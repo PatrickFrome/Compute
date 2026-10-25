@@ -47,6 +47,10 @@ jobs:
           test -z "$(git status --porcelain)"
           npm ci --prefix infra/client-state-runtime --ignore-scripts --no-audit --no-fund
           npm ci --prefix apps/metaengine-browser --ignore-scripts --no-audit --no-fund
+      - name: Build the native job helper before Windows runtime contracts
+        if: runner.os == 'Windows'
+        working-directory: apps/metaengine-browser
+        run: node scripts/prepare-codex-cli-job-runtime.mjs
       - name: Immutable W43-W73 historical ledgers and current critical-closure source seal
         shell: bash
         env:
@@ -90,7 +94,13 @@ jobs:
         run: |
           set -euo pipefail
           npm run check
-          node --test --test-concurrency=4 'test/*.test.mjs'
+          # The real Electron MAIN_PROCESS ASAR regression needs a display.
+          # Keep the complete suite and its default main-process qualification.
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a node --test --test-concurrency=4 'test/*.test.mjs'
+          else
+            node --test --test-concurrency=4 'test/*.test.mjs'
+          fi
       - name: Additional disposable coding, backup, critic and CI-train contracts
         shell: bash
         run: |

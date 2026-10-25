@@ -81,27 +81,41 @@ export function windowsSandboxBootIdentity(value){
 }
 export async function readWindowsSandboxHostBoot({exec=execFileAsync,platform=process.platform}={}) {
   if(platform!=='win32')throw Error('codex_sandbox_probe_windows_required');
+  // Emit only the fixed P/Invoke signature in memory. Compiling even a tiny C#
+  // class through WinPS Add-Type invokes the external compiler on this bounded
+  // read path. The native API, telemetry layout and double-read fence stay the
+  // same; no assembly file, cache, caller-selected DLL or fallback is loaded.
   const script=`$ErrorActionPreference='Stop'
-$source=@'
-using System;
-using System.Diagnostics;
-using System.Runtime.InteropServices;
-public static class MetaengineKernelBoot {
- [DllImport("ntdll.dll",ExactSpelling=true)] static extern int NtQueryInformationProcess(IntPtr p,int c,IntPtr b,uint n,out uint r);
- public static uint BootId(){IntPtr p=Marshal.AllocHGlobal(65536);try{uint r;int status=NtQueryInformationProcess(new IntPtr(-1),64,p,65536,out r);
-  if(status!=0||r<96||r>65536)throw new Exception("boot_telemetry_layout");
-  uint header=(uint)Marshal.ReadInt32(p,0),pid=(uint)Marshal.ReadInt32(p,4),boot=(uint)Marshal.ReadInt32(p,60);
-  if(header<96||header>r||pid!=Process.GetCurrentProcess().Id||boot==0)throw new Exception("boot_telemetry_scope");return boot;
- }finally{Marshal.FreeHGlobal(p);}}
+$PSModuleAutoLoadingPreference='None'
+Microsoft.PowerShell.Core\\Import-Module -Name 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules\\Microsoft.PowerShell.Utility\\Microsoft.PowerShell.Utility.psd1' -ErrorAction Stop
+Microsoft.PowerShell.Core\\Import-Module -Name 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules\\CimCmdlets\\CimCmdlets.psd1' -ErrorAction Stop
+$assembly=[AppDomain]::CurrentDomain.DefineDynamicAssembly([Reflection.AssemblyName]::new('MetaengineKernelBoot'),[Reflection.Emit.AssemblyBuilderAccess]::Run)
+$module=$assembly.DefineDynamicModule('Native')
+$type=$module.DefineType('MetaengineKernelBoot.Native',[Reflection.TypeAttributes]::Public -bor [Reflection.TypeAttributes]::Abstract -bor [Reflection.TypeAttributes]::Sealed)
+$parameters=[Type[]]@([IntPtr],[int],[IntPtr],[uint32],[uint32].MakeByRefType())
+$method=$type.DefinePInvokeMethod('NtQueryInformationProcess','C:\\Windows\\System32\\ntdll.dll','NtQueryInformationProcess',[Reflection.MethodAttributes]::Public -bor [Reflection.MethodAttributes]::Static -bor [Reflection.MethodAttributes]::PinvokeImpl,[Reflection.CallingConventions]::Standard,[int],$parameters,[Runtime.InteropServices.CallingConvention]::Winapi,[Runtime.InteropServices.CharSet]::None)
+$method.SetImplementationFlags($method.GetMethodImplementationFlags() -bor [Reflection.MethodImplAttributes]::PreserveSig)
+[void]$method.DefineParameter(5,[Reflection.ParameterAttributes]::Out,'returnLength')
+$native=$type.CreateType()
+function Read-KernelBootId {
+ $buffer=[Runtime.InteropServices.Marshal]::AllocHGlobal(65536)
+ try {
+  [uint32]$returned=0
+  $status=$native::NtQueryInformationProcess([IntPtr]::new(-1),64,$buffer,65536,[ref]$returned)
+  if($status -ne 0 -or $returned -lt 96 -or $returned -gt 65536){throw 'boot_telemetry_layout'}
+  $header=[BitConverter]::ToUInt32([BitConverter]::GetBytes([Runtime.InteropServices.Marshal]::ReadInt32($buffer,0)),0)
+  $processId=[BitConverter]::ToUInt32([BitConverter]::GetBytes([Runtime.InteropServices.Marshal]::ReadInt32($buffer,4)),0)
+  $bootId=[BitConverter]::ToUInt32([BitConverter]::GetBytes([Runtime.InteropServices.Marshal]::ReadInt32($buffer,60)),0)
+  if($header -lt 96 -or $header -gt $returned -or $processId -ne [Diagnostics.Process]::GetCurrentProcess().Id -or $bootId -eq 0){throw 'boot_telemetry_scope'}
+  return $bootId
+ } finally {[Runtime.InteropServices.Marshal]::FreeHGlobal($buffer)}
 }
-'@
-Add-Type -TypeDefinition $source
-$boot=[MetaengineKernelBoot]::BootId()
+$boot=Read-KernelBootId
 $system=Get-CimInstance Win32_Process -Filter 'ProcessId=4'
 if(-not $system -or $system.Name -ne 'System' -or -not $system.CreationDate){throw 'system_process_absent'}
 $birth=$system.CreationDate.ToUniversalTime();$os=Get-CimInstance Win32_OperatingSystem
 $again=Get-CimInstance Win32_Process -Filter 'ProcessId=4'
-if(-not $again -or $again.CreationDate.ToUniversalTime().ToFileTimeUtc() -ne $birth.ToFileTimeUtc() -or [MetaengineKernelBoot]::BootId() -ne $boot){throw 'kernel_boot_changed'}
+if(-not $again -or $again.CreationDate.ToUniversalTime().ToFileTimeUtc() -ne $birth.ToFileTimeUtc() -or (Read-KernelBootId) -ne $boot){throw 'kernel_boot_changed'}
 @{schema='metaengine.windows.kernel-boot.v1';kernel_boot_id=$boot;
 system_process=@{pid=4;created_at=$birth.ToString('o');created_100ns=$birth.ToFileTimeUtc().ToString()};
 last_boot_at=$os.LastBootUpTime.ToUniversalTime().ToString('o');os_version=$os.Version}|ConvertTo-Json -Depth 4 -Compress`;

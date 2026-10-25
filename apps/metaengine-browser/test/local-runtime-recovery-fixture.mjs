@@ -69,7 +69,8 @@ const canonical = value => Array.isArray(value) ? '[' + value.map(canonical).joi
 const reply = request => process.send({ schema: 'metaengine.native-coding.host-ipc.response.v1',
   instance_id: instance, host_pid: process.pid, request_id: request.request_id, action: request.action,
   request_sha256: createHash('sha256').update(canonical(request)).digest('hex'), outcome: 'OK',
-  value: { fixture_only: true, generation: plan.generation, instance_id: instance, host_pid: process.pid }, reason: null });
+  value: { fixture_only: true, generation: plan.generation, instance_id: instance, host_pid: process.pid,
+    bindings:[],has_more:false,next_after_permit_id:null }, reason: null });
 process.on('message', value => {
   if (value?.schema === 'compute.runtime-host-control.v1' && value.command === 'stop') {
     stopRequested = true;

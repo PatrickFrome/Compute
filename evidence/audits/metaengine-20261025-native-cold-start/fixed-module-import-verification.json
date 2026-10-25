@@ -1,0 +1,42 @@
+{
+  "schema": "metaengine.native-cold-start.fixed-module-import-verification.v1",
+  "baseline_source": "6adb7836ffcc5e9424747759d14701e2d0efcd02",
+  "source_and_test_sha256": {
+    ".github/windows-native-read-observation.mjs": "70bd25dff7b175f23f4e1582bbf1e133f5ef2496cc67fc6280463de02eb9bad6",
+    "apps/metaengine-browser/scripts/codex-cli-job-runner.ps1": "60f70fdb0ff5ddab3f61efb46060931e862cb71d8601a5ad3d3b1c19868ec5d6",
+    "apps/metaengine-browser/scripts/prepare-codex-cli-job-runtime.mjs": "812cc41fb36f3a22f9408cec529af2bd8fbdec99e825019cccebc1ebc9b1b4c2",
+    "apps/metaengine-browser/src/codex-cli-sandbox-probe.mjs": "13103e41745a6675ceb748cd13d05da972e92fca2c42a4d62ffc837e26d80def",
+    "apps/metaengine-browser/src/native-coding-host-observers.mjs": "d0dd9da569608f4205d8fb7de2e5f21546814b7358963bb780a2e5c36f944ce4",
+    "apps/metaengine-browser/test/codex-cli-startup-observation.test.mjs": "3477bda483641ecbcd19ac9798bddd90c094b21b1051ac4ad81e99c344d20178",
+    "apps/metaengine-browser/test/fixtures/codex-cli-startup-observation.mjs": "fff531927ef6462241b0260bdf581bfb9cd0bd6f68ac8531111bc16c1f57bed4"
+  },
+  "integration": {
+    "tests": 217,
+    "passed": 204,
+    "failed": 0,
+    "cancelled": 0,
+    "skipped": 13,
+    "suites": 1,
+    "log": "fixed-module-import-integration.txt"
+  },
+  "source_parser_checks": 240,
+  "independent_review": "PASS",
+  "csharp_byte_identical": true,
+  "byte_proof": "fixed-module-import-byte-proof.json",
+  "json_parser_unchanged": true,
+  "environment_unchanged": true,
+  "native_and_build_deadlines_unchanged": true,
+  "windows_runtime_qualified": false,
+  "package_version_unchanged": true,
+  "installed_client_modified": false,
+  "wmi_queries_and_identity_validation_unchanged": true,
+  "source_preflight": {
+    "tested_local_commit": "e3d052e9297065219214089fc85e26519faf2e92",
+    "tests": 124,
+    "passed": 124,
+    "failed": 0,
+    "skipped": 0,
+    "log": "fixed-module-import-preflight.txt",
+    "scope": "Only documentation and evidence receipts were added after the tested commit."
+  }
+}

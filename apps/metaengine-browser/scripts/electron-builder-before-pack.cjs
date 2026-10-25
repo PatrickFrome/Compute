@@ -207,6 +207,19 @@ async function metaengineGuardianNativeBeforePack(context) {
 
   const appRoot = path.resolve(__dirname, '..');
   const repoRoot = path.resolve(appRoot, '../..');
+  const { prepareCodexCliJobRuntime } = await import('./prepare-codex-cli-job-runtime.mjs');
+  const jobRuntime = await prepareCodexCliJobRuntime({
+    helperSourcePath: path.join(appRoot, 'scripts', 'codex-cli-job-runner.ps1'),
+    outputDirectory: path.join(appRoot, 'native-dist', 'codex-cli'),
+  });
+  // Electron's integrity-protected ASAR carries the expected external helper
+  // digest. The adjacent editable manifest is only a source/build receipt.
+  const jobManifestDirectory = path.join(appRoot, 'native-dist', 'codex-cli', 'asar');
+  fs.mkdirSync(jobManifestDirectory, { recursive: true });
+  const jobManifestBytes = fs.readFileSync(jobRuntime.manifestPath);
+  const packagedJobManifest = path.join(jobManifestDirectory, 'native-coding-job-runtime.json');
+  fs.writeFileSync(packagedJobManifest, jobManifestBytes);
+  if (!fs.readFileSync(packagedJobManifest).equals(jobManifestBytes)) throw new Error('codex_job_runtime_package_manifest_readback_failed');
   const trustRoot = buildEmergencyTrustRootMetadata({ appRoot, repoRoot });
   const packageVersion = String(require(path.join(appRoot, 'package.json')).version || '');
   const offlineRuntimeBinding = await buildOfflineRuntimeBinding({

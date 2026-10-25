@@ -1,0 +1,42 @@
+{
+  "schema": "metaengine.native-cold-start.compiler-lifetime-followup.v1",
+  "baseline_source": "e95423f87f562ac2f166d6a796dd6fd8f376b1a2",
+  "source_and_test_sha256": {
+    "apps/metaengine-browser/scripts/prepare-codex-cli-job-runtime.mjs": "18343ea2eca89b5e56dfca981879b611fdef1caf0818bb547f99a233febcde3b",
+    "apps/metaengine-browser/test/codex-cli-job-runtime-build.test.mjs": "27e947cd131d9ef26b2925be4a29b32aee79af371f9e8c44029234b934ab46d4"
+  },
+  "integration": {
+    "tests": 35,
+    "passed": 34,
+    "failed": 0,
+    "skipped": 1,
+    "log": "compiler-lifetime-integration.txt"
+  },
+  "source_checks": {
+    "passed": 240
+  },
+  "independent_review": "PASS",
+  "windows_build_qualified": false,
+  "windows_runtime_qualified": false,
+  "package_version_unchanged": true,
+  "installed_client_modified": false,
+  "native_runtime_changed": false,
+  "compiler_arguments_changed": false,
+  "compiler_process_wait": "System.Diagnostics.Process.WaitForExit",
+  "compiler_exit_code": "System.Diagnostics.Process.ExitCode",
+  "compiler_stdin_closed": true,
+  "compiler_stdout_stderr_drain": "concurrent_ReadToEndAsync",
+  "outer_build_timeout_ms": 180000,
+  "inner_driver_elapsed_budget_ms": 150000,
+  "inner_compiler_max_wait_ms": 120000,
+  "native_template_sha256": "0c817a654c14217e4c9292766386a88107d0a9dd7e69ab01e8b6296017f2e54f",
+  "source_preflight": {
+    "tested_local_commit": "e3bf4ad2d13b5acc3c6f52e00043161b7b9a491d",
+    "tests": 124,
+    "passed": 124,
+    "failed": 0,
+    "skipped": 0,
+    "log": "compiler-lifetime-preflight.txt",
+    "scope": "Only receipts and audit text added afterwards."
+  }
+}

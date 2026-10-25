@@ -7,8 +7,9 @@ import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {codexCliEnvironment} from '../src/codex-cli-runner.mjs';
-import {resolveCodexCliJobHelper} from '../src/codex-cli-windows-process-controller.mjs';
+import {resolveCodexCliJobHelperSource, verifyCodexCliJobHelper} from '../src/codex-cli-windows-process-controller.mjs';
 import {withOwnedCodexCliProcess} from './fixtures/with-owned-codex-cli-process.mjs';
+import {prepareCodexCliJobRuntime} from '../scripts/prepare-codex-cli-job-runtime.mjs';
 
 const observerPath = fileURLToPath(new URL('./fixtures/codex-cli-job-birth-observer.ps1', import.meta.url));
 const ownershipTransfer = 'process=createdProcess;';
@@ -323,7 +324,7 @@ function protocolEvidence(scenario = 'BOUND', auxiliary = 1) {
 }
 
 test('copied unassigned control omits only INNER association and preserves suspended no-window creation and the bounded pre-ready gate', async () => {
-  const source = await fs.readFile(resolveCodexCliJobHelper(), 'utf8');
+  const source = await fs.readFile(resolveCodexCliJobHelperSource(), 'utf8');
   const options = {nonce: 'a'.repeat(64), channel: path.resolve('generated-birth-channel.txt')};
   const bound = buildBirthGatedHelper(source, {...options, scenario: 'BOUND'});
   const control = buildBirthGatedHelper(source, {...options, scenario: 'UNASSIGNED_CONTROL'});
@@ -383,12 +384,17 @@ for (const scenario of ['BOUND', 'UNASSIGNED_CONTROL']) test(scenario === 'BOUND
     assert.ok(path.basename(directory).startsWith('metaengine-job-birth-'));
     await fs.rm(directory, {recursive: true, force: true});
   });
-  const original = await fs.readFile(resolveCodexCliJobHelper());
+  const original = await fs.readFile(resolveCodexCliJobHelperSource());
   const nonce = crypto.randomBytes(32).toString('hex');
   const channel = path.join(directory, `birth-${nonce}.txt`), canary = path.join(directory, 'must-not-run.txt');
-  const helperPath = path.join(directory, 'birth-gated-helper.ps1');
+  const helperSourcePath = path.join(directory, 'birth-gated-helper.source.ps1');
   const helperSource = buildBirthGatedHelper(original.toString('utf8'), {scenario, nonce, channel});
-  await fs.writeFile(helperPath, '\ufeff' + helperSource, 'utf8');
+  await fs.writeFile(helperSourcePath, '\ufeff' + helperSource, 'utf8');
+  // Keep the compiled helper and birth channel as siblings in the owned cwd,
+  // as required by the unchanged native observer's private_fixture_paths guard.
+  const prepared = await prepareCodexCliJobRuntime({helperSourcePath, outputDirectory: directory});
+  const helperPath = prepared.helperPath;
+  assert.equal(path.dirname(helperPath), directory, 'prepared helper must stay beside its private birth channel');
   const powershellPath = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
   const expectedSha = sha(await fs.readFile(process.execPath));
   const helperRequest = JSON.stringify({executable_path: process.execPath,
@@ -398,6 +404,7 @@ for (const scenario of ['BOUND', 'UNASSIGNED_CONTROL']) test(scenario === 'BOUND
     let stdout = '', stderr = '';
     observer.stdout.on('data', chunk => { stdout = (stdout + chunk.toString()).slice(0, 65536); });
     observer.stderr.on('data', chunk => { stderr = (stderr + chunk.toString()).slice(0, 65536); });
+    verifyCodexCliJobHelper({helperPath, expectedHelperSha256: prepared.manifest.helper_sha256});
     observer.start({powershell_path: powershellPath, helper_path: helperPath, helper_request: helperRequest, cwd: directory,
       birth_channel_path: channel, nonce, scenario, expected_child_path: process.execPath, expected_child_sha256: expectedSha});
     const completion = await observer.completion;
@@ -407,5 +414,5 @@ for (const scenario of ['BOUND', 'UNASSIGNED_CONTROL']) test(scenario === 'BOUND
     assertBirthEvidence(JSON.parse(lines[0]), {scenario, nonce});
     await assert.rejects(fs.stat(canary), {code: 'ENOENT'});
   });
-  assert.equal(sha(await fs.readFile(resolveCodexCliJobHelper())), sha(original), 'production helper must remain untouched by fault injection');
+  assert.equal(sha(await fs.readFile(resolveCodexCliJobHelperSource())), sha(original), 'production helper must remain untouched by fault injection');
 });

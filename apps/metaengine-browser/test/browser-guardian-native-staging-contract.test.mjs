@@ -37,7 +37,7 @@ test('electron-builder owns the single Guardian native staging build boundary', 
     to: 'native-coding/agent-mcp',
     filter: ['native-coding-agent-mcp-entry.mjs', 'native-coding-agent-mcp-broker.mjs', 'native-coding-agent-mcp-stdio.mjs'],
   }, {
-    from: 'scripts/codex-cli-job-runner.ps1',
+    from: 'native-dist/codex-cli/codex-cli-job-runner.ps1',
     to: 'native-coding/codex-cli-job-runner.ps1',
   }, {
     from: 'client-state-runtime-dist',
@@ -81,6 +81,10 @@ test('electron-builder owns the single Guardian native staging build boundary', 
     filter: ['**/*'],
   }]);
   assert.match(hook, /buildDevOSSourceSnapshot/);
+  assert.match(hook, /await prepareCodexCliJobRuntime\(/);
+  assert.match(hook, /native-coding-job-runtime\.json/);
+  assert.ok(builder.files.some(value => value.from === 'native-dist/codex-cli/asar'
+    && value.to === '.' && JSON.stringify(value.filter) === JSON.stringify(['native-coding-job-runtime.json'])));
   assert.match(hook, /devos-source-snapshot/);
   const parsed = spawnSync(process.execPath, ['--check', hookPath], { encoding: 'utf8' });
   assert.equal(parsed.status, 0, parsed.stderr || parsed.stdout);

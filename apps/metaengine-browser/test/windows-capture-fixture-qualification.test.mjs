@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { resolveQualifiedElectron } from '../scripts/qualified-electron-runtime.mjs';
 import {
-  CAPTURE_FIXTURE_READY_SCHEMA, CAPTURE_FIXTURE_TITLE, CAPTURE_FIXTURE_TIMEOUT_MS,
+  CAPTURE_FIXTURE_READY_SCHEMA, CAPTURE_FIXTURE_TITLE, CAPTURE_FIXTURE_TIMEOUT_MS, CAPTURE_FIXTURE_FILE_POLL_INTERVAL_MS,
   captureExactFixtureWindow, captureFixtureSource, startCaptureFixture,
 } from './helpers/windows-capture-fixture.mjs';
 
@@ -87,7 +87,11 @@ async function nodeFixture(t, body, options = {}) {
   });
   await fs.writeFile(script, `const fs=require('node:fs'),path=require('node:path');
     const readyPath=process.env.METAENGINE_CAPTURE_READY_PATH,stopPath=process.env.METAENGINE_CAPTURE_STOP_PATH;
-    fs.watch(__dirname,(_event,filename)=>{if(String(filename)===path.basename(stopPath))process.emit('message','STOP_CAPTURE_FIXTURE');});
+    function checkStop(){
+      try{if(fs.readFileSync(stopPath,'utf8')===process.env.METAENGINE_CAPTURE_NONCE){process.emit('message','STOP_CAPTURE_FIXTURE');return;}}catch{}
+      setTimeout(checkStop,${CAPTURE_FIXTURE_FILE_POLL_INTERVAL_MS});
+    }
+    setTimeout(checkStop,${CAPTURE_FIXTURE_FILE_POLL_INTERVAL_MS});
     function publishReady(message){message.nonce??=process.env.METAENGINE_CAPTURE_NONCE;
       fs.writeFileSync(readyPath+'.pending',JSON.stringify(message));fs.renameSync(readyPath+'.pending',readyPath);}
     ` + body);
@@ -115,19 +119,25 @@ test('owned atomic-file readiness drives one exact observation and capture, neve
   assert.deepEqual(phases, ['window-ready', 'OBSERVE_WINDOWS', 'CAPTURE_WINDOW']);
 });
 
-test('a filename-less watch event checks only the nonce-bound owned readiness path and never enables Node IPC mode', async t => {
+test('atomic readiness discovers only the nonce-bound owned file without directory notifications or Node IPC mode', async t => {
   const root = await temporary(t), script = path.join(root, 'fixture.cjs');
-  const child = new EventEmitter(), watcher = new EventEmitter();
+  const child = new EventEmitter();
   Object.assign(child, { pid: 123, exitCode: null, signalCode: null, kill: () => true });
-  watcher.close = () => {};
-  let notify, options;
+  let options;
   const fixture = startCaptureFixture('synthetic-electron', script, {
     environment: { ELECTRON_RUN_AS_NODE: '1' },
     spawnImpl: (_executable, _argv, value) => { options = value; return child; },
-    watchImpl: (_directory, callback) => { notify = callback; return watcher; },
   });
-  await fs.writeFile(options.env.METAENGINE_CAPTURE_READY_PATH, JSON.stringify({ ...readyMessage(123), nonce: options.env.METAENGINE_CAPTURE_NONCE }));
-  notify('rename', null);
+  t.after(() => child.emit('close', 0, null));
+  const receipt = JSON.stringify({ ...readyMessage(123), nonce: options.env.METAENGINE_CAPTURE_NONCE });
+  let admitted = false;
+  fixture.ready.then(() => { admitted = true; });
+  await fs.writeFile(path.join(root, 'unrelated.ready.json'), receipt);
+  await new Promise(resolve => setTimeout(resolve, CAPTURE_FIXTURE_FILE_POLL_INTERVAL_MS * 2));
+  assert.equal(admitted, false, 'another file cannot satisfy readiness');
+  const pendingPath = options.env.METAENGINE_CAPTURE_READY_PATH + '.pending';
+  await fs.writeFile(pendingPath, receipt);
+  await fs.rename(pendingPath, options.env.METAENGINE_CAPTURE_READY_PATH);
   assert.equal((await fixture.ready).process_id, 123);
   assert.deepEqual(options.stdio, ['ignore', 'ignore', 'pipe']);
   assert.equal(options.env.ELECTRON_RUN_AS_NODE, undefined);
@@ -237,8 +247,8 @@ test('physical capture fixture uses official preprovisioned resolution and retai
   assert.match(captureFixtureSource, /ready-to-show/);
   assert.match(captureFixtureSource, /getNativeWindowHandle/);
   assert.match(captureFixtureSource, /fs\.renameSync/);
-  assert.match(captureFixtureSource, /fs\.watch/);
-  assert.match(captureFixtureSource, /filename != null/);
+  assert.match(captureFixtureSource, /fs\.lstatSync\(stopPath\)/);
+  assert.doesNotMatch(captureFixtureSource, /fs\.watch\b/);
   assert.doesNotMatch(captureFixtureSource, /process\.send|process\.stdin/);
   assert.doesNotMatch(captureFixtureSource, /no-sandbox|disable-setuid-sandbox|webSecurity:\s*false/);
 });

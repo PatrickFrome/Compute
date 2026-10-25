@@ -1,0 +1,227 @@
+{
+  "schema": "metaengine.ci.windows-native-fixture-receipts.v1",
+  "source_head_sha": "6adb7836ffcc5e9424747759d14701e2d0efcd02",
+  "workflow": "Client Live Mechanics Recovery",
+  "run_id": 40237661456,
+  "run_attempt": 1,
+  "run_url": "https://github.com/PatrickFrome/Compute/actions/runs/40237661456",
+  "job_id": 121302579424,
+  "job_url": "https://github.com/PatrickFrome/Compute/actions/runs/40237661456/job/121302579424",
+  "job_status_when_artifact_read": "in_progress",
+  "job_conclusion_when_artifact_read": null,
+  "full_job_terminal_result_included": false,
+  "stage": {
+    "name": "Isolated Windows native diagnostic (not contention proof)",
+    "status": "completed",
+    "conclusion": "failure",
+    "started_at": "2026-10-25T21:56:09Z",
+    "completed_at": "2026-10-25T22:02:19Z",
+    "wall_duration_seconds": 370,
+    "configured_timeout_minutes": 10,
+    "completion_kind": "COMPLETE_TEST_SUMMARY",
+    "final_summary_present": true,
+    "tests": 134,
+    "pass": 132,
+    "fail": 1,
+    "cancelled": 0,
+    "skipped": 1,
+    "duration_ms": 370161.8268,
+    "files": [
+      "apps/metaengine-browser/test/codex-cli-runner.test.mjs",
+      "apps/metaengine-browser/test/codex-cli-sandbox-probe.test.mjs",
+      "apps/metaengine-browser/test/native-coding-host-observers.test.mjs",
+      "apps/metaengine-browser/test/windows-local-computer-executor.test.mjs",
+      "apps/metaengine-browser/test/codex-cli-windows-output-order.test.mjs",
+      "apps/metaengine-browser/test/codex-cli-windows-job-birth-physical.test.mjs"
+    ]
+  },
+  "artifact": {
+    "id": 12615153833,
+    "name": "windows-native-probe-6adb7836ffcc5e9424747759d14701e2d0efcd02-40237661456-1",
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/actions/artifacts/12615153833",
+    "created_at": "2026-10-25T22:02:20Z",
+    "upload_step_conclusion": "success",
+    "archive_length_bytes": 8654,
+    "archive_sha256": "320d4456f6ca64503380f7d1f6c986bb17db3ab57eebab84e929d76f58f46b91",
+    "archive_digest_verified": true,
+    "log_length_bytes": 36098,
+    "log_sha256": "f7e0d9f0f7cb834aa6a8219bcb8fa164ce364955f8faac13c0d6bf7340e29eae"
+  },
+  "failures": [
+    {
+      "file": "apps/metaengine-browser/test/codex-cli-sandbox-probe.test.mjs",
+      "test": "actual current Windows boot sequence and PID4 kernel creation are stable across independent native reads",
+      "duration_ms": 12025.8397,
+      "status": "failed",
+      "production_timeout_ms": 12000,
+      "observed_error": {
+        "code": null,
+        "killed": true,
+        "signal": "SIGTERM",
+        "stdout_empty": true,
+        "stderr_empty": true
+      }
+    }
+  ],
+  "physical_passes": [
+    {
+      "test": "real Windows controller starts suspended in its job and transports exact arguments without a model",
+      "duration_ms": 18944.8522,
+      "status": "passed"
+    },
+    {
+      "test": "real Windows deadline kills the exact job and its descendant without any model call",
+      "duration_ms": 18518.1849,
+      "status": "passed"
+    },
+    {
+      "test": "native absolute deadline can be shortened at resume and stops the real child before relative timeout",
+      "duration_ms": 19024.3417,
+      "status": "passed"
+    },
+    {
+      "test": "an expired native deadline cannot resume a suspended child and cancellation still proves exact cleanup",
+      "duration_ms": 18358.2834,
+      "status": "passed"
+    },
+    {
+      "test": "real Windows pre-RESUME cancellations never execute a canary and bind separate native identities and cancellation IDs",
+      "duration_ms": 36245.6665,
+      "status": "passed"
+    },
+    {
+      "test": "real Windows fault-injected disposable helpers never attest suspended cleanup after a native operation fails",
+      "duration_ms": 72369.5553,
+      "status": "passed"
+    },
+    {
+      "test": "Windows native suspended cleanup fault fixtures",
+      "duration_ms": 146563.2683,
+      "status": "passed"
+    },
+    {
+      "test": "real Windows inner Job kills the exact suspended birth-window child before ready, independently of the outer cleanup guard",
+      "duration_ms": 64777.4621,
+      "status": "passed"
+    },
+    {
+      "test": "real Windows unassigned INNER control survives helper death until later exact owned cleanup",
+      "duration_ms": 8562.617,
+      "status": "passed"
+    },
+    {
+      "test": "real Windows native helper buffers immediate output through a forced post-resume pre-ack window",
+      "duration_ms": 751.5025,
+      "status": "passed"
+    },
+    {
+      "test": "native Windows process inventory independently reads this test process without executing a model",
+      "duration_ms": 1369.0193,
+      "status": "passed"
+    },
+    {
+      "test": "fixed Windows PowerShell bridge physically parses and serves STATUS",
+      "duration_ms": 1147.1258,
+      "status": "passed"
+    },
+    {
+      "test": "fixed Windows bridge physically captures an exact window with raw pixel digest",
+      "duration_ms": 6931.7465,
+      "status": "passed"
+    },
+    {
+      "test": "fixed Windows bridge physically reads foreground status without overwriting the automatic PID variable",
+      "duration_ms": 1256.4371,
+      "status": "passed"
+    }
+  ],
+  "output_order_startup_observation": {
+    "schema": "metaengine.codex-cli.test-startup-phases.v1",
+    "helper_variant": "FORCED_OUTPUT_WINDOW",
+    "startup_deadline_ms": 30000,
+    "helper_spawns_observed": 1,
+    "spawn_event_elapsed_ms": 4,
+    "ready_validated_elapsed_ms": 442,
+    "close_elapsed_ms": 747,
+    "stages": [
+      {
+        "stage": "PS_ENTER",
+        "elapsed_ms": 162
+      },
+      {
+        "stage": "ASSEMBLY_LOAD_BEGIN",
+        "elapsed_ms": 172
+      },
+      {
+        "stage": "ASSEMBLY_LOAD_END",
+        "elapsed_ms": 179
+      },
+      {
+        "stage": "REQUEST_READ_BEGIN",
+        "elapsed_ms": 179
+      },
+      {
+        "stage": "REQUEST_LINE_READ",
+        "elapsed_ms": 180
+      },
+      {
+        "stage": "REQUEST_JSON_BEGIN",
+        "elapsed_ms": 180
+      },
+      {
+        "stage": "REQUEST_JSON_END",
+        "elapsed_ms": 305
+      },
+      {
+        "stage": "REQUEST_READ_END",
+        "elapsed_ms": 305
+      },
+      {
+        "stage": "NATIVE_RUN_ENTER",
+        "elapsed_ms": 332
+      },
+      {
+        "stage": "IMAGE_DIGEST_CHECKED",
+        "elapsed_ms": 435
+      },
+      {
+        "stage": "CHILD_JOB_BOUND",
+        "elapsed_ms": 440
+      },
+      {
+        "stage": "IDENTITY_READBACK_COMPLETE",
+        "elapsed_ms": 441
+      },
+      {
+        "stage": "READY_WRITE_BEGIN",
+        "elapsed_ms": 441
+      },
+      {
+        "stage": "READY_FLUSH_RETURNED",
+        "elapsed_ms": 442
+      }
+    ],
+    "unknown_stderr_bytes": 0,
+    "phase_stream_invalid": false,
+    "phase_stream_overflow": false,
+    "body_failed": false,
+    "phase_timing_observation_only": true,
+    "contention_proven": false,
+    "native_qualification_proven": false
+  },
+  "diagnostic_test_stage": true,
+  "qualified": false,
+  "original_probe_result_replaced": false,
+  "authority_effect": false,
+  "release_authority": false,
+  "native_qualification_proven": false,
+  "causal_attribution_proven": false,
+  "contention_proven": false,
+  "raw_stderr_included": false,
+  "limits": [
+    "The six-file stage completed and uploaded its complete test report while the full Browser suite in the same job was still running. This receipt contains no full-job terminal qualification.",
+    "The sole failed test is the production-budget kernel boot read. Passing process, capture, birth and output-order cases do not replace that failure or qualify the complete runtime.",
+    "This immutable source precedes the explicit-import candidate. Its faster later helper/process observations cannot be attributed to that candidate or used as evidence of a resolved cold-start cause.",
+    "The configured 10-minute stage budget was sufficient for this particular observed 370-second test run. No universal duration or scheduler-contention conclusion follows."
+  ]
+}

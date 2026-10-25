@@ -1,0 +1,40 @@
+{
+  "schema": "metaengine.native-cold-start.build-cleanup-followup.v1",
+  "baseline_source": "afbd629779e8d07e595a4f108751c4f36951d1e4",
+  "source_and_test_sha256": {
+    "apps/metaengine-browser/scripts/prepare-codex-cli-job-runtime.mjs": "1bd69cd4812fc162095871a2515b7436ea030dfe721ef7cb805f67e7da8a95aa",
+    "apps/metaengine-browser/test/codex-cli-job-runtime-build.test.mjs": "e211d7516fb9e3a64ef47452ec10b8374fd8163caecb0756c3f0914d9d555c75"
+  },
+  "integration": {
+    "tests": 35,
+    "passed": 34,
+    "failed": 0,
+    "skipped": 1,
+    "command": "npm run pretest && node --test test/codex-cli-job-runtime-build.test.mjs test/codex-cli-job-runtime.test.mjs test/live-mechanics-native-probe-workflow.test.mjs test/source-check-runner.test.mjs",
+    "log": "build-cleanup-integration.txt"
+  },
+  "source_checks": {
+    "passed": 240
+  },
+  "independent_review": "PASS",
+  "windows_build_qualified": false,
+  "windows_runtime_qualified": false,
+  "package_version_unchanged": true,
+  "installed_client_modified": false,
+  "native_runtime_changed": false,
+  "compiler_working_directory": "C:\\Windows\\System32",
+  "temporary_directory_cleanup_attempts": 6,
+  "cleanup_backoff_total_ms": 1500,
+  "primary_failure_preserved": true,
+  "native_template_sha256": "0c817a654c14217e4c9292766386a88107d0a9dd7e69ab01e8b6296017f2e54f",
+  "compiler_arguments_changed": false,
+  "source_preflight": {
+    "tested_local_commit": "ea82ca317bc34c17585ed9b673e92a322a4ad440",
+    "tests": 124,
+    "passed": 124,
+    "failed": 0,
+    "skipped": 0,
+    "log": "build-cleanup-preflight.txt",
+    "scope": "Only this receipt and audit text added afterwards."
+  }
+}

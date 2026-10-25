@@ -1,0 +1,94 @@
+{
+  "schema": "metaengine.native-admission-source-verification.v1",
+  "observed_at": "2026-10-25T17:01:01.785671+00:00",
+  "base_commit": "1871a23950b2b532a7e28d75d3faa92506bfa739",
+  "frozen_installer_source": "602d4b07f755f7cd61a6da3af06985d4384b859a",
+  "branch": "work/native-admission-readiness-20261025",
+  "platform": "linux",
+  "toolchain": {
+    "node": "24.22.1",
+    "bun": "1.3.3",
+    "typescript": "5.9.3",
+    "postgres_client_library": "3.4.7",
+    "physical_postgresql": "17.6"
+  },
+  "focused_regressions": {
+    "command": [
+      "node",
+      "--test",
+      "--test-concurrency=2",
+      "apps/metaengine-browser/test/native-coding-host-ipc.test.mjs",
+      "apps/metaengine-browser/test/client-native-coding-goal.test.mjs",
+      "apps/metaengine-browser/test/r97-goal-submission-mode.test.mjs",
+      "apps/metaengine-browser/test/client-admission-recovery.test.mjs",
+      "apps/metaengine-browser/test/client-v1-typed-goal-bridge.test.mjs",
+      "apps/metaengine-browser/test/local-runtime-host-terminal.test.mjs",
+      "apps/metaengine-browser/test/fleet-operator-target-persistence.test.mjs",
+      "apps/metaengine-browser/test/supervisor-rollover-capacity-settlement.test.mjs",
+      "infra/client-state-runtime/native-coding-host-seed-binding.test.mjs",
+      "infra/client-state-runtime/native-coding-host-seed-service.test.mjs",
+      "infra/client-state-runtime/native-coding-device-request.test.mjs",
+      "infra/client-state-runtime/native-coding-host-capabilities.test.mjs",
+      "infra/client-state-runtime/native-coding-host-authority-review.test.mjs",
+      "infra/client-state-runtime/runtime-host.test.mjs",
+      "infra/client-state-runtime/package-runtime-resources.test.mjs",
+      "infra/client-state-runtime/attached-postgres-onboarding.test.mjs",
+      "infra/client-state-runtime/local-runtime-migrations.test.mjs",
+      "apps/me2-ui/src/lib/goal-submission-mode-observer.test.mjs",
+      "apps/me2-ui/src/lib/goal-submission-mode-observer.ui.test.mjs"
+    ],
+    "summary": {
+      "tests": 258,
+      "pass": 256,
+      "fail": 0,
+      "skipped": 2,
+      "cancelled": 0
+    },
+    "log_sha256": "266cbf29749e9b50ace22fb656592a0c1f84d5df00c0a931ced32b9e02afb7ed",
+    "skipped_checks": [
+      "Windows credential admission rejects append, permission-change and ownership takeover by an untrusted principal (0.122033ms)",
+      "private Deno executable inherits the protected state DACL instead of broader bundle grants (0.301803ms)"
+    ],
+    "log_file": "focused-regressions.txt"
+  },
+  "typescript": {
+    "command": "node node_modules/typescript/bin/tsc --noEmit --incremental false",
+    "working_directory": "apps/me2-ui",
+    "exit_code": 0
+  },
+  "source_checks": {
+    "command": "node scripts/check-source.mjs",
+    "working_directory": "apps/metaengine-browser",
+    "passed": 239,
+    "exit_code": 0
+  },
+  "physical_pg17_migrations": "pg17-migrations.json",
+  "physical_pg17_acl_roundtrip": "pg17-acl-roundtrip.json",
+  "source_and_test_sha256": {
+    ".github/workflows/metaengine-client-w23-me2-typecheck.yml": "97c6de5e2179a3ed7a834178589ab689c89f1f3c7228b488579f0016b57033fd",
+    "apps/me2-ui/package.json": "5588c95dba3239e0471a7ae922fcece635985decd0d00eaa13fd194ebbd74247",
+    "apps/me2-ui/src/components/me2/shell/me2-shell.tsx": "fca152fc423778d13cf38003e7f368bd3a33722ba829bece6ae62a7c987aa5f9",
+    "apps/me2-ui/src/lib/goal-submission-mode-observer.d.mts": "8354020026a8a733fb686dc28450f97a292a3925156e624a420388ffcf5af9be",
+    "apps/me2-ui/src/lib/goal-submission-mode-observer.mjs": "f2af87aae19fbcc9d7ba3d9d08c79f9720ea0c7116294f9ebbf5702a3d16c757",
+    "apps/me2-ui/src/lib/goal-submission-mode-observer.test.mjs": "0f5b2373c286f82641f0e74b47b5dbd7d2476687a1edb74903577033a0f50072",
+    "apps/me2-ui/src/lib/goal-submission-mode-observer.ui.test.mjs": "cfc77ac3ab1f68ae4b6a350a4233665a40d5c5b74b452252572df47b654fca62",
+    "apps/metaengine-browser/scripts/check-source.mjs": "882b92014d905b4efd69d9c4f5e4fd7c4f865db9df497d9c4f468b8881060867",
+    "apps/metaengine-browser/src/client-native-coding-goal.mjs": "c484fecf8728af0a205c60d5f1315b175f10a49aff910ff8496a1aa98105710e",
+    "apps/metaengine-browser/test/client-native-coding-goal.test.mjs": "6f26483d31559b537ceb974c1a22a9e845c98da4abf839fdd120c0e53a2be6fc",
+    "apps/metaengine-browser/test/native-coding-host-ipc.test.mjs": "aa782f1b3fc5f64349f04775d31a9d9bf7e62b537bb30668ac517ad2153c2b6d",
+    "infra/client-state-runtime/attached-bundled-runtime.integration.test.mjs": "d1c6871cf9b39cec910ed563712eada961af8150654183e3f78ffa9b449ace87",
+    "infra/client-state-runtime/local-runtime-migrations.integration.test.mjs": "b717124e32fa9e0f743f3d7164460a89f444c0e71df77b4407877841edbb79c2",
+    "infra/client-state-runtime/native-coding-host-authority-review.test.mjs": "0909540c71249ae2bb8a73bf56a42cbec7a8e1b87ba3357a8a1ae60c612a1758",
+    "infra/client-state-runtime/native-coding-host-ipc.mjs": "a5b102293d9b31d41f2da392807d23e4256827b8e370029f1769a365525e8876",
+    "infra/client-state-runtime/native-coding-host-seed-binding.mjs": "5da61826281b5eba7a1cde598eda87d36d550ee8270fd924318e9a2377583cb9",
+    "infra/client-state-runtime/native-coding-host-seed-binding.test.mjs": "d243a9de63c54d7f5083e3e268f343bea93343ed214bf925b5f258c31fb7b637",
+    "infra/client-state-runtime/package.json": "3e5347201ffac636fb008c08d5504a3a38d21cee0943078209b20cf806208a21",
+    "infra/client-state-runtime/runtime-host.mjs": "18cfbd8ff21b626c2d001d562a2963a00e9866c11ad753f44352c1e50cb6917b"
+  },
+  "installed_windows_current_readback": "UNKNOWN_MCP_REQUEST_TIMED_OUT",
+  "installed_goal_execution_proven": false,
+  "production_qualified": false,
+  "package_built_for_this_source": false,
+  "main_merged": false,
+  "current_source_seal": "source-seal-refresh.json"
+}

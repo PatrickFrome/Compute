@@ -1,0 +1,50 @@
+{
+  "schema": "metaengine.native-cold-start.fixture-and-stage-verification.v1",
+  "baseline_source": "1ca3587b1104002f11b9cd86a0555ff4efbdcd30",
+  "source_and_test_sha256": {
+    ".github/windows-native-read-observation.mjs": "a98182c7234ee7da23a7f6f67d7a81f23d25dc5fea3f11a290ea2e7e7e177c4b",
+    ".github/workflows/client-live-mechanics-recovery-v1.yml": "10007ca014afa38d07d14e8fa2da8207a0ad4a2b7f2aae548b7da676afaa5875",
+    "apps/metaengine-browser/test/codex-cli-job-runtime-build.test.mjs": "44bdf650e810079d51284dc37cc7cc4801c7f0a573582f8f447592e3543dbf2a",
+    "apps/metaengine-browser/test/codex-cli-runner.test.mjs": "85a97c5c910c8aa6e82287de5a37d566252cd61596be70f35b21eb06a874ab57",
+    "apps/metaengine-browser/test/codex-cli-startup-observation.test.mjs": "770e443f80a3d105aa6110f656e7d8f253615984ace85be7e880e96c469c6222",
+    "apps/metaengine-browser/test/codex-cli-windows-job-birth-physical.test.mjs": "a17cb40e29a58857ff0e0061280c5794e27dce9eee2772c488eac2ee18b6866b",
+    "apps/metaengine-browser/test/codex-cli-windows-output-order.test.mjs": "9c25995f56526114339bccc80003d4eb9273a87f5818bee4889583488f70a47f",
+    "apps/metaengine-browser/test/fixtures/codex-cli-startup-observation.mjs": "299ae2ee5a6d9791af59c4e53119ac498022912763201b5edf3efdf9adb6e526",
+    "apps/metaengine-browser/test/live-mechanics-native-probe-workflow.test.mjs": "273291cbf5f531c62da78057ef6c5d555ee8d91002c33e224f909c0a093e127e",
+    "apps/metaengine-browser/test/windows-native-read-observation.test.mjs": "a0c39303525b9a65203418cb317b9c3fca7cbff8433d33258760922fcc142059"
+  },
+  "integration": {
+    "tests": 180,
+    "passed": 169,
+    "failed": 0,
+    "cancelled": 0,
+    "skipped": 11,
+    "suites": 1,
+    "log": "native-fixture-integration.txt"
+  },
+  "source_parser_checks": 240,
+  "preparation_lifetime_controls": [
+    "output-order-preparation-lifetime.json",
+    "output-order-preparation-refusal.json",
+    "fault-preparation-lifetime.json"
+  ],
+  "no_package_import_proof": "native-stage-import-closure.json",
+  "independent_review": "PASS",
+  "native_runtime_changed": false,
+  "production_helper_sha256": "0c817a654c14217e4c9292766386a88107d0a9dd7e69ab01e8b6296017f2e54f",
+  "production_and_native_test_budgets_unchanged": true,
+  "existing_workflow_jobs_byte_identical": true,
+  "failure_still_fails_job": true,
+  "windows_runtime_qualified": false,
+  "package_version_unchanged": true,
+  "installed_client_modified": false,
+  "source_preflight": {
+    "tested_local_commit": "4a72e494eb5f1c25942d3441a0c95395d3e2c896",
+    "tests": 124,
+    "passed": 124,
+    "failed": 0,
+    "skipped": 0,
+    "log": "native-fixture-preflight.txt",
+    "scope": "Only this verification receipt and the preflight log were added after the tested commit."
+  }
+}

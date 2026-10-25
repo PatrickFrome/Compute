@@ -1,0 +1,18 @@
+{
+  "schema": "metaengine.native-cold-start.source-seal-followup.v1",
+  "baseline_source": "afbd629779e8d07e595a4f108751c4f36951d1e4",
+  "sealed_paths": 577,
+  "updated_entries": [
+    {
+      "path": "apps/metaengine-browser/scripts/prepare-codex-cli-job-runtime.mjs",
+      "prior_blob": "25b5b6b90219519483d1178124106c05340f4dc5",
+      "current_blob": "3af11cdec3d193397b019adce860cb93da085dbd"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-job-runtime-build.test.mjs",
+      "prior_blob": "e019a565a4db108c76a452428c5b5ef15711e46c",
+      "current_blob": "e5833f8b4eec97161792c7c029d97ab73f0cbaa6"
+    }
+  ],
+  "all_other_manifest_fields_unchanged": true
+}

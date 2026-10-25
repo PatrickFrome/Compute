@@ -1,0 +1,9 @@
+{
+  "scope": "ACTUAL_FIXTURE_BEFORE_TIMEOUT_LATE_PREPARE_PORTABLE_CONTROL",
+  "setup_hook_timeout_ms": 20,
+  "controlled_prepare_delay_ms": 120,
+  "compiler_invoked": false,
+  "native_execution_invoked": false,
+  "directory_present_until_preparation_settled": true,
+  "owned_fixture_removed_after_settlement": true
+}

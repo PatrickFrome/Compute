@@ -24,6 +24,11 @@
       "from": "../../infra/client-state-runtime",
       "to": "infra/client-state-runtime",
       "filter": ["offline-runtime-bundle.mjs"]
+    },
+    {
+      "from": "native-dist/codex-cli/asar",
+      "to": ".",
+      "filter": ["native-coding-job-runtime.json"]
     }
   ],
   "beforePack": "./scripts/electron-builder-before-pack.cjs",
@@ -35,7 +40,7 @@
       "filter": ["native-coding-agent-mcp-entry.mjs", "native-coding-agent-mcp-broker.mjs", "native-coding-agent-mcp-stdio.mjs"]
     },
     {
-      "from": "scripts/codex-cli-job-runner.ps1",
+      "from": "native-dist/codex-cli/codex-cli-job-runner.ps1",
       "to": "native-coding/codex-cli-job-runner.ps1"
     },
     {

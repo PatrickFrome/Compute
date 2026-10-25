@@ -1,0 +1,12 @@
+✔ W43/W51 frozen ancestor seals only trigger on their contract files (1.941807ms)
+✔ W59 complementary physical PG and legacy qualification requires explicit final dispatch (3.949954ms)
+✔ W66 candidate independently runs frozen ancestor and current source seals on both OSes (0.253691ms)
+✔ current security, PG and release checks are still registered (never infer skipped as PASS) (0.3996ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 70.889873

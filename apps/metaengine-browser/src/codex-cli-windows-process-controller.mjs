@@ -1,26 +1,75 @@
 import { spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import fs from 'node:fs';
 import { PassThrough } from 'node:stream';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const fail = reason => new Error(`codex_cli_process_${reason}`);
+const sha256 = value => createHash('sha256').update(value).digest('hex');
+const validDigest = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 
-export function resolveCodexCliJobHelper({ moduleUrl = import.meta.url, resourcesPath = process.resourcesPath } = {}) {
+export function resolveCodexCliJobRuntime({ moduleUrl = import.meta.url, resourcesPath = process.resourcesPath } = {}) {
   const modulePath = fileURLToPath(moduleUrl);
   if (/\.asar(?:[\\/]|$)/i.test(modulePath)) {
     if (!path.isAbsolute(resourcesPath || '')) throw fail('packaged_resources_required');
-    return path.join(resourcesPath, 'native-coding', 'codex-cli-job-runner.ps1');
+    return Object.freeze({ helperPath: path.join(resourcesPath, 'native-coding', 'codex-cli-job-runner.ps1'),
+      manifestPath: fileURLToPath(new URL('../native-coding-job-runtime.json', moduleUrl)), templatePath: null });
   }
+  return Object.freeze({ helperPath: fileURLToPath(new URL('../native-dist/codex-cli/codex-cli-job-runner.ps1', moduleUrl)),
+    manifestPath: fileURLToPath(new URL('../native-dist/codex-cli/manifest.json', moduleUrl)),
+    templatePath: resolveCodexCliJobHelperSource({ moduleUrl }) });
+}
+
+export function resolveCodexCliJobHelper(options) { return resolveCodexCliJobRuntime(options).helperPath; }
+
+// Source assertions and explicit build preparation read this template. Runtime
+// launch must resolve the prepared, manifest-bound output instead.
+export function resolveCodexCliJobHelperSource({ moduleUrl = import.meta.url } = {}) {
+  if (/\.asar(?:[\\/]|$)/i.test(fileURLToPath(moduleUrl))) throw fail('packaged_source_template_unavailable');
   return fileURLToPath(new URL('../scripts/codex-cli-job-runner.ps1', moduleUrl));
 }
 
+function readBoundedFile(file, limit, reason) {
+  try {
+    const stat = fs.lstatSync(file);
+    if (!stat.isFile() || stat.size < 1 || stat.size > limit) throw fail(reason);
+    const bytes = fs.readFileSync(file);
+    if (bytes.length < 1 || bytes.length > limit) throw fail(reason);
+    return bytes;
+  } catch { throw fail(reason); }
+}
+
+export function verifyCodexCliJobHelper({ helperPath, expectedHelperSha256, moduleUrl = import.meta.url, resourcesPath = process.resourcesPath } = {}) {
+  if (helperPath !== undefined) {
+    if (!path.isAbsolute(helperPath || '') || !validDigest(expectedHelperSha256)) throw fail('helper_pin_required');
+    const bytes = readBoundedFile(helperPath, 4 * 1024 * 1024, 'helper_unreadable');
+    if (sha256(bytes) !== expectedHelperSha256) throw fail('helper_digest_mismatch');
+    return Object.freeze({ helperPath, helperSha256: expectedHelperSha256 });
+  }
+  if (expectedHelperSha256 !== undefined) throw fail('helper_pin_requires_explicit_path');
+  const runtime = resolveCodexCliJobRuntime({ moduleUrl, resourcesPath });
+  let manifest;
+  try { manifest = JSON.parse(readBoundedFile(runtime.manifestPath, 16384, 'runtime_unprepared').toString('utf8')); }
+  catch (error) { if (error.message === 'codex_cli_process_runtime_unprepared') throw error; throw fail('runtime_manifest_invalid'); }
+  if (manifest?.schema !== 'metaengine.codex-cli.job-runtime.v1' || manifest.build_mode !== 'PRECOMPILED_FRAMEWORK_CSHARP'
+    || !['template_sha256', 'csharp_sha256', 'assembly_sha256', 'helper_sha256', 'compiler_executable_sha256'].every(key => validDigest(manifest[key])))
+    throw fail('runtime_manifest_invalid');
+  if (runtime.templatePath && sha256(readBoundedFile(runtime.templatePath, 1024 * 1024, 'runtime_template_unreadable')) !== manifest.template_sha256)
+    throw fail('runtime_template_changed');
+  const bytes = readBoundedFile(runtime.helperPath, 4 * 1024 * 1024, 'runtime_unprepared');
+  if (sha256(bytes) !== manifest.helper_sha256) throw fail('helper_digest_mismatch');
+  return Object.freeze({ helperPath: runtime.helperPath, helperSha256: manifest.helper_sha256 });
+}
+
 /** A private process controller, not an OS sandbox or a lease issuer. */
-export function createCodexCliWindowsProcessController({ helperPath = resolveCodexCliJobHelper(),
+export function createCodexCliWindowsProcessController({ helperPath, expectedHelperSha256,
   powershellPath = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
   startupTimeoutMs = 30000 } = {}) {
   if (process.platform !== 'win32') throw fail('windows_required');
-  if (!path.isAbsolute(helperPath) || !path.isAbsolute(powershellPath)) throw fail('absolute_paths_required');
+  if (!path.isAbsolute(helperPath ?? resolveCodexCliJobHelper()) || !path.isAbsolute(powershellPath)) throw fail('absolute_paths_required');
+  if (helperPath !== undefined && !validDigest(expectedHelperSha256)) throw fail('helper_pin_required');
+  if (helperPath === undefined && expectedHelperSha256 !== undefined) throw fail('helper_pin_requires_explicit_path');
   return Object.freeze({
     async spawn(spec) {
       if (!path.isAbsolute(spec.executablePath || '') || !path.isAbsolute(spec.cwd || '')
@@ -29,7 +78,10 @@ export function createCodexCliWindowsProcessController({ helperPath = resolveCod
         || !/^[a-f0-9-]{36}$/.test(spec.runId || '')
         || (spec.deadlineAt != null && !Number.isFinite(Date.parse(spec.deadlineAt)))
         || !Number.isSafeInteger(spec.timeoutMs) || spec.timeoutMs < 100 || spec.timeoutMs > 1800000) throw fail('spec_invalid');
-      const helper = spawn(powershellPath, ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', helperPath], {
+      // Revalidate immediately before every launch. A missing/stale preparation
+      // cannot trigger compilation, choose a cache or fall back to the template.
+      const verified = verifyCodexCliJobHelper({ helperPath, expectedHelperSha256 });
+      const helper = spawn(powershellPath, ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', verified.helperPath], {
         cwd: spec.cwd, env: spec.env, windowsHide: true, shell: false, stdio: ['pipe', 'pipe', 'pipe'],
       });
       const stdout = new PassThrough(); const stderr = new PassThrough();

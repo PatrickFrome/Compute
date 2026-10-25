@@ -1,0 +1,60 @@
+{
+  "completed": 4,
+  "events": [
+    {
+      "kind": "build_begin",
+      "elapsed_ms": 168.173591,
+      "index": 0
+    },
+    {
+      "kind": "build_end",
+      "elapsed_ms": 288.626955,
+      "completed": 1
+    },
+    {
+      "kind": "build_begin",
+      "elapsed_ms": 289.291333,
+      "index": 1
+    },
+    {
+      "kind": "build_end",
+      "elapsed_ms": 409.65586,
+      "completed": 2
+    },
+    {
+      "kind": "build_begin",
+      "elapsed_ms": 410.19903600000004,
+      "index": 2
+    },
+    {
+      "kind": "build_end",
+      "elapsed_ms": 530.597863,
+      "completed": 3
+    },
+    {
+      "kind": "build_begin",
+      "elapsed_ms": 531.319527,
+      "index": 3
+    },
+    {
+      "kind": "build_end",
+      "elapsed_ms": 651.812057,
+      "completed": 4
+    },
+    {
+      "kind": "cleanup_begin",
+      "elapsed_ms": 652.434572,
+      "completed": 4
+    },
+    {
+      "kind": "cleanup_end",
+      "elapsed_ms": 653.666262
+    }
+  ],
+  "directory_absent": true,
+  "scope": "ACTUAL_FAULT_FIXTURE_SETUP_TIMEOUT_LATE_SETTLEMENT_PORTABLE_CONTROL",
+  "compiler_invoked": false,
+  "native_execution_invoked": false,
+  "setup_timeout_retained_as_failure": true,
+  "native_qualification_proven": false
+}

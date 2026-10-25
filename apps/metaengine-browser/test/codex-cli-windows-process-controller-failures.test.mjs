@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
+import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
 import { EventEmitter } from 'node:events';
 import { syncBuiltinESMExports } from 'node:module';
 import path from 'node:path';
@@ -11,6 +14,10 @@ import { withOwnedCodexCliProcess } from './fixtures/with-owned-codex-cli-proces
 // Generated protocol doubles only: no Windows process, PowerShell, Job Object,
 // executable hash or native cleanup is qualified by these tests.
 function fixture(t) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'metaengine-controller-protocol-'));
+  const helperPath = path.join(directory, 'fixture-helper.ps1'), helperBytes = 'protocol double, never executed';
+  fs.writeFileSync(helperPath, helperBytes);
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const platform = Object.getOwnPropertyDescriptor(process, 'platform');
   const originalSpawn = childProcess.spawn;
   Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
@@ -29,7 +36,7 @@ function fixture(t) {
   childProcess.spawn = (...args) => { calls.push(args); return helper; };
   syncBuiltinESMExports();
   const controller = createCodexCliWindowsProcessController({
-    helperPath: path.resolve('fixture-helper.ps1'), powershellPath: path.resolve('fixture-powershell.exe'),
+    helperPath, expectedHelperSha256: createHash('sha256').update(helperBytes).digest('hex'), powershellPath: path.resolve('fixture-powershell.exe'),
   });
   const spec = { executablePath: path.resolve('fixture-worker.exe'), cwd: path.resolve('fixture-worktree'),
     expectedExecutableSha256: 'a'.repeat(64), args: [], env: {}, timeoutMs: 10000,

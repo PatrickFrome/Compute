@@ -1,0 +1,16 @@
+✔ ASAR filesystem qualification keeps MAIN_PROCESS as the direct/default mode (1.27824ms)
+✔ ASAR_NODE requires an exact explicit mode, Linux and an available executable selection (1.571501ms)
+✔ an explicit ASAR qualification cannot silently skip or fall back when its Electron selection is missing or invalid (0.272689ms)
+✔ all three active Linux Browser suites select filesystem-only mode in the intended step while Windows retains MAIN_PROCESS (8.025541ms)
+✔ ASAR workflow guards accept identical LF and Windows CRLF checkouts (2.175899ms)
+✔ both newline forms still reject wrong qualification mode and mode leaking beyond its step (3.95417ms)
+✔ real Electron MAIN_PROCESS qualifies physical ASAR bytes while retaining archive package and bridge reads (278.094881ms)
+ℹ {"classification":"REAL_ELECTRON_MAIN_PROCESS_ASAR_FILESYSTEM","electron":"44.0.0","main_process_started":true,"virtual_asar_and_physical_original_fs":true,"digest_and_tamper_guards_verified":true,"installed_runtime_qualified":false,"model_calls":0}
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 348.223679

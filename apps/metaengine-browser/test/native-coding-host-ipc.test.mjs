@@ -150,6 +150,45 @@ test('real private IPC transports optional signed seed envelopes without exposin
   assert.equal((await stats()).calls,1);
 });
 
+test('unmounted optional seed capability returns a correlated rejection without dispatch or write ambiguity',async t=>{
+  const {client,instanceId,child,stats}=await setup(t);
+  for(const [action,method] of [['LIST_SEEDS','listSeeds'],['READ_SEED','readSeed'],['SEED_GOAL','seedGoal']]){
+    await assert.rejects(client[method](seedRequest(action,instanceId,child.pid)),error=>
+      error.reason==='UNSUPPORTED_ACTION'&&error.action===action&&error.instance_id===instanceId
+      &&error.effect_outcome==='NONE'&&error.readback_required===false&&error.automatic_retry_allowed===false);
+  }
+  assert.equal((await stats()).calls,0);
+  assert.equal(client.snapshot().closed,false);
+  assert.equal(client.snapshot().inflight,0);
+  assert.equal((await client.readScope()).call_count,1);
+});
+
+test('unmounted optional capability still rejects malformed and foreign envelopes before capability discovery',async t=>{
+  const {child,instanceId,stats}=await setup(t);
+  const replies=[];child.on('message',message=>{if(message?.schema==='metaengine.native-coding.host-ipc.response.v1')replies.push(message);});
+  const frame={schema:'metaengine.native-coding.host-ipc.request.v1',instance_id:instanceId,host_pid:child.pid,
+    request_id:id(),action:'LIST_SEEDS',payload:seedRequest('LIST_SEEDS',instanceId,child.pid)};
+  child.send({...frame,instance_id:id()});
+  child.send({...frame,request_id:id(),payload:{...frame.payload,extra:true}});
+  const state=await stats();
+  assert.deepEqual(state.protocolErrors,['INSTANCE_MISMATCH','INVALID_PAYLOAD']);
+  assert.equal(state.calls,0);assert.deepEqual(replies,[]);
+});
+
+test('optional discovery cannot downgrade an outstanding write by reusing its request UUID',async t=>{
+  const {child,instanceId,stats}=await setup(t,'slow-write');
+  const replies=[];child.on('message',message=>{if(message?.schema==='metaengine.native-coding.host-ipc.response.v1')replies.push(message);});
+  const frame={schema:'metaengine.native-coding.host-ipc.request.v1',instance_id:instanceId,host_pid:child.pid,
+    request_id:id(),action:'RESERVE_EXECUTION',payload:{scope:scope()}};
+  child.send(frame);
+  child.send({...frame,action:'LIST_SEEDS',payload:seedRequest('LIST_SEEDS',instanceId,child.pid)});
+  await sleep(220);
+  assert.equal((await stats()).calls,1);
+  const conflict=replies.find(reply=>reply.action==='LIST_SEEDS');
+  assert.equal(conflict.outcome,'UNKNOWN');assert.equal(conflict.reason,'REQUEST_ID_REUSED');
+  assert.equal(replies.find(reply=>reply.action==='RESERVE_EXECUTION').outcome,'OK');
+});
+
 test('seed timeout retains unknown mutation while read-only seed recovery cannot become another dispatch',async t=>{
   const {client,instanceId,child,stats}=await setup(t,'slow-seed',{timeoutMs:30,serverTimeoutMs:1000});
   const request=seedRequest('SEED_GOAL',instanceId,child.pid);

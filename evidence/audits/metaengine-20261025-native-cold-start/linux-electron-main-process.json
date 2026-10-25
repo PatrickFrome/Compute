@@ -1,0 +1,62 @@
+{
+  "schema": "metaengine.linux-electron-display-proof.v1",
+  "base_sha": "4e5de5c7fb9d9e0fe34a83c839aab58fca4cdb8e",
+  "changed_workflows": {
+    ".github/workflows/client-source-candidate-w73.yml": "d503a5a141e7883e77426de2fc4120ed3f420763f94f2fed7d588560d5c2d84c",
+    ".github/workflows/metaengine-browser-shell-v1.yml": "1a32c883e8e673962845e7ca41daa1f69a5b4b52cedf56b2d7430c59524ecdf7"
+  },
+  "node": "v24.22.1",
+  "electron": "44.0.0",
+  "electron_materialization": "Pinned installed node_modules/electron/install.js using its package checksums.json; no package/lockfile change",
+  "xvfb_source": "Ubuntu Noble signed InRelease and Packages from https://archive.ubuntu.com/ubuntu, apt verified downloads extracted only into /tmp",
+  "ubuntu_packages": [
+    {
+      "file": "libfontenc1_1%3a1.1.8-1build1_amd64.deb",
+      "sha256": "0c5d57211cac9659e7f4c856f5e1922c4a522fe8bcf5776e9707b2811f965702"
+    },
+    {
+      "file": "libxfont2_1%3a2.0.6-1build1_amd64.deb",
+      "sha256": "1d5653c395f17f48473fce56cdab30eed16aac017359e6d2c34bc402d85197a0"
+    },
+    {
+      "file": "libxkbfile1_1%3a1.1.0-1build4_amd64.deb",
+      "sha256": "22ac5b7dca740e606261cebdfaf1a07738e92ad3d123570694374ddb4d5afea2"
+    },
+    {
+      "file": "libxmuu1_2%3a1.1.3-3build2_amd64.deb",
+      "sha256": "27428f8d7b63c38424177d5b3b8b2b89d519956ccfe969927cd0a20cdec977c0"
+    },
+    {
+      "file": "x11-xkb-utils_7.7+8build2_amd64.deb",
+      "sha256": "69df4191e165f8b89d067f6234fcce89a4923d27d1e66dd92e6d63d6da93cdb0"
+    },
+    {
+      "file": "xauth_1%3a1.1.2-1build1_amd64.deb",
+      "sha256": "037e70571f39384e28c4ad0db07b44de11f0911ee6c02445560979b417012650"
+    },
+    {
+      "file": "xserver-common_2%3a21.1.12-1ubuntu1_all.deb",
+      "sha256": "49ecce1ca14f5785c4459aa7902b357047c066ad70b595fb52de10308a29e93b"
+    },
+    {
+      "file": "xvfb_2%3a21.1.12-1ubuntu1_amd64.deb",
+      "sha256": "75e28c68d6eb71ae35fafac4b7a7d3690677702087953ff960d8519aa9ab496e"
+    }
+  ],
+  "scratch_adjustment": "Read-only bubblewrap /usr/bin view binds scratch xkbcomp at Xvfb compiled absolute lookup; host /usr/bin unchanged",
+  "host_xkbcomp_absent_after_proof": true,
+  "command": "METAENGINE_TEST_ELECTRON_MODE=MAIN_PROCESS xvfb-run -a node --test test/native-coding-asar-qualification-mode.test.mjs test/native-coding-host-observers-asar.test.mjs",
+  "tests": 7,
+  "passed": 7,
+  "failed": 0,
+  "skipped": 0,
+  "classification": "REAL_ELECTRON_MAIN_PROCESS_ASAR_FILESYSTEM",
+  "main_process_started": true,
+  "virtual_asar_and_physical_original_fs": true,
+  "digest_and_tamper_guards_verified": true,
+  "installed_runtime_qualified": false,
+  "model_calls": 0,
+  "log_sha256": "3b3438f547d8ea9d6f2cf3983b3aec239b257fce4fa1e145e104b4e5b6d48480",
+  "yaml_and_bash_syntax": "PASS",
+  "only_reviewed_run_steps_changed": true
+}

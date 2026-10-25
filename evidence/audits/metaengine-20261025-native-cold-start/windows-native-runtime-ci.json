@@ -1,0 +1,604 @@
+{
+  "schema": "metaengine.ci.windows-native-runtime-receipts.v1",
+  "scope": "Normal terminal Current Source and Live Mechanics runs only. Cancelled Critical Audit diagnostics are excluded. These failed runs do not qualify the runtime or authorize release.",
+  "source_head_sha": "28b105a23e8ffa28083b27313f784c6a75b8e046",
+  "original_probe_result_replaced": false,
+  "authority_effect": false,
+  "release_authority": false,
+  "native_qualification_proven": false,
+  "causal_attribution_proven": false,
+  "contention_proven": false,
+  "jobs": [
+    {
+      "workflow": "METAENGINE Client Current Source Qualification",
+      "run_id": 40234579652,
+      "job_id": 121293297189,
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/40234579652/job/121293297189",
+      "head_sha": "28b105a23e8ffa28083b27313f784c6a75b8e046",
+      "status": "completed",
+      "conclusion": "failure",
+      "completion_kind": "NORMAL_TERMINAL",
+      "preparation": {
+        "conclusion": "success",
+        "duration_seconds": 24,
+        "receipt": {
+          "schema": "metaengine.codex-cli.job-runtime.v1",
+          "build_mode": "PRECOMPILED_FRAMEWORK_CSHARP",
+          "helper_sha256": "57e962f0eca7f6ce4befbcfedbd5dcfa17ff013272d53c7bea571339869dca4a",
+          "template_sha256": "b3bbca733e27f660fbb3867756ccfdc22391b269bfa7712550e3c6adc39db729",
+          "release_authority": false
+        }
+      },
+      "preceding_suites": [
+        {
+          "name": "Current closure source seal and ledgers",
+          "tests": 124,
+          "pass": 124,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0
+        },
+        {
+          "name": "Client State Runtime",
+          "tests": 633,
+          "pass": 633,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0
+        }
+      ],
+      "browser": {
+        "tests": 6001,
+        "pass": 5988,
+        "fail": 5,
+        "cancelled": 0,
+        "skipped": 8,
+        "duration_ms": 602144.6808,
+        "failures": [
+          {
+            "file": "apps/metaengine-browser/test/codex-cli-job-runtime-build.test.mjs",
+            "test": "build extraction rejects missing, ambiguous, malformed and invalid UTF-8 templates",
+            "duration_ms": 1.6906,
+            "status": "failed",
+            "observed_error": "AssertionError: Missing expected exception (test line 166)"
+          },
+          {
+            "file": "apps/metaengine-browser/test/codex-cli-sandbox-probe.test.mjs",
+            "test": "actual current Windows boot sequence and PID4 kernel creation are stable across independent native reads",
+            "duration_ms": 12025.3762,
+            "status": "failed",
+            "observed_error": "12s native read timeout; killed=true, signal=SIGTERM, stdout and stderr empty"
+          },
+          {
+            "file": "apps/metaengine-browser/test/codex-cli-windows-job-birth-physical.test.mjs",
+            "test": "real Windows inner Job kills the exact suspended birth-window child before ready, independently of the outer cleanup guard",
+            "duration_ms": 46171.2696,
+            "status": "failed",
+            "observed_error": "JOB_BIRTH_OBSERVER_FAILED: phase=private_fixture_paths; inventory=null"
+          },
+          {
+            "file": "apps/metaengine-browser/test/codex-cli-windows-job-birth-physical.test.mjs",
+            "test": "real Windows unassigned INNER control survives helper death until later exact owned cleanup",
+            "duration_ms": 38010.1709,
+            "status": "failed",
+            "observed_error": "JOB_BIRTH_OBSERVER_FAILED: phase=private_fixture_paths; inventory=null"
+          },
+          {
+            "file": "apps/metaengine-browser/test/native-coding-host-observers.test.mjs",
+            "test": "native Windows process inventory independently reads this test process without executing a model",
+            "duration_ms": 15027.9021,
+            "status": "failed",
+            "observed_error": "native_coding_observer_native_process_unavailable at 15s"
+          }
+        ],
+        "physical_passes": [
+          {
+            "test": "Windows preparation compiles the real class once, publishes pinned self-contained bytes and retains old outputs on a rejected build",
+            "duration_ms": 64629.6101,
+            "status": "passed"
+          },
+          {
+            "test": "real Windows controller starts suspended in its job and transports exact arguments without a model",
+            "duration_ms": 22816.4623,
+            "status": "passed"
+          },
+          {
+            "test": "real Windows deadline kills the exact job and its descendant without any model call",
+            "duration_ms": 23275.7737,
+            "status": "passed"
+          },
+          {
+            "test": "native absolute deadline can be shortened at resume and stops the real child before relative timeout",
+            "duration_ms": 20007.0145,
+            "status": "passed"
+          },
+          {
+            "test": "an expired native deadline cannot resume a suspended child and cancellation still proves exact cleanup",
+            "duration_ms": 19596.7069,
+            "status": "passed"
+          },
+          {
+            "test": "real Windows pre-RESUME cancellations never execute a canary and bind separate native identities and cancellation IDs",
+            "duration_ms": 37873.5202,
+            "status": "passed"
+          },
+          {
+            "test": "real Windows fault-injected disposable helpers never attest suspended cleanup after a native operation fails",
+            "duration_ms": 177455.4109,
+            "status": "passed"
+          },
+          {
+            "test": "real Windows native helper buffers immediate output through a forced post-resume pre-ack window",
+            "duration_ms": 45939.435,
+            "status": "passed"
+          },
+          {
+            "test": "fixed Windows bridge physically captures an exact window with raw pixel digest",
+            "duration_ms": 43193.1024,
+            "status": "passed"
+          }
+        ],
+        "startup_observations": [
+          {
+            "schema": "metaengine.codex-cli.test-startup-phases.v1",
+            "helper_variant": "FORCED_OUTPUT_WINDOW",
+            "startup_deadline_ms": 30000,
+            "helper_spawns_observed": 1,
+            "spawn_event_elapsed_ms": 3,
+            "ready_validated_elapsed_ms": 22758,
+            "close_elapsed_ms": 22845,
+            "stages": [
+              {
+                "stage": "PS_ENTER",
+                "elapsed_ms": 173
+              },
+              {
+                "stage": "ASSEMBLY_LOAD_BEGIN",
+                "elapsed_ms": 182
+              },
+              {
+                "stage": "ASSEMBLY_LOAD_END",
+                "elapsed_ms": 188
+              },
+              {
+                "stage": "REQUEST_READ_BEGIN",
+                "elapsed_ms": 188
+              },
+              {
+                "stage": "REQUEST_READ_END",
+                "elapsed_ms": 22615
+              },
+              {
+                "stage": "NATIVE_RUN_ENTER",
+                "elapsed_ms": 22642
+              },
+              {
+                "stage": "IMAGE_DIGEST_CHECKED",
+                "elapsed_ms": 22750
+              },
+              {
+                "stage": "CHILD_JOB_BOUND",
+                "elapsed_ms": 22756
+              },
+              {
+                "stage": "IDENTITY_READBACK_COMPLETE",
+                "elapsed_ms": 22757
+              },
+              {
+                "stage": "READY_WRITE_BEGIN",
+                "elapsed_ms": 22757
+              },
+              {
+                "stage": "READY_FLUSH_RETURNED",
+                "elapsed_ms": 22759
+              }
+            ],
+            "unknown_stderr_bytes": 0,
+            "phase_stream_invalid": false,
+            "phase_stream_overflow": false,
+            "body_failed": false,
+            "phase_timing_observation_only": true,
+            "contention_proven": false,
+            "native_qualification_proven": false
+          }
+        ]
+      },
+      "original_probe_result_replaced": false,
+      "authority_effect": false,
+      "release_authority": false,
+      "native_qualification_proven": false,
+      "causal_attribution_proven": false,
+      "contention_proven": false
+    },
+    {
+      "workflow": "Client Live Mechanics Recovery",
+      "run_id": 40234579576,
+      "job_id": 121293297254,
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/40234579576/job/121293297254",
+      "head_sha": "28b105a23e8ffa28083b27313f784c6a75b8e046",
+      "status": "completed",
+      "conclusion": "failure",
+      "completion_kind": "NORMAL_TERMINAL",
+      "preparation": {
+        "conclusion": "success",
+        "duration_seconds": 32,
+        "receipt": {
+          "schema": "metaengine.codex-cli.job-runtime.v1",
+          "build_mode": "PRECOMPILED_FRAMEWORK_CSHARP",
+          "helper_sha256": "40a04556a2ce60be8fe5c6ba0b7ec62961eb2b63a150741e45e9a7666695281a",
+          "template_sha256": "b3bbca733e27f660fbb3867756ccfdc22391b269bfa7712550e3c6adc39db729",
+          "release_authority": false
+        }
+      },
+      "isolated_native": {
+        "files": [
+          "codex-cli-runner.test.mjs",
+          "codex-cli-sandbox-probe.test.mjs",
+          "native-coding-host-observers.test.mjs",
+          "windows-local-computer-executor.test.mjs",
+          "codex-cli-windows-output-order.test.mjs",
+          "codex-cli-windows-job-birth-physical.test.mjs"
+        ],
+        "tests": 134,
+        "pass": 129,
+        "fail": 4,
+        "cancelled": 0,
+        "skipped": 1,
+        "duration_ms": 552695.0097,
+        "failures": [
+          {
+            "file": "apps/metaengine-browser/test/codex-cli-sandbox-probe.test.mjs",
+            "test": "actual current Windows boot sequence and PID4 kernel creation are stable across independent native reads",
+            "duration_ms": 12024.7539,
+            "status": "failed",
+            "observed_error": "12s native read timeout; killed=true, signal=SIGTERM, stdout and stderr empty"
+          },
+          {
+            "file": "apps/metaengine-browser/test/codex-cli-windows-job-birth-physical.test.mjs",
+            "test": "real Windows inner Job kills the exact suspended birth-window child before ready, independently of the outer cleanup guard",
+            "duration_ms": 35524.4879,
+            "status": "failed",
+            "observed_error": "JOB_BIRTH_OBSERVER_FAILED: phase=private_fixture_paths; inventory=null"
+          },
+          {
+            "file": "apps/metaengine-browser/test/codex-cli-windows-job-birth-physical.test.mjs",
+            "test": "real Windows unassigned INNER control survives helper death until later exact owned cleanup",
+            "duration_ms": 35699.475,
+            "status": "failed",
+            "observed_error": "JOB_BIRTH_OBSERVER_FAILED: phase=private_fixture_paths; inventory=null"
+          },
+          {
+            "file": "apps/metaengine-browser/test/native-coding-host-observers.test.mjs",
+            "test": "native Windows process inventory independently reads this test process without executing a model",
+            "duration_ms": 15032.0742,
+            "status": "failed",
+            "observed_error": "native_coding_observer_native_process_unavailable at 15s"
+          }
+        ],
+        "physical_passes": [
+          {
+            "test": "real Windows controller starts suspended in its job and transports exact arguments without a model",
+            "duration_ms": 18637.1657,
+            "status": "passed"
+          },
+          {
+            "test": "real Windows deadline kills the exact job and its descendant without any model call",
+            "duration_ms": 17862.8019,
+            "status": "passed"
+          },
+          {
+            "test": "native absolute deadline can be shortened at resume and stops the real child before relative timeout",
+            "duration_ms": 18315.6618,
+            "status": "passed"
+          },
+          {
+            "test": "an expired native deadline cannot resume a suspended child and cancellation still proves exact cleanup",
+            "duration_ms": 17541.3973,
+            "status": "passed"
+          },
+          {
+            "test": "real Windows pre-RESUME cancellations never execute a canary and bind separate native identities and cancellation IDs",
+            "duration_ms": 35339.1941,
+            "status": "passed"
+          },
+          {
+            "test": "real Windows fault-injected disposable helpers never attest suspended cleanup after a native operation fails",
+            "duration_ms": 140884.2558,
+            "status": "passed"
+          },
+          {
+            "test": "real Windows native helper buffers immediate output through a forced post-resume pre-ack window",
+            "duration_ms": 35791.7019,
+            "status": "passed"
+          },
+          {
+            "test": "fixed Windows bridge physically captures an exact window with raw pixel digest",
+            "duration_ms": 58870.0123,
+            "status": "passed"
+          },
+          {
+            "test": "fixed Windows bridge physically reads foreground status without overwriting the automatic PID variable",
+            "duration_ms": 18497.4789,
+            "status": "passed"
+          }
+        ],
+        "startup_observations": [
+          {
+            "schema": "metaengine.codex-cli.test-startup-phases.v1",
+            "helper_variant": "FORCED_OUTPUT_WINDOW",
+            "startup_deadline_ms": 30000,
+            "helper_spawns_observed": 1,
+            "spawn_event_elapsed_ms": 3,
+            "ready_validated_elapsed_ms": 17733,
+            "close_elapsed_ms": 17820,
+            "stages": [
+              {
+                "stage": "PS_ENTER",
+                "elapsed_ms": 157
+              },
+              {
+                "stage": "ASSEMBLY_LOAD_BEGIN",
+                "elapsed_ms": 165
+              },
+              {
+                "stage": "ASSEMBLY_LOAD_END",
+                "elapsed_ms": 170
+              },
+              {
+                "stage": "REQUEST_READ_BEGIN",
+                "elapsed_ms": 170
+              },
+              {
+                "stage": "REQUEST_READ_END",
+                "elapsed_ms": 17596
+              },
+              {
+                "stage": "NATIVE_RUN_ENTER",
+                "elapsed_ms": 17621
+              },
+              {
+                "stage": "IMAGE_DIGEST_CHECKED",
+                "elapsed_ms": 17726
+              },
+              {
+                "stage": "CHILD_JOB_BOUND",
+                "elapsed_ms": 17731
+              },
+              {
+                "stage": "IDENTITY_READBACK_COMPLETE",
+                "elapsed_ms": 17732
+              },
+              {
+                "stage": "READY_WRITE_BEGIN",
+                "elapsed_ms": 17732
+              },
+              {
+                "stage": "READY_FLUSH_RETURNED",
+                "elapsed_ms": 17734
+              }
+            ],
+            "unknown_stderr_bytes": 0,
+            "phase_stream_invalid": false,
+            "phase_stream_overflow": false,
+            "body_failed": false,
+            "phase_timing_observation_only": true,
+            "contention_proven": false,
+            "native_qualification_proven": false
+          }
+        ]
+      },
+      "browser": {
+        "tests": 6001,
+        "pass": 5987,
+        "fail": 5,
+        "cancelled": 1,
+        "skipped": 8,
+        "duration_ms": 736590.8004,
+        "failures": [
+          {
+            "file": "apps/metaengine-browser/test/codex-cli-job-runtime-build.test.mjs",
+            "test": "build extraction rejects missing, ambiguous, malformed and invalid UTF-8 templates",
+            "duration_ms": 2.4573,
+            "status": "failed",
+            "observed_error": "AssertionError: Missing expected exception (test line 166)"
+          },
+          {
+            "file": "apps/metaengine-browser/test/codex-cli-sandbox-probe.test.mjs",
+            "test": "actual current Windows boot sequence and PID4 kernel creation are stable across independent native reads",
+            "duration_ms": 12027.1681,
+            "status": "failed",
+            "observed_error": "12s native read timeout; killed=true, signal=SIGTERM, stdout and stderr empty"
+          },
+          {
+            "file": "apps/metaengine-browser/test/codex-cli-windows-job-birth-physical.test.mjs",
+            "test": "real Windows inner Job kills the exact suspended birth-window child before ready, independently of the outer cleanup guard",
+            "duration_ms": 58698.2699,
+            "status": "failed",
+            "observed_error": "JOB_BIRTH_OBSERVER_FAILED: phase=private_fixture_paths; inventory=null"
+          },
+          {
+            "file": "apps/metaengine-browser/test/codex-cli-windows-job-birth-physical.test.mjs",
+            "test": "real Windows unassigned INNER control survives helper death until later exact owned cleanup",
+            "duration_ms": 51196.3242,
+            "status": "failed",
+            "observed_error": "JOB_BIRTH_OBSERVER_FAILED: phase=private_fixture_paths; inventory=null"
+          },
+          {
+            "file": "apps/metaengine-browser/test/native-coding-host-observers.test.mjs",
+            "test": "native Windows process inventory independently reads this test process without executing a model",
+            "duration_ms": 15037.0734,
+            "status": "failed",
+            "observed_error": "native_coding_observer_native_process_unavailable at 15s"
+          }
+        ],
+        "cancelled_tests": [
+          {
+            "file": "apps/metaengine-browser/test/codex-cli-runner.test.mjs",
+            "test": "real Windows fault-injected disposable helpers never attest suspended cleanup after a native operation fails",
+            "duration_ms": 180008.3965,
+            "status": "cancelled",
+            "observed_error": "test timed out after 180000ms"
+          }
+        ],
+        "cancellation_scope": "The fault-injected helper test reached its own 180s test timeout; the workflow job completed normally with failure, not cancellation.",
+        "physical_passes": [
+          {
+            "test": "Windows preparation compiles the real class once, publishes pinned self-contained bytes and retains old outputs on a rejected build",
+            "duration_ms": 84547.9045,
+            "status": "passed"
+          },
+          {
+            "test": "real Windows controller starts suspended in its job and transports exact arguments without a model",
+            "duration_ms": 29582.2457,
+            "status": "passed"
+          },
+          {
+            "test": "real Windows deadline kills the exact job and its descendant without any model call",
+            "duration_ms": 29385.2874,
+            "status": "passed"
+          },
+          {
+            "test": "native absolute deadline can be shortened at resume and stops the real child before relative timeout",
+            "duration_ms": 26066.2016,
+            "status": "passed"
+          },
+          {
+            "test": "an expired native deadline cannot resume a suspended child and cancellation still proves exact cleanup",
+            "duration_ms": 25242.1219,
+            "status": "passed"
+          },
+          {
+            "test": "real Windows pre-RESUME cancellations never execute a canary and bind separate native identities and cancellation IDs",
+            "duration_ms": 54892.0575,
+            "status": "passed"
+          },
+          {
+            "test": "real Windows native helper buffers immediate output through a forced post-resume pre-ack window",
+            "duration_ms": 58871.1233,
+            "status": "passed"
+          },
+          {
+            "test": "fixed Windows bridge physically captures an exact window with raw pixel digest",
+            "duration_ms": 56507.9907,
+            "status": "passed"
+          },
+          {
+            "test": "fixed Windows bridge physically reads foreground status without overwriting the automatic PID variable",
+            "duration_ms": 18266.853,
+            "status": "passed"
+          }
+        ],
+        "startup_observations": [
+          {
+            "schema": "metaengine.codex-cli.test-startup-phases.v1",
+            "helper_variant": "FORCED_OUTPUT_WINDOW",
+            "startup_deadline_ms": 30000,
+            "helper_spawns_observed": 1,
+            "spawn_event_elapsed_ms": 3,
+            "ready_validated_elapsed_ms": 28703,
+            "close_elapsed_ms": 29318,
+            "stages": [
+              {
+                "stage": "PS_ENTER",
+                "elapsed_ms": 225
+              },
+              {
+                "stage": "ASSEMBLY_LOAD_BEGIN",
+                "elapsed_ms": 236
+              },
+              {
+                "stage": "ASSEMBLY_LOAD_END",
+                "elapsed_ms": 244
+              },
+              {
+                "stage": "REQUEST_READ_BEGIN",
+                "elapsed_ms": 244
+              },
+              {
+                "stage": "REQUEST_READ_END",
+                "elapsed_ms": 28528
+              },
+              {
+                "stage": "NATIVE_RUN_ENTER",
+                "elapsed_ms": 28564
+              },
+              {
+                "stage": "IMAGE_DIGEST_CHECKED",
+                "elapsed_ms": 28693
+              },
+              {
+                "stage": "CHILD_JOB_BOUND",
+                "elapsed_ms": 28700
+              },
+              {
+                "stage": "IDENTITY_READBACK_COMPLETE",
+                "elapsed_ms": 28701
+              },
+              {
+                "stage": "READY_WRITE_BEGIN",
+                "elapsed_ms": 28701
+              },
+              {
+                "stage": "READY_FLUSH_RETURNED",
+                "elapsed_ms": 28703
+              }
+            ],
+            "unknown_stderr_bytes": 0,
+            "phase_stream_invalid": false,
+            "phase_stream_overflow": false,
+            "body_failed": false,
+            "phase_timing_observation_only": true,
+            "contention_proven": false,
+            "native_qualification_proven": false
+          }
+        ]
+      },
+      "extended_read_observations": [
+        {
+          "schema": "metaengine.ci.native-read-duration-observation.v1",
+          "reader": "kernel_boot",
+          "observed_at": "2026-10-25T21:38:54.147Z",
+          "elapsed_ms": 17648,
+          "production_timeout_ms": 12000,
+          "diagnostic_timeout_ms": 60000,
+          "transport_calls": 1,
+          "outcome": "READ_RETURNED",
+          "original_probe_result_replaced": false,
+          "authority_effect": false,
+          "native_qualification_proven": false,
+          "causal_attribution_proven": false
+        },
+        {
+          "schema": "metaengine.ci.native-read-duration-observation.v1",
+          "reader": "own_process",
+          "observed_at": "2026-10-25T21:39:11.518Z",
+          "elapsed_ms": 17370,
+          "production_timeout_ms": 15000,
+          "diagnostic_timeout_ms": 60000,
+          "transport_calls": 1,
+          "outcome": "READ_RETURNED",
+          "original_probe_result_replaced": false,
+          "authority_effect": false,
+          "native_qualification_proven": false,
+          "causal_attribution_proven": false
+        }
+      ],
+      "original_probe_result_replaced": false,
+      "authority_effect": false,
+      "release_authority": false,
+      "native_qualification_proven": false,
+      "causal_attribution_proven": false,
+      "contention_proven": false
+    }
+  ],
+  "findings": [
+    "Actual Windows build-time compilation, entrypoint rejection and nonzero compiler syntax-error diagnostics passed. Their named physical producer test passed on both normal terminal jobs.",
+    "Both birth-attribution scenarios refused the fixture before native observation at the unchanged private_fixture_paths guard.",
+    "The malformed-template negative reported a missing expected exception; its LF-only delimiter mutation does not alter CRLF input.",
+    "Real capture passed in Current Source and in both Live Mechanics phases; no Windows fs-event assertion abort appeared in these terminal logs.",
+    "Prepared assembly loading took 5–8ms in the recorded samples. The request-read/parser stage took 17.426–28.284s; these combined markers do not distinguish stdin wait from JSON/cmdlet work.",
+    "Later extended diagnostic reads returned after 17.648s (boot) and 17.370s (own process), exceeding production ceilings of 12s and 15s. They do not replace the failed production-budget reads.",
+    "No causal attribution to contention, module loading, filesystem, compiler or host policy is established by these receipts."
+  ]
+}
+

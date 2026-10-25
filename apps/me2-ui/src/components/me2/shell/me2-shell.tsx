@@ -8,6 +8,7 @@ import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react"
 import { useMe2, type PageKey } from "@/components/me2/store";
 import { useToast } from "@/hooks/use-toast";
 import { refreshClientRuntimeStatus, useClientRuntimeStatus } from "@/hooks/use-client-runtime-status";
+import { createGoalSubmissionModeObserver, goalSubmissionModeText, type GoalSubmissionMode } from "@/lib/goal-submission-mode-observer.mjs";
 import { TopBar } from "@/components/me2/shell/topbar";
 import { CommandPalette } from "@/components/me2/shell/command-palette";
 import { InterruptedSetupRecovery } from "@/components/me2/interrupted-setup-recovery";
@@ -81,8 +82,6 @@ type NativeGoalAdmission={
   task_spec_sha256:string;permit_ids:string[];logical_policy:{max_depth:number|null;max_tasks:number|null;max_children:number|null};
   physical_execution_proven:false;global_actuation_granted:false;production_qualified:false;automatic_retry_allowed:false;authority_effect:false;
 };
-type GoalSubmissionMode={schema:"metaengine.client.goal-submission-mode.v1";kind:"NATIVE_CODING"|"BROWSER"|"UNAVAILABLE";
-  state:"HOST_VERIFICATION_REQUIRED"|"HOLD";reason:string|null;project_id?:string|null;automatic_retry_allowed:false;authority_effect:false};
 type GoalReceipt=ClientGoalSubmission|NativeGoalAdmission;
 
 type ClientGoalProgress = {
@@ -275,6 +274,15 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
   const [pending, setPending] = useState(false);
   const [receipt, setReceipt] = useState<GoalReceipt | null>(null);
   const [goalMode,setGoalMode]=useState<GoalSubmissionMode|null>(null);
+  const [modeRefreshing, setModeRefreshing] = useState(false);
+  const [modeObserver] = useState(() => createGoalSubmissionModeObserver({
+    read: async () => {
+      const read = clientControlBridge()?.goalSubmissionMode;
+      if (!read) throw new Error("goal_submission_mode_bridge_unavailable");
+      return read();
+    },
+    publish: setGoalMode,
+  }));
   const [journalEntry, setJournalEntry] = useState<ClientGoalJournalEntry | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -285,7 +293,6 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
   const operation = useRef<"submit" | "read" | "recovery" | null>(null);
   const mounted = useRef(false);
   const loadSequence = useRef(0);
-  const modeReadInFlight=useRef(false);
 
   const loadLatest = useCallback(async () => {
     const bridge = clientControlBridge();
@@ -305,14 +312,25 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
     return () => { current = false; mounted.current = false; loadSequence.current += 1; };
   }, [loadLatest]);
 
-  // Reuse the existing runtime observation cadence; no goal effect is polled.
-  useEffect(()=>{
-    if(modeReadInFlight.current)return;
-    let current=true;const read=clientControlBridge()?.goalSubmissionMode;
-    if(read){modeReadInFlight.current=true;void read().then(mode=>{if(current)setGoalMode(mode);}).catch(()=>{})
-      .finally(()=>{modeReadInFlight.current=false;});}
-    return()=>{current=false;};
-  },[nativeRuntime.state,readiness?.observed_at]);
+  useEffect(() => modeObserver.start(), [modeObserver]);
+
+  // Runtime ticks join an outstanding readonly check. Only unmount or a newer
+  // explicit check invalidates its result; a slow Host response is still useful.
+  useEffect(() => {
+    void modeObserver.refresh();
+  }, [modeObserver, nativeRuntime.state, readiness?.observed_at]);
+
+  const refreshGoalMode = useCallback(async () => {
+    if (operation.current) return;
+    operation.current = "read";
+    setModeRefreshing(true);
+    try {
+      await modeObserver.refresh({ fresh: true });
+    } finally {
+      operation.current = null;
+      if (mounted.current) setModeRefreshing(false);
+    }
+  }, [modeObserver]);
 
   const loadReadiness = useCallback(async () => {
     const current = await refreshClientRuntimeStatus();
@@ -360,7 +378,7 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
     try {
       await bridge.goalStatus(requestId);
       await loadLatest();
-      if(bridge.goalSubmissionMode){const mode=await bridge.goalSubmissionMode();if(mounted.current)setGoalMode(mode);}
+      await modeObserver.refresh({ fresh: true });
       if (mounted.current) setError(null);
     } catch (cause) {
       if (mounted.current) setError(String((cause as Error)?.message || cause || "goal_status_failed").slice(0, 180));
@@ -368,7 +386,7 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
       operation.current = null;
       if (mounted.current) setRefreshing(false);
     }
-  }, [journalEntry?.request_id, loadLatest, receipt?.request_id]);
+  }, [journalEntry?.request_id, loadLatest, modeObserver, receipt?.request_id]);
 
   // Observation only: submitGoal is never called by a timer or recovery path.
   useEffect(() => {
@@ -389,7 +407,7 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
       return;
     }
     operation.current = "submit";
-    loadSequence.current += 1;
+    const submissionSequence = ++loadSequence.current;
     setPending(true);
     setError(null);
     try {
@@ -397,10 +415,9 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
       // fresh typed read immediately before the effect so stale READY cannot
       // authorize work and stale BLOCKED cannot indefinitely suppress a later
       // valid submit. No submit occurs when the fresh read is unavailable.
-      const mode=await bridge.goalSubmissionMode();
+      const mode = await modeObserver.refresh({ fresh: true });
       if(mode?.schema!=="metaengine.client.goal-submission-mode.v1"||mode.authority_effect!==false||mode.automatic_retry_allowed!==false
         ||mode.state!=="HOST_VERIFICATION_REQUIRED"||!["BROWSER","NATIVE_CODING"].includes(mode.kind))throw new Error(mode?.reason||"Goal admission unavailable");
-      if(mounted.current)setGoalMode(mode);
       if(mode.kind==="BROWSER"){
         const freshReadiness = await loadReadiness();
         if (!freshReadiness?.execution_ready) {
@@ -408,6 +425,9 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
           return;
         }
       }
+      // Navigation can unmount the composer while either admission read is
+      // pending. A later mount must not revive that older submit operation.
+      if (!mounted.current || submissionSequence !== loadSequence.current) return;
       const next = await bridge.submitGoal(value);
       if (mode.kind==="NATIVE_CODING"?next?.schema!=="metaengine.native-coding.goal-admission.v1"||next.state!=="ADMITTED"
         ||next.physical_execution_proven!==false||next.production_qualified!==false||next.authority_effect!==false
@@ -426,12 +446,13 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
       operation.current = null;
       if (mounted.current) setPending(false);
     }
-  }, [goal, journalEntry?.state, loadLatest, loadReadiness]);
+  }, [goal, journalEntry?.state, loadLatest, loadReadiness, modeObserver]);
 
   const progress = journalEntry?.progress;
   const nativeReceipt=receipt?.schema==="metaengine.native-coding.goal-admission.v1"?receipt:null;
   const browserReceipt=receipt?.schema==="metaengine.client.goal-submission.v1"?receipt:null;
   const isNative=journalEntry?.kind==="NATIVE_CODING"||Boolean(nativeReceipt)||goalMode?.kind==="NATIVE_CODING";
+  const modeText = goalSubmissionModeText(goalMode);
   const proof = journalEntry?.execution_proof;
   const labels: Record<string, string> = {
     READY: "Queued", LEASED: "Assigned", RUNNING: "Working", RESULT_READY: "Reviewing result",
@@ -474,7 +495,7 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
       <button
         type="button"
         onClick={() => void submit()}
-        disabled={pending || refreshing || recoveryPending || !goal.trim() || journalEntry?.state === "RECONCILE_REQUIRED"||goalMode?.state==="HOLD"}
+        disabled={pending || refreshing || recoveryPending || modeRefreshing || !goal.trim() || journalEntry?.state === "RECONCILE_REQUIRED"||goalMode?.state==="HOLD"}
         data-testid="client-goal-submit"
         className="mc-soft-action h-8 shrink-0 rounded-lg px-4 text-[12px] font-medium disabled:opacity-40"
       >
@@ -483,8 +504,8 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
       <span className="min-w-0 max-w-[200px] truncate text-[12px] text-zinc-300" data-testid="client-goal-readback" role="status" aria-live="polite" title={status}>
         {status}
       </span>
-      {isNative ? <span className="min-w-0 max-w-[180px] truncate text-[11px] text-zinc-300" data-testid="client-native-goal-mode">
-        {goalMode?.reason==="NATIVE_PROFILE_BUSY"?"Current native project is active":goalMode?.state==="HOLD"?"Native admission on hold":"Native coding · Host admission"}
+      {isNative || goalMode?.state === "HOLD" ? <span className="min-w-0 max-w-[200px] truncate text-[11px] text-zinc-300" data-testid="client-native-goal-mode" title={modeText.detail} aria-label={modeText.detail}>
+        {modeText.label}
       </span> : readiness ? (
         <span
           className={`min-w-0 max-w-[180px] truncate text-[11px] ${readiness.execution_ready ? "text-emerald-300" : "text-amber-300"}`}
@@ -494,6 +515,12 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
           {readiness.label}
         </span>
       ) : null}
+      {goalMode?.state === "HOLD" ? <button type="button" onClick={() => void refreshGoalMode()}
+        disabled={modeRefreshing || pending || refreshing || recoveryPending}
+        className="h-8 shrink-0 px-2.5 text-[12px] text-zinc-300" data-testid="client-goal-mode-refresh"
+        title="Read the current admission status without submitting or retrying a goal">
+        {modeRefreshing ? "Checking…" : "Check admission"}
+      </button> : null}
       {goalMode?.reason==="NATIVE_PROFILE_BUSY"?<button type="button" onClick={()=>setPage("tasks")}
         className="h-8 shrink-0 px-2.5 text-[12px] text-zinc-300" data-testid="client-native-current-project">View current project</button>:null}
       {!isNative&&(readiness?.reason === "SUPERVISOR_RECOVERY_REQUIRED" || readiness?.reason === "AGENT_ORIGIN_UNPROVEN") ? (

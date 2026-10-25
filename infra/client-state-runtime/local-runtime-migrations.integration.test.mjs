@@ -200,10 +200,22 @@ test('disposable PostgreSQL pinned migration groups and restricted direct API gr
     await assert.rejects(fs.lstat(archive), { code: 'ENOENT' });
     const privateEnv = { ...process.env, PGHOST: '127.0.0.1', PGPORT: String(port),
       PGUSER: owner, PGPASSWORD: ownerPassword, PGDATABASE: 'postgres' };
+    const [cognitiveAcl] = await sql.unsafe(`SELECT p.prosecdef AS definer,
+      NOT EXISTS (SELECT 1 FROM pg_catalog.aclexplode(coalesce(p.proacl,pg_catalog.acldefault('f',p.proowner))) a
+        WHERE a.privilege_type='EXECUTE' AND a.grantee=0) AS public_denied,
+      pg_catalog.has_function_privilege('anon',p.oid,'EXECUTE') AS anon,
+      pg_catalog.has_function_privilege('authenticated',p.oid,'EXECUTE') AS authenticated,
+      pg_catalog.has_function_privilege('service_role',p.oid,'EXECUTE') AS service
+      FROM pg_catalog.pg_proc p WHERE p.oid=pg_catalog.to_regprocedure(
+        'public.h205f22_a2_browser_cognitive_accept_v1(uuid,text,text,uuid,bigint,bigint,jsonb,boolean)')`);
+    assert.deepEqual(cognitiveAcl,{definer:true,public_denied:true,anon:false,authenticated:false,service:true},
+      'export only the reviewed restricted Cognitive RPC privileges');
     // Source data may have been exercised above, but --schema-only ensures
     // none of those rows or sequence values is copied into the archive.
+    // Preserve ACLs: dropping them restores PostgreSQL's default PUBLIC
+    // EXECUTE and correctly trips the production Cognitive definer guard.
     await exec(path.join(bin, 'pg_dump.exe'), ['--format=custom', '--schema-only',
-      '--no-owner', '--no-acl', '--host=127.0.0.1', '--port=' + port,
+      '--no-owner', '--host=127.0.0.1', '--port=' + port,
       '--username=' + owner, '--dbname=postgres', '--file=' + archive], {
       env: privateEnv, windowsHide: true, shell: false, timeout: 180000, maxBuffer: 1024 * 1024,
     });
@@ -222,6 +234,8 @@ test('disposable PostgreSQL pinned migration groups and restricted direct API gr
       'schema-only export must precede fixture API login publication');
     assert(plan.selected.some(row => / TABLE (?:public|destruktion_meta) /.test(row)),
       'generated schema has no reviewed application table');
+    assert(plan.selected.some(row => / ACL public FUNCTION h205f22_a2_browser_cognitive_accept_v1\(/.test(row)),
+      'generated schema must retain the reviewed Cognitive RPC ACL');
     const sha256 = (await import('node:crypto')).createHash('sha256').update(await fs.readFile(archive)).digest('hex');
     await fs.writeFile(path.join(directory, 'generated-empty-schema-pg17.sha256'), sha256 + '\n', { flag: 'wx', mode: 0o600 });
     console.log(JSON.stringify({ schema: 'metaengine.browser.generated-empty-pg17-schema-qa.v1',

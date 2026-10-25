@@ -1,0 +1,19 @@
+{
+  "schema": "metaengine.native-cold-start.source-seal-followup.v1",
+  "baseline_source": "28b105a23e8ffa28083b27313f784c6a75b8e046",
+  "sealed_paths": 577,
+  "updated_entries": [
+    {
+      "path": ".github/workflows/client-live-mechanics-recovery-v1.yml",
+      "prior_blob": "3eaed42d73a5f8468209f2c32cfad96f1f944c4b",
+      "current_blob": "95a358e181b7012b06f380313547fa215f671eda"
+    },
+    {
+      "path": "apps/metaengine-browser/test/live-mechanics-native-probe-workflow.test.mjs",
+      "prior_blob": "fdaa426d21c06a3de9b0779f5c3843790b314190",
+      "current_blob": "b49856e45227ea0dba4147a3cf622432d7dca914"
+    }
+  ],
+  "all_other_manifest_fields_unchanged": true,
+  "native_runtime_changed": false
+}

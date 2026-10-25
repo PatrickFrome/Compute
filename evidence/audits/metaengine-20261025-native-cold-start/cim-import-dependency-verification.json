@@ -1,0 +1,54 @@
+{
+  "schema": "metaengine.native-cold-start.cim-import-dependency-verification.v1",
+  "baseline_source": "1bf3c63dc4e8590f0e1b171943a6e2e25bdcc237",
+  "repair": "Load the fixed Utility manifest before the fixed CimCmdlets manifest in both readers; measure the complete import interval.",
+  "primary_windows_error": "CommandNotFoundException: Set-Alias during CimCmdlets import",
+  "regression": {
+    "command": "node --test --test-concurrency=2 --test-reporter=tap apps/metaengine-browser/test/windows-native-read-environment.test.mjs apps/metaengine-browser/test/codex-cli-sandbox-probe.test.mjs apps/metaengine-browser/test/native-coding-host-observers.test.mjs apps/metaengine-browser/test/windows-native-read-observation.test.mjs",
+    "node": "v24.22.1",
+    "tests": 55,
+    "pass": 53,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 2,
+    "native_windows_tests_executed": false,
+    "log": "cim-import-dependency-integration.txt",
+    "sha256": "f373a33fe9a0cd0039026a28e8a5c1cb1c3ba14720ad0bde887305779a8ef348"
+  },
+  "source_checks": {
+    "count": 240,
+    "result": "PASS"
+  },
+  "reviewed_blobs": [
+    {
+      "path": ".github/windows-native-read-observation.mjs",
+      "prior_blob": "902a97601a5d6aa20154fe9e20a3878e2fd545e7",
+      "current_blob": "69f28764cb97f632bf3a37ba2363a9b6189699de"
+    },
+    {
+      "path": "apps/metaengine-browser/src/codex-cli-sandbox-probe.mjs",
+      "prior_blob": "96e02c19509582ffe0fc463d80b51992b7e3bc17",
+      "current_blob": "b2aa5c79ee9ee2fcd49fb76cd82e4be6aaabe8cf"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-host-observers.mjs",
+      "prior_blob": "34e51a02c089fb3c06964eef7fcf343cba10a95c",
+      "current_blob": "72b9234cbe651c5db4b5c9bc2f6b353ea9d3343a"
+    }
+  ],
+  "unchanged": {
+    "native_csharp": true,
+    "prepared_helper": true,
+    "compiler": true,
+    "production_boot_timeout_ms": 12000,
+    "production_process_timeout_ms": 15000,
+    "child_environment": true,
+    "stdin_close": true,
+    "identity_validation": true,
+    "package_version": true,
+    "historical_seals_and_transitions": true
+  },
+  "fresh_windows_qualification_proven": false,
+  "authority_effect": false,
+  "promotion_authorized": false
+}

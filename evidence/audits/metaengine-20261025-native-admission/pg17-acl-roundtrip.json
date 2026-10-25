@@ -1,0 +1,46 @@
+{
+  "schema": "metaengine.disposable-pg17-acl-restore-experiment.v1",
+  "postgres_version": "17.6",
+  "os": "Linux",
+  "real_processes": true,
+  "production_qualified": false,
+  "windows_installed_proof": false,
+  "state": "PASS",
+  "source_acl": {
+    "anon": false,
+    "owner": "acl_source_owner",
+    "definer": true,
+    "service": true,
+    "authenticated": false,
+    "public_denied": true
+  },
+  "restored_acl": {
+    "anon": false,
+    "owner": "acl_restored_owner",
+    "definer": true,
+    "service": true,
+    "authenticated": false,
+    "public_denied": true
+  },
+  "dropped_acl_negative_control": {
+    "anon": true,
+    "owner": "acl_restored_owner",
+    "definer": true,
+    "service": true,
+    "authenticated": true,
+    "public_denied": false
+  },
+  "preserved_acl_production_guard_passed": true,
+  "dropped_acl_production_guard_rejected": true,
+  "original_owner_absent_from_target": true,
+  "restored_data_rows": 0,
+  "archive_sha256": "7366bebeb7459b2c5bf50d70dcb4fa51cb9797cca898285857f886c118ffa4ea",
+  "selected_acl_entries": 2,
+  "source_sql_sha256": {
+    "20261007061415_cognitive_delta_live_acceptor_v1.sql": "6b42f2d69e4f8b5ec413145fe10b3aa070eebf1297ae34d3c8ca546100a0aa4d",
+    "20261007062908_cognitive_broadcast_correlation_readback_v1.sql": "a3ea72d42ce9c20d2b744d916351662ff6315039c3ee42f264ee638ef76af408",
+    "20261007063940_cognitive_durable_latest_batch_v1.sql": "4cee66a109a741d1ee30612fcfa7816bfb77afaaa6a236133b42d7371a44d726",
+    "cognitive-acceptor-direct-api-v1.sql": "f867fc50220305baa597251a90827b5fe77b0bbe1e5cff2e6deddc7796e9e48f"
+  },
+  "cleanup_confirmed": true
+}

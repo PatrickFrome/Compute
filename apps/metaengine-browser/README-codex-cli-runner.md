@@ -28,11 +28,37 @@ this integration. Official reference:
   explicit resume, timeout/cancellation, descendant termination and native job
   accounting. A Job Object controls lifetime and resources; it is not a sandbox.
 
-`electron-builder.test.json` copies the PowerShell helper to the physical
-`resources/native-coding/codex-cli-job-runner.ps1` file. Packaged code resolves
-that path through `process.resourcesPath`; PowerShell never receives a path
-inside `app.asar`. Development runs retain the source `scripts/` path. The next
-installed payload qualification must include the external helper's exact hash.
+The reviewed `scripts/codex-cli-job-runner.ps1` is the source template. Explicit
+build preparation compiles its unchanged C# implementation with the Windows
+.NET Framework compiler and emits a self-contained PowerShell helper with the
+managed assembly embedded. The runtime helper loads those bytes in memory; no
+compiler or generated assembly cache is used during a task.
+
+From `apps/metaengine-browser` on Windows, prepare source runs explicitly:
+
+```powershell
+node scripts/prepare-codex-cli-job-runtime.mjs
+```
+
+The outputs are `native-dist/codex-cli/codex-cli-job-runner.ps1` and its hash
+manifest. Changing the source template invalidates the preparation. A missing
+or changed output refuses launch instead of compiling or falling back during
+goal execution. The existing 30-second controller startup deadline is unchanged.
+`npm test` performs this preparation in its explicit `pretest` build stage on
+Windows. Direct `node --test` callers prepare first, as the Windows CI steps do.
+
+The normal `beforePack` hook performs the same preparation. Packaging copies
+the built helper to the established physical
+`resources/native-coding/codex-cli-job-runner.ps1` path and puts its expected hash
+manifest inside `app.asar`. Packaged code resolves the physical helper through
+`process.resourcesPath` and checks it against the in-archive manifest before
+each launch. PowerShell never receives a path inside `app.asar`. Explicit test
+helper overrides require an independently supplied exact helper digest.
+
+Compiler/source/output hashes describe build material. They do not grant task
+authority, qualify a release or replace normal installed payload/provenance
+verification. Physical Windows qualification must still exercise the prepared
+helper's suspend, resume, cancellation and complete job cleanup.
 
 The Windows sandbox is selected by explicit CLI configuration:
 `windows.sandbox="elevated"`. Writer commands use `--sandbox workspace-write`;

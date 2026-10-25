@@ -1,0 +1,37 @@
+{
+  "schema": "metaengine.native-cold-start.native-log-verification.v1",
+  "baseline_source": "28b105a23e8ffa28083b27313f784c6a75b8e046",
+  "source_and_test_sha256": {
+    ".github/workflows/client-live-mechanics-recovery-v1.yml": "b4e7ac70fadfd2c703bf8ddc88d87d966c2197b551bd3b4e083b84ef5fbfeff8",
+    "apps/metaengine-browser/test/live-mechanics-native-probe-workflow.test.mjs": "7f6ac8580b7a162424dd6c40e8f29ba4a40dea3bf8cf762424310aa6a83d278b"
+  },
+  "workflow_contracts": {
+    "tests": 14,
+    "passed": 14,
+    "failed": 0,
+    "skipped": 0,
+    "log": "native-log-workflow-contracts.txt"
+  },
+  "shell_behavior": {
+    "cases": 3,
+    "real_extracted_workflow_body": true,
+    "log": "native-log-shell-behavior.json"
+  },
+  "independent_review": "PASS",
+  "native_runtime_changed": false,
+  "native_test_files_unchanged": true,
+  "concurrency_and_time_budgets_unchanged": true,
+  "failure_still_fails_job": true,
+  "windows_runtime_qualified": false,
+  "package_version_unchanged": true,
+  "installed_client_modified": false,
+  "source_preflight": {
+    "tested_local_commit": "558e10383b77c38d27e8a35559658a4333b65377",
+    "tests": 124,
+    "passed": 124,
+    "failed": 0,
+    "skipped": 0,
+    "log": "native-log-preflight.txt",
+    "scope": "Only this receipt added afterwards."
+  }
+}

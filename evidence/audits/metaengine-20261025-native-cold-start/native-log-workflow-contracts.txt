@@ -1,0 +1,22 @@
+✔ Live Mechanics keeps the existing two jobs, platform matrix and bounded per-platform qualification budgets (1.663629ms)
+✔ Windows gets six complete serial diagnostic files and both platforms still execute the unchanged full four-worker glob (0.740483ms)
+✔ full coverage and source readback depend on all successful prerequisites, never on probe success (0.220081ms)
+✔ Windows explicitly provisions the locked official Electron before both timed qualifications without changing failure guards (0.311668ms)
+✔ Electron PE version guard accepts only 44.0.0 or 44.0.0.0 and rejects nonzero revisions and relaxed guards (2.178303ms)
+✔ both qualification steps emit safe resource/timestamp observations and helper changes trigger CI (3.46111ms)
+✔ Live Mechanics qualification guard rejects omitted native file (0.645841ms)
+✔ Live Mechanics qualification guard rejects omitted output-order native file (1.346673ms)
+✔ Live Mechanics qualification guard rejects omitted atomic-birth native file (0.366501ms)
+✔ Live Mechanics qualification guard rejects parallel native diagnostic (0.458379ms)
+✔ Live Mechanics qualification guard rejects filtered full suite (0.27301ms)
+✔ Live Mechanics qualification guard rejects probe-dependent full suite (0.14607ms)
+✔ Live Mechanics qualification guard rejects suppressed probe failure (0.426811ms)
+✔ Node expands the literal full-test glob and executes every matching fixture without shell expansion (146.903979ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 14
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 235.125662

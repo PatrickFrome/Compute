@@ -50,9 +50,10 @@ function assertElectronVersionGuard(source) {
   return new RegExp(pattern);
 }
 
-test('Live Mechanics keeps the existing two jobs, platform matrix and bounded per-platform qualification budgets', () => {
+test('Live Mechanics keeps both qualification jobs and adds one independent diagnostic job without changing qualification budgets', () => {
   const jobs = workflow.split('\njobs:\n')[1]; assert.ok(jobs);
-  assert.deepEqual([...jobs.matchAll(/^  ([a-z][\w-]*):$/gm)].map(match => match[1]), ['browser-mechanics', 'cognitive-postgres']);
+  assert.deepEqual([...jobs.matchAll(/^  ([a-z][\w-]*):$/gm)].map(match => match[1]),
+    ['browser-mechanics', 'cognitive-postgres', 'windows-native-stage-observation']);
   const mechanics = jobs.split('\n  cognitive-postgres:')[0];
   assert.match(mechanics, /fail-fast: false\n      matrix:\n        os: \[ubuntu-24\.04, windows-2025\]/);
   assert.match(mechanics, /^    timeout-minutes: \$\{\{ matrix\.os == 'windows-2025' && 35 \|\| 20 \}\}$/m);
@@ -126,7 +127,7 @@ test('both qualification steps emit safe resource/timestamp observations and hel
 for (const [name, before, after] of [
   ['omitted native file', '            test/codex-cli-sandbox-probe.test.mjs \\\n', ''],
   ['omitted output-order native file', '            test/codex-cli-windows-output-order.test.mjs \\\n', ''],
-  ['omitted atomic-birth native file', '            test/codex-cli-windows-job-birth-physical.test.mjs\n', ''],
+  ['omitted atomic-birth native file', '            test/codex-cli-windows-job-birth-physical.test.mjs \\\n', ''],
   ['parallel native diagnostic', '--test-concurrency=1 \\', '--test-concurrency=4 \\'],
   ['filtered full suite', "--test-concurrency=4 'test/*.test.mjs'", "--test-concurrency=4 --test-name-pattern=selected 'test/*.test.mjs'"],
   ['probe-dependent full suite', fullGate, "        if: ${{ success() && steps.windows_native_probe.outcome == 'success' }}"],

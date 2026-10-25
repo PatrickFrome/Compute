@@ -1,0 +1,344 @@
+{
+  "schema": "metaengine.ci.windows-native-stage-localization.v1",
+  "source_head_sha": "6adb7836ffcc5e9424747759d14701e2d0efcd02",
+  "workflow": "Client Live Mechanics Recovery",
+  "run_id": 40237661456,
+  "run_attempt": 1,
+  "run_url": "https://github.com/PatrickFrome/Compute/actions/runs/40237661456",
+  "job_id": 121302579558,
+  "job_name": "Windows native stage observation (diagnostic only)",
+  "job_url": "https://github.com/PatrickFrome/Compute/actions/runs/40237661456/job/121302579558",
+  "status": "completed",
+  "conclusion": "success",
+  "started_at": "2026-10-25T21:57:41Z",
+  "completed_at": "2026-10-25T21:59:50Z",
+  "job_duration_seconds": 129,
+  "completion_kind": "NORMAL_TERMINAL_DIAGNOSTIC",
+  "exact_source_check": {
+    "name": "Prove exact observation source head",
+    "conclusion": "success",
+    "started_at": "2026-10-25T21:57:59Z",
+    "completed_at": "2026-10-25T21:57:59Z"
+  },
+  "steps": [
+    {
+      "name": "Observe fixed native read stages (diagnostic only)",
+      "conclusion": "success",
+      "started_at": "2026-10-25T21:57:59Z",
+      "completed_at": "2026-10-25T21:58:57Z",
+      "duration_seconds": 58
+    },
+    {
+      "name": "Observe prepared helper input and JSON stages (diagnostic only)",
+      "conclusion": "success",
+      "started_at": "2026-10-25T21:58:57Z",
+      "completed_at": "2026-10-25T21:59:45Z",
+      "duration_seconds": 48
+    }
+  ],
+  "native_read_observations": [
+    {
+      "schema": "metaengine.ci.native-read-duration-observation.v2",
+      "reader": "kernel_boot",
+      "observed_at": "2026-10-25T21:58:34.258Z",
+      "elapsed_ms": 33972,
+      "production_timeout_ms": 12000,
+      "diagnostic_timeout_ms": 60000,
+      "transport_calls": 1,
+      "outcome": "READ_RETURNED",
+      "stages": [
+        {
+          "stage": "PS_ENTER",
+          "elapsed_ms": 1
+        },
+        {
+          "stage": "NATIVE_BIND_READY",
+          "elapsed_ms": 56
+        },
+        {
+          "stage": "BOOT_FIRST_READ",
+          "elapsed_ms": 119
+        },
+        {
+          "stage": "SYSTEM_CIM_BEGIN",
+          "elapsed_ms": 119
+        },
+        {
+          "stage": "SYSTEM_CIM_END",
+          "elapsed_ms": 31118
+        },
+        {
+          "stage": "OS_CIM_BEGIN",
+          "elapsed_ms": 31140
+        },
+        {
+          "stage": "OS_CIM_END",
+          "elapsed_ms": 31171
+        },
+        {
+          "stage": "SYSTEM_CONFIRM_BEGIN",
+          "elapsed_ms": 31171
+        },
+        {
+          "stage": "SYSTEM_CONFIRM_END",
+          "elapsed_ms": 31193
+        },
+        {
+          "stage": "BOOT_CONFIRM_END",
+          "elapsed_ms": 31196
+        },
+        {
+          "stage": "JSON_BEGIN",
+          "elapsed_ms": 31196
+        },
+        {
+          "stage": "JSON_END",
+          "elapsed_ms": 31912
+        }
+      ],
+      "unknown_stderr_bytes": 614,
+      "phase_stream_invalid": false,
+      "phase_stream_overflow": false,
+      "phase_timing_observation_only": true,
+      "original_probe_result_replaced": false,
+      "authority_effect": false,
+      "native_qualification_proven": false,
+      "causal_attribution_proven": false
+    },
+    {
+      "schema": "metaengine.ci.native-read-duration-observation.v2",
+      "reader": "own_process",
+      "observed_at": "2026-10-25T21:58:57.023Z",
+      "elapsed_ms": 22764,
+      "production_timeout_ms": 15000,
+      "diagnostic_timeout_ms": 60000,
+      "transport_calls": 1,
+      "outcome": "READ_RETURNED",
+      "stages": [
+        {
+          "stage": "PS_ENTER",
+          "elapsed_ms": 1
+        },
+        {
+          "stage": "PROCESS_HANDLE_READY",
+          "elapsed_ms": 21
+        },
+        {
+          "stage": "PROCESS_IMAGE_READY",
+          "elapsed_ms": 26
+        },
+        {
+          "stage": "PROCESS_CIM_BEGIN",
+          "elapsed_ms": 26
+        },
+        {
+          "stage": "PROCESS_CIM_END",
+          "elapsed_ms": 22488
+        },
+        {
+          "stage": "PROCESS_OWNER_BEGIN",
+          "elapsed_ms": 22489
+        },
+        {
+          "stage": "PROCESS_OWNER_END",
+          "elapsed_ms": 22510
+        },
+        {
+          "stage": "OUTPUT_BEGIN",
+          "elapsed_ms": 22516
+        },
+        {
+          "stage": "OUTPUT_END",
+          "elapsed_ms": 22528
+        }
+      ],
+      "unknown_stderr_bytes": 614,
+      "phase_stream_invalid": false,
+      "phase_stream_overflow": false,
+      "phase_timing_observation_only": true,
+      "original_probe_result_replaced": false,
+      "authority_effect": false,
+      "native_qualification_proven": false,
+      "causal_attribution_proven": false
+    }
+  ],
+  "helper_test_report": {
+    "tests": 2,
+    "pass": 2,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "duration_ms": 47984.5155,
+    "tests_reported": [
+      {
+        "test": "native helper acknowledges successful resume before starting either output pump",
+        "reported_duration_ms": 24334.3389,
+        "status": "passed"
+      },
+      {
+        "test": "real Windows native helper buffers immediate output through a forced post-resume pre-ack window",
+        "reported_duration_ms": 23504.6022,
+        "status": "passed"
+      }
+    ],
+    "startup_observation": {
+      "schema": "metaengine.codex-cli.test-startup-phases.v1",
+      "helper_variant": "FORCED_OUTPUT_WINDOW",
+      "startup_deadline_ms": 30000,
+      "helper_spawns_observed": 1,
+      "spawn_event_elapsed_ms": 4,
+      "ready_validated_elapsed_ms": 23408,
+      "close_elapsed_ms": 23499,
+      "stages": [
+        {
+          "stage": "PS_ENTER",
+          "elapsed_ms": 208
+        },
+        {
+          "stage": "ASSEMBLY_LOAD_BEGIN",
+          "elapsed_ms": 217
+        },
+        {
+          "stage": "ASSEMBLY_LOAD_END",
+          "elapsed_ms": 225
+        },
+        {
+          "stage": "REQUEST_READ_BEGIN",
+          "elapsed_ms": 225
+        },
+        {
+          "stage": "REQUEST_LINE_READ",
+          "elapsed_ms": 227
+        },
+        {
+          "stage": "REQUEST_JSON_BEGIN",
+          "elapsed_ms": 227
+        },
+        {
+          "stage": "REQUEST_JSON_END",
+          "elapsed_ms": 23251
+        },
+        {
+          "stage": "REQUEST_READ_END",
+          "elapsed_ms": 23251
+        },
+        {
+          "stage": "NATIVE_RUN_ENTER",
+          "elapsed_ms": 23283
+        },
+        {
+          "stage": "IMAGE_DIGEST_CHECKED",
+          "elapsed_ms": 23399
+        },
+        {
+          "stage": "CHILD_JOB_BOUND",
+          "elapsed_ms": 23405
+        },
+        {
+          "stage": "IDENTITY_READBACK_COMPLETE",
+          "elapsed_ms": 23406
+        },
+        {
+          "stage": "READY_WRITE_BEGIN",
+          "elapsed_ms": 23406
+        },
+        {
+          "stage": "READY_FLUSH_RETURNED",
+          "elapsed_ms": 23408
+        }
+      ],
+      "unknown_stderr_bytes": 0,
+      "phase_stream_invalid": false,
+      "phase_stream_overflow": false,
+      "body_failed": false,
+      "phase_timing_observation_only": true,
+      "contention_proven": false,
+      "native_qualification_proven": false
+    }
+  },
+  "measured_intervals": {
+    "kernel_boot": [
+      {
+        "name": "first_system_cim",
+        "start_stage": "SYSTEM_CIM_BEGIN",
+        "end_stage": "SYSTEM_CIM_END",
+        "duration_ms": 30999
+      },
+      {
+        "name": "os_cim",
+        "start_stage": "OS_CIM_BEGIN",
+        "end_stage": "OS_CIM_END",
+        "duration_ms": 31
+      },
+      {
+        "name": "system_confirmation_cim",
+        "start_stage": "SYSTEM_CONFIRM_BEGIN",
+        "end_stage": "SYSTEM_CONFIRM_END",
+        "duration_ms": 22
+      },
+      {
+        "name": "output_json",
+        "start_stage": "JSON_BEGIN",
+        "end_stage": "JSON_END",
+        "duration_ms": 716
+      }
+    ],
+    "own_process": [
+      {
+        "name": "process_cim",
+        "start_stage": "PROCESS_CIM_BEGIN",
+        "end_stage": "PROCESS_CIM_END",
+        "duration_ms": 22462
+      },
+      {
+        "name": "process_owner",
+        "start_stage": "PROCESS_OWNER_BEGIN",
+        "end_stage": "PROCESS_OWNER_END",
+        "duration_ms": 21
+      },
+      {
+        "name": "output",
+        "start_stage": "OUTPUT_BEGIN",
+        "end_stage": "OUTPUT_END",
+        "duration_ms": 12
+      }
+    ],
+    "helper": [
+      {
+        "name": "assembly_load",
+        "start_stage": "ASSEMBLY_LOAD_BEGIN",
+        "end_stage": "ASSEMBLY_LOAD_END",
+        "duration_ms": 8
+      },
+      {
+        "name": "stdin_line_read",
+        "start_stage": "REQUEST_READ_BEGIN",
+        "end_stage": "REQUEST_LINE_READ",
+        "duration_ms": 2
+      },
+      {
+        "name": "request_json",
+        "start_stage": "REQUEST_JSON_BEGIN",
+        "end_stage": "REQUEST_JSON_END",
+        "duration_ms": 23024
+      }
+    ]
+  },
+  "native_reads_readonly": true,
+  "diagnostic_only": true,
+  "helper_execution_scope": "DISPOSABLE_NATIVE_TEST_FIXTURE",
+  "qualified": false,
+  "original_probe_result_replaced": false,
+  "authority_effect": false,
+  "release_authority": false,
+  "native_qualification_proven": false,
+  "causal_attribution_proven": false,
+  "contention_proven": false,
+  "raw_stderr_included": false,
+  "limits": [
+    "The native reads use a separate 60000ms diagnostic ceiling. Their READ_RETURNED results do not replace failed production-budget reads or establish compliance with the production 12000ms/15000ms limits.",
+    "The helper test retains its 30000ms startup deadline and its physical suspended-process, resume and output-order assertions. Its two passing tests do not qualify the complete runtime or full six-file suite.",
+    "Intervals locate elapsed time inside the first Get-CimInstance calls and ConvertFrom-Json. They do not by themselves establish module discovery, contention or another causal explanation.",
+    "Unknown stderr is represented only by byte counts. No raw stderr or native identity payload is included."
+  ]
+}

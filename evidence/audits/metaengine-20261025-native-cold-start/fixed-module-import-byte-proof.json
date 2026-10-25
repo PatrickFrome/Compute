@@ -1,0 +1,13 @@
+{
+  "schema": "metaengine.codex-cli.explicit-import-byte-proof.v1",
+  "before_template_sha256": "0c817a654c14217e4c9292766386a88107d0a9dd7e69ab01e8b6296017f2e54f",
+  "after_template_sha256": "60f70fdb0ff5ddab3f61efb46060931e862cb71d8601a5ad3d3b1c19868ec5d6",
+  "before_csharp_sha256": "b93bc3707d783890434912e0ee3af93215073107d4481f3eb9c4d3f39987883e",
+  "after_csharp_sha256": "b93bc3707d783890434912e0ee3af93215073107d4481f3eb9c4d3f39987883e",
+  "csharp_bytes": 16766,
+  "csharp_byte_identical": true,
+  "pre_csharp_prefix_identical": true,
+  "request_protocol_and_failure_trailer_unchanged": true,
+  "change_scope": "TWO_POWERSHELL_TRAILER_LINES_EXPLICIT_UTILITY_IMPORT",
+  "native_timing_qualified": false
+}

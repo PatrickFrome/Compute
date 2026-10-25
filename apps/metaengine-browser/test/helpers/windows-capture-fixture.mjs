@@ -9,10 +9,13 @@ export const CAPTURE_FIXTURE_READY_SCHEMA = 'metaengine.test.capture-window-read
 // prerequisite, THEN a 15s native-operation budget. 45s never covered that
 // composition (serial STATUS alone took 27.8s). No production deadline changes.
 export const CAPTURE_FIXTURE_TIMEOUT_MS = 30000 + 2 * (120000 + 15000 + 5000) + 10000;
+export const CAPTURE_FIXTURE_FILE_POLL_INTERVAL_MS = 50;
 
 // Electron 44's Windows GUI main process does not support Node child-process
-// IPC, and its stdin is EOF-only. Atomic nonce-bound files and fs.watch work
-// without either unsupported transport or repeated native OBSERVE calls.
+// IPC, and its stdin is EOF-only. Keep the atomic nonce-bound file channel,
+// but read only its two owned paths: Windows directory notifications can abort
+// Node inside libuv before JavaScript can catch an error. These bounded file
+// reads never repeat a native OBSERVE or CAPTURE operation.
 export const captureFixtureSource = [
   "const { app, BrowserWindow } = require('electron');",
   "const fs = require('node:fs'), path = require('node:path');",
@@ -26,20 +29,28 @@ export const captureFixtureSource = [
   'const readyPath = process.env.METAENGINE_CAPTURE_READY_PATH, stopPath = process.env.METAENGINE_CAPTURE_STOP_PATH;',
   'const nonce = process.env.METAENGINE_CAPTURE_NONCE;',
   "app.commandLine.appendSwitch('disable-gpu');",
-  'let win;',
-  'const stopWatcher = fs.watch(path.dirname(stopPath), (_event, filename) => {',
-  '  if (filename != null && String(filename) !== path.basename(stopPath)) return;',
-  "  try { if (fs.readFileSync(stopPath, 'utf8') !== nonce) return; } catch { return; }",
-  '  if (win) win.destroy(); app.quit();',
-  '});',
-  "app.on('before-quit', () => stopWatcher.close());",
-  `setTimeout(() => app.quit(), ${CAPTURE_FIXTURE_TIMEOUT_MS}).unref();`,
+  'let win, stopTimer, stopping = false;',
+  'function checkStop() {',
+  '  if (stopping) return;',
+  '  try {',
+  '    const stat = fs.lstatSync(stopPath);',
+  "    if (stat.isFile() && stat.size === nonce.length && fs.readFileSync(stopPath, 'utf8') === nonce) {",
+  '      stopping = true; if (win) win.destroy(); app.quit(); return;',
+  '    }',
+  '  } catch {}',
+  `  stopTimer = setTimeout(checkStop, ${CAPTURE_FIXTURE_FILE_POLL_INTERVAL_MS}); stopTimer.unref();`,
+  '}',
+  `const lifetimeTimer = setTimeout(() => app.quit(), ${CAPTURE_FIXTURE_TIMEOUT_MS}); lifetimeTimer.unref();`,
+  "app.on('before-quit', () => { stopping = true; clearTimeout(stopTimer); clearTimeout(lifetimeTimer); });",
+  'checkStop();',
   'app.whenReady().then(async () => {',
+  '  if (stopping) return;',
   `  const title = ${JSON.stringify(CAPTURE_FIXTURE_TITLE)};`,
   '  win = new BrowserWindow({ width:360, height:240, x:80, y:80, show:false, frame:true, title });',
   "  const painted = new Promise(resolve => win.once('ready-to-show', resolve));",
   '  await win.loadURL(\'data:text/html,<html><head><title>METAENGINE%20Computer%20Capture%20Fixture</title></head><body><div style="font:18px sans-serif;padding:24px">stable-pixel-fixture</div></body></html>\');',
   '  await painted;',
+  '  if (stopping) return;',
   '  win.setTitle(title); win.show(); win.focus();',
   '  const handle = win.getNativeWindowHandle();',
   "  const hwnd = '0x' + (handle.length === 8 ? handle.readBigUInt64LE() : BigInt(handle.readUInt32LE())).toString(16);",
@@ -51,7 +62,7 @@ export const captureFixtureSource = [
 ].join('\n');
 
 export function startCaptureFixture(executable, fixturePath, {
-  spawnImpl = spawn, watchImpl = fs.watch, environment = process.env, signal, readyTimeoutMs = 30000, stopTimeoutMs = 5000,
+  spawnImpl = spawn, environment = process.env, signal, readyTimeoutMs = 30000, stopTimeoutMs = 5000,
 } = {}) {
   const readyPath = fixturePath + '.ready.json', stopPath = fixturePath + '.stop';
   const nonce = randomBytes(24).toString('hex');
@@ -60,13 +71,14 @@ export function startCaptureFixture(executable, fixturePath, {
   // Preserve the real main-process/sandbox mode regardless of the parent runner.
   delete env.ELECTRON_RUN_AS_NODE;
   let child, stderr = '', closed = false, terminalError = null, stopping = false, readyValue = null;
-  let settleReady, rejectReady, settleClose;
+  let settleReady, rejectReady, settleClose, readinessTimer;
   const ready = new Promise((resolve, reject) => { settleReady = resolve; rejectReady = reject; });
   ready.catch(() => {}); // No unhandled rejection before the caller awaits readiness.
   const close = new Promise(resolve => { settleClose = resolve; });
-  const fail = error => { terminalError ||= error; rejectReady(terminalError); };
-  const watcher = watchImpl(path.dirname(readyPath), (_event, filename) => {
-    if (readyValue || terminalError || (filename != null && String(filename) !== path.basename(readyPath))) return;
+  const stopReading = () => { clearTimeout(readinessTimer); readinessTimer = undefined; };
+  const fail = error => { terminalError ||= error; stopReading(); clearTimeout(timer); rejectReady(terminalError); };
+  const readReady = () => {
+    if (readyValue || terminalError || closed || stopping) return;
     try {
       const stat = fs.lstatSync(readyPath);
       if (!stat.isFile() || stat.size > 4096) throw new Error('capture_fixture_ready_file_invalid');
@@ -74,16 +86,16 @@ export function startCaptureFixture(executable, fixturePath, {
       if (message?.schema !== CAPTURE_FIXTURE_READY_SCHEMA || message.nonce !== nonce
           || message.process_id !== child.pid || message.title !== CAPTURE_FIXTURE_TITLE
           || !/^0x[1-9a-f][0-9a-f]*$/.test(message.window_handle || '')) throw new Error('capture_fixture_ready_identity_invalid');
-      readyValue = message; clearTimeout(timer); watcher.close(); settleReady(message);
+      readyValue = message; clearTimeout(timer); stopReading(); settleReady(message); return;
     } catch (error) { if (error.code !== 'ENOENT') fail(error); }
-  });
-  watcher.once('error', fail);
+    if (!terminalError) readinessTimer = setTimeout(readReady, CAPTURE_FIXTURE_FILE_POLL_INTERVAL_MS);
+  };
   const timer = setTimeout(() => fail(new Error('capture_fixture_ready_timeout')), readyTimeoutMs);
   try {
     child = spawnImpl(executable, [fixturePath], {
       windowsHide: false, shell: false, stdio: ['ignore', 'ignore', 'pipe'], env,
     });
-  } catch (error) { watcher.close(); clearTimeout(timer); throw error; }
+  } catch (error) { stopReading(); clearTimeout(timer); throw error; }
   const onAbort = () => {
     fail(signal.reason instanceof Error ? signal.reason : new Error('capture_fixture_aborted'));
     try { child.kill(); } catch {}
@@ -95,12 +107,13 @@ export function startCaptureFixture(executable, fixturePath, {
     if (!stopping) fail(new Error(`capture_fixture_exited:${code}:${nativeSignal || ''}:${stderr.slice(-500)}`));
   });
   child.once('close', (code, nativeSignal) => {
-    closed = true; clearTimeout(timer); watcher.close(); signal?.removeEventListener('abort', onAbort);
+    closed = true; clearTimeout(timer); stopReading(); signal?.removeEventListener('abort', onAbort);
     if (!stopping) fail(new Error(`capture_fixture_closed:${code}:${nativeSignal || ''}`));
     settleClose();
   });
   signal?.addEventListener('abort', onAbort, { once: true });
   if (signal?.aborted) onAbort();
+  readReady();
   const assertRunning = () => {
     if (terminalError) throw terminalError;
     if (closed || child.exitCode !== null || child.signalCode != null) throw new Error('capture_fixture_not_running');
@@ -112,7 +125,8 @@ export function startCaptureFixture(executable, fixturePath, {
   return {
     child, ready, assertRunning,
     async stop() {
-      stopping = true; clearTimeout(timer); watcher.close();
+      stopping = true; clearTimeout(timer); stopReading();
+      if (!readyValue && !terminalError) fail(new Error('capture_fixture_stopped_before_ready'));
       if (closed) return;
       try { fs.writeFileSync(stopPath + '.pending', nonce, { flag: 'wx' }); fs.renameSync(stopPath + '.pending', stopPath); }
       catch { try { child.kill(); } catch {} }

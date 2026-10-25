@@ -1,0 +1,44 @@
+✔ build cleanup retries transient Windows locks and physically removes only the captured directory (615.52436ms)
+✔ build cleanup stops after six busy attempts, fails closed and releases the owned preparation lock (1555.221755ms)
+✔ build cleanup rechecks directory identity after a busy attempt and preserves a replacement directory (113.218049ms)
+✔ build cleanup preserves the primary compiler failure and both independent cleanup failures (4.925139ms)
+✔ successful build cleanup retains the exact primary failure without wrapping or replacing it (7.605706ms)
+✔ build cleanup accepts an already removed build directory and still releases its owned lock (2.387947ms)
+✔ precompilation preserves exact C# and all protocol text outside the single Add-Type block, with LF or CRLF (3.499938ms)
+✔ build extraction rejects missing, ambiguous, malformed and invalid UTF-8 templates (1.654175ms)
+✔ the output loader refuses non-PE, unmanaged or truncated assembly bytes (1.742478ms)
+✔ instrumented fixture C# is prepared through the same exact-byte transformation (1.395527ms)
+✔ source preparation refuses a non-Windows host without creating an output or pretending compilation succeeded (0.696997ms)
+✔ normal packaging prepares once before copying only the manifest into ASAR and the compiled helper outside (1.908718ms)
+﹣ Windows preparation compiles the real class once, publishes pinned self-contained bytes and retains old outputs on a rejected build (0.288744ms) # SKIP
+✔ source runtime resolves prepared output separately from the reviewed build template (8.911959ms)
+✔ source preparation refuses a changed template, changed helper and absent manifest without fallback (3.41455ms)
+✔ runtime manifest requires its fixed build mode and every build-chain digest (3.249943ms)
+✔ packaged binding comes from the app archive and cannot be replaced by a physical resource manifest (1.961176ms)
+✔ explicit disposable helpers require their own exact hash and reject directories or oversized files (10.192697ms)
+✔ helper tampering after controller construction is rejected before any child or input effect (2.875821ms)
+✔ Live Mechanics keeps the existing two jobs, platform matrix and bounded per-platform qualification budgets (2.190431ms)
+✔ Windows gets six complete serial diagnostic files and both platforms still execute the unchanged full four-worker glob (1.094875ms)
+✔ full coverage and source readback depend on all successful prerequisites, never on probe success (0.221593ms)
+✔ Windows explicitly provisions the locked official Electron before both timed qualifications without changing failure guards (0.373952ms)
+✔ Electron PE version guard accepts only 44.0.0 or 44.0.0.0 and rejects nonzero revisions and relaxed guards (1.491651ms)
+✔ both qualification steps emit safe resource/timestamp observations and helper changes trigger CI (1.200213ms)
+✔ Live Mechanics qualification guard rejects omitted native file (0.642675ms)
+✔ Live Mechanics qualification guard rejects omitted output-order native file (1.884722ms)
+✔ Live Mechanics qualification guard rejects omitted atomic-birth native file (0.291448ms)
+✔ Live Mechanics qualification guard rejects parallel native diagnostic (0.351708ms)
+✔ Live Mechanics qualification guard rejects filtered full suite (0.294883ms)
+✔ Live Mechanics qualification guard rejects probe-dependent full suite (0.173751ms)
+✔ Live Mechanics qualification guard rejects suppressed probe failure (0.545649ms)
+✔ Node expands the literal full-test glob and executes every matching fixture without shell expansion (162.019958ms)
+source_check_failed:src/agent-resource-admission.mjs
+✔ npm source check fits Windows cmd limits and checks the full catalog without a shell (8.402103ms)
+✔ one rejected parser check fails the whole source gate and never hides its status (0.577037ms)
+ℹ tests 35
+ℹ suites 0
+ℹ pass 34
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 1
+ℹ todo 0
+ℹ duration_ms 2404.994978

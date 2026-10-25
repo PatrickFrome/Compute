@@ -191,6 +191,8 @@ public static class MetaengineCodexJob {
 }
 '@
 try {
+  $PSModuleAutoLoadingPreference = 'None'
+  Microsoft.PowerShell.Core\Import-Module -Name 'C:\Windows\System32\WindowsPowerShell\v1.0\Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1' -ErrorAction Stop
   $request = [Console]::In.ReadLine() | ConvertFrom-Json
   if ($request.run_id -notmatch '^[a-f0-9-]{36}$' -or $request.expected_sha256 -notmatch '^[a-f0-9]{64}$') { throw 'codex_job_request_invalid' }
   if ([int]$request.timeout_ms -lt 100 -or [int]$request.timeout_ms -gt 1800000) { throw 'codex_job_timeout_invalid' }

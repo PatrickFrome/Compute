@@ -1,0 +1,23 @@
+[
+  {
+    "observation_exit": 0,
+    "native_exit": 0,
+    "step_exit": 0,
+    "both_streams_retained": true,
+    "fail_fast_preserved": true
+  },
+  {
+    "observation_exit": 0,
+    "native_exit": 7,
+    "step_exit": 7,
+    "both_streams_retained": true,
+    "fail_fast_preserved": true
+  },
+  {
+    "observation_exit": 9,
+    "native_exit": null,
+    "step_exit": 9,
+    "both_streams_retained": true,
+    "fail_fast_preserved": true
+  }
+]
