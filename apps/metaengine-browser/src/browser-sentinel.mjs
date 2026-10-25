@@ -34,6 +34,10 @@ export function browserSentinelWorkerHeartbeatPath(statePath) {
   return `${String(statePath)}.worker-heartbeat-v1.json`;
 }
 
+export function runtimeRecoverySentinelFencePath(statePath,token) {
+  return `${String(statePath)}.runtime-recovery-${crypto.createHash('sha256').update(String(token)).digest('hex').slice(0,24)}.json`;
+}
+
 function safeState(value) {
   const relaunchPid = Number(value.relaunch_pid || 0);
   const workerPid = Number(value.worker_pid || 0);
@@ -52,6 +56,8 @@ function safeState(value) {
     lifecycle: String(value.lifecycle || 'ARMED'),
     expected_restart: value.expected_restart === true,
     expected_restart_reason: value.expected_restart_reason ? String(value.expected_restart_reason).slice(0, 120) : null,
+    runtime_recovery_ticket: /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(value.runtime_recovery_ticket || '')
+      ? value.runtime_recovery_ticket : null,
     installer_handoff: value.installer_handoff === true,
     worker_pid: Number.isSafeInteger(workerPid) && workerPid > 0 ? workerPid : null,
     worker_released: value.worker_released === true,
@@ -460,6 +466,36 @@ export class BrowserSentinelHost {
     return this.#mutate({ expected_restart: true, expected_restart_reason: reason, lifecycle: 'EXPECTED_RESTART' });
   }
 
+  async prepareRuntimeRecovery(ticket) {
+    if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(ticket || '')) {
+      throw new Error('browser_sentinel_runtime_recovery_ticket_invalid');
+    }
+    const current = await readJson(this.#statePath);
+    if (current?.token !== this.#state?.token || Number(current?.parent_pid) !== process.pid) throw new Error('browser_sentinel_runtime_recovery_binding_unconfirmed');
+    if (current.lifecycle === 'RUNTIME_RECOVERY' && current.runtime_recovery_ticket === ticket) return this.snapshot();
+    if (this.#transitionLatch || current.lifecycle !== 'ARMED' || current.expected_restart === true || current.installer_handoff === true) {
+      throw new Error('browser_sentinel_runtime_recovery_transition_conflict');
+    }
+    // A separate immutable deny fence survives an older async state writer.
+    // Partial/unreadable creation also makes the worker HOLD, never relaunch.
+    const fenceFile=runtimeRecoverySentinelFencePath(this.#statePath,current.token);
+    const fence={schema:'metaengine.browser-sentinel.runtime-recovery-fence.v1',token:current.token,
+      parent_pid:process.pid,executable:current.executable,ticket_id:ticket,authority_effect:false};
+    let handle;
+    try {handle=await fs.open(fenceFile,'wx',0o600);await handle.writeFile(JSON.stringify(fence));await handle.sync();}
+    catch(error){if(error.code!=='EEXIST')throw new Error('browser_sentinel_runtime_recovery_fence_unconfirmed');}
+    finally{await handle?.close();}
+    let readback;
+    try {const stat=await fs.lstat(fenceFile);if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1||stat.size>4096)throw Error();
+      readback=JSON.parse(await fs.readFile(fenceFile,'utf8'));}catch{throw new Error('browser_sentinel_runtime_recovery_fence_unconfirmed');}
+    if(JSON.stringify(readback)!==JSON.stringify(fence))throw new Error('browser_sentinel_runtime_recovery_fence_unconfirmed');
+    this.#latchTransition('RUNTIME_RECOVERY');
+    const result = await this.#mutate({lifecycle:'RUNTIME_RECOVERY',expected_restart:true,
+      expected_restart_reason:'OWNED_RUNTIME_HEALTH_RECOVERY',runtime_recovery_ticket:ticket});
+    if (result.lifecycle !== 'RUNTIME_RECOVERY' || result.runtime_recovery_ticket !== ticket) throw new Error('browser_sentinel_runtime_recovery_binding_unconfirmed');
+    return result;
+  }
+
   async prepareInstallerHandoff(reason = 'SELF_UPDATE', { timeoutMs = 5000 } = {}) {
     this.#latchTransition('INSTALLER_HANDOFF');
     await this.#mutate({
@@ -492,7 +528,9 @@ export class BrowserSentinelHost {
   markPlannedShutdownSync() {
     const current = readJsonSync(this.#statePath);
     if (!current || current.token !== this.#state?.token) return this.snapshot();
-    const lifecycle = current.installer_handoff === true
+    const lifecycle = current.lifecycle === 'RUNTIME_RECOVERY' || current.runtime_recovery_ticket
+      ? 'RUNTIME_RECOVERY'
+      : current.installer_handoff === true
       ? 'INSTALLER_HANDOFF'
       : (current.expected_restart === true ? 'EXPECTED_RESTART' : 'PLANNED_SHUTDOWN');
     this.#latchTransition(lifecycle);

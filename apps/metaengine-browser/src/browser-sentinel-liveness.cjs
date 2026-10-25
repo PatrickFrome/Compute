@@ -36,7 +36,7 @@ function evaluateParentProgress({
     state?.lifecycle === 'PLANNED_SHUTDOWN'
     || state?.expected_restart === true
     || state?.installer_handoff === true
-    || ['EXPECTED_RESTART','INSTALLER_HANDOFF'].includes(String(state?.lifecycle || ''))
+    || ['EXPECTED_RESTART','INSTALLER_HANDOFF','RUNTIME_RECOVERY'].includes(String(state?.lifecycle || ''))
   );
 
   const base = {

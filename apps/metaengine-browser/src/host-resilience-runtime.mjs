@@ -404,6 +404,13 @@ export class HostResilienceRuntime {
     return this.snapshot();
   }
 
+  async prepareRuntimeRecovery(ticket) {
+    if (this.#sentinelRequired() && this.#sentinel?.snapshot?.()?.worker_ready !== true) throw new Error('host_resilience_sentinel_not_ready_for_runtime_recovery');
+    if (!this.#sentinel || typeof this.#sentinel.prepareRuntimeRecovery !== 'function') throw new Error('host_resilience_runtime_recovery_sentinel_unavailable');
+    await this.#sentinel.prepareRuntimeRecovery(ticket);
+    return this.snapshot();
+  }
+
   async prepareInstallerHandoff(reason = 'SELF_UPDATE') {
     if (this.#sentinelRequired() && this.#sentinel?.snapshot?.()?.worker_ready !== true) throw new Error('host_resilience_sentinel_not_ready_for_installer_handoff');
     if (this.#sentinel) await this.#sentinel.prepareInstallerHandoff(reason);

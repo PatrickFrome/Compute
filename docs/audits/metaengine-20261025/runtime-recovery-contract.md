@@ -12,6 +12,61 @@ installer was changed by this audit/repair.
 
 ## Findings
 
+### Functional layer after the protective patch
+
+The controller now exposes native-only generation subscription and a zero-path
+recovery read. It retains READY/terminal/exit lineage after ownership release;
+the health witness independently reads the exact protected status file and binds
+its nonce, PID, instance and bundle. The policy accepts only three confirmed
+API/Edge transport failures after READY and confirmed terminal cleanup/exit.
+HTTP 503, PostgreSQL, attestation/source failures, deliberate stop and unknown
+cleanup remain HOLD.
+
+`runtime-recovery-transaction.mjs` provides `arm`, `prepare`, `dispatch(ticket)`,
+`acknowledgeSuccessor(ticket)`, `read` and synchronous `cancel`. Main must supply
+physical Owner/artifact/PG binding, normal-bootstrap and gate readers plus the
+existing positive worker drain. No caller may supply paths, processes, receipts,
+readiness flags or a shell. A private owner-only journal records a durable intent
+and readback before one same-executable effect. Unresolved barriers survive a new
+coordinator; only readback may settle them. The persisted storm budget permits
+two attempts per ten minutes with 5/30 second backoff. A leftover transaction
+lock is HOLD and is never automatically stolen.
+
+The process adapter uses `app.getPath('exe')`, hashes its real bytes and queries
+the actual current kernel PID/birth. Its required private `beforeRelaunch(ticket)`
+callback coordinates the dedicated HostResilience/Sentinel runtime-recovery
+purpose; the adapter then rechecks the image and invokes `app.relaunch` with only
+the fixed recovery-ticket argument, followed by `app.quit`. These are requests,
+not readiness proof. Only a different Browser birth, new Host nonce/instance,
+unchanged normal Owner/artifact/PG pins and positive old-Browser absence may ACK.
+Journal readback explicitly does not assert current liveness.
+
+Generic Sentinel EXPECTED_RESTART previously fell through to its own relaunch
+after a 45-second grace. A dedicated RUNTIME_RECOVERY purpose now suppresses
+that competing producer. Its immutable per-token deny fence also survives a
+late writer restoring ARMED state; an invalid/unreadable fence holds. Neither
+this purpose nor its narrow HostResilience forwarder grants updater/Guardian
+release authority.
+
+Qualification: 46 native/controller/transaction tests plus 22 isolated legacy
+Sentinel tests pass, with the final 17 transaction tests repeated after the last
+binding/readback edit. Actual inert Host and Browser-like child processes,
+kernel birth/absence reads, a lost spawn ACK and one durable dispatch were
+exercised. Owner/bootstrap/PG callbacks in transaction fixtures are explicitly
+generated; installed Electron/PG bootstrap and useful-work continuation still
+require the production main mount and installed qualification. Legacy transport
+tests require the same-checkout `local-supervisor-transport-fixture.mjs` preload;
+HostResilience tests use their existing offline-bootstrap fixture instead.
+
+A mistaken unisolated legacy test import started an installed Host through the
+old top-level bootstrap. The test parent was stopped; no direct PG/Guardian kill
+was issued. A separate private operator receipt established Host/API/Edge
+absence twice, unchanged Owner/PG/Guardian identities, and quarantined the exact
+old startup lock while preserving STARTING status bytes. That incident and its
+physical cleanup are local evidence, not a claim of Host terminal acknowledgement
+or installed recovery success. Private paths/configuration and receipts are not
+committed to Git.
+
 | Priority | Baseline location | Observable contract problem | Required repair |
 | --- | --- | --- | --- |
 | P1 | `apps/metaengine-browser/src/local-runtime-host-controller.mjs:169-184,282-285` | An exit event is treated as confirmed cleanup and the owned generation is discarded. `stopOwnedLocalRuntimeHost` can then return `NO_OWNED_HOST` and `cleanup_confirmed:true`, including after a crash without child cleanup evidence. | Retain the generation until exact terminal proof or independent reconciliation. Match the actual child handle/PID and per-spawn nonce, not exit code alone. |
