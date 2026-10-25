@@ -1,0 +1,12 @@
+{
+  "schema": "metaengine.browser.package-identity-candidate-plan.v1",
+  "source_head": "f8fb240ca74965227f901a4ade941a4c0e81deae",
+  "manifest_package_version": "0.7.0-dev.1107139874594.1",
+  "candidate_package_version": "0.7.0-dev.1269944506140.1",
+  "candidate_slot": 0,
+  "rejected_reserved_candidate_versions": [],
+  "manifest_update_required": true,
+  "physical_package_build_allowed": false,
+  "promotion_authorized": false,
+  "authority_effect": false
+}

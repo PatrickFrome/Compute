@@ -89,5 +89,6 @@
   "installed_goal_execution_proven": false,
   "production_qualified": false,
   "package_built_for_this_source": false,
-  "main_merged": false
+  "main_merged": false,
+  "current_source_seal": "source-seal-refresh.json"
 }

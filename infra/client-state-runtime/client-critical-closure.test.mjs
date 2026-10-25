@@ -11,9 +11,9 @@ const manifest=JSON.parse(read('coordination/operator-control/client-critical-cl
 function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion) {
  const fixed={
   classification:'SOURCE_ONLY_NO_CURRENT_PACKAGE',
-  branch:'work/fix-native-rpc-onboarding-contract-20261025',
+  branch:'work/windows-native-onboarding-diagnostics-20261025',
   source_parent:'ea405d926568508eac53ebb408e941c94faeadcf',
-  package_version:'0.7.0-dev.1107139874594.1',
+  package_version:'0.7.0-dev.1269944506140.1',
   historical_package_version:'0.7.0-dev.202610152359.1',
   package_build_authorized:false,
   package_version_reuse_authorized:false,
@@ -337,15 +337,26 @@ function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion)
     "production_ready": false,
     "promotion_authorized": false,
     "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "f952ea2cc9ac355459f8afc95d1e30f0e72ff720",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.1107139874593.1",
+    "distinct_version": "0.7.0-dev.1107139874594.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
   }
 ]);
  const successor=manifest.current_package_transition;
  assert.deepEqual(successor,{
   "schema": "metaengine.client.package-version-successor.v1",
-  "source_parent": "f952ea2cc9ac355459f8afc95d1e30f0e72ff720",
+  "source_parent": "f8fb240ca74965227f901a4ade941a4c0e81deae",
   "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
-  "prior_version": "0.7.0-dev.1107139874593.1",
-  "distinct_version": "0.7.0-dev.1107139874594.1",
+  "prior_version": "0.7.0-dev.1107139874594.1",
+  "distinct_version": "0.7.0-dev.1269944506140.1",
   "preceding_version_burned": true,
   "production_ready": false,
   "promotion_authorized": false,
@@ -507,7 +518,7 @@ test('current CI runs the complete Browser and Client suites and preserves physi
 test('QA source sealing retains explicit timing blockers and no installed or promotion authority',()=>{
  const audit=read('coordination/operator-control/AUDIT_CLOSURE_EXECUTION_REGISTER_20261018.md');
  const parseBlocks=source=>{
-  const current=source.replace(/\r\n/g,'\n').split('## QA source seal — 0.7.0-dev.1107139874594.1\n')[1];
+  const current=source.replace(/\r\n/g,'\n').split('## QA source seal — 0.7.0-dev.1269944506140.1\n')[1];
   assert.ok(current,'current QA source record required');
   return [...current.matchAll(/```json\n([\s\S]*?)\n```/g)].map(match=>JSON.parse(match[1]));
  };
@@ -515,8 +526,8 @@ test('QA source sealing retains explicit timing blockers and no installed or pro
  assert.deepEqual(parseBlocks(audit.replace(/\r?\n/g,'\r\n')),blocks,'Windows CRLF audit bytes preserve the same QA boundary');
  assert.deepEqual(blocks[0],{
   "schema": "metaengine.client.qa-source-seal.v1",
-  "functional_source_parent": "f952ea2cc9ac355459f8afc95d1e30f0e72ff720",
-  "package_version": "0.7.0-dev.1107139874594.1",
+  "functional_source_parent": "f8fb240ca74965227f901a4ade941a4c0e81deae",
+  "package_version": "0.7.0-dev.1269944506140.1",
   "classification": "QA_SOURCE_PREPARED_NOT_INSTALLED_QUALIFIED",
   "global_version_absence": "UNKNOWN",
   "immutable_producer_preflight_required": true,
