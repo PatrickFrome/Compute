@@ -2303,27 +2303,35 @@ async function connectGithubChat() {
 
 function closeManagedTaskProjectHost() {
   if (managedTaskProjectHostDrainPending) return managedTaskProjectHostClosing;
-  const host = managedTaskProjectHost;
-  const projectRuntime = autonomousProjectRuntime;
-  const coding=nativeCodingRuntime, codingHost=nativeCodingHostCapability;
-  nativeSupervisor?.bindDevosProjectRuntime(null);
-  nativeSupervisor?.bindNativeCodingRuntime(null);
-  projectRuntime?.bindNativeCodingRuntime(null);
-  if (host || projectRuntime || coding || codingHost) {
-    managedTaskProjectHostDrainPending = true;
-    managedTaskProjectHostClosing = (async () => {
-      const receipt=await drainManagedRuntimeBindings({coding,codingHost,projectRuntime,host});
-      // Clear ownership only after positive cleanup. A rejection deliberately
-      // retains the exact closed generation and its rejected admission barrier.
-      if(nativeCodingRuntime===coding)nativeCodingRuntime=null;
-      if(nativeCodingHostCapability===codingHost)nativeCodingHostCapability=null;
-      if(managedTaskProjectHost===host)managedTaskProjectHost=null;
-      if(autonomousProjectRuntime===projectRuntime)autonomousProjectRuntime=null;
-      managedTaskProjectHostDrainPending=false;
-      return receipt;
-    })();
-  }
-  return managedTaskProjectHostClosing;
+  const previous=managedTaskProjectHostClosing,mount=nativeCodingRuntimeMountPromise;
+  managedTaskProjectHostDrainPending=true;
+  let fenceError=null;
+  // Publish a new barrier even with empty globals. An unpublished mount owns
+  // its previous barrier and must reject this changed lifetime before binding.
+  const closing=Promise.resolve().then(async()=>{
+    const [prior]=await Promise.allSettled(mount?[previous,mount]:[previous]);
+    if(prior.status!=='fulfilled')throw prior.reason;
+    if(fenceError)throw fenceError.error;
+    // A failed pending mount may have retained CLOSED/HOLD custody while
+    // settling. Read these references now, not before its cleanup completed.
+    const host=managedTaskProjectHost,projectRuntime=autonomousProjectRuntime;
+    const coding=nativeCodingRuntime,codingHost=nativeCodingHostCapability;
+    const receipt=await drainManagedRuntimeBindings({coding,codingHost,projectRuntime,host});
+    // A rejection retains the same custody, failure barrier and admission hold.
+    if(nativeCodingRuntime===coding)nativeCodingRuntime=null;
+    if(nativeCodingHostCapability===codingHost)nativeCodingHostCapability=null;
+    if(managedTaskProjectHost===host)managedTaskProjectHost=null;
+    if(autonomousProjectRuntime===projectRuntime)autonomousProjectRuntime=null;
+    managedTaskProjectHostDrainPending=false;
+    return receipt;
+  });
+  managedTaskProjectHostClosing=closing;
+  try{
+    nativeSupervisor?.bindDevosProjectRuntime(null);
+    nativeSupervisor?.bindNativeCodingRuntime(null);
+    autonomousProjectRuntime?.bindNativeCodingRuntime(null);
+  }catch(error){fenceError={error};}
+  return closing;
 }
 
 async function startInstalledRuntimeRecovery() {
@@ -3466,7 +3474,8 @@ app.on('before-quit', (event) => {
   shutdownRequested = true;
   if (startupRetryTimer) clearTimeout(startupRetryTimer);
   startupRetryTimer = null;
-  if (!managedTaskProjectQuitReady && (managedTaskProjectHost || nativeCodingRuntime || nativeCodingHostCapability || managedTaskProjectHostDrainPending)) {
+  if (!managedTaskProjectQuitReady && (managedTaskProjectHost || autonomousProjectRuntime || nativeCodingRuntime || nativeCodingHostCapability
+    || nativeCodingRuntimeMountPromise || managedTaskProjectHostDrainPending)) {
     event.preventDefault();
     if(managedTaskProjectQuitPending)return;
     managedTaskProjectQuitPending=true;

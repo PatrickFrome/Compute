@@ -167,7 +167,7 @@ async function mainMountFixture(){
   const counts={init:0,construct:0,capability:0,capabilityClosed:0,runtimeClosed:0,bind:0};
   let capClosed=false,scopeWait=null,bound=null,failScope=false;
   const runtimeState={schema:'metaengine.native-coding.runtime.v1',closed:false,shutdown_state:'OPEN',host_unavailable_reason:null};
-  const runtime={snapshot:()=>({...runtimeState}),close:async()=>{counts.runtimeClosed++;runtimeState.closed=true;runtimeState.shutdown_state='DRAINED';runtimeState.worker_cleanup_confirmed=true;}};
+  const runtime={snapshot:()=>({...runtimeState}),close:async()=>{counts.runtimeClosed++;runtimeState.closed=true;runtimeState.shutdown_state='DRAINED';runtimeState.worker_cleanup_confirmed=true;return {...runtimeState};}};
   const capability={snapshot:()=>({instance_id:summary.instance_id,host_pid:42,closed:capClosed}),
     readScope:async()=>{if(scopeWait)await scopeWait;if(failScope){failScope=false;throw Error('transient scope read');}
       return {bindings:[{device_id:'device',client_id:'client',permit:{artifact:{cli_executable_sha256:'a'.repeat(64)}}}]};},
@@ -175,7 +175,8 @@ async function mainMountFixture(){
   const scope={nativeCodingRuntime:null,nativeCodingHostCapability:null,nativeCodingRuntimeMountPromise:null,nativeCodingRuntimeMountGeneration:null,nativeCodingRuntimeMountFailure:null,
     runtimeRecoveryGenerationLost:false,shutdownRequested:false,managedTaskProjectHostDrainPending:false,
     managedTaskProjectHostClosing:Promise.resolve(),nativeRuntimeInitializations:new Set(),
-    nativeSupervisor:{bindNativeCodingRuntime:value=>{counts.bind++;bound=value;},snapshot:()=>({})},autonomousProjectRuntime:null,
+    nativeSupervisor:{bindNativeCodingRuntime:value=>{counts.bind++;bound=value;},bindDevosProjectRuntime:()=>{},stop:()=>{},snapshot:()=>({})},autonomousProjectRuntime:null,
+    managedTaskProjectHost:null,drainManagedRuntimeBindings,
     readOwnedLocalRuntimeHostSummary:()=>summary,readOwnedLocalRuntimeHostRecoveryObservation:async()=>({...generation}),
     createOwnedNativeCodingHostCapability:()=>{counts.capability++;capClosed=false;return capability;},
     ensureSupervisorIdentity:()=>({snapshot:()=>({device_id:'device',client_id:'client'})}),
@@ -185,10 +186,19 @@ async function mainMountFixture(){
     app:{},process:{resourcesPath:'C:/fixture/resources'},globalThis:{},
     initNativeSupervisor:async()=>{counts.init++;},recordStartupSubsystemDegraded:()=>{},
     createClientNativeCodingGoalRouter:options=>options,Error,Promise,Set};
-  const context=vm.createContext(scope);vm.runInContext(source,context);
+  const closeSource=main.slice(main.indexOf('function closeManagedTaskProjectHost()'),main.indexOf('async function startInstalledRuntimeRecovery()'));
+  const context=vm.createContext(scope);vm.runInContext(source+closeSource,context);
   return {scope,context,summary,generation,runtimeState,counts,runtime,capability,get bound(){return bound;},failScopeOnce:()=>{failScope=true;},
     deferScope(){let release;scopeWait=new Promise(resolve=>{release=resolve;});return release;},
-    onAdmitted:()=>context.createNativeGoalRouter({}).onAdmitted()};
+    onAdmitted:()=>context.createNativeGoalRouter({}).onAdmitted(),close:()=>context.closeManagedTaskProjectHost(),
+    beforeQuit(){
+      let handler;scope.app.on=(name,callback)=>{if(name==='before-quit')handler=callback;};scope.app.quit=()=>{counts.quit=(counts.quit||0)+1;};
+      Object.assign(scope,{runtimeRecoveryPlannedQuit:false,runtimeRecoveryGateEpoch:0,runtimeRecoveryController:null,githubChatRelay:null,
+        startupRetryTimer:null,managedTaskProjectQuitReady:false,managedTaskProjectQuitPending:false,supervisorLoopbackRpc:null,
+        clearTimeout:()=>{},console:{error:()=>{}}});
+      const start=main.indexOf("app.on('before-quit'");vm.runInContext(main.slice(start,main.indexOf('\n});',start)+4),context);
+      return handler;
+    }};
 }
 
 for(const state of ['absent','closed','unbound'])test(`actual main callback cannot accept a resolved initializer with ${state} native runtime`,async()=>{
@@ -292,6 +302,64 @@ for(const failure of ['unconfirmed','throws'])test(`failed candidate ${failure} 
   await assert.rejects(()=>drainManagedRuntimeBindings({coding:f.scope.nativeCodingRuntime,codingHost:f.scope.nativeCodingHostCapability}),
     /managed_runtime_worker_cleanup_unconfirmed|fixture cleanup failed/);
   assert.equal(f.counts.capabilityClosed,0,'physical drain must retain the capability when worker cleanup remains unknown');
+});
+
+test('actual empty close fences a pending scope read and allows a fresh mount only after positive cleanup',async()=>{
+  const f=await mainMountFixture(),release=f.deferScope(),prior=f.scope.managedTaskProjectHostClosing;
+  const mounted=f.onAdmitted();await new Promise(resolve=>setImmediate(resolve));assert.equal(f.counts.capability,1);
+  const closing=f.close();assert.notEqual(closing,prior);assert.equal(f.scope.managedTaskProjectHostDrainPending,true);
+  let finished=false;closing.then(()=>{finished=true;});await new Promise(resolve=>setImmediate(resolve));assert.equal(finished,false);
+  release();await assert.rejects(mounted,/native_coding_runtime_mount_(?:closing|drain_changed)/);
+  const receipt=await closing;assert.equal(receipt.cleanup_confirmed,true);assert.equal(f.counts.construct,0);
+  assert.equal(f.counts.capabilityClosed,1);assert.equal(f.scope.managedTaskProjectHostDrainPending,false);
+  await f.onAdmitted();assert.equal(f.counts.construct,1);assert.equal(f.bound,f.runtime);
+});
+
+test('actual close before the first mount microtask joins concurrent closes and creates a new empty barrier after settlement',async()=>{
+  const f=await mainMountFixture(),prior=f.scope.managedTaskProjectHostClosing;
+  const mounted=f.onAdmitted(),closing=f.close();assert.notEqual(closing,prior);assert.equal(f.close(),closing);
+  await assert.rejects(mounted,/native_coding_runtime_mount_(?:closing|drain_changed)/);
+  assert.equal((await closing).cleanup_confirmed,true);assert.equal(f.counts.capability,0);assert.equal(f.counts.construct,0);
+  const next=f.close();assert.notEqual(next,closing);assert.equal((await next).cleanup_confirmed,true);
+});
+
+for(const cleanup of ['confirmed','unconfirmed','throws'])test(`actual close waits for pending candidate ${cleanup} cleanup and rereads retained custody`,async()=>{
+  const f=await mainMountFixture();let finish;const waiting=new Promise(resolve=>{finish=resolve;});
+  f.scope.nativeSupervisor.bindNativeCodingRuntime=value=>{if(value)throw Error('fixture binding failure');};
+  f.runtime.close=async()=>{
+    f.counts.runtimeClosed++;f.runtimeState.closed=true;await waiting;
+    f.runtimeState.shutdown_state=cleanup==='confirmed'?'DRAINED':'DRAIN_UNCONFIRMED';f.runtimeState.worker_cleanup_confirmed=cleanup==='confirmed';
+    if(cleanup==='throws')throw Error('fixture cleanup failed');return {...f.runtimeState};
+  };
+  const mounted=f.onAdmitted();await new Promise(resolve=>setImmediate(resolve));assert.equal(f.counts.construct,1);
+  assert.equal(f.scope.nativeCodingRuntime,null);const closing=f.close();let finished=false;
+  closing.then(()=>{finished=true;},()=>{finished=true;});await new Promise(resolve=>setImmediate(resolve));assert.equal(finished,false);
+  finish();await assert.rejects(mounted,/fixture binding failure/);
+  if(cleanup==='confirmed'){
+    assert.equal((await closing).cleanup_confirmed,true);assert.equal(f.scope.nativeCodingRuntime,null);
+    assert.equal(f.scope.nativeCodingHostCapability,null);assert.equal(f.counts.capabilityClosed,1);
+  }else{
+    await assert.rejects(closing,/managed_runtime_worker_cleanup_unconfirmed|fixture cleanup failed/);
+    assert.equal(f.scope.nativeCodingRuntime,f.runtime);assert.equal(f.scope.nativeCodingHostCapability,f.capability);
+    assert.equal(f.scope.managedTaskProjectHostDrainPending,true);assert.equal(f.counts.capabilityClosed,0);assert.equal(f.close(),closing);
+  }
+});
+
+test('actual close preserves a rejected previous barrier and retained custody instead of reporting an empty successful drain',async()=>{
+  const f=await mainMountFixture(),failure=Error('previous cleanup unknown');let hostClosed=0;
+  const prior=Promise.reject(failure);prior.catch(()=>{});f.scope.managedTaskProjectHostClosing=prior;
+  f.scope.managedTaskProjectHost={close:async()=>{hostClosed++;}};
+  const closing=f.close();await assert.rejects(closing,error=>error===failure);
+  assert.equal(hostClosed,0);assert.ok(f.scope.managedTaskProjectHost);assert.equal(f.scope.managedTaskProjectHostDrainPending,true);
+  assert.equal(f.close(),closing);await assert.rejects(()=>f.onAdmitted(),/native_coding_runtime_mount_closing/);
+});
+
+test('actual before-quit waits for a pending mount even when no managed runtime references have been published',async()=>{
+  const f=await mainMountFixture(),beforeQuit=f.beforeQuit();let prevented=0;
+  const mounted=f.onAdmitted();beforeQuit({preventDefault:()=>{prevented++;}});
+  assert.equal(prevented,1);await assert.rejects(mounted,/native_coding_runtime_mount_closing/);
+  await new Promise(resolve=>setImmediate(resolve));assert.equal(f.scope.managedTaskProjectQuitReady,true);assert.equal(f.counts.quit,1);
+  assert.equal(f.counts.capability,0);assert.equal(f.counts.construct,0);
 });
 
 test('unavailable observations mark saved progress stale and clear only after a matching fresh snapshot',async()=>{
