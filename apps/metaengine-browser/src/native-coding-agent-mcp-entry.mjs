@@ -18,7 +18,7 @@ export async function startNativeCodingAgentMcpStdio({environment=process.env,in
     // The broker re-resolves its private registry and asserts actual current lease
     // and native Job on every invocation. This local check only fences disconnect.
     assertInvocationAuthorized:()=>{if(client.snapshot().closed)throw Error('native_agent_bridge_closed');},
-    timeoutMs:Math.min(20000,client.timeoutMs+3000)});
+    timeoutMs:Math.min(68000,client.timeoutMs+3000)});
   let closed=false;
   const close=()=>{if(closed)return;closed=true;adapter.close();client.close();input.off('end',close);input.off('error',close);};
   input.once('end',close);input.once('error',close);void client.completion.then(close);

@@ -128,6 +128,7 @@
     "artifactName": "METAENGINE-Browser-Test-Setup-${version}-${arch}.${ext}"
   },
   "nsis": {
+    "differentialPackage": false,
     "installerHeader": "build/installerHeader.bmp",
     "installerSidebar": "build/installerSidebar.bmp",
     "uninstallerSidebar": "build/installerSidebar.bmp",

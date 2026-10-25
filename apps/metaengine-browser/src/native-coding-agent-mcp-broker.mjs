@@ -108,10 +108,12 @@ const denied=(reason,requestId=null)=>({...unknown(reason,false,requestId),readb
 
 /** Private Host only. A capability selects a pre-registered scope; wire data never selects authority. */
 export async function createNativeCodingAgentMcpBroker({endpoint,operations,assertInvocationAuthorized,readIntentReceipt=null,clock=()=>Date.now(),
-  timeoutMs=12000,maxInflight=16,maxRuns=128,maxIntents=256,maxConnections=32,maxFrameBytes=256*1024}={}){
+  // CHECK and the actual operation each traverse the independently bounded
+  // 30-second Host channel. This transport does not extend either proof TTL.
+  timeoutMs=60000,maxInflight=16,maxRuns=128,maxIntents=256,maxConnections=32,maxFrameBytes=256*1024}={}){
   endpoint??=process.platform==='win32'?`\\\\.\\pipe\\METAENGINE-NativeMcp-${randomUUID()}`:null;
   if(!endpointValid(endpoint)||typeof assertInvocationAuthorized!=='function'||typeof clock!=='function'
-    ||!integer(timeoutMs,1,20000)||!integer(maxInflight,1,16)||!integer(maxRuns,1,1024)||!integer(maxIntents,1,1024)
+    ||!integer(timeoutMs,1,60000)||!integer(maxInflight,1,16)||!integer(maxRuns,1,1024)||!integer(maxIntents,1,1024)
     ||!integer(maxConnections,1,64)||!integer(maxFrameBytes,1024,256*1024)
     ||readIntentReceipt!==null&&typeof readIntentReceipt!=='function')fail('composition');
   const handlers=Object.freeze(Object.fromEntries(NATIVE_AGENT_MCP_TOOLS.filter(name=>typeof operations?.[name]==='function').map(name=>[name,operations[name]])));
@@ -256,8 +258,8 @@ export async function createNativeCodingAgentMcpBroker({endpoint,operations,asse
 }
 
 /** Trusted stdio process only; no transparent reconnect or automatic invocation retry. */
-export async function connectNativeCodingAgentMcpBroker({endpoint,capability,timeoutMs=15000,maxFrameBytes=256*1024}={}){
-  if(!endpointValid(endpoint)||!SHA.test(capability||'')||!integer(timeoutMs,1,20000)||!integer(maxFrameBytes,1024,256*1024))fail('connection');
+export async function connectNativeCodingAgentMcpBroker({endpoint,capability,timeoutMs=65000,maxFrameBytes=256*1024}={}){
+  if(!endpointValid(endpoint)||!SHA.test(capability||'')||!integer(timeoutMs,1,65000)||!integer(maxFrameBytes,1024,256*1024))fail('connection');
   const socket=net.createConnection(endpoint),pending=new Map();let closed=false,resolveCompletion;
   const completion=new Promise(resolve=>{resolveCompletion=resolve;});
   const channel=wire(socket,{maxFrameBytes,onFrame:frame=>{
@@ -284,7 +286,7 @@ export async function connectNativeCodingAgentMcpBroker({endpoint,capability,tim
     hello=await request({action:'PROVE',proof:proof(capability,'CLIENT',clientNonce,serverNonce)});
   }catch{channel.close();fail('authentication_failed');}
   if(!keys(hello,['binding','allowed_tools','timeout_ms','expires_at','server_proof'])||!Array.isArray(hello.allowed_tools)
-    ||hello.allowed_tools.some(name=>!NATIVE_AGENT_MCP_TOOLS.includes(name))||!integer(hello.timeout_ms,1,20000)
+    ||hello.allowed_tools.some(name=>!NATIVE_AGENT_MCP_TOOLS.includes(name))||!integer(hello.timeout_ms,1,60000)
     ||!Number.isFinite(Date.parse(hello.expires_at))||!proofMatches(hello.server_proof,proof(capability,'SERVER',clientNonce,serverNonce))){channel.close();fail('handshake');}
   const binding=validateNativeCodingAgentMcpBinding(hello.binding);
   return Object.freeze({binding,allowedTools:Object.freeze([...hello.allowed_tools]),timeoutMs:hello.timeout_ms,completion,

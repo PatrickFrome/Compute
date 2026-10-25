@@ -33,6 +33,20 @@ async function fixture(t,options={}){
   const connect=async registration=>{const client=await connectNativeCodingAgentMcpBroker(registration);t.after(()=>client.close());return client;};
   return {broker,issue,connect,calls,authorizations};
 }
+
+test('a bounded slow Host authorization can finish after the former twelve-second broker deadline',async t=>{
+  let enter,release;
+  const entered=new Promise(resolve=>{enter=resolve;}),gate=new Promise(resolve=>{release=resolve;});
+  const f=await fixture(t,{authorize:async()=>{enter();await gate;}});
+  const client=await f.connect(f.issue());
+  t.mock.timers.enable({apis:['setTimeout']});
+  try{
+    const pending=client.invoke('project_overview',{}).then(value=>({ok:true,value}),error=>({ok:false,error}));
+    await entered;t.mock.timers.tick(12001);
+    await new Promise(resolve=>setImmediate(resolve));release();
+    const result=await pending;assert.equal(result.ok,true);assert.equal(f.calls.length,1);assert.equal(f.authorizations.length,1);
+  }finally{release();t.mock.timers.reset();}
+});
 function subprocess(t,registration,extraEnv={}){
   const child=spawn(process.execPath,[entry],{windowsHide:true,stdio:['pipe','pipe','pipe'],env:{...process.env,
     [NATIVE_AGENT_MCP_ENV.endpoint]:registration.endpoint,[NATIVE_AGENT_MCP_ENV.capability]:registration.capability,...extraEnv}});

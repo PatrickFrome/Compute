@@ -39,7 +39,7 @@ export async function createNativeCodingAgentMcpLaunch({registration,nodeExecuta
   const excludes=[...new Set([...shellEnvironmentExcludes,'METAENGINE_NATIVE_MCP_*'])];
   const configuration='{command='+quote(nodeExecutable)+',args=['+quote(entrypointPath)+'],cwd='+quote(directory)
     +',env_vars=['+names.map(quote).join(',')+'],enabled_tools=['+registration.allowedTools.map(quote).join(',')
-    +'],required=true,startup_timeout_sec=10,tool_timeout_sec=20}';
+    +'],required=true,startup_timeout_sec=10,tool_timeout_sec=70}';
   const argv=Object.freeze(['-c','mcp_servers.metaengine='+configuration,'-c','shell_environment_policy.exclude=['+excludes.map(quote).join(',')+']']);
   const launch=Object.freeze({argv,metadata:Object.freeze({schema:'metaengine.native-coding.agent-mcp-launch.v1',run_id:scope.run_id,
     allowed_tools:Object.freeze([...registration.allowedTools]),node_sha256:nodeSha256,bridge_sha256:Object.freeze({...bridgeSha256}),
