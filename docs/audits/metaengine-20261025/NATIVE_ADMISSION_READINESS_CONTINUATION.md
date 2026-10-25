@@ -5,7 +5,9 @@ Date: 2026-10-25. Source continuation; installed execution is not qualified by t
 ## Source and evidence boundary
 
 - Frozen `.4594` package source: `602d4b07f755f7cd61a6da3af06985d4384b859a`, Draft PR [#1345](https://github.com/PatrickFrome/Compute/pull/1345).
-- Published fixture follow-up and parent of this continuation: `1871a23950b2b532a7e28d75d3faa92506bfa739`, `work/agent-count-fixture-followup-20261025`.
+- Published fixture follow-up and common base: `1871a23950b2b532a7e28d75d3faa92506bfa739`, `work/agent-count-fixture-followup-20261025`.
+- Published native-readiness source integrated by merge ancestry: `cff3496e8510223f0b98d585a83bfc42d9f63c8d`, Draft PR [#1347](https://github.com/PatrickFrome/Compute/pull/1347).
+- Combined continuation: Draft PR [#1348](https://github.com/PatrickFrome/Compute/pull/1348). Its initial reviewed source was `8fb6be379b13e1f3bca0ce66f9ee5d1b3764d3cc`; integrating #1347 adds the published evidence and ancestry without changing that source code.
 - Working branch: `work/windows-native-onboarding-diagnostics-20261025`.
 - The native-readiness changes were preserved from a separately reviewed, stable file snapshot of the parallel working copy. That working copy was not modified. The shared bundled-onboarding test was merged with the new diagnostic consumer in this branch.
 - Browser package version is unchanged. This is not a new installer, and the `.4594` package identity must not be reused for different bytes.
@@ -79,6 +81,16 @@ The combined worktree was checked with Node 24.22.1. Tests that need child proce
 | Syntax/source checks and whitespace | 239 source checks PASS | Source registration and `git diff --check` |
 
 The listed test groups total **271 PASS, 12 Windows SKIP, 0 FAIL**. Separately, the attached-schema PG17 integration test was **SKIP** because its pinned archive and database environment were absent. The two remaining fixed RPC-count expectations in that test were updated without changing catalog admission. Opt-in physical PG17 tests must not be counted as PASS when their environment is absent.
+
+## Published PostgreSQL evidence retained by ancestry
+
+The parallel source commit `cff3496e8510223f0b98d585a83bfc42d9f63c8d` records an actual disposable Linux PostgreSQL **17.6** migration test and a two-cluster ACL restore experiment. Its records are retained unchanged under `evidence/audits/metaengine-20261025-native-admission/`:
+
+- `pg17-migrations.json`: 19 migration groups, repeated application, SCRAM direct API checks and negative controls passed; `full_attached_onboarding` and `production_qualification` remain false.
+- `pg17-acl-roundtrip.json`: the original source owner was absent in the target cluster; preserved ACLs passed the unchanged Cognitive guard, while a `--no-acl` negative control restored PUBLIC execution and was rejected. The record confirms cleanup of both disposable servers.
+- `verification.json` and `focused-regressions.txt`: the peer's 256 passing tests and two Windows skips remain evidence of that source, not additional tests to add to this continuation's count.
+
+This continuation independently checked the log digest, the recorded native-readiness file digests and all four Cognitive SQL digests. The only difference in the peer's source/test digest set is the intentional diagnostic-consumer addition to `attached-bundled-runtime.integration.test.mjs`; the native readiness production files and Cognitive SQL match. These retained Linux results strengthen the ACL diagnosis but are not a new Windows installed qualification or a rerun of the whole combined source.
 
 ## Required next evidence
 

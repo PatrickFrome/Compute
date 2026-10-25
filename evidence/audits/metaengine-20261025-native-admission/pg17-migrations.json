@@ -1,0 +1,32 @@
+{
+  "exit_code": 0,
+  "duration_seconds": 1.602,
+  "pg_version": "17.6",
+  "os": "Linux",
+  "actual_nonroot_subprocess": true,
+  "test": "infra/client-state-runtime/local-runtime-migrations.integration.test.mjs",
+  "evidence": {
+    "schema": "compute.local-runtime-migration-grants-evidence.v1",
+    "disposable": true,
+    "exact_new_rpc_count": 10,
+    "migration_sources_sha256": "36b285627cd7631a579a47a9255d44780f84563470f6fe2aeed21c378805ac93",
+    "migration_groups": 19,
+    "repeated_apply_no_changes": true,
+    "partial_install_rejected": true,
+    "disabled_trigger_rejected": true,
+    "direct_role_zero_memberships": true,
+    "column_grants": true,
+    "rls_reads": true,
+    "direct_http_health_reads_insert": true,
+    "shared_service_role_modified": false,
+    "role_ddl_rollback": true,
+    "scram_api_credentials_exercised": true,
+    "missing_insert_grant_rejected_at_startup": true,
+    "overloaded_rpc_rejected_at_startup": true,
+    "full_attached_onboarding": false,
+    "bundle_verification_stubbed": false,
+    "bundle_sha256": null,
+    "remaining_rpc_bodies_synthetic": true,
+    "production_qualification": false
+  }
+}
