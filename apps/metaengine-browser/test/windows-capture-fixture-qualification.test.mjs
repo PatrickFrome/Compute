@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -132,6 +132,34 @@ test('a filename-less watch event checks only the nonce-bound owned readiness pa
   assert.deepEqual(options.stdio, ['ignore', 'ignore', 'pipe']);
   assert.equal(options.env.ELECTRON_RUN_AS_NODE, undefined);
   const stopped = fixture.stop(); child.emit('close', 0, null); await stopped;
+});
+
+test('a real directory alias resolves to one native watch, child and nonce-file root before launch', async t => {
+  const root = await temporary(t), directory = path.join(root, 'long-generated-capture-directory');
+  const alias = path.join(root, 'directory-alias');
+  await fs.mkdir(directory);
+  await fs.symlink(directory, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  const canonical = realpathSync.native(directory), script = path.join(canonical, 'fixture.cjs');
+  const child = new EventEmitter(), watcher = new EventEmitter();
+  Object.assign(child, { pid: 321, exitCode: null, signalCode: null, kill: () => true });
+  watcher.close = () => {};
+  let watched, notify, arguments_, options;
+  const fixture = startCaptureFixture('synthetic-electron', path.join(alias, 'fixture.cjs'), {
+    spawnImpl: (_executable, argv, value) => { arguments_ = argv; options = value; return child; },
+    watchImpl: (value, callback) => { watched = value; notify = callback; return watcher; },
+  });
+  t.after(async () => { child.emit('close', 0, null); await fixture.stop(); });
+  assert.equal(watched, canonical);
+  assert.deepEqual(arguments_, [script]);
+  assert.equal(options.env.METAENGINE_CAPTURE_READY_PATH, script + '.ready.json');
+  assert.equal(options.env.METAENGINE_CAPTURE_STOP_PATH, script + '.stop');
+  await fs.writeFile(options.env.METAENGINE_CAPTURE_READY_PATH,
+    JSON.stringify({ ...readyMessage(321), nonce: options.env.METAENGINE_CAPTURE_NONCE }));
+  notify('rename', path.basename(options.env.METAENGINE_CAPTURE_READY_PATH));
+  assert.equal((await fixture.ready).process_id, 321);
+  const stopped = fixture.stop();
+  assert.equal(await fs.readFile(options.env.METAENGINE_CAPTURE_STOP_PATH, 'utf8'), options.env.METAENGINE_CAPTURE_NONCE);
+  child.emit('close', 0, null); await stopped;
 });
 
 test('spawn ENOENT is handled immediately, causes zero observations, and close is awaited', async t => {
