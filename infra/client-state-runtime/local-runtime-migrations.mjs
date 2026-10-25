@@ -23,6 +23,9 @@ export const LOCAL_RUNTIME_MIGRATIONS = Object.freeze([
       'destruktion_meta.devos_fleet_claim_transport_admission_h205f22()']),
     triggers: Object.freeze([{ relation: 'destruktion_meta.devos_fleet_claim_h205f22',
       name: 'devos_fleet_claim_transport_admission_trg', signature: 'destruktion_meta.devos_fleet_claim_transport_admission_h205f22()' }]) },
+  { path: 'cognitive-acceptor-direct-api-v1.sql',
+    signature: 'public.h205f22_a2_browser_cognitive_accept_v1(uuid,text,text,uuid,bigint,bigint,jsonb,boolean)',
+    source_url: new URL('./cognitive-acceptor-direct-api-v1.sql', import.meta.url), reviewed_security_definer: true },
   { path: '20261009194157_managed_project_admission_v1.sql', signature: 'public.h205f22_a2_managed_project_admission_v1(uuid,uuid,text,bigint,bigint,uuid,bigint,uuid,text,bigint)', source_url: new URL('../../supabase/migrations/20261009194157_managed_project_admission_v1.sql', import.meta.url),
     signatures: Object.freeze([
       'public.h205f22_a2_managed_project_repository_provision_v1(uuid,uuid,text,bigint,text,text,text)',
@@ -284,6 +287,19 @@ export async function applyLocalRuntimeMigrations({ sql, expectedMigrationSource
       const before = await inspectMigrationObjects(tx, migration);
       if (migration.prerequisite === 'SIGNED_BROWSER_DISPATCH_V3') {
         receipts.push(await ensureDispatchPrerequisite(tx, migration, before));
+        continue;
+      }
+      if (migration.reviewed_security_definer) {
+        const inspect = async () => (await tx.unsafe(`SELECT p.prosecdef AS definer FROM pg_catalog.pg_proc p
+          WHERE p.oid=pg_catalog.to_regprocedure($1::text)`, [migration.signature]))[0]?.definer === true;
+        const wasDefiner = await inspect();
+        // The SQL always validates the exact body/metadata/owner/ACL, including
+        // repeat application. Only its guarded ALTER may change invoker mode.
+        await tx.unsafe(migration.source);
+        if (!await inspect()) throw new Error('local_runtime_reviewed_definer_readback_failed:' + migration.path);
+        receipts.push({ source: migration.path, source_sha256: migration.sha256, signature: migration.signature,
+          signatures: [migration.signature], status: wasDefiner ? 'ALREADY_PRESENT_NOT_MODIFIED' : 'APPLIED_LOCAL_ONLY',
+          existing_bodies_attested: true, cognitive_acceptor_direct_api: true, table_grants_modified: false });
         continue;
       }
       if (before.complete) {

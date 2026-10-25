@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { applyLocalRuntimeMigrations, loadLocalRuntimeMigrationPlan } from './local-runtime-migrations.mjs';
@@ -11,6 +12,7 @@ test('migration plan pins deployed sources, unbounded defaults and the opt-in ow
     '20260901034500_meta_orchestrator_frontier_leader_fence_v2.sql',
     '20260902183500_devos_live_ambiguity_reconciliation_v3.sql',
     '20260902190500_devos_dispatch_admission_runtime_v2.sql',
+    'cognitive-acceptor-direct-api-v1.sql',
     '20261009194157_managed_project_admission_v1.sql',
     '20261010100000_project_continuity_history_v1.sql',
     '20261012130000_project_verifier_reference_transport_v1.sql',
@@ -97,6 +99,17 @@ test('mismatched source pin rejects before opening a database transaction', asyn
   assert.equal(opened, 0);
 });
 
+test('direct Cognitive admission elevates only the exact canonical bounded body and never grants cursor or role privileges', async () => {
+  const sql = await readFile(new URL('./cognitive-acceptor-direct-api-v1.sql', import.meta.url), 'utf8');
+  const source = (await readFile(new URL('../../supabase/migrations/20261007063940_cognitive_durable_latest_batch_v1.sql', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
+  const delimiter = 'AS $function$', from = source.indexOf(delimiter) + delimiter.length;
+  const body = source.slice(from, source.indexOf('$function$;', from));
+  assert(sql.includes(createHash('sha256').update(body).digest('hex')));
+  assert.match(sql, /existing_body_requires_review/); assert.match(sql, /table_owner_requires_review/);
+  assert.match(sql, /public_execution_requires_review/); assert.match(sql, /security definer/i);
+  assert(!/\b(?:grant|revoke|create\s+role|alter\s+role)\b/i.test(sql));
+});
+
 test('migration catalog skip requires every required object and separately attests the browser dispatch prerequisite', async () => {
   const required = {
     devos_fleet_task_h205f22: 'task_id workspace_id point_id role base_sha lease_generation lease_agent_id lease_tab_id lease_target_id lease_agent_generation_epoch lease_expires_at state authority_effect result_summary result_sha256 error_code finished_at updated_at',
@@ -111,12 +124,13 @@ test('migration catalog skip requires every required object and separately attes
     if (query.includes(' AS frontier')) return [{ frontier: true, event: true, supervisor: true }];
     if (query.includes('p.prosrc AS body')) return dispatchRows.functions;
     if (query.includes('pg_get_triggerdef')) return [{ definition: dispatchRows.trigger }];
+    if (query.includes('p.prosecdef AS definer')) return [{ definer: true }];
     if (query.includes("'function' AS kind")) return values.flatMap((value, index) => JSON.parse(value).map(identity => ({ identity, kind: ['function', 'relation', 'trigger'][index], installed: true })));
     return [];
   } };
   const receipt = await applyLocalRuntimeMigrations({ sql: { begin: run => run(tx) } });
   assert(receipt.migrations.every(row => row.status === 'ALREADY_PRESENT_NOT_MODIFIED'));
-  assert(receipt.migrations.every(row => row.existing_bodies_attested === (row.browser_dispatch_version === 3)));
+  assert(receipt.migrations.every(row => row.existing_bodies_attested === (row.browser_dispatch_version === 3 || row.cognitive_acceptor_direct_api === true)));
   assert.equal(receipt.existing_bodies_attested, false);
   assert(statements.some(query => query.includes('pg_advisory_xact_lock')));
   assert(!statements.some(query => /^create /im.test(query)));
@@ -153,6 +167,7 @@ async function dispatchUpgradeHarness({ version = 3, absent = false, partial = f
     if (query.includes(' AS frontier')) return [{ frontier: true, event: true, supervisor: true }];
     if (query.includes('p.prosrc AS body')) return state.functions;
     if (query.includes('pg_get_triggerdef')) return [{ definition: state.trigger }];
+    if (query.includes('p.prosecdef AS definer')) return [{ definer: true }];
     if (query.includes("'function' AS kind")) {
       const dispatch = JSON.parse(values[0]).includes('destruktion_meta.devos_fleet_claim_transport_admission_h205f22()');
       return values.flatMap((value, group) => JSON.parse(value).map((identity, index) => ({ identity, kind: ['function', 'relation', 'trigger'][group],

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
@@ -94,6 +94,11 @@ test('disposable PostgreSQL pinned migration groups and restricted direct API gr
   }
   // Deliberately leave all legacy dispatch prerequisite objects absent: this
   // models the older attached PG dump which failed the native trigger upgrade.
+  // Preserve the actual bounded Cognitive RPC instead of a synthetic stub.
+  for (const file of ['20261007061415_cognitive_delta_live_acceptor_v1.sql',
+    '20261007062908_cognitive_broadcast_correlation_readback_v1.sql', '20261007063940_cognitive_durable_latest_batch_v1.sql']) {
+    await sql.unsafe(await source(file));
+  }
   await sql.unsafe(await source('20260831152000_a2_workspace_binding_registry_v1.sql'));
 
   const plan = await loadLocalRuntimeMigrationPlan();
@@ -247,6 +252,48 @@ test('disposable PostgreSQL pinned migration groups and restricted direct API gr
   assert.deepEqual((await sql.unsafe('SELECT xmin::text AS version FROM pg_catalog.pg_authid WHERE rolname=$1', [login]))[0], roleBeforeRefresh);
   assert.deepEqual(await serviceGrants(), beforeAcl, 'upgrade must not modify shared service_role grants');
   assert.equal((await inspectAttachedApiAdmission({ sql: api, apiLogin: login })).rpc_names_granted, RPC_ALLOWLIST.length);
+  const cognitiveSignature = 'public.h205f22_a2_browser_cognitive_accept_v1(uuid,text,text,uuid,bigint,bigint,jsonb,boolean)';
+  const cognitiveMigration = await fs.readFile(new URL('./cognitive-acceptor-direct-api-v1.sql', import.meta.url), 'utf8');
+  // Pass the JSON text through text first: postgres.js otherwise serializes a
+  // JavaScript string a second time when a parameter is typed directly jsonb.
+  const cognitiveCall = 'SELECT public.h205f22_a2_browser_cognitive_accept_v1($1::uuid,$2::text,$3::text,$4::uuid,$5::bigint,$6::bigint,$7::text::jsonb,$8::boolean) AS result';
+  // Reproduce the original invoker failure using a real restricted role, then
+  // roll back only this fixture fault. The migration must have restored no
+  // table privileges or role attributes in order for the test to pass.
+  const cognitiveWorkspace = randomUUID(), cognitiveDevice = randomUUID(), cognitiveStream = randomUUID(), cognitiveClient = 'cognitive_fixture_client';
+  await sql.unsafe('INSERT INTO public.compute_fabric_a2_browser_device_h205f22(device_id,client_id,active) VALUES($1,$2,true)', [cognitiveDevice, cognitiveClient]);
+  await sql.unsafe("INSERT INTO public.compute_fabric_a2_browser_supervisor_state_h205f22(client_id,workspace_id,state,last_seen_at) VALUES($1,$2,'{}',clock_timestamp())", [cognitiveClient, cognitiveWorkspace]);
+  const cognitiveEvent = { schema: 'metaengine.browser.cognitive-delta.v1', stream_id: cognitiveStream, sequence: 1, priority: 'P1', source: 'SYSTEM', type: 'fixture.cognitive',
+    raw_payload_exposed: false, page_text_exposed: false, input_values_exposed: false, control_authority: false, command_leasing: false, authority_effect: false };
+  const cognitiveArgs = [cognitiveWorkspace, cognitiveClient, cognitiveDevice, cognitiveStream, 0, 1, JSON.stringify([cognitiveEvent]), false];
+  await assert.rejects(sql.begin(async tx => {
+    await tx.unsafe('ALTER FUNCTION ' + cognitiveSignature + ' SECURITY INVOKER');
+    await tx.unsafe('SET LOCAL ROLE ' + quoteIdentifier(login));
+    await tx.unsafe(cognitiveCall, cognitiveArgs);
+  }), error => error.code === '42501' && /cognitive_cursor/.test(error.message));
+  const [cognitiveAccepted] = await api.unsafe(cognitiveCall, cognitiveArgs);
+  assert.equal(cognitiveAccepted.result.accepted, true); assert.equal(cognitiveAccepted.result.authority_effect, false);
+  assert.equal(cognitiveAccepted.result.delivery_mode, 'DURABLE_LATEST_BATCH');
+  const [cognitiveRepeated] = await api.unsafe(cognitiveCall, cognitiveArgs);
+  assert.equal(cognitiveRepeated.result.duplicate, true);
+  for (const [args, reason] of [
+    [[cognitiveWorkspace, cognitiveClient, randomUUID(), ...cognitiveArgs.slice(3)], /device_binding_invalid/],
+    [[...cognitiveArgs.slice(0, 6), JSON.stringify([{ ...cognitiveEvent, type: 'changed.replay' }]), false], /replay_payload_conflict/],
+    [[...cognitiveArgs.slice(0, 6), JSON.stringify([{ ...cognitiveEvent, raw_arbitrary_payload: 'forbidden' }]), false], /unprojected_event_field/],
+    [[...cognitiveArgs.slice(0, 7), true], /authority_forbidden/],
+  ]) await assert.rejects(api.unsafe(cognitiveCall, args), error => error.code === '22023' && reason.test(error.message));
+  await assert.rejects(api.unsafe('SELECT * FROM public.compute_fabric_a2_browser_cognitive_cursor_h205f22'), error => error.code === '42501');
+  const [cursorAccess] = await api.unsafe("SELECT has_table_privilege(current_user,'public.compute_fabric_a2_browser_cognitive_cursor_h205f22','SELECT') AS select,has_table_privilege(current_user,'public.compute_fabric_a2_browser_cognitive_cursor_h205f22','INSERT') AS insert,has_table_privilege(current_user,'public.compute_fabric_a2_browser_cognitive_cursor_h205f22','UPDATE') AS update");
+  assert.deepEqual(cursorAccess, { select: false, insert: false, update: false });
+  assert.deepEqual((await sql.unsafe('SELECT xmin::text AS version FROM pg_catalog.pg_authid WHERE rolname=$1', [login]))[0], roleBeforeRefresh);
+  await assert.rejects(sql.begin(async tx => {
+    await tx.unsafe('ALTER FUNCTION ' + cognitiveSignature + ' SET search_path=public,pg_catalog');
+    await tx.unsafe(cognitiveMigration);
+  }), /cognitive_direct_api_existing_body_requires_review/);
+  await assert.rejects(sql.begin(async tx => {
+    await tx.unsafe('GRANT EXECUTE ON FUNCTION ' + cognitiveSignature + ' TO PUBLIC');
+    await tx.unsafe(cognitiveMigration);
+  }), /cognitive_direct_api_public_execution_requires_review/);
   assert.deepEqual([...(await api.unsafe('SELECT token_hash FROM public.compute_fabric_a2_chat_bridge_remote_pairing_h205f22'))], [{ token_hash: 'visible-token' }]);
   await assert.rejects(api.unsafe('SELECT private_secret FROM public.compute_fabric_a2_chat_bridge_remote_pairing_h205f22'), error => error.code === '42501');
   await assert.rejects(api.unsafe('SET ROLE service_role'), error => error.code === '42501');
