@@ -12,7 +12,7 @@ Date: 2026-10-25. Source continuation; installed execution is not qualified by t
 - The native-readiness changes were preserved from a separately reviewed, stable file snapshot of the parallel working copy. That working copy was not modified. The shared bundled-onboarding test was merged with the new diagnostic consumer in this branch.
 - Browser package version is unchanged. This is not a new installer, and the `.4594` package identity must not be reused for different bytes.
 
-The supplied installation journal ended with `Recovery required`, `Native admission on hold`, a disabled Run button and a goal entered but not sent. These are historical observations. A fresh Desktop Commander process-read request in this continuation returned `MCP request timed out`; the device listing alone did not establish live access. No installed goal, recovery replay, service restart, live PostgreSQL change or client installation was performed by this continuation.
+The supplied installation journal ended with `Recovery required`, `Native admission on hold`, a disabled Run button and a goal entered but not sent. These are historical observations. A fresh Desktop Commander process-read request in this continuation returned `MCP request timed out`; a later device listing reported `Offline` and last seen 35 minutes earlier, with no retained background calls. No installed goal, recovery replay, service restart, live PostgreSQL change or client installation was performed by this continuation.
 
 ## Defects addressed in source
 
@@ -91,6 +91,14 @@ The parallel source commit `cff3496e8510223f0b98d585a83bfc42d9f63c8d` records an
 - `verification.json` and `focused-regressions.txt`: the peer's 256 passing tests and two Windows skips remain evidence of that source, not additional tests to add to this continuation's count.
 
 This continuation independently checked the log digest, the recorded native-readiness file digests and all four Cognitive SQL digests. The only difference in the peer's source/test digest set is the intentional diagnostic-consumer addition to `attached-bundled-runtime.integration.test.mjs`; the native readiness production files and Cognitive SQL match. These retained Linux results strengthen the ACL diagnosis but are not a new Windows installed qualification or a rerun of the whole combined source.
+
+## Exact-source CI feedback
+
+The first checks associated with integrated head `05ea407df6b6d95ec310cc13edcdb1b29f0a97e0` exposed a separate Linux Shell workflow defect. [Shell job 121235210146](https://github.com/PatrickFrome/Compute/actions/runs/40215358263/job/121235210146) failed its real Electron `MAIN_PROCESS` ASAR test because its contract-suite step had no X server or `DISPLAY`. The Shell workflow checks merge compatibility; its receipt must not be promoted to exact-head native qualification.
+
+The contract step now runs `xvfb-run -a npm test`, matching the virtual display already used by that workflow's renderer diagnostic. The same complete suite and real Electron main-process mode remain enabled. This is a workflow environment correction, with no new skip, timeout, retry or product sandbox change. Local YAML parsing and whitespace checks can verify the edit; actual Electron/Xvfb execution remains a CI requirement because those executables are absent in this local environment.
+
+The ordinary read-only identity planner confirmed that `.4594` requires a new manifest version and found an unused proposed identity for that head. No reservation or manifest change was made from that preliminary observation. A changed source must be selected and its version checked again before the sole Package Smoke producer reserves and builds it.
 
 ## Required next evidence
 
