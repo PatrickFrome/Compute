@@ -82,6 +82,12 @@ jobs:
         working-directory: infra/client-state-runtime
         run: node --test development-checkpoint.integration.test.mjs
 
+      - name: Verify real single-connection PG pool and generated authority refusal fixtures
+        working-directory: infra/client-state-runtime
+        env:
+          METAENGINE_NATIVE_POOL_PG17: '1'
+        run: node --test native-coding-host-pool-target.test.mjs native-coding-host-physical-pool.integration.test.mjs native-coding-host-transaction-scope.test.mjs native-coding-execution-readback.test.mjs native-coding-host-os-scope.test.mjs native-coding-host-authority.test.mjs native-coding-host-authority-review.test.mjs native-coding-checkpoint-authority.test.mjs native-coding-agent-host-tools.test.mjs native-coding-checkpoint-verifier.test.mjs
+
   contracts:
     strategy:
       fail-fast: false

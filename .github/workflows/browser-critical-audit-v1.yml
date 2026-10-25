@@ -10,12 +10,22 @@ on:
   pull_request:
     paths:
       - 'apps/metaengine-browser/**'
+      - 'apps/me2-ui/package.json'
+      - 'apps/me2-ui/bun.lock'
+      - 'apps/me2-ui/eslint.config.mjs'
+      - 'apps/me2-ui/tsconfig.json'
       - 'apps/me2-ui/src/lib/client-runtime-resource.ts'
       - 'apps/me2-ui/src/lib/client-readiness-labels.ts'
+      - 'apps/me2-ui/src/lib/client-work-badge-text.mjs'
       - 'apps/me2-ui/src/hooks/use-client-runtime-status.ts'
+      - 'apps/me2-ui/src/components/me2/store.tsx'
+      - 'apps/me2-ui/src/components/me2/interrupted-setup-recovery.tsx'
+      - 'apps/me2-ui/src/components/me2/shell/command-palette.tsx'
       - 'apps/me2-ui/src/components/me2/shell/topbar.tsx'
+      - 'apps/me2-ui/src/components/me2/pages/code.tsx'
+      - 'apps/me2-ui/src/components/me2/pages/operator-observatory.tsx'
       - 'apps/me2-ui/src/components/me2/pages/system.tsx'
-      - 'apps/me2-ui/src/components/me2/pages/memory.tsx'
+      - 'apps/me2-ui/src/components/me2/pages/tasks.tsx'
       - 'apps/me2-ui/src/components/me2/shell/me2-shell.tsx'
       - 'apps/me2-daemon/src/rsi.ts'
       - 'apps/me2-daemon/test/rsi-draft-lifecycle.test.ts'
@@ -84,6 +94,7 @@ jobs:
           test/browser-brain-continuous-coordinator.test.mjs
           test/client-work-readiness.test.mjs
           test/client-runtime-resource.test.mjs
+          test/browser-critical-audit-ui-coverage.test.mjs
 
   full-browser-regression:
     name: full-browser-node-test-suite
@@ -145,11 +156,16 @@ jobs:
         working-directory: apps/me2-ui
         run: >-
           node node_modules/eslint/bin/eslint.js
+          src/components/me2/pages/code.tsx
+          src/components/me2/pages/operator-observatory.tsx
           src/components/me2/pages/system.tsx
-          src/components/me2/pages/memory.tsx
+          src/components/me2/pages/tasks.tsx
+          src/components/me2/shell/command-palette.tsx
           src/components/me2/shell/topbar.tsx
-          src/components/me2/shell/statusbar.tsx
           src/components/me2/shell/me2-shell.tsx
+          src/components/me2/store.tsx
+          src/components/me2/interrupted-setup-recovery.tsx
           src/hooks/use-client-runtime-status.ts
           src/lib/client-runtime-resource.ts
           src/lib/client-readiness-labels.ts
+          src/lib/client-work-badge-text.mjs

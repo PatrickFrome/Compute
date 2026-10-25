@@ -38,7 +38,7 @@ export function createCodexCliWindowsProcessController({ helperPath = resolveCod
       const completion = new Promise(resolve => { resolveCompletion = resolve; });
       const end = (reason, exitCode = null) => {
         if (finished) return; finished = true; clearTimeout(startupTimer);
-        if (!proof) rejectReady(fail(reason || 'not_started'));
+        if (!proof) rejectReady(fail(failureReason || reason || 'not_started'));
         stdout.end(); stderr.end();
         resolveCompletion((terminal && !failureReason && exitCode === 0 && !pending.trim()) ? terminal : { exit_code: exitCode, signal: null, reason: failureReason || reason,
           tree_cleanup_confirmed: false, process_tree_control: 'WINDOWS_JOB_OBJECT' });

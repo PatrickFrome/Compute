@@ -31,8 +31,9 @@ function archive(files){
 test('real Electron qualifies physical ASAR bytes while retaining archive package and bridge reads',{
   timeout:60000,skip:typeof electron!=='string'?'Electron executable unavailable; set METAENGINE_TEST_ELECTRON_EXECUTABLE':false,
 },async t=>{
-  const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-native-asar-regression-'));
-  const real=await fs.realpath(root),temp=await fs.realpath(os.tmpdir());
+  const temp=await fs.realpath(os.tmpdir());
+  const root=await fs.realpath(await fs.mkdtemp(path.join(temp,'metaengine-native-asar-regression-')));
+  const real=await fs.realpath(root);
   assert.equal(path.dirname(real).toLowerCase(),temp.toLowerCase());
   assert(path.basename(real).startsWith('metaengine-native-asar-regression-'));
   t.after(async()=>{

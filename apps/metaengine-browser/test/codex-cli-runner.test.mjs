@@ -33,8 +33,12 @@ test('packaged PowerShell helper resolves outside ASAR and is explicitly shipped
 });
 
 async function fixture(t) {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-codex-runner-'));
-  t.after(async () => { assert.ok(path.resolve(directory).startsWith(path.resolve(os.tmpdir()) + path.sep)); await fs.rm(directory, { recursive: true, force: true }); });
+  const temporary = await fs.realpath(os.tmpdir());
+  const directory = await fs.realpath(await fs.mkdtemp(path.join(temporary, 'metaengine-codex-runner-')));
+  t.after(async () => { const actual = await fs.realpath(directory);
+    assert.equal(actual, directory); assert.equal(path.dirname(actual), temporary);
+    assert.ok(path.basename(actual).startsWith('metaengine-codex-runner-'));
+    await fs.rm(actual, { recursive: true, force: true }); });
   const repo = path.join(directory, 'repo'); const worktree = path.join(directory, 'worktree'); await fs.mkdir(repo);
   const git = args => exec('git', args, { cwd: repo, windowsHide: true });
   await git(['init', '-q']); await git(['config', 'user.email', 'test@example.invalid']); await git(['config', 'user.name', 'METAENGINE tests']);

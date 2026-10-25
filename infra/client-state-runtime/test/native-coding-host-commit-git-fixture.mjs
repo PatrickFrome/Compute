@@ -18,7 +18,7 @@ export async function createNativeCodingCommitGitFixture(t){
     assert.ok(relative&&!relative.startsWith('..')&&!path.isAbsolute(relative)&&path.basename(actual).startsWith('native-git-pg-commit-'));
     await fs.rm(actual,{recursive:true,force:false});});
   const root=path.join(directory,'managed-writer'),repository=path.join(directory,'repository'),journalRoot=path.join(directory,'private-journal');
-  const executable=path.resolve(process.env.METAENGINE_GIT_TEST_EXECUTABLE||(process.platform==='win32'?'C:/Program Files/Git/mingw64/bin/git.exe':'/usr/bin/git'));
+  const executable=path.resolve(process.env.METAENGINE_GIT_TEST_EXECUTABLE||(process.platform==='win32'?'C:/Program Files/Git/bin/git.exe':'/usr/bin/git'));
   const executableSha256=hash(await fs.readFile(executable));
   const env={SystemRoot:process.env.SystemRoot,PATH:path.dirname(executable),GIT_CONFIG_NOSYSTEM:'1',
     GIT_CONFIG_GLOBAL:process.platform==='win32'?'NUL':'/dev/null',GIT_TERMINAL_PROMPT:'0',GIT_OPTIONAL_LOCKS:'0'};

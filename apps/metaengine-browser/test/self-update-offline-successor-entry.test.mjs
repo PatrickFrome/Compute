@@ -81,7 +81,18 @@ for (const entry of ['main-entry.mjs', 'final-runtime-entry.mjs']) {
       const f = await fixture(t, { mode: 'NORMAL', missing: mode === 'MISSING' });
       const result = await launch(f, { entry, extraEnv: { METAENGINE_SELF_UPDATE_SUCCESSOR_STARTUP: 'PROBE_ONLY' } });
       assert.equal(result.code, 1);
-      assert(result.events.some(row => row[0] === 'entry-failed' && row[1] === 'local_state_packaged_owner_not_ready'));
+      const diagnostics = result.stderr.trim().split(/\r?\n/).map(line => JSON.parse(line));
+      assert.deepEqual(diagnostics, [{
+        schema: 'metaengine.browser.provider-startup.v1', state: 'LOCAL_PROVIDER_STARTUP_BLOCKED',
+        reason: 'local_state_packaged_owner_not_ready', phase: 'PACKAGED_OWNER_ADMISSION',
+        bootstrap_state: 'NO_OWNER_CONFIG', attachment_state: 'NOT_ATTEMPTED',
+        authority_effect: false, browser_runtime_started: false, automatic_cloud_fallback: false,
+      }]);
+      assert(result.events.some(row => row[0] === 'exit' && row[1] === 1));
+      assert.equal(result.events.some(row => row[0] === 'entry-failed'), false);
+      assert.equal(result.events.some(row => row[0] === 'fetch'), false);
+      assert.equal(result.provider, 'LOCAL_POSTGRES');
+      assert.equal(result.boot_state, 'BLOCKED');
       assert.equal(imported(result).includes('main.mjs'), false);
       await assert.rejects(receipt(f), { code: 'ENOENT' });
     }

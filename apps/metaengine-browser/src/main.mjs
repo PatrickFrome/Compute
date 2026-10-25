@@ -121,13 +121,22 @@ let rsiRuntime = null;
 let rsiOutcomeRiver = null;
 let rsiOperatorSteering = null;
 let nativeSupervisor = null;
+const nativeSupervisorInitializationsByBarrier = new Map();
+const nativeRelayInitializationsByBarrier = new Map();
+const nativeRecoveryInitializationsByBarrier = new Map();
+const nativeInitializationCleanupCandidates = new Set();
 let managedTaskProjectHost = null;
 let interruptedSetupRecovery = null;
-let interruptedSetupRecoveryInit = null;
+let interruptedSetupRecoveryClosing = null;
+let interruptedSetupRecoverySupervisor = null;
+let interruptedSetupRecoveryFleet = null;
 let interruptedSetupPhysicalMutationsInFlight = 0;
 let autonomousProjectRuntime = null;
 let nativeCodingRuntime = null;
 let nativeCodingHostCapability = null;
+let nativeCodingRuntimeMountPromise = null;
+let nativeCodingRuntimeMountGeneration = null;
+let nativeCodingRuntimeMountFailure = null;
 let managedTaskProjectHostClosing = Promise.resolve();
 let managedTaskProjectHostDrainPending = false;
 let managedTaskProjectQuitReady = false;
@@ -801,6 +810,125 @@ async function refreshClientGoal(rawRequestId) {
   return reconcileClientGoal(requestId, entry.receipt || null);
 }
 
+function assertNativeCodingRuntimeMountOpen(summary=null) {
+  if(runtimeRecoveryGenerationLost)throw Error('local_runtime_host_generation_lost_fresh_browser_required');
+  if(shutdownRequested||globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__===true||managedTaskProjectHostDrainPending)
+    throw Error('native_coding_runtime_mount_closing');
+  if(nativeCodingRuntimeMountFailure)throw Error(nativeCodingRuntimeMountFailure);
+  if(summary&&readOwnedLocalRuntimeHostSummary()!==summary)throw Error('native_coding_runtime_mount_host_changed');
+}
+
+function nativeCodingRuntimeMountReadback(runtime,capability,summary) {
+  const r=runtime?.snapshot?.(),c=capability?.snapshot?.();
+  if(r?.schema!=='metaengine.native-coding.runtime.v1'||r.closed!==false||r.shutdown_state!=='OPEN'||r.host_unavailable_reason!==null
+    ||c?.closed!==false||!summary||c.instance_id!==summary.instance_id||c.host_pid!==summary.pid)return null;
+  return Object.freeze({schema:'metaengine.native-coding.runtime-mount.v1',mounted:true,
+    instance_id:c.instance_id,host_pid:c.host_pid,authority_effect:false});
+}
+
+function assertNativeCodingRuntimeMountGeneration(value,summary,prior=null) {
+  if(value?.schema!=='metaengine.browser.runtime-host-generation.v1'||value.ever_ready!==true
+    ||value.stopping!==false||value.exited!==false||value.transport_failed!==false||value.terminal_rejected!==false||value.terminal!==null
+    ||value.instance_id!==summary.instance_id||value.host_pid!==summary.pid||typeof value.launch_nonce!=='string'||!value.launch_nonce
+    ||prior&&['launch_nonce','host_pid','instance_id'].some(key=>value[key]!==prior[key]))
+    throw Error('native_coding_runtime_mount_host_generation_changed');
+}
+
+// Startup and verified READ_SEED use this one narrow mount. It never recreates
+// the Supervisor, loopback server, Host, goal or lease. Track the promise before
+// its first await so physical recovery drains include an in-flight mount.
+function ensureNativeCodingRuntimeMounted() {
+  if(nativeCodingRuntimeMountPromise)return nativeCodingRuntimeMountPromise;
+  // A drain may finish while readScope is pending. Its changed barrier still
+  // invalidates this attempt after the transient drain flag becomes false.
+  const closing=managedTaskProjectHostClosing;
+  const assertOpen=summary=>{
+    assertNativeCodingRuntimeMountOpen(summary);
+    if(managedTaskProjectHostClosing!==closing)throw Error('native_coding_runtime_mount_drain_changed');
+  };
+  const pending=Promise.resolve().then(async()=>{
+    assertOpen();
+    // Startup may not have constructed the Supervisor yet. Preserve admission
+    // and let a later readonly refresh try again; awaiting startup's drain Set
+    // here would deadlock when startup itself calls this helper.
+    if(!nativeSupervisor)throw Error('native_coding_runtime_mount_supervisor_unavailable');
+    await closing;assertOpen();
+    const summary=readOwnedLocalRuntimeHostSummary();
+    if(!summary){
+      if(nativeCodingRuntime||nativeCodingHostCapability)throw Error('native_coding_runtime_mount_host_unavailable');
+      return null;
+    }
+    const generation=await readOwnedLocalRuntimeHostRecoveryObservation();
+    assertOpen(summary);assertNativeCodingRuntimeMountGeneration(generation,summary);
+    if(nativeCodingRuntime||nativeCodingHostCapability){
+      const mounted=nativeCodingRuntimeMountReadback(nativeCodingRuntime,nativeCodingHostCapability,summary);
+      if(!mounted||!nativeCodingRuntimeMountGeneration)throw Error('native_coding_runtime_mount_existing_binding_unavailable');
+      assertNativeCodingRuntimeMountGeneration(generation,summary,nativeCodingRuntimeMountGeneration);
+      return mounted;
+    }
+    const directory=path.dirname(summary.status_file);
+    const present=await fs.lstat(path.join(directory,'native-coding-operator-v1.json')).catch(error=>{if(error.code==='ENOENT')return null;throw error;});
+    assertOpen(summary);if(!present)return null;
+    const operator=await readNativeCodingOperatorPaths(directory);assertOpen(summary);
+    const capability=createOwnedNativeCodingHostCapability(summary);let candidate=null,bindingAttempted=false;
+    try{
+      const scope=await capability.readScope();assertOpen(summary);
+      const current=await readOwnedLocalRuntimeHostRecoveryObservation();assertOpen(summary);
+      assertNativeCodingRuntimeMountGeneration(current,summary,generation);
+      const identity=ensureSupervisorIdentity(),device=identity.snapshot();
+      const permits=scope.bindings.filter(row=>row.device_id===device.device_id&&row.client_id===device.client_id).map(row=>row.permit);
+      const hashes=[...new Set(permits.map(permit=>permit.artifact.cli_executable_sha256))];
+      if(permits.length===0||hashes.length!==1)throw Error('native_coding_protected_permits_required');
+      const sandboxReceipts=permits.map(permit=>({...resolveNativeCodingSandboxPin(operator,permit),provider_id:permit.provider_id,agent_id:permit.agent_id,role:permit.role}));
+      candidate=createNativeCodingRuntime({identity,ownPostgres:capability,
+        readServiceControl:()=>{
+          const snapshot=nativeSupervisor?.snapshot?.();
+          return snapshot?{supervisor_mode:snapshot.supervisor_mode,armed:snapshot.armed,
+            interrupted_setup_recovery_fenced:snapshot.continuous_service?.interrupted_setup_recovery_fenced,
+            runtime_control_generation:snapshot.continuous_service?.runtime_control?.generation_floor}:null;
+        },
+        signedRequest:(route,request)=>nativeSupervisor.nativeCodingRequest(route,request),
+        observerOptions:{app,resourcesPath:process.resourcesPath,cliPath:operator.cli_executable,gitExecutable:operator.git_executable,sandboxReceipts},
+        runnerOptions:{executablePath:operator.cli_executable,expectedExecutableSha256:hashes[0],codexHome:operator.codex_home,
+          gitExecutable:operator.git_executable,journalRoot:operator.journal_root,workerTempRoot:operator.worker_temp_root},
+        resultIndexRoot:operator.result_index_root,physicalSlotBudget:Math.min(2,...permits.map(permit=>permit.physical_slot_budget))});
+      assertOpen(summary);
+      const mounted=nativeCodingRuntimeMountReadback(candidate,capability,summary);
+      if(!mounted)throw Error('native_coding_runtime_mount_candidate_unavailable');
+      bindingAttempted=true;nativeSupervisor.bindNativeCodingRuntime(candidate);
+      autonomousProjectRuntime?.bindNativeCodingRuntime(candidate);
+      assertOpen(summary);
+      if(!nativeCodingRuntimeMountReadback(candidate,capability,summary))throw Error('native_coding_runtime_mount_binding_closed');
+      nativeCodingRuntime=candidate;nativeCodingHostCapability=capability;nativeCodingRuntimeMountGeneration=current;
+      return mounted;
+    }catch(error){
+      if(bindingAttempted){
+        try{nativeSupervisor?.bindNativeCodingRuntime(null);}catch{}
+        try{autonomousProjectRuntime?.bindNativeCodingRuntime(null);}catch{}
+      }
+      let cleanupConfirmed=candidate===null;
+      if(candidate){
+        try{
+          await candidate.close();const drained=candidate.snapshot();
+          cleanupConfirmed=drained.closed===true&&drained.shutdown_state==='DRAINED'&&drained.worker_cleanup_confirmed===true;
+        }catch{cleanupConfirmed=false;}
+      }
+      if(cleanupConfirmed)try{capability.close();}catch{cleanupConfirmed=false;}
+      if(!cleanupConfirmed){
+        // Retain closed/HOLD custody for the existing physical drain. Losing
+        // these references would let recovery confirm an empty drain while an
+        // unconfirmed candidate/journal still exists. Never bind them again.
+        nativeCodingRuntimeMountFailure='native_coding_runtime_mount_cleanup_unconfirmed';
+        nativeCodingRuntime=candidate;nativeCodingHostCapability=capability;
+      }
+      throw error;
+    }
+  });
+  nativeCodingRuntimeMountPromise=pending;nativeRuntimeInitializations.add(pending);
+  const settled=()=>{nativeRuntimeInitializations.delete(pending);if(nativeCodingRuntimeMountPromise===pending)nativeCodingRuntimeMountPromise=null;};
+  pending.then(settled,settled);return pending;
+}
+
 function createNativeGoalRouter(journal){
   return createClientNativeCodingGoalRouter({journal,
     request:async(operation,input)=>{
@@ -812,7 +940,10 @@ function createNativeGoalRouter(journal){
       }finally{if(!owned)capability.close();}
     },
     projectSnapshot:request=>{if(!nativeSupervisor?.projectSnapshot)throw new Error('client_project_unavailable');return nativeSupervisor.projectSnapshot(request);},
-    onAdmitted:async()=>{if(!nativeCodingRuntime)try{await initNativeSupervisor();}catch(error){recordStartupSubsystemDegraded('NATIVE_GOAL_RUNTIME_MOUNT',error);}},
+    onAdmitted:async()=>{
+      try{const mounted=await ensureNativeCodingRuntimeMounted();if(!mounted)throw Error('native_coding_runtime_mount_unavailable');return mounted;}
+      catch(error){recordStartupSubsystemDegraded('NATIVE_GOAL_RUNTIME_MOUNT',error);throw error;}
+    },
   });
 }
 
@@ -2119,33 +2250,81 @@ function ensureGuardianStatusObserver() {
   return guardianStatusObserver;
 }
 
-async function initGithubChatRelay() {
-  if (!githubChatRelay) {
-    try {
-      githubChatRelay = await startInstalledGithubChatRelay({
+async function initGithubChatRelay(closing=managedTaskProjectHostClosing,owned=null) {
+  return runNativeInitialization(closing,nativeRelayInitializationsByBarrier,async()=>{
+    await closing;assertNativeSupervisorInitializationOpen(closing);
+    const supervisor=nativeSupervisor;
+    const assertCurrent=()=>{
+      assertNativeSupervisorInitializationOpen(closing);
+      if(nativeSupervisor!==supervisor)throw Error('native_supervisor_initialization_supervisor_changed');
+    };
+    if (!githubChatRelay) {
+      let record=null;
+      const control=operation=>(...args)=>{assertCurrent();return operation(...args);};
+      try {
+        const candidate=await startInstalledGithubChatRelay({
         userDataPath: app.getPath('userData'),clientId: ensureSupervisorIdentity().snapshot()?.client_id,
         localProvider: Boolean(explicitLocalSupervisorBase()),safeStorage,
         control: {
-          status: () => nativeSupervisorState(),
-          capabilities: async () => ({schema:'metaengine.chat-control-capabilities.v1',
+          status: control(() => nativeSupervisorState()),
+          capabilities: control(async () => ({schema:'metaengine.chat-control-capabilities.v1',
             actions:[...CHAT_COMMAND_ACTIONS],computer:computerExecutor.snapshot(),
             command_execution:'LOCAL_POSTGRES_LEASE',shared_desktop_arbitration:true,
-            authority_effect:false}),
-          commandSubmit: payload => nativeSupervisor.chatCommandSubmit(payload),
-          commandLookup: payload => nativeSupervisor.chatCommandLookup(payload),
-          commandReceipt: payload => nativeSupervisor.chatCommandReceipt(payload),
-          goalSubmit: payload => nativeSupervisor.clientGoalSubmit(payload),
-          goalProgress: payload => nativeSupervisor.clientGoalProgress(payload),
-          goalProof: payload => nativeSupervisor.clientGoalExecutionProof(payload),
+            authority_effect:false})),
+          commandSubmit: control(payload => supervisor.chatCommandSubmit(payload)),
+          commandLookup: control(payload => supervisor.chatCommandLookup(payload)),
+          commandReceipt: control(payload => supervisor.chatCommandReceipt(payload)),
+          goalSubmit: control(payload => supervisor.clientGoalSubmit(payload)),
+          goalProgress: control(payload => supervisor.clientGoalProgress(payload)),
+          goalProof: control(payload => supervisor.clientGoalExecutionProof(payload)),
         },
       });
-      githubChatRelayError = null;
-    } catch (error) {
-      githubChatRelayError = 'PAIRING_OR_TRANSPORT_UNCONFIRMED';
-      recordStartupSubsystemDegraded('GITHUB_CHAT_RELAY', error);
+        if(candidate){record={kind:'RELAY',candidate};owned?.push(record);}
+        assertCurrent();githubChatRelay=candidate;githubChatRelayError=null;
+      } catch(error) {
+        if(record)await cleanupNativeInitializationCandidate(record).catch(()=>{});
+        assertCurrent();githubChatRelayError='PAIRING_OR_TRANSPORT_UNCONFIRMED';
+        recordStartupSubsystemDegraded('GITHUB_CHAT_RELAY',error);
+      }
     }
+    assertCurrent();return githubChatState();
+  });
+}
+
+function assertNativeSupervisorInitializationOpen(closing) {
+  if(runtimeRecoveryGenerationLost)throw Error('local_runtime_host_generation_lost_fresh_browser_required');
+  if(shutdownRequested||globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__===true
+    ||managedTaskProjectHostDrainPending||managedTaskProjectHostClosing!==closing)
+    throw Error('native_supervisor_initialization_lifetime_changed');
+  if(nativeInitializationCleanupCandidates.size)throw Error('native_supervisor_initialization_cleanup_unconfirmed');
+}
+
+function runNativeInitialization(closing,byBarrier,operation) {
+  const existing=byBarrier.get(closing);if(existing)return existing;
+  const pending=Promise.resolve().then(operation);byBarrier.set(closing,pending);nativeRuntimeInitializations.add(pending);
+  const settled=()=>{nativeRuntimeInitializations.delete(pending);if(byBarrier.get(closing)===pending)byBarrier.delete(closing);};
+  pending.then(settled,settled);return pending;
+}
+
+async function cleanupNativeInitializationCandidate(record) {
+  if(record.cleaned)return;
+  const {kind,candidate}=record;nativeInitializationCleanupCandidates.add(record);
+  if(kind==='RPC')await candidate.stop();
+  else if(kind==='RELAY')candidate.stop();
+  else await candidate.close();
+  const state=candidate.snapshot();
+  const confirmed=kind==='RPC'?state.state==='STOPPED'&&state.port===null
+    :kind==='RELAY'?state.state==='REVOKED'
+    :kind==='MANAGED'?state.state==='CLOSED'&&state.in_flight===0
+    :kind==='AUTONOMOUS'?state.pending_effects===0&&state.in_flight_operations===0:false;
+  if(!confirmed)throw Error('native_supervisor_initialization_cleanup_unconfirmed');
+  if(kind==='RPC'&&supervisorLoopbackRpc===candidate)supervisorLoopbackRpc=null;
+  if(kind==='RELAY'&&githubChatRelay===candidate)githubChatRelay=null;
+  if(kind==='MANAGED'&&managedTaskProjectHost===candidate)managedTaskProjectHost=null;
+  if(kind==='AUTONOMOUS'&&autonomousProjectRuntime===candidate){
+    record.supervisor?.bindDevosProjectRuntime(null);autonomousProjectRuntime=null;
   }
-  return githubChatState();
+  record.cleaned=true;nativeInitializationCleanupCandidates.delete(record);
 }
 
 function githubChatState() {
@@ -2178,27 +2357,37 @@ async function connectGithubChat() {
 
 function closeManagedTaskProjectHost() {
   if (managedTaskProjectHostDrainPending) return managedTaskProjectHostClosing;
-  const host = managedTaskProjectHost;
-  const projectRuntime = autonomousProjectRuntime;
-  const coding=nativeCodingRuntime, codingHost=nativeCodingHostCapability;
-  nativeSupervisor?.bindDevosProjectRuntime(null);
-  nativeSupervisor?.bindNativeCodingRuntime(null);
-  projectRuntime?.bindNativeCodingRuntime(null);
-  if (host || projectRuntime || coding || codingHost) {
-    managedTaskProjectHostDrainPending = true;
-    managedTaskProjectHostClosing = (async () => {
-      const receipt=await drainManagedRuntimeBindings({coding,codingHost,projectRuntime,host});
-      // Clear ownership only after positive cleanup. A rejection deliberately
-      // retains the exact closed generation and its rejected admission barrier.
-      if(nativeCodingRuntime===coding)nativeCodingRuntime=null;
-      if(nativeCodingHostCapability===codingHost)nativeCodingHostCapability=null;
-      if(managedTaskProjectHost===host)managedTaskProjectHost=null;
-      if(autonomousProjectRuntime===projectRuntime)autonomousProjectRuntime=null;
-      managedTaskProjectHostDrainPending=false;
-      return receipt;
-    })();
-  }
-  return managedTaskProjectHostClosing;
+  const previous=managedTaskProjectHostClosing,initializations=[...nativeRuntimeInitializations];
+  const mount=nativeCodingRuntimeMountPromise;if(mount&&!initializations.includes(mount))initializations.push(mount);
+  managedTaskProjectHostDrainPending=true;
+  let fenceError=null;
+  // Publish a new barrier even with empty globals. An unpublished mount owns
+  // its previous barrier and must reject this changed lifetime before binding.
+  const closing=Promise.resolve().then(async()=>{
+    const [prior]=await Promise.allSettled([previous,...initializations]);
+    if(prior.status!=='fulfilled')throw prior.reason;
+    if(fenceError)throw fenceError.error;
+    for(const record of [...nativeInitializationCleanupCandidates])await cleanupNativeInitializationCandidate(record);
+    // A failed pending mount may have retained CLOSED/HOLD custody while
+    // settling. Read these references now, not before its cleanup completed.
+    const host=managedTaskProjectHost,projectRuntime=autonomousProjectRuntime;
+    const coding=nativeCodingRuntime,codingHost=nativeCodingHostCapability;
+    const receipt=await drainManagedRuntimeBindings({coding,codingHost,projectRuntime,host});
+    // A rejection retains the same custody, failure barrier and admission hold.
+    if(nativeCodingRuntime===coding)nativeCodingRuntime=null;
+    if(nativeCodingHostCapability===codingHost)nativeCodingHostCapability=null;
+    if(managedTaskProjectHost===host)managedTaskProjectHost=null;
+    if(autonomousProjectRuntime===projectRuntime)autonomousProjectRuntime=null;
+    managedTaskProjectHostDrainPending=false;
+    return receipt;
+  });
+  managedTaskProjectHostClosing=closing;
+  try{
+    nativeSupervisor?.bindDevosProjectRuntime(null);
+    nativeSupervisor?.bindNativeCodingRuntime(null);
+    autonomousProjectRuntime?.bindNativeCodingRuntime(null);
+  }catch(error){fenceError={error};}
+  return closing;
 }
 
 async function startInstalledRuntimeRecovery() {
@@ -2248,12 +2437,15 @@ async function startInstalledRuntimeRecovery() {
 
 async function initNativeSupervisor() {
   if(runtimeRecoveryGenerationLost)throw Error('local_runtime_host_generation_lost_fresh_browser_required');
-  let initializationFinished;
-  const initialization=new Promise(resolve=>{initializationFinished=resolve;});
-  nativeRuntimeInitializations.add(initialization);
+  const closing=managedTaskProjectHostClosing;
+  return runNativeInitialization(closing,nativeSupervisorInitializationsByBarrier,async()=>{
+  const owned=[];let supervisor=null,startingSupervisor=null,ownedPort=null;
+  const assertCurrent=()=>{
+    assertNativeSupervisorInitializationOpen(closing);
+    if(supervisor&&nativeSupervisor!==supervisor)throw Error('native_supervisor_initialization_supervisor_changed');
+  };
   try {
-  await managedTaskProjectHostClosing;
-  if(runtimeRecoveryGenerationLost)throw Error('local_runtime_host_generation_lost_fresh_browser_required');
+  await closing;assertCurrent();
   if (!nativeSupervisor) {
     const identity = ensureSupervisorIdentity();
     const observeLocalTarget = createFleetTargetLocalObserver({
@@ -2350,109 +2542,102 @@ async function initNativeSupervisor() {
       },
     });
   }
+  supervisor=nativeSupervisor;assertCurrent();
   // Both remote leased commands and authenticated loopback commands enter the
   // same host adapter. Its dependencies use this client's existing device
   // signature rail; no DB credentials or configurable paths enter a renderer.
   if (!managedTaskProjectHost) {
+    let record=null;
     try {
-      await managedTaskProjectHostClosing;
-      const request = input => nativeSupervisor.managedTaskProjectRequest(input);
+      await closing;assertCurrent();
+      const request = input => {assertCurrent();return supervisor.managedTaskProjectRequest(input);};
       const bindings = createManagedTaskProjectBindingTransport({ request });
-      managedTaskProjectHost = await createManagedTaskProjectHost({
-        userDataPath: app.getPath('userData'), executeCommand: executeNativeSupervisorCommandFenced,
+      const candidate = await createManagedTaskProjectHost({
+        userDataPath: app.getPath('userData'), executeCommand: command=>{assertCurrent();return executeNativeSupervisorCommandFenced(command);},
         resolveProjectBinding: createManagedTaskProjectAuthorityResolver({ request }),
         ...bindings, provisionRepository: createManagedTaskProjectRepositoryProvisioner({ request }),
         openProject: async ({ path: projectPath }) => {
           if (await shell.openPath(projectPath)) throw new Error('managed_project_open_failed');
         },
       });
-    } catch (error) { recordStartupSubsystemDegraded('MANAGED_TASK_PROJECTS', error); }
-  }
-  if(runtimeRecoveryGenerationLost)throw Error('local_runtime_host_generation_lost_fresh_browser_required');
-  if (!autonomousProjectRuntime && managedTaskProjectHost) {
-    try {
-      autonomousProjectRuntime = await createAutonomousProjectHost({ userDataPath: app.getPath('userData'),
-        supervisor: nativeSupervisor, getManagedHost: () => managedTaskProjectHost });
-      nativeSupervisor.bindDevosProjectRuntime(autonomousProjectRuntime);
-    } catch (error) { recordStartupSubsystemDegraded('AUTONOMOUS_PROJECT_RUNTIME', error); }
-  }
-  if(runtimeRecoveryGenerationLost)throw Error('local_runtime_host_generation_lost_fresh_browser_required');
-  if(!nativeCodingRuntime) {
-    const summary=readOwnedLocalRuntimeHostSummary();
-    if(summary) {
-      try {
-        const directory=path.dirname(summary.status_file);
-        const present=await fs.lstat(path.join(directory,'native-coding-operator-v1.json')).catch(error=>{if(error.code==='ENOENT')return null;throw error;});
-        if(present) {
-          const operator=await readNativeCodingOperatorPaths(directory);
-          const capability=createOwnedNativeCodingHostCapability(summary);
-          try {
-            const scope=await capability.readScope(),identity=ensureSupervisorIdentity(),device=identity.snapshot();
-            const permits=scope.bindings.filter(row=>row.device_id===device.device_id&&row.client_id===device.client_id).map(row=>row.permit);
-            const hashes=[...new Set(permits.map(permit=>permit.artifact.cli_executable_sha256))];
-            if(permits.length===0||hashes.length!==1) throw new Error('native_coding_protected_permits_required');
-            const sandboxReceipts=permits.map(permit=>({...resolveNativeCodingSandboxPin(operator,permit),provider_id:permit.provider_id,agent_id:permit.agent_id,role:permit.role}));
-            nativeCodingRuntime=createNativeCodingRuntime({identity,ownPostgres:capability,
-              readServiceControl:()=>{
-                const current=nativeSupervisor?.snapshot?.();
-                return current?{supervisor_mode:current.supervisor_mode,armed:current.armed,
-                  interrupted_setup_recovery_fenced:current.continuous_service?.interrupted_setup_recovery_fenced,
-                  runtime_control_generation:current.continuous_service?.runtime_control?.generation_floor}:null;
-              },
-              signedRequest:(route,request)=>nativeSupervisor.nativeCodingRequest(route,request),
-              observerOptions:{app,resourcesPath:process.resourcesPath,cliPath:operator.cli_executable,gitExecutable:operator.git_executable,sandboxReceipts},
-              runnerOptions:{executablePath:operator.cli_executable,expectedExecutableSha256:hashes[0],codexHome:operator.codex_home,
-                gitExecutable:operator.git_executable,journalRoot:operator.journal_root,workerTempRoot:operator.worker_temp_root},
-              resultIndexRoot:operator.result_index_root,physicalSlotBudget:Math.min(2,...permits.map(permit=>permit.physical_slot_budget))});
-            nativeCodingHostCapability=capability;nativeSupervisor.bindNativeCodingRuntime(nativeCodingRuntime);
-          }catch(error){capability.close();throw error;}
-        }
-      } catch(error) {recordStartupSubsystemDegraded('NATIVE_CODING_RUNTIME',error);}
+      record={kind:'MANAGED',candidate};owned.push(record);assertCurrent();managedTaskProjectHost=candidate;
+    } catch (error) {
+      if(record)await cleanupNativeInitializationCandidate(record).catch(()=>{});
+      assertCurrent();recordStartupSubsystemDegraded('MANAGED_TASK_PROJECTS', error);
     }
   }
-  autonomousProjectRuntime?.bindNativeCodingRuntime(nativeCodingRuntime);
-  if(runtimeRecoveryGenerationLost)throw Error('local_runtime_host_generation_lost_fresh_browser_required');
-  try { await ensureInterruptedSetupRecovery(); }
+  assertCurrent();
+  if (!autonomousProjectRuntime && managedTaskProjectHost) {
+    let record=null;
+    try {
+      const candidate = await createAutonomousProjectHost({ userDataPath: app.getPath('userData'),
+        supervisor, getManagedHost: () => {assertCurrent();return managedTaskProjectHost;} });
+      record={kind:'AUTONOMOUS',candidate,supervisor};owned.push(record);assertCurrent();
+      supervisor.bindDevosProjectRuntime(candidate);assertCurrent();autonomousProjectRuntime=candidate;
+    } catch (error) {
+      if(record)await cleanupNativeInitializationCandidate(record).catch(()=>{});
+      assertCurrent();recordStartupSubsystemDegraded('AUTONOMOUS_PROJECT_RUNTIME', error);
+    }
+  }
+  assertCurrent();
+  try{
+    const mounted=await ensureNativeCodingRuntimeMounted();
+    assertCurrent();
+    if(mounted)autonomousProjectRuntime?.bindNativeCodingRuntime(nativeCodingRuntime);
+  }
+  catch(error){assertCurrent();recordStartupSubsystemDegraded('NATIVE_CODING_RUNTIME',error);}
+  assertCurrent();
+  try { await ensureInterruptedSetupRecovery(closing);assertCurrent(); }
   catch (error) {
-    nativeSupervisor.setInterruptedSetupRecoveryFence(true);
+    assertCurrent();supervisor.setInterruptedSetupRecoveryFence(true);
     recordStartupSubsystemDegraded('INTERRUPTED_SETUP_RECOVERY', error);
   }
-  if(runtimeRecoveryGenerationLost)throw Error('local_runtime_host_generation_lost_fresh_browser_required');
-  if (nativeSupervisor.snapshot()?.running !== true) await nativeSupervisor.start();
-  if(runtimeRecoveryGenerationLost){nativeSupervisor?.stop();throw Error('local_runtime_host_generation_lost_fresh_browser_required');}
+  assertCurrent();
+  if (supervisor.snapshot()?.running !== true){startingSupervisor=supervisor;await supervisor.start();assertCurrent();}
+  assertCurrent();
   // W35: the absence of an attested own-local Owner must stay OFFLINE/UNKNOWN.
   // Never launch a cloud health sentinel or alternate supervisor failover.
   // The sole native Supervisor remains responsible for its existing leases.
   // T3-11 supervisor loopback RPC primary: local callers get the SAME fenced
   // executor over a loopback-only HTTP endpoint; the chat -> edge -> DB-lease
   // path stays as the remote fallback (native-supervisor-runtime-transport).
+  if(!supervisorLoopbackRpc){let record=null;
   try {
     const directory = await prepareManagedTaskProjectStorage({ userDataPath: app.getPath('userData') });
+    assertCurrent();
     const manifestPath = path.join(directory, 'supervisor-rpc.json');
     const existingManifest = await fs.lstat(manifestPath).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
-    if (existingManifest) await verifyManagedProjectPrivateFile(manifestPath);
-    supervisorLoopbackRpc = new SupervisorLoopbackRpcServer({
-      executeCommand: executeNativeSupervisorCommand,
+    assertCurrent();
+    if (existingManifest){await verifyManagedProjectPrivateFile(manifestPath);assertCurrent();}
+    const candidate = new SupervisorLoopbackRpcServer({
+      executeCommand: command=>{assertCurrent();return executeNativeSupervisorCommand(command);},
       manifestPath,
       snapshotProvider: () => nativeSupervisorState(),
       clientConnectionStatusProvider: () => readClientConnectionStatus(),
       clientWorkReadinessProvider: () => readClientWorkReadiness(),
     });
-    await supervisorLoopbackRpc.start();
-    if (supervisorLoopbackRpc.snapshot().last_error) throw new Error('supervisor_loopback_private_manifest_write_failed');
-    await verifyManagedProjectPrivateFile(manifestPath);
+    record={kind:'RPC',candidate};owned.push(record);
+    await candidate.start();assertCurrent();
+    if (candidate.snapshot().last_error) throw new Error('supervisor_loopback_private_manifest_write_failed');
+    await verifyManagedProjectPrivateFile(manifestPath);assertCurrent();supervisorLoopbackRpc=candidate;
   } catch (error) {
-    await supervisorLoopbackRpc?.stop().catch(() => {});
-    supervisorLoopbackRpc = null;
+    if(record)await cleanupNativeInitializationCandidate(record).catch(()=>{});
+    assertCurrent();
     recordStartupSubsystemDegraded('SUPERVISOR_LOOPBACK_RPC', error);
-  }
-  await initGithubChatRelay();
-  if (!shellBrainPortConsumerId) attachShellBrainPort();
+  }}
+  assertCurrent();await initGithubChatRelay(closing,owned);assertCurrent();
+  if (!shellBrainPortConsumerId){assertCurrent();attachShellBrainPort();ownedPort=shellBrainPortConsumerId;assertCurrent();}
   await publishSnapshot().catch(() => {});
-  return nativeSupervisor.snapshot();
-  } finally {
-    nativeRuntimeInitializations.delete(initialization);initializationFinished();
+  assertCurrent();return supervisor.snapshot();
+  }catch(error){
+    startingSupervisor?.stop();
+    if(ownedPort&&shellBrainPortConsumerId===ownedPort){
+      shellBrainPortConsumerId=null;try{supervisor?.detachCognitiveMessagePort?.(ownedPort);}catch{}
+    }
+    for(const record of owned.reverse())await cleanupNativeInitializationCandidate(record).catch(()=>{});
+    throw error;
   }
+  });
 }
 
 function destroyWindowContents() {
@@ -3202,11 +3387,21 @@ function readClientWorkReadiness() {
     },
   });
 }
-async function ensureInterruptedSetupRecovery() {
-  if (interruptedSetupRecovery) return interruptedSetupRecovery;
-  if (!interruptedSetupRecoveryInit) interruptedSetupRecoveryInit = (async () => {
+async function ensureInterruptedSetupRecovery(closing=managedTaskProjectHostClosing) {
+  return runNativeInitialization(closing,nativeRecoveryInitializationsByBarrier,async()=>{
+    await closing;assertNativeSupervisorInitializationOpen(closing);
+    const supervisor=nativeSupervisor,currentFleet=fleet;
+    const assertCurrent=()=>{
+      assertNativeSupervisorInitializationOpen(closing);
+      if(nativeSupervisor!==supervisor)throw Error('native_supervisor_initialization_supervisor_changed');
+      if(fleet!==currentFleet)throw Error('native_supervisor_initialization_fleet_changed');
+    };
+    if(interruptedSetupRecovery&&interruptedSetupRecoveryClosing===closing&&interruptedSetupRecoverySupervisor===supervisor&&interruptedSetupRecoveryFleet===currentFleet){
+      assertCurrent();return interruptedSetupRecovery;
+    }
     if (!nativeSupervisor || !fleet) throw new Error('interrupted_setup_native_runtime_not_ready');
     const privateRoot = await prepareManagedTaskProjectStorage({ userDataPath: app.getPath('userData') });
+    assertCurrent();
     const directory = path.join(privateRoot, 'interrupted-setup-recovery-v1');
     const recovery = new InterruptedSetupRecovery({
       directory,
@@ -3215,20 +3410,19 @@ async function ensureInterruptedSetupRecovery() {
         if (process.platform === 'win32') assertManagedProjectPrivateReceipt(await verifyOwnerOnlyWindowsStorage(location, { operation: 'VERIFY_DIRECTORY' }), 'VERIFY_DIRECTORY');
       },
       verifyFile: location => verifyManagedProjectPrivateFile(location),
-      getSnapshot: async () => ({
-        keepalive: nativeSupervisor.snapshot()?.lifecycle?.keepalive || null,
-        fleet: fleet.snapshot(),
+      getSnapshot: async () => {assertCurrent();return {
+        keepalive: supervisor.snapshot()?.lifecycle?.keepalive || null,
+        fleet: currentFleet.snapshot(),
         tabs: registry.snapshot()?.tabs,
-      }),
-      applyFleet: binding => fleet.archiveInterruptedBootstrapAgents(binding),
-      applySupervisor: binding => nativeSupervisor.archiveInterruptedBootstrapForNewEpoch(binding),
+      };},
+      applyFleet: binding => {assertCurrent();return currentFleet.archiveInterruptedBootstrapAgents(binding);},
+      applySupervisor: binding => {assertCurrent();return supervisor.archiveInterruptedBootstrapForNewEpoch(binding);},
     });
     const status = await recovery.init();
-    nativeSupervisor.setInterruptedSetupRecoveryFence(status.fenced);
-    interruptedSetupRecovery = recovery;
+    assertCurrent();supervisor.setInterruptedSetupRecoveryFence(status.fenced);
+    interruptedSetupRecovery=recovery;interruptedSetupRecoveryClosing=closing;interruptedSetupRecoverySupervisor=supervisor;interruptedSetupRecoveryFleet=currentFleet;
     return recovery;
-  })().finally(() => { interruptedSetupRecoveryInit = null; });
-  return interruptedSetupRecoveryInit;
+  });
 }
 ipcMain.handle('metaengine:client:interrupted-setup-inspect', async (event) => {
   assertShellSender(event);
@@ -3370,7 +3564,9 @@ app.on('before-quit', (event) => {
   shutdownRequested = true;
   if (startupRetryTimer) clearTimeout(startupRetryTimer);
   startupRetryTimer = null;
-  if (!managedTaskProjectQuitReady && (managedTaskProjectHost || nativeCodingRuntime || nativeCodingHostCapability || managedTaskProjectHostDrainPending)) {
+  if (!managedTaskProjectQuitReady && (managedTaskProjectHost || autonomousProjectRuntime || nativeCodingRuntime || nativeCodingHostCapability
+    || nativeCodingRuntimeMountPromise || nativeRuntimeInitializations.size || nativeInitializationCleanupCandidates.size
+    || managedTaskProjectHostDrainPending)) {
     event.preventDefault();
     if(managedTaskProjectQuitPending)return;
     managedTaskProjectQuitPending=true;

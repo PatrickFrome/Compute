@@ -18,10 +18,11 @@ const agent=`agent_${id}`;
 const proc={pid:123,created_at:'2026-10-22T04:00:00.000Z',process_incarnation_id:'pid:123:created_100ns:134055792000000000',
   user_sid:'S-1-5-21-111-1001',exe_path:path.resolve('fixture.exe')};
 async function temporary(t){
-  const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-native-observer-test-'));
+  const temporary=await fs.realpath(os.tmpdir());
+  const root=await fs.realpath(await fs.mkdtemp(path.join(temporary,'metaengine-native-observer-test-')));
   t.after(async()=>{
     const real=await fs.realpath(root);assert.equal(real,path.resolve(root));
-    assert.equal(path.dirname(real).toLowerCase(),(await fs.realpath(os.tmpdir())).toLowerCase());
+    assert.equal(path.dirname(real),temporary);
     assert(path.basename(real).startsWith('metaengine-native-observer-test-'));
     await fs.rm(real,{recursive:true,force:true});
   });return root;

@@ -44,6 +44,10 @@ if(mode==='seed-mounted'||mode==='slow-seed')for(const action of ['SEED_GOAL','R
  if(action==='SEED_GOAL'){calls++;if(mode==='slow-seed')await delay(180);}
  return {fixture_transport_only:true,operation:action,input:request.body.input};
 };
+if(mode==='prior-readback'||mode==='slow-prior')operations.READ_PRIOR_EXECUTION=async ({selector})=>{
+ ++calls;if(mode==='slow-prior')await delay(180);
+ return {fixture_transport_only:true,state:'HOLD',selector,physical_effect_replayed:false,automatic_retry_allowed:false,authority_effect:false};
+};
 const send=(frame,callback)=>{
  const copy=structuredClone(frame);
  if(mode==='wrong-action')copy.action='READ_LEASE';
@@ -138,6 +142,23 @@ test('seed timeout retains unknown mutation while read-only seed recovery cannot
   await assert.rejects(client.seedGoal(request),e=>e.effect_outcome==='UNKNOWN'&&e.readback_required===true);
   const read=seedRequest('READ_SEED',instanceId,child.pid);read.body.input=request.body.input;
   assert.equal((await client.readSeed(read)).operation,'READ_SEED');await sleep(220);assert.equal((await stats()).calls,1);
+});
+
+test('private prior-execution IPC transports only typed selectors and rejects caller old scope, hashes, paths and model actions',async t=>{
+  const {client,stats}=await setup(t,'prior-readback'),selector={...lease(),agent_generation_epoch:1};
+  const result=await client.readPriorExecution(selector);assert.equal(result.state,'HOLD');assert.deepEqual(result.selector,selector);
+  for(const extra of [{scope_sha256:'f'.repeat(64)},{host_incarnation:'pid:1:created_100ns:134000000000000000'},
+    {path:'C:/caller/receipt.json'},{sql:'select 1'}])
+    await assert.rejects(client.readPriorExecution({...selector,...extra}),error=>error.reason==='INVALID_PAYLOAD'&&error.effect_outcome==='NONE');
+  await assert.rejects(client.agentOperation({...agentRequest(),operation:'READ_PRIOR_EXECUTION'}),error=>error.reason==='INVALID_PAYLOAD');
+  assert.equal((await stats()).calls,1);
+});
+
+test('prior-execution read timeout is effect-free and never repeats a Host read or becomes an unknown write',async t=>{
+  const {client,stats}=await setup(t,'slow-prior',{timeoutMs:30,serverTimeoutMs:1000});
+  await assert.rejects(client.readPriorExecution({...lease(),agent_generation_epoch:1}),
+    error=>error.effect_outcome==='NONE'&&error.automatic_retry_allowed===false);
+  await sleep(220);assert.equal((await stats()).calls,1);
 });
 
 test('agent IPC timeout marks a write unknown and keeps a readonly CHECK effect-free without replay',async t=>{

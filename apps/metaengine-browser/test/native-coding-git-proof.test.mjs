@@ -8,7 +8,7 @@ import {promisify} from 'node:util';
 import {createHash} from 'node:crypto';
 import {readNativeCodingGitProof} from '../src/native-coding-git-proof.mjs';
 const execute=promisify(execFile),hash=bytes=>createHash('sha256').update(bytes).digest('hex');
-const gitExecutable=process.env.METAENGINE_GIT_TEST_EXECUTABLE||(process.platform==='win32'?'C:/Program Files/Git/mingw64/bin/git.exe':'git');
+const gitExecutable=process.env.METAENGINE_GIT_TEST_EXECUTABLE||(process.platform==='win32'?'C:/Program Files/Git/bin/git.exe':'git');
 async function fixture(t) {
   const temporary=await fs.realpath(os.tmpdir()),root=await fs.mkdtemp(path.join(temporary,'native-coding-git-proof-'));
   t.after(async()=>{
