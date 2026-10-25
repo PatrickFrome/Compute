@@ -9,7 +9,7 @@ const WRITES = new Set(['REGISTER_PROVIDER','RESERVE_EXECUTION','ADVANCE_EXECUTI
 const writes=(action,value)=>WRITES.has(action)||action==='AGENT_OPERATION'&&nativeCodingAgentHostOperationWrites(value);
 const REASONS = new Set(['INVALID_FRAME','INVALID_PAYLOAD','MESSAGE_TOO_LARGE','UNSUPPORTED_ACTION','INSTANCE_MISMATCH',
   'HOST_PID_MISMATCH','INFLIGHT_LIMIT','REQUEST_ID_REUSED','OPERATION_FAILED','WRITE_OUTCOME_UNKNOWN','RESPONSE_INVALID',
-  'REQUEST_TIMEOUT','CHILD_EXIT','CHANNEL_CLOSED','SEND_FAILED','CLIENT_CLOSED','SERVER_CLOSED']);
+  'REQUEST_TIMEOUT','CHILD_EXIT','CHANNEL_CLOSED','SEND_FAILED','CLIENT_CLOSED','SERVER_CLOSED','HOST_TERMINATED']);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const HASH = /^[a-f0-9]{64}$/;
 const SCOPE = ['workspace_id','task_id','lease_generation','agent_id','target_id','agent_generation_epoch','host_incarnation','scope_sha256'];
@@ -104,13 +104,22 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
     ||!UUID.test(instanceId||'')||!Number.isSafeInteger(hostPid)||hostPid<1||child.pid!==hostPid
     ||!Number.isSafeInteger(timeoutMs)||timeoutMs<1||timeoutMs>20000||!Number.isSafeInteger(maxInflight)||maxInflight<1||maxInflight>16)
     throw new NativeCodingHostIpcError('CHANNEL_CLOSED');
-  const pending=new Map();let closed=false;
+  const pending=new Map(),unavailableListeners=new Set();let closed=false,unavailable=null;
   const reject=(row,reason,unknown=row.write)=>row.reject(new NativeCodingHostIpcError(reason,
     {action:row.action,requestId:row.id,instanceId,unknown}));
   const take=id=>{const row=pending.get(id);if(row){clearTimeout(row.timer);pending.delete(id);}return row;};
-  const stop=reason=>{if(closed)return;closed=true;for(const id of [...pending.keys()]){const row=take(id);reject(row,reason);}
-    child.off('message',onMessage);child.off('exit',onExit);child.off('disconnect',onDisconnect);child.off('error',onError);};
+  const notify=listener=>{try{Promise.resolve(listener(unavailable)).catch(()=>{});}catch{/* A consumer cannot prevent other consumers from fencing. */}};
+  const stop=reason=>{if(closed)return;closed=true;
+    unavailable=Object.freeze({schema:'metaengine.native-coding.host-unavailable.v1',reason,
+      instance_id:instanceId,host_pid:hostPid,automatic_retry_allowed:false,authority_effect:false});
+    for(const id of [...pending.keys()]){const row=take(id);reject(row,reason);}
+    child.off('message',onMessage);child.off('exit',onExit);child.off('disconnect',onDisconnect);child.off('error',onError);
+    const listeners=[...unavailableListeners];unavailableListeners.clear();for(const listener of listeners)notify(listener);
+  };
   function onMessage(message,sendHandle) {
+    // A terminal declaration can only remove authority. Even malformed
+    // terminal payloads fence this exact child capability before process exit.
+    if(message?.schema==='compute.runtime-host-terminal.v1'){stop('HOST_TERMINATED');return;}
     if(!plain(message)||message.schema!==NATIVE_CODING_HOST_IPC_RESPONSE)return;
     const row=pending.get(message.request_id);if(!row)return;
     try{
@@ -118,7 +127,7 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
       if(sendHandle||message.instance_id!==instanceId||message.host_pid!==hostPid||message.request_id!==row.id
         ||message.action!==row.action||message.request_sha256!==row.digest||!['OK','REJECTED','UNKNOWN'].includes(message.outcome)
         ||(message.outcome==='OK'?(message.reason!==null):(!REASONS.has(message.reason)||message.value!==null)))invalid('RESPONSE_INVALID');
-    }catch{take(row.id);reject(row,'RESPONSE_INVALID');return;}
+    }catch{stop('RESPONSE_INVALID');return;}
     take(row.id);
     if(message.outcome==='OK')row.resolve(structuredClone(message.value));
     else reject(row,message.reason,message.outcome==='UNKNOWN');
@@ -126,7 +135,8 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
   const onExit=()=>stop('CHILD_EXIT'),onDisconnect=()=>stop('CHANNEL_CLOSED'),onError=()=>stop('CHANNEL_CLOSED');
   child.on('message',onMessage);child.on('exit',onExit);child.on('disconnect',onDisconnect);child.on('error',onError);
   function invoke(action,value) {
-    if(closed||child.connected!==true)return Promise.reject(new NativeCodingHostIpcError('CHANNEL_CLOSED'));
+    if(child.connected!==true)stop('CHANNEL_CLOSED');
+    if(closed)return Promise.reject(new NativeCodingHostIpcError('CHANNEL_CLOSED'));
     if(pending.size>=maxInflight)return Promise.reject(new NativeCodingHostIpcError('INFLIGHT_LIMIT'));
     let frame;
     try{payload(action,value);frame={schema:NATIVE_CODING_HOST_IPC_REQUEST,instance_id:instanceId,host_pid:hostPid,request_id:randomUUID(),action,payload:structuredClone(value)};json(frame);}
@@ -136,8 +146,8 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
       const row={id:frame.request_id,action,write:writes(action,value),digest:requestDigest,resolve,reject:rejectPromise,timer:null};
       row.timer=setTimeout(()=>{const current=take(row.id);if(current)reject(current,'REQUEST_TIMEOUT');},timeoutMs);
       pending.set(row.id,row);
-      try{child.send(frame,error=>{if(error){const current=take(row.id);if(current)reject(current,'SEND_FAILED');}});}
-      catch{const current=take(row.id);if(current)reject(current,'SEND_FAILED');}
+      try{child.send(frame,error=>{if(error)stop('SEND_FAILED');});}
+      catch{stop('SEND_FAILED');}
     });
   }
   return Object.freeze({
@@ -150,6 +160,13 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
     agentOperation:request=>invoke('AGENT_OPERATION',request),
     finishCheckpoint:value=>invoke('FINISH_CHECKPOINT',value),
     readFinishCheckpoint:value=>invoke('READ_FINISH_CHECKPOINT',value),
+    // Native callback only: never a renderer event or replacement permission.
+    // Late subscribers observe the already-closed capability synchronously.
+    onUnavailable(listener){
+      if(typeof listener!=='function')throw new TypeError('native_coding_host_ipc_listener_required');
+      if(closed){notify(listener);return()=>{};}
+      unavailableListeners.add(listener);return()=>unavailableListeners.delete(listener);
+    },
     close:()=>stop('CLIENT_CLOSED'),snapshot:()=>Object.freeze({instance_id:instanceId,host_pid:hostPid,inflight:pending.size,closed,automatic_retry_allowed:false}),
   });
 }

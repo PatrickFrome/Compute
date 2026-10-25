@@ -31,7 +31,7 @@ const operations={
  READ_LEASE:async value=>{++calls;if(mode==='out-of-order')await delay(value.lease_generation===1?80:5);return value;},
  REGISTER_PROVIDER:async value=>{++calls;if(mode==='throw-write')throw Error('postgresql://must-never-leak/private; raw SQL failure');return {registered:true,schema:value.descriptor.payload.schema};},
  READ_EXECUTION:async value=>({state:'RESERVED',scope:value.scope}),
- RESERVE_EXECUTION:async value=>{++calls;if(mode==='exit-write')process.exit(19);if(mode==='slow-write')await delay(180);return {state:'RESERVED',scope:value.scope};},
+ RESERVE_EXECUTION:async value=>{++calls;if(mode==='exit-write')process.exit(19);if(mode==='terminal-write'){process.send({schema:'compute.runtime-host-terminal.v1',invalid_payload:true});await delay(25);}if(mode==='slow-write')await delay(180);return {state:'RESERVED',scope:value.scope};},
  ADVANCE_EXECUTION:async value=>{++calls;return {state:value.transition.to,has_job_proof:!!value.transition.job_proof,has_result_receipt:!!value.transition.result_receipt};},
  RECONCILE_PROJECT:async value=>{++calls;if(mode==='throw-write')throw Error('checkpoint_unknown');return {project_id:value.project_id,state:'CHECKPOINTED_PENDING_COMMIT'};},
  READ_PROJECT_CHECKPOINT:async value=>({project_id:value.project_id,state:'CHECKPOINTED_PENDING_COMMIT'}),
@@ -169,9 +169,64 @@ test('server timeout keeps a still-running physical operation in the inflight bo
 
 test('child exit rejects an outstanding write as unknown and never respawns or retries',async t=>{
   const {client}=await setup(t,'exit-write');
+  const unavailable=[];client.onUnavailable(value=>unavailable.push(value));
   await assert.rejects(client.reserveExecution(scope()),error=>['CHILD_EXIT','CHANNEL_CLOSED'].includes(error.reason)
     &&error.effect_outcome==='UNKNOWN'&&error.automatic_retry_allowed===false);
   assert.equal(client.snapshot().closed,true);assert.equal(client.snapshot().inflight,0);
+  client.close();assert.equal(unavailable.length,1);
+  assert.equal(unavailable[0].schema,'metaengine.native-coding.host-unavailable.v1');
+  assert.equal(unavailable[0].automatic_retry_allowed,false);
+});
+
+test('unavailable subscribers are isolated, removable and synchronously informed after close',async t=>{
+  const {client,child,instanceId}=await setup(t);const events=[];
+  const cancel=client.onUnavailable(()=>assert.fail('removed subscriber invoked'));cancel();
+  client.onUnavailable(()=>{throw Error('consumer_failure');});
+  client.onUnavailable(async()=>{throw Error('asynchronous_consumer_failure');});
+  client.onUnavailable(event=>events.push(event));
+  client.close();client.close();child.emit('disconnect');
+  assert.equal(events.length,1);assert.equal(events[0].reason,'CLIENT_CLOSED');
+  assert.equal(events[0].instance_id,instanceId);assert.equal(events[0].host_pid,child.pid);
+  assert(Object.isFrozen(events[0]));
+  let late=null;client.onUnavailable(event=>{late=event;});assert.equal(late,events[0]);
+  assert.throws(()=>client.onUnavailable(null),/listener_required/);
+});
+
+test('a real channel disconnect notifies the native subscriber exactly once',async t=>{
+  const {client,child}=await setup(t);const events=[];
+  const unavailable=new Promise(resolve=>client.onUnavailable(event=>{events.push(event);resolve();}));
+  child.disconnect();await unavailable;client.close();
+  assert.equal(events.length,1);assert.equal(events[0].reason,'CHANNEL_CLOSED');
+  await assert.rejects(client.readScope(),error=>error.reason==='CHANNEL_CLOSED'&&error.effect_outcome==='NONE');
+});
+
+test('any terminal declaration fences before exit, rejects pending writes as unknown and ignores later replies',async t=>{
+  const {client,child,stats}=await setup(t,'terminal-write');const events=[];
+  client.onUnavailable(event=>events.push(event));
+  await assert.rejects(client.reserveExecution(scope()),error=>error.reason==='HOST_TERMINATED'
+    &&error.effect_outcome==='UNKNOWN'&&error.readback_required===true);
+  assert.equal(child.connected,true);assert.equal(client.snapshot().closed,true);
+  await sleep(60);await assert.rejects(client.readScope(),error=>error.reason==='CHANNEL_CLOSED');
+  assert.equal((await stats()).calls,1);client.close();
+  assert.equal(events.length,1);assert.equal(events[0].reason,'HOST_TERMINATED');
+});
+
+for(const mode of ['callback','throw'])test(`send ${mode} failure closes the capability and preserves pending write ambiguity`,async t=>{
+  const {client,child}=await setup(t,'slow-write');const events=[];
+  client.onUnavailable(event=>events.push(event));
+  const pending=client.reserveExecution(scope());
+  child.send=(_message,callback)=>{if(mode==='throw')throw Error('private transport detail');callback(Error('private transport detail'));};
+  const results=await Promise.allSettled([pending,client.readScope()]);
+  assert.equal(results[0].reason.reason,'SEND_FAILED');assert.equal(results[0].reason.effect_outcome,'UNKNOWN');
+  assert.equal(results[1].reason.reason,'SEND_FAILED');assert.equal(results[1].reason.effect_outcome,'NONE');
+  assert.equal(client.snapshot().closed,true);assert.equal(events.length,1);assert.equal(events[0].reason,'SEND_FAILED');
+});
+
+test('a child transport error fences without publishing raw error details',async t=>{
+  const {client,child}=await setup(t);const events=[];client.onUnavailable(event=>events.push(event));
+  child.emit('error',Error('private transport detail'));client.close();
+  assert.equal(events.length,1);assert.equal(events[0].reason,'CHANNEL_CLOSED');
+  assert.equal(JSON.stringify(events).includes('private transport detail'),false);
 });
 
 test('operation errors expose fixed reasons without raw SQL, DSNs or secret error text',async t=>{

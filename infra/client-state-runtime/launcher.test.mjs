@@ -195,6 +195,8 @@ test('automatic child-exit cleanup reports an unconfirmed stop without an unhand
   let apiChild;
   let terminateApi;
   let runtime;
+  let observeStopAttempt;
+  const stopAttempted = new Promise(resolve => { observeStopAttempt = resolve; });
   const rejections = [];
   const onUnhandled = error => rejections.push(error);
   const restoreSpawn = () => { childProcess.spawn = originalSpawn; syncBuiltinESMExports(); };
@@ -207,7 +209,7 @@ test('automatic child-exit cleanup reports an unconfirmed stop without an unhand
       if (argumentsList[1]?.includes(fixture) && argumentsList[1]?.includes('api')) {
         apiChild = child;
         terminateApi = child.kill.bind(child);
-        child.kill = () => false;
+        child.kill = () => { observeStopAttempt(); return false; };
       }
       return child;
     };
@@ -217,7 +219,15 @@ test('automatic child-exit cleanup reports an unconfirmed stop without an unhand
     restoreSpawn();
     assert.ok(apiChild);
     process.kill(runtime.children.find(child => child.name === 'edge').pid, 'SIGTERM');
+    await bounded(stopAttempted);
+    // Join the automatic stop while it still owns a live API process. Every
+    // waiter must reject; a resolved {children_stopped:false} is not cleanup.
+    const joinedStops = Promise.all([
+      assert.rejects(runtime.stop(), error => error.code === 'runtime_cleanup_unconfirmed'),
+      assert.rejects(runtime.stop(), error => error.code === 'runtime_cleanup_unconfirmed'),
+    ]);
     const {last_health_failure,...outcome}=await runtime.finished;
+    await joinedStops;
     assert.deepEqual(outcome, { reason: 'runtime_cleanup_unconfirmed', children_stopped: false });
     // The health poll and OS exit event can observe the same stopped Edge
     // in either order. Retain and validate that optional finite diagnostic.
@@ -228,6 +238,7 @@ test('automatic child-exit cleanup reports an unconfirmed stop without an unhand
     await new Promise(resolve => setImmediate(resolve));
     assert.deepEqual(rejections, []);
     assert.equal(alive(apiChild.pid), true, 'failure reports the still-running owned child');
+    await assert.rejects(runtime.stop(), error => error.code === 'runtime_cleanup_unconfirmed');
   } finally {
     restoreSpawn();
     process.removeListener('unhandledRejection', onUnhandled);
@@ -236,9 +247,49 @@ test('automatic child-exit cleanup reports an unconfirmed stop without an unhand
       terminateApi('SIGTERM');
       await ended;
     }
-    await runtime?.stop();
+    await runtime?.stop().catch(error => assert.equal(error.code, 'runtime_cleanup_unconfirmed'));
   }
 });
+
+for (const refuseCleanup of [true, false]) {
+  test(`abort during API startup ${refuseCleanup ? 'preserves cleanup uncertainty' : 'preserves the original error after confirmed cleanup'}`, async t => {
+    const { input, hooks, events } = await setup(t);
+    const controller = new AbortController();
+    const originalSpawn = childProcess.spawn;
+    let apiChild, terminateApi;
+    const restoreSpawn = () => { childProcess.spawn = originalSpawn; syncBuiltinESMExports(); };
+    try {
+      childProcess.spawn = (...argumentsList) => {
+        const child = originalSpawn(...argumentsList);
+        if (argumentsList[1]?.includes(fixture) && argumentsList[1]?.includes('api')) {
+          apiChild = child;
+          terminateApi = child.kill.bind(child);
+          if (refuseCleanup) child.kill = () => false;
+        }
+        return child;
+      };
+      syncBuiltinESMExports();
+      hooks.report = event => {
+        events.push(event);
+        // The API child is registered before this report. Aborting here starts
+        // its bounded cleanup before waitReady throws the original API error.
+        if (event.event === 'spawned' && event.component === 'api') controller.abort();
+      };
+      await assert.rejects(launchClientStateRuntime({ ...input, signal: controller.signal }, hooks),
+        error => error.code === (refuseCleanup ? 'runtime_cleanup_unconfirmed' : 'api_process_failed'));
+      assert.ok(apiChild);
+      assert.equal(events.some(event => event.event === 'spawned' && event.component === 'edge'), false);
+      assert.equal(alive(apiChild.pid), refuseCleanup);
+    } finally {
+      restoreSpawn();
+      if (apiChild && apiChild.exitCode === null && apiChild.signalCode === null) {
+        const ended = new Promise(resolve => apiChild.once('exit', resolve));
+        terminateApi('SIGTERM');
+        await bounded(ended);
+      }
+    }
+  });
+}
 
 test('an already cancelled startup refuses all children', async t => {
   const { input, hooks, events } = await setup(t);

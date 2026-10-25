@@ -23,11 +23,12 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
   // Private dependency injection supports isolated adversarial tests; it is not
   // an IPC option, renderer configuration, or a way to label fixtures native.
   observers=null,issuer=null,workerRegistry=null,runnerFactory=createCodexCliRunner,
-  agentBridgeFactory=prepareNativeCodingAgentRunBridge}={}) {
+  agentBridgeFactory=prepareNativeCodingAgentRunBridge,closeTimeoutMs=25000}={}) {
   if(typeof identity?.snapshot!=='function'||typeof signedRequest!=='function'||!runnerOptions
     ||typeof agentBridgeFactory!=='function'
     ||!['readScope','readLease','registerProvider','agentOperation'].every(name=>typeof ownPostgres?.[name]==='function'))fail('private_dependencies_required');
   if(!ownPostgres.ledger&&!['reserveExecution','advanceExecution','readExecution'].every(name=>typeof ownPostgres[name]==='function'))fail('private_ledger_required');
+  if(!Number.isSafeInteger(closeTimeoutMs)||closeTimeoutMs<1||closeTimeoutMs>25000)fail('close_timeout_invalid');
   const ledger=ownPostgres.ledger||{
     reserve:scope=>ownPostgres.reserveExecution(scope),
     advance:(scope,t)=>ownPostgres.advanceExecution(scope,{...t,critic_proof_sha256:t.critic_proof_sha256??null,checkpoint_sha256:t.checkpoint_sha256??null}),
@@ -40,8 +41,10 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
   const source=observers||createNativeCodingHostObservers({...observerOptions,identity,ownPostgres,permitRegistry:permits,
     readNativeWorker:query=>workers.readNativeWorker(query),readCriticSubject:query=>results.readCriticSubject(query)});
   const nativeIssuer=issuer||createNativeCodingHostIssuer({identity,...source});
-  let closed=false,refresh=null,refreshCursor=0,refreshReason=null;
   const activeBridges=new Set();
+  let closed=false,refresh=null,refreshCursor=0,refreshReason=null,closePromise=null,unsubscribeHost=null;
+  let unavailableReason=null,shutdownState='OPEN',workerCleanupConfirmed=null;
+  const assertOpen=()=>{if(closed)fail('host_unavailable');};
   const descriptors=new Map(),providerFences=new Map(),scopes=new Map(),completionAttempts=new Map();
   const checkpoints=['reconcileProject','readProjectCheckpoint'].every(name=>typeof ownPostgres[name]==='function')
     ?createNativeCodingProjectCheckpointObserver({ownPostgres}):null;
@@ -72,10 +75,13 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
     return reply;
   };
   async function readBoundLease({request}) {
+    assertOpen();
     const permit=await permitFor(request.lease),context=await taskContext(request.lease,permit),lease=context.value;
+    assertOpen();
     if(context.task_prompt!==request.prompt||lease.base_sha!==request.lease.base_sha||lease.role!==request.role
       ||request.worktreePath!==permit.worktree.path)fail('prepared_request_changed');
     const host=(await source.readNativeHost({provider_id:permit.provider_id,agent_id:permit.agent_id})).value;
+    assertOpen();
     const scope=buildNativeCodingExecutionScope(permit,lease,host.host_process);scopes.set(key(request.lease),scope);
     return {provider_id:permit.provider_id,scope,lease_expires_at:lease.expires_at,permit:{authorized:true,trust_namespace:'LOCAL_OPERATOR_QA',
       task_id:lease.task_id,agent_id:lease.agent_id,lease_generation:lease.lease_generation,agent_generation_epoch:lease.agent_generation_epoch,
@@ -85,6 +91,7 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
   const binding=(lease,providerId)=>({task_id:lease.task_id,agent_id:lease.agent_id,lease_generation:lease.lease_generation,
     tab_id:`native-coding:${providerId}`,target_id:`codex-cli:${providerId}`,agent_generation_epoch:lease.agent_generation_epoch});
   async function post(path,payload) {
+    assertOpen();
     const response=await signedRequest(path,{payload});
     if(!response?.ok)fail('w30_write_requires_readback');
     const value=await response.json();
@@ -92,7 +99,9 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
   }
   const executor=createNativeCodingLeaseExecutor({ledger,issuer:nativeIssuer,readBoundLease,physicalSlotBudget,
     createRunner:({authorizeLease})=>({async run(request,options) {
+      assertOpen();
       const permit=await permitFor(request.lease);
+      assertOpen();
       const processControl=workers.controllerFor({provider_id:permit.provider_id,agent_id:request.lease.agent_id,
         task_id:request.lease.task_id,lease_generation:request.lease.lease_generation,prompt_sha256:digest(request.prompt)});
       const prepareAgentBridge=async details=>{
@@ -118,12 +127,16 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
   });
   const pool=createNativeCodingExecutionPool({executor,physicalSlotBudget,
     async prepareRequest(raw) {
+      assertOpen();
       // Full installed-byte qualification precedes issuer timestamps. Only
       // physical stat guards and current OS readback run inside its window.
       await source.prepareInstalledImage?.();
+      assertOpen();
       const permit=await permitFor(raw),context=await taskContext(raw,permit),lease=context.value;
+      assertOpen();
       const subject=lease.role==='CRITIC'?await results.resolveRunnerSubject({workspace_id:permit.workspace_id,project_id:permit.project_id,
         verification_subject:lease.verification_subject}):null;
+      assertOpen();
       return {lease:{...lease,base_sha:lease.base_sha},role:lease.role,worktreePath:permit.worktree.path,prompt:context.task_prompt,
         ...(subject?{subject}:{}),provider_id:permit.provider_id};
     },
@@ -138,6 +151,7 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
     },
   });
   async function complete(lease,row) {
+    if(closed)return fence('STOPPED',{reason:unavailableReason});
     const id=key(lease),prior=completionAttempts.get(id);
     const receipt=row.result?.result;
     if(prior) {
@@ -145,6 +159,7 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
         try {
           const scope=scopes.get(id);
           const status=scope?await ledger.read(scope):null,summary=status?.task_result_summary;
+          if(closed)return fence('STOPPED',{reason:unavailableReason});
           if(status) {
             if(status.task_state==='RESULT_READY'&&status.state==='RESULT_READY'&&status.task_id===lease.task_id&&Number(status.lease_generation)===lease.lease_generation
               &&summary?.schema==='metaengine.native-coding.result-summary.v1'&&summary.run_id===receipt.run_id
@@ -165,6 +180,7 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
       const providerId=row.result.job_proof.payload.provider_id;
       const value=await post('/v1/devos/complete',{...binding(lease,providerId),state:'RESULT_READY',
         native_coding:{schema:'metaengine.native-coding.complete.v1',receipt}});
+      assertOpen();
       const ack=value.native_coding_ack;
       if(value.state!=='RESULT_READY'||ack?.state!=='RESULT_READY'||ack.lease_generation!==lease.lease_generation
         ||ack.result_sha256!==receipt.result_sha256)fail('w30_completion_ack_invalid');
@@ -208,7 +224,37 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
       descriptors.set(id,structuredClone(descriptor));
     }
   }
-  return Object.freeze({
+  function stop(reason=null) {
+    if(closePromise)return closePromise;
+    let finishClose;
+    closePromise=new Promise(resolve=>{finishClose=resolve;});
+    // Fence synchronously before any asynchronous drain. Keep the original
+    // scopes, pending receipts, provider fences and checkpoint selectors.
+    closed=true;unavailableReason=reason;shutdownState='DRAINING';
+    for(const entry of completionAttempts.values())if(entry.state==='COMPLETION_PENDING'){
+      entry.state='READBACK_REQUIRED';entry.reason='HOST_UNAVAILABLE_DURING_COMPLETION';
+    }
+    checkpoints?.close();unsubscribeHost?.();unsubscribeHost=null;
+    const pending=[];
+    for(const operation of [()=>pool.stop(),()=>workers.close(),()=>nativeIssuer.close(),
+      ()=>Promise.all([...activeBridges].map(bridge=>bridge.close()))]){
+      try{pending.push(Promise.resolve(operation()));}catch(error){pending.push(Promise.reject(error));}
+    }
+    const drained=Promise.allSettled(pending).then(values=>{
+      const workersResult=values[1];
+      workerCleanupConfirmed=workersResult.status==='fulfilled'
+        &&workersResult.value?.schema==='metaengine.native-coding.workers-close.v1'
+        &&workersResult.value.cleanup_confirmed===true;
+      shutdownState=!values.every(value=>value.status==='fulfilled')?'DRAIN_FAILED'
+        :workerCleanupConfirmed?'DRAINED':'DRAIN_UNCONFIRMED';
+    });
+    let timer;
+    void Promise.race([drained,new Promise(resolve=>{
+      timer=setTimeout(()=>{shutdownState='DRAIN_TIMEOUT';resolve();},closeTimeoutMs);
+    })]).then(()=>{clearTimeout(timer);finishClose();});
+    return closePromise;
+  }
+  const runtime=Object.freeze({
     async observeProviders() {
       if(!closed&&!refresh) {
         // The existing heartbeat alone initiates one bounded pass. Neither a
@@ -221,17 +267,30 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
     },
     dispatchLease(lease){if(closed)return fence('STOPPED');return pool.dispatch(lease);},
     observeProjectCheckpoints(candidates){
+      if(closed)return fence('STOPPED',{reason:unavailableReason});
       if(!checkpoints){if(candidates?.length)fail('private_checkpoint_capability_required');return null;}
       return checkpoints.observe(candidates);
     },
     async observeLease(lease){if(closed)return fence('STOPPED');const row=await pool.observe(lease);return row.state==='RESULT_READY'?complete(lease,row):row;},
-    async completeFromTrustedCommand(payload){const lease=payload?.lease||payload;if(!UUID.test(lease?.task_id||''))fail('completion_selector_invalid');return complete(lease,await pool.observe(lease));},
+    async completeFromTrustedCommand(payload){if(closed)return fence('STOPPED',{reason:unavailableReason});const lease=payload?.lease||payload;if(!UUID.test(lease?.task_id||''))fail('completion_selector_invalid');return complete(lease,await pool.observe(lease));},
     snapshot(){return {...pool.snapshot(),schema:'metaengine.native-coding.runtime.v1',provider_fences:providerFences.size,
       provider_refresh_running:refresh!==null,provider_refresh_reason:refreshReason,
       project_checkpoints:checkpoints?.snapshot()??null,
       completion_readbacks:[...completionAttempts.values()].filter(v=>v.state==='READBACK_REQUIRED').length,
+      host_unavailable_reason:unavailableReason,shutdown_state:shutdownState,worker_cleanup_confirmed:workerCleanupConfirmed,
+      // Drain completion is not acceptance of an interrupted task or proof
+      // that an ambiguous physical effect can be retried.
+      execution_outcomes_reconciled:false,
       production_qualified:false,useful_work_verified:false};},
-    async close(){closed=true;checkpoints?.close();await Promise.allSettled([...activeBridges].map(bridge=>bridge.close()));
-      await pool.stop();await workers.close();nativeIssuer.close();return this.snapshot();},
+    async close(){await stop();return runtime.snapshot();},
   });
+  if(typeof ownPostgres.onUnavailable==='function'){
+    const unsubscribe=ownPostgres.onUnavailable(event=>{
+      const reason=['CHILD_EXIT','CHANNEL_CLOSED','SEND_FAILED','RESPONSE_INVALID','CLIENT_CLOSED','SERVER_CLOSED','HOST_TERMINATED'].includes(event?.reason)
+        ?event.reason:'CHANNEL_CLOSED';
+      void stop(reason);
+    });
+    if(closed)unsubscribe?.();else unsubscribeHost=unsubscribe;
+  }
+  return runtime;
 }
