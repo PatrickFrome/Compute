@@ -13,7 +13,7 @@ const cases = [
   ['browser-windows-installed-chat-qualification.yml', 1],
   ['browser-final-runtime-activation-v1.yml', 2],
   ['browser-shell-first-dirty-profile-v1.yml', 2],
-  ['browser-windows-autonomous-soak-v1.yml', 5],
+  ['browser-windows-autonomous-soak-v1.yml', 6],
   ['metaengine-browser-self-update-e2e.yml', 2],
 ];
 
@@ -29,6 +29,15 @@ test('qualified physical Browser chain uses frozen npm ci installs', () => {
     assert.doesNotMatch(source, /run: npm install --no-audit --no-fund\s*$/m);
     assert.doesNotMatch(source, /node-version: '24'\s*$/m);
   }
+});
+
+test('physical soak locks both Browser and attached-runtime fixture dependencies before acquisition', () => {
+  const source = fs.readFileSync(path.join(workflows, 'browser-windows-autonomous-soak-v1.yml'), 'utf8');
+  assert.equal((source.match(/working-directory: apps\/metaengine-browser\s+run: npm ci --no-audit --no-fund/g) || []).length, 5);
+  assert.equal((source.match(/working-directory: infra\/client-state-runtime\s+run: npm ci --no-audit --no-fund/g) || []).length, 1);
+  const runtimeInstall = source.indexOf('name: Install frozen attached runtime fixture dependencies');
+  const acquire = source.indexOf('name: Acquire provenanced exact-head installer from Package Smoke');
+  assert.ok(runtimeInstall >= 0 && acquire > runtimeInstall);
 });
 
 test('Package Smoke binds frozen lock input separately from installed tree output', () => {

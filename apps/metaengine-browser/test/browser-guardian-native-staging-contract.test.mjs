@@ -31,6 +31,15 @@ function parsePowerShellFile(file) {
 test('electron-builder owns the single Guardian native staging build boundary', () => {
   assert.equal(builder.beforePack, './scripts/electron-builder-before-pack.cjs');
   assert.deepEqual(builder.extraResources, [{
+    // The native child process cannot import these entry points through ASAR.
+    // Keep the external surface an exact file list, never the whole src tree.
+    from: 'src',
+    to: 'native-coding/agent-mcp',
+    filter: ['native-coding-agent-mcp-entry.mjs', 'native-coding-agent-mcp-broker.mjs', 'native-coding-agent-mcp-stdio.mjs'],
+  }, {
+    from: 'scripts/codex-cli-job-runner.ps1',
+    to: 'native-coding/codex-cli-job-runner.ps1',
+  }, {
     from: 'client-state-runtime-dist',
     to: 'client-state-runtime',
     filter: ['**/*'],
