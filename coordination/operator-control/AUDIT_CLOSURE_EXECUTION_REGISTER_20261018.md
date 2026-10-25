@@ -405,3 +405,70 @@ Current-tree retirements preserve the original Git evidence and distinguish reta
 The immutable baseline remains `ea405d926568508eac53ebb408e941c94faeadcf`. The W43–W73 historical manifests, parent ledger and earlier transition records remain unchanged. The consumed `.4589.1` identity belongs to a separate historical source line, not a fabricated adjacent current-line transition. This source seal grants no packaging, signing, installed-state, live-effect or retry authority. A producer must independently pass its existing serialized immutable identity preflight.
 
 Predecessor .4592 was consumed by Package Smoke run 40203176070 and failed the stale RPC-count assertion before installer creation. That assertion now follows the canonical 52-function allowlist. RPC shutdown and screenshot readback are repaired and independently exercised with actual sockets and owned Windows windows. Current candidate does not claim fresh-PC automatic provisioning or installed autonomous work.
+
+
+## QA source seal — 0.7.0-dev.1107139874594.1
+
+```json
+{
+  "schema": "metaengine.client.qa-source-seal.v1",
+  "functional_source_parent": "f952ea2cc9ac355459f8afc95d1e30f0e72ff720",
+  "package_version": "0.7.0-dev.1107139874594.1",
+  "classification": "QA_SOURCE_PREPARED_NOT_INSTALLED_QUALIFIED",
+  "global_version_absence": "UNKNOWN",
+  "immutable_producer_preflight_required": true,
+  "artifact_qualification": "NOT_ESTABLISHED",
+  "known_blockers": [
+    "WINDOWS_STATUS_OBSERVE_NATIVE_READ_TIMING",
+    "WINDOWS_COLD_BOOT_FIRST_CONTROLLER_SERIAL_TIMING"
+  ],
+  "installed_qualification": "NOT_QUALIFIED",
+  "live_qualification": "NOT_QUALIFIED",
+  "continuous_autonomy_qualification": "NOT_QUALIFIED",
+  "production_ready": false,
+  "promotion_authorized": false,
+  "automatic_effect_retry_allowed": false,
+  "authority_effect": false
+}
+```
+
+Current-tree retirements preserve the original Git evidence and distinguish retained boundary coverage from retired behavior:
+
+```json
+{
+  "schema": "metaengine.client.current-seal-retirements.v1",
+  "retirements": [
+    {
+      "path": "apps/metaengine-browser/test/r95-utility-panel-docking.test.mjs",
+      "historical_blob": "41e89fbb2c6d453137471c2b9970095fdefbde07",
+      "deleted_by": "774af98749338817bbd1b802be089ebc15071e44",
+      "retired_scope": "UNMOUNTED_UTILITY_PANEL_DOCK_AND_SPLITTER_IMPLEMENTATION",
+      "retained_guards": [
+        "apps/metaengine-browser/test/r95c-run-inspector-breakpoint.test.mjs",
+        "apps/metaengine-browser/test/r97-single-main-ui-contract.test.mjs",
+        "apps/metaengine-browser/test/me2-primary-shell-runtime.test.mjs"
+      ],
+      "complete_behavioral_equivalence_claimed": false
+    },
+    {
+      "path": "apps/metaengine-browser/test/r95e-command-palette-agent-binding.test.mjs",
+      "historical_blob": "87ec8232e36627dfc1069e8560cc6df5629cf1ea",
+      "deleted_by": "774af98749338817bbd1b802be089ebc15071e44",
+      "retired_scope": "DAEMON_AGENTCHAT_HOOK_AND_OLD_PALETTE_IMPLEMENTATION",
+      "retained_guards": [
+        "apps/metaengine-browser/test/r97-single-main-ui-contract.test.mjs",
+        "apps/metaengine-browser/test/r94-workflow-shell-ia.test.mjs",
+        "apps/metaengine-browser/test/r104-tasks-agentchat-quarantine.test.mjs",
+        "apps/metaengine-browser/test/browser-critical-audit-ui-coverage.test.mjs"
+      ],
+      "complete_behavioral_equivalence_claimed": false
+    }
+  ]
+}
+```
+
+The immutable baseline remains `ea405d926568508eac53ebb408e941c94faeadcf`. The W43–W73 historical manifests, parent ledger and earlier transition records remain unchanged. The consumed `.4589.1` identity belongs to a separate historical source line, not a fabricated adjacent current-line transition. This source seal grants no packaging, signing, installed-state, live-effect or retry authority. A producer must independently pass its existing serialized immutable identity preflight.
+
+Predecessor .4592 was consumed by Package Smoke run 40203176070 and failed the stale RPC-count assertion before installer creation. That assertion now follows the canonical 52-function allowlist. RPC shutdown and screenshot readback are repaired and independently exercised with actual sockets and owned Windows windows. Current candidate does not claim fresh-PC automatic provisioning or installed autonomous work.
+
+Predecessor .4593 was consumed by Package Smoke run 40206574127 and stopped after NSIS because differentialPackage=false omitted the required blockmap. This candidate restores actual blockmap emission and removes fixed agent-count ceilings. Large generated rosters and actual isolated PG17 were exercised. Installed model work, restart continuation and fresh-PC automatic provisioning remain unproven.

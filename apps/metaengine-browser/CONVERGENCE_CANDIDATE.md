@@ -1,4 +1,6 @@
-Reserved package identity is `0.7.0-dev.1107139874593.1`.
+Reserved package identity is `0.7.0-dev.1107139874594.1`.
+
+2026-10-25: this distinct QA candidate removes fixed agent roster and two-worker ceilings, pages private scope and rotates bounded signed admission windows. It includes the PostgreSQL upgrade and restores NSIS blockmap emission required by provenance. Functional parent `f952ea2cc9ac355459f8afc95d1e30f0e72ff720`. Exact-head packaging and installed qualification are pending. Fresh-PC automatic provisioning remains under development and is not claimed by this candidate.
 
 2026-10-25: this distinct QA candidate contains the reviewed RPC drain, capture lifetime and current PostgreSQL allowlist fixes from `c701285db0b2650d5b53d327c1e728753af52214`. Exact-head packaging and installed qualification are pending. Fresh-PC automatic provisioning remains under development and is not claimed by this candidate.
 
