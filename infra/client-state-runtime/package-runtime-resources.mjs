@@ -60,6 +60,7 @@ const REMOTE_SUPPORT_SOURCE_CLOSURE = new Set([
   'apps/metaengine-browser/src/computer-authority-plane.mjs',
   'apps/metaengine-browser/src/local-state-provider-policy.mjs',
   'apps/metaengine-browser/src/local-runtime-host-controller.mjs',
+  'apps/metaengine-browser/src/runtime-recovery-policy.mjs',
 ]);
 const NATIVE_CODING_HOST_SOURCE_CLOSURE=new Set([
   'apps/metaengine-browser/src/native-coding-task-context.mjs',
@@ -72,6 +73,7 @@ const NATIVE_CODING_HOST_SOURCE_CLOSURE=new Set([
   'apps/metaengine-browser/src/native-coding-agent-mcp-launch.mjs',
   'apps/metaengine-browser/src/native-coding-host-observers.mjs',
   'apps/metaengine-browser/src/native-coding-host-ipc-client.mjs',
+  'apps/metaengine-browser/src/native-coding-device-request.mjs',
   'apps/metaengine-browser/src/native-coding-pg-ledger.mjs',
   'apps/metaengine-browser/src/native-coding-transport-proof.mjs',
   'apps/metaengine-browser/src/private-windows-storage-acl.mjs',

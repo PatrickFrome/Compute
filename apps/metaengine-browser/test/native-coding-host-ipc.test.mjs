@@ -40,6 +40,10 @@ const operations={
  READ_FINISH_CHECKPOINT:async value=>({...value,state:'PENDING_COMMIT'}),
  close:()=>{},
 };
+if(mode==='seed-mounted'||mode==='slow-seed')for(const action of ['SEED_GOAL','READ_SEED','LIST_SEEDS'])operations[action]=async request=>{
+ if(action==='SEED_GOAL'){calls++;if(mode==='slow-seed')await delay(180);}
+ return {fixture_transport_only:true,operation:action,input:request.body.input};
+};
 const send=(frame,callback)=>{
  const copy=structuredClone(frame);
  if(mode==='wrong-action')copy.action='READ_LEASE';
@@ -107,6 +111,33 @@ test('real private IPC accepts lifecycle close without exposing it and carries o
   await assert.rejects(client.finishCheckpoint({...selector,path:'C:/caller-receipt.json'}),e=>e.reason==='INVALID_PAYLOAD');
   await assert.rejects(client.agentOperation({...request,args:[]}),e=>e.reason==='INVALID_PAYLOAD');
   assert.equal((await stats()).calls,2);
+});
+
+function seedRequest(operation,instanceId,hostPid){
+  const body={host_instance_id:instanceId,host_pid:hostPid,operation,input:operation==='LIST_SEEDS'?{after_seq:0,limit:16}:
+    {request_id:id(),objective:'One native task'}};
+  return {body,headers:{'content-type':'application/json','x-a2-chat-bridge-client':id(),
+    'x-a2-device-profile':'A2_DEVICE_HTTP_SIGNATURE_V1','x-a2-device-id':id(),'x-a2-device-timestamp':new Date().toISOString(),
+    'x-a2-device-nonce':'A'.repeat(32),'x-a2-device-body-sha256':'a'.repeat(64),'x-a2-device-signature':'A'.repeat(86)}};
+}
+
+test('real private IPC transports optional signed seed envelopes without exposing identity or SQL selectors',async t=>{
+  const {client,instanceId,child,stats}=await setup(t,'seed-mounted');
+  for(const [action,method] of [['SEED_GOAL','seedGoal'],['READ_SEED','readSeed'],['LIST_SEEDS','listSeeds']]){
+    const request=seedRequest(action,instanceId,child.pid),reply=await client[method](request);
+    assert.equal(reply.fixture_transport_only,true);assert.deepEqual(reply.input,request.body.input);
+    await assert.rejects(client[method]({...request,path:'/arbitrary'}),e=>e.reason==='INVALID_PAYLOAD');
+    await assert.rejects(client[method]({...request,body:{...request.body,device_id:id()}}),e=>e.reason==='INVALID_PAYLOAD');
+  }
+  assert.equal((await stats()).calls,1);
+});
+
+test('seed timeout retains unknown mutation while read-only seed recovery cannot become another dispatch',async t=>{
+  const {client,instanceId,child,stats}=await setup(t,'slow-seed',{timeoutMs:30,serverTimeoutMs:1000});
+  const request=seedRequest('SEED_GOAL',instanceId,child.pid);
+  await assert.rejects(client.seedGoal(request),e=>e.effect_outcome==='UNKNOWN'&&e.readback_required===true);
+  const read=seedRequest('READ_SEED',instanceId,child.pid);read.body.input=request.body.input;
+  assert.equal((await client.readSeed(read)).operation,'READ_SEED');await sleep(220);assert.equal((await stats()).calls,1);
 });
 
 test('agent IPC timeout marks a write unknown and keeps a readonly CHECK effect-free without replay',async t=>{

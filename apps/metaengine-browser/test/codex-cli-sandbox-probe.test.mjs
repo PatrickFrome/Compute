@@ -1,13 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { buildCodexSandboxProbeArgs, evaluateCodexSandboxProbe } from '../src/codex-cli-sandbox-probe.mjs';
+import {buildCodexSandboxProbeArgs,evaluateCodexSandboxProbe,windowsSandboxBootIdentity,readWindowsSandboxHostBoot} from '../src/codex-cli-sandbox-probe.mjs';
 
 const denied = () => ({ outcome: 'ERROR', access_denied: true, error_type: 'System.UnauthorizedAccessException' });
 const written = () => ({ outcome: 'WRITTEN', access_denied: false });
 function input(mode = 'workspace-write') {
   return {
-    mode, hostUserSid: 'S-1-5-21-111-1001', hostBootStartedAt: '2026-10-22T03:00:00.000Z',
+    mode, hostUserSid: 'S-1-5-21-111-1001',hostBootIdentity:{schema:'metaengine.windows.kernel-boot.v1',kernel_boot_id:29,
+      system_process:{pid:4,created_at:'2026-10-22T03:00:00.000Z',created_100ns:String(BigInt(Date.parse('2026-10-22T03:00:00.000Z'))*10000n+116444736000000000n)},
+      last_boot_at:'2026-10-22T02:59:56.000Z',os_version:'10.0.19045'},
     report: { schema: 'metaengine.codex-cli.sandbox-canary.v1', mode, pid: 1234, started_at: '2026-10-22T04:00:00.123Z', user_sid: 'S-1-5-21-111-1002',
       inside_append: mode === 'workspace-write' ? written() : denied(), inside_create: mode === 'workspace-write' ? written() : denied(),
       outside_append: denied(), outside_create: denied() },
@@ -60,10 +62,28 @@ test('native PID reuse and birth mismatch fail closed', () => {
 });
 
 test('a former boot process cannot be reused as current sandbox evidence', () => {
-  const row = input(); row.hostBootStartedAt = '2026-10-23T01:02:44.500Z';
+  const row = input();row.hostBootIdentity.system_process={pid:4,created_at:'2026-10-23T01:02:44.500Z',
+    created_100ns:String(BigInt(Date.parse('2026-10-23T01:02:44.500Z'))*10000n+116444736000000000n)};
   assert.equal(evaluateCodexSandboxProbe(row).reason, 'SANDBOX_OBSERVATION_BEFORE_CURRENT_BOOT');
-  delete row.hostBootStartedAt;
+  delete row.hostBootIdentity;
   assert.equal(evaluateCodexSandboxProbe(row).state, 'BLOCKED');
+});
+
+test('kernel boot identity survives diagnostic wall-clock drift, rejects missing boot sequence or replaced System process',()=>{
+  const boot=input().hostBootIdentity,key=windowsSandboxBootIdentity(boot);
+  assert.equal(windowsSandboxBootIdentity({...boot,last_boot_at:'2026-10-21T22:00:00.000Z'}),key);
+  assert.notEqual(windowsSandboxBootIdentity({...boot,kernel_boot_id:30}),key);
+  assert.notEqual(windowsSandboxBootIdentity({...boot,system_process:{...boot.system_process,created_100ns:String(BigInt(boot.system_process.created_100ns)+1n)}}),key);
+  for(const old of [{last_boot_at:boot.last_boot_at},{...boot,kernel_boot_id:undefined},{...boot,system_process:{...boot.system_process,pid:8}}])
+    assert.throws(()=>windowsSandboxBootIdentity(old),/host_boot_unverified/);
+});
+
+test('actual current Windows boot sequence and PID4 kernel creation are stable across independent native reads',{
+  skip:process.platform!=='win32',timeout:35000,
+},async()=>{
+  const before=await readWindowsSandboxHostBoot(),after=await readWindowsSandboxHostBoot();
+  assert.equal(windowsSandboxBootIdentity(before),windowsSandboxBootIdentity(after));assert.equal(before.system_process.pid,4);
+  assert.ok(before.kernel_boot_id>0);assert.ok(Date.parse(before.system_process.created_at)<=Date.now());
 });
 
 test('self-reported identity and same-user process cannot prove the elevated sandbox account', () => {

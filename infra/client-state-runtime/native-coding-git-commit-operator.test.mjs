@@ -23,3 +23,15 @@ test('operator cannot add arbitrary commands, ambiguous roots, worker journals o
     const f=fixture();mutate(f.value);await assert.rejects(f.read(),/native_coding_commit_operator_/);
   }
 });
+test('protected profile pins may authorize an initially unknown project without model-selected roots',async()=>{
+  const f=fixture(),{project_id,...physical}=f.value.bindings[0];
+  f.value.bindings=[];f.value.profile_bindings=[{...physical,profile_id:randomUUID(),profile_sha256:'f'.repeat(64)}];
+  const out=await f.read();assert.equal(out.value.bindings.length,0);assert.equal(out.value.profile_bindings.length,1);
+  for(const mutate of [v=>v.profile_bindings[0].profile_sha256='',v=>v.profile_bindings[0].project_id=randomUUID(),
+    v=>v.profile_bindings.push(structuredClone(v.profile_bindings[0])),v=>v.bindings.push({project_id,...physical}),
+    v=>v.profile_bindings=[],v=>v.journal_root=path.join(physical.path,'journal')]){
+    const g=fixture(),{project_id:unused,...physicalPin}=g.value.bindings[0];
+    g.value.bindings=[];g.value.profile_bindings=[{...physicalPin,profile_id:randomUUID(),profile_sha256:'f'.repeat(64)}];
+    mutate(g.value);await assert.rejects(g.read(),/native_coding_commit_operator_/);
+  }
+});

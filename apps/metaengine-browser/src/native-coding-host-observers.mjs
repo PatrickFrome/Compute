@@ -7,7 +7,7 @@ import {promisify} from 'node:util';
 import {readDirectoryIdentity} from './native-coding-fs-identity.mjs';
 import {verifyOwnerOnlyWindowsStorage,protectOwnerOnlyWindowsDirectory} from './private-windows-storage-acl.mjs';
 import {verifyInstalledClientStateResources} from './local-runtime-host-controller.mjs';
-import {readWindowsSandboxHostBoot, evaluateCodexSandboxProbe} from './codex-cli-sandbox-probe.mjs';
+import {readWindowsSandboxHostBoot,windowsSandboxBootIdentity,evaluateCodexSandboxProbe} from './codex-cli-sandbox-probe.mjs';
 
 const run = promisify(execFile);
 const HASH=/^[a-f0-9]{64}$/, UUID=/^[a-f0-9-]{36}$/, HEAD=/^[a-f0-9]{40}$/;
@@ -39,9 +39,9 @@ async function hashFile(file,maxBytes=1024*1024*1024,allowEmpty=false) {
 }
 export async function readNativeCodingProtectedJson(file,{maximumBytes=256*1024,verifyStorage=verifyOwnerOnlyWindowsStorage}={}) {
   const physical=await canonical(file,'file');
-  for(const [target,operation] of [[path.dirname(physical),'VERIFY_DIRECTORY'],[physical,'VERIFY_FILE']]) {
-    const evidence=await verifyStorage(target,{operation});if(evidence?.owner_dacl_verified!==true)fail('private_storage_unverified');
-  }
+  const acl=await Promise.all([[path.dirname(physical),'VERIFY_DIRECTORY'],[physical,'VERIFY_FILE']]
+    .map(([target,operation])=>verifyStorage(target,{operation})));
+  if(acl.some(evidence=>evidence?.owner_dacl_verified!==true))fail('private_storage_unverified');
   const before=await fs.stat(physical);if(before.size<1||before.size>maximumBytes)fail('json_budget_exceeded');
   const bytes=await fs.readFile(physical), after=await fs.stat(physical);
   if(bytes.length!==before.size||before.ino!==after.ino||before.size!==after.size||before.mtimeMs!==after.mtimeMs)fail('private_file_changed');
@@ -198,18 +198,21 @@ export function createNativeCodingResultStore({journalRoot,indexRoot,verifyStora
 export async function readNativeCodingSandboxEvidence({pin,cliPath,worktreePath,role,hostProcessId=process.pid,
   readProcess=readNativeCodingWindowsProcess,readBoot=readWindowsSandboxHostBoot,verifyStorage=verifyOwnerOnlyWindowsStorage}={}) {
   if(!pin||!HASH.test(pin.sha256||'')||!['IMPLEMENTER','CRITIC'].includes(role))fail('sandbox_receipt_not_pinned');
-  const {value,sha256}=await readNativeCodingProtectedJson(pin.path,{verifyStorage});
-  const boot=await readBoot(),host=await readProcess(hostProcessId),mode=role==='CRITIC'?'read-only':'workspace-write';
+  const [{value,sha256},boot,host,cliSha]=await Promise.all([readNativeCodingProtectedJson(pin.path,{verifyStorage}),
+    readBoot(),readProcess(hostProcessId),hashFile(cliPath,512*1024*1024)]);
+  const mode=role==='CRITIC'?'read-only':'workspace-write';
   if(sha256!==pin.sha256||value.schema!=='metaengine.codex-cli.sandbox-probe.v1'||value.mode!==mode
-    ||!same(value.workspace_path||'',worktreePath)||value.cli_sha256!==await hashFile(cliPath,512*1024*1024)
+    ||!same(value.workspace_path||'',worktreePath)||value.cli_sha256!==cliSha
     ||!same(value.cli_path||'',cliPath)||value.model_called!==false||value.authority_effect!==false
-    ||Date.parse(value.host_boot?.last_boot_at)!==Date.parse(boot.last_boot_at))fail('sandbox_receipt_scope_mismatch');
+    ||!value.host_boot?.system_process)fail('sandbox_receipt_scope_mismatch');
+  try{if(windowsSandboxBootIdentity(value.host_boot)!==windowsSandboxBootIdentity(boot))fail('sandbox_receipt_scope_mismatch');}
+  catch{fail('sandbox_receipt_scope_mismatch');}
   const evaluation=evaluateCodexSandboxProbe({mode,report:value.canary,nativeProcess:value.sandbox_process,hostReadback:value.host_readback,
-    completion:value.completion,hostUserSid:host.user_sid,hostBootStartedAt:boot.last_boot_at});
+    completion:value.completion,hostUserSid:host.user_sid,hostBootIdentity:value.host_boot});
   if(evaluation.state!=='OBSERVED'||evaluation.boundary_observed!==true)fail('sandbox_boundary_unverified');
-  for(const [fileKey,hashKey] of [['stdout_path','stdout_sha256'],['stderr_path','stderr_sha256'],['exit_path','exit_sha256']]) {
+  await Promise.all([['stdout_path','stdout_sha256'],['stderr_path','stderr_sha256'],['exit_path','exit_sha256']].map(async([fileKey,hashKey])=>{
     if(!HASH.test(value.logs?.[hashKey]||'')||await hashFile(value.logs[fileKey],16*1024*1024,true)!==value.logs[hashKey])fail('sandbox_log_digest_mismatch');
-  }
+  }));
   return {backend:'CODEX_WINDOWS_ELEVATED',mode,evidence_sha256:sha256,outside_write_denied:true,worktree_write_denied:role==='CRITIC'};
 }
 

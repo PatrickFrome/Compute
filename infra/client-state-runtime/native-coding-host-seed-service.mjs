@@ -52,6 +52,9 @@ export async function createNativeCodingHostSeedService({sql,stateDirectory,read
  const operator=await readOperator(stateDirectory),pins=operator.value;
  if(!exact(pins,['schema','profile_id','profile_sha256'])||pins.schema!=='metaengine.native-coding.seed-operator.v1'
   ||!UUID.test(pins.profile_id||'')||!HASH.test(pins.profile_sha256||''))fail('operator_invalid');
+ // Cold immutable-byte qualification belongs to private capability startup,
+ // before any signed request or physical-observation freshness window.
+ await readNativeScope.prepare?.();
  const directory=path.join(stateDirectory,'native-coding-seed-intents-v1');
  await fs.mkdir(directory,{recursive:true,mode:0o700});await protectStorage(directory);await verifyStorage(directory,{operation:'VERIFY_DIRECTORY'});
  async function unchanged(){open();const now=await readOperator(stateDirectory);
@@ -97,8 +100,12 @@ export async function createNativeCodingHostSeedService({sql,stateDirectory,read
  async function observation(p){
   let common=null;const agents=[],started=Date.now();
   // Finite explicit roster; no model can append an identity or increase slots.
-  for(const a of p.agents){
-   const actual=await readNativeScope({...p,...a},true);
+  const observations=new Array(p.agents.length);let cursor=0;
+  await Promise.all(Array.from({length:Math.min(4,p.agents.length)},async()=>{
+   while(cursor<p.agents.length){const i=cursor++,a=p.agents[i];observations[i]=await readNativeScope({...p,...a},true);}
+  }));
+  for(let i=0;i<p.agents.length;i++){
+   const a=p.agents[i],actual=observations[i];
    if(!actual||!same(actual.artifact,p.artifact)||!same(actual.postgres,p.postgres)||actual.user_sid!==p.user_sid
     ||!same(actual.worktree,a.worktree)||!same(actual.sandbox,a.sandbox))fail('physical_scope_changed');
    processIdentity(actual.host_process);processIdentity(actual.postgres.postmaster);

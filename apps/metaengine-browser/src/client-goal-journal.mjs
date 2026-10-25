@@ -1,6 +1,8 @@
 import { clientGoalExecutionProofMatchesProgress } from './client-control-contract.mjs';
 import { clientUsefulWorkProofMatchesExecutionProof } from './client-useful-work-proof.mjs';
 import { normalizeClientProjectRegistration } from './client-project-continuity.mjs';
+import {normalizeNativeCodingGoalAdmission,nativeCodingGoalProject} from './client-native-coding-goal.mjs';
+import {isDeepStrictEqual} from 'node:util';
 
 const SCHEMA = 'metaengine.client.goal-journal.v1';
 const ENTRY_SCHEMA = 'metaengine.client.goal-journal-entry.v1';
@@ -36,6 +38,8 @@ function normalizeEntry(value) {
   const id = requestId(value.request_id);
   const goal = goalText(value.goal);
   const state = String(value.state || '').toUpperCase();
+  const kind=value.kind??'BROWSER';
+  if(!['BROWSER','NATIVE_CODING'].includes(kind))throw new Error('client_goal_journal_kind_invalid');
   if (!STATES.has(state)) throw new Error('client_goal_journal_state_invalid');
   if (value.authority_effect !== false || value.automatic_retry_allowed !== false) {
     throw new Error('client_goal_journal_authority_invalid');
@@ -49,9 +53,20 @@ function normalizeEntry(value) {
   const usefulWorkProof = executionProof && clientUsefulWorkProofMatchesExecutionProof(value.useful_work_proof, executionProof)
     ? clone(value.useful_work_proof)
     : null;
-  const project = value.project == null ? null : normalizeClientProjectRegistration(value.project, id);
+  const receipt=kind==='NATIVE_CODING'&&value.receipt!=null
+    ?normalizeNativeCodingGoalAdmission(value.receipt,{request_id:id,objective:goal}):value.receipt;
+  let project;
+  if(kind==='NATIVE_CODING'){
+    project=receipt?nativeCodingGoalProject(receipt):null;
+    if(value.project!=null&&!isDeepStrictEqual(value.project,project))throw new Error('client_goal_journal_native_project_drift');
+    if(value.execution_proof!=null||value.useful_work_proof!=null)throw new Error('client_goal_journal_native_legacy_proof_invalid');
+    if(progress&&(progress.schema!=='metaengine.client.native-coding-goal-progress.v1'||!receipt
+      ||progress.request_id!==id||progress.project_id!==receipt.project_id||progress.task_id!==receipt.root_task_id
+      ||progress.found!==true||progress.authority_effect!==false||progress.automatic_retry_allowed!==false
+      ||progress.physical_execution_proven!==false||!STATES.has(progress.task_state)))throw new Error('client_goal_journal_native_progress_invalid');
+  }else project=value.project == null ? null : normalizeClientProjectRegistration(value.project, id);
   const knownAdmission = value.admitted_task_id == null ? null : requestId(value.admitted_task_id);
-  const admittedTask = value.receipt?.task_id || (progress?.found === true ? progress.task_id : null) || knownAdmission;
+  const admittedTask = (kind==='NATIVE_CODING'?receipt?.root_task_id:receipt?.task_id) || (progress?.found === true ? progress.task_id : null) || knownAdmission;
   if (knownAdmission && admittedTask !== knownAdmission) throw new Error('client_goal_journal_admission_task_drift');
   if (project && (!admittedTask || project.root_task_id !== admittedTask)) {
     throw new Error('client_goal_journal_project_task_drift');
@@ -59,10 +74,11 @@ function normalizeEntry(value) {
   return Object.freeze({
     schema: ENTRY_SCHEMA,
     request_id: id,
+    kind,
     goal,
     state,
-    receipt: value.receipt && typeof value.receipt === 'object' && !Array.isArray(value.receipt)
-      ? Object.freeze(clone(value.receipt))
+    receipt: receipt && typeof receipt === 'object' && !Array.isArray(receipt)
+      ? Object.freeze(clone(receipt))
       : null,
     progress: progress ? Object.freeze(progress) : null,
     execution_proof: executionProof ? Object.freeze(executionProof) : null,
@@ -192,17 +208,18 @@ export class ClientGoalJournal {
     return write;
   }
 
-  async begin({ request_id, goal }) {
+  async begin({ request_id, goal,kind='BROWSER' }) {
     if (!this.#loaded) await this.load();
     const id = requestId(request_id);
     const text = goalText(goal);
     const observed = nowIso();
     return this.#replace(id, existing => {
-      if (existing && existing.goal !== text) throw new Error('client_goal_journal_request_collision');
+      if (existing && (existing.goal !== text||existing.kind!==kind)) throw new Error('client_goal_journal_request_collision');
       if (existing) return existing;
       return {
         schema: ENTRY_SCHEMA,
         request_id: id,
+        kind,
         goal: text,
         state: 'SUBMITTING',
         receipt: null,
@@ -225,6 +242,7 @@ export class ClientGoalJournal {
     }
     return this.#replace(id, existing => {
       if (!existing) throw new Error('client_goal_journal_request_missing');
+      if(existing.kind!=='BROWSER')throw new Error('client_goal_journal_kind_mismatch');
       return {
         ...existing,
         state: 'ADMITTED',
@@ -244,6 +262,7 @@ export class ClientGoalJournal {
     if (!STATES.has(state)) throw new Error('client_goal_journal_progress_state_invalid');
     return this.#replace(id, existing => {
       if (!existing) throw new Error('client_goal_journal_request_missing');
+      if(existing.kind!=='BROWSER')throw new Error('client_goal_journal_kind_mismatch');
       const executionProof = clientGoalExecutionProofMatchesProgress(existing.execution_proof, progress)
         ? existing.execution_proof : null;
       const usefulWorkProof = executionProof && clientUsefulWorkProofMatchesExecutionProof(existing.useful_work_proof, executionProof)
@@ -259,6 +278,25 @@ export class ClientGoalJournal {
         automatic_retry_allowed: false,
         authority_effect: false,
       };
+    });
+  }
+
+  async recordNativeAdmission(receipt){
+    const id=requestId(receipt?.request_id);
+    return this.#replace(id,existing=>{
+      if(!existing||existing.kind!=='NATIVE_CODING')throw new Error('client_goal_journal_native_request_missing');
+      const verified=normalizeNativeCodingGoalAdmission(receipt,{request_id:id,objective:existing.goal});
+      if(existing.receipt&&!isDeepStrictEqual(existing.receipt,verified))throw new Error('client_goal_journal_native_admission_drift');
+      return {...existing,receipt:verified,project:nativeCodingGoalProject(verified),admitted_task_id:verified.root_task_id,
+        state:existing.progress?.task_state||'ADMITTED',last_error:null,project_error:null,updated_at:nowIso()};
+    });
+  }
+
+  async recordNativeProgress(progress){
+    const id=requestId(progress?.request_id);
+    return this.#replace(id,existing=>{
+      if(!existing||existing.kind!=='NATIVE_CODING'||!existing.receipt)throw new Error('client_goal_journal_native_request_missing');
+      return {...existing,progress:clone(progress),state:progress.task_state,last_error:null,project_error:null,updated_at:nowIso()};
     });
   }
 

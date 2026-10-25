@@ -13,7 +13,6 @@ import {
 } from '../src/shell-layout.mjs';
 
 const read = (url) => readFile(new URL(url, import.meta.url), 'utf8');
-const store = await read('../../me2-ui/src/components/me2/store.tsx');
 const shell = await read('../../me2-ui/src/components/me2/shell/me2-shell.tsx');
 const main = await read('../src/main.mjs');
 const visualHarness = await read('./me2-r85-visual-evidence.mjs');
@@ -66,10 +65,7 @@ test('R97 IPC readback carries native telemetry decision without authority widen
   assert.match(handler, /authority_effect:\s*false/);
 });
 
-test('R108 native telemetry readback survives physical removal of the daemon Browser page', () => {
-  assert.match(store, /runTelemetryInspectorVisible: boolean/);
-  assert.match(store, /run_inspector_visible\?: boolean/);
-  assert.match(store, /runTelemetryInspectorVisible: result\?\.run_inspector_visible === true/);
+test('native primary surface has no retired Browser renderer or persistent inspector', () => {
   assert.equal(fs.existsSync(new URL('../../me2-ui/src/components/me2/pages/browser.tsx', import.meta.url)), false);
   assert.doesNotMatch(shell, /BrowserPage|pages\/browser|run-telemetry-inspector/);
   assert.match(shell, /data-testid="native-chat-surface-slot"/);

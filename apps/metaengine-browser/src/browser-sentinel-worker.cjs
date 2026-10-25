@@ -2,6 +2,7 @@
 
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
 const { durableWriteJson } = require('./durable-json-file.cjs');
 const { BrowserSentinelActionJournal } = require('./browser-sentinel-action-journal.cjs');
@@ -31,6 +32,20 @@ async function readJson(target) {
 }
 async function readState() { return readJson(STATE_PATH); }
 async function readParentProgress() { return readJson(PARENT_PROGRESS_PATH); }
+async function runtimeRecoveryFence(state) {
+  const file=`${STATE_PATH}.runtime-recovery-${crypto.createHash('sha256').update(TOKEN).digest('hex').slice(0,24)}.json`;
+  let stat;
+  try {stat=await fs.lstat(file);}catch(error){return error.code==='ENOENT'?null:'runtime_recovery_fence_unconfirmed';}
+  try {
+    if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1||stat.size>4096)throw Error();
+    const row=await readJson(file);
+    if(Object.keys(row).sort().join(',')!=='authority_effect,executable,parent_pid,schema,ticket_id,token'
+      ||row.schema!=='metaengine.browser-sentinel.runtime-recovery-fence.v1'||row.token!==TOKEN||row.parent_pid!==PARENT_PID
+      ||row.executable!==state.executable||row.authority_effect!==false
+      ||!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(row.ticket_id||''))throw Error();
+    return 'runtime_recovery_owned_by_main_transaction';
+  }catch{return 'runtime_recovery_fence_unconfirmed';}
+}
 
 function validCoreBinding(state) {
   return Boolean(
@@ -274,6 +289,8 @@ async function main() {
     if (state.lifecycle === 'PLANNED_SHUTDOWN') return;
     if (!parentAlive()) break;
 
+    if (await runtimeRecoveryFence(state)) continue;
+
     const progress = await readParentProgress().catch(() => null);
     const decision = evaluateParentProgress({
       state: { ...state, parent_liveness_termination_attempted: journal.terminationAttempted() },
@@ -288,6 +305,15 @@ async function main() {
   let state = await readState();
   if (!validBinding(state)) return;
   if (state.lifecycle === 'PLANNED_SHUTDOWN') return;
+
+  // The native runtime-recovery transaction already owns its one-shot effect
+  // barrier. Expected-restart grace must NEVER create a second spawn producer,
+  // including when the app.relaunch ACK or fresh bootstrap stays unknown.
+  const recoveryFence=await runtimeRecoveryFence(state);
+  if (recoveryFence || state.lifecycle === 'RUNTIME_RECOVERY' || state.runtime_recovery_ticket) {
+    await journal.failClosed(state, recoveryFence || 'runtime_recovery_owned_by_main_transaction');
+    return;
+  }
 
   if (state.expected_restart === true || state.lifecycle === 'EXPECTED_RESTART' || state.lifecycle === 'INSTALLER_HANDOFF') {
     if (await awaitExpectedSuccessor()) return;

@@ -21,7 +21,7 @@ const exact=(value,keys)=>value&&typeof value==='object'&&!Array.isArray(value)
 
 // Only runtime-host constructs this capability. The IPC protocol exposes
 // these fixed operations, never this connection or arbitrary SQL/functions.
-export async function createNativeCodingHostAuthority({sql,readNativeScope,readNativeWorker,readProtectedReceipt,readCheckpointScope,commitService=null}={}) {
+export async function createNativeCodingHostAuthority({sql,readNativeScope,readNativeWorker,readProtectedReceipt,readCheckpointScope,commitService=null,seedOperations=null,serviceHeartbeatOperations=null}={}) {
   if(typeof sql?.unsafe!=='function'||typeof sql?.begin!=='function'
     ||![readNativeScope,readNativeWorker,readProtectedReceipt].every(x=>typeof x==='function')) fail('private_dependencies_required');
   async function owner(tx) {
@@ -32,6 +32,8 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
   let closed=false;
   const open=()=>{if(closed)fail('closed');};
   if(commitService!==null&&!['FINISH_CHECKPOINT','READ_FINISH_CHECKPOINT','close'].every(name=>typeof commitService?.[name]==='function'))fail('commit_service_invalid');
+  if(seedOperations!==null&&!['SEED_GOAL','READ_SEED','LIST_SEEDS','close'].every(name=>typeof seedOperations?.[name]==='function'))fail('seed_service_invalid');
+  if(serviceHeartbeatOperations!==null&&!['SERVICE_HEARTBEAT','READ_SERVICE_HEARTBEAT','close'].every(name=>typeof serviceHeartbeatOperations?.[name]==='function'))fail('service_heartbeat_invalid');
   const agentTools=createNativeCodingAgentHostTools({sql,readNativeScope,readNativeWorker});
   async function finishCheckpoint(action,query){
     open();projectId(query?.project_id);
@@ -194,7 +196,8 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
     FINISH_CHECKPOINT:query=>finishCheckpoint('FINISH_CHECKPOINT',query),
     READ_FINISH_CHECKPOINT:query=>finishCheckpoint('READ_FINISH_CHECKPOINT',query),
     async READ_SCOPE() {
-      open();const native=await readNativeScope(null);
+      open();await readNativeScope.prepare?.();open();
+      const native=await readNativeScope(null);
       const rows=await sql.unsafe(`select public.native_coding_admission_context_v1(p.workspace_id,p.client_id,p.permit_id) as context
         from destruktion_meta.native_coding_operator_permit_h205f22 p
         join destruktion_meta.project_run_h205f22 r on r.project_id=(p.permit->>'project_id')::uuid and r.workspace_id=p.workspace_id
@@ -362,6 +365,12 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
         return projectResult(id,'CHECKPOINTED_PENDING_COMMIT',k,verified.checkpoint_sha256);
       });
     },
-    close(){closed=true;agentTools.close();checkpointVerifier?.close();commitService?.close();},
+    ...(seedOperations?Object.fromEntries(['SEED_GOAL','READ_SEED','LIST_SEEDS'].map(action=>[action,async request=>{
+      open();const result=await seedOperations[action](request);open();return result;
+    }])):{}),
+    ...(serviceHeartbeatOperations?Object.fromEntries(['SERVICE_HEARTBEAT','READ_SERVICE_HEARTBEAT'].map(action=>[action,async request=>{
+      open();const result=await serviceHeartbeatOperations[action](request);open();return result;
+    }])):{}),
+    close(){closed=true;agentTools.close();checkpointVerifier?.close();commitService?.close();seedOperations?.close();serviceHeartbeatOperations?.close();},
   });
 }

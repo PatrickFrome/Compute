@@ -15,19 +15,25 @@ export const NATIVE_CODING_GIT_COMMIT_OPERATOR_FILE='native-coding-git-commit-op
 export async function readNativeCodingGitCommitOperator(stateDirectory,{readProtectedJson=readNativeCodingProtectedJson}={}){
   if(!absolute(stateDirectory)||typeof readProtectedJson!=='function')fail('private_state_directory_required');
   const {value,sha256}=await readProtectedJson(path.join(stateDirectory,NATIVE_CODING_GIT_COMMIT_OPERATOR_FILE));
-  if(!HASH.test(sha256||'')||!exact(value,['schema','registry_id','generation','git_executable','git_executable_sha256',
-    'journal_root','bindings','model_paths_allowed','production_qualified','authority_effect'])
+  const fields=['schema','registry_id','generation','git_executable','git_executable_sha256',
+    'journal_root','bindings','model_paths_allowed','production_qualified','authority_effect'];
+  if(value&&Object.hasOwn(value,'profile_bindings'))fields.push('profile_bindings');
+  if(!HASH.test(sha256||'')||!exact(value,fields)
     ||value.schema!=='metaengine.native-coding.git-commit-operator.v1'||!UUID.test(value.registry_id||'')
     ||!Number.isSafeInteger(value.generation)||value.generation<1||!absolute(value.git_executable)||!absolute(value.journal_root)
     ||!HASH.test(value.git_executable_sha256||'')||value.model_paths_allowed!==false||value.production_qualified!==false
-    ||value.authority_effect!==false||!Array.isArray(value.bindings)||value.bindings.length<1||value.bindings.length>64)fail('descriptor_invalid');
+    ||value.authority_effect!==false||!Array.isArray(value.bindings)||value.bindings.length>64
+    ||Object.hasOwn(value,'profile_bindings')&&(!Array.isArray(value.profile_bindings)||value.profile_bindings.length<1||value.profile_bindings.length>64)
+    ||value.bindings.length+(value.profile_bindings?.length??0)<1||value.bindings.length+(value.profile_bindings?.length??0)>64)fail('descriptor_invalid');
   const roots=new Set(),pairs=new Set();
-  for(const row of value.bindings){
-    if(!exact(row,['project_id','workspace_id','path','root_identity_sha256','branch_ref','git_dir_identity_sha256','common_dir_identity_sha256'])
-      ||!UUID.test(row.project_id||'')||!UUID.test(row.workspace_id||'')||!absolute(row.path)
+  for(const [kind,rows] of [['project',value.bindings],['profile',value.profile_bindings??[]]])for(const row of rows){
+    const keys=['workspace_id','path','root_identity_sha256','branch_ref','git_dir_identity_sha256','common_dir_identity_sha256',
+      ...(kind==='project'?['project_id']:['profile_id','profile_sha256'])];
+    if(!exact(row,keys)||!UUID.test(row[kind==='project'?'project_id':'profile_id']||'')
+      ||kind==='profile'&&!HASH.test(row.profile_sha256||'')||!UUID.test(row.workspace_id||'')||!absolute(row.path)
       ||!['root_identity_sha256','git_dir_identity_sha256','common_dir_identity_sha256'].every(key=>HASH.test(row[key]||''))
       ||!/^refs\/heads\/[A-Za-z0-9][A-Za-z0-9._/-]{0,160}$/.test(row.branch_ref||''))fail('managed_pin_invalid');
-    const pair=row.project_id+':'+row.root_identity_sha256;
+    const pair=kind+':'+row[kind==='project'?'project_id':'profile_id']+':'+row.root_identity_sha256;
     if(roots.has(row.root_identity_sha256)||pairs.has(pair))fail('managed_pin_ambiguous');roots.add(row.root_identity_sha256);pairs.add(pair);
     const relative=path.relative(row.path,value.journal_root),reverse=path.relative(value.journal_root,row.path);
     if(!relative||!reverse||relative!=='..'&&!relative.startsWith('..'+path.sep)&&!path.isAbsolute(relative)

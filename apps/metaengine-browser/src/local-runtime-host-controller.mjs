@@ -5,6 +5,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LOCAL_STATE_INSTANCE_UUID, validateLocalStateProviderConfig } from './local-state-provider-policy.mjs';
 import { createNativeCodingHostIpcClient } from './native-coding-host-ipc-client.mjs';
+import { verifyOwnerOnlyWindowsStorage } from './private-windows-storage-acl.mjs';
+import { finiteRuntimeRecoveryHealthFailure } from './runtime-recovery-policy.mjs';
 
 const START_TIMEOUT_MS = 120_000;
 const STOP_TIMEOUT_MS = 45_000;
@@ -14,6 +16,10 @@ const ENVIRONMENT_KEYS = [
 ];
 let ownedHost = null;
 let startup = null;
+let lastGeneration = null;
+const generationObservers = new Set();
+let generationSequence = 0;
+let generationOrdinal = 0;
 const TERMINAL_KEYS = ['schema', 'launch_nonce', 'host_pid', 'instance_id', 'state',
   'children_stopped', 'ownership_released', 'reason', 'authority_effect'].sort().join(',');
 
@@ -40,6 +46,68 @@ function acceptTerminal(host, value) {
 function cleanupConfirmed(host) {
   return !host || (host.exited && (host.noSpawnEffect === true
     || (host.terminal && !host.terminalRejected)));
+}
+
+function generationSnapshot(host) {
+  if (!host) return null;
+  return Object.freeze({schema: 'metaengine.browser.runtime-host-generation.v1', sequence: host.sequence,
+    launch_nonce: host.launchNonce, host_pid: host.child.pid || null, instance_id: host.summary?.instance_id || null,
+    ever_ready: host.everReady === true, stopping: host.stopping, exited: host.exited,
+    exit_code: host.exitCode ?? null, exit_signal: host.exitSignal ?? null,
+    transport_failed: host.transportFailed, terminal_rejected: host.terminalRejected,
+    terminal: host.terminal, cleanup_confirmed: Boolean(cleanupConfirmed(host)), authority_effect: false});
+}
+
+function publishGeneration(host) {
+  if (lastGeneration && lastGeneration.ordinal > host.ordinal) return;
+  host.sequence = ++generationSequence;
+  lastGeneration = host;
+  const snapshot = generationSnapshot(host);
+  for (const observer of generationObservers) {
+    try { void Promise.resolve(observer(snapshot)).catch(() => {}); } catch { /* Native observers cannot break child cleanup. */ }
+  }
+}
+
+// Private native-main subscription. There is no renderer IPC surface, caller
+// selected PID/path, child handle, configuration or credential in this API.
+export function subscribeOwnedLocalRuntimeHostGeneration(observer) {
+  if (typeof observer !== 'function') throw new Error('local_runtime_host_observer_invalid');
+  generationObservers.add(observer);
+  if (lastGeneration) {
+    try { void Promise.resolve(observer(generationSnapshot(lastGeneration))).catch(() => {}); } catch {}
+  }
+  return () => generationObservers.delete(observer);
+}
+
+export async function readOwnedLocalRuntimeHostRecoveryObservation({ verifyStorage = verifyOwnerOnlyWindowsStorage } = {}) {
+  const host = lastGeneration;
+  if (!host) return null;
+  const snapshot = generationSnapshot(host);
+  let healthWitness = null;
+  // The exact child terminal channel binds nonce/PID/instance. The independent
+  // protected-file read binds that terminal to the final persisted diagnostic.
+  if (snapshot.ever_ready && snapshot.exited && snapshot.cleanup_confirmed && snapshot.terminal?.reason === 'runtime_health_failed') {
+    try {
+      const file = await canonicalExisting(host.summary.status_file, 'file');
+      for (const [target, operation] of [[path.dirname(file), 'VERIFY_DIRECTORY'], [file, 'VERIFY_FILE']]) {
+        if ((await verifyStorage(target, {operation}))?.owner_dacl_verified !== true) throw new Error('private_status_unverified');
+      }
+      const before = await fs.stat(file), bytes = await boundedBytes(file, 128 * 1024, 'private_status_invalid'), after = await fs.stat(file);
+      if (before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs) throw new Error('private_status_changed');
+      const status = JSON.parse(bytes.toString('utf8'));
+      const failure = finiteRuntimeRecoveryHealthFailure(status.last_health_failure);
+      if (status.schema !== 'metaengine.client-state.runtime-status.v1' || status.host_pid !== snapshot.host_pid
+        || status.instance_id !== snapshot.instance_id || status.bundle_sha256 !== host.bundleDigest
+        || status.state !== 'STOPPED' || status.runtime_ready !== false || status.children_stopped !== true
+        || status.reason !== snapshot.terminal.reason || status.authority_effect !== false
+        || !Number.isFinite(Date.parse(status.stopped_at)) || !failure) throw new Error('private_status_unbound');
+      healthWitness = Object.freeze({schema: 'metaengine.browser.runtime-recovery-health-witness.v1',
+        launch_nonce: snapshot.launch_nonce, host_pid: snapshot.host_pid, instance_id: snapshot.instance_id,
+        bundle_sha256: host.bundleDigest, status_sha256: createHash('sha256').update(bytes).digest('hex'),
+        stopped_at: status.stopped_at, failure, authority_effect: false});
+    } catch { /* Absent, changed, unprotected or invalid bytes remain unproven. */ }
+  }
+  return lastGeneration === host ? Object.freeze({...snapshot, health_witness: healthWitness}) : null;
 }
 
 // Native-main capability only. The actual owned ChildProcess and immutable
@@ -196,6 +264,7 @@ function waitForExit(host, timeoutMs) {
 async function stopHost(host, timeoutMs) {
   if (!host || host.exited) return Boolean(cleanupConfirmed(host));
   host.stopping = true;
+  publishGeneration(host);
   host.env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE = 'BLOCKED';
   host.env.METAENGINE_LOCAL_PROVIDER_BOOT_REASON = 'OWNED_RUNTIME_HOST_STOPPING';
   try {
@@ -307,14 +376,17 @@ export async function startConfiguredLocalRuntimeHost({
       stdio: ['ignore', 'ignore', 'pipe', 'ipc'], windowsHide: true, shell: false,
     });
     const host = { child, env, ownerKey, launchNonce, exited: false, stopping: false,
-      noSpawnEffect: false, terminal: null, terminalRejected: false, transportFailed: false, summary: null };
+      noSpawnEffect: false, terminal: null, terminalRejected: false, transportFailed: false, summary: null,
+      bundleDigest: config.runtime_host.expected_bundle_sha256, everReady: false, sequence: 0, ordinal: ++generationOrdinal };
     attempt.host = host;
+    publishGeneration(host);
     child.on('message', value => {
       if (value?.schema !== 'compute.runtime-host-terminal.v1') return;
       acceptTerminal(host, value);
       env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE = 'BLOCKED';
       env.METAENGINE_LOCAL_PROVIDER_BOOT_REASON = host.terminalRejected
         ? 'OWNED_RUNTIME_HOST_TERMINAL_INVALID' : 'OWNED_RUNTIME_HOST_STOPPED';
+      publishGeneration(host);
     });
     child.on('error', () => {
       host.transportFailed = true;
@@ -327,6 +399,7 @@ export async function startConfiguredLocalRuntimeHost({
         env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE = 'BLOCKED';
         env.METAENGINE_LOCAL_PROVIDER_BOOT_REASON = 'OWNED_RUNTIME_HOST_TRANSPORT_ERROR';
       }
+      publishGeneration(host);
     });
     let stderrBytes = 0;
     child.stderr?.on('data', bytes => { stderrBytes += bytes.length; });
@@ -336,9 +409,12 @@ export async function startConfiguredLocalRuntimeHost({
         env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE = 'BLOCKED';
         env.METAENGINE_LOCAL_PROVIDER_BOOT_REASON = 'OWNED_RUNTIME_HOST_DISCONNECTED';
       }
+      publishGeneration(host);
     });
-    child.once('exit', () => {
+    child.once('exit', (code, signal) => {
       host.exited = true;
+      host.exitCode = code;
+      host.exitSignal = signal;
       // Retain an unknown generation. A subsequent bootstrap must not mistake
       // its disappearance for permission to start a replacement writer.
       if (ownedHost === host && cleanupConfirmed(host)) ownedHost = null;
@@ -348,6 +424,7 @@ export async function startConfiguredLocalRuntimeHost({
         console.error(JSON.stringify({ schema: 'metaengine.browser.runtime-host.v1',
           state: 'OWNED_RUNTIME_HOST_EXITED', automatic_cloud_fallback: false, authority_effect: false }));
       }
+      publishGeneration(host);
     });
     try {
       const descriptor = await new Promise((resolve, reject) => {
@@ -395,6 +472,8 @@ export async function startConfiguredLocalRuntimeHost({
         status_file: descriptor.status_file, pid: child.pid, runtime_owned: true,
         credentials_included: false, authority_effect: false });
       ownedHost = host;
+      host.everReady = true;
+      publishGeneration(host);
       return host.summary;
     } catch (error) {
       const cleanupConfirmed = await stopHost(host, stopTimeoutMs);

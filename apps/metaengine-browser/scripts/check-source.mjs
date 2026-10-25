@@ -4,6 +4,17 @@ import { fileURLToPath } from 'node:url';
 // Keep npm's Windows command line below cmd.exe's limit. Each Node invocation
 // checks one reviewed source file, without a shell or a combined argument list.
 export const SOURCE_CHECK_FILES = Object.freeze([
+  "src/native-coding-device-request.mjs",
+  "src/native-coding-service-heartbeat-publisher.mjs",
+  "src/runtime-recovery-policy.mjs",
+  "src/runtime-recovery-process-adapter.mjs",
+  "src/runtime-recovery-transaction.mjs",
+  "src/runtime-recovery-installed-binding.mjs",
+  "src/runtime-recovery-main.mjs",
+  "../../infra/client-state-runtime/native-coding-device-request.mjs",
+  "../../infra/client-state-runtime/native-coding-host-seed-service.mjs",
+  "../../infra/client-state-runtime/native-coding-host-service-heartbeat.mjs",
+  "../../infra/client-state-runtime/runtime-recovery-postgres-proof.mjs",
   "src/native-coding-project-commits.mjs",
   "src/final-runtime-entry.mjs",
   "src/final-runtime-activation.mjs",
@@ -209,6 +220,7 @@ export const SOURCE_CHECK_FILES = Object.freeze([
   "src/autonomous-project-journal.mjs",
   "src/autonomous-project-task-runtime.mjs",
   "src/client-project-continuity.mjs",
+  "src/client-native-coding-goal.mjs",
   "src/client-goal-project-link.mjs",
   "supabase/a2-browser-native-supervisor-v1/managed-project-routes.mjs",
   "supabase/a2-browser-native-supervisor-v1/project-continuity-routes.mjs",

@@ -75,8 +75,18 @@ type ClientGoalSubmission = {
   authority_effect: false;
 };
 
+type NativeGoalAdmission={
+  schema:"metaengine.native-coding.goal-admission.v1";state:"ADMITTED";request_id:string;objective:string;
+  profile_id:string;profile_sha256:string;workspace_id:string;project_id:string;root_task_id:string;goal_id:string;goal_sha256:string;
+  task_spec_sha256:string;permit_ids:string[];logical_policy:{max_depth:number|null;max_tasks:number|null;max_children:number|null};
+  physical_execution_proven:false;global_actuation_granted:false;production_qualified:false;automatic_retry_allowed:false;authority_effect:false;
+};
+type GoalSubmissionMode={schema:"metaengine.client.goal-submission-mode.v1";kind:"NATIVE_CODING"|"BROWSER"|"UNAVAILABLE";
+  state:"HOST_VERIFICATION_REQUIRED"|"HOLD";reason:string|null;project_id?:string|null;automatic_retry_allowed:false;authority_effect:false};
+type GoalReceipt=ClientGoalSubmission|NativeGoalAdmission;
+
 type ClientGoalProgress = {
-  schema: "metaengine.client.goal-progress.v1";
+  schema: "metaengine.client.goal-progress.v1"|"metaengine.client.native-coding-goal-progress.v1";
   request_id: string;
   found: boolean;
   task_id?: string;
@@ -85,6 +95,7 @@ type ClientGoalProgress = {
   reconciliation_required: boolean;
   automatic_retry_allowed: false;
   authority_effect: false;
+  project_id?:string;project_state?:string;total_tasks?:number;last_seq?:number;observed_at?:string;source?:"OWN_PG_PROJECT_SNAPSHOT";
 };
 
 type ClientGoalExecutionProof = {
@@ -116,12 +127,14 @@ type ClientGoalExecutionProof = {
 type ClientGoalJournalEntry = {
   schema: "metaengine.client.goal-journal-entry.v1";
   request_id: string;
+  kind?:"BROWSER"|"NATIVE_CODING";
   goal: string;
   state: string;
-  receipt: ClientGoalSubmission | null;
+  receipt: GoalReceipt | null;
   progress: ClientGoalProgress | null;
   execution_proof: ClientGoalExecutionProof | null;
   last_error: string | null;
+  project_error?:string|null;
   automatic_retry_allowed: false;
   authority_effect: false;
 };
@@ -175,7 +188,8 @@ type ClientAdmissionRecoveryResult = {
 };
 
 type ClientControlBridge = {
-  submitGoal?: (goal: string) => Promise<ClientGoalSubmission>;
+  submitGoal?: (goal: string) => Promise<GoalReceipt>;
+  goalSubmissionMode?:()=>Promise<GoalSubmissionMode>;
   latestGoal?: () => Promise<ClientGoalJournalEntry | null>;
   goalStatus?: (requestId: string) => Promise<ClientGoalProgress>;
   selectAgent?: (agentId: string) => Promise<ClientAgentSelection>;
@@ -259,7 +273,8 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
   const setPage = useMe2((s) => s.setPage);
   const [goal, setGoal] = useState("");
   const [pending, setPending] = useState(false);
-  const [receipt, setReceipt] = useState<ClientGoalSubmission | null>(null);
+  const [receipt, setReceipt] = useState<GoalReceipt | null>(null);
+  const [goalMode,setGoalMode]=useState<GoalSubmissionMode|null>(null);
   const [journalEntry, setJournalEntry] = useState<ClientGoalJournalEntry | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -270,6 +285,7 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
   const operation = useRef<"submit" | "read" | "recovery" | null>(null);
   const mounted = useRef(false);
   const loadSequence = useRef(0);
+  const modeReadInFlight=useRef(false);
 
   const loadLatest = useCallback(async () => {
     const bridge = clientControlBridge();
@@ -278,7 +294,7 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
     const latest = await bridge.latestGoal().catch(() => null);
     if (mounted.current && sequence === loadSequence.current && latest?.schema === "metaengine.client.goal-journal-entry.v1") {
       setJournalEntry(latest);
-      if (latest.receipt?.schema === "metaengine.client.goal-submission.v1") setReceipt(latest.receipt);
+      if (latest.receipt?.schema === "metaengine.client.goal-submission.v1"||latest.receipt?.schema === "metaengine.native-coding.goal-admission.v1") setReceipt(latest.receipt);
     }
   }, []);
 
@@ -288,6 +304,15 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
     queueMicrotask(() => { if (current) void loadLatest(); });
     return () => { current = false; mounted.current = false; loadSequence.current += 1; };
   }, [loadLatest]);
+
+  // Reuse the existing runtime observation cadence; no goal effect is polled.
+  useEffect(()=>{
+    if(modeReadInFlight.current)return;
+    let current=true;const read=clientControlBridge()?.goalSubmissionMode;
+    if(read){modeReadInFlight.current=true;void read().then(mode=>{if(current)setGoalMode(mode);}).catch(()=>{})
+      .finally(()=>{modeReadInFlight.current=false;});}
+    return()=>{current=false;};
+  },[nativeRuntime.state,readiness?.observed_at]);
 
   const loadReadiness = useCallback(async () => {
     const current = await refreshClientRuntimeStatus();
@@ -335,6 +360,7 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
     try {
       await bridge.goalStatus(requestId);
       await loadLatest();
+      if(bridge.goalSubmissionMode){const mode=await bridge.goalSubmissionMode();if(mounted.current)setGoalMode(mode);}
       if (mounted.current) setError(null);
     } catch (cause) {
       if (mounted.current) setError(String((cause as Error)?.message || cause || "goal_status_failed").slice(0, 180));
@@ -346,18 +372,19 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
 
   // Observation only: submitGoal is never called by a timer or recovery path.
   useEffect(() => {
+    if(journalEntry?.kind==="NATIVE_CODING"&&journalEntry.progress?.terminal)return;
     if (!(receipt?.request_id || journalEntry?.request_id) || (journalEntry?.progress?.terminal && (journalEntry.progress.task_state !== "COMPLETED" || journalEntry.execution_proof?.user_goal_to_result_readback))) return;
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") void refreshProgress();
     }, 5_000);
     return () => window.clearInterval(timer);
-  }, [receipt?.request_id, journalEntry?.request_id, journalEntry?.progress?.terminal, journalEntry?.progress?.task_state, journalEntry?.execution_proof?.user_goal_to_result_readback, refreshProgress]);
+  }, [receipt?.request_id, journalEntry?.request_id,journalEntry?.kind, journalEntry?.progress?.terminal, journalEntry?.progress?.task_state, journalEntry?.execution_proof?.user_goal_to_result_readback, refreshProgress]);
 
   const submit = useCallback(async () => {
     const value = goal.trim();
     if (!value || operation.current || journalEntry?.state === "RECONCILE_REQUIRED") return;
     const bridge = clientControlBridge();
-    if (!bridge?.submitGoal || !bridge?.workReadiness || bridge.typed_positive_api !== true || bridge.generic_command_exposed !== false) {
+    if (!bridge?.submitGoal || !bridge?.workReadiness || !bridge.goalSubmissionMode || bridge.typed_positive_api !== true || bridge.generic_command_exposed !== false) {
       setError("Typed Client control bridge unavailable");
       return;
     }
@@ -370,13 +397,21 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
       // fresh typed read immediately before the effect so stale READY cannot
       // authorize work and stale BLOCKED cannot indefinitely suppress a later
       // valid submit. No submit occurs when the fresh read is unavailable.
-      const freshReadiness = await loadReadiness();
-      if (!freshReadiness?.execution_ready) {
-        setError(freshReadiness?.detail || "Execution readiness unavailable");
-        return;
+      const mode=await bridge.goalSubmissionMode();
+      if(mode?.schema!=="metaengine.client.goal-submission-mode.v1"||mode.authority_effect!==false||mode.automatic_retry_allowed!==false
+        ||mode.state!=="HOST_VERIFICATION_REQUIRED"||!["BROWSER","NATIVE_CODING"].includes(mode.kind))throw new Error(mode?.reason||"Goal admission unavailable");
+      if(mounted.current)setGoalMode(mode);
+      if(mode.kind==="BROWSER"){
+        const freshReadiness = await loadReadiness();
+        if (!freshReadiness?.execution_ready) {
+          setError(freshReadiness?.detail || "Execution readiness unavailable");
+          return;
+        }
       }
       const next = await bridge.submitGoal(value);
-      if (next?.schema !== "metaengine.client.goal-submission.v1" || next.exact_activation_readback !== true) {
+      if (mode.kind==="NATIVE_CODING"?next?.schema!=="metaengine.native-coding.goal-admission.v1"||next.state!=="ADMITTED"
+        ||next.physical_execution_proven!==false||next.production_qualified!==false||next.authority_effect!==false
+        :next?.schema !== "metaengine.client.goal-submission.v1" || next.exact_activation_readback !== true) {
         throw new Error("goal_readback_invalid");
       }
       if (mounted.current) { setReceipt(next); setJournalEntry(null); setGoal(""); }
@@ -394,6 +429,9 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
   }, [goal, journalEntry?.state, loadLatest, loadReadiness]);
 
   const progress = journalEntry?.progress;
+  const nativeReceipt=receipt?.schema==="metaengine.native-coding.goal-admission.v1"?receipt:null;
+  const browserReceipt=receipt?.schema==="metaengine.client.goal-submission.v1"?receipt:null;
+  const isNative=journalEntry?.kind==="NATIVE_CODING"||Boolean(nativeReceipt)||goalMode?.kind==="NATIVE_CODING";
   const proof = journalEntry?.execution_proof;
   const labels: Record<string, string> = {
     READY: "Queued", LEASED: "Assigned", RUNNING: "Working", RESULT_READY: "Reviewing result",
@@ -403,7 +441,10 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
   const status = error ? "Check task status"
     : proof?.user_goal_to_result_readback === true ? "Result received"
     : journalEntry?.state === "RECONCILE_REQUIRED" ? "Needs reconciliation"
+    : isNative&&journalEntry?.project_error?"Native observation unavailable"
+    : isNative&&progress?.found&&progress.task_state==="COMPLETED"?`Root completed · project ${progress.project_state?.toLowerCase()||"unknown"}`
     : progress?.found ? labels[progress.task_state || ""] || "Awaiting status"
+    : nativeReceipt?"Native goal admitted · execution pending"
     : receipt ? "Queued · accepted" : "";
 
   return (
@@ -433,16 +474,18 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
       <button
         type="button"
         onClick={() => void submit()}
-        disabled={pending || refreshing || recoveryPending || !goal.trim() || journalEntry?.state === "RECONCILE_REQUIRED"}
+        disabled={pending || refreshing || recoveryPending || !goal.trim() || journalEntry?.state === "RECONCILE_REQUIRED"||goalMode?.state==="HOLD"}
         data-testid="client-goal-submit"
         className="mc-soft-action h-8 shrink-0 rounded-lg px-4 text-[12px] font-medium disabled:opacity-40"
       >
         {pending ? "Submitting…" : "Run"}
       </button>
-      <span className="min-w-0 max-w-[200px] truncate text-[12px] text-zinc-300" data-testid="client-goal-readback" role="status" aria-live="polite">
+      <span className="min-w-0 max-w-[200px] truncate text-[12px] text-zinc-300" data-testid="client-goal-readback" role="status" aria-live="polite" title={status}>
         {status}
       </span>
-      {readiness ? (
+      {isNative ? <span className="min-w-0 max-w-[180px] truncate text-[11px] text-zinc-300" data-testid="client-native-goal-mode">
+        {goalMode?.reason==="NATIVE_PROFILE_BUSY"?"Current native project is active":goalMode?.state==="HOLD"?"Native admission on hold":"Native coding · Host admission"}
+      </span> : readiness ? (
         <span
           className={`min-w-0 max-w-[180px] truncate text-[11px] ${readiness.execution_ready ? "text-emerald-300" : "text-amber-300"}`}
           data-testid="client-work-readiness"
@@ -451,10 +494,12 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
           {readiness.label}
         </span>
       ) : null}
-      {readiness?.reason === "SUPERVISOR_RECOVERY_REQUIRED" || readiness?.reason === "AGENT_ORIGIN_UNPROVEN" ? (
+      {goalMode?.reason==="NATIVE_PROFILE_BUSY"?<button type="button" onClick={()=>setPage("tasks")}
+        className="h-8 shrink-0 px-2.5 text-[12px] text-zinc-300" data-testid="client-native-current-project">View current project</button>:null}
+      {!isNative&&(readiness?.reason === "SUPERVISOR_RECOVERY_REQUIRED" || readiness?.reason === "AGENT_ORIGIN_UNPROVEN") ? (
         <button type="button" onClick={() => setPage("operator")} className="h-8 shrink-0 px-2.5 text-[12px] text-amber-200" data-testid="client-inspect-sessions">View runtime status</button>
       ) : null}
-      {readiness?.reason === "WORKSPACE_EXECUTION_PAUSED" || recoveryResult?.state === "RECONCILE_REQUIRED" || recoveryResult?.state === "ABSENCE_CONFIRMED" ? (
+      {!isNative&&(readiness?.reason === "WORKSPACE_EXECUTION_PAUSED" || recoveryResult?.state === "RECONCILE_REQUIRED" || recoveryResult?.state === "ABSENCE_CONFIRMED") ? (
         <button
           type="button"
           onClick={() => void resumeExecution()}
@@ -473,8 +518,8 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
         <DialogContent showCloseButton={false} className="mc-dark max-h-[85vh] overflow-y-auto border-zinc-700 bg-[#111114] text-zinc-100" data-testid="client-goal-status-dialog"
           onCloseAutoFocus={(event) => { event.preventDefault(); document.querySelector<HTMLButtonElement>('[data-testid="client-goal-details"]')?.focus(); }}>
           <DialogTitle>Task status</DialogTitle>
-          <DialogDescription className="text-zinc-400">{status || "No task submitted"}. A queued task has been accepted for execution. A received result still requires independent verification before acceptance.</DialogDescription>
-          {readiness ? <p className="text-[12px] text-zinc-400" data-testid="client-work-readiness-detail">
+          <DialogDescription className="text-zinc-400">{status || "No task submitted"}. {isNative?"Admission records a native project and task. Execution, independent review, checkpoint and continuation require separate runtime evidence.":"A queued task has been accepted for execution. A received result still requires independent verification before acceptance."}</DialogDescription>
+          {!isNative&&readiness ? <p className="text-[12px] text-zinc-400" data-testid="client-work-readiness-detail">
             Execution: {readiness.label}. {readiness.detail}
           </p> : null}
           {readiness?.reason === "SUPERVISOR_RECOVERY_REQUIRED" ? <InterruptedSetupRecovery /> : null}
@@ -483,10 +528,15 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
             {recoveryResult.prior_effect_replayed === false ? " No prior effect was replayed." : ""}
           </p> : null}
           <dl className="grid grid-cols-[90px_1fr] gap-2 text-[12px]">
-            <dt className="text-zinc-400">Task</dt><dd className="break-all font-mono">{progress?.task_id || receipt?.task_id || "Awaiting readback"}</dd>
+            <dt className="text-zinc-400">Task</dt><dd className="break-all font-mono">{progress?.task_id || nativeReceipt?.root_task_id || browserReceipt?.task_id || "Awaiting readback"}</dd>
             <dt className="text-zinc-400">Request</dt><dd className="break-all font-mono">{journalEntry?.request_id || receipt?.request_id || "Unavailable"}</dd>
-            <dt className="text-zinc-400">Agent origin</dt><dd>{proof?.user_goal_to_agent_readback ? "Verified ChatGPT Agent" : "Not yet verified"}</dd>
-            <dt className="text-zinc-400">Result</dt><dd data-testid="client-goal-execution-proof">{proof?.user_goal_to_result_readback ? "Received · review pending" : "No result received"}</dd>
+            {isNative?<><dt className="text-zinc-400">Project</dt><dd className="break-all font-mono" data-testid="client-native-goal-project">{nativeReceipt?.project_id||"Awaiting admission"}</dd>
+              <dt className="text-zinc-400">Observed</dt><dd data-testid="client-native-goal-progress">{progress?.schema==="metaengine.client.native-coding-goal-progress.v1"?`${progress.project_state||"Unknown"} · ${progress.total_tasks??0} tasks · sequence ${progress.last_seq??0}`:"No project execution observation"}</dd>
+              {progress?.observed_at?<><dt className="text-zinc-400">Read at</dt><dd>{progress.observed_at}</dd></>:null}
+              {journalEntry?.project_error?<><dt className="text-amber-300">Observation</dt><dd className="text-amber-200">{journalEntry.project_error}; previous progress may be stale</dd></>:null}
+              <dt className="text-zinc-400">Admission</dt><dd>Execution proof is separate from admission</dd></>
+              :<><dt className="text-zinc-400">Agent origin</dt><dd>{proof?.user_goal_to_agent_readback ? "Verified ChatGPT Agent" : "Not yet verified"}</dd>
+              <dt className="text-zinc-400">Result</dt><dd data-testid="client-goal-execution-proof">{proof?.user_goal_to_result_readback ? "Received · review pending" : "No result received"}</dd></>}
           </dl>
           {error ? <p role="alert" className="break-words text-[12px] text-rose-300">{error}</p> : null}
           <div className="flex justify-end gap-2">

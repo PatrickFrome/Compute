@@ -78,6 +78,27 @@ test('issuer uses the existing enrolled device and binds fresh double-read nativ
   assert.equal(f.counts.permit,2);assert.equal(f.counts.artifact,2);assert.equal(f.signs(),1);
   assert.deepEqual(await fs.readFile(f.statePath),before);
 });
+
+test('independent scope reads overlap without skipping either physical collection',async t=>{
+  const f=await fixture(t);
+  const names=['readInstalledImage','readNativeHost','readPostgres','readWorktree','readSandbox'];
+  const started=new Set();let release;
+  const gate=new Promise(resolve=>{release=resolve;});
+  const dependencies={...f.dependencies};
+  for(const name of names){
+    dependencies[name]=async query=>{
+      started.add(name);
+      if(started.size===names.length)release();
+      await gate;
+      return f.dependencies[name](query);
+    };
+  }
+  const issuer=createNativeCodingHostIssuer(dependencies);
+  const proof=await issuer.issueProvider(f.providerRequest);
+  assert.equal(proof.payload.provider_id,f.providerRequest.provider_id);
+  assert.equal(started.size,5);
+  for(const kind of ['artifact','host','pg','worktree','sandbox'])assert.equal(f.counts[kind],2);
+});
 test('live W30 job proof binds its worker incarnation, prompt and generation',async t=>{
   const f=await fixture(t);const proof=await f.issuer.issueJob(f.jobRequest);
   const state=f.identity.snapshot();
@@ -131,8 +152,11 @@ test('host PID reuse between signing and publication returns no proof',async t=>
   const f=await fixture(t,{mutate:({kind,count,observation})=>{if(kind==='host'&&count===2)observation.value.host_process=processIdentity(9101,-60_000);}});
   await assert.rejects(f.issuer.issueProvider(f.providerRequest),/scope_changed_during_sign/);
 });
-test('sequential reads that become stale before collection completes are rejected',async t=>{
-  const f=await fixture(t,{mutate:({kind,setClock,observation})=>{if(kind==='sandbox'){setClock(now+31_000);observation.observed_at=iso(31_000);}}});
+test('observations that become stale before the final join are rejected',async t=>{
+  const f=await fixture(t,{mutate:async({kind,setClock,observation})=>{if(kind==='sandbox'){
+    await new Promise(resolve=>setImmediate(resolve));
+    setClock(now+31_000);observation.observed_at=iso(31_000);
+  }}});
   await assert.rejects(f.issuer.issueProvider(f.providerRequest),/readback_window_exceeded/);
   assert.equal(f.signs(),0);
 });

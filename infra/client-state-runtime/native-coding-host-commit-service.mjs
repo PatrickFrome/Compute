@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {createHash} from 'node:crypto';
 import {nativeCodingCanonicalJson as json,nativeCodingCanonicalSha256 as sha} from './native-coding-task-context.mjs';
 import {readDirectoryIdentity} from './native-coding-fs-identity.mjs';
 import {createNativeCodingGitCommitter} from './native-coding-git-commit.mjs';
@@ -13,6 +14,7 @@ const fail=reason=>{throw Error('native_coding_host_commit_'+reason);};
 const exact=(value,keys)=>value&&typeof value==='object'&&!Array.isArray(value)
   &&Object.keys(value).sort().join('\0')===[...keys].sort().join('\0');
 const same=(a,b)=>json(a)===json(b);
+const shaText=text=>createHash('sha256').update(text,'utf8').digest('hex');
 const selectors=['project_id','checkpoint_sha256'];
 function select(value){if(!exact(value,selectors)||!UUID.test(value.project_id||'')||!HASH.test(value.checkpoint_sha256||''))fail('selectors_invalid');return structuredClone(value);}
 const flags={production_qualified:false,automatic_retry_allowed:false,authority_effect:false};
@@ -59,6 +61,53 @@ export async function createNativeCodingHostCommitService({sql,stateDirectory,re
   await owner();const operator=await readOperator(stateDirectory),pins=operator.value;
   await fs.mkdir(pins.journal_root,{recursive:true,mode:0o700});await protectStorage(pins.journal_root);
   await verifyStorage(pins.journal_root,{operation:'VERIFY_DIRECTORY'});await readDirectoryIdentity(pins.journal_root);
+  async function managedBinding(k,{requireActive=false}={}){
+    const direct=pins.bindings.filter(row=>row.project_id===k.project_id&&row.workspace_id===k.workspace_id
+      &&row.root_identity_sha256===k.root_identity_sha256&&row.path===k.worktree.path);
+    if(direct.length===1)return direct[0];
+    if(direct.length||!pins.profile_bindings?.length)fail('managed_registry_unavailable');
+    const rows=await sql.unsafe(`select to_jsonb(s) as seed_record,s.body::text as canonical_body_text,to_jsonb(p) as profile_record,
+      to_jsonb(r) as seed_project from destruktion_meta.native_coding_seed_h205f22 s
+      join destruktion_meta.native_coding_seed_profile_h205f22 p using(profile_id)
+      join destruktion_meta.project_run_h205f22 r on r.project_id=s.project_id and r.workspace_id=s.workspace_id
+      where s.project_id=$1::uuid and s.workspace_id=$2::uuid`,[k.project_id,k.workspace_id]);
+    const row=rows[0],s=row?.seed_record,pr=row?.profile_record,p=pr?.profile,r=row?.seed_project;
+    const candidates=pins.profile_bindings.filter(pin=>pin.profile_id===s?.profile_id&&pin.profile_sha256===s?.profile_sha256
+      &&pin.workspace_id===k.workspace_id&&pin.path===k.worktree.path&&pin.root_identity_sha256===k.root_identity_sha256);
+    if(rows.length!==1||candidates.length!==1||!s||!pr||!p||!r)fail('seed_profile_binding_unavailable');
+    const pin=candidates[0],parse=(text,expected,digest)=>{
+      if(typeof text!=='string'||Buffer.byteLength(text)>256*1024||!HASH.test(digest||'')||shaText(text)!==digest)fail('seed_canonical_changed');
+      let value;try{value=JSON.parse(text);}catch{fail('seed_canonical_changed');}
+      if(!same(value,expected))fail('seed_canonical_changed');
+    };
+    parse(pr.canonical_profile,p,pin.profile_sha256);
+    parse(s.canonical_goal,s.goal,s.goal_sha256);parse(s.canonical_receipt,s.receipt,s.receipt_sha256);
+    parse(row.canonical_body_text,s.body,s.body_sha256);
+    const receipt=s.receipt,goal=s.goal;
+    if(pr.profile_id!==pin.profile_id||pr.profile_sha256!==pin.profile_sha256||requireActive&&pr.revoked_at!==null
+      ||p.schema!=='metaengine.native-coding.seed-profile.v1'||p.profile_id!==pin.profile_id||p.workspace_id!==k.workspace_id
+      ||p.trust_namespace!=='LOCAL_OPERATOR_QA'||p.owner_epoch!==k.owner_epoch||!same(p.artifact,k.artifact)
+      ||p.postgres?.system_identifier!==k.postgres?.system_identifier
+      ||p.postgres?.data_directory_identity_sha256!==k.postgres?.data_directory_identity_sha256
+      ||['production_qualified','automatic_retry_allowed','authority_effect'].some(key=>p[key]!==false)
+      ||!Array.isArray(p.agents)||!p.agents.some(a=>a.worktree?.path===pin.path&&a.worktree?.root_identity_sha256===pin.root_identity_sha256)
+      ||s.workspace_id!==k.workspace_id||s.project_id!==k.project_id||s.profile_sha256!==pin.profile_sha256
+      ||s.goal_id!==k.goal_id||s.goal_sha256!==k.goal_sha256
+      ||!exact(s.body,['request_id','objective'])||s.body.request_id!==s.request_id||s.body.objective!==s.objective
+      ||goal?.schema!=='metaengine.native-coding.goal.v1'||goal.project_id!==s.project_id||goal.workspace_id!==s.workspace_id
+      ||goal.profile_id!==pin.profile_id||goal.profile_sha256!==pin.profile_sha256||goal.request_id!==s.request_id
+      ||goal.goal_id!==s.goal_id||goal.objective!==s.objective
+      ||r.root_task_id!==s.root_task_id||r.request_id!==s.request_id||r.goal!==s.objective
+      ||r.device_id!==p.device_id||r.client_id!==p.client_id||Number(r.admin_grant_epoch)!==p.admin_grant_epoch
+      ||receipt?.schema!=='metaengine.native-coding.goal-admission.v1'||receipt.state!=='ADMITTED'
+      ||receipt.request_id!==s.request_id||receipt.objective!==s.objective||receipt.profile_id!==pin.profile_id
+      ||receipt.profile_sha256!==pin.profile_sha256||receipt.workspace_id!==s.workspace_id||receipt.project_id!==s.project_id
+      ||receipt.root_task_id!==s.root_task_id||receipt.goal_id!==s.goal_id||receipt.goal_sha256!==s.goal_sha256
+      ||receipt.task_spec_sha256!==s.task_spec_sha256||!same(receipt.permit_ids,s.permit_ids)||!same(receipt.logical_policy,p.policy)
+      ||['physical_execution_proven','global_actuation_granted','production_qualified','automatic_retry_allowed','authority_effect'].some(key=>receipt[key]!==false))fail('seed_profile_binding_changed');
+    const {profile_id,profile_sha256,...physical}=pin;
+    return {...physical,project_id:k.project_id};
+  }
   async function unchangedOperator(){open();const current=await readOperator(stateDirectory);if(current.sha256!==operator.sha256||!same(current.value,pins))fail('operator_changed');}
   async function checkpoint(query){
     await owner();const rows=await sql.unsafe(checkpointSql,[query.project_id,query.checkpoint_sha256]);
@@ -115,34 +164,32 @@ export async function createNativeCodingHostCommitService({sql,stateDirectory,re
     if(!current||!same(current.artifact,k.artifact)||!same(current.postgres,k.postgres)||current.user_sid!==p.user_sid
       ||current.worktree?.path!==k.worktree.path||current.worktree.root_identity_sha256!==k.root_identity_sha256
       ||!current.host_process)fail('physical_scope_changed');
-    const bindings=pins.bindings.filter(row=>row.project_id===k.project_id&&row.workspace_id===k.workspace_id
-      &&row.root_identity_sha256===k.root_identity_sha256&&row.path===k.worktree.path);
-    if(bindings.length!==1)fail('managed_registry_unavailable');
+    const managed=await managedBinding(k,{requireActive:true});
     const gates=await sql.unsafe('select destruktion_meta.native_coding_commit_gate_v1($1::uuid) as value',[k.checkpoint_id]),gate=gates[0]?.value;
     if(gates.length!==1||gate?.schema!=='metaengine.native-coding.commit-gate.v1'||gate.checkpoint_id!==k.checkpoint_id
       ||gate.checkpoint_sha256!==query.checkpoint_sha256||gate.project_id!==k.project_id||gate.workspace_id!==k.workspace_id
       ||gate.root_identity_sha256!==k.root_identity_sha256||gate.writer_permit_id!==p.permit_id||gate.critic_permit_id!==cp.permit_id
       ||gate.admitted!==true||gate.authority_effect!==false)fail('sql_commit_gate_unavailable');
-    const {project_id,workspace_id,...managed_worktree}=bindings[0];
+    const {project_id,workspace_id,...managed_worktree}=managed;
     await unchangedOperator();return {schema:'metaengine.native-coding.git-commit-context.v1',state:'CHECKPOINTED_PENDING_COMMIT',
       checkpoint:k,checkpoint_sha256:query.checkpoint_sha256,reviewed_git:receipt.git_after,managed_worktree};
   }
   const committer=createNativeCodingGitCommitter({gitExecutable:pins.git_executable,expectedGitExecutableSha256:pins.git_executable_sha256,
     journalRoot:path.join(pins.journal_root,'git'),readCheckpoint:protectedContext,protectStorage,verifyStorage});
-  function verifiedGit(receipt,k){
+  async function verifiedGit(receipt,k){
     if(!receipt||receipt.schema!=='metaengine.native-coding.git-commit-receipt.v1'||receipt.state!=='COMMITTED'
       ||receipt.project_id!==k.project_id||receipt.checkpoint_id!==k.checkpoint_id||receipt.checkpoint_sha256!==sha(k)
       ||receipt.previous_head!==k.source_head||!SHA.test(receipt.head||'')||!SHA.test(receipt.tree||'')||receipt.head===receipt.previous_head
       ||receipt.root_identity_sha256!==k.root_identity_sha256||receipt.reviewed_git_artifact_sha256!==k.git_artifact_sha256
       ||!HASH.test(receipt.intent_sha256||'')||['working_tree_preserved','index_clean','ref_update_cas_verified','commit_object_readback_verified'].some(key=>receipt[key]!==true)
       ||['production_qualified','automatic_retry_allowed','successor_admitted','authority_effect'].some(key=>receipt[key]!==false))fail('git_receipt_unverified');
-    const managed=pins.bindings.filter(row=>row.project_id===k.project_id&&row.workspace_id===k.workspace_id&&row.root_identity_sha256===k.root_identity_sha256);
-    if(managed.length!==1||receipt.branch_ref!==managed[0].branch_ref)fail('git_branch_unverified');return receipt;
+    const managed=await managedBinding(k);
+    if(receipt.branch_ref!==managed.branch_ref)fail('git_branch_unverified');return receipt;
   }
   async function sqlReadback(k){
     await owner();const rows=await sql.unsafe('select destruktion_meta.native_coding_read_commit_v1($1::uuid) as value',[k.checkpoint_id]);
     if(rows.length!==1)fail('sql_readback_unavailable');const value=rows[0].value;if(value===null)return null;
-    const receipt=verifiedGit(value.receipt,k);
+    const receipt=await verifiedGit(value.receipt,k);
     if(value.schema!=='metaengine.native-coding.commit-checkpoint.v1'||value.project_id!==k.project_id||value.checkpoint_id!==k.checkpoint_id
       ||value.checkpoint_sha256!==sha(k)||value.canonical_receipt!==json(receipt)||value.commit_receipt_sha256!==sha(receipt)
       ||!['SUCCESSOR_ADMITTED','COMMITTED_NO_SUCCESSOR','COMMITTED_PENDING_SUCCESSOR'].includes(value.state)
@@ -163,7 +210,7 @@ export async function createNativeCodingHostCommitService({sql,stateDirectory,re
     try{intent=(await readProtectedJson(file)).value;}catch(error){if(error.code!=='ENOENT')throw error;}
     if(intent&&(intent.schema!=='metaengine.native-coding.sql-commit-intent.v1'||intent.checkpoint_sha256!==sha(k)
       ||intent.operator_sha256!==operator.sha256||intent.canonical_receipt!==json(intent.receipt)||intent.receipt_sha256!==sha(intent.receipt)))fail('sql_intent_changed');
-    if(intent)verifiedGit(intent.receipt,k);return {file,intent};
+    if(intent)await verifiedGit(intent.receipt,k);return {file,intent};
   }
   async function read(query){
     const k=await checkpoint(query),stored=await sqlReadback(k);
@@ -180,7 +227,7 @@ export async function createNativeCodingHostCommitService({sql,stateDirectory,re
       let gitReceipt=await committer.COMMIT_CHECKPOINT(queryFor(k));
       if(['COMMITTED_INDEX_PENDING','COMMITTED_RECEIPT_PENDING'].includes(gitReceipt.state))gitReceipt=await committer.RECONCILE_COMMIT(queryFor(k));
       if(gitReceipt.state!=='COMMITTED')return result(query,'GIT_READBACK_REQUIRED',{checkpoint_id:k.checkpoint_id,git_readback:gitReceipt});
-      verifiedGit(gitReceipt,k);await protectedContext(queryFor(k));await unchangedOperator();
+      await verifiedGit(gitReceipt,k);await protectedContext(queryFor(k));await unchangedOperator();
       const intent={schema:'metaengine.native-coding.sql-commit-intent.v1',checkpoint_sha256:sha(k),operator_sha256:operator.sha256,
         receipt:gitReceipt,canonical_receipt:json(gitReceipt),receipt_sha256:sha(gitReceipt)};
       try{await durable(state.file,intent);}catch(error){if(error.code==='EEXIST')return read(query);throw error;}

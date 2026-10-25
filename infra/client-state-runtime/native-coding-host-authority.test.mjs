@@ -28,6 +28,22 @@ test('private authority requires the actual state_owner login and session identi
   await assert.rejects(fixture({role:'service_role'}),/state_owner_required/);
 });
 
+test('scope discovery prepares image bytes before the fresh native observation and stays closed during prepare',async()=>{
+  const f=admissionFixture(),events=[];
+  let hold=false,release;
+  const readNativeScope=async()=>{events.push('fresh');return {postgres:f.permit.postgres,user_sid:f.permit.user_sid};};
+  readNativeScope.prepare=async()=>{events.push('prepare');if(hold)await new Promise(resolve=>{release=resolve;});};
+  const sql={unsafe:async text=>text.startsWith('select current_user')?[{current_user:'state_owner',session_user:'state_owner'}]:[],
+    begin:async()=>{throw Error('readonly_only');}};
+  const authority=await createNativeCodingHostAuthority({sql,readNativeScope,readNativeWorker:async()=>{},readProtectedReceipt:async()=>{}});
+  assert.deepEqual((await authority.READ_SCOPE()).bindings,[]);
+  assert.deepEqual(events,['prepare','fresh']);
+  hold=true;const pending=authority.READ_SCOPE();await Promise.resolve();
+  authority.close();release();
+  await assert.rejects(pending,/native_coding_host_closed/);
+  assert.deepEqual(events,['prepare','fresh','prepare']);
+});
+
 test('valid enrolled signature registers only after independent native scope and a synchronous transaction',async()=>{
   const {f,calls,authority}=await fixture();
   const ack=await authority.REGISTER_PROVIDER({descriptor:f.provider});

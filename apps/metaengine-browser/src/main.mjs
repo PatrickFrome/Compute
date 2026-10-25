@@ -77,13 +77,19 @@ import {
   normalizeClientGoalRequestId,
 } from './client-control-contract.mjs';
 import { createClientGoalJournalFileStore } from './client-goal-journal-file-store.mjs';
+import {createClientNativeCodingGoalRouter,readClientGoalSubmissionMode} from './client-native-coding-goal.mjs';
+import {signNativeCodingDeviceRequest} from './native-coding-device-request.mjs';
 import { ensureClientGoalProject } from './client-goal-project-link.mjs';
 import { createClientAdmissionRecoveryJournalFileStore } from './client-admission-recovery-journal-file-store.mjs';
 import { createBrowserGuardianMachineBootstrapLauncher } from './browser-guardian-machine-bootstrap-launcher.mjs';
 import { createBrowserGuardianStatusObserver } from './browser-guardian-status-observer.mjs';
 import { notifyPrimaryWindowShown } from './browser-startup-observability.mjs';
-import {readOwnedLocalRuntimeHostSummary,createOwnedNativeCodingHostCapability} from './local-runtime-host-controller.mjs';
-import {readNativeCodingOperatorPaths} from './native-coding-operator-paths.mjs';
+import {readOwnedLocalRuntimeHostSummary,createOwnedNativeCodingHostCapability,subscribeOwnedLocalRuntimeHostGeneration,
+  readOwnedLocalRuntimeHostRecoveryObservation} from './local-runtime-host-controller.mjs';
+import {persistentLocalProviderBootstrap} from './local-state-provider-bootstrap.mjs';
+import {createInstalledRuntimeRecoveryBindingReader} from './runtime-recovery-installed-binding.mjs';
+import {createRuntimeRecoveryMainController} from './runtime-recovery-main.mjs';
+import {readNativeCodingOperatorPaths,resolveNativeCodingSandboxPin} from './native-coding-operator-paths.mjs';
 import {createNativeCodingRuntime} from './native-coding-runtime.mjs';
 import {drainManagedRuntimeBindings} from './managed-runtime-drain.mjs';
 
@@ -126,6 +132,11 @@ let managedTaskProjectHostClosing = Promise.resolve();
 let managedTaskProjectHostDrainPending = false;
 let managedTaskProjectQuitReady = false;
 let managedTaskProjectQuitPending = false;
+let runtimeRecoveryController = null;
+let runtimeRecoveryGenerationLost = false;
+let runtimeRecoveryGateEpoch = 0;
+let runtimeRecoveryPlannedQuit = false;
+const nativeRuntimeInitializations = new Set();
 let supervisorIdentity = null;
 let guardianBootstrapLauncher = null;
 let guardianStatusObserver = null;
@@ -715,12 +726,20 @@ async function reconcileClientGoal(rawRequestId, expectedReceipt = null) {
 }
 
 async function submitClientGoal(rawInput) {
+  const journal = await ensureClientGoalJournal();
+  if(journal.snapshot().entries.some(entry=>entry.kind==='NATIVE_CODING'&&['SUBMITTING','RECONCILE_REQUIRED'].includes(entry.state)))
+    throw new Error('client_native_goal_previous_request_requires_readback');
+  const mode=await readNativeGoalSubmissionMode();
+  if(mode.state==='HOLD')throw new Error('client_goal_submission_hold:'+mode.reason);
+  if(mode.kind==='NATIVE_CODING'){
+    const intent=normalizeClientGoalIntent(rawInput);
+    return createNativeGoalRouter(journal).submit({request_id:randomUUID().toLowerCase(),goal:intent.goal});
+  }
   if (!nativeSupervisor || typeof nativeSupervisor.clientGoalSubmit !== 'function') {
     throw new Error('client_goal_native_supervisor_unavailable');
   }
   const intent = normalizeClientGoalIntent(rawInput);
   const requestId = randomUUID().toLowerCase();
-  const journal = await ensureClientGoalJournal();
 
   // The correlation record is durably written BEFORE the first possible goal
   // effect. If the response is lost, the same request_id is reconciled read-only;
@@ -750,6 +769,10 @@ async function latestClientGoal() {
   const journal = await ensureClientGoalJournal();
   let latest = journal.latest();
   if (!latest) return null;
+  if(latest.kind==='NATIVE_CODING'){
+    try{await createNativeGoalRouter(journal).refresh(latest);}catch{}
+    return structuredClone(journal.get(latest.request_id));
+  }
   if (!['BLOCKED','COMPLETED','FAILED','AMBIGUOUS','FENCED'].includes(String(latest.state || ''))) {
     try {
       await reconcileClientGoal(latest.request_id, latest.receipt || null);
@@ -770,7 +793,54 @@ async function refreshClientGoal(rawRequestId) {
   const journal = await ensureClientGoalJournal();
   const entry = journal.get(requestId);
   if (!entry) throw new Error('client_goal_request_unknown');
+  if(entry.kind==='NATIVE_CODING'){
+    const observed=await createNativeGoalRouter(journal).refresh(entry);
+    return observed.state!=='RECONCILE_REQUIRED'&&observed.progress||{schema:'metaengine.client.native-coding-goal-progress.v1',request_id:requestId,found:false,
+      terminal:false,reconciliation_required:true,automatic_retry_allowed:false,authority_effect:false};
+  }
   return reconcileClientGoal(requestId, entry.receipt || null);
+}
+
+function createNativeGoalRouter(journal){
+  return createClientNativeCodingGoalRouter({journal,
+    request:async(operation,input)=>{
+      const owned=nativeCodingHostCapability?.snapshot?.().closed===false?nativeCodingHostCapability:null;
+      const capability=owned||createOwnedNativeCodingHostCapability(readOwnedLocalRuntimeHostSummary());
+      try{
+        const signed=await signNativeCodingDeviceRequest({identity:ensureSupervisorIdentity(),binding:capability.snapshot(),operation,input});
+        return operation==='SEED_GOAL'?await capability.seedGoal(signed):await capability.readSeed(signed);
+      }finally{if(!owned)capability.close();}
+    },
+    projectSnapshot:request=>{if(!nativeSupervisor?.projectSnapshot)throw new Error('client_project_unavailable');return nativeSupervisor.projectSnapshot(request);},
+    onAdmitted:async()=>{if(!nativeCodingRuntime)try{await initNativeSupervisor();}catch(error){recordStartupSubsystemDegraded('NATIVE_GOAL_RUNTIME_MOUNT',error);}},
+  });
+}
+
+async function readNativeGoalSubmissionMode(){
+  return readClientGoalSubmissionMode({readSummary:readOwnedLocalRuntimeHostSummary,readNativeBusy:async()=>{
+    const journal=await ensureClientGoalJournal();
+    const active=[...journal.snapshot().entries].reverse().find(entry=>entry.kind==='NATIVE_CODING'&&entry.receipt
+      &&(!entry.progress||entry.progress.project_state==='ACTIVE'));
+    if(active)return {busy:true,project_id:active.receipt.project_id};
+    const owned=nativeCodingHostCapability?.snapshot?.().closed===false?nativeCodingHostCapability:null;
+    const capability=owned||createOwnedNativeCodingHostCapability(readOwnedLocalRuntimeHostSummary());
+    try{
+      const identity=ensureSupervisorIdentity(),device=identity.snapshot();
+      if(device.enrolled!==true)throw new Error('client_native_goal_identity_unavailable');
+      // A regular file alone does not prove the protected seed capability was
+      // mounted. Its fixed readonly catalog validates the actual profile/device
+      // before another correlation ID can be allocated.
+      const signed=await signNativeCodingDeviceRequest({identity,binding:capability.snapshot(),operation:'LIST_SEEDS',input:{after_seq:0,limit:1}});
+      const [scope,catalog]=await Promise.all([capability.readScope(),capability.listSeeds(signed)]);
+      if(catalog?.schema!=='metaengine.native-coding.seed-catalog.v1'||catalog.authority_effect!==false
+        ||catalog.automatic_retry_allowed!==false||!Array.isArray(catalog.entries)||catalog.entries.length>1)
+        throw new Error('client_native_goal_seed_capability_unavailable');
+      if(scope?.schema!=='metaengine.native-coding.own-pg-scope.v1'||scope.source!=='PRIVATE_RUNTIME_HOST_OWN_PG'
+        ||!Array.isArray(scope.bindings)||scope.bindings.length>64)throw new Error('client_native_goal_scope_unavailable');
+      const bound=scope.bindings.find(row=>row.device_id===device.device_id&&row.client_id===device.client_id);
+      return {busy:Boolean(bound),project_id:bound?.project_id||null};
+    }finally{if(!owned)capability.close();}
+  }});
 }
 
 function selectClientAgent(rawAgentId) {
@@ -1790,6 +1860,7 @@ function systemDeltaPublisher() {
 }
 
 async function executeNativeSupervisorCommand(command) {
+  if(runtimeRecoveryGenerationLost)throw Error('local_runtime_host_generation_lost_fresh_browser_required');
   return runInterruptedSetupPhysicalMutation(command?.action, () => executeNativeSupervisorCommandWithRecoveryAdmission(command));
 }
 
@@ -1830,6 +1901,7 @@ async function executeNativeSupervisorCommandWithRecoveryAdmission(command) {
 }
 
 async function executeNativeSupervisorCommandFenced(command) {
+  if(runtimeRecoveryGenerationLost)throw Error('local_runtime_host_generation_lost_fresh_browser_required');
   return runInterruptedSetupPhysicalMutation(command?.action, () => executeNativeSupervisorCommandFencedWithRecoveryAdmission(command));
 }
 
@@ -2129,8 +2201,59 @@ function closeManagedTaskProjectHost() {
   return managedTaskProjectHostClosing;
 }
 
+async function startInstalledRuntimeRecovery() {
+  if(runtimeRecoveryController||app.isPackaged!==true||isSmoke||isDevelopmentPlaneSmoke)return;
+  const readGeneration=()=>readOwnedLocalRuntimeHostRecoveryObservation();
+  const readBinding=createInstalledRuntimeRecoveryBindingReader({app,getBootstrap:()=>persistentLocalProviderBootstrap,
+    readSummary:readOwnedLocalRuntimeHostSummary,readGeneration});
+  const readGate=()=>{
+      const update=nativeSupervisor?.snapshot()?.self_update;
+      const updateInFlight=Boolean(process.env.METAENGINE_SELF_UPDATE_HOLD_REASON||update?.install_attempted_version
+        ||update?.pre_install_receipt_persisted||update?.installer_handoff_prepared||update?.install_effect_quarantined
+        ||['RESTARTING','INSTALLING'].includes(update?.state));
+      return {schema:'metaengine.browser.runtime-recovery-gate.v1',
+        state:shutdownRequested||globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__===true||updateInFlight?'HOLD':'OPEN',
+        epoch:runtimeRecoveryGateEpoch};
+    };
+  runtimeRecoveryController=createRuntimeRecoveryMainController({app,subscribeGeneration:subscribeOwnedLocalRuntimeHostGeneration,
+    readGeneration,readBinding,readGate,
+    fenceNative:()=>{
+      runtimeRecoveryGenerationLost=true;
+      nativeSupervisor?.stop();
+      // The already-failed physical generation stays bound. No endpoint rebind,
+      // lease replay or replacement Host is permitted in this Browser process.
+    },
+    drain:async()=>{
+      nativeSupervisor?.stop();
+      await Promise.allSettled([...nativeRuntimeInitializations]);
+      const rpc=supervisorLoopbackRpc;supervisorLoopbackRpc=null;await rpc?.stop();
+      const receipt=await closeManagedTaskProjectHost();
+      return receipt||drainManagedRuntimeBindings();
+    },
+    beforeRelaunch:async ticket=>{
+      if(readGate().state!=='OPEN')throw Error('runtime_recovery_gate_closed');
+      const resilience=globalThis.__METAENGINE_HOST_RESILIENCE_RUNTIME__;
+      if(!resilience||typeof resilience.prepareRuntimeRecovery!=='function')throw Error('runtime_recovery_sentinel_unavailable');
+      await resilience.prepareRuntimeRecovery(ticket);
+      if(readGate().state!=='OPEN')throw Error('runtime_recovery_gate_closed');
+      runtimeRecoveryPlannedQuit=true;
+    },
+    onReadback:receipt=>{
+      if(receipt?.state==='AMBIGUOUS')runtimeRecoveryPlannedQuit=false;
+      console.log(JSON.stringify(receipt));
+    },
+  });
+  await runtimeRecoveryController.start();
+}
+
 async function initNativeSupervisor() {
+  if(runtimeRecoveryGenerationLost)throw Error('local_runtime_host_generation_lost_fresh_browser_required');
+  let initializationFinished;
+  const initialization=new Promise(resolve=>{initializationFinished=resolve;});
+  nativeRuntimeInitializations.add(initialization);
+  try {
   await managedTaskProjectHostClosing;
+  if(runtimeRecoveryGenerationLost)throw Error('local_runtime_host_generation_lost_fresh_browser_required');
   if (!nativeSupervisor) {
     const identity = ensureSupervisorIdentity();
     const observeLocalTarget = createFleetTargetLocalObserver({
@@ -2245,6 +2368,7 @@ async function initNativeSupervisor() {
       });
     } catch (error) { recordStartupSubsystemDegraded('MANAGED_TASK_PROJECTS', error); }
   }
+  if(runtimeRecoveryGenerationLost)throw Error('local_runtime_host_generation_lost_fresh_browser_required');
   if (!autonomousProjectRuntime && managedTaskProjectHost) {
     try {
       autonomousProjectRuntime = await createAutonomousProjectHost({ userDataPath: app.getPath('userData'),
@@ -2252,6 +2376,7 @@ async function initNativeSupervisor() {
       nativeSupervisor.bindDevosProjectRuntime(autonomousProjectRuntime);
     } catch (error) { recordStartupSubsystemDegraded('AUTONOMOUS_PROJECT_RUNTIME', error); }
   }
+  if(runtimeRecoveryGenerationLost)throw Error('local_runtime_host_generation_lost_fresh_browser_required');
   if(!nativeCodingRuntime) {
     const summary=readOwnedLocalRuntimeHostSummary();
     if(summary) {
@@ -2266,8 +2391,14 @@ async function initNativeSupervisor() {
             const permits=scope.bindings.filter(row=>row.device_id===device.device_id&&row.client_id===device.client_id).map(row=>row.permit);
             const hashes=[...new Set(permits.map(permit=>permit.artifact.cli_executable_sha256))];
             if(permits.length===0||hashes.length!==1) throw new Error('native_coding_protected_permits_required');
-            const sandboxReceipts=permits.map(permit=>({...operator.sandbox_receipts[permit.role],provider_id:permit.provider_id,agent_id:permit.agent_id,role:permit.role}));
+            const sandboxReceipts=permits.map(permit=>({...resolveNativeCodingSandboxPin(operator,permit),provider_id:permit.provider_id,agent_id:permit.agent_id,role:permit.role}));
             nativeCodingRuntime=createNativeCodingRuntime({identity,ownPostgres:capability,
+              readServiceControl:()=>{
+                const current=nativeSupervisor?.snapshot?.();
+                return current?{supervisor_mode:current.supervisor_mode,armed:current.armed,
+                  interrupted_setup_recovery_fenced:current.continuous_service?.interrupted_setup_recovery_fenced,
+                  runtime_control_generation:current.continuous_service?.runtime_control?.generation_floor}:null;
+              },
               signedRequest:(route,request)=>nativeSupervisor.nativeCodingRequest(route,request),
               observerOptions:{app,resourcesPath:process.resourcesPath,cliPath:operator.cli_executable,gitExecutable:operator.git_executable,sandboxReceipts},
               runnerOptions:{executablePath:operator.cli_executable,expectedExecutableSha256:hashes[0],codexHome:operator.codex_home,
@@ -2280,12 +2411,15 @@ async function initNativeSupervisor() {
     }
   }
   autonomousProjectRuntime?.bindNativeCodingRuntime(nativeCodingRuntime);
+  if(runtimeRecoveryGenerationLost)throw Error('local_runtime_host_generation_lost_fresh_browser_required');
   try { await ensureInterruptedSetupRecovery(); }
   catch (error) {
     nativeSupervisor.setInterruptedSetupRecoveryFence(true);
     recordStartupSubsystemDegraded('INTERRUPTED_SETUP_RECOVERY', error);
   }
+  if(runtimeRecoveryGenerationLost)throw Error('local_runtime_host_generation_lost_fresh_browser_required');
   if (nativeSupervisor.snapshot()?.running !== true) await nativeSupervisor.start();
+  if(runtimeRecoveryGenerationLost){nativeSupervisor?.stop();throw Error('local_runtime_host_generation_lost_fresh_browser_required');}
   // W35: the absence of an attested own-local Owner must stay OFFLINE/UNKNOWN.
   // Never launch a cloud health sentinel or alternate supervisor failover.
   // The sole native Supervisor remains responsible for its existing leases.
@@ -2316,6 +2450,9 @@ async function initNativeSupervisor() {
   if (!shellBrainPortConsumerId) attachShellBrainPort();
   await publishSnapshot().catch(() => {});
   return nativeSupervisor.snapshot();
+  } finally {
+    nativeRuntimeInitializations.delete(initialization);initializationFinished();
+  }
 }
 
 function destroyWindowContents() {
@@ -2702,6 +2839,11 @@ ipcMain.handle('metaengine:shell:primary-chat-actor-select', async (event, rawAc
 ipcMain.handle('metaengine:client:submit-goal', async (event, rawInput) => {
   assertShellSender(event);
   return submitClientGoal(rawInput);
+});
+ipcMain.handle('metaengine:client:goal-submission-mode',async(event,...args)=>{
+  assertShellSender(event);
+  if(args.length)throw new Error('client_goal_submission_mode_params_forbidden');
+  return readNativeGoalSubmissionMode();
 });
 ipcMain.handle('metaengine:client:select-agent', async (event, rawAgentId) => {
   assertShellSender(event);
@@ -3208,6 +3350,7 @@ async function startBrowserRuntime() {
     await startAfterHostResilience();
     browserRuntimeReady = true;
     startupRetryAttempt = 0;
+    void startInstalledRuntimeRecovery().catch(error=>recordStartupSubsystemDegraded('RUNTIME_RECOVERY',error));
   } catch (error) {
     console.error('browser-start-failed', error);
     resetFailedWindow();
@@ -3222,6 +3365,7 @@ async function startBrowserRuntime() {
 }
 
 app.on('before-quit', (event) => {
+  if(!runtimeRecoveryPlannedQuit){runtimeRecoveryGateEpoch+=1;runtimeRecoveryController?.cancel();}
   githubChatRelay?.stop();
   shutdownRequested = true;
   if (startupRetryTimer) clearTimeout(startupRetryTimer);

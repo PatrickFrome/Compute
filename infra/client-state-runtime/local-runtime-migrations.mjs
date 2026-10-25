@@ -125,6 +125,13 @@ export const LOCAL_RUNTIME_MIGRATIONS = Object.freeze([
     triggers:Object.freeze([{relation:'destruktion_meta.native_coding_seed_profile_h205f22',name:'native_coding_seed_profile_immutable_trg',signature:'destruktion_meta.native_coding_seed_immutable_v1()'},
       {relation:'destruktion_meta.native_coding_seed_h205f22',name:'native_coding_seed_immutable_trg',signature:'destruktion_meta.native_coding_seed_immutable_v1()'},
       {relation:'destruktion_meta.client_v1_goal_request_h205f22',name:'native_coding_seed_browser_correlation_guard_trg',signature:'destruktion_meta.native_coding_seed_browser_correlation_guard_v1()'}])},
+  {path:'20261025120000_native_coding_service_heartbeat_admission_v1.sql',
+    signature:'destruktion_meta.native_coding_service_heartbeat_v1(uuid,text,bigint,uuid,integer,jsonb,text,jsonb)',
+    signatures:Object.freeze(['destruktion_meta.native_coding_service_heartbeat_v1(uuid,text,bigint,uuid,integer,jsonb,text,jsonb)',
+      'destruktion_meta.native_coding_service_heartbeat_read_v1(uuid,text,bigint,uuid,text)',
+      'destruktion_meta.native_coding_service_admissible_v1(uuid)']),
+    source_url:new URL('../../supabase/migrations/20261025120000_native_coding_service_heartbeat_admission_v1.sql',import.meta.url),
+    relations:Object.freeze(['destruktion_meta.native_coding_service_heartbeat_h205f22'])},
   // P3 opt-in fleet DAG: qualified only for self-owned local PostgreSQL;
   // the existing devos lease inserts into the same canonical claim table.
   { path: 'fleet-coordination-claim-guard-v1.sql', signature: 'destruktion_meta.fleet_coordination_claim_gate_v1()',

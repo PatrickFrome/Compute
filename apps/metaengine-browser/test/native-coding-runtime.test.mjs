@@ -42,11 +42,15 @@ function fixture(options={}){
   const ownPostgres={ledger,agentOperation:async()=>{throw Error('fixture_no_agent_tool_invocation');},readScope:async()=>{},readLease:async()=>({schema:'metaengine.native-coding.own-pg-lease.v1',
       source:'PRIVATE_RUNTIME_HOST_OWN_PG',observed_at:new Date().toISOString(),value:{...lease},task_prompt:options.badPrompt?'changed in transit':prompt}),
     onUnavailable:options.onUnavailable||((listener)=>{hostListeners.add(listener);return()=>hostListeners.delete(listener);}),
+    snapshot:()=>({instance_id:ids.run,host_pid:123}),
+    serviceHeartbeat:async packet=>{calls.push('service-heartbeat');return {schema:'metaengine.native-coding.service-heartbeat-ack.v1',accepted:true,
+      body_sha256:packet.headers['x-a2-device-body-sha256'],witness_sha256:'a'.repeat(64),expires_at:new Date(Date.now()+30000).toISOString(),readback_only:false,authority_effect:false};},
+    readServiceHeartbeat:async()=>null,
     registerProvider:async envelope=>{calls.push('register-provider');if(options.unknownRegistration)throw Error('fixture_registration_ack_lost');
       await options.beforeRegisterAck?.();return {registered:true,provider_id:envelope.payload.provider_id,envelope_sha256:nativeCodingEnvelopeSha256(envelope)};}};
   const issuer={issueProvider:async selector=>{assert(prepared);providerIssues++;calls.push('issue-provider');
       await options.beforeIssueProvider?.(selector,providerIssues);
-      return {signature:'FIXTURE_ONLY',payload:{...selector,expires_at:options.providerExpiry?.()||expiry}};},
+      return {signature:'FIXTURE_ONLY',payload:{...permit,...selector,permit_id:selector.provider_id,host_process:host,expires_at:options.providerExpiry?.()||expiry}};},
     issueJob:async query=>{assert(prepared);calls.push('issue-job');return {signature:'FIXTURE_ONLY',payload:{...query,
       schema:'metaengine.codex-cli.job-proof.v1',trust_namespace:'LOCAL_OPERATOR_QA',production_qualified:false,
       target_id:lease.target_id,agent_generation_epoch:1,role,workspace_id:lease.workspace_id,project_id:lease.project_id,permit_id:permit.permit_id,
@@ -87,7 +91,12 @@ function fixture(options={}){
       task_id:ids.task,lease_generation:options.wrongResult?2:1,agent_id:agent,run_id:ids.run,role,result_sha256:'b'.repeat(64),
       result:{outcome:'DONE'},git_after:{artifact_sha256:'c'.repeat(64),head:'a'.repeat(40)}};return receipt;
   }});
-  const args={identity:{snapshot:()=>({})},ownPostgres,signedRequest,observers,issuer,
+  const args={identity:{snapshot:()=>({enrolled:true,device_id:ids.task,client_id:ids.workspace,key_fingerprint_sha256:'a'.repeat(64)}),
+      deviceHeaders:async(_method,_path,text)=>({'content-type':'application/json','x-a2-chat-bridge-client':ids.workspace,
+        'x-a2-device-profile':'A2_DEVICE_HTTP_SIGNATURE_V1','x-a2-device-id':ids.task,'x-a2-device-timestamp':new Date().toISOString(),
+        'x-a2-device-nonce':'a'.repeat(32),'x-a2-device-body-sha256':hash(text),'x-a2-device-signature':'a'.repeat(86)})},
+    readServiceControl:()=>({supervisor_mode:'CONTROL',armed:true,interrupted_setup_recovery_fenced:false,runtime_control_generation:0}),
+    ownPostgres,signedRequest,observers,issuer,
     runnerOptions:{expectedExecutableSha256:permit.artifact.cli_executable_sha256},resultStore:store,workerRegistry:workers,
     permitRegistry:{listProviderSelectors:async()=>[{provider_id:ids.provider,agent_id:agent}],readProvider:async()=>permit},runnerFactory,
     physicalSlotBudget:options.physicalSlotBudget||1,...(options.closeTimeoutMs?{closeTimeoutMs:options.closeTimeoutMs}:{})};
@@ -107,7 +116,7 @@ async function settled(f){
 }
 async function providerRefreshDone(f){
   for(let i=0;i<100;i++){
-    if(!f.runtime.snapshot().provider_refresh_running)return;
+    if(!f.runtime.snapshot().provider_refresh_running&&!f.runtime.snapshot().service_heartbeat.publication_running)return;
     await new Promise(r=>setImmediate(r));
   }
   assert.fail('fixture provider refresh did not settle');

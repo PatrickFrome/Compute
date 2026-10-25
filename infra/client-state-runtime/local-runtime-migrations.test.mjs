@@ -31,7 +31,7 @@ test('migration plan pins deployed sources, unbounded defaults and the opt-in ow
   const nativeSources=['20261022070000_native_coding_execution_ledger_v1.sql','20261023082533_native_coding_operator_qa_admission_v1.sql',
     '20261025070000_native_coding_project_continuation_v1.sql','20261025080000_native_coding_worktree_lease_admission_v1.sql',
     '20261025090000_native_coding_agent_project_tools_v1.sql','20261025100000_native_coding_checkpoint_commit_rotation_v1.sql',
-    '20261025110000_native_coding_initial_goal_seed_v1.sql'];
+    '20261025110000_native_coding_initial_goal_seed_v1.sql','20261025120000_native_coding_service_heartbeat_admission_v1.sql'];
   assert.deepEqual(sources.slice(mandatorySources.length,mandatorySources.length+nativeSources.length),nativeSources);
   const ledger=plan.migrations.find(row=>row.source===nativeSources[0]),admission=plan.migrations.find(row=>row.source===nativeSources[1]);
   assert.equal(ledger.signatures.length,3);assert(ledger.signatures.every(value=>value.startsWith('destruktion_meta.')));
@@ -60,6 +60,11 @@ test('migration plan pins deployed sources, unbounded defaults and the opt-in ow
   assert.equal(seed.signatures.length,7);assert(seed.signatures.every(value=>value.startsWith('destruktion_meta.native_coding_seed_')));
   assert.deepEqual(seed.relations,['destruktion_meta.native_coding_seed_profile_h205f22','destruktion_meta.native_coding_seed_h205f22']);
   assert.deepEqual(seed.triggers.map(row=>row.name),['native_coding_seed_profile_immutable_trg','native_coding_seed_immutable_trg','native_coding_seed_browser_correlation_guard_trg']);
+  const service=plan.migrations.find(row=>row.source===nativeSources[7]);
+  assert.equal(service.signatures.length,3);assert(service.signatures.every(value=>value.startsWith('destruktion_meta.native_coding_service_')));
+  assert.deepEqual(service.relations,['destruktion_meta.native_coding_service_heartbeat_h205f22']);
+  assert(!service.signatures.some(value=>value.includes('native_coding_claim_admission_v1')||value.includes('native_coding_worktree_admissible_v1')),
+    'existing gate replacements are not new-install markers');
   const extras = plan.migrations.slice(mandatorySources.length+nativeSources.length);
   // The W5 DAG guard is an optional source-only integration lane and must
   // never be admitted as an arbitrary migration or silently become installed.

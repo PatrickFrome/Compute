@@ -11,6 +11,7 @@ import {buildNativeCodingExecutionScope} from './native-coding-task-context.mjs'
 import {createNativeCodingProjectCheckpointObserver} from './native-coding-project-checkpoints.mjs';
 import {createNativeCodingProjectCommitObserver} from './native-coding-project-commits.mjs';
 import {prepareNativeCodingAgentRunBridge} from './native-coding-agent-run-bridge.mjs';
+import {createNativeCodingServiceHeartbeatPublisher} from './native-coding-service-heartbeat-publisher.mjs';
 
 const UUID=/^[a-f0-9-]{36}$/,HASH=/^[a-f0-9]{64}$/;
 const fail=code=>{throw new Error(`native_coding_runtime_${code}`);};
@@ -24,7 +25,7 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
   // Private dependency injection supports isolated adversarial tests; it is not
   // an IPC option, renderer configuration, or a way to label fixtures native.
   observers=null,issuer=null,workerRegistry=null,runnerFactory=createCodexCliRunner,
-  agentBridgeFactory=prepareNativeCodingAgentRunBridge,closeTimeoutMs=25000}={}) {
+  agentBridgeFactory=prepareNativeCodingAgentRunBridge,readServiceControl=null,closeTimeoutMs=25000}={}) {
   if(typeof identity?.snapshot!=='function'||typeof signedRequest!=='function'||!runnerOptions
     ||typeof agentBridgeFactory!=='function'
     ||!['readScope','readLease','registerProvider','agentOperation'].every(name=>typeof ownPostgres?.[name]==='function'))fail('private_dependencies_required');
@@ -196,9 +197,15 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
       return fence('READBACK_REQUIRED',{task_id:lease.task_id,lease_generation:lease.lease_generation,reason:record.reason});
     }
   }
-  const providerSnapshot=()=>({schema:'metaengine.native-coding.providers.v1',providers:closed?[]:
+  const registeredProviderSnapshot=()=>({schema:'metaengine.native-coding.providers.v1',providers:closed?[]:
     [...descriptors.entries()].filter(([id,value])=>!providerFences.has(id)
       &&Date.parse(value.payload.expires_at)>Date.now()).map(([,value])=>structuredClone(value))});
+  const serviceHeartbeat=typeof readServiceControl==='function'&&typeof identity.deviceHeaders==='function'
+    &&['snapshot','serviceHeartbeat','readServiceHeartbeat'].every(name=>typeof ownPostgres[name]==='function')
+    ?createNativeCodingServiceHeartbeatPublisher({identity,ownPostgres,readControl:readServiceControl,
+      readRuntime:()=>({...pool.snapshot(),shutdown_state:shutdownState,host_unavailable_reason:unavailableReason}),
+      readProviders:()=>registeredProviderSnapshot().providers}):null;
+  const providerSnapshot=()=>({schema:'metaengine.native-coding.providers.v1',providers:closed?[]:serviceHeartbeat?.admittedProviders()??[]});
   async function refreshProviders() {
     const roster=await selectors();if(closed)return;
     const active=new Set(roster.map(s=>`${s.provider_id}:${s.agent_id}`));
@@ -225,6 +232,7 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
       // Publish each exact ACK immediately; a later slow provider cannot
       // withhold this registered envelope until the whole batch finishes.
       descriptors.set(id,structuredClone(descriptor));
+      serviceHeartbeat?.observe();
     }
   }
   function stop(reason=null) {
@@ -237,10 +245,10 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
     for(const entry of completionAttempts.values())if(entry.state==='COMPLETION_PENDING'){
       entry.state='READBACK_REQUIRED';entry.reason='HOST_UNAVAILABLE_DURING_COMPLETION';
     }
-    checkpoints?.close();commits?.close();unsubscribeHost?.();unsubscribeHost=null;
+    checkpoints?.close();commits?.close();serviceHeartbeat?.close();unsubscribeHost?.();unsubscribeHost=null;
     const pending=[];
     for(const operation of [()=>pool.stop(),()=>workers.close(),()=>nativeIssuer.close(),
-      ()=>Promise.all([...activeBridges].map(bridge=>bridge.close())),()=>checkpoints?.drain(),()=>commits?.drain()]){
+      ()=>Promise.all([...activeBridges].map(bridge=>bridge.close())),()=>checkpoints?.drain(),()=>commits?.drain(),()=>serviceHeartbeat?.drain()]){
       try{pending.push(Promise.resolve(operation()));}catch(error){pending.push(Promise.reject(error));}
     }
     const drained=Promise.allSettled(pending).then(values=>{
@@ -266,6 +274,7 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
         refresh=Promise.resolve().then(refreshProviders).catch(()=>{refreshReason='PROVIDER_REFRESH_REQUIRES_READBACK';})
           .finally(()=>{refresh=null;});
       }
+      if(!closed)serviceHeartbeat?.observe();
       return providerSnapshot();
     },
     dispatchLease(lease){if(closed)return fence('STOPPED');return pool.dispatch(lease);},
@@ -285,6 +294,7 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
       provider_refresh_running:refresh!==null,provider_refresh_reason:refreshReason,
       project_checkpoints:checkpoints?.snapshot()??null,
       project_commits:commits?.snapshot()??null,
+      service_heartbeat:serviceHeartbeat?.snapshot()??{state:'PRIVATE_SERVICE_UNBOUND',authority_effect:false},
       completion_readbacks:[...completionAttempts.values()].filter(v=>v.state==='READBACK_REQUIRED').length,
       host_unavailable_reason:unavailableReason,shutdown_state:shutdownState,worker_cleanup_confirmed:workerCleanupConfirmed,
       // Drain completion is not acceptance of an interrupted task or proof

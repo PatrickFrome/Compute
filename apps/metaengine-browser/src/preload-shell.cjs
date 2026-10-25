@@ -256,6 +256,7 @@ const clientGoalStatus = (requestId) => ipcRenderer.invoke(
 );
 const clientConnectionStatus = () => ipcRenderer.invoke('metaengine:client:connection-status');
 const clientWorkReadiness = () => ipcRenderer.invoke('metaengine:client:work-readiness');
+const clientGoalSubmissionMode=()=>ipcRenderer.invoke('metaengine:client:goal-submission-mode');
 const clientProjectStatus = () => ipcRenderer.invoke('metaengine:client:project-status');
 function clientProjectRequest(request) {
   if (!request || typeof request !== 'object' || Array.isArray(request)
@@ -355,6 +356,7 @@ if (isPrimaryMe2PresentationDocument()) {
     goalStatus: clientGoalStatus,
     connectionStatus: clientConnectionStatus,
     workReadiness: clientWorkReadiness,
+    goalSubmissionMode:clientGoalSubmissionMode,
     projectStatus: clientProjectStatus,
     createProject: createClientProject,
     openProject: openClientProject,

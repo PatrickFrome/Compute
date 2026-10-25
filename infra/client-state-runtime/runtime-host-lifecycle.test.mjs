@@ -28,11 +28,14 @@ async function fixture(t) {
   await mkdir(config.pg_data_directory, { recursive: true });
   await writeFile(path.join(config.pg_data_directory, 'PG_VERSION'), '17\n');
   await writeFile(path.join(config.pg_data_directory, 'client-vault.key'), 'b'.repeat(64) + '\n');
+  await writeFile(path.join(config.pg_data_directory,'postmaster.pid'),`1234\n${config.pg_data_directory}\n1790000000\n25434\n\n127.0.0.1\nready\n`);
   const configFile = path.join(root, 'private-config.json');
   await writeFile(configFile, JSON.stringify(config));
   let finish;
   const finished = new Promise(resolve => { finish = resolve; });
   const runtime = { endpoint: 'http://127.0.0.1:25433/a2-browser-native-supervisor-v1', instanceId: randomUUID(),
+    postgresIdentity:{pid:1234,version:170007,system_identifier:'7654321098765432100',
+      started_at:new Date(1790000000000).toISOString(),data_directory:config.pg_data_directory,port:25434},
     edgeHealth: { runtime_ready: true, state_provider: 'LOCAL_POSTGRES', hosted_supabase_required: false,
       capability_health: { state: 'ATTESTED', authority_effect: false } }, children: [],
     startupManifest: { source_manifest_sha256: 'd'.repeat(64) }, finished,

@@ -62,13 +62,54 @@ export async function readWindowsSandboxProcess(pid) {
   return JSON.parse(stdout.trim());
 }
 
-export async function readWindowsSandboxHostBoot() {
-  if (process.platform !== 'win32') throw Error('codex_sandbox_probe_windows_required');
-  const script = '$os=Get-CimInstance Win32_OperatingSystem; @{last_boot_at=$os.LastBootUpTime.ToUniversalTime().ToString("o"); os_version=$os.Version} | ConvertTo-Json -Compress';
-  const { stdout } = await execFileAsync(POWERSHELL, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, timeout: 8000, maxBuffer: 8192 });
-  const value = JSON.parse(stdout.trim());
-  if (!Number.isFinite(Date.parse(value.last_boot_at))) throw Error('codex_sandbox_host_boot_unverified');
-  return value;
+// BootId is the kernel boot sequence (not a wall-clock-derived boot time):
+// https://learn.microsoft.com/windows-hardware/drivers/ddi/ntddk/ns-ntddk-kuser_shared_data
+// Its current-process telemetry field has the published SDK structure:
+// https://learn.microsoft.com/windows/win32/devnotes/process_telemetry_id_information_type
+// PID4's exact kernel-created FILETIME supplies an independent anchor. A boot
+// configuration GUID and WMI's computed LastBootUpTime are not authority.
+export function windowsSandboxBootIdentity(value){
+  const p=value?.system_process,ms=Date.parse(p?.created_at||'');
+  if(value?.schema!=='metaengine.windows.kernel-boot.v1'||!Number.isSafeInteger(value.kernel_boot_id)
+    ||value.kernel_boot_id<1||value.kernel_boot_id>0xffffffff||p?.pid!==4||!Number.isFinite(ms)
+    ||new Date(ms).toISOString()!==p.created_at||!/^[1-9][0-9]{16,18}$/.test(p.created_100ns||'')
+    ||(BigInt(p.created_100ns)-116444736000000000n)/10000n!==BigInt(ms)
+    ||!Number.isFinite(Date.parse(value.last_boot_at||''))||!/^\d+\.\d+\.\d+$/.test(value.os_version||''))
+    throw Error('codex_sandbox_host_boot_unverified');
+  return `${value.kernel_boot_id}:${p.created_100ns}`;
+}
+export async function readWindowsSandboxHostBoot({exec=execFileAsync,platform=process.platform}={}) {
+  if(platform!=='win32')throw Error('codex_sandbox_probe_windows_required');
+  const script=`$ErrorActionPreference='Stop'
+$source=@'
+using System;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+public static class MetaengineKernelBoot {
+ [DllImport("ntdll.dll",ExactSpelling=true)] static extern int NtQueryInformationProcess(IntPtr p,int c,IntPtr b,uint n,out uint r);
+ public static uint BootId(){IntPtr p=Marshal.AllocHGlobal(65536);try{uint r;int status=NtQueryInformationProcess(new IntPtr(-1),64,p,65536,out r);
+  if(status!=0||r<96||r>65536)throw new Exception("boot_telemetry_layout");
+  uint header=(uint)Marshal.ReadInt32(p,0),pid=(uint)Marshal.ReadInt32(p,4),boot=(uint)Marshal.ReadInt32(p,60);
+  if(header<96||header>r||pid!=Process.GetCurrentProcess().Id||boot==0)throw new Exception("boot_telemetry_scope");return boot;
+ }finally{Marshal.FreeHGlobal(p);}}
+}
+'@
+Add-Type -TypeDefinition $source
+$boot=[MetaengineKernelBoot]::BootId()
+$system=Get-CimInstance Win32_Process -Filter 'ProcessId=4'
+if(-not $system -or $system.Name -ne 'System' -or -not $system.CreationDate){throw 'system_process_absent'}
+$birth=$system.CreationDate.ToUniversalTime();$os=Get-CimInstance Win32_OperatingSystem
+$again=Get-CimInstance Win32_Process -Filter 'ProcessId=4'
+if(-not $again -or $again.CreationDate.ToUniversalTime().ToFileTimeUtc() -ne $birth.ToFileTimeUtc() -or [MetaengineKernelBoot]::BootId() -ne $boot){throw 'kernel_boot_changed'}
+@{schema='metaengine.windows.kernel-boot.v1';kernel_boot_id=$boot;
+system_process=@{pid=4;created_at=$birth.ToString('o');created_100ns=$birth.ToFileTimeUtc().ToString()};
+last_boot_at=$os.LastBootUpTime.ToUniversalTime().ToString('o');os_version=$os.Version}|ConvertTo-Json -Depth 4 -Compress`;
+  const {stdout}=await exec(POWERSHELL,['-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')],
+    {windowsHide:true,shell:false,timeout:12000,maxBuffer:8192,env:{SystemRoot:'C:\\Windows',SYSTEMROOT:'C:\\Windows',WINDIR:'C:\\Windows',
+      PATH:'C:\\Windows\\System32',PSModulePath:'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules'}});
+  const value=JSON.parse(stdout.trim());
+  if(value.system_process)value.system_process.created_at=new Date(value.system_process.created_at).toISOString();
+  windowsSandboxBootIdentity(value);return value;
 }
 
 const denied = value => value?.outcome === 'ERROR' && value.access_denied === true && value.error_type === 'System.UnauthorizedAccessException';
@@ -76,14 +117,14 @@ const wrote = value => value?.outcome === 'WRITTEN' && value.access_denied === f
 
 // A valid CLI flag or a Job Object is insufficient. Both the sandbox process
 // incarnation and the host's independent file readback must match.
-export function evaluateCodexSandboxProbe({ mode, report, nativeProcess, hostReadback, completion, hostUserSid, hostBootStartedAt }) {
+export function evaluateCodexSandboxProbe({ mode, report, nativeProcess, hostReadback, completion, hostUserSid, hostBootIdentity }) {
   if (!modeValid(mode)) throw Error('codex_sandbox_probe_mode_invalid');
   const blocked = reason => Object.freeze({ state: 'BLOCKED', reason, boundary_observed: false, execution_authorized: false, authority_effect: false });
   if (completion?.exit_code !== 0 || completion?.signal || completion?.reason || completion?.tree_cleanup_confirmed !== true) return blocked('SANDBOX_COMMAND_TERMINATION_UNVERIFIED');
   if (report?.schema !== 'metaengine.codex-cli.sandbox-canary.v1' || report.mode !== mode) return blocked('SANDBOX_CANARY_REPORT_INVALID');
   const birth = Date.parse(report.started_at), nativeBirth = Date.parse(nativeProcess?.started_at);
-  const hostBoot = Date.parse(hostBootStartedAt);
-  if (!Number.isFinite(hostBoot) || (Number.isFinite(nativeBirth) && nativeBirth < hostBoot)) return blocked('SANDBOX_OBSERVATION_BEFORE_CURRENT_BOOT');
+  try{windowsSandboxBootIdentity(hostBootIdentity);}catch{return blocked('SANDBOX_BOOT_IDENTITY_UNVERIFIED');}
+  if(Number.isFinite(nativeBirth)&&nativeBirth<Date.parse(hostBootIdentity.system_process.created_at))return blocked('SANDBOX_OBSERVATION_BEFORE_CURRENT_BOOT');
   if (!Number.isSafeInteger(report.pid) || report.pid < 1 || nativeProcess?.pid !== report.pid || !Number.isFinite(birth)
     || !Number.isFinite(nativeBirth) || Math.abs(birth - nativeBirth) > 2 || !/^S-1-5-/.test(String(hostUserSid))
     || !/^S-1-5-/.test(String(nativeProcess?.user_sid)) || nativeProcess.user_sid !== report.user_sid
@@ -110,7 +151,7 @@ export async function runCodexCliSandboxProbe({ cliPath, workspaceRoot, receiptD
     || (onProcessStarted !== null && typeof onProcessStarted !== 'function')
     || !Number.isSafeInteger(timeoutMs) || timeoutMs < 15000 || timeoutMs > 300000) throw Error('codex_sandbox_probe_configuration_invalid');
   const workspace = await fs.realpath(workspaceRoot), receipts = await fs.realpath(receiptDirectory);
-  const hostBoot = await readHostBoot();
+  const hostBoot = await readHostBoot();windowsSandboxBootIdentity(hostBoot);
   if (receipts === workspace || isWithin(workspace, receipts)) throw Error('codex_sandbox_probe_outside_root_required');
   const runId = randomUUID(), directory = path.join(workspace, `.metaengine-sandbox-probe-${runId}`);
   const receipt = path.join(receipts, `sandbox-probe-${mode}-${runId}.json`);
@@ -181,7 +222,10 @@ export async function runCodexCliSandboxProbe({ cliPath, workspaceRoot, receiptD
   const [insideExisting, insideNew, outsideExisting, outsideNew] = await Promise.all([read(files.inside_existing), read(files.inside_new), read(files.outside_existing), read(files.outside_new)]);
   const hostReadback = { inside_existing_unchanged: insideExisting === original, inside_existing_appended: insideExisting === original + nonce,
     inside_new_written: insideNew === nonce, inside_new_absent: insideNew === null, outside_existing_unchanged: outsideExisting === original, outside_new_absent: outsideNew === null };
-  observation = evaluateCodexSandboxProbe({ mode, report, nativeProcess, hostReadback, completion, hostUserSid, hostBootStartedAt: hostBoot.last_boot_at });
+  const bootAfter=await readHostBoot();
+  observation = windowsSandboxBootIdentity(bootAfter)!==windowsSandboxBootIdentity(hostBoot)
+    ?Object.freeze({state:'BLOCKED',reason:'SANDBOX_BOOT_IDENTITY_CHANGED',boundary_observed:false,execution_authorized:false,authority_effect:false})
+    :evaluateCodexSandboxProbe({ mode, report, nativeProcess, hostReadback, completion, hostUserSid, hostBootIdentity:hostBoot });
   if (logWriteFailed) observation = Object.freeze({ state: 'BLOCKED', reason: 'SANDBOX_PROBE_LOG_WRITE_FAILED', boundary_observed: false, execution_authorized: false, authority_effect: false });
   const evidence = { schema: CODEX_SANDBOX_PROBE_SCHEMA, run_id: runId, observed_at: new Date().toISOString(), ...observation,
     cli_path: await fs.realpath(cliPath), cli_sha256: cliSha, workspace_path: workspace, host_user_sid: hostUserSid,

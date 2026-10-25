@@ -100,12 +100,17 @@ export function createNativeCodingHostIssuer({
         || permit.device_key_fingerprint_sha256 !== enrolled.key_fingerprint_sha256) error('permit_identity_mismatch');
     const query=Object.freeze({...request, permit_id:permit.permit_id, project_id:permit.project_id,
       workspace_id:permit.workspace_id, worktree_path:permit.worktree?.path, role:permit.role});
-    // Sequential reads keep dependencies explicit and make no physical effect.
-    const artifact=await observedRead('image',readInstalledImage,query);
-    const host=await observedRead('host',readNativeHost,query);
-    const pg=await observedRead('postgres',readPostgres,query);
-    const worktree=await observedRead('worktree',readWorktree,query);
-    const sandbox=await observedRead('sandbox',readSandbox,query);
+    // These five read-only observations depend on the same immutable permit,
+    // not on each other. Bound their concurrency so cold Windows readers do
+    // not consume one another's freshness window. Every timestamp is still
+    // checked again at completion, and the complete scope is reread after sign.
+    const [artifact,host,pg,worktree,sandbox]=await Promise.all([
+      observedRead('image',readInstalledImage,query),
+      observedRead('host',readNativeHost,query),
+      observedRead('postgres',readPostgres,query),
+      observedRead('worktree',readWorktree,query),
+      observedRead('sandbox',readSandbox,query),
+    ]);
     exactFields(host,['host_process','user_sid'],'host');
     exactFields(pg,['postgres','workspace_id','project_id'],'postgres');
     equal(artifact,permit.artifact,'installed_artifact'); equal(pg.postgres,permit.postgres,'own_postgres');

@@ -1,10 +1,12 @@
 import { createHash } from 'node:crypto';
 import {validateNativeCodingAgentHostRequest,nativeCodingAgentHostOperationWrites} from '../../apps/metaengine-browser/src/native-coding-agent-host-contract.mjs';
+import {validateNativeCodingDeviceRequest} from '../../apps/metaengine-browser/src/native-coding-device-request.mjs';
 
 export const NATIVE_CODING_HOST_IPC_REQUEST = 'metaengine.native-coding.host-ipc.request.v1';
 export const NATIVE_CODING_HOST_IPC_RESPONSE = 'metaengine.native-coding.host-ipc.response.v1';
 const ACTIONS = ['READ_SCOPE','READ_LEASE','REGISTER_PROVIDER','READ_EXECUTION','RESERVE_EXECUTION','ADVANCE_EXECUTION','RECONCILE_PROJECT','READ_PROJECT_CHECKPOINT','AGENT_OPERATION','FINISH_CHECKPOINT','READ_FINISH_CHECKPOINT'];
-const WRITES = new Set(['REGISTER_PROVIDER','RESERVE_EXECUTION','ADVANCE_EXECUTION','RECONCILE_PROJECT','FINISH_CHECKPOINT']);
+const OPTIONAL_ACTIONS=['SEED_GOAL','READ_SEED','LIST_SEEDS','SERVICE_HEARTBEAT','READ_SERVICE_HEARTBEAT'];
+const WRITES = new Set(['REGISTER_PROVIDER','RESERVE_EXECUTION','ADVANCE_EXECUTION','RECONCILE_PROJECT','FINISH_CHECKPOINT','SEED_GOAL','SERVICE_HEARTBEAT']);
 const writes=(action,value)=>WRITES.has(action)||action==='AGENT_OPERATION'&&nativeCodingAgentHostOperationWrites(value);
 const REASONS = new Set(['INVALID_FRAME','INVALID_PAYLOAD','MESSAGE_TOO_LARGE','UNSUPPORTED_ACTION','INSTANCE_MISMATCH',
   'HOST_PID_MISMATCH','INFLIGHT_LIMIT','REQUEST_ID_REUSED','OPERATION_FAILED','WRITE_OUTCOME_UNKNOWN','RESPONSE_INVALID',
@@ -51,6 +53,7 @@ function scope(value,reservation=false) {
 function payload(action,value) {
   json(value);
   if(action==='READ_SCOPE')keys(value,[]);
+  else if(OPTIONAL_ACTIONS.includes(action)){try{validateNativeCodingDeviceRequest(value,action);}catch{invalid('INVALID_PAYLOAD');}}
   else if(action==='AGENT_OPERATION'){try{validateNativeCodingAgentHostRequest(value);}catch{invalid('INVALID_PAYLOAD');}}
   else if(action==='FINISH_CHECKPOINT'||action==='READ_FINISH_CHECKPOINT'){
     keys(value,['project_id','checkpoint_sha256']);if(!UUID.test(value.project_id||'')||!HASH.test(value.checkpoint_sha256||''))invalid('INVALID_PAYLOAD');
@@ -89,15 +92,16 @@ const digest=value=>createHash('sha256').update(canonical(value)).digest('hex');
 // This module has no SQL connection, DSN, network endpoint or lease poller.
 // Root binds handleMessage directly to the existing private process IPC event.
 export function createNativeCodingHostIpcServer({instanceId,operations,send=process.send?.bind(process),hostPid=process.pid,
-  parentPid=process.ppid,maxInflight=16,timeoutMs=20000,onProtocolError=()=>{}}={}) {
+  parentPid=process.ppid,maxInflight=16,timeoutMs=30000,onProtocolError=()=>{}}={}) {
   if(!UUID.test(instanceId||'')||hostPid!==process.pid||parentPid!==process.ppid||process.connected!==true
     ||typeof process.send!=='function'||typeof send!=='function'||typeof onProtocolError!=='function'
     ||!Number.isSafeInteger(maxInflight)||maxInflight<1||maxInflight>16
-    ||!Number.isSafeInteger(timeoutMs)||timeoutMs<1||timeoutMs>20000)invalid('CHANNEL_CLOSED');
+    ||!Number.isSafeInteger(timeoutMs)||timeoutMs<1||timeoutMs>30000)invalid('CHANNEL_CLOSED');
   // close is a private lifecycle method on the real authority. It is never a
   // dispatchable IPC action; reject every other unexpected property.
-  keys(operations,[...ACTIONS,...(Object.hasOwn(operations||{},'close')?['close']:[])]);
-  for(const action of ACTIONS)if(typeof operations[action]!=='function')invalid('INVALID_PAYLOAD');
+  const mountedActions=[...ACTIONS,...OPTIONAL_ACTIONS.filter(action=>Object.hasOwn(operations||{},action))];
+  keys(operations,[...mountedActions,...(Object.hasOwn(operations||{},'close')?['close']:[])]);
+  for(const action of mountedActions)if(typeof operations[action]!=='function')invalid('INVALID_PAYLOAD');
   if(Object.hasOwn(operations,'close')&&typeof operations.close!=='function')invalid('INVALID_PAYLOAD');
   let closed=false;const active=new Map(),completed=new Map();
   const protocolError=reason=>{try{onProtocolError(REASONS.has(reason)?reason:'INVALID_FRAME');}catch{}};
@@ -138,7 +142,7 @@ export function createNativeCodingHostIpcServer({instanceId,operations,send=proc
       if(message.instance_id!==instanceId)invalid('INSTANCE_MISMATCH');
       if(message.host_pid!==hostPid)invalid('HOST_PID_MISMATCH');
       if(!UUID.test(message.request_id||''))invalid('INVALID_FRAME');
-      if(!ACTIONS.includes(message.action))invalid('UNSUPPORTED_ACTION');
+      if(!mountedActions.includes(message.action))invalid('UNSUPPORTED_ACTION');
       payload(message.action,message.payload);requestDigest=digest(message);
     }catch(error){protocolError(REASONS.has(error.reason)?error.reason:'INVALID_FRAME');return true;}
     const old=completed.get(message.request_id),running=active.get(message.request_id);

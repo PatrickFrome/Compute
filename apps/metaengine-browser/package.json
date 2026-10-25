@@ -1,9 +1,9 @@
 {
   "name": "@metaengine/browser-shell",
-  "version": "0.7.0-dev.1107139874588.1",
+  "version": "0.7.0-dev.1107139874590.1",
   "private": true,
   "type": "module",
-  "description": "METAENGINE Development OS shell with autonomous agent sessions, Browser surfaces, embedded Development Plane, durable supervisor keepalive, crash sentinel, host resilience and self-update runtime",
+  "description": "METAENGINE client with native coordinated agents, managed projects, own PostgreSQL and guarded runtime recovery",
   "author": "METAENGINE",
   "main": "src/final-runtime-entry.mjs",
   "repository": {

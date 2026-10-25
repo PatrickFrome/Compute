@@ -9,7 +9,7 @@ import {nativeCodingCanonicalJson} from './native-coding-task-context.mjs';
 import {readNativeCodingGitProof} from '../../apps/metaengine-browser/src/native-coding-git-proof.mjs';
 import {readNativeCodingWindowsProcess,readNativeCodingProtectedJson,readNativeCodingSandboxEvidence}
   from '../../apps/metaengine-browser/src/native-coding-host-observers.mjs';
-import {readNativeCodingOperatorPaths} from '../../apps/metaengine-browser/src/native-coding-operator-paths.mjs';
+import {readNativeCodingOperatorPaths,resolveNativeCodingSandboxPin} from '../../apps/metaengine-browser/src/native-coding-operator-paths.mjs';
 export {readNativeCodingOperatorPaths};
 
 const run=promisify(execFile);
@@ -26,6 +26,35 @@ async function fileHash(file) {
   return hash.digest('hex');
 }
 
+// Hash immutable installed bytes once per private Host. Every later use still
+// checks exact volume/file identity, birth/change/write times, size and links.
+// A change permanently fences this Host; it cannot silently re-qualify bytes.
+export function createNativeCodingHostImageGuard(){
+  const files=new Map();let invalid=false;
+  const inventory=async file=>{
+    const actual=await fs.realpath(file),s=await fs.lstat(file,{bigint:true});
+    if(!samePath(actual,file)||!s.isFile()||s.isSymbolicLink()||s.nlink!==1n||s.size<1n||s.size>1073741824n)fail('image_file_unverified');
+    for(let p=path.dirname(actual);;){const row=await fs.lstat(p);if(!row.isDirectory()||row.isSymbolicLink()||!samePath(await fs.realpath(p),p))fail('image_ancestor_unverified');
+      const next=path.dirname(p);if(next===p)break;p=next;}
+    return ['dev','ino','birthtimeNs','ctimeNs','mtimeNs','size','nlink'].map(k=>String(s[k])).join(':');
+  };
+  const guard=async file=>{if(invalid)fail('image_preparation_invalidated');const entry=files.get(file);
+    if(!entry)fail('image_not_prepared');await entry.pending;
+    try{if(await inventory(file)!==entry.inventory)fail('image_preparation_invalidated');return entry.sha256;}
+    catch(error){invalid=true;throw error;}};
+  return Object.freeze({
+    async prepare(paths){if(invalid)fail('image_preparation_invalidated');
+      await Promise.all([...new Set(paths)].map(async file=>{
+        if(!files.has(file)){const entry={pending:null,inventory:null,sha256:null};
+          entry.pending=Promise.resolve().then(async()=>{const before=await inventory(file),sha256=await fileHash(file);
+            if(before!==await inventory(file))fail('image_changed_during_preparation');entry.inventory=before;entry.sha256=sha256;})
+            .catch(error=>{invalid=true;throw error;});files.set(file,entry);}
+        await guard(file);
+      }));
+    },read:guard,
+  });
+}
+
 // This private descriptor contains paths and canary digest pins, never DB
 // credentials or execution permissions. The own-PG permit remains authority.
 
@@ -33,6 +62,12 @@ async function fileHash(file) {
 // already-open state_owner connection. No caller-selected DSN/path enters it.
 export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid}={}) {
   if(!config||typeof sql?.unsafe!=='function'||!Number.isSafeInteger(parentPid)||parentPid<1) fail('private_dependencies_required');
+  const image=createNativeCodingHostImageGuard();
+  const resources=path.dirname(config.bundle_directory),expectedExe=path.join(path.dirname(resources),'METAENGINE Browser Test.exe');
+  async function prepareNativeScopes(){
+    const operator=await readNativeCodingOperatorPaths(config.state_directory);
+    await image.prepare([expectedExe,path.join(resources,'app.asar'),operator.cli_executable]);
+  }
   async function postgres() {
     const before=(await fs.readFile(path.join(config.pg_data_directory,'postmaster.pid'),'utf8')).split(/\r?\n/);
     const rows=await sql.unsafe(`select current_setting('data_directory') as data_directory,
@@ -50,18 +85,20 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
     return {system_identifier:row.system_identifier,postmaster:publicProcess(native),data_directory_identity_sha256};
   }
   async function readNativeScope(permit,includeSandbox=true) {
-    const pg=await postgres(),host=await readNativeCodingWindowsProcess(parentPid);
+    const [pg,host]=await Promise.all([postgres(),readNativeCodingWindowsProcess(parentPid)]);
     const base={postgres:pg,host_process:publicProcess(host),user_sid:host.user_sid};
     if(permit===null) return base;
     const operator=await readNativeCodingOperatorPaths(config.state_directory);
     if(path.basename(host.exe_path)!=='METAENGINE Browser Test.exe') fail('browser_parent_unverified');
-    const resources=path.join(path.dirname(host.exe_path),'resources');
+    if(!samePath(host.exe_path,expectedExe))fail('browser_parent_unverified');
     const expectedBundle=path.join(resources,'client-state-runtime');
     if(!samePath(config.bundle_directory,expectedBundle)) fail('installed_runtime_path_mismatch');
-    const artifact={installed_exe_sha256:await fileHash(host.exe_path),
-      installed_asar_sha256:await fileHash(path.join(resources,'app.asar')),
+    await image.prepare([host.exe_path,path.join(resources,'app.asar'),operator.cli_executable]);
+    const [exeSha,asarSha,cliSha]=await Promise.all([image.read(host.exe_path),image.read(path.join(resources,'app.asar')),image.read(operator.cli_executable)]);
+    const artifact={installed_exe_sha256:exeSha,
+      installed_asar_sha256:asarSha,
       runtime_bundle_sha256:config.expected_bundle_sha256,source_sha:permit.artifact.source_sha,
-      cli_executable_sha256:await fileHash(operator.cli_executable)};
+      cli_executable_sha256:cliSha};
     // Source SHA is meaningful only together with the exact protected ASAR
     // hash and verified runtime bundle; it is never accepted on its own.
     if(Object.keys(artifact).some(key=>artifact[key]!==permit.artifact[key])) fail('installed_artifact_mismatch');
@@ -70,10 +107,11 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
       {windowsHide:true,shell:false,timeout:10000,maxBuffer:4096,env:{SystemRoot:process.env.SystemRoot,PATH:path.dirname(operator.git_executable),GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'NUL',GIT_TERMINAL_PROMPT:'0'}});
     pending.child?.stdin?.end();const head=(await pending).stdout.trim();
     const worktree={path:permit.worktree.path,root_identity_sha256,base_sha:head};
-    if(!includeSandbox)return {...base,artifact,worktree};
-    const sandbox=await readNativeCodingSandboxEvidence({pin:operator.sandbox_receipts[permit.role],cliPath:operator.cli_executable,
+    const unchanged=()=>Promise.all([host.exe_path,path.join(resources,'app.asar'),operator.cli_executable].map(file=>image.read(file)));
+    if(!includeSandbox){await unchanged();return {...base,artifact,worktree};}
+    const sandbox=await readNativeCodingSandboxEvidence({pin:resolveNativeCodingSandboxPin(operator,permit),cliPath:operator.cli_executable,
       worktreePath:permit.worktree.path,role:permit.role,hostProcessId:parentPid});
-    return {...base,artifact,worktree,sandbox};
+    await unchanged();return {...base,artifact,worktree,sandbox};
   }
   // Acceptance reads physical current bytes and current Host identity without
   // manufacturing a fresh launch proof for a historical worker/canary.
@@ -110,5 +148,6 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
     if(result.sha256!==receipt.result_sha256||nativeCodingCanonicalJson(result.value)!==nativeCodingCanonicalJson(receipt.result)) fail('result_bytes_mismatch');
     return receipt;
   }
-  return Object.freeze({readNativeScope,readNativeWorker,readProtectedReceipt,readCheckpointScope});
+  Object.defineProperty(readNativeScope,'prepare',{value:prepareNativeScopes});
+  return Object.freeze({readNativeScope,prepareNativeScopes,readNativeWorker,readProtectedReceipt,readCheckpointScope});
 }

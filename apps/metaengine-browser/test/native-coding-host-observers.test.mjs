@@ -223,7 +223,9 @@ async function sandboxFixture(t){
   const canary={schema:'metaengine.codex-cli.sandbox-canary.v1',mode:'workspace-write',pid:124,started_at:'2026-10-22T04:00:00.123Z',user_sid:'S-1-5-21-111-1002',
     inside_append:written,inside_create:written,outside_append:denied,outside_create:denied};
   const value={schema:'metaengine.codex-cli.sandbox-probe.v1',mode:'workspace-write',workspace_path:root,cli_path:cliPath,cli_sha256:hash('fixture-cli'),
-    model_called:false,authority_effect:false,host_boot:{last_boot_at:'2026-10-22T03:00:00.000Z'},canary,
+    model_called:false,authority_effect:false,host_boot:{schema:'metaengine.windows.kernel-boot.v1',kernel_boot_id:29,
+      system_process:{pid:4,created_at:'2026-10-22T03:00:00.000Z',created_100ns:String(BigInt(Date.parse('2026-10-22T03:00:00.000Z'))*10000n+116444736000000000n)},
+      last_boot_at:'2026-10-22T03:00:00.000Z',os_version:'10.0.19045'},canary,
     sandbox_process:{pid:124,started_at:canary.started_at,user_sid:canary.user_sid},
     host_readback:{inside_existing_appended:true,inside_new_written:true,outside_existing_unchanged:true,outside_new_absent:true},
     completion:{exit_code:0,signal:null,tree_cleanup_confirmed:true},logs:{}};
@@ -232,13 +234,16 @@ async function sandboxFixture(t){
   }
   const save=async()=>{const text=JSON.stringify(value);await fs.writeFile(receiptPath,text);return {path:receiptPath,sha256:hash(text)};};
   const options={pin:await save(),cliPath,worktreePath:root,role:'IMPLEMENTER',readProcess:async()=>proc,
-    readBoot:async()=>({last_boot_at:value.host_boot.last_boot_at}),verifyStorage:yes};return {value,options,save};
+    readBoot:async()=>structuredClone(value.host_boot),verifyStorage:yes};return {value,options,save};
 }
 test('sandbox reader binds exact CLI, worktree, current boot and raw logs including empty stderr',async t=>{
   const f=await sandboxFixture(t);assert.equal((await readNativeCodingSandboxEvidence(f.options)).mode,'workspace-write');
   await assert.rejects(readNativeCodingSandboxEvidence({...f.options,worktreePath:path.join(f.options.worktreePath,'elsewhere')}),/scope_mismatch/);
   await assert.rejects(readNativeCodingSandboxEvidence({...f.options,role:'CRITIC'}),/scope_mismatch/);
-  await assert.rejects(readNativeCodingSandboxEvidence({...f.options,readBoot:async()=>({last_boot_at:'2026-10-23T03:00:00.000Z'})}),/scope_mismatch/);
+  assert.equal((await readNativeCodingSandboxEvidence({...f.options,readBoot:async()=>({...f.value.host_boot,last_boot_at:'2026-10-23T03:00:00.000Z'})})).mode,'workspace-write');
+  await assert.rejects(readNativeCodingSandboxEvidence({...f.options,readBoot:async()=>({...f.value.host_boot,kernel_boot_id:30})}),/scope_mismatch/);
+  const old=f.value.host_boot;f.value.host_boot={last_boot_at:old.last_boot_at};await assert.rejects(readNativeCodingSandboxEvidence({...f.options,pin:await f.save()}),/scope_mismatch/);
+  f.value.host_boot=old;f.options.pin=await f.save();
   await fs.writeFile(f.value.logs.stdout_path,'tampered');await assert.rejects(readNativeCodingSandboxEvidence(f.options),/log_digest_mismatch/);
 });
 
