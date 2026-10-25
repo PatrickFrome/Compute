@@ -81,6 +81,9 @@ export const LOCAL_RUNTIME_MIGRATIONS = Object.freeze([
     relations:Object.freeze(['destruktion_meta.native_coding_worktree_fence_h205f22','destruktion_meta.native_coding_checkpoint_h205f22']),
     triggers:Object.freeze([{relation:'destruktion_meta.native_coding_execution_h205f22',
       name:'native_coding_execution_worktree_fence_trg',signature:'destruktion_meta.native_coding_execution_worktree_fence_v1()'}])},
+  {path:'20261025080000_native_coding_worktree_lease_admission_v1.sql',
+    signature:'destruktion_meta.native_coding_worktree_admissible_v1(uuid,uuid)',
+    source_url:new URL('../../supabase/migrations/20261025080000_native_coding_worktree_lease_admission_v1.sql',import.meta.url)},
   // P3 opt-in fleet DAG: qualified only for self-owned local PostgreSQL;
   // the existing devos lease inserts into the same canonical claim table.
   { path: 'fleet-coordination-claim-guard-v1.sql', signature: 'destruktion_meta.fleet_coordination_claim_gate_v1()',

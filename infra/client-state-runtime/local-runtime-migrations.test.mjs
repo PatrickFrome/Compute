@@ -29,7 +29,7 @@ test('migration plan pins deployed sources, unbounded defaults and the opt-in ow
   const unbounded = plan.migrations.find(row => row.source === mandatorySources.at(-1));
   assert.deepEqual(unbounded.signatures, ['destruktion_meta.project_unbounded_defaults_h205f22()']);
   const nativeSources=['20261022070000_native_coding_execution_ledger_v1.sql','20261023082533_native_coding_operator_qa_admission_v1.sql',
-    '20261025070000_native_coding_project_continuation_v1.sql'];
+    '20261025070000_native_coding_project_continuation_v1.sql','20261025080000_native_coding_worktree_lease_admission_v1.sql'];
   assert.deepEqual(sources.slice(mandatorySources.length,mandatorySources.length+nativeSources.length),nativeSources);
   const ledger=plan.migrations.find(row=>row.source===nativeSources[0]),admission=plan.migrations.find(row=>row.source===nativeSources[1]);
   assert.equal(ledger.signatures.length,3);assert(ledger.signatures.every(value=>value.startsWith('destruktion_meta.')));
@@ -40,6 +40,8 @@ test('migration plan pins deployed sources, unbounded defaults and the opt-in ow
   assert.equal(checkpoint.relations.length,2);assert.equal(checkpoint.signatures.length,7);
   assert(checkpoint.signatures.every(value=>value.startsWith('destruktion_meta.')));
   assert.deepEqual(checkpoint.triggers.map(row=>row.name),['native_coding_execution_worktree_fence_trg']);
+  assert.deepEqual(plan.migrations.find(row=>row.source===nativeSources[3]).signatures,
+    ['destruktion_meta.native_coding_worktree_admissible_v1(uuid,uuid)']);
   const extras = plan.migrations.slice(mandatorySources.length+nativeSources.length);
   // The W5 DAG guard is an optional source-only integration lane and must
   // never be admitted as an arbitrary migration or silently become installed.
