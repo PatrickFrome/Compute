@@ -25,6 +25,9 @@ const knownIdentityRequirement = 'Require(GetProcessId(helper.process)==helper.p
 const knownMembershipRequirement = 'Require(IsProcessInJob(helper.process,guard,out membership) && membership && IsProcessInJob(child,guard,out membership) && membership,"known_membership_before_helper_kill");';
 const forcedHelperKill = 'Require(TerminateProcess(helper.process,91),"forced_exact_helper_kill");';
 const outerCleanup = 'Require(TerminateJobObject(guard,125),"outer_final_cleanup")';
+const childOuterMembership = 'Require(IsProcessInJob(child,guard,out membership) && membership,"child_outer_membership"); childOuterBound=true;';
+const childFallback = 'if(child!=IntPtr.Zero && childOwned && !(outerTerminationRequested && childOuterBound)) {';
+const childCleanupWait = 'if(child!=IntPtr.Zero && childOwned) Cleanup(cleanupErrors,()=>Require(WaitForSingleObject(child,5000)==0,"child_cleanup_wait"));';
 const controlWait = 'Require(WaitForSingleObject(child,5000)==0x102,"unassigned_control_survives_helper_exit");';
 const controlActive = 'Require(GetExitCodeProcess(child,out childCode) && childCode==259,"unassigned_control_still_active"); controlSurvived=true;';
 const observerStages = [
@@ -39,7 +42,7 @@ const observerStages = [
   'Require(GetProcessId(child)==childPid',
   'Require(SamePath(Image(child),childPath),"child_image");',
   parentRequirement,
-  'Require(IsProcessInJob(child,guard,out membership) && membership,"child_outer_membership");',
+  childOuterMembership,
   inventoryRequirement, knownIdentityRequirement, knownMembershipRequirement,
   forcedHelperKill,
   'Require(WaitForSingleObject(helper.process,5000)==0,"helper_exit_wait");',
@@ -49,7 +52,12 @@ const observerStages = [
   controlWait, controlActive,
   'GuardLimits(guard); observed=true;',
   outerCleanup,
-  'Require(WaitForSingleObject(child,5000)==0,"child_cleanup_wait")',
+  'outerTerminationRequested=true;',
+  childFallback,
+  'uint state=WaitForSingleObject(child,0);',
+  'Cleanup(cleanupErrors,()=>Require(state==0 || state==0x102,"owned_child_cleanup_probe"));',
+  'if(state!=0) Cleanup(cleanupErrors,()=>Require(TerminateProcess(child,125),"owned_child_final_cleanup"));',
+  childCleanupWait,
   'Require(GetExitCodeProcess(child,out code) && code!=259,"child_cleanup_exit_readback");',
   'if(control) Require(code==125,"unassigned_control_cleanup_code");',
   'Close(ref guard,"outer_guard_close")',
@@ -65,7 +73,10 @@ function assertObserverCustody(source) {
   assert.doesNotMatch(source, /\b(?:OpenProcess|GetProcessById)\s*\(/, 'numeric PIDs never authorize a process handle or kill');
   assert.match(source, /GetHandleInformation\(guard,out handleFlags\) && \(handleFlags&1\)==0/);
   assert.match(source, /limits\.basic\.flags==0x2000 && limits\.basic\.processTime==0 && limits\.basic\.jobTime==0/);
-  assert.match(source, /if\(child!=IntPtr\.Zero && childOwned && WaitForSingleObject\(child,0\)!=0\)/);
+  assert.match(source, /bool helperBound=false,childOwned=false,childOuterBound=false,outerTerminationRequested=false,/);
+  assert.equal(source.split('childOuterBound=true;').length, 2, 'only a checked native membership readback can confirm child containment');
+  assert.equal(source.split('outerTerminationRequested=true;').length, 2, 'only a checked successful OUTER termination can suppress the fallback');
+  assert.match(source, /Require\(TerminateJobObject\(guard,125\),"outer_final_cleanup"\); outerTerminationRequested=true;/);
   assert.match(source, /Require\(scenario=="BOUND" \|\| scenario=="UNASSIGNED_CONTROL","fixture_scenario"\); bool control=scenario=="UNASSIGNED_CONTROL";/);
   assert.match(source, /if\(!control\) \{[\s\S]*"inner_last_close_child_exit"[\s\S]*\} else \{[\s\S]*"unassigned_control_survives_helper_exit"/);
   assert.doesNotMatch(source, /accounting\.active\s*==\s*2/, 'aggregate association/reference counts are not the claimed two-process identity proof');
@@ -84,6 +95,75 @@ function assertObserverCustody(source) {
 
 test('birth-window observer uses complete known-identity inventory and counterfactual outcomes before outer cleanup', async () => {
   assertObserverCustody(await fs.readFile(observerPath, 'utf8'));
+});
+
+// Execute only the committed fixture's small teardown-request/wait statements
+// with deterministic native stubs. C# lambdas/operators here are also JavaScript;
+// the sole local uint declaration becomes let. This is an ordering/race contract,
+// not a C# compilation, Windows API execution or native cleanup qualification.
+function exerciseChildTeardown(source, {outerOk = true, childBound = true, childOwned = true,
+  probe = 0x102, terminateOk = true, wait = 0, exitDuringProbe = false} = {}) {
+  const begin = source.indexOf('      if(guard!=IntPtr.Zero) Cleanup(cleanupErrors,()=>');
+  const end = source.indexOf(childCleanupWait, begin) + childCleanupWait.length;
+  assert.ok(begin >= 0 && end > begin);
+  const statements = source.slice(begin, end).replace('uint state=', 'let state=');
+  const calls = [], errors = []; let childSignaled = false;
+  const run = new Function('guard', 'helper', 'child', 'IntPtr', 'helperBound', 'childOwned', 'childOuterBound',
+    'Cleanup', 'cleanupErrors', 'Require', 'TerminateJobObject', 'TerminateProcess', 'WaitForSingleObject',
+    'let outerTerminationRequested=false;\n' + statements);
+  run('outer', {process: 'helper'}, 'child', {Zero: null}, true, childOwned, childBound,
+    (errors, action) => { try { action(); } catch (error) { errors.push(error.message); } }, errors,
+    (ok, stage) => { if (!ok) throw Error(stage); },
+    (handle, code) => { calls.push(['job', handle, code]); return outerOk; },
+    (handle, code) => { calls.push(['process', handle, code]); return !childSignaled && terminateOk; },
+    (handle, milliseconds) => {
+      calls.push(['wait', handle, milliseconds]);
+      if (handle === 'helper') return 0;
+      if (milliseconds === 0) { if (exitDuringProbe) childSignaled = true; return probe; }
+      assert.equal(milliseconds, 5000); return wait;
+    });
+  return {calls, errors};
+}
+
+test('successful OUTER termination of a verified child waits for exit without a racy duplicate individual termination', async () => {
+  const source = await fs.readFile(observerPath, 'utf8');
+  const result = exerciseChildTeardown(source, {exitDuringProbe: true});
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.calls, [['job', 'outer', 125], ['wait', 'helper', 5000], ['wait', 'child', 5000]]);
+  // Replay the old source branch with a timeout probe immediately followed by
+  // process exit. The redundant native kill now fails, although the later exact
+  // handle wait succeeds. This deterministically refutes the previous ordering.
+  const begin = source.indexOf('      ' + childFallback), end = source.indexOf('\n      if(helper.process!=IntPtr.Zero) Cleanup(', begin);
+  assert.ok(begin >= 0 && end > begin);
+  const old = source.slice(0, begin) + '      if(child!=IntPtr.Zero && childOwned && WaitForSingleObject(child,0)!=0) Cleanup(cleanupErrors,()=>Require(TerminateProcess(child,125),"owned_child_final_cleanup"));' + source.slice(end);
+  const legacy = exerciseChildTeardown(old, {exitDuringProbe: true});
+  assert.deepEqual(legacy.errors, ['owned_child_final_cleanup']);
+  assert.ok(legacy.calls.some(call => call[0] === 'process'));
+  assert.deepEqual(legacy.calls.at(-1), ['wait', 'child', 5000]);
+  assert.throws(() => assertObserverCustody(old), assert.AssertionError);
+});
+
+test('OUTER failure or unverified child membership retains checked exact-owned fallback and unconditional completion waits', async () => {
+  const source = await fs.readFile(observerPath, 'utf8');
+  for (const options of [{outerOk: false}, {childBound: false}]) {
+    const result = exerciseChildTeardown(source, options);
+    assert.deepEqual(result.errors, options.outerOk === false ? ['outer_final_cleanup'] : []);
+    assert.deepEqual(result.calls, [['job', 'outer', 125], ['wait', 'child', 0], ['process', 'child', 125], ['wait', 'helper', 5000], ['wait', 'child', 5000]]);
+  }
+  assert.deepEqual(exerciseChildTeardown(source, {childBound: false, terminateOk: false}).errors, ['owned_child_final_cleanup']);
+  assert.deepEqual(exerciseChildTeardown(source, {outerOk: false, terminateOk: false, wait: 0x102}).errors,
+    ['outer_final_cleanup', 'owned_child_final_cleanup', 'child_cleanup_wait'], 'request, fallback and completion failures are all retained');
+  const failedProbe = exerciseChildTeardown(source, {childBound: false, probe: 0xffffffff});
+  assert.deepEqual(failedProbe.errors, ['owned_child_cleanup_probe']);
+  assert.ok(failedProbe.calls.some(call => call[0] === 'process'), 'a failed probe cannot prevent best-effort termination of the already-owned handle');
+  assert.deepEqual(exerciseChildTeardown(source, {childBound: false, probe: 0xffffffff, terminateOk: false}).errors,
+    ['owned_child_cleanup_probe', 'owned_child_final_cleanup'], 'arbitrary native termination failures are not ignored');
+  assert.deepEqual(failedProbe.calls.at(-1), ['wait', 'child', 5000], 'completion is still awaited after a fallback failure');
+  const alreadyExited = exerciseChildTeardown(source, {childBound: false, probe: 0});
+  assert.deepEqual(alreadyExited.errors, []); assert.ok(!alreadyExited.calls.some(call => call[0] === 'process'));
+  for (const wait of [0x102, 0xffffffff]) assert.deepEqual(exerciseChildTeardown(source, {wait}).errors, ['child_cleanup_wait']);
+  const unowned = exerciseChildTeardown(source, {childOwned: false, childBound: false});
+  assert.deepEqual(unowned.calls, [['job', 'outer', 125], ['wait', 'helper', 5000]], 'no individual fallback or readback is authorized by an unowned child handle');
 });
 
 function assertFailureInventoryDiagnostic(source) {
@@ -134,6 +214,11 @@ for (const [name, mutate] of [
   ['unowned handle-transfer source', source => source.replace('DuplicateHandle(helper.process,', 'DuplicateHandle(new IntPtr(rawValue),')],
   ['missing parent correlation', source => source.replace(parentRequirement, '')],
   ['missing known kernel identity recheck', source => source.replace(knownIdentityRequirement, '')],
+  ['OUTER success alone suppressing child fallback', source => source.replace('outerTerminationRequested && childOuterBound', 'outerTerminationRequested')],
+  ['membership alone suppressing child fallback', source => source.replace('outerTerminationRequested && childOuterBound', 'childOuterBound')],
+  ['membership flagged before native confirmation', source => source.replace(childOuterMembership, 'childOuterBound=true; ' + childOuterMembership.replace(' childOuterBound=true;', ''))],
+  ['OUTER request flagged before checked success', source => source.replace(outerCleanup + '; outerTerminationRequested=true;', 'outerTerminationRequested=true; ' + outerCleanup + ';')],
+  ['missing exact-child completion wait', source => source.replace(childCleanupWait, '')],
   ['control death accepted as survival', source => source.replace(controlWait, controlWait.replace('==0x102', '==0'))],
   ['missing eventual unassigned cleanup code', source => source.replace('if(control) Require(code==125,"unassigned_control_cleanup_code");', '')],
 ]) test(`birth-window observer source refuses ${name}`, async () => {

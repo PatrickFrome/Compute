@@ -208,7 +208,7 @@ public static class MetaengineJobBirthObserver {
     }
     IntPtr guard=IntPtr.Zero,stdinRead=IntPtr.Zero,stdinWrite=IntPtr.Zero,stdoutRead=IntPtr.Zero,stdoutWrite=IntPtr.Zero,stderrRead=IntPtr.Zero,stderrWrite=IntPtr.Zero,child=IntPtr.Zero;
     var helper=new ProcessInfo(); Drain stdout=null,stderr=null; Inventory inventory=null;
-    bool helperBound=false,childOwned=false,observed=false,innerObserved=false,controlSurvived=false,childExitConfirmed=false;
+    bool helperBound=false,childOwned=false,childOuterBound=false,outerTerminationRequested=false,observed=false,innerObserved=false,controlSurvived=false,childExitConfirmed=false;
     long helperBirth=0,childBirth=0; uint childPid=0,childCode=0,cleanupChildCode=0;
     Exception primary=null; var cleanupErrors=new List<Exception>();
     try {
@@ -277,7 +277,7 @@ public static class MetaengineJobBirthObserver {
       IntPtr transferred; Require(DuplicateHandle(helper.process,new IntPtr(rawValue),new IntPtr(-1),out transferred,0,false,2),"child_handle_transfer"); child=transferred;
       Require(GetProcessId(child)==childPid && childPid!=helper.pid && childBirth>0 && Birth(child)==childBirth && childBirth>=helperBirth,"child_kernel_identity");
       Require(SamePath(Image(child),childPath),"child_image"); Require(ParentIs(child,helper.pid),"child_parent"); childOwned=true;
-      Require(IsProcessInJob(child,guard,out membership) && membership,"child_outer_membership");
+      Require(IsProcessInJob(child,guard,out membership) && membership,"child_outer_membership"); childOuterBound=true;
       GuardLimits(guard); Accounting accounting; var accountingDeadline=DateTime.UtcNow.AddSeconds(2);
       int accountingPolls=0; uint firstActive=0,minActive=UInt32.MaxValue,maxActive=0;
       do {
@@ -312,9 +312,22 @@ public static class MetaengineJobBirthObserver {
     finally {
       // On every abort, the independent OUTER guard contains only this helper's
       // inert test tree. No file-supplied PID is ever opened or terminated.
-      if(guard!=IntPtr.Zero) Cleanup(cleanupErrors,()=>Require(TerminateJobObject(guard,125),"outer_final_cleanup"));
+      if(guard!=IntPtr.Zero) Cleanup(cleanupErrors,()=> {
+        Require(TerminateJobObject(guard,125),"outer_final_cleanup"); outerTerminationRequested=true;
+      });
       if(helper.process!=IntPtr.Zero && !helperBound) Cleanup(cleanupErrors,()=>Require(TerminateProcess(helper.process,125),"unbound_owned_helper_cleanup"));
-      if(child!=IntPtr.Zero && childOwned && WaitForSingleObject(child,0)!=0) Cleanup(cleanupErrors,()=>Require(TerminateProcess(child,125),"owned_child_final_cleanup"));
+      // Successful Job termination already requests exit for this verified member.
+      // Wait below: a zero-time probe followed by a second TerminateProcess can
+      // race that exit and fail with ERROR_ACCESS_DENIED after it has completed.
+      // Only an unconfirmed Job request/membership needs the exact-owned fallback;
+      // neither request success nor a failed wait is itself cleanup confirmation.
+      if(child!=IntPtr.Zero && childOwned && !(outerTerminationRequested && childOuterBound)) {
+        uint state=WaitForSingleObject(child,0);
+        Cleanup(cleanupErrors,()=>Require(state==0 || state==0x102,"owned_child_cleanup_probe"));
+        // A probe error is retained, but cannot stop the already-owned handle's
+        // best-effort termination or the unconditional completion wait below.
+        if(state!=0) Cleanup(cleanupErrors,()=>Require(TerminateProcess(child,125),"owned_child_final_cleanup"));
+      }
       if(helper.process!=IntPtr.Zero) Cleanup(cleanupErrors,()=>Require(WaitForSingleObject(helper.process,5000)==0,"helper_cleanup_wait"));
       if(child!=IntPtr.Zero && childOwned) Cleanup(cleanupErrors,()=>Require(WaitForSingleObject(child,5000)==0,"child_cleanup_wait"));
       if(child!=IntPtr.Zero && childOwned) Cleanup(cleanupErrors,()=> {
