@@ -105,16 +105,26 @@ jobs:
         timeout-minutes: 10
         working-directory: apps/metaengine-browser
         shell: bash
+        env:
+          NATIVE_PROBE_LOG: ${{ runner.temp }}/windows-native-probe-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}.log
         run: |
           set -euo pipefail
-          node ../../.github/browser-ci-resource-observation.mjs isolated-windows-native
+          node ../../.github/browser-ci-resource-observation.mjs isolated-windows-native 2>&1 | tee "$NATIVE_PROBE_LOG"
           node --test --test-concurrency=1 \
             test/codex-cli-runner.test.mjs \
             test/codex-cli-sandbox-probe.test.mjs \
             test/native-coding-host-observers.test.mjs \
             test/windows-local-computer-executor.test.mjs \
             test/codex-cli-windows-output-order.test.mjs \
-            test/codex-cli-windows-job-birth-physical.test.mjs
+            test/codex-cli-windows-job-birth-physical.test.mjs \
+            2>&1 | tee -a "$NATIVE_PROBE_LOG"
+      - name: Publish isolated Windows native diagnostic before the full suite
+        if: ${{ !cancelled() && runner.os == 'Windows' && (steps.windows_native_probe.outcome == 'success' || steps.windows_native_probe.outcome == 'failure') }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-native-probe-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/windows-native-probe-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}.log
+          if-no-files-found: error
       - name: Exercise all Browser mechanics including real local IPC
         # Explicit status function retains full coverage after a failed/timed-out
         # probe. That failure still fails this job; cancellation remains honored.

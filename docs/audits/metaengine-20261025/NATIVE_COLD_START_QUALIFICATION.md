@@ -210,6 +210,32 @@ References:
 - [PowerShell native process waiting semantics](https://devblogs.microsoft.com/powershell/managing-processes-in-powershell/).
 - [Process redirected output and deadlock avoidance](https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.process.standardoutput?view=netframework-4.8.1).
 
+## Early native failure receipts while complete coverage continues
+
+Source `28b105a23e8ffa28083b27313f784c6a75b8e046` passed actual Windows helper
+preparation on the Live Mechanics and Current Source runners (32 and 24 seconds).
+This includes compilation, reflected entrypoint validation, publication/readback
+and owned cleanup. Linux exact-source qualification also passed with 5,927 Browser
+passes, zero failures and 65 platform skips, including real Electron/ASAR checks.
+
+The Live Mechanics isolated Windows native stage then failed at 21:26:19 UTC,
+after 9 minutes 13 seconds, within its unchanged ten-minute ceiling. The full
+suite correctly continued. The GitHub job-log endpoint returned `404 BlobNotFound`
+while the containing job remained active, so the failing assertion was not yet
+available. No successful Windows runtime qualification or new package identity
+was inferred from successful build preparation.
+
+The workflow follow-up captures the isolated native stage output with `tee` under
+its existing `set -euo pipefail`, then uploads that receipt immediately after the
+stage succeeds or fails. The full regression suite still runs after successful
+prerequisites, including when the native stage failed. The same six complete
+native test files, concurrency, time ceilings and failure propagation remain in
+force; neither this artifact nor its upload grants qualification. Cancellation is
+still honored. The source/run/attempt-scoped log gives a reviewer the native
+failure details before the longer complete regression job finishes.
+
+The observed stage statuses are retained in `native-stage-observability.json`.
+
 ## Acceptance still required
 
 This continuation must be qualified on its own final source commit. Portable

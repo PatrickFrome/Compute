@@ -126,7 +126,7 @@ test('both qualification steps emit safe resource/timestamp observations and hel
 for (const [name, before, after] of [
   ['omitted native file', '            test/codex-cli-sandbox-probe.test.mjs \\\n', ''],
   ['omitted output-order native file', '            test/codex-cli-windows-output-order.test.mjs \\\n', ''],
-  ['omitted atomic-birth native file', '            test/codex-cli-windows-job-birth-physical.test.mjs\n', ''],
+  ['omitted atomic-birth native file', '            test/codex-cli-windows-job-birth-physical.test.mjs \\\n', ''],
   ['parallel native diagnostic', '--test-concurrency=1 \\', '--test-concurrency=4 \\'],
   ['filtered full suite', "--test-concurrency=4 'test/*.test.mjs'", "--test-concurrency=4 --test-name-pattern=selected 'test/*.test.mjs'"],
   ['probe-dependent full suite', fullGate, "        if: ${{ success() && steps.windows_native_probe.outcome == 'success' }}"],

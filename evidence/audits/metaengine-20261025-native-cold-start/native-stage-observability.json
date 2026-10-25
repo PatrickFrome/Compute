@@ -1,0 +1,40 @@
+{
+  "schema": "metaengine.native-cold-start.native-stage-observability.v1",
+  "source_head": "28b105a23e8ffa28083b27313f784c6a75b8e046",
+  "run_id": 40234579576,
+  "job_id": 121293297254,
+  "url": "https://github.com/PatrickFrome/Compute/actions/runs/40234579576/job/121293297254",
+  "job_status_at_read": "in_progress",
+  "steps": [
+    {
+      "name": "Build the native job helper before Windows runtime contracts",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 6,
+      "started_at": "2026-10-25T21:16:12Z",
+      "completed_at": "2026-10-25T21:16:44Z"
+    },
+    {
+      "name": "Isolated Windows native diagnostic (not contention proof)",
+      "status": "completed",
+      "conclusion": "failure",
+      "number": 10,
+      "started_at": "2026-10-25T21:17:06Z",
+      "completed_at": "2026-10-25T21:26:19Z"
+    },
+    {
+      "name": "Exercise all Browser mechanics including real local IPC",
+      "status": "in_progress",
+      "conclusion": null,
+      "number": 11,
+      "started_at": "2026-10-25T21:26:19Z",
+      "completed_at": null
+    }
+  ],
+  "isolated_native_failed": true,
+  "failed_test_details_available": false,
+  "log_endpoint_result": "404 BlobNotFound while containing job continues",
+  "full_suite_continues": true,
+  "windows_runtime_qualified": false,
+  "package_version_selected": false
+}
