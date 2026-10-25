@@ -10,6 +10,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import test from 'node:test';
 import postgres from 'postgres';
+import { RPC_ALLOWLIST } from './db-api-core.mjs';
 import { verifyOfflineRuntimeBundle } from './offline-runtime-bundle.mjs';
 import { normalizeRuntimeHealthFailure } from './launcher.mjs';
 import { schemaOnlyRestorePlan } from './test/isolated-goal-fixture.mjs';
@@ -148,7 +149,7 @@ test('verified bundled onboarding and attached host restart preserve an existing
     assert(evidence.isDirectory() && !evidence.isSymbolicLink());
   }
   const bundledModule = name => import(pathToFileURL(path.join(verified.paths.sourceRoot, 'infra/client-state-runtime', name)).href);
-  const { loadLocalRuntimeMigrationPlan, LOCAL_VAULT_COMPAT_SQL_RESOURCE } = await bundledModule('local-runtime-migrations.mjs');
+  const { applyLocalRuntimeMigrations, loadLocalRuntimeMigrationPlan, LOCAL_VAULT_COMPAT_SQL_RESOURCE } = await bundledModule('local-runtime-migrations.mjs');
   const { secureAttachedPrivateFile, inspectAttachedApiAdmission } = await bundledModule('attached-postgres-onboarding.mjs');
   const { initializeLocalVaultKey } = await bundledModule('local-vault-key.mjs');
   const { startOwnedWindowsPostgres } = await bundledModule('owned-postgres-process.mjs');
@@ -227,6 +228,25 @@ test('verified bundled onboarding and attached host restart preserve an existing
   await fs.writeFile(tocPath, restorePlan.selected.join('\n') + '\n', { flag: 'wx', mode: 0o600 });
   await privateExec(path.join(bin, 'pg_restore.exe'), ['--schema-only', '--no-owner', '--exit-on-error', '--single-transaction',
     '--host=127.0.0.1', '--port=' + port, '--username=' + owner, '--dbname=postgres', '--use-list=' + tocPath, dump], env, 'schema_restore');
+  const cognitiveSignature = 'public.h205f22_a2_browser_cognitive_accept_v1(uuid,text,text,uuid,bigint,bigint,jsonb,boolean)';
+  const readCognitiveAcl = async () => (await sql.unsafe(`SELECT p.prosecdef AS definer,
+    NOT EXISTS (SELECT 1 FROM pg_catalog.aclexplode(coalesce(p.proacl,pg_catalog.acldefault('f',p.proowner))) a
+      WHERE a.privilege_type='EXECUTE' AND a.grantee=0) AS public_denied,
+    pg_catalog.has_function_privilege('anon',p.oid,'EXECUTE') AS anon,
+    pg_catalog.has_function_privilege('authenticated',p.oid,'EXECUTE') AS authenticated,
+    pg_catalog.has_function_privilege('service_role',p.oid,'EXECUTE') AS service
+    FROM pg_catalog.pg_proc p WHERE p.oid=pg_catalog.to_regprocedure($1::text)`,[cognitiveSignature]))[0];
+  const reviewedCognitiveAcl = {definer:true,public_denied:true,anon:false,authenticated:false,service:true};
+  assert.deepEqual(await readCognitiveAcl(),reviewedCognitiveAcl,
+    'schema restore must preserve reviewed privileges before production onboarding');
+  // Exercise the production guard in a rolled-back disposable transaction.
+  // Neither the fixture nor onboarding may repair away unexpected PUBLIC access.
+  await assert.rejects(sql.begin(async tx => {
+    await tx.unsafe('GRANT EXECUTE ON FUNCTION '+cognitiveSignature+' TO PUBLIC');
+    await applyLocalRuntimeMigrations({sql:{begin:run=>run(tx)},expectedMigrationSourcesSha256:plan.source_manifest_sha256});
+  }),/cognitive_direct_api_public_execution_requires_review/);
+  assert.deepEqual(await readCognitiveAcl(),reviewedCognitiveAcl,'negative ACL control must roll back');
+  t.diagnostic('restored reviewed Cognitive RPC ACL and rejected public execution without weakening the production guard');
   // A schema-only restored Owner must carry the exact DB capability
   // attestation function. Catalog-only synthetic JSON can never qualify Edge.
   const [restoredCapabilityRow] = await sql.unsafe('SELECT public.devos_runtime_capabilities_v1() AS capabilities');
@@ -280,7 +300,7 @@ test('verified bundled onboarding and attached host restart preserve an existing
   assert.deepEqual(setup.closed, { code: 0, signal: null }, setupFailure);
   assert.equal(setup.receipt.state, 'CONFIGURED_UNQUALIFIED');
   assert.equal(setup.receipt.source_manifest_sha256, plan.source_manifest_sha256);
-  assert.equal(setup.receipt.restricted_api_admission.rpc_names_granted, 50);
+  assert.equal(setup.receipt.restricted_api_admission.rpc_names_granted, RPC_ALLOWLIST.length);
   assert.equal(setup.receipt.postgres_started, false);
   assert.equal(setup.receipt.postgres_stopped, false);
   await fs.unlink(optionsFile);
@@ -292,10 +312,10 @@ test('verified bundled onboarding and attached host restart preserve an existing
     max: 1, prepare: false, connect_timeout: 3, onnotice: () => {} });
   const admission = await inspectAttachedApiAdmission({ sql: direct, apiLogin: login });
   assert.equal(admission.restricted_login, true);
-  assert.equal(admission.rpc_names_granted, 50);
+  assert.equal(admission.rpc_names_granted, RPC_ALLOWLIST.length);
   await assert.rejects(direct.unsafe('SET ROLE service_role'), error => error.code === '42501');
   await direct.end({ timeout: 3 }); direct = null;
-  t.diagnostic('real bundled onboarding configured all 50 RPC names and admitted the SCRAM direct API role');
+  t.diagnostic(`real bundled onboarding configured all ${RPC_ALLOWLIST.length} RPC names and admitted the SCRAM direct API role`);
   const instances = [], childPids = [];
   const statusFile = path.join(state, 'runtime-instance.json');
   for (let run = 0; run < 2; run += 1) {

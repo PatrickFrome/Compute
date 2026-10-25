@@ -15,7 +15,8 @@
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit",
     "test:operator-observatory": "node --test src/lib/operator-observatory.test.mjs src/lib/operator-observatory-resync.test.mjs src/lib/operator-observatory-resync.ui.test.mjs",
     "test:operator-observatory-resync": "node --test src/lib/operator-observatory-resync.test.mjs src/lib/operator-observatory-resync.ui.test.mjs",
-    "test:operator-primary": "node --test src/lib/operator-primary-views.test.mjs src/lib/operator-primary-views.ui.test.mjs"
+    "test:operator-primary": "node --test src/lib/operator-primary-views.test.mjs src/lib/operator-primary-views.ui.test.mjs",
+    "test:goal-admission": "node --test src/lib/goal-submission-mode-observer.test.mjs src/lib/goal-submission-mode-observer.ui.test.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

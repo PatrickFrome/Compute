@@ -66,6 +66,10 @@ async function fixture({executionState='RESERVED',postExecutionHead=null,role='I
     if(text.startsWith('set local '))return[];
     if(text.includes('native_coding_admission_context_v1')) {
       if(!controls.projectBound||values[1]===true&&!controls.projectActive)return[];
+      if(text.includes('order by p.permit_id'))return (controls.scopeContexts??[controls.context])
+        .filter(context=>context.permit.permit_id>values[2])
+        .sort((left,right)=>left.permit.permit_id.localeCompare(right.permit.permit_id))
+        .slice(0,33).map(context=>({context:structuredClone(context)}));
       return[{context:structuredClone(controls.context)}];
     }
     if(text.startsWith('select to_jsonb(t)'))return[{task:structuredClone(task)}];
@@ -157,11 +161,40 @@ test('scope discovery is bound to the current own PG, OS user and active enrolle
   assert.deepEqual(Object.keys(discovered.bindings[0].device).sort(),
     ['admin_grant_epoch','client_id','device_id','key_fingerprint_sha256','profile','public_jwk']);
   const query=x.calls.find(call=>call.text?.includes('order by p.permit_id'));
-  assert.deepEqual(query.values,[x.native.postgres.system_identifier,x.native.user_sid]);
+  assert.deepEqual(query.values,[x.native.postgres.system_identifier,x.native.user_sid,'00000000-0000-0000-0000-000000000000']);
+  assert.match(query.text,/p\.permit_id>\$3::uuid order by p\.permit_id limit 33/);
+  assert.equal(discovered.has_more,false);assert.equal(discovered.next_after_permit_id,null);
   assert.match(query.text,/r\.state='ACTIVE'/);assert.match(query.text,/d\.active and d\.revoked_at is null/);
   assert.match(query.text,/d\.admin_grant_epoch=p\.admin_grant_epoch/);
   x.controls.context.device.public_jwk.d='private-material';
   await assert.rejects(x.authority.READ_SCOPE(),/protected_context_invalid/);
+});
+
+test('scope pages return every permit beyond 64 without consuming the lookahead row or rebinding native scope',async()=>{
+  const x=await fixture();
+  const permitIds=Array.from({length:65},(_,i)=>`${String(i+1).padStart(8,'0')}-0000-4000-8000-000000000000`);
+  x.controls.scopeContexts=permitIds.map(permit_id=>{
+    const context=structuredClone(x.controls.context);context.permit.permit_id=permit_id;return context;
+  }).reverse();
+  const first=await x.authority.READ_SCOPE();
+  assert.deepEqual(first.bindings.map(row=>row.permit_id),permitIds.slice(0,32));
+  assert.equal(first.has_more,true);assert.equal(first.next_after_permit_id,permitIds[31]);
+  const second=await x.authority.READ_SCOPE({after_permit_id:first.next_after_permit_id});
+  assert.deepEqual(second.bindings.map(row=>row.permit_id),permitIds.slice(32,64));
+  assert.equal(second.has_more,true);assert.equal(second.next_after_permit_id,permitIds[63]);
+  const final=await x.authority.READ_SCOPE({after_permit_id:second.next_after_permit_id});
+  assert.deepEqual(final.bindings.map(row=>row.permit_id),permitIds.slice(64));
+  assert.equal(final.has_more,false);assert.equal(final.next_after_permit_id,null);
+  const empty=await x.authority.READ_SCOPE({after_permit_id:permitIds[64]});
+  assert.deepEqual(empty.bindings,[]);assert.equal(empty.has_more,false);assert.equal(empty.next_after_permit_id,null);
+  const queries=x.calls.filter(call=>call.text?.includes('order by p.permit_id'));
+  assert.deepEqual(queries.map(call=>call.values),['00000000-0000-0000-0000-000000000000',permitIds[31],permitIds[63],permitIds[64]]
+    .map(cursor=>[x.native.postgres.system_identifier,x.native.user_sid,cursor]));
+  for(const query of queries)assert.match(query.text,/p\.permit_id>\$3::uuid order by p\.permit_id limit 33/);
+  const reads=queries.length;
+  for(const query of [{after_permit_id:'invalid'},{after_permit_id:permitIds[0],workspace_id:randomUUID()}])
+    await assert.rejects(x.authority.READ_SCOPE(query),/scope_cursor_invalid/);
+  assert.equal(x.calls.filter(call=>call.text?.includes('order by p.permit_id')).length,reads);
 });
 
 test('reserve requires the complete installed image and original managed worktree',async()=>{

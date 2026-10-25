@@ -11,7 +11,7 @@ import { reconcileAbandonedAttachedRuntimeLock } from './runtime-host-orphan-rec
 import { createNativeCodingHostIpcServer } from './native-coding-host-ipc.mjs';
 import { createNativeCodingHostAuthority } from './native-coding-host-authority.mjs';
 import {createNativeCodingHostCommitService} from './native-coding-host-commit-service.mjs';
-import {createNativeCodingHostSeedService} from './native-coding-host-seed-service.mjs';
+import {createNativeCodingHostSeedBinding} from './native-coding-host-seed-binding.mjs';
 import {createNativeCodingDeviceRequestVerifier,createNativeCodingAuthenticatedRequestContext} from './native-coding-device-request.mjs';
 import {createNativeCodingHostServiceHeartbeat} from './native-coding-host-service-heartbeat.mjs';
 import { createNativeCodingHostOsScope,readNativeCodingOperatorPaths } from './native-coding-host-os-scope.mjs';
@@ -327,6 +327,7 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
   let stopPromise;
   let nativeCodingAuthority = null;
   let nativeCodingSql = null;
+  let nativeCodingSeedBinding = null;
   let abortRequested = signal?.aborted === true;
   let lastStatus = baseStatus;
   let lastHealthFailure = null;
@@ -358,6 +359,7 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
     if (!terminalPromise) terminalPromise = (async () => {
       const confirmed = outcome.children_stopped === true;
       nativeCodingAuthority?.close();
+      nativeCodingSeedBinding?.close();
       if(nativeCodingSql) {await nativeCodingSql.end({timeout:5});nativeCodingSql=null;}
       if (outcome.last_health_failure) {
         try { lastHealthFailure = normalizeRuntimeHealthFailure(outcome.last_health_failure); } catch { /* Never forward unvalidated diagnostics. */ }
@@ -408,45 +410,62 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
     if(await lstat(operatorFile).catch(error=>{if(error.code==='ENOENT')return null;throw error;})) {
       await readNativeCodingOperatorPaths(config.state_directory);
       const {default:postgres}=await import('postgres');
+      // A terminal callback may have run while the private paths/import were
+      // awaited. Never create new owned resources after its cleanup snapshot.
+      if(abortRequested||runtime.stopped===true||terminalPromise)throw failure('runtime_host_child_ended_during_startup');
       nativeCodingSql=postgres(config.inspect_database_url,{max:2,connect_timeout:10,idle_timeout:30,prepare:false});
       const native=createNativeCodingHostOsScope({config,sql:nativeCodingSql,parentPid:process.ppid});
-      let commitService=null;
-      // A missing/invalid separate commit capability fences commit only. It
-      // must not take the existing PG/API or readonly agent path offline.
+      let commitService=null,serviceHeartbeatOperations=null,transferred=false;
       try{
-        if(await lstat(path.join(config.state_directory,'native-coding-git-commit-operator-v1.json')))
-          commitService=await createNativeCodingHostCommitService({sql:nativeCodingSql,stateDirectory:config.state_directory,
-            readNativeScope:native.readNativeScope,readProtectedReceipt:native.readProtectedReceipt});
-      }catch{/* Missing/unreadable/invalid commit capability remains COMMIT_CAPABILITY_HOLD only. */}
-      let seedOperations=null;
-      try{
-        if(await lstat(path.join(config.state_directory,'native-coding-seed-operator-v1.json'))){
-          const verifier=createNativeCodingDeviceRequestVerifier({sql:nativeCodingSql,hostInstanceId:descriptor.instance_id,hostPid:process.pid});
-          const context=createNativeCodingAuthenticatedRequestContext({verifier});
-          try{
-            const seed=await createNativeCodingHostSeedService({sql:nativeCodingSql,stateDirectory:config.state_directory,
-              readNativeScope:native.readNativeScope,readCurrentDevice:context.readCurrentDevice});
-            seedOperations={...Object.fromEntries(['SEED_GOAL','READ_SEED','LIST_SEEDS'].map(action=>[action,
-              request=>context.run(action,request,input=>seed[action](input))])),
-              close(){seed.close();context.close();verifier.close();}};
-          }catch(error){context.close();verifier.close();throw error;}
+        // A missing/invalid separate commit capability fences commit only. It
+        // must not take the existing PG/API or readonly agent path offline.
+        try{
+          if(await lstat(path.join(config.state_directory,'native-coding-git-commit-operator-v1.json')))
+            commitService=await createNativeCodingHostCommitService({sql:nativeCodingSql,stateDirectory:config.state_directory,
+              readNativeScope:native.readNativeScope,readProtectedReceipt:native.readProtectedReceipt});
+        }catch{/* Missing/unreadable/invalid commit capability remains COMMIT_CAPABILITY_HOLD only. */}
+        if(abortRequested||runtime.stopped===true||terminalPromise)throw failure('runtime_host_child_ended_during_startup');
+        nativeCodingSeedBinding=createNativeCodingHostSeedBinding({sql:nativeCodingSql,stateDirectory:config.state_directory,
+          readNativeScope:native.readNativeScope,hostInstanceId:descriptor.instance_id,hostPid:process.pid});
+        try{await nativeCodingSeedBinding.prepare();}
+        catch{/* Keep PG/API available; a later authenticated readonly discovery can inspect a newly published profile. */}
+        const seedOperations=nativeCodingSeedBinding.operations;
+        if(abortRequested||runtime.stopped===true||terminalPromise)throw failure('runtime_host_child_ended_during_startup');
+        const serviceVerifier=createNativeCodingDeviceRequestVerifier({sql:nativeCodingSql,hostInstanceId:descriptor.instance_id,hostPid:process.pid});
+        let serviceContext;
+        try{serviceContext=createNativeCodingAuthenticatedRequestContext({verifier:serviceVerifier});}
+        catch(error){serviceVerifier.close();throw error;}
+        try{
+          const service=await createNativeCodingHostServiceHeartbeat({sql:nativeCodingSql,hostInstanceId:descriptor.instance_id,hostPid:process.pid,
+            readNativeScope:native.readNativeScope,readCurrentDevice:serviceContext.readCurrentDevice});
+          serviceHeartbeatOperations={...Object.fromEntries(['SERVICE_HEARTBEAT','READ_SERVICE_HEARTBEAT'].map(action=>[action,
+            request=>serviceContext.run(action,request,(_input,checked)=>service[action](checked))])),
+            close(){service.close();serviceContext.close();serviceVerifier.close();}};
+        }catch{serviceContext.close();serviceVerifier.close();}
+        if(abortRequested||runtime.stopped===true||terminalPromise)throw failure('runtime_host_child_ended_during_startup');
+        const candidate=await createNativeCodingHostAuthority({sql:nativeCodingSql,...native,commitService,seedOperations,serviceHeartbeatOperations});
+        transferred=true;
+        if(abortRequested||runtime.stopped===true||terminalPromise){
+          candidate.close();throw failure('runtime_host_child_ended_during_startup');
         }
-      }catch{/* An absent/invalid separate seed capability cannot retire the working PG/API. */}
-      let serviceHeartbeatOperations=null;
-      const serviceVerifier=createNativeCodingDeviceRequestVerifier({sql:nativeCodingSql,hostInstanceId:descriptor.instance_id,hostPid:process.pid});
-      const serviceContext=createNativeCodingAuthenticatedRequestContext({verifier:serviceVerifier});
-      try{
-        const service=await createNativeCodingHostServiceHeartbeat({sql:nativeCodingSql,hostInstanceId:descriptor.instance_id,hostPid:process.pid,
-          readNativeScope:native.readNativeScope,readCurrentDevice:serviceContext.readCurrentDevice});
-        serviceHeartbeatOperations={...Object.fromEntries(['SERVICE_HEARTBEAT','READ_SERVICE_HEARTBEAT'].map(action=>[action,
-          request=>serviceContext.run(action,request,(_input,checked)=>service[action](checked))])),
-          close(){service.close();serviceContext.close();serviceVerifier.close();}};
-      }catch{serviceContext.close();serviceVerifier.close();}
-      nativeCodingAuthority=await createNativeCodingHostAuthority({sql:nativeCodingSql,...native,commitService,seedOperations,serviceHeartbeatOperations});
+        nativeCodingAuthority=candidate;
+      }finally{
+        // An ended Host may already have a cached finalize promise while an
+        // optional service is still being created. Reclaim local capabilities
+        // that never reached the canonical authority; never restart/stop PG.
+        if(!transferred){
+          try{commitService?.close();}finally{
+            try{nativeCodingSeedBinding?.close();}finally{serviceHeartbeatOperations?.close();}
+          }
+        }
+      }
     }
     return { descriptor, statusFile: path.join(config.state_directory, 'runtime-instance.json'), stop, finished,
       nativeCodingAuthority };
   } catch (error) {
+    // Also fence a pending optional binding when stop/finalize already has a
+    // cached promise. Closing it cannot stop or replace the working PostgreSQL.
+    nativeCodingSeedBinding?.close();
     if (runtime) await stop('requested');
     else {
       signal?.removeEventListener('abort', onAbort);
