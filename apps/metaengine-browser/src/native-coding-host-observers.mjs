@@ -133,7 +133,7 @@ export function createNativeCodingPermitRegistry({ownPostgres,identity}={}) {
   const rows=async()=>{
     const scope=await ownPostgres.readScope(),device=identity.snapshot();
     if(scope?.schema!=='metaengine.native-coding.own-pg-scope.v1'||scope.source!=='PRIVATE_RUNTIME_HOST_OWN_PG'
-      ||!fresh(scope.observed_at)||!Array.isArray(scope.bindings)||scope.bindings.length>64)fail('permit_registry_scope_invalid');
+      ||!fresh(scope.observed_at)||!Array.isArray(scope.bindings))fail('permit_registry_scope_invalid');
     return scope.bindings.filter(row=>row.device_id===device.device_id&&row.client_id===device.client_id&&row.permit
       &&row.permit.provider_id===row.provider_id&&row.permit.agent_id===row.agent_id&&row.permit.revoked===false
       &&row.permit.device_id===row.device_id&&row.permit.permit_id===row.permit_id
@@ -331,7 +331,7 @@ export function createNativeCodingHostObservers({app,resourcesPath,cliPath,ident
   const readScope=async()=>{
     const value=await ownPostgres.readScope();
     if(value?.schema!=='metaengine.native-coding.own-pg-scope.v1'||value.source!=='PRIVATE_RUNTIME_HOST_OWN_PG'||!fresh(value.observed_at)
-      ||!Array.isArray(value.bindings)||value.bindings.length>64)fail('own_pg_scope_unverified');
+      ||!Array.isArray(value.bindings))fail('own_pg_scope_unverified');
     return value;
   };
   const readPermit=async query=>{

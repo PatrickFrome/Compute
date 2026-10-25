@@ -27,7 +27,14 @@ import {createNativeCodingHostIpcServer} from ${JSON.stringify(serverUrl)};
 const mode=process.env.METAENGINE_IPC_TEST_MODE;let calls=0,protocolErrors=[];
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const operations={
- READ_SCOPE:async()=>{const n=++calls;if(mode==='delayed-read')await delay(80);return {call_count:n};},
+ READ_SCOPE:async value=>{const n=++calls;if(mode==='delayed-read')await delay(80);
+  if(mode==='paged-scope'){
+   const all=Array.from({length:160},(_,i)=>({permit_id:'00000000-0000-4000-8000-'+String(i+1).padStart(12,'0'),permit:{padding:'x'.repeat(3000)}}));
+   const rows=all.filter(r=>!value.after_permit_id||r.permit_id>value.after_permit_id),page=rows.slice(0,32);
+   return {schema:'metaengine.native-coding.own-pg-scope.v1',source:'PRIVATE_RUNTIME_HOST_OWN_PG',postgres:{system_identifier:'1'},
+    bindings:page,has_more:rows.length>32,next_after_permit_id:rows.length>32?page.at(-1).permit_id:null};
+  }
+  return {call_count:n,bindings:[]};},
  READ_LEASE:async value=>{++calls;if(mode==='out-of-order')await delay(value.lease_generation===1?80:5);return value;},
  REGISTER_PROVIDER:async value=>{++calls;if(mode==='throw-write')throw Error('postgresql://must-never-leak/private; raw SQL failure');return {registered:true,schema:value.descriptor.payload.schema};},
  READ_EXECUTION:async value=>({state:'RESERVED',scope:value.scope}),
@@ -89,6 +96,13 @@ process.send({schema:'test.native-coding.ready'});
     child.on('message',listener);child.send({schema:'test.native-coding.stats'});});
   return {child,client,instanceId,stats};
 }
+
+test('paged private scope crosses the per-message byte budget without truncating a 160-agent roster',async t=>{
+ const {client,stats}=await setup(t,'paged-scope');
+ const scope=await client.readScope();assert.equal(scope.bindings.length,160);
+ assert.equal((await stats()).calls,5);assert.equal(scope.has_more,false);
+ assert(Buffer.byteLength(JSON.stringify(scope))>256*1024);
+});
 
 test('real private parent/child IPC supports all fixed actions including transaction evidence',async t=>{
   const {client}=await setup(t);

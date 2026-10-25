@@ -52,7 +52,10 @@ function scope(value,reservation=false) {
 }
 function payload(action,value) {
   json(value);
-  if(action==='READ_SCOPE')keys(value,[]);
+  if(action==='READ_SCOPE'){
+    keys(value,Object.hasOwn(value,'after_permit_id')?['after_permit_id']:[]);
+    if(Object.hasOwn(value,'after_permit_id')&&!UUID.test(value.after_permit_id))invalid('INVALID_PAYLOAD');
+  }
   else if(action==='READ_PRIOR_EXECUTION'){
     keys(value,['selector']);const s=value.selector;
     keys(s,['workspace_id','project_id','task_id','lease_generation','agent_id','provider_id','agent_generation_epoch']);
@@ -162,7 +165,22 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
     });
   }
   return Object.freeze({
-    readScope:()=>invoke('READ_SCOPE',{}),readLease:value=>invoke('READ_LEASE',value),
+    async readScope(){
+      let after=null,current=null;const bindings=[],seen=new Set();
+      do{
+        const page=await invoke('READ_SCOPE',after?{after_permit_id:after}:{});
+        if(!page||!Array.isArray(page.bindings)||page.has_more!==undefined&&typeof page.has_more!=='boolean'
+          ||current&&(page.schema!==current.schema||page.source!==current.source
+            ||JSON.stringify(page.postgres)!==JSON.stringify(current.postgres)))invalid('INVALID_SCOPE_PAGE');
+        for(const row of page.bindings){
+          if(!UUID.test(row.permit_id||'')||seen.has(row.permit_id)||after&&row.permit_id<=after)invalid('INVALID_SCOPE_CURSOR');
+          seen.add(row.permit_id);bindings.push(row);after=row.permit_id;
+        }
+        if(page.has_more&&(!page.bindings.length||page.next_after_permit_id!==after))invalid('INVALID_SCOPE_CURSOR');
+        current=page;
+      }while(current.has_more===true);
+      return {...current,bindings,has_more:false,next_after_permit_id:null};
+    },readLease:value=>invoke('READ_LEASE',value),
     registerProvider:descriptor=>invoke('REGISTER_PROVIDER',{descriptor}),
     readExecution:scope=>invoke('READ_EXECUTION',{scope}),readPriorExecution:selector=>invoke('READ_PRIOR_EXECUTION',{selector}),
     reserveExecution:scope=>invoke('RESERVE_EXECUTION',{scope}),

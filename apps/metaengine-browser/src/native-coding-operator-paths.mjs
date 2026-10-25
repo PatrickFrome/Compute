@@ -21,7 +21,7 @@ export function validateNativeCodingOperatorPaths(value){
       throw Error('native_coding_host_os_sandbox_pin_invalid');
   if(Object.hasOwn(value,'provider_sandbox_receipts')){
     const seen=new Set();
-    if(!Array.isArray(value.provider_sandbox_receipts)||value.provider_sandbox_receipts.length<2||value.provider_sandbox_receipts.length>64)
+    if(!Array.isArray(value.provider_sandbox_receipts)||value.provider_sandbox_receipts.length<2)
       throw Error('native_coding_host_os_provider_sandbox_pins_invalid');
     for(const pin of value.provider_sandbox_receipts){
       if(!pin||Object.keys(pin).sort().join(',')!=='agent_id,path,provider_id,role,sha256'

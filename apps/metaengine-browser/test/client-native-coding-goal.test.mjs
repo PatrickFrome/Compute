@@ -182,6 +182,7 @@ async function mainMountFixture(){
     ensureSupervisorIdentity:()=>({snapshot:()=>({device_id:'device',client_id:'client'})}),
     readNativeCodingOperatorPaths:async()=>({}),resolveNativeCodingSandboxPin:()=>({}),
     createNativeCodingRuntime:()=>{counts.construct++;return runtime;},
+    readAgentResourceAdmission:()=>({physical_start_allowed:true}),
     fs:{lstat:async()=>({isFile:()=>true})},path:{dirname:()=> 'C:/private/runtime',join:(...parts)=>parts.join('/')},
     app:{},process:{resourcesPath:'C:/fixture/resources'},globalThis:{},
     initNativeSupervisor:async()=>{counts.init++;},recordStartupSubsystemDegraded:()=>{},

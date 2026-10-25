@@ -84,7 +84,7 @@ test('private initial native goal admission is atomic and preserves the W30 auth
    (select count(*)::int from destruktion_meta.devos_fleet_task_h205f22 where workspace_id=$2) as tasks,
    (select count(*)::int from destruktion_meta.native_coding_operator_permit_h205f22 where workspace_id=$2) as permits,
    (select count(*)::int from destruktion_meta.client_v1_goal_request_h205f22 where workspace_id=$2) as browser_goals`,[f.profile.profile_id,f.profile.workspace_id]))[0];
-  async function fixture({pairs=2,sqlBinding=sql}={}){
+  async function fixture({pairs=2,budget=2,sqlBinding=sql}={}){
    const generated=admissionFixture(),p=generated.permit,pairing=randomUUID(),agents=[];
    p.postgres.system_identifier=cluster;
    for(let i=0;i<pairs;i++)for(const role of ['IMPLEMENTER','CRITIC'])agents.push({provider_id:randomUUID(),agent_id:'agent_seed-'+randomUUID().slice(0,8),role,agent_generation_epoch:1,
@@ -94,7 +94,7 @@ test('private initial native goal admission is atomic and preserves the W30 auth
    const profile={schema:'metaengine.native-coding.seed-profile.v1',trust_namespace:'LOCAL_OPERATOR_QA',profile_id:randomUUID(),
     workspace_id:p.workspace_id,device_id:p.device_id,client_id:generated.clientId,admin_grant_epoch:1,device_key_fingerprint_sha256:p.device_key_fingerprint_sha256,
     owner_epoch:p.owner_epoch,user_sid:p.user_sid,artifact:p.artifact,postgres:p.postgres,agents,primary_provider_id:agents[0].provider_id,
-    physical_slot_budget:2,expires_at:p.expires_at,storage_evidence_sha256:sha(randomUUID()),branch_name:'work/native-seed',
+    physical_slot_budget:budget,expires_at:p.expires_at,storage_evidence_sha256:sha(randomUUID()),branch_name:'work/native-seed',
     policy:{max_depth:null,max_tasks:null,max_children:null},production_qualified:false,automatic_retry_allowed:false,authority_effect:false};
    await sql.unsafe('insert into public.compute_fabric_a2_chat_bridge_remote_pairing_h205f22(token_hash)values($1)',[pairing]);
    await sql.unsafe(`insert into public.compute_fabric_a2_browser_device_h205f22(device_id,client_id,profile,public_jwk,key_fingerprint_sha256,enrollment_pairing_token_hash)
@@ -257,7 +257,17 @@ test('private initial native goal admission is atomic and preserves the W30 auth
     await assert.rejects(context.run('READ_SEED',changed,input=>service.READ_SEED(input)),/current_device_changed|PROJECT_DEVICE_GRANT_REVOKED/);
    }finally{service.close();context.close();verifier.close();}passed++;
   });
-  assert.equal(passed,11);
+  await sql.unsafe(await source('20261025120000_native_coding_service_heartbeat_admission_v1.sql'));
+  const capacityUpgrade=await fs.readFile(new URL('./native-agent-count-unbounded-v2.sql',import.meta.url),'utf8');
+  await sql.unsafe(capacityUpgrade);await sql.unsafe(capacityUpgrade);
+  await t.test('80 protected agents and a physical budget above 64 are admitted without a roster ceiling',async()=>{
+   const f=await fixture({pairs:40,budget:130}),service=await createNativeCodingHostSeedService(f.options);
+   try{const reply=await service.SEED_GOAL(f.input);assert.equal(reply.admission.receipt.permit_ids.length,80);
+    assert.equal((await count(f)).permits,80);
+    assert.deepEqual(reply.admission.receipt.logical_policy,{max_depth:null,max_tasks:null,max_children:null});
+   }finally{service.close();}passed++;
+  });
+  assert.equal(passed,12);
   await fs.writeFile(path.join(directory,'receipt.json'),JSON.stringify({schema:'metaengine.native-coding.initial-seed.disposable-qa.v1',state:'PASS',
    postgres_version_num:identity.version,postgres_system_identifier:cluster,port,subtests:passed,migration_sha256:migrationSha,
    source_classification:'REAL_DISPOSABLE_PG_AND_HOST_SERVICE_WITH_GENERATED_ENROLLED_DEVICE_INSTALLED_IMAGE_OS_CANARY_AND_ACL_FIXTURES',

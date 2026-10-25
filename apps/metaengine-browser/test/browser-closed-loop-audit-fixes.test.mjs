@@ -220,22 +220,13 @@ test('lifecycle core source carries the deferred rollover bounded auto-release',
 // passthrough, scaling budgets, full-overview roster.
 // ---------------------------------------------------------------------------
 
-test('fleet ceilings are raised by default and bounded by contract', async () => {
-  const { FLEET_TAB_CEILING, MAX_TABS } = await importAbsolute(path.join(SRC, 'tab-registry.mjs'));
-  assert.ok(FLEET_TAB_CEILING >= 16, `fleet tab ceiling raised (got ${FLEET_TAB_CEILING})`);
-  assert.ok(MAX_TABS >= 48, `shared tab wall raised (got ${MAX_TABS})`);
-  assert.ok(MAX_TABS - FLEET_TAB_CEILING >= 16, 'user reservation never shrinks below the historical guarantee');
-
-  const { ELASTIC_FLEET_CONTRACT, planElasticFleetCapacity } = await importAbsolute(path.join(SRC, 'fleet-elastic-governor.mjs'));
-  assert.ok(ELASTIC_FLEET_CONTRACT.max_target_agents_default >= 24, 'live-agent ceiling raised');
-  // The governor honors the policy ceiling passthrough end-to-end.
-  const plan = planElasticFleetCapacity({
-    backlog: { ready: 500, running: 40 },
-    fleetSnapshot: { agents: [], policy: { warm_agents: 0, spawn_burst_limit: 20, elastic_max_target_agents: 20 } },
-    maxTargetAgents: 20,
-  });
-  assert.equal(plan.target_agents, 20);
-  assert.equal(plan.max_target_agents, 20);
+test('fleet has no default or legacy agent-count ceiling',async()=>{
+ const {FLEET_TAB_CEILING,MAX_TABS}=await importAbsolute(path.join(SRC,'tab-registry.mjs'));
+ assert.equal(FLEET_TAB_CEILING,null);assert.equal(MAX_TABS,null);
+ const {ELASTIC_FLEET_CONTRACT,planElasticFleetCapacity}=await importAbsolute(path.join(SRC,'fleet-elastic-governor.mjs'));
+ assert.equal(ELASTIC_FLEET_CONTRACT.max_target_agents_default,null);
+ const plan=planElasticFleetCapacity({backlog:{ready:500,running:40},fleetSnapshot:{agents:[],policy:{warm_agents:0,spawn_burst_limit:80,elastic_max_target_agents:2}},maxTargetAgents:2});
+ assert.equal(plan.target_agents,80);assert.equal(plan.max_target_agents,null);
 });
 
 test('provisioner policy carries elastic_max_target_agents through normalization', async () => {
@@ -253,7 +244,8 @@ test('provisioner policy carries elastic_max_target_agents through normalization
   });
   await provisioner.init();
   const snapshot = provisioner.snapshot();
-  assert.equal(snapshot.policy.elastic_max_target_agents, 20, 'policy key survives normalization');
+  assert.equal(snapshot.policy.elastic_max_target_agents,null);
+  assert.equal(snapshot.policy.legacy_elastic_max_target_agents_ignored,true);
 });
 
 test('dispatch and observation budgets scale with the live fleet', async () => {

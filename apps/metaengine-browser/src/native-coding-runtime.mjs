@@ -13,6 +13,8 @@ import {createNativeCodingProjectCommitObserver} from './native-coding-project-c
 import {prepareNativeCodingAgentRunBridge} from './native-coding-agent-run-bridge.mjs';
 import {createNativeCodingServiceHeartbeatPublisher} from './native-coding-service-heartbeat-publisher.mjs';
 
+import {defaultNativePhysicalSlotBudget} from './agent-resource-admission.mjs';
+
 const UUID=/^[a-f0-9-]{36}$/,HASH=/^[a-f0-9]{64}$/;
 const fail=code=>{throw new Error(`native_coding_runtime_${code}`);};
 const digest=value=>createHash('sha256').update(value).digest('hex');
@@ -21,7 +23,7 @@ const fence=(state,extra={})=>Object.freeze({state,...extra,automatic_retry_allo
 
 /** Native private composition, driven exclusively by the existing W30 heartbeat. */
 export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,observerOptions={},runnerOptions,
-  resultIndexRoot,physicalSlotBudget=2,processController=null,permitRegistry=null,resultStore=null,
+  resultIndexRoot,physicalSlotBudget=defaultNativePhysicalSlotBudget(),readResourceAdmission,processController=null,permitRegistry=null,resultStore=null,
   // Private dependency injection supports isolated adversarial tests; it is not
   // an IPC option, renderer configuration, or a way to label fixtures native.
   observers=null,issuer=null,workerRegistry=null,runnerFactory=createCodexCliRunner,
@@ -55,7 +57,7 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
 
   const selectors=async()=>{
     const rows=await permits.listProviderSelectors();
-    if(!Array.isArray(rows)||rows.length>64||rows.some(row=>!UUID.test(row.provider_id||'')||!/^agent_[a-z0-9-]{8,64}$/.test(row.agent_id||'')))fail('provider_roster_invalid');
+    if(!Array.isArray(rows)||rows.some(row=>!UUID.test(row.provider_id||'')||!/^agent_[a-z0-9-]{8,64}$/.test(row.agent_id||'')))fail('provider_roster_invalid');
     return rows;
   };
   const permitFor=async lease=>{
@@ -129,7 +131,7 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
       if(value.state!=='RUNNING')fail('w30_running_ack_invalid');
     },
   });
-  const pool=createNativeCodingExecutionPool({executor,physicalSlotBudget,
+  const pool=createNativeCodingExecutionPool({executor,physicalSlotBudget,readResourceAdmission,
     async prepareRequest(raw) {
       assertOpen();
       // Full installed-byte qualification precedes issuer timestamps. Only
@@ -245,7 +247,6 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
       const id=`${selector.provider_id}:${selector.agent_id}`;
       if(providerFences.has(id))continue;
       // Roster removal is not reconciliation of an unknown registration.
-      if(providerFences.size>=128)fail('provider_fence_capacity');
       const previous=descriptors.get(id);
       if(previous&&Date.parse(previous.payload.expires_at)>Date.now()+10000)continue;
       issued++;

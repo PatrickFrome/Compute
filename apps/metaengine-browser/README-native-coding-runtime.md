@@ -21,7 +21,8 @@ Native main supplies `createNativeCodingRuntime` with:
   `expectedExecutableSha256`, `codexHome`, `gitExecutable`, `journalRoot`, and
   a separate protected `workerTempRoot`.
 * `resultIndexRoot`: a protected sibling of the execution journal, outside
-  the model worktree. `physicalSlotBudget` defaults to two.
+  the model worktree. `physicalSlotBudget` defaults to observed CPU/memory
+  capacity. The former fixed two-worker ceiling is removed.
 
 `observeProviders()` starts one bounded background preparation/refresh pass and
 immediately returns only registered, unexpired provider snapshots. The pass
@@ -86,3 +87,13 @@ acceptance, production release qualification, or restart continuation. Those
 remain properties of the complete installed W30 goal/critic/checkpoint/next
 cycle path. Logical work belongs to W30; simultaneous native processes remain
 bounded by the physical pool.
+
+Agent-count revision (2026-10-25): there is no native roster ceiling at 64,
+no fixed two-worker mount and no browser fleet/tab-count ceiling. Legacy
+elastic count ceilings are ignored. The private own-PG scope is read through
+cursor pages; signed service witnesses rotate byte-bounded admission windows.
+Message/page budgets bound one transfer, not the registry or cumulative runs.
+The existing W30 queue retains work while current physical resources are busy.
+Permit/device/sandbox checks, independent Critic and ambiguous-effect custody
+remain required. A large generated roster is not proof of installed model work
+or automatic creation of new independently sandboxed worktrees.

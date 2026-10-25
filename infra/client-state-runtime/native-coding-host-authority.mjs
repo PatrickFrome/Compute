@@ -196,8 +196,10 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
     AGENT_OPERATION:request=>{open();return agentTools.invoke(request);},
     FINISH_CHECKPOINT:query=>finishCheckpoint('FINISH_CHECKPOINT',query),
     READ_FINISH_CHECKPOINT:query=>finishCheckpoint('READ_FINISH_CHECKPOINT',query),
-    async READ_SCOPE() {
+    async READ_SCOPE(query={}) {
       open();await readNativeScope.prepare?.();open();
+      const after=query.after_permit_id??'00000000-0000-0000-0000-000000000000';
+      if(!/^[a-f0-9-]{36}$/.test(after)||Object.keys(query).some(k=>k!=='after_permit_id'))fail('scope_cursor_invalid');
       const native=await readNativeScope(null);
       const rows=await sql.unsafe(`select public.native_coding_admission_context_v1(p.workspace_id,p.client_id,p.permit_id) as context
         from destruktion_meta.native_coding_operator_permit_h205f22 p
@@ -210,13 +212,14 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
           and d.admin_scopes @> '["CONTROL_PLANE","DEVOS"]'::jsonb
         where p.revoked_at is null and (p.permit->>'expires_at')::timestamptz>clock_timestamp()
         and p.permit->'postgres'->>'system_identifier'=$1::text and p.permit->>'user_sid'=$2::text
-        order by p.permit_id limit 65`,[native.postgres.system_identifier,native.user_sid]);
-      if(rows.length>64) fail('provider_budget_exceeded');
-      const bindings=rows.map(({context:value})=>{const c=validateContext(value);return {permit_id:c.permit.permit_id,provider_id:c.permit.provider_id,
+        and p.permit_id>$3::uuid order by p.permit_id limit 33`,[native.postgres.system_identifier,native.user_sid,after]);
+      // A page bounds IPC bytes, never the number of registered agents.
+      const bindings=rows.slice(0,32).map(({context:value})=>{const c=validateContext(value);return {permit_id:c.permit.permit_id,provider_id:c.permit.provider_id,
         agent_id:c.permit.agent_id,workspace_id:c.permit.workspace_id,project_id:c.permit.project_id,
         device_id:c.device.device_id,client_id:c.device.client_id,permit:c.permit,device:c.device};});
       return {schema:'metaengine.native-coding.own-pg-scope.v1',source:'PRIVATE_RUNTIME_HOST_OWN_PG',
-        observed_at:new Date().toISOString(),postgres:native.postgres,bindings};
+        observed_at:new Date().toISOString(),postgres:native.postgres,bindings,
+        has_more:rows.length>32,next_after_permit_id:rows.length>32?bindings.at(-1).permit_id:null};
     },
     async READ_LEASE(query) {
       open();const c=await task(sql,query);

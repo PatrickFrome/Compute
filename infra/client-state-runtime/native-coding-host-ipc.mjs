@@ -52,7 +52,10 @@ function scope(value,reservation=false) {
 }
 function payload(action,value) {
   json(value);
-  if(action==='READ_SCOPE')keys(value,[]);
+  if(action==='READ_SCOPE'){
+    keys(value,Object.hasOwn(value,'after_permit_id')?['after_permit_id']:[]);
+    if(Object.hasOwn(value,'after_permit_id')&&!UUID.test(value.after_permit_id))invalid('INVALID_PAYLOAD');
+  }
   else if(action==='READ_PRIOR_EXECUTION'){
     keys(value,['selector']);const s=value.selector;
     keys(s,['workspace_id','project_id','task_id','lease_generation','agent_id','provider_id','agent_generation_epoch']);

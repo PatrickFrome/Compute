@@ -146,6 +146,10 @@ export const LOCAL_RUNTIME_MIGRATIONS = Object.freeze([
       'destruktion_meta.native_coding_service_admissible_v1(uuid)']),
     source_url:new URL('../../supabase/migrations/20261025120000_native_coding_service_heartbeat_admission_v1.sql',import.meta.url),
     relations:Object.freeze(['destruktion_meta.native_coding_service_heartbeat_h205f22'])},
+  {path:'native-agent-count-unbounded-v2.sql',
+    signature:'destruktion_meta.native_agent_count_unbounded_v2()',
+    source_url:new URL('./native-agent-count-unbounded-v2.sql',import.meta.url),
+    reviewed_agent_count_upgrade:true},
   // P3 opt-in fleet DAG: qualified only for self-owned local PostgreSQL;
   // the existing devos lease inserts into the same canonical claim table.
   { path: 'fleet-coordination-claim-guard-v1.sql', signature: 'destruktion_meta.fleet_coordination_claim_gate_v1()',
@@ -300,6 +304,18 @@ export async function applyLocalRuntimeMigrations({ sql, expectedMigrationSource
         receipts.push({ source: migration.path, source_sha256: migration.sha256, signature: migration.signature,
           signatures: [migration.signature], status: wasDefiner ? 'ALREADY_PRESENT_NOT_MODIFIED' : 'APPLIED_LOCAL_ONLY',
           existing_bodies_attested: true, cognitive_acceptor_direct_api: true, table_grants_modified: false });
+        continue;
+      }
+      if (migration.reviewed_agent_count_upgrade) {
+        // The source verifies exact old/current bodies and the full permit
+        // constraint on every application. A marker alone is not admission.
+        await tx.unsafe(migration.source);
+        if (!(await inspectMigrationObjects(tx,migration)).complete)
+          throw Error('local_runtime_agent_count_upgrade_readback_failed');
+        receipts.push({source:migration.path,source_sha256:migration.sha256,
+          signature:migration.signature,signatures:[migration.signature],
+          status:before.complete?'ALREADY_PRESENT_NOT_MODIFIED':'APPLIED_LOCAL_ONLY',
+          existing_bodies_attested:true,agent_count_limit:null});
         continue;
       }
       if (before.complete) {

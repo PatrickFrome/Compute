@@ -14,15 +14,16 @@ export function createNativeCodingServiceHeartbeatPublisher({identity,ownPostgre
   ||typeof identity?.snapshot!=='function'||typeof identity.deviceHeaders!=='function'
   ||!['snapshot','serviceHeartbeat','readServiceHeartbeat'].every(k=>typeof ownPostgres?.[k]==='function'))fail('private_dependencies_required');
  let closed=false,inflight=null,pending=null,accepted=null,reason='WITNESS_NOT_PUBLISHED';
+ let providerCursor=0,nextProviderCursor=0,providerWindowTruncated=false;
  function input(){
   const control=readControl(),runtime=readRuntime(),descriptors=readProviders();
   if(!control||control.supervisor_mode!=='CONTROL'||control.armed!==true||control.interrupted_setup_recovery_fenced!==false
    ||!Number.isSafeInteger(control.runtime_control_generation)||control.runtime_control_generation<0)fail('control_fenced');
   if(runtime?.closed!==false||runtime.shutdown_state!=='OPEN'||runtime.host_unavailable_reason!==null
-   ||!Number.isSafeInteger(runtime.physical_slot_budget)||runtime.physical_slot_budget<1||runtime.physical_slot_budget>16
+   ||!Number.isSafeInteger(runtime.physical_slot_budget)||runtime.physical_slot_budget<1
    ||!Number.isSafeInteger(runtime.occupied_slots)||runtime.occupied_slots<0||runtime.occupied_slots>runtime.physical_slot_budget
    ||!Array.isArray(runtime.jobs)||runtime.jobs.length!==runtime.occupied_slots)fail('runtime_fenced');
-  if(!Array.isArray(descriptors)||!descriptors.length||descriptors.length>64)fail('providers_unavailable');
+  if(!Array.isArray(descriptors)||!descriptors.length)fail('providers_unavailable');
   const first=descriptors[0]?.payload,seen=new Set(),providers=[];
   if(!UUID.test(first?.workspace_id||'')||!first.host_process||!first.artifact||!first.postgres)fail('provider_scope_invalid');
   for(const envelope of descriptors){
@@ -40,13 +41,25 @@ export function createNativeCodingServiceHeartbeatPublisher({identity,ownPostgre
    .sort((a,b)=>a.task_id.localeCompare(b.task_id)||a.lease_generation-b.lease_generation);
   if(jobs.some(j=>!UUID.test(j.task_id||'')||!Number.isSafeInteger(j.lease_generation)||j.lease_generation<1
    ||!['PREPARING','RUNNING','RESULT_READY','READBACK_REQUIRED','READBACK_ONLY','AMBIGUOUS','PHYSICAL_POOL_BUSY'].includes(j.state)))fail('held_job_invalid');
-  return {schema:'metaengine.native-coding.service-heartbeat.v1',workspace_id:first.workspace_id,
+  const value={schema:'metaengine.native-coding.service-heartbeat.v1',workspace_id:first.workspace_id,
    host_process:structuredClone(first.host_process),artifact:structuredClone(first.artifact),postgres:structuredClone(first.postgres),
    control:{supervisor_mode:control.supervisor_mode,armed:control.armed,interrupted_setup_recovery_fenced:control.interrupted_setup_recovery_fenced,
     runtime_control_generation:control.runtime_control_generation},
    runtime:{schema:'metaengine.native-coding.runtime.v1',physical_slot_budget:runtime.physical_slot_budget,occupied_slots:runtime.occupied_slots,
     closed:runtime.closed,shutdown_state:runtime.shutdown_state,host_unavailable_reason:runtime.host_unavailable_reason,jobs},
-   providers,production_qualified:false,automatic_retry_allowed:false,authority_effect:false};
+   providers:[],production_qualified:false,automatic_retry_allowed:false,authority_effect:false};
+  // The signed request has a byte budget, not a fleet-size quota. Rotate
+  // admission windows so a large durable roster cannot fence the whole fleet.
+  let bytes=Buffer.byteLength(json(value)),visited=0;
+  while(visited<providers.length){
+   const index=(providerCursor+visited)%providers.length,row=providers[index],size=Buffer.byteLength(json(row))+1;
+   if(bytes+size>48*1024)break;
+   value.providers.push(row);bytes+=size;visited++;
+  }
+  if(!value.providers.length)fail('witness_byte_budget');
+  nextProviderCursor=(providerCursor+visited)%providers.length;
+  providerWindowTruncated=visited<providers.length;
+  return value;
  }
  function exactAck(value,record,readback){
   if(value?.schema!=='metaengine.native-coding.service-heartbeat-ack.v1'||value.accepted!==true||value.body_sha256!==record.body_sha256
@@ -91,14 +104,22 @@ export function createNativeCodingServiceHeartbeatPublisher({identity,ownPostgre
    if(pending)operation=reconcile;
    else{
     let value;try{value=input();}catch(error){accepted=null;reason=error.message;return;}
-    if(accepted&&accepted.input_sha256===sha(value)&&Date.parse(accepted.expires_at)>now()+8000)return;
+    if(accepted&&accepted.input_sha256===sha(value)&&Date.parse(accepted.expires_at)>now()+8000){
+     if(!providerWindowTruncated||!accepted.delivered)return;
+     providerCursor=nextProviderCursor;value=input();
+    }
     operation=()=>publish(value);
    }
    inflight=Promise.resolve().then(operation).finally(()=>{inflight=null;});
   },
   admittedProviders(){
    if(closed||pending||!accepted||Date.parse(accepted.expires_at)<=now())return [];
-   try{if(accepted.input_sha256!==sha(input()))return [];return structuredClone(readProviders());}catch{return [];}
+   try{
+    if(accepted.input_sha256!==sha(input()))return [];
+    const admitted=new Set(accepted.input.providers.map(p=>p.permit_id));
+    accepted.delivered=true;
+    return structuredClone(readProviders().filter(p=>admitted.has(p.payload.permit_id)));
+   }catch{return [];}
   },
   snapshot(){return {schema:'metaengine.native-coding.service-publisher.v1',state:closed?'CLOSED':reason,
    publication_running:inflight!==null,unknown_write_retained:pending!==null,body_sha256:pending?.body_sha256??accepted?.body_sha256??null,

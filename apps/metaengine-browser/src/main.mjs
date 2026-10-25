@@ -5,6 +5,7 @@ import path from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { ComputeBridgeClient } from './compute-bridge-client.mjs';
+import {readAgentResourceAdmission} from './agent-resource-admission.mjs';
 import { DevelopmentPlane } from './development-plane.mjs';
 import { RsiRuntimeService } from './rsi-runtime-service.mjs';
 import { RsiOutcomeRiver, extractRsiCommandTaskContext } from './rsi-outcome-river.mjs';
@@ -880,7 +881,7 @@ function ensureNativeCodingRuntimeMounted() {
       const hashes=[...new Set(permits.map(permit=>permit.artifact.cli_executable_sha256))];
       if(permits.length===0||hashes.length!==1)throw Error('native_coding_protected_permits_required');
       const sandboxReceipts=permits.map(permit=>({...resolveNativeCodingSandboxPin(operator,permit),provider_id:permit.provider_id,agent_id:permit.agent_id,role:permit.role}));
-      candidate=createNativeCodingRuntime({identity,ownPostgres:capability,
+      candidate=createNativeCodingRuntime({identity,ownPostgres:capability,readResourceAdmission:readAgentResourceAdmission,
         readServiceControl:()=>{
           const snapshot=nativeSupervisor?.snapshot?.();
           return snapshot?{supervisor_mode:snapshot.supervisor_mode,armed:snapshot.armed,
@@ -891,7 +892,7 @@ function ensureNativeCodingRuntimeMounted() {
         observerOptions:{app,resourcesPath:process.resourcesPath,cliPath:operator.cli_executable,gitExecutable:operator.git_executable,sandboxReceipts},
         runnerOptions:{executablePath:operator.cli_executable,expectedExecutableSha256:hashes[0],codexHome:operator.codex_home,
           gitExecutable:operator.git_executable,journalRoot:operator.journal_root,workerTempRoot:operator.worker_temp_root},
-        resultIndexRoot:operator.result_index_root,physicalSlotBudget:Math.min(2,...permits.map(permit=>permit.physical_slot_budget))});
+        resultIndexRoot:operator.result_index_root,physicalSlotBudget:permits.reduce((budget,permit)=>Math.min(budget,permit.physical_slot_budget),Number.MAX_SAFE_INTEGER)});
       assertOpen(summary);
       const mounted=nativeCodingRuntimeMountReadback(candidate,capability,summary);
       if(!mounted)throw Error('native_coding_runtime_mount_candidate_unavailable');
@@ -967,7 +968,7 @@ async function readNativeGoalSubmissionMode(){
         ||catalog.automatic_retry_allowed!==false||!Array.isArray(catalog.entries)||catalog.entries.length>1)
         throw new Error('client_native_goal_seed_capability_unavailable');
       if(scope?.schema!=='metaengine.native-coding.own-pg-scope.v1'||scope.source!=='PRIVATE_RUNTIME_HOST_OWN_PG'
-        ||!Array.isArray(scope.bindings)||scope.bindings.length>64)throw new Error('client_native_goal_scope_unavailable');
+        ||!Array.isArray(scope.bindings))throw new Error('client_native_goal_scope_unavailable');
       const bound=scope.bindings.find(row=>row.device_id===device.device_id&&row.client_id===device.client_id);
       return {busy:Boolean(bound),project_id:bound?.project_id||null};
     }finally{if(!owned)capability.close();}
@@ -1565,16 +1566,6 @@ async function initOwnerSafetyGates() {
   return ownerSafetyGates.snapshot();
 }
 
-// Closed-loop audit fix (fleet scale): startup fleet policy carries the
-// elastic live-agent ceiling (A2_FLEET_MAX_TARGET_AGENTS; absent -> the
-// governor's own default). Flows through the persisted policy into
-// planElasticFleetCapacity, so the shell/DB can observe and audit it.
-function fleetElasticMaxTargetAgents() {
-  const parsed = Number(process.env.A2_FLEET_MAX_TARGET_AGENTS);
-  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 64) return null;
-  return parsed;
-}
-
 async function initFleet() {
   fleet = new FleetProvisioner({
     createTab: async ({ url, select, load, ownership }) => createTab(url, {
@@ -1587,7 +1578,7 @@ async function initFleet() {
     loadState: loadFleetState,
     saveState: saveFleetState,
     census: () => registry.census(),
-    policy: { profile: 'BALANCED', warm_agents: 0, desired_agents: 0, spawn_burst_limit: 8, elastic_max_target_agents: fleetElasticMaxTargetAgents() },
+    policy: { profile: 'BALANCED', warm_agents: 0, desired_agents: 0, spawn_burst_limit: 8, elastic_max_target_agents: null },
   });
   await fleet.init();
   // Operator fleet target persistence: honor the persisted boot_fleet_target
@@ -1595,7 +1586,7 @@ async function initFleet() {
   // restart (self-update, crash, reboot). Restart-stale LOST rows occupy no
   // slots, so the pass spawns fresh agents up to the recorded target. A target
   // of 0 keeps the historical fail-safe boot posture (no auto-grow).
-  const bootFleetTarget = Math.min(64, Math.max(0, Math.floor(Number(fleet?.snapshot?.()?.policy?.boot_fleet_target)) || 0));
+  const bootFleetTarget = Math.max(0, Math.floor(Number(fleet?.snapshot?.()?.policy?.boot_fleet_target)) || 0);
   await fleet.reconcile({ active: bootFleetTarget > 0, target_agents: bootFleetTarget > 0 ? bootFleetTarget : null });
 }
 

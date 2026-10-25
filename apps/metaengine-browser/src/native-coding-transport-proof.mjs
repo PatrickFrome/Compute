@@ -172,7 +172,6 @@ function validateProvider(payload, {expected, now}) {
   keys(payload, [...COMMON, 'state', 'physical_slot_budget'], 'provider');
   if (payload.schema !== NATIVE_CODING_PROVIDER_SCHEMA || payload.state !== 'READY') fail('provider_schema_invalid');
   positive(payload.physical_slot_budget, 'physical_slot_budget');
-  if (payload.physical_slot_budget > 64) fail('physical_slot_budget_invalid');
   common(payload, expected, now, 60_000);
   equal(payload.physical_slot_budget, expected.physical_slot_budget, 'physical_slot_budget');
   return freeze(payload);

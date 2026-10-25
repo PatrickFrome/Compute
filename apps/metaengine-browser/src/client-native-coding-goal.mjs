@@ -40,7 +40,7 @@ export function normalizeNativeCodingGoalAdmission(value,{request_id,objective}=
     ||value.request_id!==request_id||value.objective!==objective
     ||!['request_id','profile_id','workspace_id','project_id','root_task_id','goal_id'].every(k=>UUID.test(value[k]||''))
     ||!['profile_sha256','goal_sha256','task_spec_sha256'].every(k=>SHA.test(value[k]||''))
-    ||!Array.isArray(value.permit_ids)||value.permit_ids.length<2||value.permit_ids.length>64
+    ||!Array.isArray(value.permit_ids)||value.permit_ids.length<2
     ||value.permit_ids.some(id=>!UUID.test(id||''))||new Set(value.permit_ids).size!==value.permit_ids.length
     ||!exact(value.logical_policy,['max_depth','max_tasks','max_children'])
     ||Object.entries(value.logical_policy).some(([key,v])=>v!==null&&(!Number.isSafeInteger(v)||v<(key==='max_depth'?0:1)))
