@@ -16,6 +16,11 @@ import {
   normalizeComputerTargetIdentity,
 } from '../src/computer-authority-plane.mjs';
 
+import { resolveQualifiedElectron } from '../scripts/qualified-electron-runtime.mjs';
+import {
+  CAPTURE_FIXTURE_TIMEOUT_MS, captureFixtureSource, captureExactFixtureWindow, startCaptureFixture,
+} from './helpers/windows-capture-fixture.mjs';
+
 const target = {
   machine_fingerprint_sha256:'a'.repeat(64),
   session_id:1,
@@ -85,61 +90,46 @@ test('fixed Windows PowerShell bridge physically parses and serves STATUS', { sk
   assert.equal(result.authority_effect, false);
 });
 
-test('fixed Windows bridge physically captures an exact window with raw pixel digest', { skip: process.platform !== 'win32', timeout:45000 }, async () => {
+test('fixed Windows bridge physically captures an exact window with raw pixel digest', {
+  skip: process.platform !== 'win32', timeout: CAPTURE_FIXTURE_TIMEOUT_MS,
+}, async t => {
+  const { executable } = resolveQualifiedElectron();
   const fixtureDir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-computer-fixture-'));
   const fixturePath = path.join(fixtureDir, 'fixture.cjs');
-  const electronExe = path.join(process.cwd(), 'node_modules', 'electron', 'dist', 'electron.exe');
-  const fixtureSource = [
-    "const { app, BrowserWindow } = require('electron');",
-    "app.commandLine.appendSwitch('disable-gpu');",
-    "app.whenReady().then(async () => {",
-    "  const title = 'METAENGINE Computer Capture Fixture';",
-    "  const win = new BrowserWindow({ width:360, height:240, x:80, y:80, show:true, frame:true, title });",
-    "  await win.loadURL('data:text/html,<html><head><title>METAENGINE%20Computer%20Capture%20Fixture</title></head><body><div style=\"font:18px sans-serif;padding:24px\">stable-pixel-fixture</div></body></html>');",
-    "  win.setTitle(title);",
-    "  win.show();",
-    "  win.focus();",
-    "});",
-    "app.on('window-all-closed', () => app.quit());",
-  ].join('\n');
-  await fs.writeFile(fixturePath, fixtureSource, 'utf8');
-
-  const child = spawn(electronExe, [fixturePath], {
-    windowsHide:false,
-    stdio:['ignore','ignore','pipe'],
-    env:{ ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS:'true' },
-  });
-  let stderr = '';
-  child.stderr.setEncoding('utf8');
-  child.stderr.on('data', chunk => { stderr += chunk; });
-
-  try {
-    const executor = new WindowsLocalComputerExecutor({ platform:'win32' });
-    let identity = null;
-    let lastObserved = null;
-    await new Promise(resolve => setTimeout(resolve,750));
-    for (let attempt=0; attempt<12 && !identity; attempt += 1) {
-      const observed = await executor.observe({ action:'OBSERVE_WINDOWS', args:{ limit:256 } });
-      lastObserved = observed.result;
-      const row = observed.result.windows.find(candidate => (
-        candidate?.title === 'METAENGINE Computer Capture Fixture'
-        || Number(candidate?.identity?.process_id) === child.pid
-      ));
-      identity = row?.identity || null;
-      if (!identity) await new Promise(resolve => setTimeout(resolve,150));
+  let fixture;
+  const phase = async (name, run) => {
+    const started = performance.now();
+    let outcome = 'FAILED';
+    try { const value = await run(); outcome = 'COMPLETED'; return value; }
+    finally {
+      t.diagnostic(JSON.stringify({ schema: 'metaengine.test.capture-fixture-phase.v1', phase: name,
+        outcome, elapsed_ms: Math.round(performance.now() - started), native_qualification_proven: false }));
     }
-    assert.ok(identity, 'fixture window identity; observed=' + JSON.stringify({
-      child_pid:child.pid,
-      count:lastObserved?.count,
-      total_candidates:lastObserved?.total_candidates,
-      process_ids:lastObserved?.windows?.map(row => row?.identity?.process_id),
-      rejected:lastObserved?.rejected_windows,
-      child_exit_code:child.exitCode,
-      stderr:stderr.slice(-500),
-    }));
-
-    const capture = await executor.observe({ action:'CAPTURE_WINDOW', target:identity });
+  };
+  try {
+    await fs.writeFile(fixturePath, captureFixtureSource, 'utf8');
+    fixture = startCaptureFixture(executable, fixturePath, { signal: t.signal });
+    const executor = new WindowsLocalComputerExecutor({ platform:'win32', runner: request => {
+      const requested = performance.now();
+      return runFixedWindowsPowerShell(request, { spawn_impl: (...args) => {
+        const spawned = performance.now();
+        t.diagnostic(JSON.stringify({ schema: 'metaengine.test.capture-fixture-phase.v1',
+          phase: request.action + ':private-preparation-before-spawn', elapsed_ms: Math.round(spawned - requested),
+          native_qualification_proven: false }));
+        const child = spawn(...args);
+        child.once('close', () => t.diagnostic(JSON.stringify({ schema: 'metaengine.test.capture-fixture-phase.v1',
+          phase: request.action + ':bridge-spawn-to-close', elapsed_ms: Math.round(performance.now() - spawned),
+          native_qualification_proven: false })));
+        return child;
+      } });
+    } });
+    const capture = await captureExactFixtureWindow(fixture, request => executor.observe(request), phase);
+    fixture.assertRunning();
     assert.equal(capture.result.effect_started, false);
+    assert.equal(capture.authority_effect, false);
+    assert.equal(capture.result.target.process_id, fixture.child.pid);
+    assert.equal(capture.result.target.window_handle, (await fixture.ready).window_handle);
+    assert.equal(capture.result.target_identity_sha256, computerTargetIdentityDigest(capture.request.target));
     assert.match(capture.result.png_sha256, /^[0-9a-f]{64}$/);
     assert.match(capture.result.pixel_sha256, /^[0-9a-f]{64}$/);
     assert.equal(typeof capture.result.foreground, 'boolean');
@@ -147,7 +137,7 @@ test('fixed Windows bridge physically captures an exact window with raw pixel di
     assert.ok(capture.result.rect.width > 0);
     assert.ok(capture.result.rect.height > 0);
   } finally {
-    child.kill();
+    if (fixture) await phase('owned-child-teardown', () => fixture.stop());
     await fs.rm(fixtureDir, { recursive:true, force:true });
   }
 });

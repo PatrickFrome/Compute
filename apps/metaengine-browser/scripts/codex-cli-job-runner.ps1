@@ -16,6 +16,7 @@ public static class MetaengineCodexJob {
     public int cb; public string reserved,desktop,title; public uint x,y,xsize,ysize,xc,yc,fill,flags;
     public ushort show,reservedLength; public IntPtr reservedData,stdin,stdout,stderr;
   }
+  [StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)] struct StartupEx { public Startup startup; public IntPtr attributes; }
   [StructLayout(LayoutKind.Sequential)] struct ProcessInfo { public IntPtr process,thread; public uint pid,tid; }
   [StructLayout(LayoutKind.Sequential)] struct Basic {
     public long processTime,jobTime; public uint flags; public UIntPtr min,max; public uint active;
@@ -28,9 +29,11 @@ public static class MetaengineCodexJob {
   [DllImport("kernel32.dll",SetLastError=true)] static extern bool SetInformationJobObject(IntPtr j,int c,ref Limits l,uint s);
   [DllImport("kernel32.dll",SetLastError=true)] static extern bool CreatePipe(out IntPtr r,out IntPtr w,ref Security a,uint size);
   [DllImport("kernel32.dll",SetLastError=true)] static extern bool SetHandleInformation(IntPtr h,uint mask,uint flags);
+  [DllImport("kernel32.dll",SetLastError=true)] static extern bool InitializeProcThreadAttributeList(IntPtr list,uint count,uint flags,ref UIntPtr size);
+  [DllImport("kernel32.dll",SetLastError=true)] static extern bool UpdateProcThreadAttribute(IntPtr list,uint flags,UIntPtr attribute,IntPtr value,UIntPtr size,IntPtr previous,IntPtr returned);
+  [DllImport("kernel32.dll")] static extern void DeleteProcThreadAttributeList(IntPtr list);
   [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool CreateProcess(string app,StringBuilder args,
-    IntPtr pa,IntPtr ta,bool inherit,uint flags,IntPtr env,string cwd,ref Startup startup,out ProcessInfo process);
-  [DllImport("kernel32.dll",SetLastError=true)] static extern bool AssignProcessToJobObject(IntPtr j,IntPtr p);
+    IntPtr pa,IntPtr ta,bool inherit,uint flags,IntPtr env,string cwd,ref StartupEx startup,out ProcessInfo process);
   [DllImport("kernel32.dll",SetLastError=true)] static extern bool IsProcessInJob(IntPtr p,IntPtr j,out bool result);
   [DllImport("kernel32.dll",SetLastError=true)] static extern bool GetProcessTimes(IntPtr p,out long c,out long e,out long k,out long u);
   [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool QueryFullProcessImageName(IntPtr p,uint f,StringBuilder s,ref uint n);
@@ -77,12 +80,35 @@ public static class MetaengineCodexJob {
       Require(CreatePipe(out stdoutRead,out stdoutWrite,ref security,0),"stdout_pipe_failed");
       Require(CreatePipe(out stderrRead,out stderrWrite,ref security,0),"stderr_pipe_failed");
       Require(SetHandleInformation(stdinWrite,1,0)&&SetHandleInformation(stdoutRead,1,0)&&SetHandleInformation(stderrRead,1,0),"parent_pipe_inheritance_failed");
-      var startup=new Startup(); startup.cb=Marshal.SizeOf(typeof(Startup)); startup.flags=0x100|1; startup.show=0;
+      var startup=new Startup(); startup.flags=0x100|1; startup.show=0;
       startup.stdin=stdinRead; startup.stdout=stdoutWrite; startup.stderr=stderrWrite;
       var command=new StringBuilder(Quote(exe)); foreach(string arg in args) command.Append(" "+Quote(arg));
-      Require(CreateProcess(exe,command,IntPtr.Zero,IntPtr.Zero,true,0x08000004,IntPtr.Zero,cwd,ref startup,out process),"create_process_failed");
-      Require(AssignProcessToJobObject(job,process.process),"assign_failed"); assigned=true;
-      bool inJob; Require(IsProcessInJob(process.process,job,out inJob)&&inJob,"membership_readback_failed");
+      // Windows 10+/Server 2016+ JOB_LIST binds within CreateProcess, before the
+      // initial thread can run. Unsupported attributes refuse before creation;
+      // there is deliberately no create-then-assign or breakaway fallback.
+      IntPtr attributes=IntPtr.Zero,jobList=IntPtr.Zero; bool attributesInitialized=false;
+      try {
+        UIntPtr attributeBytes=UIntPtr.Zero;
+        bool sized=InitializeProcThreadAttributeList(IntPtr.Zero,1,0,ref attributeBytes); int sizeError=Marshal.GetLastWin32Error();
+        if(sized || sizeError!=122 || attributeBytes==UIntPtr.Zero) throw new InvalidOperationException("codex_job_attributes_size_invalid:"+sizeError);
+        attributes=Marshal.AllocHGlobal(checked((int)attributeBytes.ToUInt64()));
+        Require(InitializeProcThreadAttributeList(attributes,1,0,ref attributeBytes),"attributes_initialize_failed"); attributesInitialized=true;
+        jobList=Marshal.AllocHGlobal(IntPtr.Size); Marshal.WriteIntPtr(jobList,job);
+        Require(UpdateProcThreadAttribute(attributes,0,new UIntPtr(0x0002000d),jobList,new UIntPtr((uint)IntPtr.Size),IntPtr.Zero,IntPtr.Zero),"job_attribute_failed");
+        var extended=new StartupEx(); extended.startup=startup; extended.startup.cb=Marshal.SizeOf(typeof(StartupEx)); extended.attributes=attributes;
+        ProcessInfo createdProcess;
+        bool created=CreateProcess(exe,command,IntPtr.Zero,IntPtr.Zero,true,0x08000004|0x00080000,IntPtr.Zero,cwd,ref extended,out createdProcess);
+        Require(created,"create_process_failed");
+        // Failed PROCESS_INFORMATION outputs are not owned handles. Transfer
+        // them into the outer cleanup scope only after successful creation.
+        process=createdProcess;
+      } finally {
+        // Attribute values must stay alive until the initialized list is deleted.
+        if(attributesInitialized) DeleteProcThreadAttributeList(attributes);
+        if(jobList!=IntPtr.Zero) Marshal.FreeHGlobal(jobList);
+        if(attributes!=IntPtr.Zero) Marshal.FreeHGlobal(attributes);
+      }
+      bool inJob; Require(IsProcessInJob(process.process,job,out inJob)&&inJob,"membership_readback_failed"); assigned=true;
       long birth,exit,kernel,user; Require(GetProcessTimes(process.process,out birth,out exit,out kernel,out user),"birth_readback_failed");
       var image=new StringBuilder(32768); uint imageSize=32768; Require(QueryFullProcessImageName(process.process,0,image,ref imageSize),"image_readback_failed");
       if(!String.Equals(Path.GetFullPath(image.ToString()),Path.GetFullPath(exe),StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("codex_job_image_changed");

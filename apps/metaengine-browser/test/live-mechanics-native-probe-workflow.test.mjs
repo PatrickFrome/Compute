@@ -14,7 +14,7 @@ const self = 'test/live-mechanics-native-probe-workflow.test.mjs';
 const observation = '../../.github/browser-ci-resource-observation.mjs';
 const files = ['test/codex-cli-runner.test.mjs', 'test/codex-cli-sandbox-probe.test.mjs',
   'test/native-coding-host-observers.test.mjs', 'test/windows-local-computer-executor.test.mjs',
-  'test/codex-cli-windows-output-order.test.mjs'];
+  'test/codex-cli-windows-output-order.test.mjs', 'test/codex-cli-windows-job-birth-physical.test.mjs'];
 const fullGate = "        if: ${{ !cancelled() && steps.qualification_prerequisites.outcome == 'success' }}";
 
 function step(source, name) {
@@ -30,7 +30,7 @@ function assertProbeAndFull(source) {
   assert.match(probe, /^        timeout-minutes: 10$/m);
   assert.match(probe, /^          node --test --test-concurrency=1 \\$/m);
   const targets = [...probe.matchAll(/^ {12}(test\/[^\s]+\.test\.mjs)(?: \\)?$/gm)].map(match => match[1]);
-  assert.deepEqual(targets, files, 'all five complete native-bearing files must run serially');
+  assert.deepEqual(targets, files, 'all six complete native-bearing files must run serially');
   assert.match(full, /^        timeout-minutes: 20$/m);
   assert.match(full, /^          node --test --test-concurrency=4 'test\/\*\.test\.mjs'$/m);
   assert.ok(full.includes(fullGate), 'a failed/timed-out probe must not suppress the full suite after successful prerequisites');
@@ -42,6 +42,14 @@ function assertProbeAndFull(source) {
   }
 }
 
+function assertElectronVersionGuard(source) {
+  const provision = step(source, 'Provision locked official Electron before timed Windows qualification');
+  const pattern = provision.match(/if \(\$productVersion -notmatch '([^']+)'\)/)?.[1];
+  assert.equal(pattern, '^44\\.0\\.0(?:\\.0)?$', 'only canonical locked 44 text or zero revision is accepted');
+  assert.match(provision, /\$version\.Revision -notin @\(-1, 0\)/, 'undefined or zero revision only');
+  return new RegExp(pattern);
+}
+
 test('Live Mechanics keeps the existing two jobs, platform matrix and bounded per-platform qualification budgets', () => {
   const jobs = workflow.split('\njobs:\n')[1]; assert.ok(jobs);
   assert.deepEqual([...jobs.matchAll(/^  ([a-z][\w-]*):$/gm)].map(match => match[1]), ['browser-mechanics', 'cognitive-postgres']);
@@ -50,7 +58,7 @@ test('Live Mechanics keeps the existing two jobs, platform matrix and bounded pe
   assert.match(mechanics, /^    timeout-minutes: \$\{\{ matrix\.os == 'windows-2025' && 35 \|\| 20 \}\}$/m);
   assert.doesNotMatch(mechanics, /continue-on-error|\n        (?:include|exclude):|max-parallel/);
 });
-test('Windows gets five complete serial diagnostic files and both platforms still execute the unchanged full four-worker glob', () => {
+test('Windows gets six complete serial diagnostic files and both platforms still execute the unchanged full four-worker glob', () => {
   assertProbeAndFull(workflow);
   for (const file of files) assert.ok(statSync(new URL(file, browser)).isFile());
   const full = step(workflow, 'Exercise all Browser mechanics including real local IPC');
@@ -66,6 +74,34 @@ test('full coverage and source readback depend on all successful prerequisites, 
   assert.ok(workflow.indexOf('name: Parse runtime contracts') < workflow.indexOf('name: Isolated Windows native diagnostic'));
   const inspect = step(workflow, 'Inspect generated artifacts and prove tracked source unchanged');
   assert.ok(inspect.includes(fullGate)); assert.match(inspect, /git diff --exit-code/);
+});
+test('Windows explicitly provisions the locked official Electron before both timed qualifications without changing failure guards', () => {
+  const provision = step(workflow, 'Provision locked official Electron before timed Windows qualification');
+  assert.match(provision, /^        if: runner\.os == 'Windows'$/m);
+  assert.match(provision, /node scripts\/qualified-electron-runtime\.mjs --out \$receiptPath/);
+  assert.match(provision, /qualification_electron_materialization_failed/);
+  assert.match(provision, /System\.Diagnostics\.FileVersionInfo/);
+  assert.match(provision, /Get-FileHash -Algorithm SHA256/);
+  assert.match(provision, /package_version -ne '44\.0\.0'/);
+  assert.doesNotMatch(provision, /continue-on-error|--no-sandbox|--version|install\.js/);
+  assert.ok(workflow.indexOf('name: Install locked Browser dependencies') < workflow.indexOf('name: Provision locked official Electron'));
+  assert.ok(workflow.indexOf('name: Provision locked official Electron') < workflow.indexOf('name: Parse runtime contracts'));
+  assertProbeAndFull(workflow);
+});
+test('Electron PE version guard accepts only 44.0.0 or 44.0.0.0 and rejects nonzero revisions and relaxed guards', () => {
+  const allowed = assertElectronVersionGuard(workflow);
+  for (const [version, expected] of [['44.0.0', true], ['44.0.0.0', true], ['44.0.0.999', false],
+    ['44.0.0.1', false], ['44.0.1', false], ['44.0', false], ['44.0.0.00', false],
+    ['44.0.0-beta.1', false], ['44.0.0+metadata', false], ['044.0.0', false]]) {
+    assert.equal(allowed.test(version), expected, version);
+  }
+  for (const [before, after] of [
+    ['-or $version.Revision -notin @(-1, 0)', ''],
+    ["^44\\.0\\.0(?:\\.0)?$", "^44\\.0\\.0(?:\\.[0-9]+)?$"],
+  ]) {
+    assert.ok(workflow.includes(before));
+    assert.throws(() => assertElectronVersionGuard(workflow.replace(before, after)), { code: 'ERR_ASSERTION' });
+  }
 });
 test('both qualification steps emit safe resource/timestamp observations and helper changes trigger CI', () => {
   const probe = step(workflow, 'Isolated Windows native diagnostic (not contention proof)');
@@ -89,7 +125,8 @@ test('both qualification steps emit safe resource/timestamp observations and hel
 });
 for (const [name, before, after] of [
   ['omitted native file', '            test/codex-cli-sandbox-probe.test.mjs \\\n', ''],
-  ['omitted output-order native file', '            test/codex-cli-windows-output-order.test.mjs\n', ''],
+  ['omitted output-order native file', '            test/codex-cli-windows-output-order.test.mjs \\\n', ''],
+  ['omitted atomic-birth native file', '            test/codex-cli-windows-job-birth-physical.test.mjs\n', ''],
   ['parallel native diagnostic', '--test-concurrency=1 \\', '--test-concurrency=4 \\'],
   ['filtered full suite', "--test-concurrency=4 'test/*.test.mjs'", "--test-concurrency=4 --test-name-pattern=selected 'test/*.test.mjs'"],
   ['probe-dependent full suite', fullGate, "        if: ${{ success() && steps.windows_native_probe.outcome == 'success' }}"],

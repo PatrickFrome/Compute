@@ -11,6 +11,7 @@ on:
       - 'supabase/migrations/*native_device_transport_bootstrap*'
       - '.github/workflows/client-live-mechanics-recovery-v1.yml'
       - '.github/browser-ci-resource-observation.mjs'
+      - '.github/windows-native-read-observation.mjs'
   workflow_dispatch:
 permissions:
   contents: read
@@ -41,6 +42,33 @@ jobs:
       - name: Install locked Browser dependencies
         working-directory: apps/metaengine-browser
         run: npm ci --no-audit --no-fund
+      - name: Provision locked official Electron before timed Windows qualification
+        if: runner.os == 'Windows'
+        working-directory: apps/metaengine-browser
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $receiptPath = Join-Path $env:RUNNER_TEMP 'qualified-electron-runtime.json'
+          node scripts/qualified-electron-runtime.mjs --out $receiptPath
+          if ($LASTEXITCODE -ne 0) { throw 'qualification_electron_materialization_failed' }
+          $runtime = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+          if ($runtime.schema -ne 'metaengine.browser.qualified-electron-runtime.v1' `
+              -or $runtime.package_version -ne '44.0.0' `
+              -or $runtime.binary_sha256 -notmatch '^[a-f0-9]{64}$' `
+              -or $runtime.authority_effect -ne $false) { throw 'qualification_electron_receipt_invalid' }
+          $productVersion = ([System.Diagnostics.FileVersionInfo]::GetVersionInfo($runtime.executable).ProductVersion).Trim()
+          # Electron 44 RC string version is 44.0.0; its fixed numeric revision is 0.
+          if ($productVersion -notmatch '^44\.0\.0(?:\.0)?$') {
+            throw 'qualification_electron_product_version_drift'
+          }
+          $version = [version]$productVersion
+          if ($version.Major -ne 44 -or $version.Minor -ne 0 -or $version.Build -ne 0 `
+              -or $version.Revision -notin @(-1, 0)) {
+            throw 'qualification_electron_product_version_drift'
+          }
+          if (((Get-FileHash -Algorithm SHA256 -LiteralPath $runtime.executable).Hash).ToLowerInvariant() -ne $runtime.binary_sha256) {
+            throw 'qualification_electron_binary_changed'
+          }
       - name: Prove the prior installed wiring stalls behind advisory capture
         working-directory: apps/metaengine-browser
         shell: bash
@@ -66,6 +94,7 @@ jobs:
           set -euo pipefail
           npm run check
           node --test test/live-mechanics-native-probe-workflow.test.mjs
+          node --test test/windows-native-read-observation.test.mjs
       - name: Isolated Windows native diagnostic (not contention proof)
         id: windows_native_probe
         if: runner.os == 'Windows'
@@ -80,7 +109,8 @@ jobs:
             test/codex-cli-sandbox-probe.test.mjs \
             test/native-coding-host-observers.test.mjs \
             test/windows-local-computer-executor.test.mjs \
-            test/codex-cli-windows-output-order.test.mjs
+            test/codex-cli-windows-output-order.test.mjs \
+            test/codex-cli-windows-job-birth-physical.test.mjs
       - name: Exercise all Browser mechanics including real local IPC
         # Explicit status function retains full coverage after a failed/timed-out
         # probe. That failure still fails this job; cancellation remains honored.
@@ -96,6 +126,12 @@ jobs:
           set -euo pipefail
           node ../../.github/browser-ci-resource-observation.mjs full-browser-suite
           node --test --test-concurrency=4 'test/*.test.mjs'
+      - name: Observe failed Windows native reads without replacing qualification
+        # Read-only timing evidence with a separate diagnostic ceiling. The
+        # original failed probe remains failed; no production timeout changes.
+        if: ${{ !cancelled() && runner.os == 'Windows' && steps.windows_native_probe.outcome == 'failure' }}
+        timeout-minutes: 3
+        run: node .github/windows-native-read-observation.mjs
       - name: Inspect generated artifacts and prove tracked source unchanged
         if: ${{ !cancelled() && steps.qualification_prerequisites.outcome == 'success' }}
         shell: bash

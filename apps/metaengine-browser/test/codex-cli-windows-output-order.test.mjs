@@ -7,6 +7,7 @@ import path from 'node:path';
 import {codexCliEnvironment} from '../src/codex-cli-runner.mjs';
 import {createCodexCliWindowsProcessController, resolveCodexCliJobHelper} from '../src/codex-cli-windows-process-controller.mjs';
 import {withOwnedCodexCliProcess} from './fixtures/with-owned-codex-cli-process.mjs';
+import {instrumentCodexCliHelperStartup, withCodexCliStartupObservation} from './fixtures/codex-cli-startup-observation.mjs';
 
 const resumeCall = 'Require(ResumeThread(process.thread)!=0xffffffff,"resume_failed");';
 const resumedFrame = 'Emit("{\\"type\\":\\"resumed\\"}");';
@@ -48,7 +49,7 @@ test('real Windows native helper buffers immediate output through a forced post-
     + '        System.Threading.Thread.Sleep(10);\n      }';
   const helperPath = path.join(directory, 'forced-output-window.ps1');
   // Windows PowerShell 5 must decode a potentially non-ASCII temp path as UTF-8.
-  await fs.writeFile(helperPath, '\ufeff' + helperSource.replace(/^\ufeff/, '').replace(resumeCall, resumeCall + delay), 'utf8');
+  await fs.writeFile(helperPath, '\ufeff' + instrumentCodexCliHelperStartup(helperSource.replace(/^\ufeff/, '')).replace(resumeCall, resumeCall + delay), 'utf8');
   const expectedStdout = 'stdout-before-ack\n';
   const expectedStderr = 'stderr-before-ack\n';
   const script = `const fs=require('node:fs');`
@@ -57,26 +58,30 @@ test('real Windows native helper buffers immediate output through a forced post-
   const expectedExecutableSha256 = sha(await fs.readFile(process.execPath));
   const runId = crypto.randomUUID();
   const processController = createCodexCliWindowsProcessController({helperPath});
-  await withOwnedCodexCliProcess(processController, {
-    executablePath: process.execPath, expectedExecutableSha256, args: ['-e', script],
-    cwd: directory, env: codexCliEnvironment(path.join(directory, 'unused-auth')), timeoutMs: 15000, runId,
-  }, async handle => {
-    assert.equal(handle.proof.started_suspended, true);
-    assert.equal(handle.proof.tree_control_bound, true);
-    assert.equal(handle.proof.job_bound_before_resume, true);
-    assert.equal(handle.proof.job_id, runId);
-    assert.equal(handle.proof.executable_sha256, expectedExecutableSha256);
-    let stdout = '', stderr = '';
-    handle.stdout.on('data', chunk => { stdout += chunk.toString(); });
-    handle.stderr.on('data', chunk => { stderr += chunk.toString(); });
-    await handle.resume('');
-    const completion = await handle.completion;
-    assert.equal(completion.exit_code, 0);
-    assert.equal(completion.reason, null);
-    assert.equal(completion.tree_cleanup_confirmed, true);
-    assert.equal(stdout, expectedStdout);
-    assert.equal(stderr, expectedStderr);
-    assert.equal(await fs.readFile(written, 'utf8'), 'both-pipes-written');
+  const powershellPath = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  await withCodexCliStartupObservation({helperPath, powershellPath, report: record => t.diagnostic(JSON.stringify(record))}, async ({readyValidated}) => {
+    await withOwnedCodexCliProcess(processController, {
+      executablePath: process.execPath, expectedExecutableSha256, args: ['-e', script],
+      cwd: directory, env: codexCliEnvironment(path.join(directory, 'unused-auth')), timeoutMs: 15000, runId,
+    }, async handle => {
+      readyValidated();
+      assert.equal(handle.proof.started_suspended, true);
+      assert.equal(handle.proof.tree_control_bound, true);
+      assert.equal(handle.proof.job_bound_before_resume, true);
+      assert.equal(handle.proof.job_id, runId);
+      assert.equal(handle.proof.executable_sha256, expectedExecutableSha256);
+      let stdout = '', stderr = '';
+      handle.stdout.on('data', chunk => { stdout += chunk.toString(); });
+      handle.stderr.on('data', chunk => { stderr += chunk.toString(); });
+      await handle.resume('');
+      const completion = await handle.completion;
+      assert.equal(completion.exit_code, 0);
+      assert.equal(completion.reason, null);
+      assert.equal(completion.tree_cleanup_confirmed, true);
+      assert.equal(stdout, expectedStdout);
+      assert.equal(stderr, expectedStderr);
+      assert.equal(await fs.readFile(written, 'utf8'), 'both-pipes-written');
+    });
   });
   assert.equal(sha(await fs.readFile(resolveCodexCliJobHelper())), sha(helperSource), 'production helper must stay untouched');
 });
