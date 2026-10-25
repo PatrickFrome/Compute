@@ -174,7 +174,7 @@ async function mainMountFixture(){
     close:()=>{counts.capabilityClosed++;capClosed=true;}};
   const scope={nativeCodingRuntime:null,nativeCodingHostCapability:null,nativeCodingRuntimeMountPromise:null,nativeCodingRuntimeMountGeneration:null,nativeCodingRuntimeMountFailure:null,
     runtimeRecoveryGenerationLost:false,shutdownRequested:false,managedTaskProjectHostDrainPending:false,
-    managedTaskProjectHostClosing:Promise.resolve(),nativeRuntimeInitializations:new Set(),
+    managedTaskProjectHostClosing:Promise.resolve(),nativeRuntimeInitializations:new Set(),nativeInitializationCleanupCandidates:new Set(),
     nativeSupervisor:{bindNativeCodingRuntime:value=>{counts.bind++;bound=value;},bindDevosProjectRuntime:()=>{},stop:()=>{},snapshot:()=>({})},autonomousProjectRuntime:null,
     managedTaskProjectHost:null,drainManagedRuntimeBindings,
     readOwnedLocalRuntimeHostSummary:()=>summary,readOwnedLocalRuntimeHostRecoveryObservation:async()=>({...generation}),
