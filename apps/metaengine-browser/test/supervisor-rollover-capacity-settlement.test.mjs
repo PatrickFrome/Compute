@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import test from 'node:test';
 import { SupervisorKeepalive } from '../src/supervisor-keepalive.mjs';
+import {TabRegistry} from '../src/tab-registry.mjs';
 
 const CHAT_URL = 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 
@@ -32,9 +33,8 @@ const OPEN = Object.freeze({
 });
 
 test('tab capacity guard remains before WebContents allocation and matches native outcome policy', async () => {
-  const [main, registry, nativeClient] = await Promise.all([
+  const [main, nativeClient] = await Promise.all([
     fs.readFile(new URL('../src/main.mjs', import.meta.url), 'utf8'),
-    fs.readFile(new URL('../src/tab-registry.mjs', import.meta.url), 'utf8'),
     fs.readFile(new URL('../src/native-supervisor-client-base.mjs', import.meta.url), 'utf8'),
   ]);
   const createStart = main.indexOf('async function createTab');
@@ -45,7 +45,10 @@ test('tab capacity guard remains before WebContents allocation and matches nativ
   assert.ok(createStart >= 0 && createEnd > createStart);
   assert.ok(registryCreate >= 0 && rendererCreate > registryCreate,
     'capacity registry guard must run before WebContents allocation');
-  assert.match(registry, /if \(this\.\#tabs\.size >= MAX_TABS\) throw new Error\('tab_capacity_exceeded'\)/);
+  const denied=new TabRegistry({readResources:()=>({physical_start_allowed:false,memory_headroom:0})});
+  assert.throws(()=>denied.create({url:CHAT_URL,role:'FLEET'}),/tab_capacity_exceeded/);
+  assert.equal(denied.snapshot().tabs.length,0);
+  assert.equal(denied.snapshot().agent_count_limit,null);
   assert.match(nativeClient, /action === 'NEW_TAB' && message === 'tab_capacity_exceeded'\) return 'NO_EFFECT_PROVEN'/);
 });
 

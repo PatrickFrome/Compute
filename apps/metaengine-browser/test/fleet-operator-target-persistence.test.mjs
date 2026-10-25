@@ -113,10 +113,10 @@ test('no persisted file keeps the historical fail-safe posture (no auto-grow)', 
   assert.equal(h.p.snapshot().policy.desired_agents, 0);
 });
 
-test('invalid boot seeds and targets clamp into the [0,64] band without throwing', async () => {
+test('large boot targets survive without a ceiling while invalid values safely restore zero', async () => {
   const h = makeProvisioner({ persisted: stateWithBootTarget(9999) });
   await h.p.init();
-  assert.equal(h.p.snapshot().policy.boot_fleet_target, 64, 'out-of-range persisted seed clamps to the hard ceiling');
+  assert.equal(h.p.snapshot().policy.boot_fleet_target, 9999);
   const garbage = makeProvisioner({ persisted: stateWithBootTarget('not-a-number') });
   await garbage.p.init();
   assert.equal(garbage.p.snapshot().policy.boot_fleet_target, 0, 'garbage seed clamps to 0 (no auto-grow)');
@@ -127,5 +127,5 @@ test('invalid boot seeds and targets clamp into the [0,64] band without throwing
   await h.p.setOperatorFleetTarget(64);
   assert.equal(h.p.snapshot().policy.boot_fleet_target, 64);
   await h.p.setOperatorFleetTarget(65);
-  assert.equal(h.p.snapshot().policy.boot_fleet_target, 64, 'targets clamp at the hard 64 ceiling');
+  assert.equal(h.p.snapshot().policy.boot_fleet_target, 65);
 });

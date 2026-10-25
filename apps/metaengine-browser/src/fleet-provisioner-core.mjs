@@ -47,6 +47,10 @@ function nonNegativeInteger(value, fallback, name) {
   if (!Number.isSafeInteger(out) || out < 0) throw new Error(`fleet_${name}_invalid`);
   return out;
 }
+function operatorBootTarget(value) {
+  const out=Math.floor(Number(value));
+  return Number.isSafeInteger(out)&&out>=0?out:0;
+}
 function generationFloor(value) {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw new Error('fleet_generation_floor_invalid');
   return Math.max(1, value);
@@ -77,7 +81,7 @@ function normalizePolicy(policy = {}) {
   // cycle); this field only seeds the STARTUP fleet so a self-update restart
   // restores the operator's fleet instead of silently shrinking it to demand.
   // Invalid values clamp to 0 (fail-safe: no auto-grow), never throw.
-  const bootFleetTarget = nonNegativeInteger(policy.boot_fleet_target,0,'boot_fleet_target');
+  const bootFleetTarget = operatorBootTarget(policy.boot_fleet_target);
   // Closed-loop audit fix (fleet scale): the elastic live-agent ceiling flows
   // through the persisted fleet policy (the governor reads
   // policy.elastic_max_target_agents; before this key was normalized away and
@@ -179,11 +183,11 @@ function sanitizeLoadedState(input, policy) {
   // the ONLY policy field that survives the startup-policy replacement. It
   // lifts the startup desired_agents so the first active reconcile can restore
   // the operator's fleet after a restart (self-update, crash, reboot).
-  const operatorBootTarget = nonNegativeInteger(input?.policy?.boot_fleet_target,0,'boot_fleet_target');
+  const bootTarget = operatorBootTarget(input?.policy?.boot_fleet_target);
   const startupPolicy = normalizePolicy({
     ...policy,
-    boot_fleet_target: operatorBootTarget,
-    desired_agents: Math.max(Number(policy?.desired_agents ?? 0) || 0, operatorBootTarget),
+    boot_fleet_target: bootTarget,
+    desired_agents: Math.max(Number(policy?.desired_agents ?? 0) || 0, bootTarget),
   });
   if (!input || input.schema !== 'metaengine.browser.fleet-state.v1' || !Array.isArray(input.agents)) return freshState(startupPolicy);
   const agents = [];
@@ -377,7 +381,7 @@ export class FleetProvisioner {
   async setOperatorFleetTarget(targetAgents) {
     return this.#serial(async () => {
       this.#assertReady();
-      const target = nonNegativeInteger(targetAgents,0,'boot_fleet_target');
+      const target = operatorBootTarget(targetAgents);
       this.#state.policy = clone(normalizePolicy({
         ...this.#state.policy,
         boot_fleet_target: target,

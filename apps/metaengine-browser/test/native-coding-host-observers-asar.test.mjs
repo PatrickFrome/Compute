@@ -102,7 +102,11 @@ if(qualificationMode==='MAIN_PROCESS'){
 `);
   const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;delete env.NODE_OPTIONS;
   if(qualification.mode==='ASAR_NODE'){env.ELECTRON_RUN_AS_NODE='1';delete env.ELECTRON_NO_ASAR;}
-  const pending=run(electron,[entry],{windowsHide:true,shell:false,timeout:45000,maxBuffer:256*1024,env});
+  // This isolated MAIN_PROCESS fixture loads no renderer or remote content.
+  // Ubuntu's runner does not configure Electron's setuid helper. The product
+  // launch and its renderer sandbox settings remain outside this fixture.
+  const args=process.platform==='linux'&&qualification.mode==='MAIN_PROCESS'?['--no-sandbox',entry]:[entry];
+  const pending=run(electron,args,{windowsHide:true,shell:false,timeout:45000,maxBuffer:256*1024,env});
   pending.child?.stdin?.end();
   try{await pending;}catch(error){
     const result=await fs.readFile(resultPath,'utf8').catch(()=>null);
