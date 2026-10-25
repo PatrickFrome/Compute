@@ -11,9 +11,9 @@ const manifest=JSON.parse(read('coordination/operator-control/client-critical-cl
 function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion) {
  const fixed={
   classification:'SOURCE_ONLY_NO_CURRENT_PACKAGE',
-  branch:'work/autonomous-development-fabric-v1-20261017',
+  branch:'work/fix-native-rpc-onboarding-contract-20261025',
   source_parent:'ea405d926568508eac53ebb408e941c94faeadcf',
-  package_version:'0.7.0-dev.1107139874586.1',
+  package_version:'0.7.0-dev.1107139874592.1',
   historical_package_version:'0.7.0-dev.202610152359.1',
   package_build_authorized:false,
   package_version_reuse_authorized:false,
@@ -205,9 +205,8 @@ function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion)
   "production_ready": false,
   "promotion_authorized": false,
   "authority_effect": false
-}]);
- const successor=manifest.current_package_transition;
- assert.deepEqual(successor,{
+},
+{
   "schema": "metaengine.client.package-version-successor.v1",
   "source_parent": "179df86c8e882d2866a2fcdb3bcae1158b12951e",
   "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
@@ -217,29 +216,77 @@ function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion)
   "production_ready": false,
   "promotion_authorized": false,
   "authority_effect": false
+},
+{
+  "schema": "metaengine.client.package-version-successor.v1",
+  "source_parent": "56a745dcc4c38ac072b25740c43530931e1ee1c0",
+  "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+  "prior_version": "0.7.0-dev.1107139874586.1",
+  "distinct_version": "0.7.0-dev.1107139874587.1",
+  "preceding_version_burned": true,
+  "production_ready": false,
+  "promotion_authorized": false,
+  "authority_effect": false
+},
+{
+  "schema": "metaengine.client.package-version-successor.v1",
+  "source_parent": "72e66165f6f8a59196371ba1ff16feaecbb7a521",
+  "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+  "prior_version": "0.7.0-dev.1107139874587.1",
+  "distinct_version": "0.7.0-dev.1107139874588.1",
+  "preceding_version_burned": true,
+  "production_ready": false,
+  "promotion_authorized": false,
+  "authority_effect": false
+},
+{
+  "schema": "metaengine.client.package-version-successor.v1",
+  "source_parent": "ef9266faee3eaf3151af203b7bf48c0d85abbdd3",
+  "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+  "prior_version": "0.7.0-dev.1107139874588.1",
+  "distinct_version": "0.7.0-dev.1107139874590.1",
+  "preceding_version_burned": true,
+  "production_ready": false,
+  "promotion_authorized": false,
+  "authority_effect": false
+},
+{
+  "schema": "metaengine.client.package-version-successor.v1",
+  "source_parent": "04bffffb1b7f2950d61ae3a15de7d7bc5886fd6b",
+  "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+  "prior_version": "0.7.0-dev.1107139874590.1",
+  "distinct_version": "0.7.0-dev.1107139874591.1",
+  "preceding_version_burned": true,
+  "production_ready": false,
+  "promotion_authorized": false,
+  "authority_effect": false
+}]);
+ const successor=manifest.current_package_transition;
+ assert.deepEqual(successor,{
+  "schema": "metaengine.client.package-version-successor.v1",
+  "source_parent": "a32b2134d44453112046bc721dd0f8f132ad7b67",
+  "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+  "prior_version": "0.7.0-dev.1107139874591.1",
+  "distinct_version": "0.7.0-dev.1107139874592.1",
+  "preceding_version_burned": true,
+  "production_ready": false,
+  "promotion_authorized": false,
+  "authority_effect": false
 });
  assert.equal(parentVersion,previous[0].prior_version,'baseline source package identity drift');
- assert.equal(previous[0].distinct_version,previous[1].prior_version,'historical successor chain');
- assert.equal(previous[1].distinct_version,previous[2].prior_version,'historical successor chain');
- assert.equal(previous[2].distinct_version,previous[3].prior_version,'historical successor chain');
- assert.equal(previous[3].distinct_version,previous[4].prior_version,'historical successor chain');
- assert.equal(previous[4].distinct_version,previous[5].prior_version,'historical successor chain');
- assert.equal(previous[5].distinct_version,previous[6].prior_version,'historical successor chain');
- assert.equal(previous[6].distinct_version,previous[7].prior_version,'historical successor chain');
- assert.equal(previous[7].distinct_version,previous[8].prior_version,'historical successor chain');
- assert.equal(previous[8].distinct_version,previous[9].prior_version,'historical successor chain');
- assert.equal(previous[9].distinct_version,previous[10].prior_version,'historical successor chain');
- assert.equal(previous[10].distinct_version,previous[11].prior_version,'historical successor chain');
- assert.equal(previous[11].distinct_version,previous[12].prior_version,'historical successor chain');
- assert.equal(previous[12].distinct_version,previous[13].prior_version,'historical successor chain');
- assert.equal(previous[13].distinct_version,previous[14].prior_version,'historical successor chain');
- assert.equal(previous[14].distinct_version,previous[15].prior_version,'historical successor chain');
- assert.equal(previous[15].distinct_version,previous[16].prior_version,'historical successor chain');
- assert.equal(previous[16].distinct_version,previous[17].prior_version,'historical successor chain');
- assert.equal(previous[17].distinct_version,previous[18].prior_version,'historical successor chain');
- assert.equal(previous[18].distinct_version,previous[19].prior_version,'historical successor chain');
- assert.equal(previous[19].distinct_version,previous[20].prior_version,'historical successor chain');
- assert.equal(previous[20].distinct_version,successor.prior_version,'current successor chain');
+ for(let index=1;index<previous.length;index++)
+  assert.equal(previous[index-1].distinct_version,previous[index].prior_version,'historical successor chain');
+ assert.equal(previous.at(-1).distinct_version,successor.prior_version,'current successor chain');
+ for(const item of [...previous,successor]) {
+  assert.equal(item.baseline_source_parent,'ea405d926568508eac53ebb408e941c94faeadcf','immutable transition baseline');
+  assert.equal(JSON.parse(git('show',item.source_parent+':apps/metaengine-browser/package.json')).version,item.prior_version,
+   'transition predecessor must contain its asserted package identity');
+  assert.equal(spawnSync('git',['-C',root,'merge-base','--is-ancestor',item.source_parent,'HEAD']).status,0,
+   'transition predecessor must be a real Git ancestor');
+ }
+ const lock=JSON.parse(read('apps/metaengine-browser/package-lock.json'));
+ assert.equal(lock.version,observedVersion,'lockfile package identity drift');
+ assert.equal(lock.packages[''].version,observedVersion,'root lockfile package identity drift');
  assert.equal(candidate.package_version,successor.distinct_version,'new source version drift');
  assert.ok(manifest.burned_versions.includes(parentVersion),'previous physical version must stay burned');
  assert.equal(candidate.historical_package_version,manifest.test_candidate.version);
@@ -376,4 +423,88 @@ test('current CI runs the complete Browser and Client suites and preserves physi
  assert.match(read('.github/workflows/client-wave10-w62-source-r97.yml'),/client-critical-closure\.manifest\.json/);
  const selfUpdate=read('.github/workflows/metaengine-browser-self-update-e2e.yml');
  assert.match(selfUpdate,/if:.*github\.head_ref != 'work\/metaengine-critical-closure-20261015'/);
+});
+
+
+test('QA source sealing retains explicit timing blockers and no installed or promotion authority',()=>{
+ const audit=read('coordination/operator-control/AUDIT_CLOSURE_EXECUTION_REGISTER_20261018.md');
+ const parseBlocks=source=>{
+  const current=source.replace(/\r\n/g,'\n').split('## QA source seal — 0.7.0-dev.1107139874592.1\n')[1];
+  assert.ok(current,'current QA source record required');
+  return [...current.matchAll(/```json\n([\s\S]*?)\n```/g)].map(match=>JSON.parse(match[1]));
+ };
+ const blocks=parseBlocks(audit);
+ assert.deepEqual(parseBlocks(audit.replace(/\r?\n/g,'\r\n')),blocks,'Windows CRLF audit bytes preserve the same QA boundary');
+ assert.deepEqual(blocks[0],{
+  "schema": "metaengine.client.qa-source-seal.v1",
+  "functional_source_parent": "a32b2134d44453112046bc721dd0f8f132ad7b67",
+  "package_version": "0.7.0-dev.1107139874592.1",
+  "classification": "QA_SOURCE_PREPARED_NOT_INSTALLED_QUALIFIED",
+  "global_version_absence": "UNKNOWN",
+  "immutable_producer_preflight_required": true,
+  "artifact_qualification": "NOT_ESTABLISHED",
+  "known_blockers": [
+    "WINDOWS_STATUS_OBSERVE_NATIVE_READ_TIMING",
+    "WINDOWS_COLD_BOOT_FIRST_CONTROLLER_SERIAL_TIMING"
+  ],
+  "installed_qualification": "NOT_QUALIFIED",
+  "live_qualification": "NOT_QUALIFIED",
+  "continuous_autonomy_qualification": "NOT_QUALIFIED",
+  "production_ready": false,
+  "promotion_authorized": false,
+  "automatic_effect_retry_allowed": false,
+  "authority_effect": false
+});
+ assert.deepEqual(blocks[1],{
+  "schema": "metaengine.client.current-seal-retirements.v1",
+  "retirements": [
+    {
+      "path": "apps/metaengine-browser/test/r95-utility-panel-docking.test.mjs",
+      "historical_blob": "41e89fbb2c6d453137471c2b9970095fdefbde07",
+      "deleted_by": "774af98749338817bbd1b802be089ebc15071e44",
+      "retired_scope": "UNMOUNTED_UTILITY_PANEL_DOCK_AND_SPLITTER_IMPLEMENTATION",
+      "retained_guards": [
+        "apps/metaengine-browser/test/r95c-run-inspector-breakpoint.test.mjs",
+        "apps/metaengine-browser/test/r97-single-main-ui-contract.test.mjs",
+        "apps/metaengine-browser/test/me2-primary-shell-runtime.test.mjs"
+      ],
+      "complete_behavioral_equivalence_claimed": false
+    },
+    {
+      "path": "apps/metaengine-browser/test/r95e-command-palette-agent-binding.test.mjs",
+      "historical_blob": "87ec8232e36627dfc1069e8560cc6df5629cf1ea",
+      "deleted_by": "774af98749338817bbd1b802be089ebc15071e44",
+      "retired_scope": "DAEMON_AGENTCHAT_HOOK_AND_OLD_PALETTE_IMPLEMENTATION",
+      "retained_guards": [
+        "apps/metaengine-browser/test/r97-single-main-ui-contract.test.mjs",
+        "apps/metaengine-browser/test/r94-workflow-shell-ia.test.mjs",
+        "apps/metaengine-browser/test/r104-tasks-agentchat-quarantine.test.mjs",
+        "apps/metaengine-browser/test/browser-critical-audit-ui-coverage.test.mjs"
+      ],
+      "complete_behavioral_equivalence_claimed": false
+    }
+  ]
+});
+ for(const retired of blocks[1].retirements) {
+  assert.equal(manifest.current_tree_blobs[retired.path],undefined,'retired test must not claim current bytes');
+  assert.equal(fs.existsSync(new URL(retired.path,new URL('../../',import.meta.url))),false);
+  assert.equal(git('rev-parse',retired.deleted_by+'^:'+retired.path),retired.historical_blob,'retired evidence must remain independently recoverable');
+  for(const guard of retired.retained_guards) assert.match(manifest.current_tree_blobs[guard],/^[a-f0-9]{40}$/,'current replacement boundary must be sealed');
+ }
+});
+
+
+test('QA successor preserves exact immutable W43-W73 manifest bytes',()=>{
+ const frozen=[
+  ['w43','484e9c6b7db6e0ed8abdd625446ee35b7e82e770'],
+  ['w51','39252b584976a1a2308eb2868acaa0c4acab8f50'],
+  ['w59','22337575525ab196a477abb5bc902709a1fd1437'],
+  ['w66','8337b889acb89d6f652c65f1b1ef44d25b17a796'],
+  ['w73','f135919d682552bc54f63de8ca392390bbc63557'],
+ ];
+ for(const [wave,blob] of frozen) {
+  const file='coordination/operator-control/client-source-candidate-'+wave+'.manifest.json';
+  assert.equal(git('rev-parse','HEAD:'+file),blob,'immutable historical commit bytes: '+wave);
+  assert.equal(git('hash-object',file),blob,'immutable historical worktree bytes: '+wave);
+ }
 });
