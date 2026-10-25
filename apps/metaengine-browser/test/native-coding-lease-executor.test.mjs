@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createNativeCodingLeaseExecutor } from '../src/native-coding-lease-executor.mjs';
+import { nativeCodingEnvelopeSha256 } from '../src/native-coding-transport-proof.mjs';
 
 const task='11111111-1111-4111-8111-111111111111',provider='22222222-2222-4222-8222-222222222222';
 const agent='agent_11111111-1111-4111-8111-111111111111';
@@ -106,4 +107,25 @@ test('a long operator permit cannot extend the actual W30 execution deadline',as
   await f.executor.execute(request);
   assert.equal(permits[0].expires_at,f.expiry);
   assert.equal(permits[1].expires_at,f.expiry);
+});
+
+test('the private Host receives the signed job and receipt before W30 resume acknowledgement',async()=>{
+  const events=[];
+  const f=fixture({ledger:{advance:async(_scope,event)=>{events.push(event);f.calls.push(event.to);}},
+    executor:{onJobAttempted:async value=>{
+      f.calls.push('mark-running');
+      assert.equal(events[0].job_proof,value.job_proof);
+      assert.equal(events[0].evidence_sha256,nativeCodingEnvelopeSha256(value.job_proof));
+    }}});
+  const result=await f.executor.execute(request);
+  assert.deepEqual(f.calls,['reserve','runner','sign-job','ATTEMPTED','mark-running','resume','RESULT_READY']);
+  assert.equal(events[1].result_receipt,result.result);
+});
+
+test('a failed W30 acknowledgement leaves the durable attempt and cannot resume or retry',async()=>{
+  const f=fixture({executor:{onJobAttempted:async()=>{throw new Error('w30_ack_unknown');}}});
+  await assert.rejects(f.executor.execute(request),e=>e.automatic_retry_allowed===false&&e.execution.state==='ATTEMPTED');
+  assert.equal(f.calls.includes('resume'),false);
+  assert.equal(f.calls.filter(x=>x==='ATTEMPTED').length,1);
+  assert.equal(f.calls.at(-1),'read');
 });

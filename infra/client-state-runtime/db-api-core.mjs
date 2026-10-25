@@ -1,6 +1,8 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 
 export const RPC_ALLOWLIST = Object.freeze([
+  'native_coding_admission_context_v1',
+  'native_coding_execution_context_v1',
   'client_v1_device_admin_readback_v1',
   'client_v1_goal_execution_proof_v1',
   'client_v1_goal_progress_v1',

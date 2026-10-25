@@ -175,6 +175,7 @@ test('real Windows controller starts suspended in its job and transports exact a
     args: ['-e', 'process.stdout.write(JSON.stringify(process.argv.slice(1)))', 'argument with spaces', 'quote"and\\slash', 'тест🚀'],
     cwd: os.tmpdir(), env: codexCliEnvironment(path.join(os.tmpdir(), 'unused-auth')), timeoutMs: 10000, runId: crypto.randomUUID() });
   assert.equal(handle.proof.started_suspended, true); assert.equal(handle.proof.tree_control_bound, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(handle.proof)),handle.proof,'native proof must remain exact across protected JSON and private IPC');
   let output = ''; handle.stdout.setEncoding('utf8'); handle.stdout.on('data', value => { output += value; });
   await handle.resume(''); const completion = await handle.completion;
   assert.equal(completion.exit_code, 0); assert.equal(completion.tree_cleanup_confirmed, true);

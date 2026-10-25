@@ -82,6 +82,9 @@ import { createClientAdmissionRecoveryJournalFileStore } from './client-admissio
 import { createBrowserGuardianMachineBootstrapLauncher } from './browser-guardian-machine-bootstrap-launcher.mjs';
 import { createBrowserGuardianStatusObserver } from './browser-guardian-status-observer.mjs';
 import { notifyPrimaryWindowShown } from './browser-startup-observability.mjs';
+import {readOwnedLocalRuntimeHostSummary,createOwnedNativeCodingHostCapability} from './local-runtime-host-controller.mjs';
+import {readNativeCodingOperatorPaths} from '../../../infra/client-state-runtime/native-coding-host-os-scope.mjs';
+import {createNativeCodingRuntime} from './native-coding-runtime.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, '..');
@@ -116,6 +119,8 @@ let interruptedSetupRecovery = null;
 let interruptedSetupRecoveryInit = null;
 let interruptedSetupPhysicalMutationsInFlight = 0;
 let autonomousProjectRuntime = null;
+let nativeCodingRuntime = null;
+let nativeCodingHostCapability = null;
 let managedTaskProjectHostClosing = Promise.resolve();
 let managedTaskProjectHostDrainPending = false;
 let managedTaskProjectQuitReady = false;
@@ -2100,14 +2105,17 @@ async function connectGithubChat() {
 function closeManagedTaskProjectHost() {
   const host = managedTaskProjectHost;
   const projectRuntime = autonomousProjectRuntime;
+  const coding=nativeCodingRuntime, codingHost=nativeCodingHostCapability;
+  nativeCodingRuntime=null;nativeCodingHostCapability=null;
   managedTaskProjectHost = null;
   autonomousProjectRuntime = null;
   nativeSupervisor?.bindDevosProjectRuntime(null);
-  if (host || projectRuntime) {
+  nativeSupervisor?.bindNativeCodingRuntime(null);
+  if (host || projectRuntime || coding || codingHost) {
     managedTaskProjectHostDrainPending = true;
     managedTaskProjectHostClosing = (async () => {
-      try { await projectRuntime?.close(); }
-      finally { await host?.close(); }
+      try { await coding?.close(); }
+      finally { codingHost?.close();try {await projectRuntime?.close();} finally {await host?.close();} }
     })().finally(() => { managedTaskProjectHostDrainPending = false; });
   }
   return managedTaskProjectHostClosing;
@@ -2234,6 +2242,33 @@ async function initNativeSupervisor() {
         supervisor: nativeSupervisor, getManagedHost: () => managedTaskProjectHost });
       nativeSupervisor.bindDevosProjectRuntime(autonomousProjectRuntime);
     } catch (error) { recordStartupSubsystemDegraded('AUTONOMOUS_PROJECT_RUNTIME', error); }
+  }
+  if(!nativeCodingRuntime) {
+    const summary=readOwnedLocalRuntimeHostSummary();
+    if(summary) {
+      try {
+        const directory=path.dirname(summary.status_file);
+        const present=await fs.lstat(path.join(directory,'native-coding-operator-v1.json')).catch(error=>{if(error.code==='ENOENT')return null;throw error;});
+        if(present) {
+          const operator=await readNativeCodingOperatorPaths(directory);
+          const capability=createOwnedNativeCodingHostCapability(summary);
+          try {
+            const scope=await capability.readScope(),identity=ensureSupervisorIdentity(),device=identity.snapshot();
+            const permits=scope.bindings.filter(row=>row.device_id===device.device_id&&row.client_id===device.client_id).map(row=>row.permit);
+            const hashes=[...new Set(permits.map(permit=>permit.artifact.cli_executable_sha256))];
+            if(permits.length===0||hashes.length!==1) throw new Error('native_coding_protected_permits_required');
+            const sandboxReceipts=permits.map(permit=>({...operator.sandbox_receipts[permit.role],provider_id:permit.provider_id,agent_id:permit.agent_id,role:permit.role}));
+            nativeCodingRuntime=createNativeCodingRuntime({identity,ownPostgres:capability,
+              signedRequest:(route,request)=>nativeSupervisor.nativeCodingRequest(route,request),
+              observerOptions:{app,resourcesPath:process.resourcesPath,cliPath:operator.cli_executable,gitExecutable:operator.git_executable,sandboxReceipts},
+              runnerOptions:{executablePath:operator.cli_executable,expectedExecutableSha256:hashes[0],codexHome:operator.codex_home,
+                gitExecutable:operator.git_executable,journalRoot:operator.journal_root,workerTempRoot:operator.worker_temp_root},
+              resultIndexRoot:operator.result_index_root,physicalSlotBudget:Math.min(2,...permits.map(permit=>permit.physical_slot_budget))});
+            nativeCodingHostCapability=capability;nativeSupervisor.bindNativeCodingRuntime(nativeCodingRuntime);
+          }catch(error){capability.close();throw error;}
+        }
+      } catch(error) {recordStartupSubsystemDegraded('NATIVE_CODING_RUNTIME',error);}
+    }
   }
   try { await ensureInterruptedSetupRecovery(); }
   catch (error) {

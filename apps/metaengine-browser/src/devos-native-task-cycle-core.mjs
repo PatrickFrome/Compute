@@ -363,6 +363,7 @@ export class DevOsNativeTaskCycle {
   // cycle snapshot so operators and tests can audit the scaling.
   #lastObservationBudget = RUNNING_OBSERVATION_BUDGET_FLOOR;
   #projectRuntime = null;
+  #nativeCodingRuntime = null;
   #projectCoordination = { state: 'NOT_BOUND', reason: null, coordination_sweep_available: false, authority_effect: false };
   #projectDeliveredTools = new Map();
   #projectTranscriptFloor = new Map();
@@ -432,6 +433,12 @@ export class DevOsNativeTaskCycle {
     this.#toolbelt.bindProjectRuntime(runtime);
   }
 
+  bindNativeCodingRuntime(runtime) {
+    if(runtime!==null && !['observeProviders','dispatchLease','observeLease','completeFromTrustedCommand']
+      .every(key=>typeof runtime?.[key]==='function')) throw new Error('devos_native_coding_runtime_invalid');
+    this.#nativeCodingRuntime=runtime;
+  }
+
   #projectRuntimeForLease(lease) {
     if (this.#projectCoordination.state !== 'UNAVAILABLE') return this.#projectRuntime;
     // A legacy task can continue without the optional project addon. A task
@@ -475,7 +482,9 @@ export class DevOsNativeTaskCycle {
     if (this.#effectJournal && this.#journalInitialized && typeof this.#effectJournal.snapshot === 'function') {
       journal = this.#effectJournal.snapshot();
     }
-    return structuredClone({ ...this.#last, project_continuity: this.#projectCoordination, effect_delivery_journal: journal, agent_toolbelt: this.#toolbelt.snapshot(), dispatch_effect: { last: this.#lastDispatchEffect, counters: { ...this.#dispatchEffectCounters } } });
+    return structuredClone({ ...this.#last, project_continuity: this.#projectCoordination,
+      native_coding_runtime:this.#nativeCodingRuntime?.snapshot?.()??null,
+      effect_delivery_journal: journal, agent_toolbelt: this.#toolbelt.snapshot(), dispatch_effect: { last: this.#lastDispatchEffect, counters: { ...this.#dispatchEffectCounters } } });
   }
 
   async cycle() {
@@ -514,6 +523,9 @@ export class DevOsNativeTaskCycle {
           }
         : null,
     };
+    // Native providers have protected Host admission. Keep them out of the
+    // browser census and consume the same single W30 cycle.
+    const nativeProviders=this.#nativeCodingRuntime ? await this.#nativeCodingRuntime.observeProviders() : null;
     const planResponse = await this.#signedRequest('/v1/devos/cycle', {
       payload: {
         fleet: {
@@ -525,6 +537,7 @@ export class DevOsNativeTaskCycle {
           })),
         },
         planes: workGraphPlanes,
+        ...(nativeProviders ? {native_coding:nativeProviders} : {}),
       },
     });
     if (planResponse.status === 404) return this.#record({ state: 'SERVER_ROUTE_UNAVAILABLE', ambiguity_recovery: ambiguityRecovery });
@@ -548,7 +561,10 @@ export class DevOsNativeTaskCycle {
     // idle-shrink grace + reliability-ordered retirement. Pure projection;
     // demand math and the scheduler authority are unchanged.
     const fleetExperience = deriveFleetExperienceSignal({ riverSnapshot: state?.rsi_outcome_river || null, fleetSnapshot });
-    const capacity = planElasticFleetCapacity({ backlog: plan.backlog, fleetSnapshot, idleCycles: this.#elasticIdleCycles, tabCensus: tabCensusFromState(state), experience: fleetExperience });
+    // A native coding backlog must not cause the browser governor to spawn
+    // chat tabs. Require a separate server browser projection in mixed mode.
+    const capacityBacklog=this.#nativeCodingRuntime ? plan.browser_backlog ?? null : plan.backlog;
+    const capacity = planElasticFleetCapacity({ backlog: capacityBacklog, fleetSnapshot, idleCycles: this.#elasticIdleCycles, tabCensus: tabCensusFromState(state), experience: fleetExperience });
     this.#elasticIdleCycles = capacity.idle_cycles;
     // An absent/malformed authoritative backlog cannot mean idle. Do not
     // grow or retire physical sessions until the existing DB-cycle readback
@@ -573,7 +589,7 @@ export class DevOsNativeTaskCycle {
       ? plan.leases.slice(0, dispatchConcurrency)
       : (plan.lease ? [plan.lease] : []);
     let dispatch = null;
-    if (leaseBatch.length === 1) dispatch = await this.#dispatchLease(leaseBatch[0], postState?.fleet);
+    if (leaseBatch.length === 1) dispatch = await this.#dispatchAnyLease(leaseBatch[0], postState?.fleet);
     else if (leaseBatch.length > 1) dispatch = await this.#dispatchLeases(leaseBatch, postState?.fleet);
     let resultReady = null;
     let resultReadyBatch = null;
@@ -583,7 +599,7 @@ export class DevOsNativeTaskCycle {
       // an independent read-back of its own bound tab. Failures are collected
       // per task; the first error is rethrown only when EVERY observation
       // failed, preserving the single-observation error surface.
-      const settled = await Promise.allSettled(batch.map((running) => this.#observeRunning(running, postState?.fleet)));
+      const settled = await Promise.allSettled(batch.map((running) => this.#observeAnyLease(running, postState?.fleet)));
       const observations = [];
       const failures = [];
       settled.forEach((outcome, index) => {
@@ -617,6 +633,10 @@ export class DevOsNativeTaskCycle {
   }
 
   async completeFromTrustedCommand(payload = {}) {
+    if(String(payload.target_id || '').startsWith('codex-cli:')) {
+      if(!this.#nativeCodingRuntime) throw new Error('devos_native_coding_runtime_unbound');
+      return this.#nativeCodingRuntime.completeFromTrustedCommand(payload);
+    }
     await this.#ensureJournal();
     const lease = assertLiveLeaseBinding(payload, (await this.#getState())?.fleet);
     const state = String(payload.state || '').toUpperCase();
@@ -991,7 +1011,9 @@ export class DevOsNativeTaskCycle {
     // Closed-loop audit fix (fleet scale): budget scales with the live fleet.
     const concurrency = fleetLeaseDispatchConcurrency(Array.isArray(fleetSnapshot?.agents) ? fleetSnapshot.agents.length : 0);
     const batch = Array.isArray(rawLeases) ? rawLeases.slice(0, concurrency) : [];
-    const settled = await Promise.allSettled(batch.map((raw) => this.#withTabGate(raw?.tab_id, () => this.#dispatchLease(raw, fleetSnapshot))));
+    const settled = await Promise.allSettled(batch.map((raw) => String(raw?.target_id || '').startsWith('codex-cli:')
+      ? this.#dispatchAnyLease(raw,fleetSnapshot)
+      : this.#withTabGate(raw?.tab_id, () => this.#dispatchLease(raw, fleetSnapshot))));
     const results = [];
     const failures = [];
     settled.forEach((outcome, index) => {
@@ -1019,6 +1041,18 @@ export class DevOsNativeTaskCycle {
       results: Object.freeze(results),
       authority_effect: true,
     });
+  }
+
+  async #dispatchAnyLease(raw,fleetSnapshot) {
+    if(!String(raw?.target_id || '').startsWith('codex-cli:')) return this.#dispatchLease(raw,fleetSnapshot);
+    if(!this.#nativeCodingRuntime) throw new Error('devos_native_coding_runtime_unbound');
+    return this.#nativeCodingRuntime.dispatchLease(raw);
+  }
+
+  async #observeAnyLease(raw,fleetSnapshot) {
+    if(!String(raw?.target_id || '').startsWith('codex-cli:')) return this.#observeRunning(raw,fleetSnapshot);
+    if(!this.#nativeCodingRuntime) throw new Error('devos_native_coding_runtime_unbound');
+    return this.#nativeCodingRuntime.observeLease(raw);
   }
 
   async #dispatchLease(rawLease, fleetSnapshot) {

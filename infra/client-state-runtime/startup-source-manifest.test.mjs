@@ -14,7 +14,7 @@ test('source closure includes side-effect, re-export and dynamic literal imports
   // Canonicalize test-owned TEMP roots, not the paths checked by production source attestation.
   const directory = await realpath(fixturePath);
   try {
-    await writeFile(join(directory, 'entry.mjs'), "import './side.mjs'; export {value} from './export.mjs'; await import('./dynamic.mjs');\n");
+    await writeFile(join(directory, 'entry.mjs'), "const fields=['from','to','import','state']; import './side.mjs'; export {value} from './export.mjs'; await import('./dynamic.mjs');\n");
     for (const name of ['side.mjs', 'export.mjs', 'dynamic.mjs']) await writeFile(join(directory, name), 'export const value=1;\n');
     if (process.platform === 'win32' && fixturePath.toLowerCase() !== directory.toLowerCase()) {
       await assert.rejects(sourceClosure([join(fixturePath, 'entry.mjs')], fixturePath), /alias_path_forbidden/);

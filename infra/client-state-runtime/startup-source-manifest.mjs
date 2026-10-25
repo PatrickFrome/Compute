@@ -62,14 +62,15 @@ export async function sourceClosure(entries, repositoryRoot) {
     await regularFile(path);
     paths.add(path);
     const text = await readFile(path, 'utf8');
-    for (const match of text.matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s*)['"]([^'"\r\n]+)['"]/g)) {
+    // A quoted data key such as ['from','to'] is not an ESM import keyword.
+    for (const match of text.matchAll(/(?<!['"`])(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s*)['"]([^'"\r\n]+)['"]/g)) {
       const specifier = match[1];
       if (specifier.startsWith('.')) {
         const imported = resolve(dirname(path), specifier);
         if (!/\.(js|mjs|cjs|ts|json)$/.test(imported)) throw manifestError('startup_manifest_source_extension_unsupported');
         await visit(imported);
       } else if (specifier.startsWith('npm:')) npm.add(specifier);
-      else if (!specifier.startsWith('node:') && specifier !== 'postgres') throw manifestError('startup_manifest_import_unsupported');
+      else if (!specifier.startsWith('node:') && specifier !== 'postgres') throw Object.assign(manifestError('startup_manifest_import_unsupported'),{source_path:path,specifier});
     }
     // Reviewed migration catalogs use literal resource URLs. SQL is hashed as
     // data, never parsed as JavaScript or discovered through arbitrary folders.

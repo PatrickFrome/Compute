@@ -480,6 +480,11 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
     if (typeof this.#devosTaskCycle?.bindProjectRuntime === 'function') this.#devosTaskCycle.bindProjectRuntime(runtime);
   }
 
+  bindNativeCodingRuntime(runtime) {
+    if (typeof this.#devosTaskCycle?.bindNativeCodingRuntime !== 'function') throw new Error('native_supervisor_coding_cycle_unavailable');
+    this.#devosTaskCycle.bindNativeCodingRuntime(runtime);
+  }
+
   async #observeWorkers() {
     if (!this.#workerObserver) return;
     try {

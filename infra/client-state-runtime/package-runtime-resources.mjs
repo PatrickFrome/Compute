@@ -57,8 +57,18 @@ const REMOTE_SUPPORT_SOURCE_CLOSURE = new Set([
   'apps/metaengine-browser/src/local-state-provider-policy.mjs',
   'apps/metaengine-browser/src/local-runtime-host-controller.mjs',
 ]);
+const NATIVE_CODING_HOST_SOURCE_CLOSURE=new Set([
+  'apps/metaengine-browser/src/native-coding-host-observers.mjs',
+  'apps/metaengine-browser/src/native-coding-host-ipc-client.mjs',
+  'apps/metaengine-browser/src/native-coding-pg-ledger.mjs',
+  'apps/metaengine-browser/src/native-coding-transport-proof.mjs',
+  'apps/metaengine-browser/src/private-windows-storage-acl.mjs',
+  'apps/metaengine-browser/src/codex-cli-sandbox-probe.mjs',
+  'apps/metaengine-browser/src/codex-cli-runner.mjs',
+  'apps/metaengine-browser/src/codex-cli-result-schema.mjs',
+]);
 function sourcePathAllowed(value) {
-  return (value === runtimeRoot + 'local-vault-compat.sql' || migrationResources.has(value) || REMOTE_SUPPORT_SOURCE_CLOSURE.has(value)
+  return (value === runtimeRoot + 'local-vault-compat.sql' || migrationResources.has(value) || REMOTE_SUPPORT_SOURCE_CLOSURE.has(value) || NATIVE_CODING_HOST_SOURCE_CLOSURE.has(value)
     || /^(?:infra\/client-state-runtime\/[^/]+\.mjs|apps\/metaengine-browser\/src\/meta-(?:objective|orchestrator)-[^/]+\.mjs|apps\/metaengine-browser\/supabase\/a2-browser-native-supervisor-v1\/[^/]+\.(?:mjs|ts))$/.test(value))
     && !/(?:\.test\.|-fixture\.)/.test(value);
 }

@@ -58,7 +58,8 @@ export function createCodexCliWindowsProcessController({ helperPath = resolveCod
             || value.tree_control_bound !== true || value.started_suspended !== true
             || value.process_tree_control !== 'WINDOWS_JOB_OBJECT'
             || value.job_bound_before_resume !== true || value.job_id !== spec.runId || !/^S-1-/.test(value.user_sid || '')) return protocolFailure();
-          proof = Object.freeze({ ...value, type: undefined }); clearTimeout(startupTimer); resolveReady(proof);
+          const {type,...nativeProof}=value;
+          proof = Object.freeze(nativeProof); clearTimeout(startupTimer); resolveReady(proof);
         } else if (value.type === 'resumed') {
           if (!proof || resumed) return protocolFailure(); resumed = true;
         } else if (value.type === 'output') {

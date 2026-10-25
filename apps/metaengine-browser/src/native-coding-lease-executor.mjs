@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { nativeCodingEnvelopeSha256 } from './native-coding-transport-proof.mjs';
 
 const SHA = /^[a-f0-9]{64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -11,10 +12,11 @@ const sameScope = (a,b) => !!a && !!b && scopeKeys.every(key=>a[key]===b[key]);
 // A consumer of an ALREADY ISSUED W30 lease, called by the existing native
 // cycle. No timers, task creation, provider enrollment, leasing, or retry here.
 // All dependencies are private Host capabilities; there is no public JSON API.
-export function createNativeCodingLeaseExecutor({ledger,createRunner,readBoundLease,issuer,physicalSlotBudget=2}={}) {
+export function createNativeCodingLeaseExecutor({ledger,createRunner,readBoundLease,issuer,onJobAttempted=null,physicalSlotBudget=2}={}) {
   if (!['reserve','advance','read'].every(key=>typeof ledger?.[key]==='function')
       || typeof createRunner!=='function' || typeof readBoundLease!=='function'
       || typeof issuer?.issueJob!=='function') fail('private_dependencies_required');
+  if (onJobAttempted!==null && typeof onJobAttempted!=='function') fail('attempt_hook_invalid');
   if (!Number.isSafeInteger(physicalSlotBudget) || physicalSlotBudget<1 || physicalSlotBudget>16) fail('physical_slot_budget_invalid');
   const inflight = new Map();
   return Object.freeze({
@@ -70,11 +72,15 @@ export function createNativeCodingLeaseExecutor({ledger,createRunner,readBoundLe
                 || !Number.isFinite(Date.parse(proof.expires_at)) || Date.parse(proof.expires_at)<=Date.now()
                 || !Number.isFinite(Date.parse(current.lease_expires_at))
                 || Date.parse(proof.expires_at)>Date.parse(current.lease_expires_at)) fail('job_proof_denied');
-            jobDigest = digest(JSON.stringify(jobEnvelope));
+            jobDigest = nativeCodingEnvelopeSha256(jobEnvelope);
             // The process is still suspended. No prompt/command execution is
             // permitted until the own-PG synchronous commit is acknowledged.
-            await ledger.advance(reservation.scope,{from:'RESERVED',to:'ATTEMPTED',evidence_sha256:jobDigest});
+            await ledger.advance(reservation.scope,{from:'RESERVED',to:'ATTEMPTED',evidence_sha256:jobDigest,job_proof:jobEnvelope});
             attempted = true;
+            // W30 acknowledges the protected job only after the durable Host
+            // transaction and before this callback can permit native resume.
+            if(onJobAttempted) await onJobAttempted({request,job_proof:jobEnvelope,
+              job_proof_sha256:jobDigest,execution_scope:reservation.scope});
           }
           const expiry=Math.min(Date.parse(current.permit?.expires_at),Date.parse(current.lease_expires_at),
             jobEnvelope ? Date.parse(jobEnvelope.payload.expires_at) : Infinity);
@@ -93,7 +99,8 @@ export function createNativeCodingLeaseExecutor({ledger,createRunner,readBoundLe
             && result.agent_id===lease.agent_id && result.run_id===jobEnvelope.payload.run_id
             && result.role===request.role;
           const resultDigest = completed ? result.result_sha256 : digest(JSON.stringify(result || {}));
-          await ledger.advance(reservation.scope,{from:'ATTEMPTED',to:completed?'RESULT_READY':'AMBIGUOUS',evidence_sha256:resultDigest});
+          await ledger.advance(reservation.scope,{from:'ATTEMPTED',to:completed?'RESULT_READY':'AMBIGUOUS',evidence_sha256:resultDigest,
+            ...(completed?{result_receipt:result}:{})});
           return Object.freeze({state:completed?'RESULT_READY':'AMBIGUOUS',result,job_proof:jobEnvelope,
             job_proof_sha256:jobDigest,execution_scope:reservation.scope,
             // The separate W30 Critic lease and checkpoint owner decide acceptance.

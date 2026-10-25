@@ -1334,6 +1334,15 @@ export class NativeSupervisorClient {
     return value;
   }
 
+  nativeCodingRequest(path,{method='POST',payload=null}={}) {
+    const status=method==='GET'&&/^\/v1\/devos\/tasks\/[a-f0-9-]{36}\/status$/.test(path);
+    const schema=path==='/v1/devos/mark-running'?'metaengine.native-coding.mark-running.v1'
+      :path==='/v1/devos/complete'?'metaengine.native-coding.complete.v1':null;
+    if(!status && (method!=='POST'||schema===null||payload?.native_coding?.schema!==schema
+      ||!/^codex-cli:[a-f0-9-]{36}$/.test(payload?.target_id||''))) throw new Error('native_coding_transport_route_invalid');
+    return this.#signedRequest(path,{method,payload});
+  }
+
   async projectContinuityRequest({ operation, body } = {}) {
     if (!['register', 'snapshot', 'history', 'spawn', 'activity', 'policy', 'reconcile'].includes(operation)) throw new Error('project_continuity_transport_operation_invalid');
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('project_continuity_transport_body_invalid');

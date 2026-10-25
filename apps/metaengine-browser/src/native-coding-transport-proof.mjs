@@ -54,6 +54,11 @@ export function nativeCodingProofSigningBytes(payload) {
   if (bytes.length > 65536) fail('json_budget_exceeded');
   return bytes;
 }
+// Storage identifiers hash the canonical envelope without its signing-purpose
+// prefix. Object insertion order must not change the protected PG identity.
+export function nativeCodingEnvelopeSha256(envelope) {
+  return createHash('sha256').update(canonical(envelope)).digest('hex');
+}
 function equal(actual, expected, name) {
   if (expected === undefined || canonical(actual) !== canonical(expected)) fail(`${name}_binding_mismatch`);
 }

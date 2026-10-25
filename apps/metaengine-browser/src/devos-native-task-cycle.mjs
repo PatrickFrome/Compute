@@ -428,6 +428,10 @@ export class DevOsNativeTaskCycle {
     this.#inner.bindProjectRuntime(runtime);
   }
 
+  bindNativeCodingRuntime(runtime) {
+    this.#inner.bindNativeCodingRuntime(runtime);
+  }
+
   snapshot() {
     return {
       ...this.#inner.snapshot(),

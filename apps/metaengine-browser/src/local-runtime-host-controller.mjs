@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LOCAL_STATE_INSTANCE_UUID, validateLocalStateProviderConfig } from './local-state-provider-policy.mjs';
+import { createNativeCodingHostIpcClient } from './native-coding-host-ipc-client.mjs';
 
 const START_TIMEOUT_MS = 120_000;
 const STOP_TIMEOUT_MS = 45_000;
@@ -13,6 +14,16 @@ const ENVIRONMENT_KEYS = [
 ];
 let ownedHost = null;
 let startup = null;
+
+// Native-main capability only. The actual owned ChildProcess and immutable
+// descriptor identity select the channel; no renderer-selected PID/endpoint.
+export function createOwnedNativeCodingHostCapability(summary) {
+  if(!ownedLocalRuntimeHostReady(summary)||!ownedHost.child?.connected) throw new Error('local_runtime_native_coding_host_unavailable');
+  return createNativeCodingHostIpcClient({child:ownedHost.child,instanceId:summary.instance_id,hostPid:ownedHost.child.pid});
+}
+export function readOwnedLocalRuntimeHostSummary() {
+  return ownedHost?.summary && ownedLocalRuntimeHostReady(ownedHost.summary) ? ownedHost.summary : null;
+}
 const shutdownApps = new WeakSet();
 const SHA256 = /^[a-f0-9]{64}$/;
 const SOURCE_BINDING_KEYS = ['source_bundle_sha256', 'reviewed_startup_source_sha256',

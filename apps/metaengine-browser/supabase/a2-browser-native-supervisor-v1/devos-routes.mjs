@@ -2,6 +2,7 @@ import { createMetaDevosSuperstep } from './meta-devos-superstep.mjs';
 import { createWorkspaceObservationRoutes } from './workspace-observation-routes.mjs';
 import { planFleetDagAdmission } from './fleet-coordination-dag.mjs';
 import { planFleetDagClaims } from './fleet-dag-claim-plan.mjs';
+import { nativeCodingCycleCandidates, admitNativeCodingExecution } from './native-coding-admission.mjs';
 
 const AGENT_RE=/^agent_[a-z0-9-]{8,64}$/;
 const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -226,6 +227,7 @@ function ambiguityRpcResponse(error){
 }
 function transportAdmissionFence(error){
   const message=String(error?.message||error||'').toLowerCase();
+  if(message.includes('native_coding_'))return Object.freeze({reason:'NATIVE_CODING_ADMISSION_FENCED',fenced:true,automatic_retry_allowed:false,authority_effect:false});
   const graphFence=message.match(/fleet_coordination_[a-z0-9_]+/);
   if(graphFence)return Object.freeze({reason:graphFence[0],fenced:true,automatic_retry_allowed:false,authority_effect:false});
   for(const reason of TRANSPORT_ADMISSION_FENCES){
@@ -242,7 +244,7 @@ export function createDevosSupervisorRoutes({rpc,workspaceId,readRuntimeControl=
   if(typeof rpc!=='function'||!UUID_RE.test(String(workspaceId||'')))throw new Error('devos_routes_dependencies_invalid');
   const metaSuperstep=createMetaDevosSuperstep({rpc,workspaceId,roadmapId:metaRoadmapId});
   const workspaceObservation=createWorkspaceObservationRoutes({rpc,workspaceId});
-  return async function handle({req,path,body,clientId}={}){
+  return async function handle({req,path,body,clientId,identity}={}){
     const effectMatch=String(path||'').match(/^\/v1\/commands\/([0-9a-f-]{36})\/effect-intent$/i);
     if(req?.method==='POST'&&effectMatch){
       if(!clientId)return json(401,{error:'device_auth_required'});
@@ -296,7 +298,12 @@ export function createDevosSupervisorRoutes({rpc,workspaceId,readRuntimeControl=
       if(runtimeControl&&runtimeControl.continuous_service_allowed!==true){
         return json(200,{schema:'metaengine.devos.browser-cycle.v1',state:'ADMISSION_FENCED',runtime_control:runtimeControl,admission_fenced:true,reconcile:null,backlog:{ready:0,running:0,by_role:{},authority_effect:false},lease:null,leases:[],scheduler_backpressure:null,lease_fenced:true,lease_fence_reason:runtimeControl.reason||'CONTINUOUS_SERVICE_ADMISSION_FENCED',running:[],scheduler_source:'NATIVE_SUPERVISOR_HEARTBEAT',scheduler_policy:'IDLE_ROLE_FAIR_SHARE_V1',lease_attempts:0,second_scheduler_loop:false,automatic_retry_allowed:false,authority_effect:false});
       }
-      const agents=boundedAgents(body?.fleet);
+      const browserAgents=boundedAgents(body?.fleet);
+      let nativeAgents;
+      try{nativeAgents=await nativeCodingCycleCandidates(body?.native_coding,{rpc,identity,workspaceId,clientId});}
+      catch{return json(409,{error:'native_coding_admission_denied',fenced:true,automatic_retry_allowed:false,authority_effect:false});}
+      const agents=[...browserAgents,...nativeAgents];
+      if(new Set(agents.map(row=>row.agent_id)).size!==agents.length)return json(409,{error:'native_coding_agent_collision',fenced:true,automatic_retry_allowed:false,authority_effect:false});
       const metaOrchestrator=await metaSuperstep({clientId});
       const reconcile=await rpc('devos_fleet_reconcile_v1',{p_workspace:workspaceId});
       const snapshot=await rpc('devos_fleet_snapshot_v1',{p_workspace:workspaceId});
@@ -334,7 +341,8 @@ export function createDevosSupervisorRoutes({rpc,workspaceId,readRuntimeControl=
       const leaseCeiling=Math.max(0,Math.min(16,Number(schedulerBacklog?.ready||0)||0,fleetDagAdmission?.remaining_slots??16));
       const candidates=leaseCeiling>0?fairIdleLeaseCandidates(snapshot,agents,schedulerBacklog):[];
       for(const agent of candidates.slice(0,32)){
-        if((Number(remainingByRole[agent.role]||0)||0)<1||exhaustedRoles.has(agent.role))continue;
+        const exhaustionKey=agent.native_coding_permit_id?`${agent.role}:NATIVE:${agent.native_coding_permit_id}`:`${agent.role}:BROWSER`;
+        if((Number(remainingByRole[agent.role]||0)||0)<1||exhaustedRoles.has(exhaustionKey))continue;
         if(fleetDagAdmission){
           // Stop/owner-epoch can change after planning. Re-observe before
           // each bounded lease attempt; the existing DB claim gate remains
@@ -360,7 +368,7 @@ export function createDevosSupervisorRoutes({rpc,workspaceId,readRuntimeControl=
             if(leases.length>=leaseCeiling)break;
           }
           else{
-            exhaustedRoles.add(agent.role);
+            exhaustedRoles.add(exhaustionKey);
             backpressure=schedulerBackpressure(result);
             if(backpressure)break;
           }
@@ -380,6 +388,13 @@ export function createDevosSupervisorRoutes({rpc,workspaceId,readRuntimeControl=
       return json(200,{schema:'metaengine.devos.browser-cycle.v1',state:'OPEN',runtime_control:runtimeControl,admission_fenced:false,meta_orchestrator:metaOrchestrator,reconcile,backlog,work_graph:workGraph,lease,leases,scheduler_backpressure:backpressure,lease_fenced:leaseFence?.fenced===true,lease_fence_reason:leaseFence?.reason||null,running:runningRows,scheduler_source:'NATIVE_SUPERVISOR_HEARTBEAT',scheduler_policy:'IDLE_ROLE_FAIR_SHARE_V1',fleet_dag_admission:fleetDagAdmission,lease_attempts:leaseAttempts,second_scheduler_loop:false,automatic_retry_allowed:false,authority_effect:false});
     }
     if(req?.method==='POST'&&path==='/v1/devos/mark-running'){
+      if(String(body?.target_id||'').startsWith('codex-cli:')||body?.native_coding!==undefined){
+        try{
+          const {binding:b,proof}=await admitNativeCodingExecution(body,{rpc,identity,workspaceId,clientId});
+          const result=await rpc('devos_fleet_mark_running_v1',{p_task:b.task_id,p_agent:b.agent_id,p_generation:b.lease_generation,p_tab:b.tab_id,p_target:b.target_id,p_epoch:b.agent_generation_epoch,p_proof:proof});
+          return json(200,{...result,automatic_retry_allowed:false,authority_effect:false});
+        }catch{return json(409,{error:'native_coding_execution_not_proven',fenced:true,automatic_retry_allowed:false,authority_effect:false});}
+      }
       const b=binding(body); const proof=body?.proof||{};
       const promptSha=String(proof.prompt_sha256||'').toLowerCase();
       const conversationSha=String(proof.conversation_url_sha256||'').toLowerCase();
@@ -400,6 +415,14 @@ export function createDevosSupervisorRoutes({rpc,workspaceId,readRuntimeControl=
       }catch(error){const mapped=ambiguityRpcResponse(error);if(mapped)return mapped;throw error;}
     }
     if(req?.method==='POST'&&path==='/v1/devos/complete'){
+      if(String(body?.target_id||'').startsWith('codex-cli:')||body?.native_coding!==undefined){
+        try{
+          const {binding:b,summary}=await admitNativeCodingExecution(body,{rpc,identity,workspaceId,clientId,complete:true});
+          const result=await rpc('devos_fleet_complete_v1',{p_task:b.task_id,p_agent:b.agent_id,p_generation:b.lease_generation,p_tab:b.tab_id,p_target:b.target_id,p_epoch:b.agent_generation_epoch,p_state:'RESULT_READY',p_summary:summary,p_error:null});
+          if(result?.task_id!==b.task_id||result?.state!=='RESULT_READY')return json(409,{error:'native_coding_completion_ack_unproven',automatic_retry_allowed:false,authority_effect:false});
+          return json(200,{...result,native_coding_ack:{state:'RESULT_READY',lease_generation:b.lease_generation,result_sha256:summary.result_sha256},automatic_retry_allowed:false,authority_effect:false});
+        }catch{return json(409,{error:'native_coding_result_not_proven',fenced:true,automatic_retry_allowed:false,authority_effect:false});}
+      }
       const b=binding(body); const state=String(body?.state||'').toUpperCase();
       if(!FINALISH.has(state)||!body?.summary||typeof body.summary!=='object'||Array.isArray(body.summary))return json(400,{error:'invalid_result'});
       try{

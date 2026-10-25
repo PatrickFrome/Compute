@@ -7,6 +7,9 @@ import { fileURLToPath } from 'node:url';
 import { launchClientStateRuntime, normalizeLauncherConfig, normalizeRuntimeHealthFailure } from './launcher.mjs';
 import { verifyOfflineRuntimeBundle } from './offline-runtime-bundle.mjs';
 import { reconcileAbandonedAttachedRuntimeLock } from './runtime-host-orphan-reconciliation.mjs';
+import { createNativeCodingHostIpcServer } from './native-coding-host-ipc.mjs';
+import { createNativeCodingHostAuthority } from './native-coding-host-authority.mjs';
+import { createNativeCodingHostOsScope,readNativeCodingOperatorPaths } from './native-coding-host-os-scope.mjs';
 
 const hostEntry = fileURLToPath(import.meta.url);
 const repositoryRoot = path.resolve(path.dirname(hostEntry), '../..');
@@ -315,6 +318,8 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
   let runtime;
   let terminalPromise;
   let stopPromise;
+  let nativeCodingAuthority = null;
+  let nativeCodingSql = null;
   let abortRequested = signal?.aborted === true;
   let lastStatus = baseStatus;
   let lastHealthFailure = null;
@@ -345,6 +350,8 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
   const finalize = outcome => {
     if (!terminalPromise) terminalPromise = (async () => {
       const confirmed = outcome.children_stopped === true;
+      nativeCodingAuthority?.close();
+      if(nativeCodingSql) {await nativeCodingSql.end({timeout:5});nativeCodingSql=null;}
       if (outcome.last_health_failure) {
         try { lastHealthFailure = normalizeRuntimeHealthFailure(outcome.last_health_failure); } catch { /* Never forward unvalidated diagnostics. */ }
       }
@@ -382,7 +389,18 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
       postgres_mode: postgresMode, api_role_mode: launcherConfig.apiRoleMode, children: runtime.children, startup_source_sha256: runtime.startupManifest.source_manifest_sha256 });
     const finished = runtime.finished.then(finalize, () => finalize({ reason: 'runtime_host_child_failed', children_stopped: false }));
     if (runtime.stopped === true) throw failure('runtime_host_child_ended_during_startup');
-    return { descriptor, statusFile: path.join(config.state_directory, 'runtime-instance.json'), stop, finished };
+    // An operator must first publish this private local-QA descriptor. Ordinary
+    // installed clients do not open another DB capability or enable a backend.
+    const operatorFile=path.join(config.state_directory,'native-coding-operator-v1.json');
+    if(await lstat(operatorFile).catch(error=>{if(error.code==='ENOENT')return null;throw error;})) {
+      await readNativeCodingOperatorPaths(config.state_directory);
+      const {default:postgres}=await import('postgres');
+      nativeCodingSql=postgres(config.inspect_database_url,{max:2,connect_timeout:10,idle_timeout:30,prepare:false});
+      const native=createNativeCodingHostOsScope({config,sql:nativeCodingSql,parentPid:process.ppid});
+      nativeCodingAuthority=await createNativeCodingHostAuthority({sql:nativeCodingSql,...native});
+    }
+    return { descriptor, statusFile: path.join(config.state_directory, 'runtime-instance.json'), stop, finished,
+      nativeCodingAuthority };
   } catch (error) {
     if (runtime) await stop('requested');
     else {
@@ -399,18 +417,25 @@ async function main() {
   const controller = new AbortController();
   let host;
   let pendingStop = null;
+  let nativeCodingIpc = null;
   const requestStop = reason => { pendingStop ||= reason; controller.abort(); if (host) void host.stop(reason).catch(() => { process.exitCode = 1; }); };
   process.once('SIGINT', () => requestStop('signal'));
   process.once('SIGTERM', () => requestStop('signal'));
   process.once('disconnect', () => requestStop('parent_disconnect'));
-  process.on('message', message => {
+  process.on('message', (message,handle) => {
     if (message?.schema === 'compute.runtime-host-control.v1' && message.command === 'stop') requestStop('requested');
+    else if(nativeCodingIpc) void nativeCodingIpc.handleMessage(message,handle);
   });
   host = await startManagedRuntimeHost({ configFile: process.env.COMPUTE_RUNTIME_HOST_CONFIG, signal: controller.signal });
+  if(host.nativeCodingAuthority && process.send && process.connected) {
+    nativeCodingIpc=createNativeCodingHostIpcServer({instanceId:host.descriptor.instance_id,
+      operations:host.nativeCodingAuthority,hostPid:process.pid,parentPid:process.ppid,send:process.send.bind(process)});
+  }
   if (pendingStop || (process.send && !process.connected)) await host.stop(pendingStop || 'parent_disconnect');
   else if (process.send) process.send(host.descriptor);
   else console.log(JSON.stringify(host.descriptor));
   const outcome = await host.finished;
+  nativeCodingIpc?.close();
   if (!['requested', 'signal', 'parent_disconnect', 'startup_cancelled'].includes(outcome.reason)) process.exitCode = 1;
   if (process.connected) process.disconnect();
 }

@@ -613,7 +613,7 @@ Deno.serve(localRuntime.serverOptions,async(req:Request)=>{
     const dbInspect=await dbInspectRoutes({req,path});if(dbInspect)return dbInspect;
     const promotion=await devosPromotionRoutes({req,path,body,clientId:identity.id});if(promotion)return promotion;
     const meta=await metaRoutes({req,path,body,clientId:identity.id});if(meta)return meta;
-    const devos=await devosRoutes({req,path,body,clientId:identity.id});if(devos)return devos;
+    const devos=await devosRoutes({req,path,body,clientId:identity.id,identity});if(devos)return devos;
     if(req.method==='POST'&&path==='/v1/state'){const state=await upsertState(req,body,identity);return json(202,{accepted:true,state,runtime_control:await runtimeControl()})}
     if(req.method==='POST'&&path==='/v1/commands/next')return json(200,await lease(req,body));
     if(req.method==='POST'&&path==='/v1/commands/next-batch')return json(200,await leaseBatch(req,body));
