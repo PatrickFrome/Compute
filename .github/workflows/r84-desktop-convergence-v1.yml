@@ -10,6 +10,7 @@ on:
       - 'apps/metaengine-browser/src/native-supervisor-client.mjs'
       - 'apps/metaengine-browser/src/me2/**'
       - 'apps/metaengine-browser/test/r84-desktop-canonical-identity.test.mjs'
+      - 'apps/metaengine-browser/test/r84-desktop-workflow-contract.test.mjs'
       - 'apps/metaengine-browser/test/tab-registry.test.mjs'
       - 'apps/metaengine-browser/test/browser-realtime-process-plane.test.mjs'
       - 'apps/metaengine-browser/test/browser-webcontents-tab-index.test.mjs'
@@ -60,13 +61,16 @@ jobs:
         working-directory: apps/metaengine-browser
         run: |
           node --check src/main.mjs
+          node --check src/tab-registry.mjs
+          node --check src/browser-webcontents-tab-index.mjs
           node --check src/browser-realtime-process-plane.mjs
           node --check src/native-supervisor-client.mjs
-          node --check src/me2/me2-fleet-tabs-host.mjs
+          node --check src/me2/me2-ui-gateway.mjs
       - name: Prove canonical WebContents BrowserCell CDP identity convergence
         working-directory: apps/metaengine-browser
         run: >-
           node --test
+          test/r84-desktop-workflow-contract.test.mjs
           test/r84-desktop-canonical-identity.test.mjs
           test/tab-registry.test.mjs
           test/browser-realtime-process-plane.test.mjs

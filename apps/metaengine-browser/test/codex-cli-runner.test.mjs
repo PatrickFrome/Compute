@@ -131,7 +131,9 @@ test('native permit rejection occurs before spawning or reserving the model job'
   assert.equal(processController.spawns, 0);
 });
 
-test('runner binds real private broker only after RUNNING authorization and before prompt resume, then revokes',async t=>{
+test('runner binds real private broker only after RUNNING authorization and before prompt resume, then revokes',{
+  skip:process.platform!=='win32'?'Production per-run bridge requires a Windows named pipe':false,
+},async t=>{
   const f=await fixture(t),pins=await agentBridgePins(t),events=[];let running=false,bridge;
   const processController=controller({onResume:async()=>{
     events.push('resume');const env=processController.lastSpec.env;
@@ -159,20 +161,27 @@ test('runner binds real private broker only after RUNNING authorization and befo
   await assert.rejects(connectNativeCodingAgentMcpBroker({endpoint:spec.env[NATIVE_AGENT_MCP_ENV.endpoint],capability:cap}));
 });
 
-test('unverified bridge descriptor or Host bind refusal cannot resume the suspended worker',async t=>{
-  for(const mode of ['unverified','bind-refused']){
+for(const mode of ['unverified','bind-refused','unsupported-platform'])test(
+  ({unverified:'an unverified bridge descriptor cannot spawn or resume a worker',
+    'bind-refused':'a refused Host binding cannot resume the suspended Windows named-pipe worker',
+    'unsupported-platform':'non-Windows production bridge refusal leaves no worker or Host effect'})[mode],{
+    skip:mode==='bind-refused'&&process.platform!=='win32'?'Host binding integration requires a Windows named pipe'
+      :mode==='unsupported-platform'&&process.platform==='win32'?'Non-Windows refusal contract':false,
+  },async t=>{
     const f=await fixture(t),processController=controller();let closes=0;
-    let pins;if(mode==='bind-refused')pins=await agentBridgePins(t);
+    let hostCalls=0,pins;if(mode!=='unverified')pins=await agentBridgePins(t);
     const runner=createCodexCliRunner({...f,processController,async prepareAgentBridge(details){
       if(mode==='unverified')return {launch:{argv:['--dangerously-bypass-approvals-and-sandbox']},bindRun:async()=>{},close:async()=>{closes++;}};
       const a=details.authorization,permit={...details.binding,...a,trust_namespace:'LOCAL_OPERATOR_QA',revoked:false,provider_id:id(55),
         artifact:{cli_executable_sha256:f.expectedExecutableSha256},worktree:{path:a.worktree_path,base_sha:details.binding.base_sha}};
-      return prepareNativeCodingAgentRunBridge({...details,permit,pins,ownPostgres:{agentOperation:async()=>{throw Error('fixture_current_lease_rejected');}}});
+      return prepareNativeCodingAgentRunBridge({...details,permit,pins,ownPostgres:{agentOperation:async()=>{hostCalls++;throw Error('fixture_current_lease_rejected');}}});
     }});
     const receipt=await runner.run({lease:f.lease(1),role:'IMPLEMENTER',worktreePath:f.worktree,prompt:'Never resume'});
     assert.equal(receipt.state,'AMBIGUOUS');assert.equal(await fs.readFile(path.join(f.worktree,'feature.txt'),'utf8'),'before\n');
-    assert.equal(processController.spawns,mode==='unverified'?0:1);if(mode==='unverified')assert.equal(closes,1);
-  }
+    assert.equal(processController.spawns,mode==='bind-refused'?1:0);if(mode==='unverified')assert.equal(closes,1);
+    if(mode==='unsupported-platform'){
+      assert.equal(receipt.terminal_reason,'native_agent_bridge_composition');assert.equal(hostCalls,0);
+    }
 });
 
 test('lease revoked before native resume leaves a durable ambiguous attempt and never reruns', async t => {

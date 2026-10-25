@@ -78,21 +78,51 @@ test('diagnosis: pending shell snapshot also prevents native scheduling after Fl
   assert.ok(!h.calls.includes('native'));
 });
 
-test('native startup has Fleet recovery and protected permit dependencies, not unconditional independence', () => {
+function assertNativeStartupDependencies(source) {
   const nativeStart = source.indexOf('async function initNativeSupervisor()');
   const nativeEnd = source.indexOf('\nfunction destroyWindowContents()', nativeStart);
-  const recoveryStart = source.indexOf('async function ensureInterruptedSetupRecovery()');
+  const recoveryStart = source.indexOf('async function ensureInterruptedSetupRecovery(');
   const recoveryEnd = source.indexOf("ipcMain.handle('metaengine:client:interrupted-setup-inspect'", recoveryStart);
+  const mountStart = source.indexOf('function ensureNativeCodingRuntimeMounted()');
+  const mountEnd = source.indexOf('\nfunction createNativeGoalRouter(', mountStart);
   assert.ok(nativeStart >= 0 && nativeEnd > nativeStart, 'native function boundaries must exist');
   assert.ok(recoveryStart >= 0 && recoveryEnd > recoveryStart, 'recovery function boundaries must exist');
+  assert.ok(mountStart >= 0 && mountEnd > mountStart, 'protected mount boundaries must exist');
   const native = source.slice(nativeStart, nativeEnd);
   const recovery = source.slice(recoveryStart, recoveryEnd);
+  const mount = source.slice(mountStart, mountEnd);
   assert.match(recovery, /if \(!nativeSupervisor \|\| !fleet\) throw/);
-  assert.match(recovery, /fleet: fleet.snapshot\(\)/);
-  assert.match(recovery, /applyFleet: binding => fleet.archiveInterruptedBootstrapAgents\(binding\)/);
-  const recoveryAt = native.indexOf('await ensureInterruptedSetupRecovery()');
-  const startAt = native.indexOf('await nativeSupervisor.start()');
-  assert.ok(recoveryAt >= 0 && startAt > recoveryAt, 'recovery must precede native start');
-  assert.match(native, /catch \(error\) \{\s*nativeSupervisor.setInterruptedSetupRecoveryFence\(true\)/);
-  assert.match(native, /if\(permits.length===0\|\|hashes.length!==1\) throw new Error\('native_coding_protected_permits_required'\)/);
+  assert.match(recovery, /const supervisor=nativeSupervisor,currentFleet=fleet/);
+  assert.match(recovery, /if\(nativeSupervisor!==supervisor\)throw/);
+  assert.match(recovery, /if\(fleet!==currentFleet\)throw/);
+  assert.match(recovery, /getSnapshot: async \(\) => \{assertCurrent\(\);return \{/);
+  assert.match(recovery, /fleet: currentFleet.snapshot\(\)/);
+  assert.match(recovery, /applyFleet: binding => \{assertCurrent\(\);return currentFleet.archiveInterruptedBootstrapAgents\(binding\);\}/);
+  assert.match(native, /supervisor=nativeSupervisor;assertCurrent\(\)/);
+  const mountAt = native.indexOf('await ensureNativeCodingRuntimeMounted()');
+  const recoveryAt = native.indexOf('await ensureInterruptedSetupRecovery(closing);assertCurrent()');
+  const startAt = native.indexOf('await supervisor.start();assertCurrent()');
+  assert.ok(mountAt >= 0 && recoveryAt > mountAt && startAt > recoveryAt, 'protected mount and recovery must precede captured supervisor start');
+  assert.match(native, /catch \(error\) \{\s*assertCurrent\(\);supervisor.setInterruptedSetupRecoveryFence\(true\)/);
+  const permitsAt = mount.indexOf("if(permits.length===0||hashes.length!==1)throw Error('native_coding_protected_permits_required')");
+  const candidateAt = mount.indexOf('candidate=createNativeCodingRuntime(');
+  assert.ok(permitsAt >= 0 && candidateAt > permitsAt, 'protected permit refusal must precede runtime construction');
+}
+
+test('native startup has captured Fleet recovery and protected mount dependencies, not unconditional independence', () => {
+  assertNativeStartupDependencies(source);
+});
+
+for (const [name, before, after] of [
+  ['missing Fleet prerequisite', 'if (!nativeSupervisor || !fleet) throw', 'if (!nativeSupervisor) throw'],
+  ['mutable Fleet callback', 'fleet: currentFleet.snapshot()', 'fleet: fleet.snapshot()'],
+  ['missing recovery call', 'await ensureInterruptedSetupRecovery(closing);assertCurrent()', 'assertCurrent()'],
+  ['missing captured start', 'await supervisor.start();assertCurrent()', 'await nativeSupervisor.start();assertCurrent()'],
+  ['missing recovery fence', 'assertCurrent();supervisor.setInterruptedSetupRecoveryFence(true)', 'assertCurrent()'],
+  ['missing protected permit refusal', "if(permits.length===0||hashes.length!==1)throw Error('native_coding_protected_permits_required')", ''],
+]) test('native startup dependency diagnostic rejects ' + name, () => {
+  assert.ok(source.includes(before), 'mutation must target actual current production source');
+  const mutated = source.replace(before, after);
+  assert.notEqual(mutated, source);
+  assert.throws(() => assertNativeStartupDependencies(mutated), { code: 'ERR_ASSERTION' });
 });

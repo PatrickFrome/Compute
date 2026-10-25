@@ -71,6 +71,10 @@ jobs:
 
       - name: Prove full Browser regression
         working-directory: apps/metaengine-browser
+        # Linux qualifies real Electron ASAR filesystem behavior without a GUI.
+        # Windows retains MAIN_PROCESS; later R97/UI qualification is unchanged.
+        env:
+          METAENGINE_TEST_ELECTRON_MODE: ${{ matrix.os == 'ubuntu-24.04' && 'ASAR_NODE' || 'MAIN_PROCESS' }}
         run: npm test
 
       - name: Prove root transport static two-phase contract
