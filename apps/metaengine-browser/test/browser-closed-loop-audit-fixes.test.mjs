@@ -321,17 +321,26 @@ test('mission control projection surfaces the authoritative work graph', async (
   assert.match(mainSource, /work_graph: supervisor\?\.devos_task_cycle\?\.work_graph \|\| null/);
 });
 
-test('ME2 supervisor renders the canonical work graph and keeps RSI adoption behind approvals', () => {
-  const supervisor = fs.readFileSync(
-    path.join(HERE, '..', '..', 'me2-ui', 'src', 'components', 'me2', 'pages', 'supervisor.tsx'),
-    'utf8',
-  );
-  // R97 uses the goal-to-task-to-agent projection, not the retired raw work_graph heading.
-  assert.match(supervisor, /title="Goal relationships"/);
-  assert.match(supervisor, /data-testid="wg-projection"/);
-  assert.match(supervisor, /Goal relationships are unavailable/);
-  assert.match(supervisor, /setWg\(r\?\.ok === true \? r : null\)/);
-  assert.doesNotMatch(supervisor, /WORKGRAPH · ПРОЕКЦИЯ/);
-  assert.match(supervisor, /rsi_adopt/);
-  assert.match(supervisor, /RSI adopt/);
+test('ME2 retires daemon supervisor and routes observation through the source-bound read-only context', () => {
+  const me2 = path.join(HERE, '..', '..', 'me2-ui', 'src', 'components', 'me2');
+  assert.throws(() => fs.accessSync(path.join(me2, 'pages', 'supervisor.tsx')), { code: 'ENOENT' });
+  const shell = fs.readFileSync(path.join(me2, 'shell', 'me2-shell.tsx'), 'utf8');
+  const observatory = fs.readFileSync(path.join(me2, 'pages', 'operator-observatory.tsx'), 'utf8');
+  assert.match(shell, /case "operator": return <OperatorObservatoryPage \/>/);
+  assert.doesNotMatch(shell, /pages\/supervisor|SupervisorPage|rsi_adopt/);
+  // R100 has no adoption action here: observation must never grant effect authority.
+  assert.match(observatory, /data-authority-effect="false"/);
+  for (const forbidden of [
+    /rsi_adopt|RSI adopt/, /fetch\s*\(/, /submitGoal\s*\(/, /sendCommand\s*\(/,
+    /legacyWorkspace/, /daemonSnapshot/,
+  ]) assert.doesNotMatch(observatory, forbidden);
+  assert.equal((observatory.match(/bridge\.readContext\(/g) ?? []).length, 1);
+  assert.match(observatory, /update\(advanceOperatorObservatoryResync\(checkpoint\.current, result,/);
+  assert.match(observatory, /const projection = resync\.projection/);
+  assert.match(observatory, /projectPrimaryOperatorView\(resync, view, \{ delivery, firstTruthMs \}\)/);
+  // Missing/unverified/stale readback cannot keep an optimistic activity claim.
+  assert.match(observatory, /update\(advanceOperatorObservatoryResync\(checkpoint\.current, null\)\)/);
+  assert.match(observatory, /expireOperatorObservatoryResync\(checkpoint\.current\)/);
+  assert.match(observatory, /resync\.mode !== "TRACKING" \|\| projection\.cursor_state !== "VERIFIED_CURSOR"/);
+  assert.match(observatory, /data-testid="operator-context-warning"/);
 });
