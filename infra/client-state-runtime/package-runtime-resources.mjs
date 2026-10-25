@@ -2,6 +2,7 @@ import { constants } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { lstat, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { captureStartupSource, sourceClosure, startupFilesDigest } from './startup-source-manifest.mjs';
 import { LOCAL_RUNTIME_MIGRATIONS } from './local-runtime-migrations.mjs';
 
@@ -22,12 +23,6 @@ const selectedEntries = includeRuntimeHost => includeRuntimeHost ? [...BUNDLE_EN
 const runtimeRoot = 'infra/client-state-runtime/';
 const packageRoot = runtimeRoot + 'node_modules/postgres/';
 const locks = Object.freeze(['package.json', 'package-lock.json', 'deno.lock']);
-// Historical migration sources retain their legacy repository path; the W5
-// claim guard is a reviewed own-local-PostgreSQL source in this runtime tree.
-// Pin the exception explicitly rather than widening the reviewed source scope.
-const migrationResources = new Set(LOCAL_RUNTIME_MIGRATIONS.map(migration =>
-  migration.path === 'fleet-coordination-claim-guard-v1.sql'
-    ? runtimeRoot + migration.path : `supabase/migrations/${migration.path}`));
 const sha256 = value => createHash('sha256').update(value).digest('hex');
 const slash = value => value.split(sep).join('/');
 const digestPattern = /^[a-f0-9]{64}$/;
@@ -49,6 +44,21 @@ function safeRelativePath(value) {
     && value.split('/').some(part => /^(?:private|secrets?|credentials?|passwords?|dumps?|backups?|pgdata|profiles?)(?:[._-]|$)/i.test(part))) fail('bundle_private_path_forbidden');
   return value;
 }
+
+// The reviewed catalog's URLs, not migration basenames, identify source bytes.
+// Include upgrade resources too, retaining an exact allowlist within the two
+// reviewed SQL roots rather than permitting arbitrary SQL files.
+const migrationRepositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
+const migrationResources = new Set(LOCAL_RUNTIME_MIGRATIONS.flatMap(migration =>
+  [migration.source_url, ...(migration.upgrade_source_url ? [migration.upgrade_source_url] : [])])
+  .map(url => {
+    if (!(url instanceof URL) || url.protocol !== 'file:' || url.search || url.hash) fail('bundle_migration_source_invalid');
+    const absolute = fileURLToPath(url);
+    if (!within(migrationRepositoryRoot, absolute)) fail('bundle_migration_source_invalid');
+    const path = safeRelativePath(slash(relative(migrationRepositoryRoot, absolute)));
+    if (!/^(?:infra\/client-state-runtime|supabase\/migrations)\/[A-Za-z0-9_-]+\.sql$/.test(path)) fail('bundle_migration_source_invalid');
+    return path;
+  }));
 
 // These explicitly listed files form the only permitted Windows computer-control import
 // closure. Never broaden this to all browser/src modules: the bundle includes
@@ -78,6 +88,7 @@ const NATIVE_CODING_HOST_SOURCE_CLOSURE=new Set([
   'apps/metaengine-browser/src/native-coding-transport-proof.mjs',
   'apps/metaengine-browser/src/private-windows-storage-acl.mjs',
   'apps/metaengine-browser/src/codex-cli-sandbox-probe.mjs',
+  'apps/metaengine-browser/src/windows-native-read-environment.mjs',
   'apps/metaengine-browser/src/codex-cli-runner.mjs',
   'apps/metaengine-browser/src/native-coding-git-proof.mjs',
   'apps/metaengine-browser/src/codex-cli-result-schema.mjs',

@@ -170,6 +170,48 @@ function registerPresentationIpc() {
     admin_ready: true, cloud_control_state: 'CONNECTED', authority_effect: false,
   }));
   ipcMain.handle('metaengine:client:work-readiness', () => fixtureWorkReadiness());
+  // This isolated presentation fixture exercises the browser route, not native
+  // coding admission. Route selection is read-only and is NOT work readiness;
+  // the renderer must still fetch the separate work-readiness fixture on submit.
+  ipcMain.handle('metaengine:client:goal-submission-mode', (_event, ...args) => {
+    if (args.length) throw new Error('client_goal_submission_mode_params_forbidden');
+    return Object.freeze({
+      schema: 'metaengine.client.goal-submission-mode.v1',
+      kind: 'BROWSER',
+      state: 'HOST_VERIFICATION_REQUIRED',
+      reason: null,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+  });
+
+  // Read-only absent-profile projections. No credential, Guardian activation,
+  // repository connection or chat enrollment capability exists in this harness.
+  ipcMain.handle('metaengine:client:guardian-status', () => Object.freeze({
+    schema: 'metaengine.browser-guardian.machine-bootstrap-launcher.v1',
+    state: 'HOLD', reason: 'GUARDIAN_OBSERVATION_NOT_YET_AVAILABLE', ready: false,
+    guardian_service_ready: false, owner_binding_proven: false, device_binding_proven: false,
+    explicit_user_action_required: true, uac_consent_required: false, fixed_packaged_bootstrap: true,
+    caller_supplied_path_used: false, caller_supplied_arguments_used: false, arbitrary_shell_used: false,
+    automatic_retry_allowed: false, authority_effect: false,
+    last_confirmed_state: null, last_confirmed_at: null, last_confirmed_guardian_service_ready: false,
+    last_confirmed_owner_binding_proven: false, last_confirmed_device_binding_proven: false,
+    observed_at: null, expires_at: null, stale: true, refresh_in_flight: false,
+    observation_generation: 0, observation_revision: 0, observation_error: null,
+    invalidated_reason: 'GUARDIAN_OBSERVATION_NOT_YET_AVAILABLE',
+  }));
+  ipcMain.handle('metaengine:client:github-repository-status', (_event, ...args) => {
+    if (args.length) throw new Error('CALLER_ARGUMENTS_FORBIDDEN');
+    return Object.freeze({
+      schema: 'metaengine.github-repository-connection.v1', state: 'NOT_CONFIGURED', repository: null,
+      account_login: null, account_id: null, authenticated: false, repository_access_verified: false,
+      can_push: false, checked_at: null, reason: 'REPOSITORY_NOT_CONFIGURED', credential_source: null,
+      automatic_cloud_fallback: false, authority_effect: false,
+    });
+  });
+  ipcMain.handle('metaengine:client:github-chat-status', () => Object.freeze({
+    schema: 'metaengine.github-chat-relay.v1', state: 'NOT_PAIRED', reason: null, authority_effect: false,
+  }));
 
   ipcMain.handle('metaengine:shell:primary-page', (_event, rawPage) => {
     page = String(rawPage || 'browser');
@@ -328,7 +370,7 @@ async function metrics(contents) {
     const rgba = (color) => { ctx.clearRect(0,0,1,1); ctx.fillStyle = color; ctx.fillRect(0,0,1,1); return [...ctx.getImageData(0,0,1,1).data]; };
     const composite = (fg,bg) => fg.slice(0,3).map((v,i) => v*fg[3]/255+bg[i]*(1-fg[3]/255));
     const luminance = (rgb) => rgb.map((v) => { const c=v/255; return c<=0.04045 ? c/12.92 : Math.pow((c+0.055)/1.055,2.4); }).reduce((n,v,i)=>n+v*[0.2126,0.7152,0.0722][i],0);
-    const paletteTextStyles = [...document.querySelectorAll('[data-palette-detail], [data-palette-scope]')].filter((el)=>el.getClientRects().length).map((el)=>{
+    const paletteTextStyles = [...document.querySelectorAll('[cmdk-item], [cmdk-group-heading], [role=dialog] [role=status]')].filter((el)=>el.getClientRects().length).map((el)=>{
       const ancestors=[]; for(let n=el;n;n=n.parentElement) ancestors.unshift(n);
       let bg=[0,0,0]; for(const n of ancestors) bg=composite(rgba(getComputedStyle(n).backgroundColor),bg);
       const style=getComputedStyle(el); const fg=composite(rgba(style.color),bg);
@@ -338,6 +380,16 @@ async function metrics(contents) {
     return {
       palette_text_styles: paletteTextStyles,
       palette_svg_count: document.querySelectorAll('[cmdk-root] svg').length,
+      palette_icons: [...document.querySelectorAll('[cmdk-root] svg')].map(svg => ({
+        identity: svg.classList.contains('lucide-search') ? 'lucide-search' : svg.getAttribute('class'),
+        aria_hidden: svg.getAttribute('aria-hidden'), parent_slot: svg.parentElement?.getAttribute('data-slot'),
+        interactive: Boolean(svg.closest('button, a, [role="button"], [onclick], [tabindex]:not([tabindex="-1"])')),
+        shape: [...svg.children].map(el => el.tagName === 'path' ? {tag: el.tagName, d: el.getAttribute('d')}
+          : {tag: el.tagName, cx: el.getAttribute('cx'), cy: el.getAttribute('cy'), r: el.getAttribute('r')}),
+      })),
+      palette_search_input_accessible: (() => { const input = document.querySelector('[cmdk-input]');
+        return Boolean(input && input.getClientRects().length && !input.disabled && input.getAttribute('role') === 'combobox'
+          && input.getAttribute('aria-label') === 'Поиск по экранам и задачам'); })(),
       topbar: rect('topbar'),
       primary: rect('primary-chat-fleet'),
       rail: rect('chat-fleet-rail'),
@@ -357,8 +409,12 @@ async function metrics(contents) {
       run_inspector_present: Boolean(document.querySelector('[data-testid="run-telemetry-inspector"]')),
       palette_present: Boolean(document.querySelector('[cmdk-root], [role="dialog"]')),
       focused_test_id: document.activeElement?.getAttribute('data-testid') || null,
-      settings_area_count: document.querySelectorAll('[data-testid="settings-areas"] [role="tab"]').length,
-      settings_route_count: document.querySelectorAll('[data-testid^="settings-open-"]').length,
+      settings_sections: [...document.querySelectorAll('[data-testid="page-system"] > section')].map(el => el.getAttribute('data-testid')),
+      settings_routes: [...document.querySelectorAll('[data-testid="page-system"] nav[aria-label="Рабочие экраны"] button')].map(el => el.textContent),
+      settings_statuses: ['github-repository-connection','github-chat-control','guardian-runtime-status'].map(id =>
+        document.querySelector('[data-testid="'+id+'"] [role="status"]')?.textContent || null),
+      guardian_activation_disabled: document.querySelector('[data-testid="guardian-runtime-status"] button')?.disabled === true,
+      github_chat_revoke_disabled: document.querySelectorAll('[data-testid="github-chat-control"] button')[1]?.disabled === true,
       task_details: document.querySelector('[data-testid="client-goal-status-dialog"]')?.textContent || null,
       native_work_readiness: document.querySelector('[data-testid="native-work-readiness"]')?.textContent || null,
       work_badge: (() => { const badge = document.querySelector('[data-testid="admin-connection-badge"]');
@@ -370,6 +426,18 @@ async function metrics(contents) {
       body_background: getComputedStyle(document.body).backgroundColor,
     };
   })()`);
+}
+
+function assertPaletteDecorativeSearch(metrics) {
+  const icons = metrics.palette_icons;
+  if (!Array.isArray(icons) || metrics.palette_svg_count !== 1 || icons.length !== 1
+      || metrics.palette_search_input_accessible !== true) throw new Error('ui1_palette_icon_contract_failed');
+  const icon = icons[0];
+  if (icon.identity !== 'lucide-search' || icon.aria_hidden !== 'true'
+      || icon.parent_slot !== 'command-input-wrapper' || icon.interactive !== false
+      || JSON.stringify(icon.shape) !== JSON.stringify([
+        { tag: 'path', d: 'm21 21-4.34-4.34' }, { tag: 'circle', cx: '11', cy: '11', r: '8' },
+      ])) throw new Error('ui1_palette_icon_contract_failed');
 }
 
 async function capture(view, name) {
@@ -416,7 +484,7 @@ function assertMain(row) {
 async function main() {
   const watchdog = setTimeout(() => {
     console.error(JSON.stringify({
-      schema: 'metaengine.browser.r97-visual-evidence.v1',
+      schema: 'metaengine.browser.r97-visual-evidence.v2',
       ok: false,
       error: `r97_visual_phase_watchdog:${phase}`,
       authority_effect: false,
@@ -457,12 +525,12 @@ async function main() {
   shellView.setBounds({ x:0, y:0, width:1440, height:960 });
 
   const evidence = {
-    schema: 'metaengine.browser.r97-visual-evidence.v1',
+    schema: 'metaengine.browser.r97-visual-evidence.v2',
     source_head: String(process.env.ME2_BUILD_SHA || ''),
     ok: false,
     captures: [],
     exact_main_workspace: false,
-    advanced_surfaces_settings_only: false,
+    settings_controls_scoped_and_routes_verified: false,
     command_search_available: false,
     primary_me2_ui_captured: true,
     legacy_shell_captured: false,
@@ -568,31 +636,40 @@ async function main() {
       `document.querySelector('[data-testid="settings-button"]')?.click(); true`,
     );
     await waitFor(shellView.webContents, "document.querySelector('[data-testid=page-outlet]')?.getAttribute('data-page') === 'system'");
-    await waitFor(shellView.webContents, "document.querySelectorAll('[data-testid^=settings-open-]').length === 6");
+    await waitFor(shellView.webContents, `['native-work-readiness','github-repository-connection','github-chat-control','guardian-runtime-status'].every(id => Boolean(document.querySelector('[data-testid="'+id+'"]'))) && document.querySelector('[data-testid="github-repository-connection"] [role=status]')?.textContent === 'NOT_CONFIGURED' && document.querySelector('[data-testid="github-chat-control"] [role=status]')?.textContent === 'NOT_PAIRED' && document.querySelector('[data-testid="guardian-runtime-status"] [role=status]')?.textContent.includes('GUARDIAN_OBSERVATION_NOT_YET_AVAILABLE')`);
     const settingsCapture = await capture(shellView, 'r97-settings-advanced-surface-1440x960');
     if (settingsCapture.metrics.primary != null || settingsCapture.metrics.rail != null) {
       throw new Error('r97_visual_main_rail_persisted_inside_settings');
     }
     evidence.captures.push(settingsCapture);
-    evidence.advanced_surfaces_settings_only = true;
-    if (settingsCapture.metrics.settings_area_count !== 5) throw new Error('ui1_settings_areas_missing');
+    if (JSON.stringify(settingsCapture.metrics.settings_sections) !== JSON.stringify(['native-work-readiness','github-repository-connection','github-chat-control','guardian-runtime-status'])) throw new Error('ui1_settings_sections_missing');
+    if (JSON.stringify(settingsCapture.metrics.settings_routes) !== JSON.stringify(['Агенты и цель','Задачи и очередь','Проекты и история','Наблюдение'])) throw new Error('ui1_settings_routes_missing');
+    if (!settingsCapture.metrics.guardian_activation_disabled || !settingsCapture.metrics.github_chat_revoke_disabled) throw new Error('ui1_unverified_settings_actions_enabled');
     if (geometryFixture.getVisible()) throw new Error('ui1_native_fixture_visible_in_settings');
 
-    for (const target of ['tasks','code','supervisor','memory','observability','operator']) {
-      await shellView.webContents.executeJavaScript(`document.querySelector('[data-testid="settings-open-${target}"]')?.click(); true`);
-      await waitFor(shellView.webContents, `document.querySelector('[data-testid=page-outlet]')?.getAttribute('data-page') === '${target}'`);
-      if(target !== 'operator') await waitFor(shellView.webContents, `Boolean(document.querySelector('[data-testid="page-${target}"]'))`);
+    for (const [target, label, selector] of [
+      ['browser','Агенты и цель','primary-chat-fleet'], ['tasks','Задачи и очередь','page-tasks'],
+      ['code','Проекты и история','page-code'], ['operator','Наблюдение','operator-observatory'],
+    ]) {
+      await shellView.webContents.executeJavaScript(`[...document.querySelectorAll('[data-testid="page-system"] nav[aria-label="Рабочие экраны"] button')].find(button => button.textContent === ${JSON.stringify(label)})?.click(); true`);
+      await waitFor(shellView.webContents, `document.querySelector('[data-testid=page-outlet]')?.getAttribute('data-page') === '${target}' && Boolean(document.querySelector('[data-testid="${selector}"]'))`);
+      const controlsLeaked = await shellView.webContents.executeJavaScript(`Boolean(document.querySelector('[data-testid="github-repository-connection"], [data-testid="github-chat-control"], [data-testid="guardian-runtime-status"], [data-testid="page-supervisor"], [data-testid="page-memory"], [data-testid="page-observability"]'))`);
+      if (controlsLeaked) throw new Error('ui1_settings_controls_or_retired_surface_leaked');
+      if (target !== 'browser' && geometryFixture.getVisible()) throw new Error('ui1_native_fixture_visible_outside_browser');
+      if (target === 'operator') await waitFor(shellView.webContents, `document.querySelector('[data-testid="operator-observatory"]')?.getAttribute('data-authority-effect') === 'false' && document.querySelector('[data-testid="operator-owner-epoch"]')?.textContent === 'UNKNOWN'`);
       await shellView.webContents.executeJavaScript(`document.querySelector('[data-testid="settings-button"]')?.click(); true`);
-      await waitFor(shellView.webContents, "Boolean(document.querySelector('[data-testid=settings-advanced-surfaces]'))");
+      await waitFor(shellView.webContents, "Boolean(document.querySelector('[data-testid=page-system]'))");
     }
+    // v2 proves current R100 routes and scoped connection controls, not the
+    // retired v1 promise that advanced daemon pages exist only in Settings.
+    evidence.settings_controls_scoped_and_routes_verified = true;
     evidence.settings_routes_verified = true;
 
     markPhase('SETTINGS_OFFLINE_READBACK');
-    await shellView.webContents.executeJavaScript(`document.getElementById('settings-tab-runtime')?.click(); true`);
     runtimeFixtureMode = 'PAUSED';
     await waitFor(shellView.webContents, "document.querySelector('[data-testid=admin-connection-badge]')?.getAttribute('data-work-state') === 'PAUSED' && document.querySelector('[data-testid=native-work-readiness]')?.textContent.includes('Execution paused')");
     const pausedCapture = await capture(shellView, 'ui1-settings-runtime-paused-1440x960');
-    if (!pausedCapture.metrics.native_work_readiness?.includes('Connected') || pausedCapture.metrics.legacy_runtime_panels_present) throw new Error('ui1_native_runtime_owner_not_distinct');
+    if (pausedCapture.metrics.work_badge?.admin_ready !== 'true' || pausedCapture.metrics.work_badge?.state !== 'PAUSED' || pausedCapture.metrics.legacy_runtime_panels_present) throw new Error('ui1_native_runtime_owner_not_distinct');
     evidence.captures.push(pausedCapture);
     evidence.paused_readiness_verified = true;
     runtimeFixtureMode = 'UNAVAILABLE';
@@ -639,7 +716,8 @@ async function main() {
     if (!searchCapture.metrics.palette_present) throw new Error('r97_visual_command_search_not_visible');
     evidence.captures.push(searchCapture);
     evidence.command_search_available = true;
-    if (searchCapture.metrics.palette_text_styles.length < 4 || searchCapture.metrics.palette_text_styles.some((row) => row.font_size < 12 || row.contrast < 4.5) || searchCapture.metrics.palette_svg_count !== 0) throw new Error('ui1_palette_legibility_failed');
+    if (searchCapture.metrics.palette_text_styles.length < 4 || searchCapture.metrics.palette_text_styles.some((row) => row.font_size < 12 || row.contrast < 4.5)) throw new Error('ui1_palette_legibility_failed');
+    assertPaletteDecorativeSearch(searchCapture.metrics);
     evidence.command_palette_legibility_verified = true;
     if (geometryFixture.getVisible()) throw new Error('ui1_native_fixture_overlays_command_palette');
     shellView.webContents.focus();
@@ -674,7 +752,7 @@ async function main() {
 
 main().then(() => app.exit(0)).catch(async (error) => {
   console.error(JSON.stringify({
-    schema: 'metaengine.browser.r97-visual-evidence.v1',
+    schema: 'metaengine.browser.r97-visual-evidence.v2',
     ok: false,
     phase,
     error: String(error?.stack || error?.message || error).slice(0, 4000),

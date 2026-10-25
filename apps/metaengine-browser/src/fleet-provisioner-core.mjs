@@ -77,7 +77,7 @@ function normalizePolicy(policy = {}) {
   // cycle); this field only seeds the STARTUP fleet so a self-update restart
   // restores the operator's fleet instead of silently shrinking it to demand.
   // Invalid values clamp to 0 (fail-safe: no auto-grow), never throw.
-  const bootFleetTarget = Math.min(64, Math.max(0, Math.floor(Number(policy.boot_fleet_target)) || 0));
+  const bootFleetTarget = nonNegativeInteger(policy.boot_fleet_target,0,'boot_fleet_target');
   // Closed-loop audit fix (fleet scale): the elastic live-agent ceiling flows
   // through the persisted fleet policy (the governor reads
   // policy.elastic_max_target_agents; before this key was normalized away and
@@ -85,14 +85,15 @@ function normalizePolicy(policy = {}) {
   const elasticMaxTargetAgents = (() => {
     const out = policy.elastic_max_target_agents == null ? null : Number(policy.elastic_max_target_agents);
     if (out == null) return null;
-    if (!Number.isSafeInteger(out) || out < 1 || out > 64) throw new Error('fleet_elastic_max_target_agents_invalid');
+    if (!Number.isSafeInteger(out) || out < 1) throw new Error('fleet_elastic_max_target_agents_invalid');
     return out;
   })();
   return Object.freeze({
     profile,
     warm_agents: warmAgents,
     desired_agents: desiredAgents,
-    ...(elasticMaxTargetAgents != null ? { elastic_max_target_agents: elasticMaxTargetAgents } : {}),
+    elastic_max_target_agents: null,
+    legacy_elastic_max_target_agents_ignored: elasticMaxTargetAgents!==null||policy.legacy_elastic_max_target_agents_ignored===true,
     boot_fleet_target: bootFleetTarget,
     elastic: true,
     hard_agent_cap: null,
@@ -178,7 +179,7 @@ function sanitizeLoadedState(input, policy) {
   // the ONLY policy field that survives the startup-policy replacement. It
   // lifts the startup desired_agents so the first active reconcile can restore
   // the operator's fleet after a restart (self-update, crash, reboot).
-  const operatorBootTarget = Math.min(64, Math.max(0, Math.floor(Number(input?.policy?.boot_fleet_target)) || 0));
+  const operatorBootTarget = nonNegativeInteger(input?.policy?.boot_fleet_target,0,'boot_fleet_target');
   const startupPolicy = normalizePolicy({
     ...policy,
     boot_fleet_target: operatorBootTarget,
@@ -376,7 +377,7 @@ export class FleetProvisioner {
   async setOperatorFleetTarget(targetAgents) {
     return this.#serial(async () => {
       this.#assertReady();
-      const target = Math.min(64, Math.max(0, Math.floor(Number(targetAgents)) || 0));
+      const target = nonNegativeInteger(targetAgents,0,'boot_fleet_target');
       this.#state.policy = clone(normalizePolicy({
         ...this.#state.policy,
         boot_fleet_target: target,
@@ -506,7 +507,11 @@ export class FleetProvisioner {
   async reconcile({ active = false, target_agents = null, spawn_burst_limit = null } = {}) {
     return this.#serial(async () => {
       this.#assertReady();
-      if (active && this.#capacityBackpressure) return this.snapshot();
+      if (active && this.#capacityBackpressure) {
+        const resources=this.#readCensus();
+        if(resources&&!resources.fleet_at_ceiling&&!resources.total_at_wall)this.#capacityBackpressure=false;
+        else return this.snapshot();
+      }
       const desired = active
         ? nonNegativeInteger(target_agents, this.#state.policy.desired_agents, 'desired_agents')
         : this.#state.policy.warm_agents;

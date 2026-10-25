@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { link, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { link, lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +9,7 @@ import { promisify } from 'node:util';
 import test from 'node:test';
 import { runtimeProviderDescriptor, stageManagedDenoCache, stageManagedDenoExecutable, startManagedRuntimeHost, validateRuntimeHostConfig, validateRuntimeHostPhysicalBoundaries } from './runtime-host.mjs';
 import { protectOwnerOnlyWindowsDirectory, verifyOwnerOnlyWindowsStorage } from '../../apps/metaengine-browser/src/private-windows-storage-acl.mjs';
+import {runtimeRecoveryPostgresProof} from './runtime-recovery-postgres-proof.mjs';
 
 const hostEntry = fileURLToPath(new URL('./runtime-host.mjs', import.meta.url));
 const configValue = root => ({ schema: 'compute.runtime-host-config.v1', version: 1,
@@ -18,9 +19,10 @@ const configValue = root => ({ schema: 'compute.runtime-host-config.v1', version
   inspect_database_url: 'postgresql://synthetic:private-password@127.0.0.1:25434/fixture',
   api_port: 25432, edge_port: 25433, startup_timeout_ms: 1000 });
 
-async function fixture(t, overrides = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'compute-host-test-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+async function fixture(t, overrides = {}, temporaryDirectory = os.tmpdir()) {
+  const temporary = await realpath(temporaryDirectory);
+  const root = await realpath(await mkdtemp(path.join(temporary, 'compute-host-test-')));
+  t.after(() => removeFixtureDirectory(root,temporary,'compute-host-test-'));
   const config = { ...configValue(root), ...overrides };
   await mkdir(config.bundle_directory, { recursive: true });
   await mkdir(config.pg_data_directory, { recursive: true });
@@ -45,6 +47,35 @@ async function fixture(t, overrides = {}) {
     hooks: { verifyBundle: async () => verified, stageDenoCache: async () => root,
       stageDenoExecutable: async () => path.join(root, 'private-deno.exe'), launchRuntime: async () => runtime } };
 }
+
+async function removeFixtureDirectory(directory,temporary,prefix){
+  const actual=await realpath(directory);assert.equal(actual,directory);
+  assert.equal(path.dirname(actual),temporary);assert.ok(path.basename(actual).startsWith(prefix));
+  await rm(actual,{recursive:true,force:true});
+}
+
+test('generated Host fixture canonicalizes an aliased temporary root before deriving PG continuity inputs',async t=>{
+  const temporary=await realpath(os.tmpdir());
+  const parent=await realpath(await mkdtemp(path.join(temporary,'compute-host-alias-proof-')));
+  t.after(()=>removeFixtureDirectory(parent,temporary,'compute-host-alias-proof-'));
+  const physical=path.join(parent,'physical'),alias=path.join(parent,'alias');
+  await mkdir(physical);await symlink(physical,alias,process.platform==='win32'?'junction':'dir');
+  await t.test('canonical generated paths pass while alias-spelled postmaster data is still refused',async child=>{
+    const f=await fixture(child,{},alias);
+    // Generated SQL/process metadata only: this does not start or attest PG.
+    const options={identity:f.runtime.postgresIdentity,pgDataDirectory:f.config.pg_data_directory};
+    const proof=await runtimeRecoveryPostgresProof(options);
+    assert.equal(f.root,await realpath(f.root));
+    assert.equal(f.config.pg_data_directory,await realpath(f.config.pg_data_directory));
+    const pidFile=path.join(f.config.pg_data_directory,'postmaster.pid'),bytes=await readFile(pidFile,'utf8');
+    const lines=bytes.split('\n');
+    assert.equal(lines[1],f.config.pg_data_directory);
+    lines[1]=path.join(alias,path.basename(f.root),'state','data');
+    await writeFile(pidFile,lines.join('\n'));
+    await assert.rejects(runtimeRecoveryPostgresProof(options),/runtime_recovery_postgres_identity_unproven/);
+    await writeFile(pidFile,bytes);assert.deepEqual(await runtimeRecoveryPostgresProof(options),proof);
+  });
+});
 
 test('host rejects private-state overlap, extra config fields and unqualified providers', () => {
   const root = path.resolve(os.tmpdir(), 'synthetic-host-config');
@@ -213,8 +244,9 @@ test('host serializes overlapping health and terminal status writes', async t =>
 });
 
 test('attached host passes through mode and shutdown never claims the external PostgreSQL', async t => {
-  const f = await fixture(t, { postgres_mode: 'attached', api_role_mode: 'direct', expected_cluster_system_identifier: '7654321098765432100', pg_data_directory: path.join(os.tmpdir(), `compute-attached-data-${randomUUID()}`) });
-  t.after(() => rm(f.config.pg_data_directory, { recursive: true, force: true }));
+  const temporary=await realpath(os.tmpdir());
+  const f = await fixture(t, { postgres_mode: 'attached', api_role_mode: 'direct', expected_cluster_system_identifier: '7654321098765432100', pg_data_directory: path.join(temporary, `compute-attached-data-${randomUUID()}`) });
+  t.after(() => removeFixtureDirectory(f.config.pg_data_directory,temporary,'compute-attached-data-'));
   await mkdir(f.config.state_directory, { recursive: true });
   await writeFile(path.join(f.config.state_directory, 'PG_VERSION'), '17\n');
   await writeFile(path.join(f.config.state_directory, 'client-vault.key'), 'b'.repeat(64) + '\n');
@@ -240,12 +272,13 @@ test('real attached-host startup adopts only a physically absent predecessor and
   await new Promise(resolve => keeper.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => keeper.close(resolve)));
   const keeperPort = keeper.address().port;
+  const temporary=await realpath(os.tmpdir());
   const f = await fixture(t, { postgres_mode: 'attached', api_role_mode: 'direct',
     expected_cluster_system_identifier: '7654321098765432100',
-    pg_data_directory: path.join(os.tmpdir(), 'runtime-host-recovery-attached-' + randomUUID()),
+    pg_data_directory: path.join(temporary, 'runtime-host-recovery-attached-' + randomUUID()),
     database_url: 'postgresql://synthetic:private-password@127.0.0.1:' + keeperPort + '/fixture',
     inspect_database_url: 'postgresql://synthetic:private-password@127.0.0.1:' + keeperPort + '/fixture' });
-  t.after(() => rm(f.config.pg_data_directory, { recursive: true, force: true }));
+  t.after(() => removeFixtureDirectory(f.config.pg_data_directory,temporary,'runtime-host-recovery-attached-'));
   await mkdir(f.config.state_directory, { recursive: true });
   const predecessorPid = 19551001;
   const priorLock = JSON.stringify({ schema: 'compute.runtime-host-lock.v1',

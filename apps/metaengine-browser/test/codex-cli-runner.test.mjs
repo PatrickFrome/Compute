@@ -15,6 +15,7 @@ import {prepareNativeCodingAgentRunBridge} from '../src/native-coding-agent-run-
 import {agentBridgePins} from './fixtures/native-coding-agent-bridge-pins.mjs';
 import {connectNativeCodingAgentMcpBroker} from '../src/native-coding-agent-mcp-broker.mjs';
 import {NATIVE_AGENT_MCP_ENV} from '../src/native-coding-agent-mcp-entry.mjs';
+import {withOwnedCodexCliProcess} from './fixtures/with-owned-codex-cli-process.mjs';
 
 const exec = promisify(execFile);
 const sha = value => crypto.createHash('sha256').update(value).digest('hex');
@@ -33,8 +34,12 @@ test('packaged PowerShell helper resolves outside ASAR and is explicitly shipped
 });
 
 async function fixture(t) {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-codex-runner-'));
-  t.after(async () => { assert.ok(path.resolve(directory).startsWith(path.resolve(os.tmpdir()) + path.sep)); await fs.rm(directory, { recursive: true, force: true }); });
+  const temporary = await fs.realpath(os.tmpdir());
+  const directory = await fs.realpath(await fs.mkdtemp(path.join(temporary, 'metaengine-codex-runner-')));
+  t.after(async () => { const actual = await fs.realpath(directory);
+    assert.equal(actual, directory); assert.equal(path.dirname(actual), temporary);
+    assert.ok(path.basename(actual).startsWith('metaengine-codex-runner-'));
+    await fs.rm(actual, { recursive: true, force: true }); });
   const repo = path.join(directory, 'repo'); const worktree = path.join(directory, 'worktree'); await fs.mkdir(repo);
   const git = args => exec('git', args, { cwd: repo, windowsHide: true });
   await git(['init', '-q']); await git(['config', 'user.email', 'test@example.invalid']); await git(['config', 'user.name', 'METAENGINE tests']);
@@ -127,7 +132,9 @@ test('native permit rejection occurs before spawning or reserving the model job'
   assert.equal(processController.spawns, 0);
 });
 
-test('runner binds real private broker only after RUNNING authorization and before prompt resume, then revokes',async t=>{
+test('runner binds real private broker only after RUNNING authorization and before prompt resume, then revokes',{
+  skip:process.platform!=='win32'?'Production per-run bridge requires a Windows named pipe':false,
+},async t=>{
   const f=await fixture(t),pins=await agentBridgePins(t),events=[];let running=false,bridge;
   const processController=controller({onResume:async()=>{
     events.push('resume');const env=processController.lastSpec.env;
@@ -155,20 +162,27 @@ test('runner binds real private broker only after RUNNING authorization and befo
   await assert.rejects(connectNativeCodingAgentMcpBroker({endpoint:spec.env[NATIVE_AGENT_MCP_ENV.endpoint],capability:cap}));
 });
 
-test('unverified bridge descriptor or Host bind refusal cannot resume the suspended worker',async t=>{
-  for(const mode of ['unverified','bind-refused']){
+for(const mode of ['unverified','bind-refused','unsupported-platform'])test(
+  ({unverified:'an unverified bridge descriptor cannot spawn or resume a worker',
+    'bind-refused':'a refused Host binding cannot resume the suspended Windows named-pipe worker',
+    'unsupported-platform':'non-Windows production bridge refusal leaves no worker or Host effect'})[mode],{
+    skip:mode==='bind-refused'&&process.platform!=='win32'?'Host binding integration requires a Windows named pipe'
+      :mode==='unsupported-platform'&&process.platform==='win32'?'Non-Windows refusal contract':false,
+  },async t=>{
     const f=await fixture(t),processController=controller();let closes=0;
-    let pins;if(mode==='bind-refused')pins=await agentBridgePins(t);
+    let hostCalls=0,pins;if(mode!=='unverified')pins=await agentBridgePins(t);
     const runner=createCodexCliRunner({...f,processController,async prepareAgentBridge(details){
       if(mode==='unverified')return {launch:{argv:['--dangerously-bypass-approvals-and-sandbox']},bindRun:async()=>{},close:async()=>{closes++;}};
       const a=details.authorization,permit={...details.binding,...a,trust_namespace:'LOCAL_OPERATOR_QA',revoked:false,provider_id:id(55),
         artifact:{cli_executable_sha256:f.expectedExecutableSha256},worktree:{path:a.worktree_path,base_sha:details.binding.base_sha}};
-      return prepareNativeCodingAgentRunBridge({...details,permit,pins,ownPostgres:{agentOperation:async()=>{throw Error('fixture_current_lease_rejected');}}});
+      return prepareNativeCodingAgentRunBridge({...details,permit,pins,ownPostgres:{agentOperation:async()=>{hostCalls++;throw Error('fixture_current_lease_rejected');}}});
     }});
     const receipt=await runner.run({lease:f.lease(1),role:'IMPLEMENTER',worktreePath:f.worktree,prompt:'Never resume'});
     assert.equal(receipt.state,'AMBIGUOUS');assert.equal(await fs.readFile(path.join(f.worktree,'feature.txt'),'utf8'),'before\n');
-    assert.equal(processController.spawns,mode==='unverified'?0:1);if(mode==='unverified')assert.equal(closes,1);
-  }
+    assert.equal(processController.spawns,mode==='bind-refused'?1:0);if(mode==='unverified')assert.equal(closes,1);
+    if(mode==='unsupported-platform'){
+      assert.equal(receipt.terminal_reason,'native_agent_bridge_composition');assert.equal(hostCalls,0);
+    }
 });
 
 test('lease revoked before native resume leaves a durable ambiguous attempt and never reruns', async t => {
@@ -219,15 +233,16 @@ test('result schema rejects unexpected fields and wrong critic subject', () => {
 test('real Windows controller starts suspended in its job and transports exact arguments without a model', { skip: process.platform !== 'win32' }, async () => {
   const processController = createCodexCliWindowsProcessController();
   const expectedExecutableSha256 = sha(await fs.readFile(process.execPath));
-  const handle = await processController.spawn({ executablePath: process.execPath, expectedExecutableSha256,
+  await withOwnedCodexCliProcess(processController, { executablePath: process.execPath, expectedExecutableSha256,
     args: ['-e', 'process.stdout.write(JSON.stringify(process.argv.slice(1)))', 'argument with spaces', 'quote"and\\slash', 'тест🚀'],
-    cwd: os.tmpdir(), env: codexCliEnvironment(path.join(os.tmpdir(), 'unused-auth')), timeoutMs: 10000, runId: crypto.randomUUID() });
-  assert.equal(handle.proof.started_suspended, true); assert.equal(handle.proof.tree_control_bound, true);
-  assert.deepEqual(JSON.parse(JSON.stringify(handle.proof)),handle.proof,'native proof must remain exact across protected JSON and private IPC');
-  let output = ''; handle.stdout.setEncoding('utf8'); handle.stdout.on('data', value => { output += value; });
-  await handle.resume(''); const completion = await handle.completion;
-  assert.equal(completion.exit_code, 0); assert.equal(completion.tree_cleanup_confirmed, true);
-  assert.deepEqual(JSON.parse(output), ['argument with spaces', 'quote"and\\slash', 'тест🚀']);
+    cwd: os.tmpdir(), env: codexCliEnvironment(path.join(os.tmpdir(), 'unused-auth')), timeoutMs: 10000, runId: crypto.randomUUID() }, async handle => {
+    assert.equal(handle.proof.started_suspended, true); assert.equal(handle.proof.tree_control_bound, true);
+    assert.deepEqual(JSON.parse(JSON.stringify(handle.proof)),handle.proof,'native proof must remain exact across protected JSON and private IPC');
+    let output = ''; handle.stdout.setEncoding('utf8'); handle.stdout.on('data', value => { output += value; });
+    await handle.resume(''); const completion = await handle.completion;
+    assert.equal(completion.exit_code, 0); assert.equal(completion.tree_cleanup_confirmed, true);
+    assert.deepEqual(JSON.parse(output), ['argument with spaces', 'quote"and\\slash', 'тест🚀']);
+  });
 });
 
 test('real Windows deadline kills the exact job and its descendant without any model call', { skip: process.platform !== 'win32' }, async t => {
@@ -237,37 +252,113 @@ test('real Windows deadline kills the exact job and its descendant without any m
   const descendant = `setTimeout(()=>require('node:fs').writeFileSync(${JSON.stringify(canary)},'escaped'),2000)`;
   const script = `require('node:child_process').spawn(process.execPath,['-e',${JSON.stringify(descendant)}],{stdio:'ignore'});setInterval(()=>{},1000)`;
   const processController = createCodexCliWindowsProcessController();
-  const handle = await processController.spawn({ executablePath: process.execPath, expectedExecutableSha256: sha(await fs.readFile(process.execPath)),
-    args: ['-e', script], cwd: directory, env: codexCliEnvironment(path.join(directory, 'unused-auth')), timeoutMs: 300, runId: crypto.randomUUID() });
-  handle.stdout.resume(); handle.stderr.resume(); await handle.resume('');
-  const completion = await handle.completion;
-  assert.equal(completion.reason, 'TIMEOUT'); assert.equal(completion.tree_cleanup_confirmed, true);
-  await assert.rejects(fs.stat(canary), { code: 'ENOENT' });
+  await withOwnedCodexCliProcess(processController, { executablePath: process.execPath, expectedExecutableSha256: sha(await fs.readFile(process.execPath)),
+    args: ['-e', script], cwd: directory, env: codexCliEnvironment(path.join(directory, 'unused-auth')), timeoutMs: 300, runId: crypto.randomUUID() }, async handle => {
+    handle.stdout.resume(); handle.stderr.resume(); await handle.resume('');
+    const completion = await handle.completion;
+    assert.equal(completion.reason, 'TIMEOUT'); assert.equal(completion.tree_cleanup_confirmed, true);
+    await assert.rejects(fs.stat(canary), { code: 'ENOENT' });
+  });
 });
 
 test('native absolute deadline can be shortened at resume and stops the real child before relative timeout', { skip: process.platform !== 'win32' }, async () => {
   const processController = createCodexCliWindowsProcessController();
-  const handle = await processController.spawn({ executablePath: process.execPath, expectedExecutableSha256: sha(await fs.readFile(process.execPath)),
+  await withOwnedCodexCliProcess(processController, { executablePath: process.execPath, expectedExecutableSha256: sha(await fs.readFile(process.execPath)),
     args: ['-e', 'process.stdout.write("started");setInterval(()=>{},1000)'], cwd: os.tmpdir(),
     env: codexCliEnvironment(path.join(os.tmpdir(), 'unused-auth')), timeoutMs: 10000,
-    deadlineAt: new Date(Date.now() + 20000).toISOString(), runId: crypto.randomUUID() });
-  let output = ''; handle.stdout.on('data', value => { output += value.toString(); }); handle.stderr.resume();
-  const resumedAt = Date.now(); await handle.resume('', { deadlineAt: new Date(Date.now() + 600).toISOString() });
-  const completion = await handle.completion;
-  assert.equal(completion.reason, 'TIMEOUT'); assert.equal(completion.tree_cleanup_confirmed, true);
-  assert.equal(output, 'started'); assert.ok(Date.now() - resumedAt < 4000);
+    // The original fixture permit must outlive the unchanged 30s helper startup
+    // budget; the actual runtime deadline is still shortened to 600ms below.
+    deadlineAt: new Date(Date.now() + 60000).toISOString(), runId: crypto.randomUUID() }, async handle => {
+    let output = ''; handle.stdout.on('data', value => { output += value.toString(); }); handle.stderr.resume();
+    const resumedAt = Date.now(); await handle.resume('', { deadlineAt: new Date(Date.now() + 600).toISOString() });
+    const completion = await handle.completion;
+    assert.equal(completion.reason, 'TIMEOUT'); assert.equal(completion.tree_cleanup_confirmed, true);
+    assert.equal(output, 'started'); assert.ok(Date.now() - resumedAt < 4000);
+  });
 });
 
-test('an expired native deadline cannot resume a suspended child', { skip: process.platform !== 'win32' }, async t => {
+function assertSuspendedCancellation(handle, completion, runId, reason) {
+  assert.equal(completion.reason, reason); assert.equal(completion.exit_code, 125);
+  assert.equal(completion.tree_cleanup_confirmed, true); assert.equal(completion.never_resumed, true);
+  assert.equal(completion.process_exit_confirmed, true); assert.equal(completion.handles_closed, true);
+  assert.equal(completion.process_tree_control, 'WINDOWS_JOB_OBJECT');
+  assert.equal(completion.run_id, runId); assert.equal(completion.job_id, runId);
+  assert.equal(completion.pid, handle.proof.pid); assert.equal(completion.process_incarnation_id, handle.proof.process_incarnation_id);
+  assert.match(completion.cancellation_id, /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
+  assert.equal(completion.job_accounting.active_processes, 0); assert.equal(completion.job_accounting.total_processes, 1);
+  assert.ok(Number.isSafeInteger(completion.job_accounting.total_terminated_processes));
+  assert.ok(completion.job_accounting.total_terminated_processes >= 0 && completion.job_accounting.total_terminated_processes <= 1);
+}
+
+test('an expired native deadline cannot resume a suspended child and cancellation still proves exact cleanup', { skip: process.platform !== 'win32', timeout: 45000 }, async t => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-codex-expiry-'));
   t.after(async () => { assert.ok(path.resolve(directory).startsWith(path.resolve(os.tmpdir()) + path.sep)); await fs.rm(directory, { recursive: true, force: true }); });
   const canary = path.join(directory, 'must-not-exist.txt');
   const processController = createCodexCliWindowsProcessController();
-  const handle = await processController.spawn({ executablePath: process.execPath, expectedExecutableSha256: sha(await fs.readFile(process.execPath)),
+  const runId = crypto.randomUUID();
+  await withOwnedCodexCliProcess(processController, { executablePath: process.execPath, expectedExecutableSha256: sha(await fs.readFile(process.execPath)),
     args: ['-e', `require('node:fs').writeFileSync(${JSON.stringify(canary)},'ran')`], cwd: directory,
     env: codexCliEnvironment(path.join(directory, 'unused-auth')), timeoutMs: 10000,
-    deadlineAt: new Date(Date.now() - 1).toISOString(), runId: crypto.randomUUID() });
-  await assert.rejects(handle.resume(''), /deadline_expired_before_resume/);
-  await handle.terminate('EXPIRED');
-  await assert.rejects(fs.stat(canary), { code: 'ENOENT' });
+    deadlineAt: new Date(Date.now() - 1).toISOString(), runId }, async handle => {
+    let output = ''; handle.stdout.on('data', chunk => { output += chunk.toString(); }); handle.stderr.resume();
+    await assert.rejects(handle.resume(''), /deadline_expired_before_resume/);
+    const terminating = handle.terminate('EXPIRED');
+    await assert.rejects(handle.resume('must never reach child'), /resume_invalid/);
+    await terminating; assertSuspendedCancellation(handle, await handle.completion, runId, 'EXPIRED');
+    assert.equal(output, '');
+    await assert.rejects(fs.stat(canary), { code: 'ENOENT' });
+  });
+});
+
+test('real Windows pre-RESUME cancellations never execute a canary and bind separate native identities and cancellation IDs', { skip: process.platform !== 'win32', timeout: 90000 }, async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-codex-suspended-cancel-'));
+  t.after(async () => { assert.ok(path.resolve(directory).startsWith(path.resolve(os.tmpdir()) + path.sep)); await fs.rm(directory, { recursive: true, force: true }); });
+  const processController = createCodexCliWindowsProcessController(), receipts = [];
+  const expectedExecutableSha256 = sha(await fs.readFile(process.execPath));
+  for (let n = 0; n < 2; n++) {
+    const runId = crypto.randomUUID(), canary = path.join(directory, `must-not-exist-${n}.txt`);
+    await withOwnedCodexCliProcess(processController, { executablePath: process.execPath, expectedExecutableSha256,
+      args: ['-e', `require('node:fs').writeFileSync(${JSON.stringify(canary)},'ran');process.stdout.write('ran')`],
+      cwd: directory, env: codexCliEnvironment(path.join(directory, 'unused-auth')), timeoutMs: 10000, runId }, async handle => {
+      let output = ''; handle.stdout.on('data', chunk => { output += chunk.toString(); }); handle.stderr.resume();
+      const terminating = handle.terminate('CANCELLED'), repeated = handle.terminate('OTHER');
+      await assert.rejects(handle.resume('must never reach child'), /resume_invalid/);
+      await Promise.all([terminating, repeated]);
+      const receipt = await handle.completion; assertSuspendedCancellation(handle, receipt, runId, 'CANCELLED');
+      receipts.push(receipt); assert.equal(output, ''); await assert.rejects(fs.stat(canary), { code: 'ENOENT' });
+    });
+  }
+  assert.notEqual(receipts[0].run_id, receipts[1].run_id);
+  assert.notEqual(receipts[0].cancellation_id, receipts[1].cancellation_id);
+  assert.notEqual(receipts[0].process_incarnation_id, receipts[1].process_incarnation_id);
+});
+
+test('real Windows fault-injected disposable helpers never attest suspended cleanup after a native operation fails', { skip: process.platform !== 'win32', timeout: 180000 }, async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-codex-cancel-fault-'));
+  t.after(async () => { assert.ok(path.resolve(directory).startsWith(path.resolve(os.tmpdir()) + path.sep)); await fs.rm(directory, { recursive: true, force: true }); });
+  const source = await fs.readFile(resolveCodexCliJobHelper(), 'utf8');
+  const expectedExecutableSha256 = sha(await fs.readFile(process.execPath));
+  // These copies deliberately pass invalid native handles; production helper
+  // bytes and OS policy stay untouched. This is failure-path evidence only.
+  const faults = [
+    ['TerminateJobObject(job,125)', 'TerminateJobObject(IntPtr.Zero,125)'],
+    ['GetExitCodeProcess(process.process,out cancelledCode)', 'GetExitCodeProcess(IntPtr.Zero,out cancelledCode)'],
+    ['QueryInformationJobObject(job,1,out cancelledAccounting', 'QueryInformationJobObject(new IntPtr(-1),1,out cancelledAccounting'],
+    ['CloseChecked(ref job,"suspended_job_close_failed");', 'Require(CloseHandle(IntPtr.Zero),"suspended_job_close_failed");'],
+  ];
+  for (const [index, [before, after]] of faults.entries()) {
+    assert.equal(source.split(before).length, 2, 'each fault must target exactly one suspended cleanup operation');
+    const helperPath = path.join(directory, `fault-${index}.ps1`), canary = path.join(directory, `must-not-exist-${index}.txt`);
+    await fs.writeFile(helperPath, source.replace(before, after), 'utf8');
+    const processController = createCodexCliWindowsProcessController({ helperPath });
+    await withOwnedCodexCliProcess(processController, { executablePath: process.execPath, expectedExecutableSha256,
+      args: ['-e', `require('node:fs').writeFileSync(${JSON.stringify(canary)},'ran')`],
+      cwd: directory, env: codexCliEnvironment(path.join(directory, 'unused-auth')), timeoutMs: 10000, runId: crypto.randomUUID() }, async handle => {
+      handle.stdout.resume(); handle.stderr.resume(); await handle.terminate('CANCELLED');
+      const completion = await handle.completion;
+      assert.equal(completion.tree_cleanup_confirmed, false); assert.equal(completion.reason, 'NATIVE_JOB_FAILED');
+      assert.equal(completion.exit_code, 1); assert.equal(completion.cancellation_id, undefined);
+      await assert.rejects(fs.stat(canary), { code: 'ENOENT' });
+    });
+  }
 });

@@ -16,6 +16,7 @@ public static class MetaengineCodexJob {
     public int cb; public string reserved,desktop,title; public uint x,y,xsize,ysize,xc,yc,fill,flags;
     public ushort show,reservedLength; public IntPtr reservedData,stdin,stdout,stderr;
   }
+  [StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)] struct StartupEx { public Startup startup; public IntPtr attributes; }
   [StructLayout(LayoutKind.Sequential)] struct ProcessInfo { public IntPtr process,thread; public uint pid,tid; }
   [StructLayout(LayoutKind.Sequential)] struct Basic {
     public long processTime,jobTime; public uint flags; public UIntPtr min,max; public uint active;
@@ -28,9 +29,11 @@ public static class MetaengineCodexJob {
   [DllImport("kernel32.dll",SetLastError=true)] static extern bool SetInformationJobObject(IntPtr j,int c,ref Limits l,uint s);
   [DllImport("kernel32.dll",SetLastError=true)] static extern bool CreatePipe(out IntPtr r,out IntPtr w,ref Security a,uint size);
   [DllImport("kernel32.dll",SetLastError=true)] static extern bool SetHandleInformation(IntPtr h,uint mask,uint flags);
+  [DllImport("kernel32.dll",SetLastError=true)] static extern bool InitializeProcThreadAttributeList(IntPtr list,uint count,uint flags,ref UIntPtr size);
+  [DllImport("kernel32.dll",SetLastError=true)] static extern bool UpdateProcThreadAttribute(IntPtr list,uint flags,UIntPtr attribute,IntPtr value,UIntPtr size,IntPtr previous,IntPtr returned);
+  [DllImport("kernel32.dll")] static extern void DeleteProcThreadAttributeList(IntPtr list);
   [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool CreateProcess(string app,StringBuilder args,
-    IntPtr pa,IntPtr ta,bool inherit,uint flags,IntPtr env,string cwd,ref Startup startup,out ProcessInfo process);
-  [DllImport("kernel32.dll",SetLastError=true)] static extern bool AssignProcessToJobObject(IntPtr j,IntPtr p);
+    IntPtr pa,IntPtr ta,bool inherit,uint flags,IntPtr env,string cwd,ref StartupEx startup,out ProcessInfo process);
   [DllImport("kernel32.dll",SetLastError=true)] static extern bool IsProcessInJob(IntPtr p,IntPtr j,out bool result);
   [DllImport("kernel32.dll",SetLastError=true)] static extern bool GetProcessTimes(IntPtr p,out long c,out long e,out long k,out long u);
   [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool QueryFullProcessImageName(IntPtr p,uint f,StringBuilder s,ref uint n);
@@ -40,9 +43,13 @@ public static class MetaengineCodexJob {
   [DllImport("kernel32.dll",SetLastError=true)] static extern bool TerminateJobObject(IntPtr j,uint code);
   [DllImport("kernel32.dll",SetLastError=true)] static extern bool TerminateProcess(IntPtr p,uint code);
   [DllImport("kernel32.dll",SetLastError=true)] static extern bool QueryInformationJobObject(IntPtr j,int c,out Accounting a,uint n,IntPtr returned);
-  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+  [DllImport("kernel32.dll",SetLastError=true)] static extern bool CloseHandle(IntPtr h);
   static readonly object outputLock = new object();
   static void Require(bool ok,string phase) { if(!ok) throw new InvalidOperationException("codex_job_"+phase+":"+Marshal.GetLastWin32Error()); }
+  static void CloseChecked(ref IntPtr handle,string phase) {
+    if(handle==IntPtr.Zero) return;
+    Require(CloseHandle(handle),phase); handle=IntPtr.Zero;
+  }
   static void Emit(string json) { lock(outputLock) { Console.Out.WriteLine(json); Console.Out.Flush(); } }
   static string Escape(string s) { return "\""+s.Replace("\\","\\\\").Replace("\"","\\\"").Replace("\r","\\r").Replace("\n","\\n")+"\""; }
   static string Quote(string s) {
@@ -73,22 +80,73 @@ public static class MetaengineCodexJob {
       Require(CreatePipe(out stdoutRead,out stdoutWrite,ref security,0),"stdout_pipe_failed");
       Require(CreatePipe(out stderrRead,out stderrWrite,ref security,0),"stderr_pipe_failed");
       Require(SetHandleInformation(stdinWrite,1,0)&&SetHandleInformation(stdoutRead,1,0)&&SetHandleInformation(stderrRead,1,0),"parent_pipe_inheritance_failed");
-      var startup=new Startup(); startup.cb=Marshal.SizeOf(typeof(Startup)); startup.flags=0x100|1; startup.show=0;
+      var startup=new Startup(); startup.flags=0x100|1; startup.show=0;
       startup.stdin=stdinRead; startup.stdout=stdoutWrite; startup.stderr=stderrWrite;
       var command=new StringBuilder(Quote(exe)); foreach(string arg in args) command.Append(" "+Quote(arg));
-      Require(CreateProcess(exe,command,IntPtr.Zero,IntPtr.Zero,true,0x08000004,IntPtr.Zero,cwd,ref startup,out process),"create_process_failed");
-      Require(AssignProcessToJobObject(job,process.process),"assign_failed"); assigned=true;
-      bool inJob; Require(IsProcessInJob(process.process,job,out inJob)&&inJob,"membership_readback_failed");
+      // Windows 10+/Server 2016+ JOB_LIST binds within CreateProcess, before the
+      // initial thread can run. Unsupported attributes refuse before creation;
+      // there is deliberately no create-then-assign or breakaway fallback.
+      IntPtr attributes=IntPtr.Zero,jobList=IntPtr.Zero; bool attributesInitialized=false;
+      try {
+        UIntPtr attributeBytes=UIntPtr.Zero;
+        bool sized=InitializeProcThreadAttributeList(IntPtr.Zero,1,0,ref attributeBytes); int sizeError=Marshal.GetLastWin32Error();
+        if(sized || sizeError!=122 || attributeBytes==UIntPtr.Zero) throw new InvalidOperationException("codex_job_attributes_size_invalid:"+sizeError);
+        attributes=Marshal.AllocHGlobal(checked((int)attributeBytes.ToUInt64()));
+        Require(InitializeProcThreadAttributeList(attributes,1,0,ref attributeBytes),"attributes_initialize_failed"); attributesInitialized=true;
+        jobList=Marshal.AllocHGlobal(IntPtr.Size); Marshal.WriteIntPtr(jobList,job);
+        Require(UpdateProcThreadAttribute(attributes,0,new UIntPtr(0x0002000d),jobList,new UIntPtr((uint)IntPtr.Size),IntPtr.Zero,IntPtr.Zero),"job_attribute_failed");
+        var extended=new StartupEx(); extended.startup=startup; extended.startup.cb=Marshal.SizeOf(typeof(StartupEx)); extended.attributes=attributes;
+        ProcessInfo createdProcess;
+        bool created=CreateProcess(exe,command,IntPtr.Zero,IntPtr.Zero,true,0x08000004|0x00080000,IntPtr.Zero,cwd,ref extended,out createdProcess);
+        Require(created,"create_process_failed");
+        // Failed PROCESS_INFORMATION outputs are not owned handles. Transfer
+        // them into the outer cleanup scope only after successful creation.
+        process=createdProcess;
+      } finally {
+        // Attribute values must stay alive until the initialized list is deleted.
+        if(attributesInitialized) DeleteProcThreadAttributeList(attributes);
+        if(jobList!=IntPtr.Zero) Marshal.FreeHGlobal(jobList);
+        if(attributes!=IntPtr.Zero) Marshal.FreeHGlobal(attributes);
+      }
+      bool inJob; Require(IsProcessInJob(process.process,job,out inJob)&&inJob,"membership_readback_failed"); assigned=true;
       long birth,exit,kernel,user; Require(GetProcessTimes(process.process,out birth,out exit,out kernel,out user),"birth_readback_failed");
       var image=new StringBuilder(32768); uint imageSize=32768; Require(QueryFullProcessImageName(process.process,0,image,ref imageSize),"image_readback_failed");
       if(!String.Equals(Path.GetFullPath(image.ToString()),Path.GetFullPath(exe),StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("codex_job_image_changed");
-      CloseHandle(stdinRead); stdinRead=IntPtr.Zero; CloseHandle(stdoutWrite); stdoutWrite=IntPtr.Zero; CloseHandle(stderrWrite); stderrWrite=IntPtr.Zero;
+      CloseChecked(ref stdinRead,"stdin_child_close_failed"); CloseChecked(ref stdoutWrite,"stdout_child_close_failed"); CloseChecked(ref stderrWrite,"stderr_child_close_failed");
       string sid=System.Security.Principal.WindowsIdentity.GetCurrent().User.Value;
       Emit("{\"type\":\"ready\",\"pid\":"+process.pid+",\"process_incarnation_id\":"+Escape("pid:"+process.pid+":created_100ns:"+birth)+
         ",\"started_at\":"+Escape(DateTime.FromFileTimeUtc(birth).ToString("o"))+",\"user_sid\":"+Escape(sid)+",\"job_id\":"+Escape(runId)+
         ",\"executable_path\":"+Escape(image.ToString())+",\"executable_sha256\":"+Escape(expectedSha)+",\"tree_control_bound\":true,\"started_suspended\":true,\"job_bound_before_resume\":true,\"process_tree_control\":\"WINDOWS_JOB_OBJECT\"}");
       // No model prompt or child execution before the native host's second authorization.
       string resume=Console.In.ReadLine();
+      if(resume!=null && resume.StartsWith("CANCEL_SUSPENDED ",StringComparison.Ordinal)) {
+        string[] cancel=resume.Split(' '); Guid cancellationId;
+        if(cancel.Length!=3 || !Guid.TryParseExact(cancel[1],"D",out cancellationId) || cancellationId.ToString("D")!=cancel[1]
+          || !System.Text.RegularExpressions.Regex.IsMatch(cancel[2],"\\A[A-Z_]{1,80}\\z")) throw new InvalidOperationException("codex_job_cancel_invalid");
+        // This branch cannot call ResumeThread or pump/write child input. A receipt
+        // is emitted only after native exit, empty accounting and checked closes.
+        Require(TerminateJobObject(job,125),"suspended_termination_failed");
+        Require(WaitForSingleObject(process.process,5000)==0,"suspended_exit_wait_failed");
+        uint cancelledCode; Require(GetExitCodeProcess(process.process,out cancelledCode),"suspended_exit_readback_failed");
+        Require(cancelledCode==125,"suspended_exit_code_invalid");
+        CloseChecked(ref process.thread,"suspended_thread_close_failed"); CloseChecked(ref process.process,"suspended_process_close_failed");
+        CloseChecked(ref stdinWrite,"suspended_stdin_close_failed"); CloseChecked(ref stdoutRead,"suspended_stdout_close_failed"); CloseChecked(ref stderrRead,"suspended_stderr_close_failed");
+        var cancelDeadline=DateTime.UtcNow.AddSeconds(5); Accounting cancelledAccounting;
+        do {
+          Require(QueryInformationJobObject(job,1,out cancelledAccounting,(uint)Marshal.SizeOf(typeof(Accounting)),IntPtr.Zero),"suspended_accounting_readback_failed");
+          if(cancelledAccounting.active==0) break;
+          System.Threading.Thread.Sleep(20);
+        } while(DateTime.UtcNow<cancelDeadline);
+        // This unnamed, non-inheritable Job received exactly this one process;
+        // its initial thread was never resumed, so it could not spawn children.
+        Require(cancelledAccounting.active==0 && cancelledAccounting.total==1 && cancelledAccounting.terminated<=cancelledAccounting.total,"suspended_accounting_invalid");
+        CloseChecked(ref job,"suspended_job_close_failed");
+        Emit("{\"type\":\"suspended_cancelled\",\"run_id\":"+Escape(runId)+",\"job_id\":"+Escape(runId)+",\"pid\":"+process.pid+
+          ",\"process_incarnation_id\":"+Escape("pid:"+process.pid+":created_100ns:"+birth)+",\"cancellation_id\":"+Escape(cancel[1])+",\"reason\":"+Escape(cancel[2])+
+          ",\"exit_code\":"+cancelledCode+",\"never_resumed\":true,\"process_exit_confirmed\":true,\"handles_closed\":true,\"tree_cleanup_confirmed\":true,\"process_tree_control\":\"WINDOWS_JOB_OBJECT\""+
+          ",\"job_accounting\":{\"active_processes\":"+cancelledAccounting.active+",\"total_processes\":"+cancelledAccounting.total+",\"total_terminated_processes\":"+cancelledAccounting.terminated+"}}");
+        return;
+      }
       if(resume==null || !resume.StartsWith("RESUME ")) throw new InvalidOperationException("codex_job_resume_not_authorized");
       string resumeBody=resume.Substring(7); int separator=resumeBody.IndexOf(' ');
       if(separator<1) throw new InvalidOperationException("codex_job_resume_deadline_missing");
@@ -102,9 +160,9 @@ public static class MetaengineCodexJob {
       if(DateTime.UtcNow>=deadline) throw new InvalidOperationException("codex_job_deadline_expired_before_resume");
       byte[] prompt=Convert.FromBase64String(resumeBody.Substring(separator+1));
       if(prompt.Length>65536) throw new InvalidOperationException("codex_job_prompt_too_large");
-      var outTask=Pump(stdoutRead,"stdout"); stdoutRead=IntPtr.Zero; var errTask=Pump(stderrRead,"stderr"); stderrRead=IntPtr.Zero;
       Require(ResumeThread(process.thread)!=0xffffffff,"resume_failed");
       Emit("{\"type\":\"resumed\"}");
+      var outTask=Pump(stdoutRead,"stdout"); stdoutRead=IntPtr.Zero; var errTask=Pump(stderrRead,"stderr"); stderrRead=IntPtr.Zero;
       IntPtr inputHandle=stdinWrite; stdinWrite=IntPtr.Zero;
       var inputTask=Task.Run(()=> { using(var input=new FileStream(new SafeFileHandle(inputHandle,true),FileAccess.Write)) input.Write(prompt,0,prompt.Length); });
       var control=Task.Run(()=>Console.In.ReadLine()); string reason=null;

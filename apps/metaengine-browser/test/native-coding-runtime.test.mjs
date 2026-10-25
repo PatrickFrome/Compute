@@ -182,7 +182,8 @@ test('lost completion acknowledgement can be reconciled only by exact private W3
 test('a restarted runtime reads prior durable execution without a new runner or completion POST',async t=>{
   const f=fixture();t.after(()=>f.runtime.close());
   const row=await f.runtime.observeLease(f.lease);assert.equal(row.state,'READBACK_ONLY');
-  assert.equal(f.runCount,0);assert.equal(f.calls.includes('complete'),false);assert.equal(f.calls.includes('reserve'),false);assert.equal(f.readCount,1);
+  assert.equal(row.result.state,'HOLD');assert.equal(row.result.reason,'PRIVATE_PRIOR_EXECUTION_READBACK_UNAVAILABLE');
+  assert.equal(f.runCount,0);assert.equal(f.calls.includes('complete'),false);assert.equal(f.calls.includes('reserve'),false);assert.equal(f.readCount,0);
 });
 
 test('an existing durable reservation cannot be converted into another process by dispatch',async t=>{

@@ -44,14 +44,11 @@ test('scale-up stays demand-driven and identical to the backlog plan while below
   assert.equal(plan.authority_effect, false);
 });
 
-test('scale-up ceiling protects the shared tab budget', () => {
-  const plan = planElasticFleetCapacity({ backlog: { ready: 500, running: 40 }, fleetSnapshot: fleetSnapshot([]), maxTargetAgents: 10 });
-  assert.equal(plan.target_agents, 10);
-  // Closed-loop audit fix (fleet scale): the live-agent ceiling follows the
-  // contract default (24, env-tunable) — a fleet at that ceiling never grows.
-  const atCeiling = fleetSnapshot(Array.from({ length: ELASTIC_FLEET_CONTRACT.max_target_agents_default }, (_, i) => agent(`agent_h${i + 1}`, 'ACTIVE', { tab_id: `tab_h${i + 1}` })));
-  const held = planElasticFleetCapacity({ backlog: { ready: 500, running: 40 }, fleetSnapshot: atCeiling });
-  assert.equal(held.target_agents, ELASTIC_FLEET_CONTRACT.max_target_agents_default, 'a fleet already at the ceiling never grows past it');
+test('legacy count ceilings do not prevent growth beyond 128 live agents',()=>{
+ const snap=fleetSnapshot(Array.from({length:140},(_,i)=>agent('agent_h'+i,'ACTIVE',{tab_id:'tab_h'+i})));
+ const plan=planElasticFleetCapacity({backlog:{ready:500,running:140},fleetSnapshot:snap,maxTargetAgents:2});
+ assert.equal(plan.target_agents,148);assert.equal(plan.max_target_agents,null);
+ assert.equal(ELASTIC_FLEET_CONTRACT.max_target_agents_default,null);
 });
 
 test('demand resets the idle hysteresis counter', () => {

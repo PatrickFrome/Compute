@@ -73,7 +73,8 @@ test('signed native service admission preserves browser ambiguity and finite phy
    '20261025080000_native_coding_worktree_lease_admission_v1.sql','20261025090000_native_coding_agent_project_tools_v1.sql','20261025100000_native_coding_checkpoint_commit_rotation_v1.sql','20261025110000_native_coding_initial_goal_seed_v1.sql',migration]){
    const bytes=await source(name);if(name===migration)migrationSha=hash(bytes);await sql.unsafe(bytes);
   }
-  async function fixture({pairs=2}={}){
+  await sql.unsafe(await fs.readFile(new URL('./native-agent-count-unbounded-v2.sql',import.meta.url),'utf8'));
+  async function fixture({pairs=2,budget=2}={}){
    const generated=admissionFixture(),p=generated.permit,pairing=randomUUID(),agents=[];
    p.postgres.system_identifier=cluster;
    for(let i=0;i<pairs;i++){
@@ -83,7 +84,7 @@ test('signed native service admission preserves browser ambiguity and finite phy
    }
    const profile={schema:'metaengine.native-coding.seed-profile.v1',trust_namespace:'LOCAL_OPERATOR_QA',profile_id:randomUUID(),workspace_id:p.workspace_id,
     device_id:p.device_id,client_id:generated.clientId,admin_grant_epoch:1,device_key_fingerprint_sha256:p.device_key_fingerprint_sha256,owner_epoch:1,
-    user_sid:p.user_sid,artifact:p.artifact,postgres:p.postgres,agents,primary_provider_id:agents[0].provider_id,physical_slot_budget:2,expires_at:p.expires_at,
+    user_sid:p.user_sid,artifact:p.artifact,postgres:p.postgres,agents,primary_provider_id:agents[0].provider_id,physical_slot_budget:budget,expires_at:p.expires_at,
     storage_evidence_sha256:sha(randomUUID()),branch_name:'work/native-service',policy:{max_depth:null,max_tasks:null,max_children:null},
     production_qualified:false,automatic_retry_allowed:false,authority_effect:false};
    await sql.unsafe('insert into public.compute_fabric_a2_chat_bridge_remote_pairing_h205f22(token_hash)values($1)',[pairing]);
@@ -125,7 +126,7 @@ test('signed native service admission preserves browser ambiguity and finite phy
      postgres:permit.postgres,worktree:permit.worktree,sandbox:agents.find(a=>a.provider_id===permit.provider_id).sandbox})});
    const serviceInput=()=>({schema:'metaengine.native-coding.service-heartbeat.v1',workspace_id:profile.workspace_id,host_process:generated.payload().host_process,
     artifact:structuredClone(profile.artifact),postgres:structuredClone(profile.postgres),control:{supervisor_mode:'CONTROL',armed:true,interrupted_setup_recovery_fenced:false,runtime_control_generation:0},
-    runtime:{schema:'metaengine.native-coding.runtime.v1',physical_slot_budget:2,occupied_slots:0,closed:false,shutdown_state:'OPEN',host_unavailable_reason:null,jobs:[]},
+    runtime:{schema:'metaengine.native-coding.runtime.v1',physical_slot_budget:budget,occupied_slots:0,closed:false,shutdown_state:'OPEN',host_unavailable_reason:null,jobs:[]},
     providers:structuredClone(providers),production_qualified:false,automatic_retry_allowed:false,authority_effect:false});
    let clock=Date.now();
    const signed=(input=serviceInput(),{timestamp,nonce=randomUUID().replaceAll('-','')}={},operation='SERVICE_HEARTBEAT')=>{
@@ -160,6 +161,12 @@ test('signed native service admission preserves browser ambiguity and finite phy
    const state=async()=>(await sql.unsafe('select state from public.compute_fabric_a2_browser_supervisor_state_h205f22 where workspace_id=$1',[profile.workspace_id]))[0].state;
    return{generated,profile,agents,providers,nativeDescriptors,publisherIdentity,publisherCapability,seed,browserState,serviceInput,signed,write,publish,read,permitFor,lease,seedPeer,state,verifier,publicationControl};
   }
+  await t.test('80 registered providers publish a verified service witness with 130 physical slots',async()=>{
+   const f=await fixture({pairs:40,budget:130});
+   try{const ack=await f.publish();assert.equal(ack.accepted,true);
+    const input=f.serviceInput();assert.equal(input.providers.length,80);assert.equal(input.runtime.physical_slot_budget,130);
+   }finally{f.verifier.close();}passed++;
+  });
   await t.test('only state_owner can publish or read private native witness',async()=>{
    const [r]=await sql.unsafe(`select has_function_privilege('service_role','destruktion_meta.native_coding_service_heartbeat_v1(uuid,text,bigint,uuid,integer,jsonb,text,jsonb)','execute') as effect,
     has_table_privilege('service_role','destruktion_meta.native_coding_service_heartbeat_h205f22','insert') as insertable`);assert.deepEqual(r,{effect:false,insertable:false});passed++;
@@ -254,7 +261,7 @@ test('signed native service admission preserves browser ambiguity and finite phy
    const lease=await f.lease();assert.equal(lease.leased,true);assert.equal(lease.task_id,f.seed.root_task_id);assert.deepEqual(await f.state(),f.browserState);
    publisher.close();assert.equal(publisher.admittedProviders().length,0);passed++;
   });
-  assert.equal(passed,11);
+  assert.equal(passed,12);
   await fs.writeFile(path.join(directory,'receipt.json'),JSON.stringify({schema:'metaengine.native-coding.service-admission.disposable-qa.v1',state:'PASS',
    postgres_version_num:identity.version,postgres_system_identifier:cluster,port,subtests:passed,migration_sha256:migrationSha,
    source_classification:'REAL_DISPOSABLE_PG_AND_ES256_SIGNATURE_WITH_GENERATED_DEVICE_IMAGE_OS_PROVIDER_AND_POOL_FIXTURES',

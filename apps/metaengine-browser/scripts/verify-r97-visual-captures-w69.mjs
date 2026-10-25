@@ -12,7 +12,9 @@ export async function verifyR97VisualCaptures(root, expectedHead) {
   assert.match(expectedHead, HEX_SOURCE, 'r97_expected_source_sha_required');
   const dir = await realpath(root);
   const evidence = JSON.parse(await readFile(path.join(dir, 'r85-visual-evidence.json'), 'utf8'));
-  assert.equal(evidence.schema, 'metaengine.browser.r97-visual-evidence.v1');
+  assert.equal(evidence.schema, 'metaengine.browser.r97-visual-evidence.v2');
+  assert.equal(Object.hasOwn(evidence, 'advanced_surfaces_settings_only'), false, 'r97_obsolete_settings_evidence');
+  assert.equal(evidence.settings_controls_scoped_and_routes_verified, true, 'r97_settings_scope_not_verified');
   assert.equal(evidence.source_head, expectedHead, 'r97_wrong_source_head');
   assert.equal(evidence.ok, true, 'r97_visual_gate_not_complete');
   assert.equal(evidence.presentation_only, true, 'r97_no_installed_authority');

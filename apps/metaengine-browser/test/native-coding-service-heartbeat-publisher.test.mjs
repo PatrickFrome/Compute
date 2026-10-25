@@ -33,6 +33,21 @@ function fixture(){
 }
 const observe=async f=>{f.publisher.observe();await f.publisher.drain();};
 
+test('a 700-provider roster rotates signed byte-bounded admission windows without a fleet ceiling',async()=>{
+ const f=fixture(),rows=Array.from({length:700},()=>{
+  const row=structuredClone(f.f.provider);row.payload.permit_id=randomUUID();row.payload.provider_id=randomUUID();
+  row.payload.agent_id='agent_'+randomUUID();return row;
+ });
+ f.setProviders(rows);const seen=new Set();
+ for(let i=0;i<12&&seen.size<rows.length;i++){
+  await observe(f);
+  const admitted=f.publisher.admittedProviders();assert(admitted.length>0);
+  for(const row of admitted)seen.add(row.payload.permit_id);
+  assert(Buffer.byteLength(json(f.calls.at(-1).packet.body))<65536);
+ }
+ assert.equal(seen.size,700);
+});
+
 test('existing heartbeat publishes actual purpose-bound signature and admits only exact acknowledged private providers',async()=>{
  const f=fixture();assert.deepEqual(f.publisher.admittedProviders(),[]);assert.equal(f.calls.length,0);
  await observe(f);assert.equal(f.calls.length,1);const {packet}=f.calls[0];

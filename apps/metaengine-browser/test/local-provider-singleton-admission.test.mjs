@@ -89,7 +89,7 @@ async function launch(f, { entry, primary = true, flags = [], extraEnv = {}, emi
 }
 
 async function addManagedHost(f, { mode = 'ready', descriptorInstance = currentInstance,
-  readyDelayMs = 0, stopDelayMs = 0 } = {}) {
+  readyDelayMs = 0, stopDelayMs = 0, terminalMode = 'valid' } = {}) {
   // This inert host is an actual subprocess with the production controller's
   // IPC/environment/cleanup boundary. Database lifecycle is independently
   // exercised by runtime-host.test.mjs using the reviewed offline bundle.
@@ -103,14 +103,20 @@ async function addManagedHost(f, { mode = 'ready', descriptorInstance = currentI
     'const evidence = { state:"STARTED", credentials_absent: !process.env.SUPABASE_SERVICE_ROLE_KEY && !process.env.GITHUB_TOKEN, identity_absent: !process.env.METAENGINE_STATE_PROVIDER };',
     'const persist = () => fs.writeFileSync(config.evidence_file, JSON.stringify(evidence));',
     'persist();',
-    'process.on("message", value => { if (value?.schema === "compute.runtime-host-control.v1" && value.command === "stop") setTimeout(() => { evidence.state="STOPPED_BY_OWNER_IPC"; persist(); process.exit(0); }, config.stop_delay_ms); });',
+    // Even this inert host must acknowledge the production terminal protocol:
+    // exit alone does not prove that a real Host released its owned resources.
+    'process.on("message", value => { if (value?.schema === "compute.runtime-host-control.v1" && value.command === "stop") setTimeout(() => {',
+    '  evidence.state="STOPPED_BY_OWNER_IPC"; persist();',
+    '  if(config.terminal_mode === "missing") return process.exit(0);',
+    '  process.send({schema:"compute.runtime-host-terminal.v1",launch_nonce:config.terminal_mode === "wrong-nonce" ? "foreign-launch" : process.env.COMPUTE_RUNTIME_HOST_LAUNCH_NONCE,host_pid:process.pid,instance_id:config.instance_id,state:"STOPPED",children_stopped:true,ownership_released:true,reason:"requested",authority_effect:false}, () => process.exit(0));',
+    '}, config.stop_delay_ms); });',
     'process.once("disconnect", () => { evidence.state="STOPPED_BY_PARENT_DISCONNECT"; persist(); process.exit(0); });',
     'if (config.mode === "failure") { process.stderr.write("PRIVATE_DATABASE_FIXTURE_SECRET"); process.send({ schema:"compute.runtime-host-failure.v1", reason:"PRIVATE_DATABASE_FIXTURE_SECRET" }); }',
     'else setTimeout(() => process.send({ schema:"compute.runtime-host-provider.v1", provider:"LOCAL_POSTGRES", endpoint:config.endpoint, instance_id:config.instance_id, status_file:config.identity_file, runtime_ready:true, automatic_cloud_fallback:false, hosted_supabase_required:false, authority_effect:false }), config.ready_delay_ms);',
   ].join('\n'));
   await fs.writeFile(configFile, JSON.stringify({ mode, endpoint: f.base, instance_id: descriptorInstance,
     identity_file: f.identityFile, evidence_file: evidenceFile, password: 'PRIVATE_DATABASE_FIXTURE_SECRET',
-    ready_delay_ms: readyDelayMs, stop_delay_ms: stopDelayMs }));
+    ready_delay_ms: readyDelayMs, stop_delay_ms: stopDelayMs, terminal_mode: terminalMode }));
   const config = JSON.parse(await fs.readFile(f.ownerFile, 'utf8'));
   config.runtime_host = { bundle_directory: bundleDirectory, expected_bundle_sha256: 'a'.repeat(64), config_file: configFile };
   await fs.writeFile(f.ownerFile, JSON.stringify(config));
@@ -219,6 +225,26 @@ for (const entry of entries) {
     assert.doesNotMatch(result.stderr + result.stdout, /PRIVATE_DATABASE_FIXTURE_SECRET|private-host-config/);
   });
 
+  test(entry + ': installer cannot force replacement after host exit without a bound terminal receipt', async t => {
+    for (const terminalMode of ['missing', 'wrong-nonce']) {
+      const f = await fixture(t);
+      const host = await addManagedHost(f, { terminalMode });
+      const result = await launch(f, { entry, managedHost: host.managedHost,
+        holdQuit: true, installerAfterBoot: true });
+      // Only the fixture watchdog may end this blocked inert primary. The
+      // production installer barrier must not arm its successful-exit fallback.
+      assert.equal(result.code, 99, result.stderr);
+      assert.ok(eventIndex(result, 'runtime-import') >= 0);
+      assert.equal(result.boot_state, 'BLOCKED');
+      assert.equal(JSON.parse(await fs.readFile(host.evidenceFile, 'utf8')).state, 'STOPPED_BY_OWNER_IPC');
+      assert.match(result.stderr, /PRIMARY_SHUTDOWN_BLOCKED/);
+      assert.equal(event(result, 'forced-fallback-armed'), undefined);
+      assert.equal(event(result, 'forced-fallback-fired'), undefined);
+      assert.equal(event(result, 'quit-requested'), undefined);
+      assert.doesNotMatch(result.stderr + result.stdout, /PRIVATE_DATABASE_FIXTURE_SECRET|private-host-config/);
+    }
+  });
+
   test(entry + ': secondary and installer control never verify or start a provisioned managed host', async t => {
     const f = await fixture(t);
     const host = await addManagedHost(f);
@@ -245,6 +271,21 @@ for (const entry of entries) {
       assert.equal(JSON.parse(await fs.readFile(host.evidenceFile, 'utf8')).state, 'STOPPED_BY_OWNER_IPC');
       assert.doesNotMatch(result.stdout + result.stderr, /PRIVATE_DATABASE_FIXTURE_SECRET|private-host-config/);
       assert.match(result.stderr, /local_runtime_host_start_failed|local_state_provider_host_identity_mismatch/);
+    }
+  });
+
+  test(entry + ': failed startup cannot confirm cleanup from exit or a foreign terminal nonce', async t => {
+    for (const terminalMode of ['missing', 'wrong-nonce']) {
+      const f = await fixture(t);
+      const host = await addManagedHost(f, { mode: 'failure', terminalMode });
+      const result = await launch(f, { entry, managedHost: host.managedHost });
+      assert.equal(result.code, 1, result.stderr);
+      assert.equal(result.boot_state, 'BLOCKED');
+      assert.equal(event(result, 'runtime-import'), undefined);
+      assert.equal(event(result, 'fetch'), undefined);
+      assert.equal(JSON.parse(await fs.readFile(host.evidenceFile, 'utf8')).state, 'STOPPED_BY_OWNER_IPC');
+      assert.match(result.stderr, /local_runtime_host_cleanup_unconfirmed/);
+      assert.doesNotMatch(result.stdout + result.stderr, /PRIVATE_DATABASE_FIXTURE_SECRET|private-host-config/);
     }
   });
 

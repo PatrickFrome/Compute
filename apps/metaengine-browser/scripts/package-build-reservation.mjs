@@ -50,11 +50,17 @@ export function deriveDistinctCandidatePackageVersion({ packageVersion, sourceHe
   }
   const payload = `metaengine.package-candidate.v1\n${version}\n${head}\n${slot}\n`;
   const digest = createHash('sha256').update(payload, 'utf8').digest('hex');
-  // 12 decimal digits in a distinct development namespace; no clock, run ID,
-  // randomness, automatic retry or truncation of the trusted source witness.
+  // Retain the historical namespace for old manifests, but move beyond the
+  // manifest's serial bucket once it reaches that range. A fixed 12-digit
+  // namespace would silently propose a downgrade for current 13-digit serials.
+  // Use BigInt throughout: no clock, run ID, randomness or numeric truncation.
   // Collision with another source is still possible and MUST be checked against
   // immutable artifact reservations, never assumed away from the hash alone.
-  const serial = 800_000_000_000n + (BigInt(`0x${digest.slice(0, 13)}`) % 100_000_000_000n);
+  const width = 100_000_000_000n;
+  const current = BigInt(version.slice('0.7.0-dev.'.length, -2));
+  const nextBucket = (current / width + 1n) * width;
+  const base = nextBucket > 800_000_000_000n ? nextBucket : 800_000_000_000n;
+  const serial = base + (BigInt(`0x${digest.slice(0, 13)}`) % width);
   return `0.7.0-dev.${serial}.1`;
 }
 

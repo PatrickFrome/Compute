@@ -7,6 +7,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { sourceClosure } from './startup-source-manifest.mjs';
+import { LOCAL_RUNTIME_MIGRATIONS } from './local-runtime-migrations.mjs';
 import {
   BUNDLE_ENTRY_POINTS, BUNDLE_MANIFEST_FILE, BUNDLE_SCHEMA, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY, REMOTE_SUPPORT_ENTRY, ATTACHED_ONBOARDING_ENTRY,
   reviewedBundlePlan, stageRuntimeSourceBundle, verifyRuntimeSourceBundle,
@@ -115,6 +116,82 @@ test('reviewed source bundle is deterministic, complete and omits runtime/privat
     assert.equal((await files(stage)).some(name => name.includes('dump')), false);
     assert.deepEqual(await verifyRuntimeSourceBundle({ ...options, expectedBundleDigest: first.bundle_sha256 }), first);
   });
+});
+
+test('reviewed migration source and upgrade URLs retain their exact repository paths and bytes', async () => {
+  await fixture(async ({ repository, stage, manifest, options }) => {
+    const registered = LOCAL_RUNTIME_MIGRATIONS.flatMap(migration =>
+      [migration.source_url, ...(migration.upgrade_source_url ? [migration.upgrade_source_url] : [])])
+      .map(url => slash(relative(repositoryRoot, fileURLToPath(url))));
+    const bundle = await stageRuntimeSourceBundle(options);
+    for (const path of registered) {
+      const source = manifest.source.files.find(file => file.id === 'repository/' + path);
+      const staged = bundle.files.find(file => file.path === path);
+      assert.ok(source, 'source closure omitted registered migration: ' + path);
+      assert.deepEqual(staged, { path, kind: 'source', bytes: source.bytes, sha256: source.sha256 });
+      assert.deepEqual(await readFile(join(stage, path)), await readFile(join(repository, path)));
+    }
+    assert.ok(registered.includes(runtimeRoot + 'cognitive-acceptor-direct-api-v1.sql'));
+    assert.ok(registered.includes('supabase/migrations/20260903052200_devos_dispatch_admission_signed_native_v3.sql'));
+    assert.equal(bundle.files.some(file => file.path === 'supabase/migrations/cognitive-acceptor-direct-api-v1.sql'), false);
+  });
+});
+
+test('migration SQL cannot move paths, expand the catalog or bypass digest verification', async t => {
+  await fixture(async ({ repository, stage, manifest, options }) => {
+    const localPath = runtimeRoot + 'cognitive-acceptor-direct-api-v1.sql';
+    for (const [label, id, expected] of [
+      ['wrong historical location', 'repository/supabase/migrations/cognitive-acceptor-direct-api-v1.sql', /unexpected_source_record/],
+      ['unregistered local SQL', 'repository/' + runtimeRoot + 'unregistered.sql', /unexpected_source_record/],
+      ['unregistered historical SQL', 'repository/supabase/migrations/unregistered.sql', /unexpected_source_record/],
+      ['SQL traversal', 'repository/' + runtimeRoot + '../cognitive-acceptor-direct-api-v1.sql', /path_invalid/],
+      ['encoded SQL traversal', 'repository/' + runtimeRoot + '%2e%2e/cognitive-acceptor-direct-api-v1.sql', /path_invalid/],
+      ['backslash SQL path', 'repository/infra\\client-state-runtime\\cognitive-acceptor-direct-api-v1.sql', /path_invalid/],
+    ]) await t.test(label, async () => {
+      const changed = structuredClone(manifest);
+      changed.source.files.find(file => file.id === 'repository/' + localPath).id = id;
+      await assert.rejects(stageRuntimeSourceBundle({ ...options, startupManifest: changed,
+        expectedSourceDigest: refreshDigest(changed) }), expected);
+      assert.deepEqual(await readdir(stage), []);
+    });
+    const path = join(repository, localPath);
+    const original = await readFile(path);
+    await writeFile(path, Buffer.concat([original, Buffer.from('\n-- unreviewed SQL change\n')]));
+    await assert.rejects(stageRuntimeSourceBundle(options), /reviewed_file_digest_mismatch/);
+    assert.deepEqual(await readdir(stage), []);
+    await writeFile(path, original);
+    const bundle = await stageRuntimeSourceBundle(options);
+    await writeFile(join(stage, localPath), '-- altered after staging\n');
+    await assert.rejects(verifyRuntimeSourceBundle({ ...options, expectedBundleDigest: bundle.bundle_sha256 }), /staged_file_digest_mismatch/);
+  });
+});
+
+test('build-resource inventory stages and verifies the full real runtime-host closure without launch', async () => {
+  const stage = await realpath(await mkdtemp(join(tmpdir(), 'compute-real-host-stage-')));
+  try {
+    const inventory = await receipt(repositoryRoot, { includeRuntimeHost: true });
+    inventory.schema = 'compute.runtime-build-resource-inventory.v1';
+    inventory.artifact_kind = 'BUILD_RESOURCE_INVENTORY';
+    inventory.runtime_liveness_proven = false;
+    delete inventory.stable_during_startup;
+    inventory.source.policy.artifact_kind = 'BUILD_RESOURCE_INVENTORY';
+    inventory.source.policy.runtime_liveness_proven = false;
+    refreshDigest(inventory);
+    const options = { repositoryRoot, stagingDirectory: stage, buildInventory: inventory,
+      expectedSourceDigest: inventory.source_manifest_sha256, includeRuntimeHost: true };
+    const bundle = await stageRuntimeSourceBundle(options);
+    assert.equal(bundle.policy.provider_bootstrap_included, true);
+    assert.equal(bundle.policy.installed_client_qualified, false);
+    assert.ok(bundle.files.some(file => file.path === runtimeRoot + 'cognitive-acceptor-direct-api-v1.sql'));
+    assert.ok(bundle.files.some(file => file.path === ATTACHED_ONBOARDING_ENTRY));
+    const nativeContext = 'apps/metaengine-browser/src/windows-native-read-environment.mjs';
+    const contextBytes = await readFile(join(repositoryRoot, nativeContext));
+    assert.equal(bundle.files.find(file => file.path === nativeContext)?.sha256, hash(contextBytes));
+    assert.deepEqual(await readFile(join(stage, nativeContext)), contextBytes);
+    assert.deepEqual(await verifyRuntimeSourceBundle({ ...options, expectedBundleDigest: bundle.bundle_sha256 }), bundle);
+  } finally {
+    await rm(stage, { recursive: true, force: true });
+  }
 });
 
 test('reviewed runtime host source is included only by explicit host selection', async () => {
@@ -302,9 +379,13 @@ test('selected runtime bundle includes the full real first-run source closure', 
 test('native Host reviewed source catalog admits the exact ACL implementation and all bridge dependencies, not private data',async()=>{
   const manifest=await receipt(repositoryRoot,{includeRuntimeHost:true});
   const plan=reviewedBundlePlan(manifest,manifest.source_manifest_sha256,{includeRuntimeHost:true});
-  for(const name of ['private-windows-storage-acl.mjs','native-coding-task-context.mjs','native-coding-agent-host-contract.mjs',
+  for(const name of ['windows-native-read-environment.mjs','private-windows-storage-acl.mjs','native-coding-task-context.mjs','native-coding-agent-host-contract.mjs',
     'native-coding-agent-mcp-broker.mjs','native-coding-agent-mcp-launch.mjs','native-coding-agent-mcp-entry.mjs','native-coding-agent-mcp-stdio.mjs'])
     assert(plan.some(row=>row.path==='apps/metaengine-browser/src/'+name),name);
+  for(const name of ['windows-native-read-environment-copy.mjs','windows-native-read-environment.js']){
+    const forged=structuredClone(manifest);forged.source.files.push({id:'repository/apps/metaengine-browser/src/'+name,kind:'source',bytes:0,sha256:hash('')});
+    const digest=refreshDigest(forged);assert.throws(()=>reviewedBundlePlan(forged,digest,{includeRuntimeHost:true}),/bundle_unexpected_source_record/);
+  }
   for(const name of ['private-windows-storage-acl-copy.mjs','private/config.json','credentials.json']){
     const forged=structuredClone(manifest);forged.source.files.push({id:'repository/apps/metaengine-browser/src/'+name,kind:'source',bytes:0,sha256:hash('')});
     const digest=refreshDigest(forged);assert.throws(()=>reviewedBundlePlan(forged,digest,{includeRuntimeHost:true}),/private_path_forbidden/);

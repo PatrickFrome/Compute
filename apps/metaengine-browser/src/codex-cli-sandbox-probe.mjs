@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { fixedWindowsNativeReadEnvironment } from './windows-native-read-environment.mjs';
 import { protectOwnerOnlyWindowsDirectory, verifyOwnerOnlyWindowsStorage } from './private-windows-storage-acl.mjs';
 import { codexCliEnvironment, codexCliTemporaryEnvironment } from './codex-cli-runner.mjs';
 
@@ -104,9 +105,12 @@ if(-not $again -or $again.CreationDate.ToUniversalTime().ToFileTimeUtc() -ne $bi
 @{schema='metaengine.windows.kernel-boot.v1';kernel_boot_id=$boot;
 system_process=@{pid=4;created_at=$birth.ToString('o');created_100ns=$birth.ToFileTimeUtc().ToString()};
 last_boot_at=$os.LastBootUpTime.ToUniversalTime().ToString('o');os_version=$os.Version}|ConvertTo-Json -Depth 4 -Compress`;
-  const {stdout}=await exec(POWERSHELL,['-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')],
-    {windowsHide:true,shell:false,timeout:12000,maxBuffer:8192,env:{SystemRoot:'C:\\Windows',SYSTEMROOT:'C:\\Windows',WINDIR:'C:\\Windows',
-      PATH:'C:\\Windows\\System32',PSModulePath:'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules'}});
+  const pending=exec(POWERSHELL,['-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')],
+    {windowsHide:true,shell:false,timeout:12000,maxBuffer:8192,env:fixedWindowsNativeReadEnvironment()});
+  // This fixed encoded read has no interactive input; close its unused pipe
+  // before awaiting completion, just like the native process inventory reader.
+  pending.child?.stdin?.end();
+  const {stdout}=await pending;
   const value=JSON.parse(stdout.trim());
   if(value.system_process)value.system_process.created_at=new Date(value.system_process.created_at).toISOString();
   windowsSandboxBootIdentity(value);return value;

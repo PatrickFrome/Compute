@@ -108,7 +108,7 @@ export function createNativeCodingCheckpointVerifier({readProtectedReceipt,readC
     return value;
   }
   return Object.freeze({
-    async verify({project,writer,critic}={}) {
+    async verify({project,writer,critic}={},reader) {
       open();const observed=clock();
       if(!Number.isSafeInteger(observed)||!project||project.state!=='ACTIVE'||!UUID.test(project.project_id||''))fail('project_unavailable');
       const w=await registered(writer,project,'IMPLEMENTER');
@@ -126,8 +126,10 @@ export function createNativeCodingCheckpointVerifier({readProtectedReceipt,readC
         ||c.receipt.subject_result_sha256!==subject.result_sha256||c.receipt.subject_git_artifact_sha256!==subject.git_artifact_sha256
         ||c.receipt.subject_source_head!==subject.source_head||!same(c.receipt.git_before,w.receipt.git_after)
         ||!same(c.receipt.git_after,w.receipt.git_after))fail('independent_critic_mismatch');
-      const first=current(await readCheckpointScope(w.permit),w.permit,w);open();
-      const last=current(await readCheckpointScope(c.permit),c.permit,w);open();
+      // Private callers can retain their transaction-owned PG connection;
+      // standalone verification keeps the physical reader's default pool.
+      const first=current(await readCheckpointScope(w.permit,reader),w.permit,w);open();
+      const last=current(await readCheckpointScope(c.permit,reader),c.permit,w);open();
       if(!same(first,last)||clock()<observed||clock()-observed>30000)fail('physical_readback_changed');
       const checkpoint={schema:'metaengine.native-coding.checkpoint.v1',trust_namespace:'LOCAL_OPERATOR_QA',checkpoint_id:randomUUID(),
         workspace_id:project.workspace_id,project_id:project.project_id,goal_id:w.permit.goal_id,goal_sha256:w.permit.goal_sha256,owner_epoch:w.permit.owner_epoch,

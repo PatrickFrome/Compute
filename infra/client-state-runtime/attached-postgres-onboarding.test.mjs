@@ -253,6 +253,16 @@ test('API catalog probe admits zero-membership direct credentials with explicit 
   assert.equal(result.insert_columns_granted, 7);
 });
 
+test('API probe requires explicit direct grants for both native coding context RPCs', async () => {
+  for (const name of ['native_coding_admission_context_v1', 'native_coding_execution_context_v1']) {
+    assert.ok(RPC_ALLOWLIST.includes(name));
+    for (const changes of [{ missingRpc: name }, { deniedRpc: name }, { publicOnlyRpc: name }]) {
+      await assert.rejects(inspectAttachedApiAdmission({ sql: admissionSql(changes), apiLogin: 'restricted_api' }),
+        { code: changes.missingRpc ? 'attached_onboarding_api_rpc_catalog_incomplete' : 'attached_onboarding_api_rpc_grants_unattested' });
+    }
+  }
+});
+
 test('API probe rejects elevated roles, SET memberships, missing signatures and PUBLIC-only or excessive grants', async () => {
   for (const changes of [{ login: { restricted: false } }, { login: { memberships: 1 } }, { login: { database_create: true } },
     { login: { session_login: 'keeper_owner' } }, { missingRpc: RPC_ALLOWLIST[0] }, { deniedRpc: RPC_ALLOWLIST[0] },

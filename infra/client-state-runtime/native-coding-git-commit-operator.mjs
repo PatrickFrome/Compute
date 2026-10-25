@@ -22,9 +22,9 @@ export async function readNativeCodingGitCommitOperator(stateDirectory,{readProt
     ||value.schema!=='metaengine.native-coding.git-commit-operator.v1'||!UUID.test(value.registry_id||'')
     ||!Number.isSafeInteger(value.generation)||value.generation<1||!absolute(value.git_executable)||!absolute(value.journal_root)
     ||!HASH.test(value.git_executable_sha256||'')||value.model_paths_allowed!==false||value.production_qualified!==false
-    ||value.authority_effect!==false||!Array.isArray(value.bindings)||value.bindings.length>64
-    ||Object.hasOwn(value,'profile_bindings')&&(!Array.isArray(value.profile_bindings)||value.profile_bindings.length<1||value.profile_bindings.length>64)
-    ||value.bindings.length+(value.profile_bindings?.length??0)<1||value.bindings.length+(value.profile_bindings?.length??0)>64)fail('descriptor_invalid');
+    ||value.authority_effect!==false||!Array.isArray(value.bindings)
+    ||Object.hasOwn(value,'profile_bindings')&&(!Array.isArray(value.profile_bindings)||value.profile_bindings.length<1)
+    ||value.bindings.length+(value.profile_bindings?.length??0)<1)fail('descriptor_invalid');
   const roots=new Set(),pairs=new Set();
   for(const [kind,rows] of [['project',value.bindings],['profile',value.profile_bindings??[]]])for(const row of rows){
     const keys=['workspace_id','path','root_identity_sha256','branch_ref','git_dir_identity_sha256','common_dir_identity_sha256',

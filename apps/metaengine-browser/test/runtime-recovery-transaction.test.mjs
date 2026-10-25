@@ -153,7 +153,9 @@ test('successor readback rejects a live old Browser, unchanged Host, altered PG 
   f.binding=goodBinding;assert.equal((await f.fresh().acknowledgeSuccessor(prepared.ticket_id)).state,'CONFIRMED');
 });
 
-test('real inert process handoff crosses the durable barrier once, survives lost spawn ACK and reconciles successor birth without replay',async t=>{
+test('real inert process handoff crosses the durable barrier once, survives lost spawn ACK and reconciles successor birth without replay',{
+  skip:process.platform!=='win32'?'Physical handoff requires the Windows kernel birth reader':false,
+},async t=>{
   const f=await fixture(t),children=[];
   async function inertBrowser() {
     const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore',windowsHide:true,shell:false});
@@ -192,7 +194,9 @@ test('real inert process handoff crosses the durable barrier once, survives lost
   assert.equal(persisted.active.origin_browser.executable_sha256,persisted.active.new_browser.executable_sha256);
 });
 
-test('actual native kernel reader pins an inert child birth and proves its later absence; private Electron adapter binds own EXE and exact ticket args',async t=>{
+test('actual native kernel reader pins an inert child birth and proves its later absence; private Electron adapter binds own EXE and exact ticket args',{
+  skip:process.platform!=='win32'?'Physical birth/absence qualification requires the Windows kernel reader':false,
+},async t=>{
   const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore',windowsHide:true,shell:false});
   await new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});
   t.after(()=>{if(child.exitCode===null)child.kill();});
@@ -213,5 +217,42 @@ test('actual native kernel reader pins an inert child birth and proves its later
   await adapter.requestRelaunch(ticket,own);
   assert.deepEqual(calls,[{execPath:own.executable,args:['--metaengine-runtime-recovery='+ticket]},'quit']);
   await assert.rejects(adapter.requestRelaunch(ticket,{...own,created_100ns:'134000000000000001'}),/relaunch_binding_changed/);
+  assert.equal(calls.length,2);
+});
+
+test('the native recovery reader refuses invalid PIDs before querying a process on every platform',async()=>{
+  for(const pid of [null,0,-1,1.5,'1',0x80000000,Number.NaN])
+    await assert.rejects(readRuntimeRecoveryProcess(pid),{message:'runtime_recovery_process_query_invalid'});
+});
+
+test('non-Windows native recovery refuses even a valid current PID rather than fabricating Windows birth evidence',{
+  skip:process.platform==='win32'?'Non-Windows refusal contract':false,
+},async()=>{
+  await assert.rejects(readRuntimeRecoveryProcess(process.pid),{message:'runtime_recovery_process_query_invalid'});
+});
+
+test('portable adapter contract binds private process readback and exact ticket args without qualifying a native kernel',async t=>{
+  const directory=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-recovery-adapter-')));
+  t.after(()=>fs.rm(directory,{recursive:true,force:true}));
+  const executable=path.join(directory,'fixture-browser.exe');await fs.writeFile(executable,'generated adapter fixture');
+  const calls=[],tickets=[],reads=[];
+  let physical={schema:'metaengine.browser.runtime-recovery-process.v1',state:'PRESENT',pid:process.pid,
+    created_100ns:'134000000000000000',executable,authority_effect:false};
+  const adapter=createSameExecutableRuntimeRecoveryAdapter({
+    app:{isPackaged:true,getPath:kind=>{assert.equal(kind,'exe');return executable;},
+      relaunch:value=>calls.push(value),quit:()=>calls.push('quit')},
+    beforeRelaunch:async ticket=>tickets.push(ticket),
+    readProcess:async pid=>{reads.push(pid);return {...physical};},
+  });
+  const own=await adapter.capture(),ticket=randomUUID();
+  assert.equal(own.executable_sha256,createHash('sha256').update('generated adapter fixture').digest('hex'));
+  assert.equal(own.pid,process.pid);assert.equal(own.authority_effect,false);
+  const requested=await adapter.requestRelaunch(ticket,own);
+  assert.deepEqual(calls,[{execPath:executable,args:['--metaengine-runtime-recovery='+ticket]},'quit']);
+  assert.deepEqual(tickets,[ticket]);assert.ok(reads.every(pid=>pid===process.pid));
+  assert.equal(requested.successor_ready,false);assert.equal(requested.automatic_retry_allowed,false);assert.equal(requested.authority_effect,false);
+  await assert.rejects(adapter.requestRelaunch('not-a-ticket',own),/relaunch_binding_changed/);
+  await assert.rejects(adapter.requestRelaunch(ticket,{...own,created_100ns:'134000000000000001'}),/relaunch_binding_changed/);
+  physical={...physical,pid:process.pid+1};await assert.rejects(adapter.capture(),/own_process_unbound/);
   assert.equal(calls.length,2);
 });

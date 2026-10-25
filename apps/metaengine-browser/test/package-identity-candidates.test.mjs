@@ -75,6 +75,31 @@ test('candidate derivation rejects malformed source, package and unbounded slot'
   }
 });
 
+test('distinct proposals advance beyond the manifest serial across namespace and safe-integer boundaries', () => {
+  const serialOf = version => BigInt(version.match(/^0\.7\.0-dev\.([0-9]+)\.1$/)[1]);
+  for (const serial of [799999999999n, 800000000000n, 899999999999n,
+    999999999999n, 1107139874591n, 9007199254740993n]) {
+    for (let slot = 0; slot < MAX_PACKAGE_IDENTITY_CANDIDATES; slot++) {
+      const options = { packageVersion: `0.7.0-dev.${serial}.1`, sourceHead: HEADS[0], slot };
+      const candidate = deriveDistinctCandidatePackageVersion(options);
+      assert.ok(serialOf(candidate) > serial, `${candidate} must advance beyond ${options.packageVersion}`);
+      assert.equal(candidate, deriveDistinctCandidatePackageVersion(options));
+    }
+  }
+});
+
+test('a consumed modern manifest yields a strictly newer proposal, not build authority', async () => {
+  const packageVersion = '0.7.0-dev.1107139874591.1';
+  await withMock(name => name === reservationArtifactName(packageVersion) ? [prior(name)] : [], async () => {
+    const plan = await planDistinctPackageBuildIdentity({ ...opts, packageVersion });
+    assert.ok(BigInt(plan.candidate_package_version.split('-dev.')[1].split('.')[0]) > 1107139874591n);
+    assert.equal(plan.manifest_update_required, true);
+    assert.equal(plan.physical_package_build_allowed, false);
+    assert.equal(plan.promotion_authorized, false);
+    assert.equal(plan.authority_effect, false);
+  });
+});
+
 test('original duplicate version never becomes build-authorized merely by candidate derivation', () => {
   assert.throws(
     () => evaluatePackageBuildReservation({

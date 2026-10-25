@@ -72,7 +72,10 @@ test('migration plan pins deployed sources, unbounded defaults and the opt-in ow
   assert.deepEqual(service.relations,['destruktion_meta.native_coding_service_heartbeat_h205f22']);
   assert(!service.signatures.some(value=>value.includes('native_coding_claim_admission_v1')||value.includes('native_coding_worktree_admissible_v1')),
     'existing gate replacements are not new-install markers');
-  const extras = plan.migrations.slice(mandatorySources.length+nativeSources.length);
+  const upgrade=plan.migrations[mandatorySources.length+nativeSources.length];
+  assert.equal(upgrade.source,'native-agent-count-unbounded-v2.sql');
+  assert.deepEqual(upgrade.signatures,['destruktion_meta.native_agent_count_unbounded_v2()']);
+  const extras = plan.migrations.slice(mandatorySources.length+nativeSources.length+1);
   // The W5 DAG guard is an optional source-only integration lane and must
   // never be admitted as an arbitrary migration or silently become installed.
   assert(extras.length <= 1, 'unrecognized extra migration requires an explicit contract');
@@ -130,10 +133,10 @@ test('migration catalog skip requires every required object and separately attes
   } };
   const receipt = await applyLocalRuntimeMigrations({ sql: { begin: run => run(tx) } });
   assert(receipt.migrations.every(row => row.status === 'ALREADY_PRESENT_NOT_MODIFIED'));
-  assert(receipt.migrations.every(row => row.existing_bodies_attested === (row.browser_dispatch_version === 3 || row.cognitive_acceptor_direct_api === true)));
+  assert(receipt.migrations.every(row => row.existing_bodies_attested === (row.browser_dispatch_version === 3 || row.cognitive_acceptor_direct_api === true || row.source==='native-agent-count-unbounded-v2.sql')));
   assert.equal(receipt.existing_bodies_attested, false);
   assert(statements.some(query => query.includes('pg_advisory_xact_lock')));
-  assert(!statements.some(query => /^create /im.test(query)));
+  assert(!statements.some(query => !query.startsWith('-- Reviewed local upgrade.') && /^create /im.test(query)));
 });
 
 async function dispatchFixture(version = 3) {

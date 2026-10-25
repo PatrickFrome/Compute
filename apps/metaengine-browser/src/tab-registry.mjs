@@ -1,24 +1,11 @@
 import crypto from 'node:crypto';
+import {readAgentResourceAdmission} from './agent-resource-admission.mjs';
 
-// Closed-loop audit fix (fleet scale): the per-role quota and the shared tab
-// wall are now operator-tunable through the environment so the fleet can grow
-// past the historical small-constant bounds on capable machines
-// (A2_FLEET_TAB_CEILING, A2_MAX_TABS). Defaults are raised (fleet 16 -> 28,
-// total 32 -> 48) — the elastic governor only ever grows the fleet on
-// server-authoritative demand, so a higher ceiling never means idle tabs.
-// The human user keeps MAX_TABS - FLEET_TAB_CEILING = 20 reserved slots at
-// all times (was 16).
-function envBoundedInt(name, fallback, min, max) {
-  const parsed = Number(process.env[name]);
-  return Number.isSafeInteger(parsed) ? Math.max(min, Math.min(max, parsed)) : fallback;
-}
-export const FLEET_TAB_CEILING = envBoundedInt('A2_FLEET_TAB_CEILING', 28, 4, 64);
-export const MAX_TABS = envBoundedInt('A2_MAX_TABS', 48, 8, 128);
-// ME2 smart merge (R41): SUPERVISOR role — вкладка Mission Control, которую браузер открывает
-// сам (TabRegistry.create(role='SUPERVISOR') — её собственный крошечный потолок, ОТДЕЛЬНЫЙ от
-// FLEET: супервизорская вкладка не съедает флот-квоту и не ломает пользовательскую бронь).
-// Все существующие контракты USER/FLEET не тронуты (аддитивно, census остаётся честным).
-export const SUPERVISOR_TAB_CEILING = envBoundedInt('A2_SUPERVISOR_TAB_CEILING', 4, 1, 16);
+// No per-role or total tab-count quota. Current memory admission applies
+// before a physical tab is created; logical agents can remain queued.
+export const FLEET_TAB_CEILING = null;
+export const MAX_TABS = null;
+export const SUPERVISOR_TAB_CEILING = null;
 const TAB_ROLES = Object.freeze(['USER', 'FLEET', 'SUPERVISOR']);
 // Continuity provenance stamp (P0 repair, point 4): tabs created by a
 // self-update session-continuity restore attempt carry the attempt's
@@ -35,6 +22,11 @@ function countRole(tabs, role) {
 export class TabRegistry {
   #tabs = new Map();
   #selectedId = null;
+  #readResources;
+  constructor({readResources=readAgentResourceAdmission}={}) {
+    if(typeof readResources!=='function')throw Error('tab_resource_reader_invalid');
+    this.#readResources=readResources;
+  }
 
   create({ url, kind = 'USER_WEB', title = '', role = 'USER', created_by_continuity_id = null } = {}) {
     const tabRole = String(role || 'USER').toUpperCase();
@@ -43,17 +35,8 @@ export class TabRegistry {
     if (continuityProvenance && !CREATED_BY_CONTINUITY_ID_RE.test(continuityProvenance)) {
       throw new Error('tab_created_by_continuity_id_invalid');
     }
-    // Deterministic pre-effect capacity contract: both the shared wall and the
-    // per-kind fleet ceiling surface the SAME error string, so the fleet
-    // provisioner's existing classification (deterministic no-effect, never
-    // ambiguous) keeps working without modification.
-    if (this.#tabs.size >= MAX_TABS) throw new Error('tab_capacity_exceeded');
-    if (tabRole === 'FLEET' && countRole([...this.#tabs.values()], 'FLEET') >= FLEET_TAB_CEILING) {
-      throw new Error('tab_capacity_exceeded');
-    }
-    if (tabRole === 'SUPERVISOR' && countRole([...this.#tabs.values()], 'SUPERVISOR') >= SUPERVISOR_TAB_CEILING) {
-      throw new Error('tab_capacity_exceeded');
-    }
+    // A denied resource observation is a deterministic pre-effect hold.
+    if(this.#readResources().physical_start_allowed!==true)throw new Error('tab_capacity_exceeded');
     const tabId = `tab_${crypto.randomUUID()}`;
     const tab = Object.freeze({
       tab_id: tabId,
@@ -140,25 +123,26 @@ export class TabRegistry {
     const fleetTabs = countRole(tabs, 'FLEET');
     const supervisorTabs = countRole(tabs, 'SUPERVISOR');
     const userTabs = countRole(tabs, 'USER');
+    const resources=this.#readResources(),headroom=resources.memory_headroom;
     return Object.freeze({
       schema: 'metaengine.browser.tab-census.v1',
       total_tabs: tabs.length,
-      max_tabs: MAX_TABS,
+      max_tabs: tabs.length+headroom,
+      agent_count_limit: null,
       by_role: Object.freeze({ USER: userTabs, FLEET: fleetTabs, SUPERVISOR: supervisorTabs }),
       by_kind: Object.freeze(byKind),
-      fleet_tab_ceiling: FLEET_TAB_CEILING,
-      fleet_tab_headroom: Math.max(0, FLEET_TAB_CEILING - fleetTabs),
+      fleet_tab_ceiling: fleetTabs+headroom,
+      fleet_tab_headroom: headroom,
       // How many more USER tabs can open right now given current occupancy.
-      user_tab_headroom: Math.max(0, MAX_TABS - tabs.length),
-      // Structural guarantee: slots the user can ALWAYS open, even with the
-      // fleet parked at its ceiling.
-      user_reserved_slots: Math.max(0, MAX_TABS - FLEET_TAB_CEILING),
-      fleet_at_ceiling: fleetTabs >= FLEET_TAB_CEILING,
-      total_at_wall: tabs.length >= MAX_TABS,
+      user_tab_headroom: headroom,
+      // Resource headroom is shared; no artificial role reservation.
+      user_reserved_slots: 0,
+      fleet_at_ceiling: headroom===0,
+      total_at_wall: headroom===0,
       fleet_tab_ids: Object.freeze(tabs.filter((tab) => tab.role === 'FLEET').map((tab) => tab.tab_id)),
       // R41: SUPERVISOR-квота Mission Control (аддитивные поля, старые потребители не читают)
-      supervisor_tab_ceiling: SUPERVISOR_TAB_CEILING,
-      supervisor_tab_headroom: Math.max(0, SUPERVISOR_TAB_CEILING - supervisorTabs),
+      supervisor_tab_ceiling: supervisorTabs+headroom,
+      supervisor_tab_headroom: headroom,
       supervisor_tab_ids: Object.freeze(tabs.filter((tab) => tab.role === 'SUPERVISOR').map((tab) => tab.tab_id)),
       create_tab_attempted: false,
       release_signal: 'PHYSICAL_TAB_CLOSED',
@@ -171,7 +155,8 @@ export class TabRegistry {
     return Object.freeze({
       tabs: [...this.#tabs.values()].map((x) => structuredClone(x)),
       selected_tab_id: this.#selectedId,
-      max_tabs: MAX_TABS,
+      max_tabs: census.max_tabs,
+      agent_count_limit: null,
       census,
     });
   }

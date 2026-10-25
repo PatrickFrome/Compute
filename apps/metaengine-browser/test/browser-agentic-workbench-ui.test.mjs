@@ -18,15 +18,28 @@ test('current primary workspace is native ChatGPT fleet plus selected Browser su
   assert.match(me2Shell, /PrimaryChatFleetWorkspace/);
   assert.match(me2Shell, /Verified ChatGPT Agent/);
   assert.match(me2Shell, /Open an existing ChatGPT agent conversation\./);
-  assert.match(store, /native ChatGPT agent fleet and selected Browser surface/);
+  // R100 moved fleet data to typed native resources; the store owns navigation only.
+  const pages = [...store.matchAll(/\{key:'([^']+)',label:/g)].map(match => match[1]);
+  assert.deepEqual(pages, ['browser', 'tasks', 'code', 'operator', 'system']);
+  assert.match(store, /page:'browser',paletteOpen:false,recentPages:\['browser'\]/);
+  assert.match(store, /\['supervisor','memory','observability'\]\.includes\(key\)\)return 'operator'/);
+  assert.match(store, /PAGES\.find\(page=>page\.key===key\)\?\.key\?\?'browser'/);
+  assert.doesNotMatch(store, /daemonSnapshot|sendCommand\s*\(|spawnAgent\s*\(|submitGoal\s*\(/);
   assert.doesNotMatch(me2Shell, /GLM-5\.3-Flash|Verified z\.ai Agent|Open an existing z\.ai Agent conversation/i);
 });
 
-test('command palette routes to the existing native fleet without creating daemon agents', () => {
-  assert.match(palette, /CommandGroup heading="Native Agent fleet"/);
-  assert.match(palette, /Open native ChatGPT agent fleet/);
-  assert.match(palette, /setPage\("browser"\)/);
-  assert.doesNotMatch(palette, /spawnAgent|AgentChat|Open native z\.ai Agent fleet/);
+test('command palette navigates current screens and confirmed native project tasks without daemon effects', () => {
+  assert.match(palette, /CommandGroup heading="Рабочая область"/);
+  assert.match(palette, /PAGES\.map\(page=>/);
+  assert.match(palette, /onSelect=\{\(\)=>\{setPage\(page\.key\);setOpen\(false\);\}\}/);
+  assert.match(palette, /const \{resource,view\}=useClientProjectTasks\(\)/);
+  assert.match(palette, /\(view\.page\?\.tasks\?\?\[\]\)\.map\(task=>/);
+  // Failed/stale task selection must not navigate or dismiss the palette.
+  assert.match(palette, /onSelect=\{\(\)=>\{if\(resource\.selectTask\(task\.task_id\)\)\{setPage\('tasks'\);setOpen\(false\);\}\}\}/);
+  for (const state of ['OBSERVED', 'DEGRADED', 'UNBOUND']) {
+    assert.ok(palette.includes(`view.state==='${state}'`), `missing task-source boundary: ${state}`);
+  }
+  assert.doesNotMatch(palette, /spawnAgent|AgentChat|Open native z\.ai Agent fleet|daemonSnapshot|sendCommand\s*\(|submitGoal\s*\(|fetch\s*\(/);
 });
 
 test('current primary renderer keeps legacy proof token internal and carries no arbitrary evaluation primitive', () => {

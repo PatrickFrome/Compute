@@ -11,9 +11,9 @@ const manifest=JSON.parse(read('coordination/operator-control/client-critical-cl
 function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion) {
  const fixed={
   classification:'SOURCE_ONLY_NO_CURRENT_PACKAGE',
-  branch:'work/autonomous-development-fabric-v1-20261017',
+  branch:'work/fix-native-rpc-onboarding-contract-20261025',
   source_parent:'ea405d926568508eac53ebb408e941c94faeadcf',
-  package_version:'0.7.0-dev.1107139874586.1',
+  package_version:'0.7.0-dev.1107139874594.1',
   historical_package_version:'0.7.0-dev.202610152359.1',
   package_build_authorized:false,
   package_version_reuse_authorized:false,
@@ -29,217 +29,342 @@ function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion)
  assert.deepEqual(candidate,fixed,'current source identity and qualification boundary');
  assert.equal(observedVersion,candidate.package_version,'current package identity drift');
  const previous=manifest.previous_package_transitions;
- assert.deepEqual(previous,[{
-  schema:'metaengine.client.package-version-successor.v1',
-  source_parent:'104d4b0a0d5e0bc1dce0eefcad9f75a81214974f',
-  baseline_source_parent:candidate.source_parent,
-  prior_version:'0.7.0-dev.876000886467.1',
-  distinct_version:'0.7.0-dev.875758155169.1',
-  preceding_version_burned:true,production_ready:false,
-  promotion_authorized:false,authority_effect:false,
- },{
-  schema:'metaengine.client.package-version-successor.v1',
-  source_parent:'314c2a15bbb092864550500974b5134a7940c34a',
-  baseline_source_parent:candidate.source_parent,
-  prior_version:'0.7.0-dev.875758155169.1',
-  distinct_version:'0.7.0-dev.870171998070.1',
-  preceding_version_burned:true,production_ready:false,
-  promotion_authorized:false,authority_effect:false,
- },{
-  schema:'metaengine.client.package-version-successor.v1',
-  source_parent:'234d3a9e1ed7b139ed229fa5cf998678a76607b7',
-  baseline_source_parent:candidate.source_parent,
-  prior_version:'0.7.0-dev.870171998070.1',
-  distinct_version:'0.7.0-dev.864629885843.1',
-  preceding_version_burned:true,production_ready:false,
-  promotion_authorized:false,authority_effect:false,
- },{
-  schema:'metaengine.client.package-version-successor.v1',
-  source_parent:'adcd58073377fa4276330c5046b42458116e4dac',
-  baseline_source_parent:candidate.source_parent,
-  prior_version:'0.7.0-dev.864629885843.1',
-  distinct_version:'0.7.0-dev.1107139874568.1',
-  preceding_version_burned:true,production_ready:false,
-  promotion_authorized:false,authority_effect:false,
- },{
-  schema:'metaengine.client.package-version-successor.v1',
-  source_parent:'980bd4bff7aa016c738dac9ce52269e3a1e36830',
-  baseline_source_parent:candidate.source_parent,
-  prior_version:'0.7.0-dev.1107139874568.1',
-  distinct_version:'0.7.0-dev.1107139874569.1',
-  preceding_version_burned:true,production_ready:false,
-  promotion_authorized:false,authority_effect:false,
- },{
-  schema:'metaengine.client.package-version-successor.v1',
-  source_parent:'231fcf02e5c51fb1d22fd98b2deb05df4b934009',
-  baseline_source_parent:candidate.source_parent,
-  prior_version:'0.7.0-dev.1107139874569.1',
-  distinct_version:'0.7.0-dev.1107139874570.1',
-  preceding_version_burned:true,production_ready:false,
-  promotion_authorized:false,authority_effect:false,
- },{
-  schema:'metaengine.client.package-version-successor.v1',
-  source_parent:'a9c863b82535e39ed60db85227ccca57658fcf7e',
-  baseline_source_parent:candidate.source_parent,
-  prior_version:'0.7.0-dev.1107139874570.1',
-  distinct_version:'0.7.0-dev.1107139874571.1',
-  preceding_version_burned:true,production_ready:false,
-  promotion_authorized:false,authority_effect:false,
- },{
-  schema:'metaengine.client.package-version-successor.v1',
-  source_parent:'b18054e1489af8c433692533dd1e87fde7c8a49c',
-  baseline_source_parent:candidate.source_parent,
-  prior_version:'0.7.0-dev.1107139874571.1',
-  distinct_version:'0.7.0-dev.1107139874572.1',
-  preceding_version_burned:true,production_ready:false,
-  promotion_authorized:false,authority_effect:false,
- },{
-  schema:'metaengine.client.package-version-successor.v1',
-  source_parent:'6809eff4d8428274b72309b90aaac742ca19f134',
-  baseline_source_parent:candidate.source_parent,
-  prior_version:'0.7.0-dev.1107139874572.1',
-  distinct_version:'0.7.0-dev.1107139874573.1',
-  preceding_version_burned:true,production_ready:false,
-  promotion_authorized:false,authority_effect:false,
- },{
-  schema:'metaengine.client.package-version-successor.v1',
-  source_parent:'dbff3714d22761d4a8a849317ef37db25e73be97',
-  baseline_source_parent:candidate.source_parent,
-  prior_version:'0.7.0-dev.1107139874573.1',
-  distinct_version:'0.7.0-dev.1107139874574.1',
-  preceding_version_burned:true,production_ready:false,
-  promotion_authorized:false,authority_effect:false,
- },{
-  schema:'metaengine.client.package-version-successor.v1',
-  source_parent:'ea400b9fdac32b328a64f53f6b0b351b04d930b2',
-  baseline_source_parent:candidate.source_parent,
-  prior_version:'0.7.0-dev.1107139874574.1',
-  distinct_version:'0.7.0-dev.1107139874575.1',
-  preceding_version_burned:true,production_ready:false,
-  promotion_authorized:false,authority_effect:false,
- },{
-  schema:'metaengine.client.package-version-successor.v1',
-  source_parent:'fac1b07f600ff1bcaf17bb0c6d2ecd64bd7eac4f',
-  baseline_source_parent:candidate.source_parent,
-  prior_version:'0.7.0-dev.1107139874575.1',
-  distinct_version:'0.7.0-dev.1107139874576.1',
-  preceding_version_burned:true,production_ready:false,
-  promotion_authorized:false,authority_effect:false,
- },{
-  schema:'metaengine.client.package-version-successor.v1',
-  source_parent:'04ace552bcde49d0d720038e82ef81d97ca10333',
-  baseline_source_parent:candidate.source_parent,
-  prior_version:'0.7.0-dev.1107139874576.1',
-  distinct_version:'0.7.0-dev.1107139874577.1',
-  preceding_version_burned:true,production_ready:false,
-  promotion_authorized:false,authority_effect:false,
- },{
-  schema:'metaengine.client.package-version-successor.v1',
-  source_parent:'6d138c8a8e07ffef7e67f33eb3e0a175631d41a9',
-  baseline_source_parent:candidate.source_parent,
-  prior_version:'0.7.0-dev.1107139874577.1',
-  distinct_version:'0.7.0-dev.1107139874578.1',
-  preceding_version_burned:true,production_ready:false,
-  promotion_authorized:false,authority_effect:false,
- },{
-  schema:'metaengine.client.package-version-successor.v1',
-  source_parent:'59808ca48ee0d832baf39d64fff48216f1742873',
-  baseline_source_parent:candidate.source_parent,
-  prior_version:'0.7.0-dev.1107139874578.1',
-  distinct_version:'0.7.0-dev.1107139874579.1',
-  preceding_version_burned:true,production_ready:false,
-  promotion_authorized:false,authority_effect:false,
- },{
-  schema:'metaengine.client.package-version-successor.v1',
-  source_parent:'e5f081ba724ffe7dc33bf4ab97f15b4375bbe526',
-  baseline_source_parent:candidate.source_parent,
-  prior_version:'0.7.0-dev.1107139874579.1',
-  distinct_version:'0.7.0-dev.1107139874580.1',
-  preceding_version_burned:true,production_ready:false,
-  promotion_authorized:false,authority_effect:false,
- },{
-  schema:'metaengine.client.package-version-successor.v1',
-  source_parent:'7abe627b12c2c2054d51980b0524239fcc25d8a8',
-  baseline_source_parent:candidate.source_parent,
-  prior_version:'0.7.0-dev.1107139874580.1',
-  distinct_version:'0.7.0-dev.1107139874581.1',
-  preceding_version_burned:true,production_ready:false,
-  promotion_authorized:false,authority_effect:false,
- },{
-  "schema": "metaengine.client.package-version-successor.v1",
-  "source_parent": "40c1aa85a007d13127a05db21f5f6947253ac40d",
-  "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
-  "prior_version": "0.7.0-dev.1107139874581.1",
-  "distinct_version": "0.7.0-dev.1107139874582.1",
-  "preceding_version_burned": true,
-  "production_ready": false,
-  "promotion_authorized": false,
-  "authority_effect": false
-},{
-  "schema": "metaengine.client.package-version-successor.v1",
-  "source_parent": "c2a45d82fecab447c318b4dca027c16d5970f997",
-  "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
-  "prior_version": "0.7.0-dev.1107139874582.1",
-  "distinct_version": "0.7.0-dev.1107139874583.1",
-  "preceding_version_burned": true,
-  "production_ready": false,
-  "promotion_authorized": false,
-  "authority_effect": false
-},{
-  "schema": "metaengine.client.package-version-successor.v1",
-  "source_parent": "421bfce64d71ffbc5a916b22c89eae86a2a7a538",
-  "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
-  "prior_version": "0.7.0-dev.1107139874583.1",
-  "distinct_version": "0.7.0-dev.1107139874584.1",
-  "preceding_version_burned": true,
-  "production_ready": false,
-  "promotion_authorized": false,
-  "authority_effect": false
-},{
-  "schema": "metaengine.client.package-version-successor.v1",
-  "source_parent": "c5f3f7d3416b6e599829911c8c19923ccc3a2c7e",
-  "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
-  "prior_version": "0.7.0-dev.1107139874584.1",
-  "distinct_version": "0.7.0-dev.1107139874585.1",
-  "preceding_version_burned": true,
-  "production_ready": false,
-  "promotion_authorized": false,
-  "authority_effect": false
-}]);
+ assert.deepEqual(previous,[
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "104d4b0a0d5e0bc1dce0eefcad9f75a81214974f",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.876000886467.1",
+    "distinct_version": "0.7.0-dev.875758155169.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "314c2a15bbb092864550500974b5134a7940c34a",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.875758155169.1",
+    "distinct_version": "0.7.0-dev.870171998070.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "234d3a9e1ed7b139ed229fa5cf998678a76607b7",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.870171998070.1",
+    "distinct_version": "0.7.0-dev.864629885843.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "adcd58073377fa4276330c5046b42458116e4dac",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.864629885843.1",
+    "distinct_version": "0.7.0-dev.1107139874568.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "980bd4bff7aa016c738dac9ce52269e3a1e36830",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.1107139874568.1",
+    "distinct_version": "0.7.0-dev.1107139874569.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "231fcf02e5c51fb1d22fd98b2deb05df4b934009",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.1107139874569.1",
+    "distinct_version": "0.7.0-dev.1107139874570.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "a9c863b82535e39ed60db85227ccca57658fcf7e",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.1107139874570.1",
+    "distinct_version": "0.7.0-dev.1107139874571.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "b18054e1489af8c433692533dd1e87fde7c8a49c",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.1107139874571.1",
+    "distinct_version": "0.7.0-dev.1107139874572.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "6809eff4d8428274b72309b90aaac742ca19f134",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.1107139874572.1",
+    "distinct_version": "0.7.0-dev.1107139874573.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "dbff3714d22761d4a8a849317ef37db25e73be97",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.1107139874573.1",
+    "distinct_version": "0.7.0-dev.1107139874574.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "ea400b9fdac32b328a64f53f6b0b351b04d930b2",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.1107139874574.1",
+    "distinct_version": "0.7.0-dev.1107139874575.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "fac1b07f600ff1bcaf17bb0c6d2ecd64bd7eac4f",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.1107139874575.1",
+    "distinct_version": "0.7.0-dev.1107139874576.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "04ace552bcde49d0d720038e82ef81d97ca10333",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.1107139874576.1",
+    "distinct_version": "0.7.0-dev.1107139874577.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "6d138c8a8e07ffef7e67f33eb3e0a175631d41a9",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.1107139874577.1",
+    "distinct_version": "0.7.0-dev.1107139874578.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "59808ca48ee0d832baf39d64fff48216f1742873",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.1107139874578.1",
+    "distinct_version": "0.7.0-dev.1107139874579.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "e5f081ba724ffe7dc33bf4ab97f15b4375bbe526",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.1107139874579.1",
+    "distinct_version": "0.7.0-dev.1107139874580.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "7abe627b12c2c2054d51980b0524239fcc25d8a8",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.1107139874580.1",
+    "distinct_version": "0.7.0-dev.1107139874581.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "40c1aa85a007d13127a05db21f5f6947253ac40d",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.1107139874581.1",
+    "distinct_version": "0.7.0-dev.1107139874582.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "c2a45d82fecab447c318b4dca027c16d5970f997",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.1107139874582.1",
+    "distinct_version": "0.7.0-dev.1107139874583.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "421bfce64d71ffbc5a916b22c89eae86a2a7a538",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.1107139874583.1",
+    "distinct_version": "0.7.0-dev.1107139874584.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "c5f3f7d3416b6e599829911c8c19923ccc3a2c7e",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.1107139874584.1",
+    "distinct_version": "0.7.0-dev.1107139874585.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "179df86c8e882d2866a2fcdb3bcae1158b12951e",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.1107139874585.1",
+    "distinct_version": "0.7.0-dev.1107139874586.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "56a745dcc4c38ac072b25740c43530931e1ee1c0",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.1107139874586.1",
+    "distinct_version": "0.7.0-dev.1107139874587.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "72e66165f6f8a59196371ba1ff16feaecbb7a521",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.1107139874587.1",
+    "distinct_version": "0.7.0-dev.1107139874588.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "ef9266faee3eaf3151af203b7bf48c0d85abbdd3",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.1107139874588.1",
+    "distinct_version": "0.7.0-dev.1107139874590.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "04bffffb1b7f2950d61ae3a15de7d7bc5886fd6b",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.1107139874590.1",
+    "distinct_version": "0.7.0-dev.1107139874591.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "a32b2134d44453112046bc721dd0f8f132ad7b67",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.1107139874591.1",
+    "distinct_version": "0.7.0-dev.1107139874592.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "c701285db0b2650d5b53d327c1e728753af52214",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.1107139874592.1",
+    "distinct_version": "0.7.0-dev.1107139874593.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  }
+]);
  const successor=manifest.current_package_transition;
  assert.deepEqual(successor,{
   "schema": "metaengine.client.package-version-successor.v1",
-  "source_parent": "179df86c8e882d2866a2fcdb3bcae1158b12951e",
+  "source_parent": "f952ea2cc9ac355459f8afc95d1e30f0e72ff720",
   "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
-  "prior_version": "0.7.0-dev.1107139874585.1",
-  "distinct_version": "0.7.0-dev.1107139874586.1",
+  "prior_version": "0.7.0-dev.1107139874593.1",
+  "distinct_version": "0.7.0-dev.1107139874594.1",
   "preceding_version_burned": true,
   "production_ready": false,
   "promotion_authorized": false,
   "authority_effect": false
 });
  assert.equal(parentVersion,previous[0].prior_version,'baseline source package identity drift');
- assert.equal(previous[0].distinct_version,previous[1].prior_version,'historical successor chain');
- assert.equal(previous[1].distinct_version,previous[2].prior_version,'historical successor chain');
- assert.equal(previous[2].distinct_version,previous[3].prior_version,'historical successor chain');
- assert.equal(previous[3].distinct_version,previous[4].prior_version,'historical successor chain');
- assert.equal(previous[4].distinct_version,previous[5].prior_version,'historical successor chain');
- assert.equal(previous[5].distinct_version,previous[6].prior_version,'historical successor chain');
- assert.equal(previous[6].distinct_version,previous[7].prior_version,'historical successor chain');
- assert.equal(previous[7].distinct_version,previous[8].prior_version,'historical successor chain');
- assert.equal(previous[8].distinct_version,previous[9].prior_version,'historical successor chain');
- assert.equal(previous[9].distinct_version,previous[10].prior_version,'historical successor chain');
- assert.equal(previous[10].distinct_version,previous[11].prior_version,'historical successor chain');
- assert.equal(previous[11].distinct_version,previous[12].prior_version,'historical successor chain');
- assert.equal(previous[12].distinct_version,previous[13].prior_version,'historical successor chain');
- assert.equal(previous[13].distinct_version,previous[14].prior_version,'historical successor chain');
- assert.equal(previous[14].distinct_version,previous[15].prior_version,'historical successor chain');
- assert.equal(previous[15].distinct_version,previous[16].prior_version,'historical successor chain');
- assert.equal(previous[16].distinct_version,previous[17].prior_version,'historical successor chain');
- assert.equal(previous[17].distinct_version,previous[18].prior_version,'historical successor chain');
- assert.equal(previous[18].distinct_version,previous[19].prior_version,'historical successor chain');
- assert.equal(previous[19].distinct_version,previous[20].prior_version,'historical successor chain');
- assert.equal(previous[20].distinct_version,successor.prior_version,'current successor chain');
+ for(let index=1;index<previous.length;index++)
+  assert.equal(previous[index-1].distinct_version,previous[index].prior_version,'historical successor chain');
+ assert.equal(previous.at(-1).distinct_version,successor.prior_version,'current successor chain');
+ for(const item of [...previous,successor]) {
+  assert.equal(item.baseline_source_parent,'ea405d926568508eac53ebb408e941c94faeadcf','immutable transition baseline');
+  assert.equal(JSON.parse(git('show',item.source_parent+':apps/metaengine-browser/package.json')).version,item.prior_version,
+   'transition predecessor must contain its asserted package identity');
+  assert.equal(spawnSync('git',['-C',root,'merge-base','--is-ancestor',item.source_parent,'HEAD']).status,0,
+   'transition predecessor must be a real Git ancestor');
+ }
+ const lock=JSON.parse(read('apps/metaengine-browser/package-lock.json'));
+ assert.equal(lock.version,observedVersion,'lockfile package identity drift');
+ assert.equal(lock.packages[''].version,observedVersion,'root lockfile package identity drift');
  assert.equal(candidate.package_version,successor.distinct_version,'new source version drift');
  assert.ok(manifest.burned_versions.includes(parentVersion),'previous physical version must stay burned');
  assert.equal(candidate.historical_package_version,manifest.test_candidate.version);
@@ -376,4 +501,88 @@ test('current CI runs the complete Browser and Client suites and preserves physi
  assert.match(read('.github/workflows/client-wave10-w62-source-r97.yml'),/client-critical-closure\.manifest\.json/);
  const selfUpdate=read('.github/workflows/metaengine-browser-self-update-e2e.yml');
  assert.match(selfUpdate,/if:.*github\.head_ref != 'work\/metaengine-critical-closure-20261015'/);
+});
+
+
+test('QA source sealing retains explicit timing blockers and no installed or promotion authority',()=>{
+ const audit=read('coordination/operator-control/AUDIT_CLOSURE_EXECUTION_REGISTER_20261018.md');
+ const parseBlocks=source=>{
+  const current=source.replace(/\r\n/g,'\n').split('## QA source seal — 0.7.0-dev.1107139874594.1\n')[1];
+  assert.ok(current,'current QA source record required');
+  return [...current.matchAll(/```json\n([\s\S]*?)\n```/g)].map(match=>JSON.parse(match[1]));
+ };
+ const blocks=parseBlocks(audit);
+ assert.deepEqual(parseBlocks(audit.replace(/\r?\n/g,'\r\n')),blocks,'Windows CRLF audit bytes preserve the same QA boundary');
+ assert.deepEqual(blocks[0],{
+  "schema": "metaengine.client.qa-source-seal.v1",
+  "functional_source_parent": "f952ea2cc9ac355459f8afc95d1e30f0e72ff720",
+  "package_version": "0.7.0-dev.1107139874594.1",
+  "classification": "QA_SOURCE_PREPARED_NOT_INSTALLED_QUALIFIED",
+  "global_version_absence": "UNKNOWN",
+  "immutable_producer_preflight_required": true,
+  "artifact_qualification": "NOT_ESTABLISHED",
+  "known_blockers": [
+    "WINDOWS_STATUS_OBSERVE_NATIVE_READ_TIMING",
+    "WINDOWS_COLD_BOOT_FIRST_CONTROLLER_SERIAL_TIMING"
+  ],
+  "installed_qualification": "NOT_QUALIFIED",
+  "live_qualification": "NOT_QUALIFIED",
+  "continuous_autonomy_qualification": "NOT_QUALIFIED",
+  "production_ready": false,
+  "promotion_authorized": false,
+  "automatic_effect_retry_allowed": false,
+  "authority_effect": false
+});
+ assert.deepEqual(blocks[1],{
+  "schema": "metaengine.client.current-seal-retirements.v1",
+  "retirements": [
+    {
+      "path": "apps/metaengine-browser/test/r95-utility-panel-docking.test.mjs",
+      "historical_blob": "41e89fbb2c6d453137471c2b9970095fdefbde07",
+      "deleted_by": "774af98749338817bbd1b802be089ebc15071e44",
+      "retired_scope": "UNMOUNTED_UTILITY_PANEL_DOCK_AND_SPLITTER_IMPLEMENTATION",
+      "retained_guards": [
+        "apps/metaengine-browser/test/r95c-run-inspector-breakpoint.test.mjs",
+        "apps/metaengine-browser/test/r97-single-main-ui-contract.test.mjs",
+        "apps/metaengine-browser/test/me2-primary-shell-runtime.test.mjs"
+      ],
+      "complete_behavioral_equivalence_claimed": false
+    },
+    {
+      "path": "apps/metaengine-browser/test/r95e-command-palette-agent-binding.test.mjs",
+      "historical_blob": "87ec8232e36627dfc1069e8560cc6df5629cf1ea",
+      "deleted_by": "774af98749338817bbd1b802be089ebc15071e44",
+      "retired_scope": "DAEMON_AGENTCHAT_HOOK_AND_OLD_PALETTE_IMPLEMENTATION",
+      "retained_guards": [
+        "apps/metaengine-browser/test/r97-single-main-ui-contract.test.mjs",
+        "apps/metaengine-browser/test/r94-workflow-shell-ia.test.mjs",
+        "apps/metaengine-browser/test/r104-tasks-agentchat-quarantine.test.mjs",
+        "apps/metaengine-browser/test/browser-critical-audit-ui-coverage.test.mjs"
+      ],
+      "complete_behavioral_equivalence_claimed": false
+    }
+  ]
+});
+ for(const retired of blocks[1].retirements) {
+  assert.equal(manifest.current_tree_blobs[retired.path],undefined,'retired test must not claim current bytes');
+  assert.equal(fs.existsSync(new URL(retired.path,new URL('../../',import.meta.url))),false);
+  assert.equal(git('rev-parse',retired.deleted_by+'^:'+retired.path),retired.historical_blob,'retired evidence must remain independently recoverable');
+  for(const guard of retired.retained_guards) assert.match(manifest.current_tree_blobs[guard],/^[a-f0-9]{40}$/,'current replacement boundary must be sealed');
+ }
+});
+
+
+test('QA successor preserves exact immutable W43-W73 manifest bytes',()=>{
+ const frozen=[
+  ['w43','484e9c6b7db6e0ed8abdd625446ee35b7e82e770'],
+  ['w51','39252b584976a1a2308eb2868acaa0c4acab8f50'],
+  ['w59','22337575525ab196a477abb5bc902709a1fd1437'],
+  ['w66','8337b889acb89d6f652c65f1b1ef44d25b17a796'],
+  ['w73','f135919d682552bc54f63de8ca392390bbc63557'],
+ ];
+ for(const [wave,blob] of frozen) {
+  const file='coordination/operator-control/client-source-candidate-'+wave+'.manifest.json';
+  assert.equal(git('rev-parse','HEAD:'+file),blob,'immutable historical commit bytes: '+wave);
+  assert.equal(git('hash-object',file),blob,'immutable historical worktree bytes: '+wave);
+ }
 });

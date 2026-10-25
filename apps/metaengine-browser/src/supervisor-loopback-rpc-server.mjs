@@ -25,6 +25,20 @@ export const SUPERVISOR_LOOPBACK_RPC_METHODS = Object.freeze({
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
 const MAX_BODY_BYTES = 256 * 1024;
 const DEFAULT_MANIFEST_PATH = path.join(os.homedir(), '.a2', 'supervisor-loopback.json');
+const manifestMutations = new Map();
+
+// Browser owns one process, but old and replacement listeners can overlap
+// while an accepted command drains. Serialize publication and retirement so
+// an old owner's read/unlink cannot race a new publication in that process.
+async function mutateManifest(manifestPath, operation) {
+  const resolved = path.resolve(manifestPath);
+  const key = process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+  const previous = manifestMutations.get(key) || Promise.resolve();
+  const pending = previous.catch(() => {}).then(operation);
+  manifestMutations.set(key, pending);
+  try { return await pending; }
+  finally { if (manifestMutations.get(key) === pending) manifestMutations.delete(key); }
+}
 
 // These methods expose the installed Client's existing observation owners.
 // Keep the response projection explicit: future owner fields must never turn
@@ -143,6 +157,10 @@ export class SupervisorLoopbackRpcServer {
   #requestsTotal = 0;
   #errorsTotal = 0;
   #lastError = null;
+  #startPromise = null;
+  #stopPromise = null;
+  #manifestPayload = null;
+  #dispatches = new Set();
 
   constructor({
     executeCommand,
@@ -190,7 +208,17 @@ export class SupervisorLoopbackRpcServer {
   }
 
   async start() {
+    if (this.#stopPromise) await this.#stopPromise;
+    if (this.#state === 'STOPPING') throw new Error('supervisor_loopback_cleanup_unconfirmed');
+    if (this.#startPromise) return this.#startPromise;
     if (this.#server) return this.snapshot();
+    const pending = this.#start();
+    this.#startPromise = pending;
+    try { return await pending; }
+    finally { if (this.#startPromise === pending) this.#startPromise = null; }
+  }
+
+  async #start() {
     await new Promise((resolve, reject) => {
       const server = http.createServer((req, res) => { this.#handle(req, res); });
       server.once('error', reject);
@@ -202,14 +230,23 @@ export class SupervisorLoopbackRpcServer {
       this.#startedAt = new Date().toISOString();
     });
     try {
-      await fs.mkdir(path.dirname(this.#manifestPath), { recursive: true });
-      await fs.writeFile(this.#manifestPath, JSON.stringify({
+      const instanceId = randomBytes(24).toString('hex');
+      this.#manifestPayload = JSON.stringify({
         schema: SUPERVISOR_LOOPBACK_RPC_SCHEMA,
+        instance_id: instanceId,
         url: `http://${this.#host}:${this.#port}/rpc`,
         token: this.#token,
         pid: process.pid,
         methods: SUPERVISOR_LOOPBACK_RPC_METHODS,
-      }, null, 2) + '\n', { mode: 0o600 });
+      }, null, 2) + '\n';
+      await mutateManifest(this.#manifestPath, async () => {
+        await fs.mkdir(path.dirname(this.#manifestPath), { recursive: true });
+        const temporaryPath = `${this.#manifestPath}.${instanceId}.tmp`;
+        try {
+          await fs.writeFile(temporaryPath, this.#manifestPayload, { mode: 0o600, flag: 'wx' });
+          await fs.rename(temporaryPath, this.#manifestPath);
+        } finally { await fs.unlink(temporaryPath).catch(error => { if (error.code !== 'ENOENT') throw error; }); }
+      });
     } catch (error) {
       this.#lastError = clip(error?.message || error, 240);
     }
@@ -217,13 +254,31 @@ export class SupervisorLoopbackRpcServer {
   }
 
   async stop() {
+    if (this.#stopPromise) return this.#stopPromise;
+    const pending = this.#stop();
+    this.#stopPromise = pending;
+    try { return await pending; }
+    finally { if (this.#stopPromise === pending) this.#stopPromise = null; }
+  }
+
+  async #stop() {
+    if (this.#startPromise) await this.#startPromise;
     const server = this.#server;
-    if (!server) { this.#state = 'STOPPED'; return this.snapshot(); }
     this.#state = 'STOPPING';
-    await new Promise((resolve) => { server.close(() => resolve()); });
+    if (server) await new Promise((resolve, reject) => { server.close(error => error ? reject(error) : resolve()); });
+    // A disconnected caller can leave its accepted executor running after the
+    // socket closes. Cleanup must await that execution without replaying it.
+    await Promise.allSettled([...this.#dispatches]);
     this.#server = null;
+    if (this.#manifestPayload) await mutateManifest(this.#manifestPath, async () => {
+      const current = await fs.readFile(this.#manifestPath, 'utf8').catch(error => {
+        if (error.code === 'ENOENT') return null;
+        throw error;
+      });
+      if (current === this.#manifestPayload) await fs.unlink(this.#manifestPath);
+    });
+    this.#manifestPayload = null;
     this.#state = 'STOPPED';
-    try { await fs.unlink(this.#manifestPath); } catch { /* best effort */ }
     return this.snapshot();
   }
 
@@ -265,9 +320,12 @@ export class SupervisorLoopbackRpcServer {
           this.#reject(res, 400, 'supervisor_loopback_body_invalid', 'JSON body required');
           return;
         }
-        this.#dispatch(body, res).catch((error) => {
+        const dispatched = this.#dispatch(body, res).catch((error) => {
           this.#reject(res, 500, 'supervisor_loopback_internal_error', error?.message || error);
         });
+        this.#dispatches.add(dispatched);
+        const settled = () => this.#dispatches.delete(dispatched);
+        dispatched.then(settled, settled);
       });
     } catch (error) {
       this.#reject(res, 500, 'supervisor_loopback_internal_error', error?.message || error);

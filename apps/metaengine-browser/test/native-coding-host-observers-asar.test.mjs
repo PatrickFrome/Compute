@@ -7,14 +7,20 @@ import {createHash} from 'node:crypto';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {createRequire} from 'node:module';
+import {nativeCodingAsarQualificationMode} from './fixtures/native-coding-asar-qualification-mode.mjs';
 
 const run=promisify(execFile),hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 let electron=process.env.METAENGINE_TEST_ELECTRON_EXECUTABLE;
-if(!electron)try{electron=createRequire(import.meta.url)('electron');}catch{}
+if(electron===undefined)try{electron=createRequire(import.meta.url)('electron');}catch{}
+const qualification=nativeCodingAsarQualificationMode({mode:process.env.METAENGINE_TEST_ELECTRON_MODE,electron,
+  explicitExecutable:process.env.METAENGINE_TEST_ELECTRON_EXECUTABLE!==undefined});
 
 // A real ASAR header and real Electron fs implementations exercise the bug.
 // Executable/resource/process identities below are isolated fixtures: this regression
 // does not install a client, start a Host, contact PG or run an agent/model.
+// MAIN_PROCESS remains the default. Explicit Linux ASAR_NODE uses Electron's
+// supported Node mode and its genuine ASAR/original-fs implementations, without
+// qualifying GUI/main-process startup or changing Chromium sandbox settings.
 function archive(files){
   const header={files:{}},contents=[];let offset=0;
   for(const [name,bytes] of Object.entries(files)){
@@ -28,11 +34,12 @@ function archive(files){
   return Buffer.concat([size,pickle,...contents]);
 }
 
-test('real Electron qualifies physical ASAR bytes while retaining archive package and bridge reads',{
-  timeout:60000,skip:typeof electron!=='string'?'Electron executable unavailable; set METAENGINE_TEST_ELECTRON_EXECUTABLE':false,
+test('real Electron '+qualification.mode+' qualifies physical ASAR bytes while retaining archive package and bridge reads',{
+  timeout:60000,skip:qualification.skip,
 },async t=>{
-  const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-native-asar-regression-'));
-  const real=await fs.realpath(root),temp=await fs.realpath(os.tmpdir());
+  const temp=await fs.realpath(os.tmpdir());
+  const root=await fs.realpath(await fs.mkdtemp(path.join(temp,'metaengine-native-asar-regression-')));
+  const real=await fs.realpath(root);
   assert.equal(path.dirname(real).toLowerCase(),temp.toLowerCase());
   assert(path.basename(real).startsWith('metaengine-native-asar-regression-'));
   t.after(async()=>{
@@ -52,7 +59,6 @@ test('real Electron qualifies physical ASAR bytes while retaining archive packag
   const sourceUrl=new URL('../src/native-coding-host-observers.mjs',import.meta.url).href;
   const resultPath=path.join(root,'result.json'),entry=path.join(root,'entry.mjs');
   await fs.writeFile(entry,`
-import {app} from 'electron';
 import nodeFs from 'node:fs';
 import {createRequire} from 'node:module';
 import path from 'node:path';
@@ -60,8 +66,9 @@ import {createNativeCodingHostObservers} from ${JSON.stringify(sourceUrl)};
 const physicalFs=createRequire(import.meta.url)('original-fs');
 const root=${JSON.stringify(root)},resources=${JSON.stringify(resources)},bundle=${JSON.stringify(bundle)},asar=${JSON.stringify(asar)};
 const exe=${JSON.stringify(exe)},cli=${JSON.stringify(cli)},resultPath=${JSON.stringify(resultPath)};
-app.setPath('userData',path.join(root,'electron-user-data'));app.disableHardwareAcceleration();
-app.whenReady().then(async()=>{
+const qualificationMode=${JSON.stringify(qualification.mode)};
+let finish=code=>{process.exitCode=code;};
+async function qualify(){
  try{
   let verifications=0;
   const observers=createNativeCodingHostObservers({app:{isPackaged:true,getPath:()=>exe,getAppPath:()=>asar},
@@ -79,12 +86,22 @@ app.whenReady().then(async()=>{
   try{await observers.readInstalledImage();}catch(error){changedRejected=/guard_changed/.test(error.message);}
   try{await observers.prepareInstalledImage();}catch(error){permanentlyFenced=/invalidated/.test(error.message);}
   await physicalFs.promises.writeFile(resultPath,JSON.stringify({electron:process.versions.electron,virtualIsDirectory,physicalIsFile,
+   qualification_mode:qualificationMode,main_process_started:process.type==='browser',process_type:process.type??null,
    artifact:observed.value,bridgeSha256:pins.bridgeSha256,verifications,changedRejected,permanentlyFenced,
-   installed_runtime_qualified:false,model_calls:0}));app.exit(0);
- }catch(error){await physicalFs.promises.writeFile(resultPath,JSON.stringify({error:error.stack}));app.exit(1);}
-});
+   installed_runtime_qualified:false,model_calls:0}));finish(0);
+ }catch(error){await physicalFs.promises.writeFile(resultPath,JSON.stringify({error:error.stack}));finish(1);}
+}
+if(qualificationMode==='MAIN_PROCESS'){
+ const {app}=await import('electron');
+ app.setPath('userData',path.join(root,'electron-user-data'));app.disableHardwareAcceleration();
+ finish=code=>app.exit(code);app.whenReady().then(qualify);
+}else{
+ if(process.env.ELECTRON_RUN_AS_NODE!=='1'||process.type!==undefined)throw Error('asar_node_mode_unconfirmed');
+ await qualify();
+}
 `);
   const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;delete env.NODE_OPTIONS;
+  if(qualification.mode==='ASAR_NODE'){env.ELECTRON_RUN_AS_NODE='1';delete env.ELECTRON_NO_ASAR;}
   const pending=run(electron,[entry],{windowsHide:true,shell:false,timeout:45000,maxBuffer:256*1024,env});
   pending.child?.stdin?.end();
   try{await pending;}catch(error){
@@ -93,9 +110,15 @@ app.whenReady().then(async()=>{
   }
   const result=JSON.parse(await fs.readFile(resultPath,'utf8'));
   assert.match(result.electron,/^\d+\./);assert.equal(result.virtualIsDirectory,true);assert.equal(result.physicalIsFile,true);
+  assert.equal(result.qualification_mode,qualification.mode);
+  assert.equal(result.main_process_started,qualification.mode==='MAIN_PROCESS');
+  assert.equal(result.process_type,qualification.mode==='MAIN_PROCESS'?'browser':null);
   assert.equal(result.artifact.installed_asar_sha256,hash(bytes));assert.equal(result.artifact.installed_exe_sha256,hash('fixture exe'));
   assert.equal(result.artifact.cli_executable_sha256,hash('fixture cli'));assert.equal(result.artifact.source_sha,'b'.repeat(40));
   for(const [key,name]of Object.entries(bridge))assert.equal(result.bridgeSha256[key],hash(sources['src/'+name]));
   assert.equal(result.verifications,1);assert.equal(result.changedRejected,true);assert.equal(result.permanentlyFenced,true);
   assert.equal(result.installed_runtime_qualified,false);assert.equal(result.model_calls,0);
+  t.diagnostic(JSON.stringify({classification:'REAL_ELECTRON_'+qualification.mode+'_ASAR_FILESYSTEM',electron:result.electron,
+    main_process_started:result.main_process_started,virtual_asar_and_physical_original_fs:true,
+    digest_and_tamper_guards_verified:true,installed_runtime_qualified:false,model_calls:0}));
 });

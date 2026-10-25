@@ -6,8 +6,8 @@
 // surplus worker tabs persisted forever once demand disappeared.
 //
 // The governor turns the capacity plan into a true elastic policy:
-//   - scale-up is immediate and demand-driven (unchanged semantics), bounded by
-//     a live-agent ceiling that protects the shared 32-tab budget;
+//   - scale-up is immediate and demand-driven (unchanged semantics), subject to
+//     current physical resource admission at tab creation;
 //   - scale-down is hysteresis-gated: only after a bounded run of consecutive
 //     zero-demand cycles, and only by retiring surplus claim-INELIGIBLE agents.
 //     ACTIVE agents carry transport proofs and may hold server-side leases, so
@@ -36,17 +36,8 @@
 
 const DEFAULT_WARM_AGENTS = 2;
 const DEFAULT_SPAWN_BURST_LIMIT = 8;
-// Live-agent ceiling. Closed-loop audit fix (fleet scale): raised 12 -> 24 and
-// operator-tunable via A2_FLEET_MAX_TARGET_AGENTS (bounded by the physical
-// tab ceiling the TabRegistry enforces). The governor only ever grows the
-// fleet on server-authoritative backlog demand, so a higher ceiling simply
-// means the fleet CAN scale when work exists — idle agents still shrink away
-// after the hysteresis window.
-function envBoundedInt(name, fallback, min, max) {
-  const parsed = Number(process.env[name]);
-  return Number.isSafeInteger(parsed) ? Math.max(min, Math.min(max, parsed)) : fallback;
-}
-const DEFAULT_MAX_TARGET_AGENTS = envBoundedInt('A2_FLEET_MAX_TARGET_AGENTS', 24, 1, 64);
+// null denotes no agent-count ceiling. Per-pass work remains batched.
+const DEFAULT_MAX_TARGET_AGENTS = null;
 // Hysteresis: consecutive zero-demand cycles before scale-down may start.
 const IDLE_CYCLES_REQUIRED = 3;
 // Bounded retire fan-out per cycle (tabs closed per DevOS cycle).
@@ -186,7 +177,9 @@ export function planElasticFleetCapacity({ backlog = null, fleetSnapshot = {}, i
   const policy = fleetSnapshot?.policy || {};
   const warm = Math.max(0, nonNegative(policy.warm_agents ?? DEFAULT_WARM_AGENTS));
   const burst = Math.max(1, nonNegative(policy.spawn_burst_limit ?? DEFAULT_SPAWN_BURST_LIMIT) || DEFAULT_SPAWN_BURST_LIMIT);
-  const ceiling = Math.max(warm, nonNegative(maxTargetAgents ?? policy.elastic_max_target_agents ?? DEFAULT_MAX_TARGET_AGENTS));
+  // Legacy operator count ceilings are ignored. The registry performs current
+  // memory admission before each physical tab creation.
+  const ceiling = null;
   const live = liveFleetAgents(fleetSnapshot).length;
   const pool = workerTabPoolCount(fleetSnapshot);
   const census = normalizeTabCensus(tabCensus);
@@ -222,7 +215,7 @@ export function planElasticFleetCapacity({ backlog = null, fleetSnapshot = {}, i
     target = live;
   } else if (demand > 0) {
     nextIdleCycles = 0;
-    target = Math.max(warm, Math.min(Math.max(live, warm) + Math.min(ready, burst), warm + demand, ceiling));
+    target = Math.max(warm, Math.min(Math.max(live, warm) + Math.min(ready, burst), warm + demand));
   } else {
     nextIdleCycles = previousIdleCycles + 1;
     if (nextIdleCycles >= idleRequired) {
@@ -236,7 +229,7 @@ export function planElasticFleetCapacity({ backlog = null, fleetSnapshot = {}, i
         retireAgentIds = eligible.map((row) => String(row.agent_id));
       }
     } else {
-      target = Math.max(warm, Math.min(live, ceiling));
+      target = Math.max(warm, live);
     }
   }
 

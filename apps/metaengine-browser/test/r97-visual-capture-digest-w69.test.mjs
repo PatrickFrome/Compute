@@ -13,9 +13,10 @@ const sha = createHash('sha256').update(png).digest('hex');
 async function fixture(fn) {
   const root = await mkdtemp(join(tmpdir(), 'metaengine-w69-r97-'));
   const evidence = {
-    schema: 'metaengine.browser.r97-visual-evidence.v1',
+    schema: 'metaengine.browser.r97-visual-evidence.v2',
     source_head: HEAD, ok: true, presentation_only: true, authority_effect: false,
     remote_browser_content_captured: false, legacy_shell_captured: false,
+    settings_controls_scoped_and_routes_verified: true,
     capture_count: 4,
     captures: Array.from({ length: 4 }, (_, i) => ({
       name: `screen-${i}`, file: `screen-${i}.png`, bytes: png.length, sha256: sha,
@@ -85,4 +86,20 @@ test('W69 R97 workflow registers valid push/PR receipts without uploading a brow
   assert.match(harness, /path\.dirname\(OUTPUT_ROOT\)/);
   assert.match(harness, /app\.setPath\('userData', visualProfile\)/);
   assert.match(harness, /app\.setPath\('sessionData', visualSession\)/);
+});
+
+
+test('R97 v2 rejects retired v1 receipts and ambiguous/false settings evidence', async () => {
+  await fixture(async ({root,evidence,save}) => {
+    evidence.schema = 'metaengine.browser.r97-visual-evidence.v1'; await save();
+    await assert.rejects(() => verifyR97VisualCaptures(root,HEAD), /r97-visual-evidence/);
+    evidence.schema = 'metaengine.browser.r97-visual-evidence.v2';
+    evidence.advanced_surfaces_settings_only = true; await save();
+    await assert.rejects(() => verifyR97VisualCaptures(root,HEAD), /r97_obsolete_settings_evidence/);
+    delete evidence.advanced_surfaces_settings_only;
+    for (const value of [false, undefined, 'true']) {
+      evidence.settings_controls_scoped_and_routes_verified = value; await save();
+      await assert.rejects(() => verifyR97VisualCaptures(root,HEAD), /r97_settings_scope_not_verified/);
+    }
+  });
 });

@@ -70,14 +70,14 @@ export async function admitNativeCodingProvider(envelope,{context,identity,works
   const payload=envelope.payload;payloadScope(payload,permit,context.device,now,60000);
   if(payload.schema!=='metaengine.codex-cli.transport-proof.v1'||payload.state!=='READY'
     ||payload.physical_slot_budget!==permit.physical_slot_budget||!Number.isSafeInteger(payload.physical_slot_budget)
-    ||payload.physical_slot_budget<1||payload.physical_slot_budget>64)fail('provider_invalid');
+    ||payload.physical_slot_budget<1)fail('provider_invalid');
   return Object.freeze({agent_id:payload.agent_id,role:payload.role,lifecycle_state:'ACTIVE',
     tab_id:`native-coding:${payload.provider_id}`,target_id:payload.target_id,generation_epoch:payload.agent_generation_epoch,
     native_coding_permit_id:payload.permit_id,physical_slot_budget:payload.physical_slot_budget});
 }
 export async function nativeCodingCycleCandidates(value,{rpc,identity,workspaceId,clientId,now=Date.now()}={}){
   if(value===undefined)return [];
-  if(value?.schema!=='metaengine.native-coding.providers.v1'||!Array.isArray(value.providers)||value.providers.length>64)fail('providers_invalid');
+  if(value?.schema!=='metaengine.native-coding.providers.v1'||!Array.isArray(value.providers))fail('providers_invalid');
   const out=[],seen=new Set();
   for(const envelope of value.providers){
     const permitId=envelope?.payload?.permit_id;if(!UUID.test(permitId||''))fail('permit_id_invalid');

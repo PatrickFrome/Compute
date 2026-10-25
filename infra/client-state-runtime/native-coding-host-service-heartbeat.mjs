@@ -47,9 +47,9 @@ export function createNativeCodingHostServiceHeartbeat({sql,readCurrentDevice,re
    ||!Number.isSafeInteger(ctl.runtime_control_generation)||ctl.runtime_control_generation<0
    ||!exact(run,['schema','physical_slot_budget','occupied_slots','closed','shutdown_state','host_unavailable_reason','jobs'])
    ||run.schema!=='metaengine.native-coding.runtime.v1'||run.closed!==false||run.shutdown_state!=='OPEN'||run.host_unavailable_reason!==null
-   ||!Number.isSafeInteger(run.physical_slot_budget)||run.physical_slot_budget<1||run.physical_slot_budget>16
+   ||!Number.isSafeInteger(run.physical_slot_budget)||run.physical_slot_budget<1
    ||!Number.isSafeInteger(run.occupied_slots)||run.occupied_slots<0||run.occupied_slots>run.physical_slot_budget
-   ||!Array.isArray(run.jobs)||run.jobs.length!==run.occupied_slots||!Array.isArray(v.providers)||!v.providers.length||v.providers.length>64)fail('snapshot_invalid');
+   ||!Array.isArray(run.jobs)||run.jobs.length!==run.occupied_slots||!Array.isArray(v.providers)||!v.providers.length)fail('snapshot_invalid');
   const seen=new Set(),started=Date.now();
   let cursor=0;
   await Promise.all(Array.from({length:Math.min(4,v.providers.length)},async()=>{while(cursor<v.providers.length){const selector=v.providers[cursor++];

@@ -67,7 +67,7 @@ export async function createNativeCodingHostSeedService({sql,stateDirectory,read
    ||typeof value.canonical_profile!=='string'||digest(value.canonical_profile)!==pins.profile_sha256
    ||!same(JSON.parse(value.canonical_profile),p)||p.profile_id!==pins.profile_id||p.trust_namespace!=='LOCAL_OPERATOR_QA'
    ||p.production_qualified!==false||p.automatic_retry_allowed!==false||p.authority_effect!==false
-   ||!Array.isArray(p.agents)||p.agents.length<2||p.agents.length>64)fail('profile_unverified');
+   ||!Array.isArray(p.agents)||p.agents.length<2)fail('profile_unverified');
   await currentDevice(p);
   await unchanged();return p;
  }
@@ -87,7 +87,7 @@ export async function createNativeCodingHostSeedService({sql,stateDirectory,read
    ||!same(JSON.parse(value.canonical_receipt),r)||r?.schema!=='metaengine.native-coding.goal-admission.v1'||r.state!=='ADMITTED'
    ||r.request_id!==input.request_id||r.objective!==input.objective||r.profile_id!==pins.profile_id||r.profile_sha256!==pins.profile_sha256
    ||![r.workspace_id,r.project_id,r.root_task_id,r.goal_id].every(x=>UUID.test(x||''))
-   ||![r.goal_sha256,r.task_spec_sha256].every(x=>HASH.test(x||''))||!Array.isArray(r.permit_ids)||r.permit_ids.length<2||r.permit_ids.length>64
+   ||![r.goal_sha256,r.task_spec_sha256].every(x=>HASH.test(x||''))||!Array.isArray(r.permit_ids)||r.permit_ids.length<2
    ||r.permit_ids.some(x=>!UUID.test(x||''))||['physical_execution_proven','global_actuation_granted','production_qualified','automatic_retry_allowed','authority_effect'].some(k=>r[k]!==false)
    ||value.readback_only!==true||value.physical_effect_replayed!==false||value.authority_effect!==false)fail('readback_unverified');
   return structuredClone(value);
@@ -99,7 +99,7 @@ export async function createNativeCodingHostSeedService({sql,stateDirectory,read
  }
  async function observation(p){
   let common=null;const agents=[],started=Date.now();
-  // Finite explicit roster; no model can append an identity or increase slots.
+  // Protected roster has no count ceiling; only verified identities are admitted.
   const observations=new Array(p.agents.length);let cursor=0;
   await Promise.all(Array.from({length:Math.min(4,p.agents.length)},async()=>{
    while(cursor<p.agents.length){const i=cursor++,a=p.agents[i];observations[i]=await readNativeScope({...p,...a},true);}

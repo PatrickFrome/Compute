@@ -68,9 +68,9 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
     const operator=await readNativeCodingOperatorPaths(config.state_directory);
     await image.prepare([expectedExe,path.join(resources,'app.asar'),operator.cli_executable]);
   }
-  async function postgres() {
+  async function postgres(reader=sql) {
     const before=(await fs.readFile(path.join(config.pg_data_directory,'postmaster.pid'),'utf8')).split(/\r?\n/);
-    const rows=await sql.unsafe(`select current_setting('data_directory') as data_directory,
+    const rows=await reader.unsafe(`select current_setting('data_directory') as data_directory,
       current_setting('server_version_num')::int as version,host(inet_server_addr()) as address,inet_server_port() as port,
       (select system_identifier::text from pg_catalog.pg_control_system()) as system_identifier`);
     const row=rows[0],native=await readNativeCodingWindowsProcess(Number(before[0]));
@@ -84,8 +84,8 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
     if((await fs.readFile(path.join(config.pg_data_directory,'postmaster.pid'),'utf8')).split(/\r?\n/).slice(0,4).join('\n')!==before.slice(0,4).join('\n')) fail('postgres_changed');
     return {system_identifier:row.system_identifier,postmaster:publicProcess(native),data_directory_identity_sha256};
   }
-  async function readNativeScope(permit,includeSandbox=true) {
-    const [pg,host]=await Promise.all([postgres(),readNativeCodingWindowsProcess(parentPid)]);
+  async function readNativeScope(permit,includeSandbox=true,reader=sql) {
+    const [pg,host]=await Promise.all([postgres(reader),readNativeCodingWindowsProcess(parentPid)]);
     const base={postgres:pg,host_process:publicProcess(host),user_sid:host.user_sid};
     if(permit===null) return base;
     const operator=await readNativeCodingOperatorPaths(config.state_directory);
@@ -115,8 +115,8 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
   }
   // Acceptance reads physical current bytes and current Host identity without
   // manufacturing a fresh launch proof for a historical worker/canary.
-  async function readCheckpointScope(permit) {
-    const current=await readNativeScope(permit,false);
+  async function readCheckpointScope(permit,reader=sql) {
+    const current=await readNativeScope(permit,false,reader);
     const operator=await readNativeCodingOperatorPaths(config.state_directory);
     const env={SystemRoot:process.env.SystemRoot,PATH:path.dirname(operator.git_executable),
       GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'NUL',GIT_TERMINAL_PROMPT:'0'};

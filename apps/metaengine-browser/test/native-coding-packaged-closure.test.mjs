@@ -11,8 +11,9 @@ import {buildNativeCodingExecutionScope as hostScope} from '../../../infra/clien
 
 test('native Browser modules load at the real packaged relative layout and ASAR retains their exact source bytes',async t=>{
   const asar=createRequire(import.meta.url)('@electron/asar');
-  const directory=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-native-packaged-closure-'));
-  t.after(async()=>{const actual=await fs.realpath(directory);assert(actual.startsWith(path.resolve(os.tmpdir())+path.sep));
+  const temporary=await fs.realpath(os.tmpdir());
+  const directory=await fs.realpath(await fs.mkdtemp(path.join(temporary,'metaengine-native-packaged-closure-')));
+  t.after(async()=>{const actual=await fs.realpath(directory);assert.equal(actual,directory);assert.equal(path.dirname(actual),temporary);
     assert(path.basename(actual).startsWith('metaengine-native-packaged-closure-'));await fs.rm(actual,{recursive:true,force:true});});
   const app=path.join(directory,'app'),src=path.join(app,'src'),archive=path.join(directory,'app.asar');
   await fs.mkdir(app);await fs.cp(new URL('../src/',import.meta.url),src,{recursive:true});

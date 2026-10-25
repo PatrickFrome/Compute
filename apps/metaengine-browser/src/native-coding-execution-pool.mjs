@@ -1,3 +1,5 @@
+import {defaultNativePhysicalSlotBudget} from './agent-resource-admission.mjs';
+
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 function keyOf(lease) {
   if(!UUID.test(lease?.task_id || '') || !Number.isSafeInteger(lease.lease_generation) || lease.lease_generation<1)
@@ -9,10 +11,10 @@ function keyOf(lease) {
 // heartbeat until completion: freshness and lease observation continue while
 // the bounded physical jobs run. No queue, timer, retry or alternate scheduler.
 export function createNativeCodingExecutionPool({executor,prepareRequest,readPriorExecution,
-  physicalSlotBudget=2}={}) {
+  physicalSlotBudget=defaultNativePhysicalSlotBudget(),readResourceAdmission=()=>({physical_start_allowed:true})}={}) {
   if(typeof executor?.execute!=='function' || typeof prepareRequest!=='function'
       || typeof readPriorExecution!=='function' || !Number.isSafeInteger(physicalSlotBudget)
-      || physicalSlotBudget<1 || physicalSlotBudget>16) throw new Error('native_coding_pool_dependencies_invalid');
+      || physicalSlotBudget<1 || typeof readResourceAdmission!=='function') throw new Error('native_coding_pool_dependencies_invalid');
   const jobs=new Map(); let closed=false;
   const observation=row=>Object.freeze({state:row.state,task_id:row.lease.task_id,
     lease_generation:row.lease.lease_generation,result:row.result,
@@ -24,7 +26,7 @@ export function createNativeCodingExecutionPool({executor,prepareRequest,readPri
       if(jobs.has(key)) return observation(jobs.get(key));
       // Pending receipts retain their slot until the SAME heartbeat has a
       // confirmed W30 completion. Losing a write ACK cannot drop the result.
-      if(jobs.size>=physicalSlotBudget) return Object.freeze({state:'PHYSICAL_POOL_BUSY',
+      if(jobs.size>=physicalSlotBudget||readResourceAdmission().physical_start_allowed!==true) return Object.freeze({state:'PHYSICAL_POOL_BUSY',
         automatic_retry_allowed:false,authority_effect:false});
       const row={lease:structuredClone(lease),state:'PREPARING',result:null,reason:null,
         controller:new AbortController(),done:null};

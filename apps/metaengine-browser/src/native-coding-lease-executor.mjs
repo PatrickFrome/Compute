@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { nativeCodingEnvelopeSha256 } from './native-coding-transport-proof.mjs';
 
+import {defaultNativePhysicalSlotBudget} from './agent-resource-admission.mjs';
+
 const SHA = /^[a-f0-9]{64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const digest = value => createHash('sha256').update(value).digest('hex');
@@ -12,12 +14,12 @@ const sameScope = (a,b) => !!a && !!b && scopeKeys.every(key=>a[key]===b[key]);
 // A consumer of an ALREADY ISSUED W30 lease, called by the existing native
 // cycle. No timers, task creation, provider enrollment, leasing, or retry here.
 // All dependencies are private Host capabilities; there is no public JSON API.
-export function createNativeCodingLeaseExecutor({ledger,createRunner,readBoundLease,issuer,onJobAttempted=null,physicalSlotBudget=2}={}) {
+export function createNativeCodingLeaseExecutor({ledger,createRunner,readBoundLease,issuer,onJobAttempted=null,physicalSlotBudget=defaultNativePhysicalSlotBudget()}={}) {
   if (!['reserve','advance','read'].every(key=>typeof ledger?.[key]==='function')
       || typeof createRunner!=='function' || typeof readBoundLease!=='function'
       || typeof issuer?.issueJob!=='function') fail('private_dependencies_required');
   if (onJobAttempted!==null && typeof onJobAttempted!=='function') fail('attempt_hook_invalid');
-  if (!Number.isSafeInteger(physicalSlotBudget) || physicalSlotBudget<1 || physicalSlotBudget>16) fail('physical_slot_budget_invalid');
+  if (!Number.isSafeInteger(physicalSlotBudget) || physicalSlotBudget<1) fail('physical_slot_budget_invalid');
   const inflight = new Map();
   return Object.freeze({
     async execute(request,{signal}={}) {

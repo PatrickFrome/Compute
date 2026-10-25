@@ -2,7 +2,7 @@ import {createPublicKey} from 'node:crypto';
 import {NativeCodingPgLedger} from '../../apps/metaengine-browser/src/native-coding-pg-ledger.mjs';
 import {verifyNativeCodingProviderDescriptor,verifyNativeCodingJobProof,nativeCodingDeviceKeyFingerprint} from '../../apps/metaengine-browser/src/native-coding-transport-proof.mjs';
 import {validateCodexCliResult} from '../../apps/metaengine-browser/src/codex-cli-result-schema.mjs';
-import {buildNativeCodingTaskContext,buildNativeCodingExecutionScope,nativeCodingCanonicalJson as json,
+import {buildNativeCodingTaskContext,buildNativeCodingHistoricalTaskContext,buildNativeCodingExecutionScope,nativeCodingCanonicalJson as json,
   nativeCodingCanonicalSha256 as sha} from './native-coding-task-context.mjs';
 import {createNativeCodingCheckpointVerifier} from './native-coding-checkpoint-verifier.mjs';
 import {createNativeCodingAgentHostTools} from './native-coding-agent-host-tools.mjs';
@@ -175,7 +175,8 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
       provider_id:c.permit.provider_id,agent_id:c.task.lease_agent_id,target_id:c.task.lease_target_id,
       agent_generation_epoch:Number(c.task.lease_agent_generation_epoch),lease_generation:Number(c.task.lease_generation),
       role:c.task.role,base_sha:c.task.base_sha};
-    const native=await readNativeScope(c.permit),actual=buildNativeCodingExecutionScope(c.permit,historical,native.host_process);
+    // PG identity must use the connection this transaction already owns.
+    const native=await readNativeScope(c.permit,true,tx),actual=buildNativeCodingExecutionScope(c.permit,historical,native.host_process);
     if(Date.parse(c.permit.expires_at)<=Date.now()||!matchScope(scope,actual)
       ||!same(native.postgres,c.permit.postgres)||!same(native.artifact,c.permit.artifact)
       ||native.user_sid!==c.permit.user_sid||native.worktree?.path!==c.permit.worktree.path
@@ -195,8 +196,10 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
     AGENT_OPERATION:request=>{open();return agentTools.invoke(request);},
     FINISH_CHECKPOINT:query=>finishCheckpoint('FINISH_CHECKPOINT',query),
     READ_FINISH_CHECKPOINT:query=>finishCheckpoint('READ_FINISH_CHECKPOINT',query),
-    async READ_SCOPE() {
+    async READ_SCOPE(query={}) {
       open();await readNativeScope.prepare?.();open();
+      const after=query.after_permit_id??'00000000-0000-0000-0000-000000000000';
+      if(!/^[a-f0-9-]{36}$/.test(after)||Object.keys(query).some(k=>k!=='after_permit_id'))fail('scope_cursor_invalid');
       const native=await readNativeScope(null);
       const rows=await sql.unsafe(`select public.native_coding_admission_context_v1(p.workspace_id,p.client_id,p.permit_id) as context
         from destruktion_meta.native_coding_operator_permit_h205f22 p
@@ -209,13 +212,14 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
           and d.admin_scopes @> '["CONTROL_PLANE","DEVOS"]'::jsonb
         where p.revoked_at is null and (p.permit->>'expires_at')::timestamptz>clock_timestamp()
         and p.permit->'postgres'->>'system_identifier'=$1::text and p.permit->>'user_sid'=$2::text
-        order by p.permit_id limit 65`,[native.postgres.system_identifier,native.user_sid]);
-      if(rows.length>64) fail('provider_budget_exceeded');
-      const bindings=rows.map(({context:value})=>{const c=validateContext(value);return {permit_id:c.permit.permit_id,provider_id:c.permit.provider_id,
+        and p.permit_id>$3::uuid order by p.permit_id limit 33`,[native.postgres.system_identifier,native.user_sid,after]);
+      // A page bounds IPC bytes, never the number of registered agents.
+      const bindings=rows.slice(0,32).map(({context:value})=>{const c=validateContext(value);return {permit_id:c.permit.permit_id,provider_id:c.permit.provider_id,
         agent_id:c.permit.agent_id,workspace_id:c.permit.workspace_id,project_id:c.permit.project_id,
         device_id:c.device.device_id,client_id:c.device.client_id,permit:c.permit,device:c.device};});
       return {schema:'metaengine.native-coding.own-pg-scope.v1',source:'PRIVATE_RUNTIME_HOST_OWN_PG',
-        observed_at:new Date().toISOString(),postgres:native.postgres,bindings};
+        observed_at:new Date().toISOString(),postgres:native.postgres,bindings,
+        has_more:rows.length>32,next_after_permit_id:rows.length>32?bindings.at(-1).permit_id:null};
     },
     async READ_LEASE(query) {
       open();const c=await task(sql,query);
@@ -224,7 +228,7 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
     },
     async REGISTER_PROVIDER({descriptor}) {
       return write(async tx=>{
-        const c=await context(tx,descriptor?.payload?.permit_id,{lock:true}),native=await readNativeScope(c.permit);
+        const c=await context(tx,descriptor?.payload?.permit_id,{lock:true}),native=await readNativeScope(c.permit,true,tx);
         verifyNativeCodingProviderDescriptor(descriptor,{publicKey:key(c),expected:expected(descriptor,c,native),now:Date.now()});
         const text=json(descriptor),digest=sha(descriptor);
         const rows=await tx.unsafe(`insert into destruktion_meta.native_coding_provider_registration_h205f22
@@ -243,6 +247,99 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
       // evidence only, but still must be the exact requested durable scope.
       if(row&&!matchScope(scope,row))fail('execution_readback_scope_mismatch');
       return row?{...row,task_state:c.task.state,task_result_summary:c.task.result_summary}:null;
+    },
+    async READ_PRIOR_EXECUTION({selector}) {
+      open();
+      if(!exact(selector,['workspace_id','project_id','task_id','lease_generation','agent_id','provider_id','agent_generation_epoch'])
+        ||!['workspace_id','project_id','task_id','provider_id'].every(name=>uuid.test(selector[name]||''))
+        ||!/^agent_[a-z0-9-]{8,64}$/.test(selector.agent_id||'')
+        ||!['lease_generation','agent_generation_epoch'].every(name=>Number.isSafeInteger(selector[name])&&selector[name]>0))fail('prior_selector_invalid');
+      // No caller supplies a historical incarnation, digest, reservation or path.
+      // A repeatable read joins the existing task, permit and execution only.
+      return sql.begin('isolation level repeatable read read only',async tx=>{
+        await owner(tx);const c=await task(tx,selector,{requireLive:false}),p=c.permit,t=c.task;
+        if(selector.agent_generation_epoch!==p.agent_generation_epoch)fail('prior_selector_mismatch');
+        const rows=await tx.unsafe(`select to_jsonb(e) as execution,to_jsonb(j) as registration
+          from destruktion_meta.native_coding_execution_h205f22 e
+          left join destruktion_meta.native_coding_job_registration_h205f22 j using(task_id,lease_generation)
+          where e.workspace_id=$1::uuid and e.task_id=$2::uuid and e.lease_generation=$3::bigint`,
+          [selector.workspace_id,selector.task_id,selector.lease_generation]);
+        if(rows.length>1)fail('prior_execution_ambiguous');
+        const e=rows[0]?.execution??null,j=rows[0]?.registration??null;
+        let saved=null;
+        const reply=(state,reason,receiptSha256=null)=>({schema:'metaengine.native-coding.execution-readback.v1',
+          source:'PRIVATE_RUNTIME_HOST_OWN_PG',state,reason,selector:{...selector},execution_scope:saved,
+          execution:e?structuredClone(e):null,receipt_sha256:receiptSha256,
+          task_state:t.state,task_result_summary:t.result_summary??null,
+          readback_only:true,physical_effect_replayed:false,automatic_retry_allowed:false,authority_effect:false});
+        if(!e){open();return reply('HOLD','PRIOR_EXECUTION_MISSING');}
+        const birth=/^pid:([1-9][0-9]*):created_100ns:[1-9][0-9]{16,18}$/.exec(e.host_incarnation||'');
+        if(!birth||!uuid.test(e.reservation_id||'')||e.automatic_retry_allowed!==false||e.authority_effect!==false
+          ||!['RESERVED','ATTEMPTED','RESULT_READY','FAILED','AMBIGUOUS','CHECKPOINTED'].includes(e.state))fail('prior_execution_invalid');
+        const lease={task_id:t.task_id,workspace_id:t.workspace_id,project_id:p.project_id,provider_id:p.provider_id,
+          agent_id:t.lease_agent_id,target_id:t.lease_target_id,agent_generation_epoch:Number(t.lease_agent_generation_epoch),
+          lease_generation:Number(t.lease_generation),role:t.role,base_sha:t.base_sha};
+        saved=buildNativeCodingExecutionScope(p,lease,{pid:Number(birth[1]),process_incarnation_id:e.host_incarnation});
+        if(!matchScope(e,saved))fail('prior_execution_scope_changed');
+        if(typeof readCheckpointScope!=='function')return reply('HOLD','CURRENT_PHYSICAL_SCOPE_UNAVAILABLE');
+        const current=await readCheckpointScope(p,tx);open();
+        const samePhysical=value=>same(value?.artifact,p.artifact)&&same(value?.postgres,p.postgres)&&value?.user_sid===p.user_sid
+          &&value?.worktree?.path===p.worktree.path&&value.worktree.root_identity_sha256===p.worktree.root_identity_sha256;
+        if(!samePhysical(current))fail('prior_physical_scope_changed');
+        if(!['RESULT_READY','CHECKPOINTED'].includes(e.state))return reply('HOLD','PRIOR_EXECUTION_INCOMPLETE');
+        if(!j?.result_receipt||!j?.job_envelope)return reply('HOLD','PROTECTED_RESULT_UNAVAILABLE');
+        const envelope=j.job_envelope,payload=envelope.payload;
+        if(j.task_id!==t.task_id||Number(j.lease_generation)!==Number(t.lease_generation)||j.permit_id!==p.permit_id
+          ||j.run_id!==payload?.run_id||j.canonical_job_envelope!==json(envelope)||j.job_envelope_sha256!==sha(envelope)
+          ||e.job_proof_sha256!==j.job_envelope_sha256
+          ||!matchScope(saved,buildNativeCodingExecutionScope(p,lease,payload.host_process)))fail('prior_registered_job_changed');
+        let receipt;
+        try{receipt=await readProtectedReceipt({scope:saved,permit:p,job:envelope});}
+        catch{open();return reply('HOLD','PROTECTED_RESULT_UNAVAILABLE');}
+        open();
+        if(!receipt)return reply('HOLD','PROTECTED_RESULT_UNAVAILABLE');
+        if(!same(receipt,j.result_receipt)||j.canonical_result_receipt!==json(receipt)||j.result_receipt_sha256!==sha(receipt)
+          ||receipt?.schema!=='metaengine.codex-cli.run-receipt.v1'||receipt.state!=='RESULT_READY'
+          ||receipt.trust_namespace!=='LOCAL_OPERATOR_QA'||receipt.provider!=='CODEX_CLI'
+          ||receipt.task_id!==t.task_id||receipt.lease_generation!==Number(t.lease_generation)||receipt.agent_id!==p.agent_id
+          ||receipt.agent_generation_epoch!==p.agent_generation_epoch||receipt.workspace_id!==p.workspace_id||receipt.project_id!==p.project_id
+          ||receipt.permit_id!==p.permit_id||receipt.owner_epoch!==p.owner_epoch||receipt.user_sid!==p.user_sid||receipt.role!==p.role
+          ||receipt.base_sha!==p.worktree.base_sha||receipt.worktree_path!==p.worktree.path
+          ||receipt.executable_sha256!==p.artifact.cli_executable_sha256||receipt.run_id!==payload.run_id
+          ||receipt.result_sha256!==e.result_sha256||!/^[a-f0-9]{64}$/.test(receipt.result_sha256||'')
+          ||receipt.git_before?.head!==p.worktree.base_sha||!receipt.process||!payload.worker_process
+          ||!Number.isFinite(Date.parse(receipt.process.created_at??receipt.process.started_at))
+          ||receipt.pid!==payload.worker_process?.pid||receipt.process_incarnation_id!==payload.worker_process?.process_incarnation_id
+          ||!same(processProof(receipt.process),payload.worker_process)||receipt.process.job_id!==payload.job_id
+          ||receipt.process.started_suspended!==true||receipt.process.tree_control_bound!==true||receipt.process.job_bound_before_resume!==true
+          ||receipt.process.process_tree_control!=='WINDOWS_JOB_OBJECT'||receipt.process_result?.exit_code!==0
+          ||receipt.process_result.signal!=null||receipt.process_result.reason||receipt.process_result.tree_cleanup_confirmed!==true
+          ||receipt.process_result.process_tree_control!=='WINDOWS_JOB_OBJECT'
+          ||receipt.sandbox_mode!==(p.role==='CRITIC'?'read-only':'workspace-write')
+          ||['useful_work_verified','model_claim_authority','production_qualified','automatic_retry_allowed','authority_effect'].some(name=>receipt[name]!==false))
+          return reply('HOLD','PROTECTED_RESULT_UNVERIFIED');
+        const subject=p.role==='CRITIC'?t.task_spec.native_coding.verification_subject:null;
+        const historical=['RESULT_READY','COMPLETED'].includes(t.state)?buildNativeCodingHistoricalTaskContext(t,{projectId:p.project_id,providerId:p.provider_id,verificationSubject:subject})
+          :buildNativeCodingTaskContext(t,{projectId:p.project_id,providerId:p.provider_id,verificationSubject:subject});
+        if(receipt.prompt_sha256!==historical.value.prompt_sha256||payload.prompt_sha256!==historical.value.prompt_sha256)fail('prior_prompt_changed');
+        if(p.role==='CRITIC'&&(!subject||Object.keys(subject).some(name=>payload.subject?.[name]!==subject[name])
+          ||receipt.subject_run_id!==subject.run_id||receipt.subject_result_sha256!==subject.result_sha256
+          ||receipt.subject_git_artifact_sha256!==subject.git_artifact_sha256||receipt.subject_source_head!==subject.source_head
+          ||receipt.git_before?.head!==subject.source_head||receipt.git_before?.artifact_sha256!==subject.git_artifact_sha256
+          ||receipt.git_after?.artifact_sha256!==receipt.git_before?.artifact_sha256))fail('prior_critic_subject_changed');
+        validateCodexCliResult(receipt.result,p.role,subject?.result_sha256??null);
+        const wanted={...payload};
+        for(const name of ['permit_id','goal_id','goal_sha256','owner_epoch','user_sid','workspace_id','project_id','provider_id',
+          'agent_id','role','agent_generation_epoch','device_id','artifact','postgres','worktree'])wanted[name]=p[name];
+        Object.assign(wanted,{device_key_fingerprint_sha256:c.device.key_fingerprint_sha256,task_id:t.task_id,
+          lease_generation:Number(t.lease_generation),prompt_sha256:historical.value.prompt_sha256,expires_at:p.expires_at});
+        if(Date.parse(payload.lease_expires_at)>Date.parse(t.lease_expires_at))fail('prior_lease_changed');
+        verifyNativeCodingJobProof(envelope,{publicKey:key(c),expected:wanted,now:Date.parse(payload.proven_at)});
+        const after=await readCheckpointScope(p,tx);open();
+        if(!samePhysical(after)||!same(current,after)||receipt.git_after?.head!==after.worktree.base_sha
+          ||receipt.git_after?.artifact_sha256!==after.git?.artifact_sha256)fail('prior_physical_scope_changed');
+        return reply('READBACK_ONLY','PROTECTED_RESULT_VERIFIED',j.result_receipt_sha256);
+      });
     },
     async ADVANCE_EXECUTION({scope,transition}) {
       if(transition?.to==='CHECKPOINTED') fail('independent_checkpoint_verifier_unbound');
@@ -342,7 +439,7 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
         if(projects.length!==1)fail('checkpoint_project_unavailable');
         const writer=await checkpointBundle(tx,id,candidate.writer_task_id,candidate.writer_lease_generation);
         const critic=await checkpointBundle(tx,id,candidate.critic_task_id,candidate.critic_lease_generation);
-        const verified=await checkpointVerifier.verify({project:projects[0].project,writer,critic});open();
+        const verified=await checkpointVerifier.verify({project:projects[0].project,writer,critic},tx);open();
         const k=verified.checkpoint;
         const inserted=await tx.unsafe(`insert into destruktion_meta.native_coding_checkpoint_h205f22
           (checkpoint_id,workspace_id,project_id,writer_task_id,writer_lease_generation,critic_task_id,critic_lease_generation,

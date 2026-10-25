@@ -2,50 +2,21 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TabRegistry, FLEET_TAB_CEILING, MAX_TABS } from '../src/tab-registry.mjs';
 
-test('tab census is a read-only probe: it never mutates registry state', () => {
-  const r = new TabRegistry();
-  r.create({ url: 'https://chatgpt.com/', kind: 'CHATGPT' });
-  const before = r.snapshot();
-  const census = r.census();
-  assert.equal(census.schema, 'metaengine.browser.tab-census.v1');
-  assert.equal(census.total_tabs, 1);
-  assert.equal(census.by_role.USER, 1);
-  assert.equal(census.by_role.FLEET, 0);
-  assert.equal(census.create_tab_attempted, false);
-  assert.equal(census.authority_effect, false);
-  assert.equal(census.fleet_tab_ceiling, FLEET_TAB_CEILING);
-  // Closed-loop audit fix (fleet scale): the shared wall is exported so the
-  // census contract tracks the (env-tunable) constants, not literals.
-  assert.equal(census.user_reserved_slots, MAX_TABS - FLEET_TAB_CEILING);
-  assert.equal(census.fleet_tab_headroom, FLEET_TAB_CEILING);
-  assert.deepEqual(r.snapshot().tabs.map((t) => t.tab_id), before.tabs.map((t) => t.tab_id));
+test('tab census observes resource headroom without changing logical tabs',()=>{
+ const r=new TabRegistry({readResources:()=>({physical_start_allowed:true,memory_headroom:200})});
+ r.create({url:'https://chatgpt.com/',kind:'CHATGPT'});const before=r.snapshot(),c=r.census();
+ assert.equal(c.agent_count_limit,null);assert.equal(c.total_tabs,1);assert.equal(c.user_tab_headroom,200);
+ assert.equal(FLEET_TAB_CEILING,null);assert.equal(MAX_TABS,null);assert.equal(c.authority_effect,false);
+ assert.deepEqual(r.snapshot().tabs,before.tabs);
 });
 
-test('fleet tabs draw from their own ceiling, user tabs from the shared wall', () => {
-  const r = new TabRegistry();
-  for (let i = 0; i < FLEET_TAB_CEILING; i += 1) {
-    r.create({ url: 'https://chatgpt.com/', kind: 'CHATGPT', role: 'FLEET' });
-  }
-  assert.equal(r.census().fleet_at_ceiling, true);
-  assert.equal(r.census().fleet_tab_headroom, 0);
-  // The fleet wall is hit exactly at the per-kind ceiling...
-  assert.throws(() => r.create({ url: 'https://chatgpt.com/', kind: 'CHATGPT', role: 'FLEET' }), /tab_capacity_exceeded/);
-  // ...while the user still holds the full guaranteed reservation.
-  for (let i = 0; i < MAX_TABS - FLEET_TAB_CEILING; i += 1) {
-    r.create({ url: 'https://example.com/', kind: 'USER_WEB', role: 'USER' });
-  }
-  assert.equal(r.census().by_role.USER, MAX_TABS - FLEET_TAB_CEILING);
-  assert.equal(r.census().user_tab_headroom, 0);
-  assert.throws(() => r.create({ url: 'https://example.com/', kind: 'USER_WEB' }), /tab_capacity_exceeded/);
-  // Closing one fleet tab reopens exactly one fleet slot, user slots unchanged.
-  const fleetIds = r.census().fleet_tab_ids;
-  r.close(fleetIds[0]);
-  const c = r.census();
-  assert.equal(c.by_role.FLEET, FLEET_TAB_CEILING - 1);
-  assert.equal(c.fleet_tab_headroom, 1);
-  assert.equal(c.by_role.USER, MAX_TABS - FLEET_TAB_CEILING);
-  r.create({ url: 'https://chatgpt.com/', kind: 'CHATGPT', role: 'FLEET' });
-  assert.equal(r.census().by_role.FLEET, FLEET_TAB_CEILING);
+test('resource recovery allows more tabs without changing a fixed count ceiling',()=>{
+ let headroom=200;const r=new TabRegistry({readResources:()=>({physical_start_allowed:headroom>0,memory_headroom:headroom})});
+ for(let i=0;i<140;i++)r.create({url:'https://chatgpt.com/',role:'FLEET'});
+ assert.equal(r.census().by_role.FLEET,140);headroom=0;
+ assert.throws(()=>r.create({url:'https://chatgpt.com/',role:'FLEET'}),/tab_capacity_exceeded/);
+ assert.equal(r.census().total_at_wall,true);headroom=10;
+ r.create({url:'https://chatgpt.com/',role:'FLEET'});assert.equal(r.census().by_role.FLEET,141);
 });
 
 test('tab role is validated at creation and immutable through updates', () => {

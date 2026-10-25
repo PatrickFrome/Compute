@@ -38,6 +38,10 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Parse and contract gates
         working-directory: apps/metaengine-browser
+        # Filesystem-only Electron qualification; Windows main-process/UI gates
+        # remain separate and no Chromium sandbox setting is changed.
+        env:
+          METAENGINE_TEST_ELECTRON_MODE: ASAR_NODE
         run: |
           npm run check
           npm test

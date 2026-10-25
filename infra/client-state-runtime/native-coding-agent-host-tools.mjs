@@ -52,7 +52,7 @@ export function createNativeCodingAgentHostTools({sql,readNativeScope,readNative
       ||Number(t.lease_generation)!==b.lease_generation||t.lease_agent_id!==b.agent_id
       ||Number(t.lease_agent_generation_epoch)!==b.agent_generation_epoch)fail('binding_changed');
     const {job,execution}=await protectedJob(tx,value,p),j=job.payload;
-    const native=await readNativeScope(p,false);
+    const native=await readNativeScope(p,false,tx);
     if(!same(native.postgres,p.postgres)||!same(native.artifact,p.artifact)||!same(native.worktree,p.worktree)
       ||native.user_sid!==p.user_sid||!same(processOnly(native.host_process),processOnly(j.host_process)))fail('host_scope_changed');
     const lease=buildNativeCodingTaskContext(t,{projectId:b.project_id,providerId:b.provider_id,

@@ -40,7 +40,7 @@ export function normalizeNativeCodingGoalAdmission(value,{request_id,objective}=
     ||value.request_id!==request_id||value.objective!==objective
     ||!['request_id','profile_id','workspace_id','project_id','root_task_id','goal_id'].every(k=>UUID.test(value[k]||''))
     ||!['profile_sha256','goal_sha256','task_spec_sha256'].every(k=>SHA.test(value[k]||''))
-    ||!Array.isArray(value.permit_ids)||value.permit_ids.length<2||value.permit_ids.length>64
+    ||!Array.isArray(value.permit_ids)||value.permit_ids.length<2
     ||value.permit_ids.some(id=>!UUID.test(id||''))||new Set(value.permit_ids).size!==value.permit_ids.length
     ||!exact(value.logical_policy,['max_depth','max_tasks','max_children'])
     ||Object.entries(value.logical_policy).some(([key,v])=>v!==null&&(!Number.isSafeInteger(v)||v<(key==='max_depth'?0:1)))
@@ -92,17 +92,23 @@ export function normalizeNativeCodingGoalProgress(raw,entry){
 // including after a lost IPC reply or a restart; refresh only calls READ_SEED.
 export function createClientNativeCodingGoalRouter({journal,request,projectSnapshot,onAdmitted=async()=>{}}={}){
   if(!journal||typeof request!=='function'||typeof projectSnapshot!=='function')fail('router_configuration');
-  if(!routerStates.has(journal))routerStates.set(journal,{inFlight:false,mounts:new Set()});
+  if(!routerStates.has(journal))routerStates.set(journal,{inFlight:false,mount:null});
   const state=routerStates.get(journal);
   async function observe(entry,raw){
     const input={request_id:entry.request_id,objective:entry.goal};
     const receipt=normalizeNativeCodingSeedResult(raw,input);
     if(!receipt){await journal.markReconcileRequired(entry.request_id,'native_seed_readback_required');return journal.get(entry.request_id);}
     await journal.recordNativeAdmission(receipt);
-    if(!entry.receipt&&!state.mounts.has(entry.request_id)){
-      state.mounts.add(entry.request_id);
-      try{await onAdmitted();}catch{/* Mount failure does not revoke a committed admission. */}
+    // A receipt proves admission, not that this Browser still has an open
+    // runtime. Recheck after every verified read, including restored journals.
+    // Only concurrent observations join; successful mounts are never cached
+    // here because the private runtime/capability can subsequently close.
+    if(!state.mount){
+      const pending=Promise.resolve().then(()=>onAdmitted());state.mount=pending;
+      const settled=()=>{if(state.mount===pending)state.mount=null;};
+      pending.then(settled,settled);
     }
+    try{await state.mount;}catch{/* Mount failure does not revoke a committed admission. */}
     try{const progress=normalizeNativeCodingGoalProgress(await projectSnapshot({project_id:receipt.project_id,task_after_seq:0,limit:1}),journal.get(entry.request_id));
       await journal.recordNativeProgress(progress);}catch{
       // Preserve the last observation, explicitly label it stale, and never

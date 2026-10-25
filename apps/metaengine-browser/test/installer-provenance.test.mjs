@@ -1164,7 +1164,7 @@ test('R90/R91 workflow topology builds NSIS once, overlaps physical consumers, t
   for (const [name, source, physicalMarker] of [
     ['installed-chat', installedChat, 'Install exact installer and prove clean-genesis persistent ChatGPT preconnect'],
     ['final-runtime', finalRuntime, 'Install and prove all Final runtime modules READY'],
-    ['soak', soak, 'Open normal UI and prove 64 sequential plus 8 concurrent exact activations'],
+    ['soak', soak, 'Prove 72 activations with a real disposable Owner and attached PostgreSQL'],
   ]) {
     assert.doesNotMatch(source, /electron-builder@26\.15\.7 --win nsis/);
     assert.doesNotMatch(source, /Build and stage exact-head ME2 UI|Build and pack ME2 UI|bun run build/);
@@ -1180,4 +1180,10 @@ test('R90/R91 workflow topology builds NSIS once, overlaps physical consumers, t
     assert.match(source.slice(terminal), /qualified-installer-consumer\.ps1 -Mode Wait/);
     assert.doesNotMatch(source, /installer-provenance\.mjs acquire|installer-provenance\.mjs verify|installer-provenance\.mjs wait/);
   }
+  const ownerProof = soak.indexOf('node --test --test-concurrency=1 attached-bundled-runtime.integration.test.mjs');
+  const ownerFence = soak.indexOf("throw 'soak_owner_consumer_unproven'");
+  const producerFence = soak.indexOf('name: Require bound Package Smoke producer terminal success');
+  assert.ok(ownerProof >= 0 && ownerFence > ownerProof && producerFence > ownerFence);
+  assert.match(soak.slice(ownerProof, ownerFence), /real_local_runtime_attested -ne \$true/);
+  assert.match(soak.slice(ownerProof, ownerFence), /attached_postgres_incarnation_preserved -ne \$true/);
 });

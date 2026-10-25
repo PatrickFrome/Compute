@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { createHash, randomUUID } from 'node:crypto';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,12 +12,20 @@ import {
   WindowsLocalComputerExecutor,
   runFixedWindowsPowerShell,
   windowsComputerProcessPlan,
+  retireExpiredWindowsComputerCaptures,
 } from '../src/windows-local-computer-executor.mjs';
 import {
   computerTargetIdentityDigest,
   normalizeComputerRequest,
   normalizeComputerTargetIdentity,
 } from '../src/computer-authority-plane.mjs';
+
+import { resolveQualifiedElectron } from '../scripts/qualified-electron-runtime.mjs';
+import { readBoundedCapture } from '../src/remote-support-mcp.mjs';
+import { readGithubChatCapture } from '../src/github-chat-capture.mjs';
+import {
+  CAPTURE_FIXTURE_TIMEOUT_MS, captureFixtureSource, captureExactFixtureWindow, startCaptureFixture,
+} from './helpers/windows-capture-fixture.mjs';
 
 const target = {
   machine_fingerprint_sha256:'a'.repeat(64),
@@ -25,6 +36,33 @@ const target = {
   executable_sha256:'b'.repeat(64),
   generation:3,
 };
+
+test('expired capture cleanup preserves a replacement image and an unexpired lease', {
+  skip: process.platform !== 'win32',
+}, async t => {
+  await retireExpiredWindowsComputerCaptures();
+  const root=path.join(await fs.realpath(os.tmpdir()),'metaengine-computer-captures');
+  const files=[];
+  t.after(async()=>{for(const file of files)await fs.unlink(file).catch(()=>{});});
+  for(const kind of ['OWNED_EXPIRED','REPLACED_EXPIRED','OWNED_CURRENT']){
+    const filename='window-'+randomUUID().replaceAll('-','')+'.png';
+    const image=path.join(root,filename),marker=image+'.lease.json';files.push(image,marker);
+    const original=Buffer.alloc(24,17),replacement=Buffer.alloc(24,31);
+    const created=Date.now()-(kind==='OWNED_CURRENT'?0:120000);
+    await fs.writeFile(image,kind==='REPLACED_EXPIRED'?replacement:original,{flag:'wx'});
+    await fs.writeFile(marker,JSON.stringify({schema:'metaengine.windows-computer-capture-lease.v1',filename,
+      sha256:createHash('sha256').update(original).digest('hex'),created_at:new Date(created).toISOString(),
+      expires_at:new Date(created+60000).toISOString()}),{flag:'wx'});
+    await retireExpiredWindowsComputerCaptures();
+    if(kind==='OWNED_EXPIRED'){
+      await assert.rejects(fs.stat(image),{code:'ENOENT'});
+      await assert.rejects(fs.stat(marker),{code:'ENOENT'});
+    }else{
+      assert.deepEqual(await fs.readFile(image),kind==='REPLACED_EXPIRED'?replacement:original);
+      assert.equal((await fs.stat(marker)).isFile(),true);
+    }
+  }
+});
 
 test('OS bridge ignores PATH, module and credential injection and uses private temp', () => {
   const plan = windowsComputerProcessPlan('C:\\private-test\\run', {
@@ -74,8 +112,14 @@ test('executor snapshot exposes fixed bridge identity and no scheduler authority
   assert.match(WINDOWS_COMPUTER_BRIDGE_SHA256, /^[0-9a-f]{64}$/);
 });
 
-test('fixed Windows PowerShell bridge physically parses and serves STATUS', { skip: process.platform !== 'win32' }, async () => {
-  const result = await runFixedWindowsPowerShell(normalizeComputerRequest({ action:'STATUS' }), { timeout_ms:20000 });
+test('fixed Windows PowerShell bridge physically parses and serves STATUS', { skip: process.platform !== 'win32' }, async t => {
+  const stages = [], started = performance.now();
+  const result = await runFixedWindowsPowerShell(normalizeComputerRequest({ action:'STATUS' }), {
+    timeout_ms:20000, on_native_phase: stage => {
+      stages.push(stage); t.diagnostic(JSON.stringify({schema:'metaengine.test.computer-bridge-phase.v1',
+        stage,elapsed_ms:Math.round(performance.now()-started),authority_effect:false}));
+    },
+  });
   assert.equal(result.ok, true);
   assert.equal(result.effect_started, false);
   assert.equal(result.schema, 'metaengine.windows-computer-executor.status.v1');
@@ -83,73 +127,136 @@ test('fixed Windows PowerShell bridge physically parses and serves STATUS', { sk
   assert.equal(result.arbitrary_shell, false);
   assert.equal(result.raw_powershell_command_input, false);
   assert.equal(result.authority_effect, false);
+  assert.deepEqual(stages,['SCRIPT_ENTER','MODULES_READY','REQUEST_READ','ACTION_BEGIN','ACTION_END'],
+    'STATUS must not initialize the unrelated drawing, UI Automation or C# actuator');
 });
 
-test('fixed Windows bridge physically captures an exact window with raw pixel digest', { skip: process.platform !== 'win32', timeout:45000 }, async () => {
+test('bridge waits for close and drains output after exit before releasing private request files', {
+  skip: process.platform !== 'win32',
+}, async () => {
+  let directory, sawExit = false, finished = false, observationError;
+  const stages = [];
+  const pending = runFixedWindowsPowerShell({action:'STATUS',args:{}}, {on_native_phase: stage => stages.push(stage),
+    spawn_impl: (_exe,_args,options) => {
+      directory = options.cwd;
+      const child = new EventEmitter(); child.stdout = new PassThrough(); child.stderr = new PassThrough(); child.kill = () => {throw Error('unexpected_kill');};
+      setImmediate(async () => {
+        try {
+          child.stderr.write('private-native-detail\nME_PC_BRIDGE_V1 SCRIPT_');
+          child.stderr.write('ENTER\nME_PC_BRIDGE_V1 UNKNOWN\nME_PC_BRIDGE_V1 ACTION_END\n');
+          child.stdout.write('{"ok":'); child.emit('exit',0); sawExit = true;
+          await new Promise(resolve=>setTimeout(resolve,25));
+          assert.equal(finished,false); assert.equal((await fs.stat(options.env.METAENGINE_COMPUTER_REQUEST_PATH)).isFile(),true);
+        } catch(error) { observationError=error; }
+        finally { child.stdout.end('true}\n'); child.stderr.end(); child.emit('close',0,null); }
+      });
+      return child;
+    }});
+  pending.then(()=>{finished=true;},()=>{finished=true;});
+  assert.deepEqual(await pending,{ok:true}); assert.equal(sawExit,true);
+  if(observationError)throw observationError;
+  assert.deepEqual(stages,['SCRIPT_ENTER','ACTION_END']);
+  await assert.rejects(fs.stat(directory),{code:'ENOENT'});
+});
+
+test('bridge timeout preserves exact failure and protected files until owned helper close', {
+  skip: process.platform !== 'win32',
+}, async () => {
+  let directory, kills=0, filePresentBeforeClose=false, observationError;
+  await assert.rejects(runFixedWindowsPowerShell({action:'STATUS',args:{}},{timeout_ms:1000,
+    spawn_impl: (_exe,_args,options) => {
+      directory=options.cwd;
+      const child=new EventEmitter();child.stdout=new PassThrough();child.stderr=new PassThrough();
+      setImmediate(()=>child.stderr.write('ME_PC_BRIDGE_V1 SCRIPT_ENTER\n'));
+      child.kill=()=>{kills++;setTimeout(async()=>{
+        try { filePresentBeforeClose=(await fs.stat(options.env.METAENGINE_COMPUTER_REQUEST_PATH)).isFile(); }
+        catch(error) { observationError=error; }
+        finally { child.stdout.end();child.stderr.end();child.emit('close',null,'SIGTERM'); }
+      },25);return true;};
+      return child;
+    }}),error=>error.message==='computer_executor_timeout:STATUS'&&error.native_phase==='SCRIPT_ENTER'&&error.helper_close_confirmed===true);
+  assert.equal(kills,1);assert.equal(filePresentBeforeClose,true);
+  if(observationError)throw observationError;
+  await assert.rejects(fs.stat(directory),{code:'ENOENT'});
+});
+
+test('fixed Windows bridge physically captures an exact window with raw pixel digest', {
+  skip: process.platform !== 'win32', timeout: CAPTURE_FIXTURE_TIMEOUT_MS,
+}, async t => {
+  const { executable } = resolveQualifiedElectron();
   const fixtureDir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-computer-fixture-'));
   const fixturePath = path.join(fixtureDir, 'fixture.cjs');
-  const electronExe = path.join(process.cwd(), 'node_modules', 'electron', 'dist', 'electron.exe');
-  const fixtureSource = [
-    "const { app, BrowserWindow } = require('electron');",
-    "app.commandLine.appendSwitch('disable-gpu');",
-    "app.whenReady().then(async () => {",
-    "  const title = 'METAENGINE Computer Capture Fixture';",
-    "  const win = new BrowserWindow({ width:360, height:240, x:80, y:80, show:true, frame:true, title });",
-    "  await win.loadURL('data:text/html,<html><head><title>METAENGINE%20Computer%20Capture%20Fixture</title></head><body><div style=\"font:18px sans-serif;padding:24px\">stable-pixel-fixture</div></body></html>');",
-    "  win.setTitle(title);",
-    "  win.show();",
-    "  win.focus();",
-    "});",
-    "app.on('window-all-closed', () => app.quit());",
-  ].join('\n');
-  await fs.writeFile(fixturePath, fixtureSource, 'utf8');
-
-  const child = spawn(electronExe, [fixturePath], {
-    windowsHide:false,
-    stdio:['ignore','ignore','pipe'],
-    env:{ ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS:'true' },
-  });
-  let stderr = '';
-  child.stderr.setEncoding('utf8');
-  child.stderr.on('data', chunk => { stderr += chunk; });
-
-  try {
-    const executor = new WindowsLocalComputerExecutor({ platform:'win32' });
-    let identity = null;
-    let lastObserved = null;
-    await new Promise(resolve => setTimeout(resolve,750));
-    for (let attempt=0; attempt<12 && !identity; attempt += 1) {
-      const observed = await executor.observe({ action:'OBSERVE_WINDOWS', args:{ limit:256 } });
-      lastObserved = observed.result;
-      const row = observed.result.windows.find(candidate => (
-        candidate?.title === 'METAENGINE Computer Capture Fixture'
-        || Number(candidate?.identity?.process_id) === child.pid
-      ));
-      identity = row?.identity || null;
-      if (!identity) await new Promise(resolve => setTimeout(resolve,150));
+  let fixture;
+  const phase = async (name, run) => {
+    const started = performance.now();
+    let outcome = 'FAILED';
+    try { const value = await run(); outcome = 'COMPLETED'; return value; }
+    finally {
+      t.diagnostic(JSON.stringify({ schema: 'metaengine.test.capture-fixture-phase.v1', phase: name,
+        outcome, elapsed_ms: Math.round(performance.now() - started), native_qualification_proven: false }));
     }
-    assert.ok(identity, 'fixture window identity; observed=' + JSON.stringify({
-      child_pid:child.pid,
-      count:lastObserved?.count,
-      total_candidates:lastObserved?.total_candidates,
-      process_ids:lastObserved?.windows?.map(row => row?.identity?.process_id),
-      rejected:lastObserved?.rejected_windows,
-      child_exit_code:child.exitCode,
-      stderr:stderr.slice(-500),
-    }));
-
-    const capture = await executor.observe({ action:'CAPTURE_WINDOW', target:identity });
+  };
+  try {
+    await fs.writeFile(fixturePath, captureFixtureSource, 'utf8');
+    fixture = startCaptureFixture(executable, fixturePath, { signal: t.signal });
+    const executor = new WindowsLocalComputerExecutor({ platform:'win32', runner: request => {
+      const requested = performance.now();
+      return runFixedWindowsPowerShell(request, {
+        on_native_phase: stage => t.diagnostic(JSON.stringify({schema:'metaengine.test.computer-bridge-phase.v1',
+          action:request.action,stage,elapsed_ms:Math.round(performance.now()-requested),authority_effect:false})),
+        spawn_impl: (...args) => {
+        const spawned = performance.now();
+        t.diagnostic(JSON.stringify({ schema: 'metaengine.test.capture-fixture-phase.v1',
+          phase: request.action + ':private-preparation-before-spawn', elapsed_ms: Math.round(spawned - requested),
+          native_qualification_proven: false }));
+        const child = spawn(...args);
+        child.once('close', () => t.diagnostic(JSON.stringify({ schema: 'metaengine.test.capture-fixture-phase.v1',
+          phase: request.action + ':bridge-spawn-to-close', elapsed_ms: Math.round(performance.now() - spawned),
+          native_qualification_proven: false })));
+        return child;
+      } });
+    } });
+    const capture = await captureExactFixtureWindow(fixture, request => executor.observe(request), phase);
+    fixture.assertRunning();
     assert.equal(capture.result.effect_started, false);
+    assert.equal(capture.authority_effect, false);
+    assert.equal(capture.result.target.process_id, fixture.child.pid);
+    assert.equal(capture.result.target.window_handle, (await fixture.ready).window_handle);
+    assert.equal(capture.result.target_identity_sha256, computerTargetIdentityDigest(capture.request.target));
     assert.match(capture.result.png_sha256, /^[0-9a-f]{64}$/);
     assert.match(capture.result.pixel_sha256, /^[0-9a-f]{64}$/);
+    assert.ok(Date.parse(capture.result.capture_expires_at)>Date.now());
+    const relayBytes=await readGithubChatCapture(capture.result.png_path,capture.result.png_sha256);
+    const supportBytes=await readBoundedCapture(capture.result.png_path,capture.result.png_sha256);
+    assert.deepEqual(relayBytes,supportBytes,'both existing consumers must read actual verified PNG bytes after observe returns');
+    assert.equal(supportBytes.subarray(0,8).toString('hex'),'89504e470d0a1a0a');
+    await assert.rejects(fs.stat(capture.result.png_path),{code:'ENOENT'},'support consumer owns one-shot image disposal');
     assert.equal(typeof capture.result.foreground, 'boolean');
     assert.equal(capture.result.geometry_stable, true);
     assert.ok(capture.result.rect.width > 0);
     assert.ok(capture.result.rect.height > 0);
+    const uia = await phase('UIA_SNAPSHOT', () => executor.observe({action:'UIA_SNAPSHOT',
+      target:capture.request.target,args:{offset:0,limit:8}}));
+    assert.equal(uia.result.ok,true);
+    assert.equal(uia.result.schema,'metaengine.windows-computer-executor.uia-snapshot.v1');
+    assert.equal(uia.result.target.process_id,fixture.child.pid);
+    assert.ok(uia.result.elements.length>0);
+    assert.equal(uia.result.effect_started,false);
+    fixture.assertRunning();
   } finally {
-    child.kill();
+    if (fixture) await phase('owned-child-teardown', () => fixture.stop());
     await fs.rm(fixtureDir, { recursive:true, force:true });
   }
+});
+
+test('fixed Windows bridge physically reads foreground status without overwriting the automatic PID variable', {
+  skip:process.platform!=='win32',
+}, async()=>{
+  const result=await runFixedWindowsPowerShell(normalizeComputerRequest({action:'FOREGROUND_STATUS'}));
+  assert.equal(result.ok,true);
+  assert.equal(result.schema,'metaengine.windows-computer-executor.foreground.v1');
+  assert.equal(result.effect_started,false);
+  assert.equal(result.authority_effect,false);
 });
 
 test('read-only observation carries no authority effect', async () => {
