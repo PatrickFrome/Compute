@@ -16,6 +16,13 @@ export const CAPTURE_FIXTURE_TIMEOUT_MS = 30000 + 2 * (120000 + 15000 + 5000) + 
 export const captureFixtureSource = [
   "const { app, BrowserWindow } = require('electron');",
   "const fs = require('node:fs'), path = require('node:path');",
+  'const fixtureRoot = fs.realpathSync(__dirname);',
+  "for (const name of ['userData', 'sessionData']) {",
+  '  const profilePath = path.join(fixtureRoot, name);',
+  '  fs.mkdirSync(profilePath, { mode:0o700 });',
+  "  if (!fs.lstatSync(profilePath).isDirectory() || fs.realpathSync(profilePath) !== profilePath) throw new Error('capture_fixture_profile_path_invalid');",
+  '  app.setPath(name, profilePath);',
+  '}',
   'const readyPath = process.env.METAENGINE_CAPTURE_READY_PATH, stopPath = process.env.METAENGINE_CAPTURE_STOP_PATH;',
   'const nonce = process.env.METAENGINE_CAPTURE_NONCE;',
   "app.commandLine.appendSwitch('disable-gpu');",

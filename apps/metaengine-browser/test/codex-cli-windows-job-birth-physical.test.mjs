@@ -57,6 +57,52 @@ test('birth-window observer keeps its outer cleanup guard separate from exact-ch
   assertObserverCustody(await fs.readFile(observerPath, 'utf8'));
 });
 
+function assertFailureInventoryDiagnostic(source) {
+  assertObserverCustody(source);
+  assert.equal(source.split('var accountingDeadline=DateTime.UtcNow.AddSeconds(2);').length, 2);
+  const capture = 'if(accounting.active!=2 || accounting.total<2) CaptureFailureInventory(';
+  assert.equal(source.split(capture).length, 2);
+  const call = source.indexOf(capture), refusal = source.indexOf(observerStages[12]);
+  assert.ok(call < refusal && refusal < source.indexOf(observerStages[13]), 'diagnostics cannot replace refusal or move outer cleanup before the observation');
+  const begin = source.indexOf('  static string DiagnosticWaitState('), end = source.indexOf('  static void GuardLimits(');
+  assert.ok(begin > 0 && end > begin);
+  const diagnostic = source.slice(begin, end);
+  assert.match(diagnostic, /const int capacity=256; int bytes=checked\(8\+capacity\*IntPtr\.Size\);/);
+  assert.match(diagnostic, /QueryInformationJobObject\(guard,3,information,\(uint\)bytes,out returned\)/);
+  assert.match(diagnostic, /listed<=\(uint\)capacity && returned>=8\+listed\*\(uint\)IntPtr\.Size/);
+  assert.match(diagnostic, /if\(information!=IntPtr\.Zero\) Marshal\.FreeHGlobal\(information\)/);
+  assert.doesNotMatch(diagnostic, /\b(?:Require|OpenProcess|GetProcessById|TerminateProcess|TerminateJobObject|ResumeThread|Image)\s*\(/,
+    'failure diagnostics have no effect authority and cannot replace the primary phase');
+  for (const key of ['active_processes', 'total_processes', 'limit_terminated_processes', 'accounting_polls',
+    'first_active_processes', 'minimum_active_processes', 'maximum_active_processes', 'accounting_struct_bytes',
+    'total_field_offset', 'active_field_offset', 'pointer_bytes', 'pid_list_capacity', 'pid_list_complete',
+    'pid_list_assigned_processes', 'pid_list_count', 'helper_listed', 'child_listed', 'other_listed_processes',
+    'snapshot_hint_console_hosts', 'snapshot_hint_compilers', 'snapshot_hint_unclassified', 'helper_wait_state', 'child_wait_state']) {
+    assert.ok(diagnostic.includes(String.raw`\"${key}\":`), key);
+  }
+  assert.ok(diagnostic.includes(String.raw`\"diagnostic_only\":true`));
+  assert.ok(diagnostic.includes(String.raw`\"native_qualification_proven\":false`));
+  assert.ok(!diagnostic.includes(String.raw`\"native_qualification_proven\":true`));
+  for (const forbidden of ['pid', 'helper_pid', 'child_pid', 'path', 'image', 'args', 'env', 'exception']) {
+    assert.ok(!diagnostic.includes(String.raw`\"${forbidden}\":`), 'no raw identity or private text key: ' + forbidden);
+  }
+  assert.match(source, /\$inventory = \[MetaengineJobBirthObserver\]::FailureInventoryJson/);
+}
+
+test('failed outer inventory emits bounded fixed-label diagnostics without changing exact-count refusal or cleanup', async () => {
+  assertFailureInventoryDiagnostic(await fs.readFile(observerPath, 'utf8'));
+});
+
+for (const [name, mutate] of [
+  ['weakened active-count proof', source => source.replace(observerStages[12], observerStages[12].replace('accounting.active==2', 'accounting.active>=2'))],
+  ['effectful diagnostic', source => source.replace('const int capacity=256;', 'TerminateProcess(child,125); const int capacity=256;')],
+  ['diagnostic native-qualification promotion', source => source.replace(String.raw`\"native_qualification_proven\":false`, String.raw`\"native_qualification_proven\":true`)],
+]) test(`outer inventory diagnostic source rejects ${name}`, async () => {
+  const source = await fs.readFile(observerPath, 'utf8');
+  assert.notEqual(mutate(source), source);
+  assert.throws(() => assertFailureInventoryDiagnostic(mutate(source)), assert.AssertionError);
+});
+
 for (const [name, mutate] of [
   ['outer cleanup before child-exit observation', source => source.replace(observerStages[18], '').replace(observerStages[13], observerStages[18] + ';\n' + observerStages[13])],
   ['file-PID process opening', source => source + '\nOpenProcess(0,false,childPid);'],

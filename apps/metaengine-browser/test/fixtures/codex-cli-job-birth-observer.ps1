@@ -39,6 +39,7 @@ public static class MetaengineJobBirthObserver {
   [DllImport("kernel32.dll",SetLastError=true)] static extern bool SetInformationJobObject(IntPtr job,int kind,ref Limits limits,uint bytes);
   [DllImport("kernel32.dll",SetLastError=true)] static extern bool QueryInformationJobObject(IntPtr job,int kind,out Limits limits,uint bytes,IntPtr returned);
   [DllImport("kernel32.dll",SetLastError=true)] static extern bool QueryInformationJobObject(IntPtr job,int kind,out Accounting accounting,uint bytes,IntPtr returned);
+  [DllImport("kernel32.dll",SetLastError=true)] static extern bool QueryInformationJobObject(IntPtr job,int kind,IntPtr information,uint bytes,out uint returned);
   [DllImport("kernel32.dll",SetLastError=true)] static extern bool GetHandleInformation(IntPtr handle,out uint flags);
   [DllImport("kernel32.dll",SetLastError=true)] static extern bool CreatePipe(out IntPtr read,out IntPtr write,ref Security security,uint size);
   [DllImport("kernel32.dll",SetLastError=true)] static extern bool SetHandleInformation(IntPtr handle,uint mask,uint flags);
@@ -61,6 +62,7 @@ public static class MetaengineJobBirthObserver {
   [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool Process32Next(IntPtr snapshot,ref ProcessEntry entry);
   [DllImport("kernel32.dll",SetLastError=true)] static extern bool CloseHandle(IntPtr handle);
   public static string Phase = "setup";
+  public static string FailureInventoryJson = "null";
   static void Require(bool ok,string stage) { if(!ok) { if(Phase=="setup") Phase=stage; throw new InvalidOperationException("observer_"+stage+":"+Marshal.GetLastWin32Error()); } }
   static void Close(ref IntPtr handle,string stage) { if(handle==IntPtr.Zero)return; Require(CloseHandle(handle),stage); handle=IntPtr.Zero; }
   static void Pipe(ref IntPtr read,ref IntPtr write,ref Security security,string stage) {
@@ -77,6 +79,82 @@ public static class MetaengineJobBirthObserver {
   static string Image(IntPtr process) { var image=new StringBuilder(32768); uint size=32768; Require(QueryFullProcessImageName(process,0,image,ref size),"image_readback"); return Path.GetFullPath(image.ToString()); }
   static long Birth(IntPtr process) { long birth,exit,kernel,user; Require(GetProcessTimes(process,out birth,out exit,out kernel,out user),"birth_readback"); return birth; }
   static bool SamePath(string a,string b) { return String.Equals(Path.GetFullPath(a),Path.GetFullPath(b),StringComparison.OrdinalIgnoreCase); }
+  static string DiagnosticWaitState(IntPtr process) {
+    uint result=WaitForSingleObject(process,0);
+    return result==0 ? "SIGNALED" : result==0x102 ? "LIVE" : "WAIT_UNCONFIRMED";
+  }
+  static bool DiagnosticSnapshotHints(HashSet<ulong> otherPids,out int consoleHosts,out int compilers,out int unclassified,out int seen) {
+    consoleHosts=0; compilers=0; unclassified=0; seen=0;
+    IntPtr snapshot=CreateToolhelp32Snapshot(2,0); if(snapshot==IntPtr.Zero || snapshot==new IntPtr(-1)) return false;
+    bool ok=false;
+    try {
+      var entry=new ProcessEntry(); entry.size=(uint)Marshal.SizeOf(typeof(ProcessEntry));
+      if(Process32First(snapshot,ref entry)) {
+        do {
+          if(otherPids.Contains(entry.pid)) {
+            seen++;
+            if(String.Equals(entry.image,"conhost.exe",StringComparison.OrdinalIgnoreCase)) consoleHosts++;
+            else if(String.Equals(entry.image,"csc.exe",StringComparison.OrdinalIgnoreCase) || String.Equals(entry.image,"cvtres.exe",StringComparison.OrdinalIgnoreCase)) compilers++;
+            else unclassified++;
+          }
+        } while(Process32Next(snapshot,ref entry));
+        ok=Marshal.GetLastWin32Error()==18;
+      }
+    } finally { if(!CloseHandle(snapshot)) ok=false; }
+    return ok;
+  }
+  static void CaptureFailureInventory(IntPtr guard,Accounting accounting,uint helperPid,uint childPid,IntPtr helper,IntPtr child,
+    int polls,uint firstActive,uint minActive,uint maxActive) {
+    // Observation only: native Job-list IDs are compared with already-pinned
+    // identities, never opened or used to authorize termination. No PID/path is
+    // exported. A partial list cannot establish a complete active-process set.
+    IntPtr information=IntPtr.Zero;
+    try {
+      const int capacity=256; int bytes=checked(8+capacity*IntPtr.Size);
+      information=Marshal.AllocHGlobal(bytes); Marshal.Copy(new byte[bytes],0,information,bytes);
+      uint returned; bool ok=QueryInformationJobObject(guard,3,information,(uint)bytes,out returned); int error=ok ? 0 : Marshal.GetLastWin32Error();
+      uint assigned=0,listed=0; bool helperListed=false,childListed=false; int other=0,invalid=0,duplicates=0;
+      bool header=(ok || error==234) && returned>=8 && returned<=(uint)bytes;
+      var seen=new HashSet<ulong>(); var otherPids=new HashSet<ulong>();
+      if(header) {
+        assigned=unchecked((uint)Marshal.ReadInt32(information,0)); listed=unchecked((uint)Marshal.ReadInt32(information,4));
+        if(listed<=(uint)capacity && returned>=8+listed*(uint)IntPtr.Size) {
+          for(int i=0;i<(int)listed;i++) {
+            int at=8+i*IntPtr.Size;
+            ulong pid=IntPtr.Size==4 ? unchecked((uint)Marshal.ReadInt32(information,at)) : unchecked((ulong)Marshal.ReadInt64(information,at));
+            if(pid==0 || pid>UInt32.MaxValue) { invalid++; continue; }
+            if(!seen.Add(pid)) { duplicates++; continue; }
+            if(pid==helperPid) helperListed=true; else if(pid==childPid) childListed=true; else { other++; otherPids.Add(pid); }
+          }
+        } else header=false;
+      }
+      bool complete=ok && header && assigned==listed && invalid==0 && duplicates==0;
+      // Snapshot names are allowlisted hints, not pinned identities or liveness
+      // proof. PID reuse can invalidate a hint; no such ID authorizes an effect.
+      int consoleHosts,compilers,unclassified,snapshotSeen;
+      bool snapshotOk=DiagnosticSnapshotHints(otherPids,out consoleHosts,out compilers,out unclassified,out snapshotSeen);
+      FailureInventoryJson="{\"diagnostic_only\":true,\"native_qualification_proven\":false,\"active_processes\":"+accounting.active.ToString(CultureInfo.InvariantCulture)
+        +",\"total_processes\":"+accounting.total.ToString(CultureInfo.InvariantCulture)+",\"limit_terminated_processes\":"+accounting.terminated.ToString(CultureInfo.InvariantCulture)
+        +",\"accounting_polls\":"+polls.ToString(CultureInfo.InvariantCulture)+",\"first_active_processes\":"+firstActive.ToString(CultureInfo.InvariantCulture)
+        +",\"minimum_active_processes\":"+minActive.ToString(CultureInfo.InvariantCulture)+",\"maximum_active_processes\":"+maxActive.ToString(CultureInfo.InvariantCulture)
+        +",\"accounting_struct_bytes\":"+Marshal.SizeOf(typeof(Accounting)).ToString(CultureInfo.InvariantCulture)
+        +",\"total_field_offset\":"+Marshal.OffsetOf(typeof(Accounting),"total").ToInt64().ToString(CultureInfo.InvariantCulture)
+        +",\"active_field_offset\":"+Marshal.OffsetOf(typeof(Accounting),"active").ToInt64().ToString(CultureInfo.InvariantCulture)
+        +",\"pointer_bytes\":"+IntPtr.Size.ToString(CultureInfo.InvariantCulture)+",\"pid_list_capacity\":"+capacity.ToString(CultureInfo.InvariantCulture)+",\"pid_list_query_ok\":"+(ok?"true":"false")
+        +",\"pid_list_error\":"+error.ToString(CultureInfo.InvariantCulture)+",\"pid_list_returned_bytes\":"+returned.ToString(CultureInfo.InvariantCulture)
+        +",\"pid_list_complete\":"+(complete?"true":"false")+",\"pid_list_assigned_processes\":"+assigned.ToString(CultureInfo.InvariantCulture)
+        +",\"pid_list_count\":"+listed.ToString(CultureInfo.InvariantCulture)+",\"helper_listed\":"+(helperListed?"true":"false")+",\"child_listed\":"+(childListed?"true":"false")
+        +",\"other_listed_processes\":"+other.ToString(CultureInfo.InvariantCulture)+",\"invalid_pid_entries\":"+invalid.ToString(CultureInfo.InvariantCulture)
+        +",\"duplicate_pid_entries\":"+duplicates.ToString(CultureInfo.InvariantCulture)+",\"snapshot_query_ok\":"+(snapshotOk?"true":"false")
+        +",\"snapshot_hint_rows\":"+snapshotSeen.ToString(CultureInfo.InvariantCulture)+",\"snapshot_hint_console_hosts\":"+consoleHosts.ToString(CultureInfo.InvariantCulture)
+        +",\"snapshot_hint_compilers\":"+compilers.ToString(CultureInfo.InvariantCulture)+",\"snapshot_hint_unclassified\":"+unclassified.ToString(CultureInfo.InvariantCulture)
+        +",\"helper_wait_state\":\""+DiagnosticWaitState(helper)+"\",\"child_wait_state\":\""+DiagnosticWaitState(child)+"\"}";
+    } catch {
+      FailureInventoryJson="{\"diagnostic_only\":true,\"native_qualification_proven\":false,\"capture_failed\":true,\"active_processes\":"
+        +accounting.active.ToString(CultureInfo.InvariantCulture)+",\"total_processes\":"+accounting.total.ToString(CultureInfo.InvariantCulture)
+        +",\"limit_terminated_processes\":"+accounting.terminated.ToString(CultureInfo.InvariantCulture)+"}";
+    } finally { if(information!=IntPtr.Zero) Marshal.FreeHGlobal(information); }
+  }
   static void GuardLimits(IntPtr guard) {
     uint handleFlags; Require(GetHandleInformation(guard,out handleFlags) && (handleFlags&1)==0,"outer_noninherited");
     Limits limits; Require(QueryInformationJobObject(guard,9,out limits,(uint)Marshal.SizeOf(typeof(Limits)),IntPtr.Zero),"outer_limits_readback");
@@ -183,12 +261,16 @@ public static class MetaengineJobBirthObserver {
       Require(SamePath(Image(child),childPath),"child_image"); Require(ParentIs(child,helper.pid),"child_parent"); childOwned=true;
       Require(IsProcessInJob(child,guard,out membership) && membership,"child_outer_membership");
       GuardLimits(guard); Accounting accounting; var accountingDeadline=DateTime.UtcNow.AddSeconds(2);
+      int accountingPolls=0; uint firstActive=0,minActive=UInt32.MaxValue,maxActive=0;
       do {
         Require(QueryInformationJobObject(guard,1,out accounting,(uint)Marshal.SizeOf(typeof(Accounting)),IntPtr.Zero),"outer_accounting");
+        if(accountingPolls++==0) firstActive=accounting.active;
+        if(accounting.active<minActive) minActive=accounting.active; if(accounting.active>maxActive) maxActive=accounting.active;
         if(accounting.active==2) break;
         Require(WaitForSingleObject(child,0)==0x102 && WaitForSingleObject(helper.process,0)==0x102,"both_live_during_accounting");
         Thread.Sleep(10);
       } while(DateTime.UtcNow<accountingDeadline);
+      if(accounting.active!=2 || accounting.total<2) CaptureFailureInventory(guard,accounting,helper.pid,childPid,helper.process,child,accountingPolls,firstActive,minActive,maxActive);
       Require(accounting.active==2 && accounting.total>=2,"outer_active_identity_set");
       Require(WaitForSingleObject(child,0)==0x102 && WaitForSingleObject(helper.process,0)==0x102,"both_live_before_helper_kill");
       Require(Interlocked.Read(ref stdout.bytes)==0 && Interlocked.Read(ref stderr.bytes)==0,"never_ready_before_helper_kill");
@@ -232,8 +314,9 @@ $request = [Console]::In.ReadLine() | ConvertFrom-Json
   [string]$request.birth_channel_path,[string]$request.nonce,[string]$request.expected_child_path,[string]$request.expected_child_sha256)
 } catch {
   $phase = 'compile_or_request'
-  try { $phase = [MetaengineJobBirthObserver]::Phase } catch { }
+  $inventory = 'null'
+  try { $phase = [MetaengineJobBirthObserver]::Phase; $inventory = [MetaengineJobBirthObserver]::FailureInventoryJson } catch { }
   # Phase is a source-controlled constant, never command text or file contents.
-  [Console]::Out.WriteLine('{"error":"JOB_BIRTH_OBSERVER_FAILED","phase":"' + $phase + '"}')
+  [Console]::Out.WriteLine('{"error":"JOB_BIRTH_OBSERVER_FAILED","phase":"' + $phase + '","inventory":' + $inventory + '}')
   exit 1
 }

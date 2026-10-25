@@ -4,6 +4,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
+import {fixedWindowsNativeReadEnvironment} from './windows-native-read-environment.mjs';
 import {readDirectoryIdentity} from './native-coding-fs-identity.mjs';
 import {verifyOwnerOnlyWindowsStorage,protectOwnerOnlyWindowsDirectory} from './private-windows-storage-acl.mjs';
 import {verifyInstalledClientStateResources} from './local-runtime-host-controller.mjs';
@@ -81,9 +82,7 @@ try {
   try {
     const pending=exec(path.win32.join(root,'System32','WindowsPowerShell','v1.0','powershell.exe'),
       ['-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')],
-      {windowsHide:true,shell:false,timeout:15000,maxBuffer:16384,env:{SystemRoot:root,SYSTEMROOT:root,WINDIR:root,
-        PATH:path.win32.join(root,'System32'),PSModulePath:path.win32.join(root,'System32','WindowsPowerShell','v1.0','Modules'),
-        METAENGINE_NATIVE_CODING_PID:String(pid)}});
+      {windowsHide:true,shell:false,timeout:15000,maxBuffer:16384,env:{...fixedWindowsNativeReadEnvironment(),METAENGINE_NATIVE_CODING_PID:String(pid)}});
     pending.child?.stdin?.end();output=(await pending).stdout;
   }catch{fail('native_process_unavailable');}
   let value;try{value=JSON.parse(output.trim());}catch{fail('native_process_invalid');}
