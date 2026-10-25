@@ -8,26 +8,12 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '../..');
 const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 
-test('R100 PageKey contains product surfaces only', () => {
+test('PageKey exposes five product screens without retired daemon authority modules', () => {
   const store = read('me2-ui/src/components/me2/store.tsx');
-  const pageType = store.slice(store.indexOf('export type PageKey'), store.indexOf('// R97 native swarm convergence'));
-  for (const legacy of ['"command"', '"agents"', '"compute"']) {
-    assert.equal(pageType.includes(legacy), false, 'legacy authority page remains in PageKey: ' + legacy);
-  }
-  for (const product of ['"browser"', '"tasks"', '"code"', '"supervisor"', '"memory"', '"observability"', '"system"']) {
-    assert.equal(pageType.includes(product), true, 'product page missing: ' + product);
-  }
-});
-
-test('R100 retired route strings normalize to the native Browser fleet without re-entering PageKey', () => {
-  const store = read('me2-ui/src/components/me2/store.tsx');
-  assert.match(store, /export function normalizePageKey\(value: unknown\): PageKey/);
-  assert.match(store, /raw === "command" \|\| raw === "agents" \|\| raw === "compute"/);
-  assert.match(store, /const nextPage = normalizePageKey\(p\)/);
-  const pageType = store.slice(store.indexOf('export type PageKey'), store.indexOf('// R97 native swarm convergence'));
-  assert.equal(pageType.includes('"command"'), false);
-  assert.equal(pageType.includes('"agents"'), false);
-  assert.equal(pageType.includes('"compute"'), false);
+  const pageType = store.match(/export type PageKey\s*=\s*([^;]+);/);
+  assert.ok(pageType);
+  const keys = [...pageType[1].matchAll(/['"]([^'"]+)['"]/g)].map(match => match[1]);
+  assert.deepEqual(keys, ['browser','tasks','code','operator','system']);
 });
 
 test('R100 primary shell imports no daemon Agent/Command/Compute page', () => {
@@ -44,10 +30,10 @@ test('R100 primary shell imports no daemon Agent/Command/Compute page', () => {
   assert.match(shell, /primaryChatFleetRoster/);
 });
 
-test('R100 production palette exposes native Browser fleet instead of daemon agent creation', () => {
+test('production palette navigates current screens and exact native project tasks without daemon agent creation', () => {
   const palette = read('me2-ui/src/components/me2/shell/command-palette.tsx');
-  assert.match(palette, /Native Agent fleet/);
-  assert.match(palette, /Open native ChatGPT agent fleet/);
+  assert.match(palette, /PAGES\.map/);
+  assert.match(palette, /useClientProjectTasks/);
   assert.doesNotMatch(palette, /Open native z\.ai Agent fleet/);
   assert.equal(palette.includes('spawnAgent'), false);
   assert.equal(palette.includes('AgentChat'), false);

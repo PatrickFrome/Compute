@@ -1,48 +1,44 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import { filterSupportedLegacyDaemonActionCatalog } from '../../me2-ui/src/lib/task-content-snapshot.mjs';
+import { readNativeProjectTaskPage } from '../../me2-ui/src/lib/client-project-tasks.ts';
 
-const tasks = await readFile(new URL('../../me2-ui/src/components/me2/pages/tasks.tsx', import.meta.url), 'utf8');
-const dialogs = await readFile(new URL('../../me2-ui/src/components/me2/shell/dialogs.tsx', import.meta.url), 'utf8');
-const store = await readFile(new URL('../../me2-ui/src/components/me2/store.tsx', import.meta.url), 'utf8');
-const palette = await readFile(new URL('../../me2-ui/src/components/me2/shell/command-palette.tsx', import.meta.url), 'utf8');
-const taskSurfaces = tasks + '\n' + dialogs;
+const read = relative => readFile(new URL(relative, import.meta.url), 'utf8');
+const tasks = await read('../../me2-ui/src/components/me2/pages/tasks.tsx');
+const code = await read('../../me2-ui/src/components/me2/pages/code.tsx');
+const store = await read('../../me2-ui/src/components/me2/store.tsx');
+const palette = await read('../../me2-ui/src/components/me2/shell/command-palette.tsx');
+const hook = await read('../../me2-ui/src/hooks/use-client-project-tasks.ts');
 
-test('R104 task UI cannot invoke the retired daemon AgentChat/reflection plane', () => {
-  for (const forbidden of [
-    'agentChatOp',
-    '/agentchat?XTransformPort=3041',
-    'op: "send"',
-    'branch-reflect',
-    'onReflect=',
-    'reflectTask',
-    'setReflectingId',
-  ]) {
-    assert.equal(taskSurfaces.includes(forbidden), false, `retired AgentChat token resurfaced: ${forbidden}`);
+test('live task and search surfaces cannot invoke retired daemon task or AgentChat effects', () => {
+  for (const surface of [tasks, code, store, palette, hook]) {
+    assert.doesNotMatch(surface, /me2-bus|me2Fetch|sendCommand|agentChatOp|useAgentChatSessions|taskAction\(|createTaskFromForm|branch-(?:retry|reflect)|\/agentchat\?|TASK_(?:ENQUEUE|SCHEDULE|CANCEL|RETRY|ARCHIVE)|BUDGET_FLUSH|visibleCatalog|loadCatalog/);
   }
-  assert.doesNotMatch(taskSurfaces, /retryMetrics|\/metrics\?XTransformPort=3041|A\/B T|LLM-рефлексия \(tier-2\)/);
-});
-
-test('R104 task product surfaces are observation-only until canonical DevOS mutations are wired', () => {
-  assert.doesNotMatch(tasks, /taskAction\(|setDialog\("newTask"\)|branch-retry/);
-  assert.doesNotMatch(dialogs, /taskAction\(|NewTaskDialog|createTaskFromForm|TASK_(?:ENQUEUE|SCHEDULE|CANCEL|RETRY|ARCHIVE)/);
-  assert.doesNotMatch(store, /createTaskFromForm|TASK_ENQUEUE|TASK_SCHEDULE|"newTask"/);
   assert.match(tasks, /data-testid="page-tasks"/);
-  assert.match(tasks, /read-only projection/);
-  assert.match(tasks, /hover\.t\.reflection/);
-  assert.doesNotMatch(tasks, /onRetry=|onReflect=|branch-retry|branch-reflect/);
+  assert.match(tasks, /data-source="NATIVE_PROJECT_API"/);
+  assert.match(tasks, /useClientProjectTasks/);
+  assert.match(hook, /useSyncExternalStore/);
+  assert.match(hook, /resource\.observe/);
 });
 
-test('R104 command palette hard-fences retired daemon task mutations including generic catalog entries', () => {
-  assert.match(palette, /filterSupportedLegacyDaemonActionCatalog\(catalog\)/);
-  assert.match(palette, /filterSupportedLegacyDaemonActionCatalog\(\[meta\]\)/);
-  const visible=filterSupportedLegacyDaemonActionCatalog([
-    ...['TASK_ENQUEUE','TASK_SCHEDULE','TASK_CANCEL','TASK_RETRY','TASK_ARCHIVE'].map((action) => ({ action })),
-    { action:'AGENT_SPAWN' }, { action:'FLEET_RECONCILE' }, { action:'BUDGET_ADJUST' },
-    { action:'PING' }, { action:'BROWSER_OPEN' },
-  ]);
-  assert.deepEqual(visible.map((row) => row.action), ['PING','BROWSER_OPEN']);
-  assert.match(palette, /visibleCatalog\.map/);
-  assert.doesNotMatch(palette, /setDialog\("newTask"\)|value="new новая задача"/);
+test('task history and palette select exact rows from the confirmed project page', () => {
+  assert.match(tasks, /page\?\.tasks\.find\(task=>task\.task_id===view\.selectedTaskId\)/);
+  assert.match(tasks, /resource\.selectTask\(task\.task_id\)/);
+  assert.match(tasks, /<ManagedProjectHistory key=\{selected\.task_id\} taskId=\{selected\.task_id\}/);
+  assert.match(palette, /view\.page\?\.tasks\?\?\[\]/);
+  assert.match(palette, /if\(resource\.selectTask\(task\.task_id\)\)\{setPage\('tasks'\)/);
+  assert.match(code, /<ManagedProjects\/>/);
+  assert.match(code, /<ManagedProjectHistory\/>/);
+  assert.doesNotMatch(palette, /spawnAgent|AGENT_SPAWN|FLEET_RECONCILE|BUDGET_ADJUST|window\.confirm|window\.prompt/);
+});
+
+test('probe snapshots and daemon placeholders cannot become native project task truth', () => {
+  for (const value of [
+    {ok:true,tasks:[],commands:[],task_content_authority:false},
+    {schema:'metaengine.browser.probe.v1',found:false,authority_effect:false,automatic_retry_allowed:false},
+    {schema:'metaengine.devos.project-snapshot.v1',found:true,scheduler_authority:true,authority_effect:false,automatic_retry_allowed:false},
+  ]) assert.throws(() => readNativeProjectTaskPage(value), /native_project_tasks_invalid/);
+  assert.equal(readNativeProjectTaskPage({schema:'metaengine.devos.project-snapshot.v1',found:false,authority_effect:false,automatic_retry_allowed:false}), null);
+  assert.match(tasks, /view\.state==='DEGRADED'/);
+  assert.match(palette, /view\.state==='DEGRADED'/);
 });

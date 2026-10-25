@@ -9,7 +9,7 @@ import {
   Play, Pause, Clock, OctagonAlert, XCircle, RotateCw, CheckCircle2, WifiOff,
   AlertTriangle, Loader2, Radio,
 } from "lucide-react";
-import { STATUS_BADGE } from "@/lib/me2-bus";
+import { STATUS_BADGE } from "@/lib/status-presentation";
 
 // ── Dot: живой индикатор ────────────────────────────────────────────────────────
 export function Dot({ on, pulse }: { on: boolean; pulse?: boolean }) {

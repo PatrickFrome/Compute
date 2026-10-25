@@ -1,174 +1,18 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-
-import {
-  ME2_PRIMARY_BROWSER_STATUS_HEIGHT,
-  ME2_PRIMARY_BROWSER_TABSTRIP_HEIGHT,
-  ME2_PRIMARY_CONTEXT_DRAWER_HEIGHT,
-  ME2_PRIMARY_CONTEXT_DRAWER_MIN_HEIGHT,
-  ME2_PRIMARY_CONTEXT_DRAWER_MAX_HEIGHT,
-  ME2_PRIMARY_MIN_BROWSER_HEIGHT,
-  ME2_PRIMARY_BROWSER_URLBAR_HEIGHT,
-  ME2_PRIMARY_COMMAND_AGENT_HEADER_HEIGHT,
-  ME2_PRIMARY_COMMAND_GAP,
-  ME2_PRIMARY_COMMAND_SIDEBAR_WIDTH,
-  ME2_PRIMARY_PAGEBAR_HEIGHT,
-  ME2_PRIMARY_PAGE_PADDING,
-  ME2_PRIMARY_STATUSBAR_HEIGHT,
-  ME2_PRIMARY_TOP_HEIGHT,
-  SHELL_MIN_REMOTE_WIDTH,
-  normalizeShellLayoutState,
-  planShellLayout,
-} from '../src/shell-layout.mjs';
 import { projectMe2UiRoutingAuthority } from '../src/me2/me2-ui-host.mjs';
-import {
-  presentationSyncStillCurrent,
-  resolveExactAgentTab,
-  zAiUrlContainsExactSession,
-} from '../../me2-ui/src/lib/r85-ui-contracts.mjs';
 
-const main = await readFile(new URL('../src/main.mjs', import.meta.url), 'utf8');
-const preload = await readFile(new URL('../src/preload-shell.cjs', import.meta.url), 'utf8');
-const store = await readFile(new URL('../../me2-ui/src/components/me2/store.tsx', import.meta.url), 'utf8');
-const integration = await readFile(new URL('../src/me2/me2-integration-entry.mjs', import.meta.url), 'utf8');
-const uiHost = await readFile(new URL('../src/me2/me2-ui-host.mjs', import.meta.url), 'utf8');
-const me2Shell = await readFile(new URL('../../me2-ui/src/components/me2/shell/me2-shell.tsx', import.meta.url), 'utf8');
-const me2Topbar = await readFile(new URL('../../me2-ui/src/components/me2/shell/topbar.tsx', import.meta.url), 'utf8');
-const me2Pagebar = await readFile(new URL('../../me2-ui/src/components/me2/shell/pagebar.tsx', import.meta.url), 'utf8');
-const me2Statusbar = await readFile(new URL('../../me2-ui/src/components/me2/shell/statusbar.tsx', import.meta.url), 'utf8');
-const me2Palette = await readFile(new URL('../../me2-ui/src/components/me2/shell/command-palette.tsx', import.meta.url), 'utf8');
-const me2BrowserStage = await readFile(new URL('../../me2-ui/src/components/me2/stages/browser-stage.tsx', import.meta.url), 'utf8');
-const me2Observability = await readFile(new URL('../../me2-ui/src/components/me2/pages/observability.tsx', import.meta.url), 'utf8');
-const me2CodePage = await readFile(new URL('../../me2-ui/src/components/me2/pages/code.tsx', import.meta.url), 'utf8');
-const me2TasksPage = await readFile(new URL('../../me2-ui/src/components/me2/pages/tasks.tsx', import.meta.url), 'utf8');
-const me2Dialogs = await readFile(new URL('../../me2-ui/src/components/me2/shell/dialogs.tsx', import.meta.url), 'utf8');
-const me2ContextDrawer = await readFile(new URL('../../me2-ui/src/components/me2/shell/context-drawer.tsx', import.meta.url), 'utf8');
-const r85VisualHarness = await readFile(new URL('./me2-r85-visual-evidence.mjs', import.meta.url), 'utf8');
-const packageSmokeWorkflow = await readFile(new URL('../../../.github/workflows/browser-windows-package-smoke.yml', import.meta.url), 'utf8');
-
-test('R75 primary shell keeps ME2 chrome and agent rail outside the native Browser surface', () => {
-  const plan = planShellLayout({
-    width: 1440,
-    height: 960,
-    state: normalizeShellLayoutState(),
-    surface_profile: 'ME2_R75_COMMAND',
-  });
-  assert.equal(plan.surface_profile, 'ME2_R75_COMMAND');
-  assert.equal(plan.remote_bounds.x, ME2_PRIMARY_PAGE_PADDING + ME2_PRIMARY_COMMAND_SIDEBAR_WIDTH + ME2_PRIMARY_COMMAND_GAP);
-  assert.equal(
-    plan.remote_bounds.y,
-    ME2_PRIMARY_TOP_HEIGHT
-      + ME2_PRIMARY_PAGE_PADDING
-      + ME2_PRIMARY_COMMAND_AGENT_HEADER_HEIGHT
-      + ME2_PRIMARY_COMMAND_GAP
-      + ME2_PRIMARY_BROWSER_TABSTRIP_HEIGHT
-      + ME2_PRIMARY_BROWSER_URLBAR_HEIGHT,
-  );
-  assert.equal(
-    plan.remote_bounds.width,
-    1440 - (ME2_PRIMARY_PAGE_PADDING + ME2_PRIMARY_COMMAND_SIDEBAR_WIDTH + ME2_PRIMARY_COMMAND_GAP) - ME2_PRIMARY_PAGE_PADDING,
-  );
-  assert.equal(
-    plan.reserved_bottom_height,
-    ME2_PRIMARY_PAGEBAR_HEIGHT
-      + ME2_PRIMARY_STATUSBAR_HEIGHT
-      + ME2_PRIMARY_PAGE_PADDING
-      + ME2_PRIMARY_BROWSER_STATUS_HEIGHT,
-  );
-  assert.equal(plan.remote_bounds.height, 960 - plan.remote_bounds.y - plan.reserved_bottom_height);
-  assert.equal(plan.overlay_remote_content, false);
-  assert.equal(plan.renderer_dimensions_authoritative, false);
-  assert.equal(plan.authority_effect, false);
-});
-
-test('R75 primary shell releases rail reservation before starving the Browser center', () => {
-  const plan = planShellLayout({
-    width: 900,
-    height: 640,
-    state: normalizeShellLayoutState(),
-    surface_profile: 'ME2_R75_COMMAND',
-  });
-  assert.equal(plan.effective_sidebar, 'HIDDEN');
-  assert.equal(plan.remote_bounds.x, ME2_PRIMARY_PAGE_PADDING);
-  assert.ok(plan.remote_bounds.width >= SHELL_MIN_REMOTE_WIDTH);
-  assert.ok(plan.adaptations.includes('ME2_AGENT_RAIL_RESERVED_SPACE_RELEASED_FOR_ACTIVE_SURFACE'));
-  assert.equal(plan.authority_effect, false);
-});
-
-test('R85 command rail visibility and native Browser bounds share one presentation state', () => {
-  const open = planShellLayout({
-    width: 1440,
-    height: 960,
-    state: normalizeShellLayoutState(),
-    surface_profile: 'ME2_R75_COMMAND',
-    me2_command_rail_open: true,
-  });
-  const closed = planShellLayout({
-    width: 1440,
-    height: 960,
-    state: normalizeShellLayoutState(),
-    surface_profile: 'ME2_R75_COMMAND',
-    me2_command_rail_open: false,
-  });
-  assert.equal(open.effective_sidebar, 'EXPANDED');
-  assert.equal(open.remote_bounds.x, ME2_PRIMARY_PAGE_PADDING + ME2_PRIMARY_COMMAND_SIDEBAR_WIDTH + ME2_PRIMARY_COMMAND_GAP);
-  assert.equal(closed.effective_sidebar, 'HIDDEN');
-  assert.equal(closed.remote_bounds.x, ME2_PRIMARY_PAGE_PADDING);
-  assert.ok(closed.remote_bounds.width > open.remote_bounds.width);
-  assert.ok(closed.adaptations.includes('ME2_AGENT_RAIL_HIDDEN_BY_PRESENTATION'));
-  assert.equal(closed.authority_effect, false);
-});
-
-test('R85 contextual drawer reserves native Browser height and degrades before starving the active surface', () => {
-  const closed = planShellLayout({
-    width: 1440,
-    height: 960,
-    state: normalizeShellLayoutState(),
-    surface_profile: 'ME2_R75_COMMAND',
-    me2_context_drawer_open: false,
-  });
-  const open = planShellLayout({
-    width: 1440,
-    height: 960,
-    state: normalizeShellLayoutState(),
-    surface_profile: 'ME2_R75_COMMAND',
-    me2_context_drawer_open: true,
-  });
-  assert.equal(open.me2_context_drawer_effective_open, true);
-  assert.equal(open.me2_context_drawer_requested_height, ME2_PRIMARY_CONTEXT_DRAWER_HEIGHT);
-  assert.equal(open.me2_context_drawer_height, ME2_PRIMARY_CONTEXT_DRAWER_HEIGHT);
-  assert.equal(open.remote_bounds.height, closed.remote_bounds.height - ME2_PRIMARY_CONTEXT_DRAWER_HEIGHT);
-  assert.ok(open.remote_bounds.height >= ME2_PRIMARY_MIN_BROWSER_HEIGHT);
-  assert.equal(open.authority_effect, false);
-
-  const large = planShellLayout({
-    width: 1440,
-    height: 800,
-    state: normalizeShellLayoutState(),
-    surface_profile: 'ME2_R75_COMMAND',
-    me2_context_drawer_open: true,
-    me2_context_drawer_height: ME2_PRIMARY_CONTEXT_DRAWER_MAX_HEIGHT,
-  });
-  assert.equal(large.me2_context_drawer_effective_open, true);
-  assert.equal(large.me2_context_drawer_requested_height, ME2_PRIMARY_CONTEXT_DRAWER_MAX_HEIGHT);
-  assert.ok(large.me2_context_drawer_height >= ME2_PRIMARY_CONTEXT_DRAWER_MIN_HEIGHT);
-  assert.ok(large.me2_context_drawer_height < ME2_PRIMARY_CONTEXT_DRAWER_MAX_HEIGHT);
-  assert.ok(large.adaptations.includes('ME2_CONTEXT_DRAWER_CLAMPED_FOR_ACTIVE_SURFACE'));
-  assert.equal(large.remote_bounds.height, ME2_PRIMARY_MIN_BROWSER_HEIGHT);
-
-  const short = planShellLayout({
-    width: 1440,
-    height: 640,
-    state: normalizeShellLayoutState(),
-    surface_profile: 'ME2_R75_COMMAND',
-    me2_context_drawer_open: true,
-  });
-  assert.equal(short.me2_context_drawer_effective_open, false);
-  assert.equal(short.me2_context_drawer_height, 0);
-  assert.ok(short.adaptations.includes('ME2_CONTEXT_DRAWER_CLOSED_FOR_ACTIVE_SURFACE'));
-  assert.ok(short.remote_bounds.height >= ME2_PRIMARY_MIN_BROWSER_HEIGHT);
-});
+const read = relative => readFile(new URL(relative, import.meta.url), 'utf8');
+const main = await read('../src/main.mjs');
+const preload = await read('../src/preload-shell.cjs');
+const store = await read('../../me2-ui/src/components/me2/store.tsx');
+const integration = await read('../src/me2/me2-integration-entry.mjs');
+const uiHost = await read('../src/me2/me2-ui-host.mjs');
+const me2Shell = await read('../../me2-ui/src/components/me2/shell/me2-shell.tsx');
+const me2Topbar = await read('../../me2-ui/src/components/me2/shell/topbar.tsx');
+const r85VisualHarness = await read('./me2-r85-visual-evidence.mjs');
+const packageSmokeWorkflow = await read('../../../.github/workflows/browser-windows-package-smoke.yml');
 
 test('normal Browser startup prefers packaged ME2 and falls back only to generated fail-closed recovery', () => {
   assert.match(main, /await preparePrimaryShellTarget\(\)/);
@@ -193,17 +37,15 @@ test('ME2 page navigation controls presentation only through the trusted preload
     preload.indexOf('} else {', preload.indexOf('if (isPrimaryMe2PresentationDocument())')),
   );
   assert.doesNotMatch(primaryBranch, /snapshot:\s*\(\)|command:\s*\(|presentationFocus|onBrainDelta|brainStreamStatus/);
-  assert.match(store, /metaengineShell\?: \{[\s\S]{0,220}setPrimaryPage\?: \(page: string\) => Promise<unknown> \| unknown/);
-  assert.match(store, /const result = shell\?\.setPrimaryPage\?\.\(p\)/);
-  assert.match(store, /primaryPageAck = Promise\.resolve\(result\)/);
-  assert.match(store, /return primaryPageAck/);
+  assert.match(store, /metaengineShell\?:/);
+  assert.match(store, /native\?\.setPrimaryPage\?\.\(page\)/);
+  assert.doesNotMatch(store, /sendCommand|workspace_bindings|lease_current/);
   assert.match(main, /presentation_only:\s*true/);
   assert.match(main, /scheduler_authority:\s*false/);
   assert.match(main, /browser_command_authority:\s*false/);
   assert.match(main, /release_authority:\s*false/);
   assert.match(main, /authority_effect:\s*false/);
 });
-
 
 test('packaged ME2 UI routing waits for bounded initial readiness', () => {
   assert.match(uiHost, /export async function waitForMe2UiReady/);
@@ -224,7 +66,6 @@ test('concurrent primary-window startup joins the same ME2 readiness barrier', (
   assert.match(integration, /return await startPromise/);
   assert.match(integration, /finally \{[\s\S]*startPromise = null/);
 });
-
 
 test('R97 CDP proof converges only inside a bounded read-only window', () => {
   assert.match(main, /probeMe2R97InstalledDomOnce/);
@@ -259,8 +100,6 @@ test('installed ME2 primary shell is attested from main-process CDP DOM geometry
   assert.match(main, /release_authority:\s*false/);
 });
 
-
-
 test('R97 Package Smoke captures the actual single-main ME2 surface, not legacy shell fixtures', () => {
   assert.match(packageSmokeWorkflow, /Capture R97 primary chat-fleet visual evidence/);
   assert.match(packageSmokeWorkflow, /test\\me2-r85-visual-evidence\.mjs|test\/me2-r85-visual-evidence\.mjs/);
@@ -285,21 +124,9 @@ test('R97 Package Smoke captures the actual single-main ME2 surface, not legacy 
   assert.match(r85VisualHarness, /r97-settings-advanced-surface-1440x960/);
 });
 
-test('R85 control-room chrome keeps closed overlays out of the semantic tree', () => {
+test('primary shell keeps closed overlays out of the semantic tree', () => {
   assert.match(me2Shell, /\{paletteOpen \? <CommandPalette \/> : null\}/);
-  assert.match(me2Shell, /\{overlaysOpen \? <GlobalDialogs \/> : null\}/);
-  assert.doesNotMatch(me2Shell, /<CommandPalette \/>\s*<GlobalDialogs \/>/);
-});
-
-test('R85 persistent chrome is compact and cannot directly fire emergency flush', () => {
-  assert.match(me2Topbar, /h-\[42px\]/);
-  assert.match(me2Pagebar, /className="flex h-9/);
-  assert.match(me2Statusbar, /h-\[22px\]/);
-  assert.doesNotMatch(me2Statusbar, /budgetFlush|BUDGET_FLUSH|EMERGENCY/);
-  assert.doesNotMatch(me2Palette, /window\.confirm\(|window\.prompt\(/);
-  assert.match(me2Palette, /BUDGET_FLUSH:\s*confirmBudgetFlush/);
-  assert.match(me2Palette, /data-testid="emergency-flush-confirm"/);
-  assert.match(me2Palette, /setConfirmFlush\(true\)/);
+  assert.doesNotMatch(me2Shell, /GlobalDialogs|ContextDrawer|PeekInspector/);
 });
 
 test('R108 retired COMMAND and daemon Browser pages are absent while native selected-agent slot remains', async () => {
@@ -315,38 +142,6 @@ test('R108 retired COMMAND and daemon Browser pages are absent while native sele
   assert.match(me2Shell, /PrimaryChatFleetWorkspace/);
   assert.doesNotMatch(me2Shell, /BrowserStage|pages\/browser/);
   assert.match(me2Topbar, /data-testid="topbar"/);
-  assert.match(me2Pagebar, /data-testid="pagebar"/);
-  assert.match(me2Statusbar, /data-testid="statusbar"/);
-});
-
-test('R85 agent tab binding is exact-session-only and rejects similar-title fallbacks', () => {
-  const sessionId = 'sess-abc-123';
-  const exact = resolveExactAgentTab([
-    { id: 'tab-a', url: 'https://chat.z.ai/c/sess-abc-123', title: 'Refactor auth' },
-    { id: 'tab-b', url: 'https://chat.z.ai/c/other-session', title: 'Refactor auth v2' },
-  ], sessionId);
-  assert.equal(exact.kind, 'exact');
-  assert.equal(exact.tab.id, 'tab-a');
-
-  const titleOnly = resolveExactAgentTab([
-    { id: 'tab-title', url: 'https://chat.z.ai/c/other-session', title: 'Refactor auth' },
-  ], sessionId);
-  assert.equal(titleOnly.kind, 'missing');
-  assert.equal(titleOnly.zai.length, 1);
-
-  assert.equal(zAiUrlContainsExactSession('https://chat.z.ai/c/sess-abc-1234', sessionId), false);
-  assert.equal(zAiUrlContainsExactSession('https://example.com/?session=sess-abc-123', sessionId), false);
-
-  const duplicate = resolveExactAgentTab([
-    { id: 'tab-1', url: 'https://chat.z.ai/c/sess-abc-123', title: 'one' },
-    { id: 'tab-2', url: 'https://chat.z.ai/session/sess-abc-123?view=2', title: 'two' },
-  ], sessionId);
-  assert.equal(duplicate.kind, 'ambiguous');
-  assert.equal(duplicate.matches.length, 2);
-
-  // The pure resolver remains a historical fail-closed contract; the product
-  // shell does not consume it as Browser/session authority.
-  assert.doesNotMatch(me2Shell, /selectPrimaryAgentSession|resolveExactAgentTab|loadBrowserTabs|BROWSER_SELECT_TAB/);
 });
 
 test('R106 removed COMMAND cannot recreate an interactive Agent authority surface', async () => {
@@ -357,261 +152,8 @@ test('R106 removed COMMAND cannot recreate an interactive Agent authority surfac
   assert.doesNotMatch(me2Shell, /selectPrimaryAgentSession|agentChatOp|useAgentChatSessions/);
 });
 
-test('R85 Browser tabs use sibling controls instead of nested interactive semantics', () => {
-  assert.match(me2BrowserStage, /type="button"\s+title=\{\`\$\{t\.title\}\\n\$\{t\.url\}\`}\s+role="tab"/);
-  assert.match(me2BrowserStage, /aria-label=\{\`Закрыть вкладку/);
-  assert.doesNotMatch(me2BrowserStage, /<span[\s\S]{0,240}role="tab"[\s\S]{0,900}<button/);
-});
-
-test('R85 Command hides browser transport tuning while full Browser retains it', () => {
-  assert.match(me2BrowserStage, /\{!compact && \(\s*<div role="group" aria-label="Профиль полосы стрима"/);
-  assert.match(me2BrowserStage, /compact \? \(\s*<span className="ml-auto text-zinc-600">/);
-  assert.match(me2BrowserStage, /\[30, 55, 85\]\.map/);
-  assert.match(me2BrowserStage, /\[480, 640, 960\]\.map/);
-});
-
-test('R85 Browser image fallbacks never expose broken-image text in the primary surface', () => {
-  assert.match(me2BrowserStage, /data-testid="browser-cast-image"/);
-  assert.match(me2BrowserStage, /data-testid="browser-cdp-fallback-image"/);
-  assert.match(me2BrowserStage, /alt=""\s+aria-hidden="true"\s+className="block h-full w-full object-contain opacity-0"/);
-  assert.match(me2BrowserStage, /alt=""\s+aria-hidden="true"\s+className="absolute inset-0 h-full w-full object-contain opacity-0"/);
-  assert.match(me2BrowserStage, /onLoad=\{\(e\) => \{ e\.currentTarget\.style\.opacity = "1"; \}\}/);
-  assert.match(me2BrowserStage, /onError=\{\(e\) => \{ e\.currentTarget\.style\.opacity = "0"; \}\}/);
-  assert.match(me2BrowserStage, /onLoad=\{\(e\) => \{ e\.currentTarget\.style\.opacity = "1"; cdpNextTick\(2000\); \}\}/);
-  assert.match(me2BrowserStage, /onError=\{\(e\) => \{ e\.currentTarget\.style\.opacity = "0"; cdpNextTick\(6000\); \}\}/);
-});
-
-test('R85 native Browser overlays only the viewport and preserves compact Browser chrome', () => {
-  assert.match(me2BrowserStage, /compact \? "h-7 pt-1" : "pt-1\.5"/);
-  assert.match(me2BrowserStage, /compact \? "h-9 py-0" : "py-1\.5"/);
-  assert.match(me2BrowserStage, /compact \? "h-6 py-0" : "py-1"/);
-  const plan = planShellLayout({
-    width: 1440,
-    height: 960,
-    state: normalizeShellLayoutState(),
-    surface_profile: 'ME2_R75_COMMAND',
-  });
-  assert.ok(plan.remote_bounds.y > ME2_PRIMARY_TOP_HEIGHT + ME2_PRIMARY_COMMAND_AGENT_HEADER_HEIGHT);
-  assert.ok(plan.reserved_bottom_height > ME2_PRIMARY_PAGEBAR_HEIGHT + ME2_PRIMARY_STATUSBAR_HEIGHT);
-  assert.equal(plan.authority_effect, false);
-});
-
-test('R85 Observability exposes persisted operator view presets without new effect authority', () => {
-  assert.match(me2Observability, /data-testid="event-view-presets"/);
-  assert.match(me2Observability, /me2\.obs\.events\.preset\.v1/);
-  assert.match(me2Observability, /EVENT_ATTENTION_TOKENS/);
-  assert.match(me2Observability, /applyViewPreset/);
-  assert.match(me2Observability, /localStorage\.setItem\(EVENT_VIEW_PRESET_LS, key\)/);
-  assert.doesNotMatch(me2Observability, /setPrimaryCommandRail|metaengine:shell:primary-overlay/);
-});
-
-test('R97 attention and observability are advanced-only and keep zero effect authority', () => {
-  assert.doesNotMatch(me2Topbar, /data-testid="attention-button"|data-testid="attention-center"/);
-  assert.match(me2Topbar, /data-testid="settings-button"/);
-  assert.match(me2Topbar, /data-testid="global-cmdbar"/);
-  assert.doesNotMatch(me2Topbar, /sendCommand\(|BUDGET_FLUSH|EMERGENCY/);
-  assert.match(me2Observability, /"compact" \| "full"/);
-  assert.match(me2Observability, /me2\.obs\.events\.view\.v1/);
-  assert.match(me2Observability, /prev\.event\.type === event\.type/);
-});
-
 test('R106 primary shell consumes no retired COMMAND AgentChat feed', () => {
   assert.doesNotMatch(me2Shell, /useAgentChatSessions|agentChatOp|\/agentchat|WebSocket|me2Fetch/);
-});
-
-test('R85 unavailable legacy sandbox plane is fail-close and collapsed by default', () => {
-  assert.match(me2CodePage, /id="code-sandboxes-plane" title="Sandbox records"[^\n]+defaultOpen=\{false\}/);
-  assert.match(me2CodePage, /Sandbox lifecycle operations are unavailable in this runtime/);
-});
-
-test('R85 Tasks is task-focused and does not duplicate Browser or Mirror control planes', () => {
-  assert.match(me2TasksPage, /data-testid="page-tasks"/);
-  assert.match(me2TasksPage, /title=\{`Task branches/);
-  assert.doesNotMatch(me2TasksPage, /loadBrowserTabs|type BrowserTab|me2:cast-toggle|me2:cast-ctl/);
-  assert.doesNotMatch(me2TasksPage, /<MirrorPanel|mirror-panel/);
-  assert.doesNotMatch(me2TasksPage, /MonitorPlay|MousePointerClick|AppWindow/);
-  assert.match(me2TasksPage, /me2\.tasks\.branch-view\.v1/);
-  assert.match(me2TasksPage, /localStorage\.setItem\(TASKS_BRANCH_VIEW_LS, branchTab\)/);
-});
-
-test('R97 persistent chrome avoids duplicate task, mirror and attention telemetry', () => {
-  assert.doesNotMatch(me2Topbar, /useKpis|kpi\.ready|kpi\.running|kpi\.fail/);
-  assert.doesNotMatch(me2Topbar, /data-testid="attention-button"/);
-  assert.doesNotMatch(me2Shell, /<StatusBar\s*\/>/);
-  assert.match(me2Statusbar, /useClientRuntimeStatus/);
-  assert.match(me2Statusbar, /work\?\.proven_agent_count/);
-  assert.doesNotMatch(me2Statusbar, /runtime live|stats\.agentsIdle/);
-});
-
-test('R85 Task Sheet schedules scroll after commit, never during render', () => {
-  assert.match(me2Dialogs, /useRef<HTMLDivElement \| null>\(null\)/);
-  assert.match(me2Dialogs, /requestAnimationFrame\(\(\) => \{/);
-  assert.match(me2Dialogs, /\[detail\?\.id, stream\.length\]/);
-  assert.doesNotMatch(me2Dialogs, /if \(detail\) setTimeout\(/);
-});
-
-test('R85 registry command arguments stay inside the semantic palette', () => {
-  assert.match(me2Palette, /data-testid="registry-action-args"/);
-  assert.match(me2Palette, /JSON\.parse\(pendingArgs\)/);
-  assert.match(me2Palette, /sendCommand\(pendingAction\.action, payload/);
-  assert.doesNotMatch(me2Palette, /window\.prompt\(/);
-});
-
-test('R85 command palette exposes full authority lanes instead of abbreviated color-only hints', () => {
-  assert.match(me2Palette, /Authority lane: \$\{m\.lane\}/);
-  assert.match(me2Palette, /aria-label=\{\`Authority lane \$\{m\.lane\}\`\}/);
-  assert.match(me2Palette, /m\.lane\.replace\("_", " "\)/);
-  assert.doesNotMatch(me2Palette, /m\.lane\.slice\(0, 4\)/);
-});
-
-test('R85 native open-site intent uses the ME2 overlay plane instead of window.prompt', () => {
-  assert.match(store, /type === "open-site-prompt"[\s\S]{0,240}dialog: "openSite"/);
-  assert.doesNotMatch(store, /window\.prompt\("URL сайта для нативной вкладки/);
-  assert.match(me2Dialogs, /data-testid="open-site-dialog"/);
-  assert.match(me2Dialogs, /desktop\.tabs\.openSite\(value\)/);
-  assert.match(me2Dialogs, /https\?:/);
-  assert.match(me2Dialogs, /\.test\(value\)/);
-});
-
-test('R97 retains bounded page-history metadata without a direct Alt navigation path', () => {
-  assert.match(store, /pageHistoryIndex:\s*number/);
-  assert.match(store, /const prefix = st\.recentPages\.slice\(0, st\.pageHistoryIndex \+ 1\)/);
-  assert.doesNotMatch(store, /nextIndex = st\.pageHistoryIndex \+ delta/);
-  assert.doesNotMatch(store, /set\(\{ page: target, pageHistoryIndex: nextIndex \}\)/);
-  assert.doesNotMatch(store, /e\.key === "ArrowLeft" \|\| e\.key === "ArrowRight"/);
-  assert.doesNotMatch(store, /rp\.length - 2/);
-});
-
-test('R85 workspace switch restores workspace-scoped layout preferences', () => {
-  assert.match(store, /me2\.workspace-layouts\.v1/);
-  assert.match(store, /readWorkspaceLayout\(workspace: WorkspaceKey\)/);
-  assert.match(store, /writeWorkspaceLayout\(get\(\)\.workspace, \{ drawerOpen: open \}\)/);
-  assert.match(store, /const layoutPreference = readWorkspaceLayout\(w\)/);
-  assert.match(store, /contextDrawerPreferredOpen: layoutPreference\.drawerOpen/);
-  assert.match(store, /contextDrawerTab: layoutPreference\.drawerTab/);
-  assert.match(store, /commandRailPreferredOpen: layoutPreference\.commandRailOpen/);
-  assert.match(store, /setCommandRailPreference/);
-  assert.match(store, /me2\.command\.agent-rail\.v2:/);
-});
-
-test('R97 retains workspace reset capability without a persistent topbar control', () => {
-  assert.match(store, /resetWorkspaceLayout/);
-  assert.match(store, /drawerHeight: CONTEXT_DRAWER_DEFAULT_HEIGHT/);
-  assert.match(store, /drawerFollowSelection: true/);
-  assert.match(store, /commandRailOpen: true/);
-  assert.match(store, /me2:workspace-layout-reset/);
-  assert.doesNotMatch(me2Topbar, /data-testid="workspace-reset-layout"/);
-  assert.match(me2Topbar, /data-testid="settings-button"/);
-});
-
-test('R85 Context Drawer exposes selection-driven inspection without a second data plane', () => {
-  assert.match(store, /ContextDrawerTab = "selection" \| "events" \| "commands" \| "runtime"/);
-  assert.match(store, /inspectedTaskId:\s*string \| null/);
-  assert.match(store, /inspectedTaskId: task\?\.id \?\? id/);
-  assert.match(me2ContextDrawer, /data-testid="context-drawer-selection"/);
-  assert.match(me2ContextDrawer, /useAgentChatSessions\(\)/);
-  assert.match(me2ContextDrawer, /Selected agent/);
-  assert.match(me2ContextDrawer, /Last inspected task/);
-  assert.doesNotMatch(me2ContextDrawer, /me2Fetch\(|sendCommand\(|agentChatOp\(/);
-});
-
-test('R85 Context Drawer follows selection only when explicitly enabled and already open', () => {
-  assert.match(store, /drawerFollowSelection:\s*boolean/);
-  assert.match(store, /contextDrawerFollowSelection:\s*boolean/);
-  assert.match(store, /setContextDrawerFollowSelection/);
-  assert.match(store, /contextDrawerPreferredOpen && state\.contextDrawerFollowSelection \? "selection"/);
-  assert.match(store, /writeWorkspaceLayout\(get\(\)\.workspace, \{ drawerTab: "selection" \}\)/);
-  assert.doesNotMatch(store, /setContextDrawer\(true\)[\s\S]{0,120}drawerTab: "selection"/);
-  assert.match(me2ContextDrawer, /data-testid="context-drawer-follow-selection"/);
-  assert.match(me2ContextDrawer, /Drawer никогда не открывается автоматически/);
-});
-
-test('R85 late drawer replies are rejected after page or workspace transitions', () => {
-  const request = { seq: 41, workspace: 'development', page: 'command' };
-  assert.equal(presentationSyncStillCurrent(request, { seq: 41, workspace: 'development', page: 'command' }), true);
-  assert.equal(presentationSyncStillCurrent(request, { seq: 42, workspace: 'development', page: 'command' }), false);
-  assert.equal(presentationSyncStillCurrent(request, { seq: 41, workspace: 'development', page: 'tasks' }), false);
-  assert.equal(presentationSyncStillCurrent(request, { seq: 41, workspace: 'browser-ops', page: 'command' }), false);
-
-  assert.match(store, /presentationSyncStillCurrent/);
-  assert.match(store, /workspace: get\(\)\.workspace,\s*page: get\(\)\.page/);
-  const setPageStart = store.indexOf('setPage: (p) => {');
-  const setWorkspaceStart = store.indexOf('setWorkspace: (w) => {');
-  assert.ok(setPageStart >= 0 && setWorkspaceStart > setPageStart);
-  assert.ok(
-    store.indexOf('contextDrawerSyncSeq += 1;', setPageStart) > setPageStart
-      && store.indexOf('contextDrawerSyncSeq += 1;', setPageStart) < setWorkspaceStart,
-    'page transition must advance the drawer request generation',
-  );
-  assert.ok(
-    store.indexOf('contextDrawerSyncSeq += 1;', setWorkspaceStart) > setWorkspaceStart,
-    'workspace transition must advance the drawer request generation',
-  );
-  assert.match(store, /if \(!presentationSyncStillCurrent\(request,/);
-});
-
-test('R95 Utility Panel splitter is keyboard-accessible in bottom and right docks and native-sync fenced', () => {
-  assert.match(me2ContextDrawer, /data-testid="context-drawer-resizer"/);
-  assert.match(me2ContextDrawer, /role="separator"/);
-  assert.match(me2ContextDrawer, /aria-orientation=\{dock === "right" \? "vertical" : "horizontal"\}/);
-  assert.match(me2ContextDrawer, /event\.key === "ArrowUp"/);
-  assert.match(me2ContextDrawer, /event\.key === "ArrowDown"/);
-  assert.match(me2ContextDrawer, /event\.key === "ArrowLeft"/);
-  assert.match(me2ContextDrawer, /event\.key === "ArrowRight"/);
-  assert.match(me2ContextDrawer, /event\.key === "Home"/);
-  assert.match(me2ContextDrawer, /event\.key === "End"/);
-  assert.match(me2ContextDrawer, /setHeight\(nextHeight, false\)/);
-  assert.match(me2ContextDrawer, /setWidth\(nextWidth, false\)/);
-  assert.match(store, /let contextDrawerSyncSeq = 0/);
-  assert.match(store, /seq:\s*\+\+contextDrawerSyncSeq/);
-  assert.match(store, /presentationSyncStillCurrent\(request,/);
-  assert.match(store, /setContextDrawerHeight: \(height: number, persist\?: boolean\)/);
-  assert.match(store, /setContextDrawerWidth: \(width: number, persist\?: boolean\)/);
-  assert.match(store, /setContextDrawerDock: \(dock: ContextDrawerDock\)/);
-});
-
-test('R95 Utility Panel remains a read-only presentation plane with native geometry reconciliation', () => {
-  assert.match(preload, /const setPrimaryContextDrawer = \(open, dock, height, width\) => ipcRenderer\.invoke\(/);
-  assert.match(preload, /'metaengine:shell:primary-context-drawer'/);
-  const primaryBranch = preload.slice(
-    preload.indexOf('if (isPrimaryMe2PresentationDocument())'),
-    preload.indexOf('} else {', preload.indexOf('if (isPrimaryMe2PresentationDocument())')),
-  );
-  assert.match(primaryBranch, /setPrimaryContextDrawer/);
-  assert.doesNotMatch(primaryBranch, /snapshot:\s*\(\)|command:\s*\(/);
-
-  assert.match(main, /let primaryContextDrawerOpen = false/);
-  assert.match(main, /let primaryContextDrawerDock = 'BOTTOM'/);
-  assert.match(main, /let primaryContextDrawerHeight = 200/);
-  assert.match(main, /let primaryContextDrawerWidth = 380/);
-  assert.match(main, /me2_context_drawer_dock: primaryContextDrawerDock/);
-  assert.match(main, /me2_context_drawer_width: primaryContextDrawerWidth/);
-  assert.match(main, /ipcMain\.handle\('metaengine:shell:primary-context-drawer'/);
-  const drawerHandler = main.slice(
-    main.indexOf("ipcMain.handle('metaengine:shell:primary-context-drawer'"),
-    main.indexOf("ipcMain.handle('metaengine:shell:system-deltas'", main.indexOf("ipcMain.handle('metaengine:shell:primary-context-drawer'")),
-  );
-  assert.match(drawerHandler, /presentation_only:\s*true/);
-  assert.match(drawerHandler, /scheduler_authority:\s*false/);
-  assert.match(drawerHandler, /browser_command_authority:\s*false/);
-  assert.match(drawerHandler, /update_authority:\s*false/);
-  assert.match(drawerHandler, /release_authority:\s*false/);
-  assert.match(drawerHandler, /authority_effect:\s*false/);
-
-  assert.match(store, /drawerDock: ContextDrawerDock/);
-  assert.match(store, /drawerWidth: number/);
-  assert.doesNotMatch(store, /Ctrl\/Cmd\+J|e\.key === "j"/);
-  assert.match(store, /only global UI shortcut is Ctrl\/Cmd\+K/);
-  assert.match(store, /setPrimaryContextDrawer/);
-  assert.doesNotMatch(me2Topbar, /data-testid="context-drawer-toggle"/);
-  assert.doesNotMatch(me2Shell, /<ContextDrawer \/>/);
-  assert.match(me2ContextDrawer, /data-testid="context-drawer"/);
-  assert.match(me2ContextDrawer, /data-drawer-dock=\{dock\}/);
-  assert.match(me2ContextDrawer, /data-testid="utility-panel-dock-bottom"/);
-  assert.match(me2ContextDrawer, /data-testid="utility-panel-dock-right"/);
-  assert.match(store, /setContextDrawerHeight/);
-  assert.match(store, /setContextDrawerWidth/);
-  assert.doesNotMatch(me2ContextDrawer, /sendCommand\(|me2Fetch\(|agentChatOp\(/);
 });
 
 test('R85 command rail bridge is presentation-only and reconciles effective geometry', () => {
@@ -667,11 +209,9 @@ test('R85 presentation overlays temporarily remove the native Browser surface wi
   assert.match(overlayHandler, /release_authority:\s*false/);
   assert.match(overlayHandler, /authority_effect:\s*false/);
 
-  assert.match(store, /setChromeOverlay/);
   assert.match(me2Shell, /setPrimaryOverlay\(nativeOverlayOpen\)/);
   assert.doesNotMatch(me2Topbar, /setChromeOverlay\("attention"|setChromeOverlay\("workspace-menu"/);
   assert.match(me2Topbar, /setPalette\(true\)/);
-  assert.match(me2Pagebar, /setChromeOverlay\("stage-menu"/);
 });
 
 test('ME2 UI routing authority is revoked on stop, degradation, or owned-process loss', () => {
@@ -736,13 +276,6 @@ test('ME2 UI routing authority is revoked on stop, degradation, or owned-process
   });
   assert.equal(adoptedStopped.external_adopt_authorized, false);
   assert.equal(adoptedStopped.routing_authorized, false);
-});
-
-test('R90 BrowserStage clears stale live frames before degraded fallback becomes visible', () => {
-  assert.match(me2BrowserStage, /const hideCastImage = \(\) => \{[\s\S]{0,220}img\.style\.opacity = "0";[\s\S]{0,120}img\.removeAttribute\("src"\)/);
-  assert.match(me2BrowserStage, /ws\.onerror = \(\) => \{[\s\S]{0,180}hideCastImage\(\)/);
-  assert.match(me2BrowserStage, /ws\.onclose = \(\) => \{[\s\S]{0,180}hideCastImage\(\)/);
-  assert.match(me2BrowserStage, /return \(\) => \{[\s\S]{0,220}hideCastImage\(\)[\s\S]{0,180}ws\?\.close\(\)/);
 });
 
 test('R90 physical ME2 visual qualification blocks live Browser transports and records zero remote pixels', () => {

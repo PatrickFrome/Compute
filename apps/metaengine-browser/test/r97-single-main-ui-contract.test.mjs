@@ -94,8 +94,8 @@ test('R97 renderer keeps only chat fleet + native site persistent; advanced surf
   assert.match(topbar, /data-testid="global-cmdbar"/);
   assert.match(topbar, /data-testid="settings-button"/);
   assert.match(topbar, /setPage\("system"\)/);
-  assert.match(store, /page: "browser"/);
-  assert.match(store, /const restoredPage: PageKey = "browser"/);
+  assert.match(store, /page:\s*['"]browser['"]/);
+  assert.match(store, /normalizePageKey/);
 });
 
 
@@ -109,22 +109,18 @@ test('R97 has no legacy renderer fallback and degrades only to generated fail-cl
 });
 
 
-test('R97 Settings is the explicit directory for every hidden advanced surface', () => {
-  assert.match(settings, /data-testid="settings-advanced-surfaces"/);
-  for (const page of ['code','tasks','supervisor','memory','observability']) {
-    assert.match(settings, new RegExp(`page: "${page}"`));
-  }
-  assert.match(settings, /data-testid=\{\`settings-open-\$\{surface\.page\}\`\}/);
-  assert.match(settings, /setPage\(surface\.page\)/);
-  assert.doesNotMatch(settings, /page: "(?:command|agents|compute)"/);
-  assert.match(settings, /role="tablist"/);
-  assert.match(settings, /Find any view with Ctrl\+K/);
+test('Settings navigates to the current screen directory and shows typed runtime capabilities', () => {
+  assert.match(settings, /PAGES\.filter\(page=>page\.key!=='system'\)\.map/);
+  assert.match(settings, /setPage\(page\.key\)/);
+  assert.match(settings, /useClientRuntimeStatus/);
+  assert.match(settings, /data-testid="native-work-readiness"/);
+  assert.match(settings, /'chat_dispatch'[\s\S]*'coding_execution'[\s\S]*'host_continuity'[\s\S]*'continuous_autonomy'/);
+  assert.doesNotMatch(settings, /me2Fetch|sendCommand|glmOp|spawnAgent|setDialog/);
 });
 
 
-test('R97 command palette advertises search-only advanced navigation, never retired Alt routes', () => {
-  assert.match(palette, /heading="Workspace"/);
-  assert.doesNotMatch(palette, /Pages · Alt\+1\.\.0/);
-  assert.doesNotMatch(palette, />Alt\+\{p\.num\}</);
-  assert.match(palette, /onSelect=\{\(\) => \{ setPage\(p\.key\); setOpen\(false\); \}\}/);
+test('command palette offers current screens and exact project tasks without retired Alt routes', () => {
+  assert.match(palette, /PAGES\.map/);
+  assert.match(palette, /setPage\(page\.key\);setOpen\(false\)/);
+  assert.doesNotMatch(palette, /Pages · Alt\+1\.\.0|>Alt\+|spawnAgent|AGENT_SPAWN|sendCommand|loadCatalog/);
 });

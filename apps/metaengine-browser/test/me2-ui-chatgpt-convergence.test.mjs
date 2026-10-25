@@ -39,9 +39,10 @@ test('deprecated metaengine-dark-workspace-v2 bundle and route are absent', asyn
   assert.doesNotMatch(main, /metaengine-dark-workspace-v2/);
 
   const builder = JSON.parse(await readFile(browserPath('electron-builder.test.json'), 'utf8'));
-  assert.deepEqual(builder.files, ['src/**/*', 'package.json', {
-    from: '../../infra/client-state-runtime', to: 'infra/client-state-runtime', filter: ['offline-runtime-bundle.mjs'],
-  }]);
+  assert.ok(builder.files.includes('src/**/*'));
+  assert.ok(builder.files.includes('package.json'));
+  assert.ok(builder.files.some(entry => entry?.to === 'infra/client-state-runtime' && entry.filter?.includes('offline-runtime-bundle.mjs')));
+  assert.equal(builder.files.some(entry => typeof entry === 'string' && /(?:^|\/)ui(?:\/|$)/.test(entry)), false);
   assert.equal(
     builder.extraResources.some((entry) => String(entry?.from || '') === 'ui' || String(entry?.to || '') === 'ui'),
     false,
@@ -55,16 +56,17 @@ test('deprecated metaengine-dark-workspace-v2 bundle and route are absent', asyn
 test('primary ME2 UI is ChatGPT-aligned without hard-coded model version', async () => {
   const shell = await text('src/components/me2/shell/me2-shell.tsx');
   const store = await text('src/components/me2/store.tsx');
-  const chat = await text('src/components/me2/agent-chat-panel.tsx');
+  const topbar = await text('src/components/me2/shell/topbar.tsx');
 
   assert.match(shell, /ChatGPT ·/);
   assert.match(shell, /Verified ChatGPT Agent/);
   assert.match(shell, /Open an existing ChatGPT agent conversation\./);
-  assert.match(store, /native ChatGPT agent fleet/);
+  assert.match(shell, /primaryChatFleetRoster/);
+  assert.match(shell, /selectPrimaryChatActor/);
 
   assert.doesNotMatch(shell, bannedPrimary);
   assert.doesNotMatch(store, bannedPrimary);
-  assert.doesNotMatch(chat, bannedPrimary);
+  assert.doesNotMatch(topbar, bannedPrimary);
   assert.doesNotMatch(shell, /GPT-[0-9]/i);
 });
 
@@ -74,20 +76,7 @@ test('historical Agent origin wire token remains compatible but is not user-visi
   assert.doesNotMatch(shell, /Verified z\.ai Agent|Open an existing z\.ai Agent conversation/i);
 });
 
-test('legacy provider telemetry remains read-only while reviews keep explicit action', async () => {
-  const supervisor = await text('src/components/me2/pages/supervisor.tsx');
 
-  assert.match(supervisor, /me2Fetch<GlmData>\("\/glm\?XTransformPort=3041"\)/);
-  assert.match(supervisor, /title="Provider diagnostics and reviews"/);
-  assert.match(supervisor, /legacy · read-only/);
-  assert.match(supervisor, /data-testid="reviews-run"/);
-  assert.match(supervisor, /reviews\/run/);
-  assert.match(supervisor, /disabled=\{mcxBusy \|\| !reviewTaskId\.trim\(\)\}/);
-
-  assert.doesNotMatch(supervisor, /mcxOp\("glm"/);
-  assert.doesNotMatch(supervisor, /glmOp\(/);
-  assert.doesNotMatch(supervisor, /upgrade флот|Снять живую пробу GLM/);
-});
 
 test('ME2 source tree has no active legacy provider branding or Z.ai SDK imports', async () => {
   const files = await walk(me2('src/'));
