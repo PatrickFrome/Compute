@@ -1,0 +1,142 @@
+{
+  "schema": "metaengine.native-cold-start.source-seal.v1",
+  "baseline_source": "4e5de5c7fb9d9e0fe34a83c839aab58fca4cdb8e",
+  "prior_sealed_paths": 571,
+  "sealed_paths": 577,
+  "updated_entries": [
+    {
+      "path": ".github/workflows/client-live-mechanics-recovery-v1.yml",
+      "prior_blob": "a43f5ddae80bded1ea682cf4b3b8bd7eff5efc43",
+      "current_blob": "3eaed42d73a5f8468209f2c32cfad96f1f944c4b"
+    },
+    {
+      "path": ".github/workflows/client-source-candidate-w73.yml",
+      "prior_blob": "cd0d83fb28f966604a3028e56d2d3fd87787d7ee",
+      "current_blob": "bd59a6fc89fc5188e1802aa84906485ba7d2958f"
+    },
+    {
+      "path": "apps/metaengine-browser/electron-builder.test.json",
+      "prior_blob": "5fd3702152e5feb274dc346016011267045d0d80",
+      "current_blob": "26b95ac6aef3c337463d16154fe48b25c855591e"
+    },
+    {
+      "path": "apps/metaengine-browser/package.json",
+      "prior_blob": "da9e339632d9963414217e0b2b51fe5cad858cde",
+      "current_blob": "e02a278cd6899e8c8d653339a17336c179d69a9a"
+    },
+    {
+      "path": "apps/metaengine-browser/scripts/check-source.mjs",
+      "prior_blob": "b627894c2257b6cb0bfdef5f540c7032dd16a18e",
+      "current_blob": "8d2a0b6e9f488bba28b8f22b23e3426e1ef24d8c"
+    },
+    {
+      "path": "apps/metaengine-browser/src/codex-cli-sandbox-probe.mjs",
+      "prior_blob": "31cb8648b2be45b4a17eb83d5f72e40ce034cecb",
+      "current_blob": "bcd09489c0b70f78bb9fafe125e05711067af2ea"
+    },
+    {
+      "path": "apps/metaengine-browser/src/codex-cli-windows-process-controller.mjs",
+      "prior_blob": "714a23d852cae824bf8652d4aca0283fea994f72",
+      "current_blob": "2c99b0f2af33591810c1d6a82639cd1ad2ff10ea"
+    },
+    {
+      "path": "apps/metaengine-browser/test/browser-guardian-native-staging-contract.test.mjs",
+      "prior_blob": "bc64d663d25324a36a7cd09358a57e0626c1af5e",
+      "current_blob": "c7ce97f9db21da38a4958476838a655649e203f3"
+    },
+    {
+      "path": "apps/metaengine-browser/test/browser-quiescent-zero-tab-contract.test.mjs",
+      "prior_blob": "e93c52a168846aed8795ceac72ddb57ea9fb4a80",
+      "current_blob": "70b783ed97fc67baf7daabed59a89c9d972c556d"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-runner.test.mjs",
+      "prior_blob": "cbd34fc2da77a02470988b9ce515eb75db591574",
+      "current_blob": "a1d8d04b38bed5c21b274def90cf994b63c9eb2c"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-startup-observation.test.mjs",
+      "prior_blob": "25588a55a1641ac3b306b3ab24bda70f6a852415",
+      "current_blob": "ab8ed04507c5bcdf480a75d0329b982b431b75f8"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-windows-job-birth-physical.test.mjs",
+      "prior_blob": "ed31f55d73ee92dddd8a423ecc6cf85f12ca5e40",
+      "current_blob": "45294ddee8f2a5249ee59e34c3a7d33826a6d670"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-windows-job-birth.test.mjs",
+      "prior_blob": "37f18b1f3b260fd0aaba156bb8ba2a0d6f8c3ca6",
+      "current_blob": "28b1ab050e0b8ca7601f93e3fd74e768d8e2f287"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-windows-output-order.test.mjs",
+      "prior_blob": "59af06850ce0e549355ddb591fff4402dce45c83",
+      "current_blob": "9add5de97855511e488f4b75422fe859727089e3"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-windows-process-controller-failures.test.mjs",
+      "prior_blob": "ff910088c31e2257a01808d6397d4d02513f7747",
+      "current_blob": "1f350c99b8401f1565706c25aa10562a430ea95d"
+    },
+    {
+      "path": "apps/metaengine-browser/test/fixtures/codex-cli-startup-observation.mjs",
+      "prior_blob": "83714b5c64fc0aae26ba86a16cc68a9c02646d9c",
+      "current_blob": "0f1b2f25fad8143cbc8dfc780bfe6a1622775d70"
+    },
+    {
+      "path": "apps/metaengine-browser/test/helpers/windows-capture-fixture.mjs",
+      "prior_blob": "01e873b0a59960469dad515472d9726f13e8dd31",
+      "current_blob": "817e07f1a1a27c718f8eb4b5e9c2f0ed6027d799"
+    },
+    {
+      "path": "apps/metaengine-browser/test/windows-capture-fixture-qualification.test.mjs",
+      "prior_blob": "b5ffd717b1cb123b8e5151464f40d1fa20deb77d",
+      "current_blob": "53ae76cdb1e953093a65f7d89d647894d8c5211d"
+    },
+    {
+      "path": "apps/metaengine-browser/test/windows-capture-profile-isolation.test.mjs",
+      "prior_blob": "3c43823d8a51173d1ea874681b3e38b3fc5f5f3a",
+      "current_blob": "4fe2c6206c99d1fdfc4760d2ca718f35170b3d0a"
+    },
+    {
+      "path": "apps/metaengine-browser/test/windows-native-read-environment.test.mjs",
+      "prior_blob": "d3665baef09fea2cfb3b3191fbfa55642dd4496b",
+      "current_blob": "f1801ab83306c29c24ae597043c4d9978b8673eb"
+    },
+    {
+      "path": "coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md",
+      "prior_blob": "269bddd850aa67fc34d20dff4ad1e7dc49dfe76c",
+      "current_blob": "c627da65ddb82ac4205eb0408e271b57f7880090"
+    }
+  ],
+  "added_entries": [
+    {
+      "path": ".github/workflows/metaengine-browser-shell-v1.yml",
+      "current_blob": "e46c2ba53df26956eff40cb88877493e638b7075"
+    },
+    {
+      "path": "apps/metaengine-browser/scripts/electron-builder-before-pack.cjs",
+      "current_blob": "0a317cd9f38ff8d9a672080c7410059ae9a89dbb"
+    },
+    {
+      "path": "apps/metaengine-browser/scripts/prepare-codex-cli-job-runtime.mjs",
+      "current_blob": "25b5b6b90219519483d1178124106c05340f4dc5"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-job-runtime-build.test.mjs",
+      "current_blob": "e019a565a4db108c76a452428c5b5ef15711e46c"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-job-runtime.test.mjs",
+      "current_blob": "460ee752d5e6e1225db61307ab4b3dad1504f69f"
+    },
+    {
+      "path": "apps/metaengine-browser/test/emergency-maintenance-trust-root.test.mjs",
+      "current_blob": "ef32c964156187ee9e25df3df23ad8770fdb5134"
+    }
+  ],
+  "all_other_manifest_fields_unchanged": true,
+  "source_assertions_unchanged": true,
+  "package_version_unchanged": true
+}

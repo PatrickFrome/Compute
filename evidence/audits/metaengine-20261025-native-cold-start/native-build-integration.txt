@@ -1,0 +1,38 @@
+✔ precompilation preserves exact C# and all protocol text outside the single Add-Type block, with LF or CRLF (7.865528ms)
+✔ build extraction rejects missing, ambiguous, malformed and invalid UTF-8 templates (2.214738ms)
+✔ the output loader refuses non-PE, unmanaged or truncated assembly bytes (1.906264ms)
+✔ instrumented fixture C# is prepared through the same exact-byte transformation (1.36417ms)
+✔ source preparation refuses a non-Windows host without creating an output or pretending compilation succeeded (1.484871ms)
+✔ normal packaging prepares once before copying only the manifest into ASAR and the compiled helper outside (2.212704ms)
+﹣ Windows preparation compiles the real class once, publishes pinned self-contained bytes and retains old outputs on a rejected build (3.562773ms) # SKIP
+✔ source runtime resolves prepared output separately from the reviewed build template (5.202567ms)
+✔ source preparation refuses a changed template, changed helper and absent manifest without fallback (3.020488ms)
+✔ runtime manifest requires its fixed build mode and every build-chain digest (2.788951ms)
+✔ packaged binding comes from the app archive and cannot be replaced by a physical resource manifest (1.354164ms)
+✔ explicit disposable helpers require their own exact hash and reject directories or oversized files (8.67266ms)
+✔ helper tampering after controller construction is rejected before any child or input effect (2.96184ms)
+✔ Live Mechanics keeps the existing two jobs, platform matrix and bounded per-platform qualification budgets (1.953154ms)
+✔ Windows gets six complete serial diagnostic files and both platforms still execute the unchanged full four-worker glob (1.067023ms)
+✔ full coverage and source readback depend on all successful prerequisites, never on probe success (0.238118ms)
+✔ Windows explicitly provisions the locked official Electron before both timed qualifications without changing failure guards (0.418769ms)
+✔ Electron PE version guard accepts only 44.0.0 or 44.0.0.0 and rejects nonzero revisions and relaxed guards (1.780976ms)
+✔ both qualification steps emit safe resource/timestamp observations and helper changes trigger CI (1.436027ms)
+✔ Live Mechanics qualification guard rejects omitted native file (0.684678ms)
+✔ Live Mechanics qualification guard rejects omitted output-order native file (1.297068ms)
+✔ Live Mechanics qualification guard rejects omitted atomic-birth native file (3.74758ms)
+✔ Live Mechanics qualification guard rejects parallel native diagnostic (0.546331ms)
+✔ Live Mechanics qualification guard rejects filtered full suite (0.368454ms)
+✔ Live Mechanics qualification guard rejects probe-dependent full suite (0.257777ms)
+✔ Live Mechanics qualification guard rejects suppressed probe failure (1.114926ms)
+✔ Node expands the literal full-test glob and executes every matching fixture without shell expansion (111.957082ms)
+source_check_failed:src/agent-resource-admission.mjs
+✔ npm source check fits Windows cmd limits and checks the full catalog without a shell (5.893094ms)
+✔ one rejected parser check fails the whole source gate and never hides its status (0.555164ms)
+ℹ tests 29
+ℹ suites 0
+ℹ pass 28
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 1
+ℹ todo 0
+ℹ duration_ms 188.098018

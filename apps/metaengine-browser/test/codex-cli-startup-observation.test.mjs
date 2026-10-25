@@ -6,9 +6,12 @@ import {syncBuiltinESMExports} from 'node:module';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {PassThrough} from 'node:stream';
-import {createCodexCliWindowsProcessController, resolveCodexCliJobHelper} from '../src/codex-cli-windows-process-controller.mjs';
-import {CODEX_STARTUP_STAGES, createCodexCliStartupPhaseParser, instrumentCodexCliHelperStartup,
+import {createHash} from 'node:crypto';
+import os from 'node:os';
+import {createCodexCliWindowsProcessController, resolveCodexCliJobHelperSource} from '../src/codex-cli-windows-process-controller.mjs';
+import {CODEX_STARTUP_STAGES, createCodexCliStartupPhaseParser, instrumentCodexCliHelperStartup, instrumentCodexCliRuntimeStartup,
   withCodexCliStartupObservation} from './fixtures/codex-cli-startup-observation.mjs';
+import {CODEX_CLI_JOB_ASSEMBLY_LOAD_PREFIX, CODEX_CLI_JOB_ASSEMBLY_LOAD_SUFFIX} from '../scripts/prepare-codex-cli-job-runtime.mjs';
 
 // Portable source/parser/protocol doubles only: no Windows startup phase, native
 // compilation, Job Object or physical cleanup is qualified by these tests.
@@ -34,17 +37,16 @@ const immediate = () => new Promise(resolve => setImmediate(resolve));
 // Mutation refuses missing/duplicate anchors instead of running a partial or
 // misleading trace. All injected bytes are fixed nonsecret diagnostic literals.
 test('startup instrumentation has exact source anchors and never changes the production helper bytes', async () => {
-  const original = await fs.readFile(resolveCodexCliJobHelper());
+  const original = await fs.readFile(resolveCodexCliJobHelperSource());
   const source = original.toString('utf8').replace(/\r\n/g, '\n');
   const traced = instrumentCodexCliHelperStartup(source);
   assert.notEqual(traced, source);
   const crlf = instrumentCodexCliHelperStartup(source.replaceAll('\n', '\r\n'));
   assert.equal(crlf.replaceAll('\r\n', '\n'), traced);
   assert.ok(!crlf.replaceAll('\r\n', '').includes('\n'), 'injected labels retain the disposable helper newline form');
-  for (const stage of CODEX_STARTUP_STAGES) assert.equal(traced.split(prefix + stage).length, 2, stage);
+  for (const stage of CODEX_STARTUP_STAGES.filter(stage => !stage.startsWith('ASSEMBLY_LOAD_'))) assert.equal(traced.split(prefix + stage).length, 2, stage);
   assert.ok(traced.indexOf(prefix + 'PS_ENTER') < traced.indexOf("$ErrorActionPreference = 'Stop'"));
-  assert.ok(traced.indexOf(prefix + 'ADD_TYPE_BEGIN') < traced.indexOf("Add-Type -TypeDefinition @'"));
-  assert.ok(traced.indexOf("\n'@\ntry {") < traced.indexOf(prefix + 'ADD_TYPE_END'));
+  assert.doesNotMatch(traced, /ME_CODEX_STARTUP_V1 (?:ADD_TYPE|ASSEMBLY_LOAD)_/);
   const request = traced.indexOf('$request = [Console]::In.ReadLine() | ConvertFrom-Json');
   assert.ok(traced.indexOf(prefix + 'REQUEST_READ_BEGIN') < request);
   assert.ok(request < traced.indexOf(prefix + 'REQUEST_READ_END'));
@@ -53,10 +55,24 @@ test('startup instrumentation has exact source anchors and never changes the pro
     const at = traced.indexOf(prefix + stage); assert.ok(at > previous); previous = at;
   }
   assert.ok(traced.indexOf('Console.Error.WriteLine("' + prefix + 'READY_FLUSH_RETURNED') > traced.indexOf(String.raw`      Emit("{\"type\":\"ready\",`));
-  assert.deepEqual(await fs.readFile(resolveCodexCliJobHelper()), original);
+  assert.deepEqual(await fs.readFile(resolveCodexCliJobHelperSource()), original);
   for (const changed of [source.replace('Add-Type -TypeDefinition', 'Removed-Type -TypeDefinition'),
     source + "\n$ErrorActionPreference = 'Stop'", traced]) {
     assert.throws(() => instrumentCodexCliHelperStartup(changed), {message: 'native_startup_observation_source_anchor_invalid'});
+  }
+});
+
+test('prepared-helper instrumentation measures only the bounded assembly load and rejects runtime compilation', () => {
+  const loader = CODEX_CLI_JOB_ASSEMBLY_LOAD_PREFIX + 'c3ludGhldGljLWJ5dGVz' + CODEX_CLI_JOB_ASSEMBLY_LOAD_SUFFIX;
+  for (const eol of ['\n', '\r\n']) {
+    const source = ['# generated protocol fixture, not a native assembly', loader, 'try {', '}'].join(eol);
+    const traced = instrumentCodexCliRuntimeStartup(source);
+    assert.ok(traced.indexOf(prefix + 'ASSEMBLY_LOAD_BEGIN') < traced.indexOf(loader));
+    assert.ok(traced.indexOf(prefix + 'ASSEMBLY_LOAD_END') > traced.indexOf(loader));
+    assert.equal(traced.split(loader).length, 2);
+    if (eol === '\r\n') assert.ok(!traced.replaceAll('\r\n', '').includes('\n'));
+    for (const bad of [traced, source + eol + loader, source.replace(loader, ''), source + "\nAdd-Type -TypeDefinition @'"])
+      assert.throws(() => instrumentCodexCliRuntimeStartup(bad), /source_anchor_invalid/);
   }
 });
 
@@ -65,9 +81,9 @@ test('startup parser accepts split ASCII/CRLF markers and exports only allowlist
   const parser = createCodexCliStartupPhaseParser({now: () => clock, startedAt: 100});
   parser.write(Buffer.from('private compiler error with prompt/env/path\nME_CODEX_START'));
   clock = 107; parser.write(Buffer.from('UP_V1 PS_ENTER\r\n'));
-  clock = 113; parser.write(Buffer.from(prefix + 'ADD_TYPE_BEGIN\n'));
+  clock = 113; parser.write(Buffer.from(prefix + 'ASSEMBLY_LOAD_BEGIN\n'));
   const record = parser.snapshot();
-  assert.deepEqual(record.stages, [{stage: 'PS_ENTER', elapsed_ms: 7}, {stage: 'ADD_TYPE_BEGIN', elapsed_ms: 13}]);
+  assert.deepEqual(record.stages, [{stage: 'PS_ENTER', elapsed_ms: 7}, {stage: 'ASSEMBLY_LOAD_BEGIN', elapsed_ms: 13}]);
   assert.ok(record.unknown_stderr_bytes > 0);
   assert.equal(record.phase_stream_invalid, false); assert.equal(record.phase_stream_overflow, false);
   assert.doesNotMatch(JSON.stringify(record), /private|compiler|prompt|env|path|ME_CODEX_START/);
@@ -76,10 +92,10 @@ test('startup parser accepts split ASCII/CRLF markers and exports only allowlist
 
 test('startup parser rejects duplicate/out-of-order/unrecognized stage labels without printing them', () => {
   const parser = createCodexCliStartupPhaseParser({now: () => 0});
-  for (const stage of ['ADD_TYPE_BEGIN', 'PS_ENTER', 'ADD_TYPE_BEGIN', 'private-unrecognized-label']) parser.write(prefix + stage + '\n');
+  for (const stage of ['ASSEMBLY_LOAD_BEGIN', 'PS_ENTER', 'ASSEMBLY_LOAD_BEGIN', 'private-unrecognized-label']) parser.write(prefix + stage + '\n');
   const record = parser.snapshot();
   assert.equal(record.phase_stream_invalid, true);
-  assert.deepEqual(record.stages, [{stage: 'ADD_TYPE_BEGIN', elapsed_ms: 0}]);
+  assert.deepEqual(record.stages, [{stage: 'ASSEMBLY_LOAD_BEGIN', elapsed_ms: 0}]);
   assert.doesNotMatch(JSON.stringify(record), /private-unrecognized|PS_ENTER/);
 });
 
@@ -157,6 +173,11 @@ test('an observer report failure cannot produce a successful physical qualificat
 });
 
 test('observing the real controller preserves its unchanged default30s startup timeout and fixed failure', async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-startup-protocol-'));
+  t.after(() => fs.rm(directory, {recursive: true, force: true}));
+  const helperPath = path.join(directory, 'owned-helper.ps1'), helperBytes = 'protocol double, never executed';
+  await fs.writeFile(helperPath, helperBytes);
+  const expectedHelperSha256 = createHash('sha256').update(helperBytes).digest('hex');
   const f = fixture(t), child = f.children[0];
   const platform = Object.getOwnPropertyDescriptor(process, 'platform');
   Object.defineProperty(process, 'platform', {...platform, value: 'win32'});
@@ -164,7 +185,7 @@ test('observing the real controller preserves its unchanged default30s startup t
   t.mock.timers.enable({apis: ['setTimeout']});
   const reports = [];
   const observed = withCodexCliStartupObservation({helperPath, powershellPath, report: record => reports.push(record)}, async () => {
-    const controller = createCodexCliWindowsProcessController({helperPath, powershellPath});
+    const controller = createCodexCliWindowsProcessController({helperPath, powershellPath, expectedHelperSha256});
     await controller.spawn({executablePath: path.resolve('inert-worker.exe'), cwd: options.cwd, args: [],
       expectedExecutableSha256: 'a'.repeat(64), runId: '11111111-1111-4111-8111-111111111111', env: options.env, timeoutMs: 15000});
   });

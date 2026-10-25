@@ -5,9 +5,10 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {codexCliEnvironment} from '../src/codex-cli-runner.mjs';
-import {createCodexCliWindowsProcessController, resolveCodexCliJobHelper} from '../src/codex-cli-windows-process-controller.mjs';
+import {createCodexCliWindowsProcessController, resolveCodexCliJobHelperSource} from '../src/codex-cli-windows-process-controller.mjs';
 import {withOwnedCodexCliProcess} from './fixtures/with-owned-codex-cli-process.mjs';
-import {instrumentCodexCliHelperStartup, withCodexCliStartupObservation} from './fixtures/codex-cli-startup-observation.mjs';
+import {instrumentCodexCliHelperStartup, instrumentCodexCliRuntimeStartup, withCodexCliStartupObservation} from './fixtures/codex-cli-startup-observation.mjs';
+import {prepareCodexCliJobRuntime} from '../scripts/prepare-codex-cli-job-runtime.mjs';
 
 const resumeCall = 'Require(ResumeThread(process.thread)!=0xffffffff,"resume_failed");';
 const resumedFrame = 'Emit("{\\"type\\":\\"resumed\\"}");';
@@ -16,7 +17,7 @@ const stderrPump = 'Pump(stderrRead,"stderr")';
 const sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 
 test('native helper acknowledges successful resume before starting either output pump', async () => {
-  const source = await fs.readFile(resolveCodexCliJobHelper(), 'utf8');
+  const source = await fs.readFile(resolveCodexCliJobHelperSource(), 'utf8');
   for (const marker of [resumeCall, resumedFrame, stdoutPump, stderrPump]) {
     assert.equal(source.split(marker).length, 2, 'each native ordering marker must occur exactly once');
   }
@@ -36,7 +37,7 @@ test('real Windows native helper buffers immediate output through a forced post-
     assert.ok(path.basename(directory).startsWith('metaengine-codex-output-order-'));
     await fs.rm(directory, {recursive: true, force: true});
   });
-  const helperSource = await fs.readFile(resolveCodexCliJobHelper(), 'utf8');
+  const helperSource = await fs.readFile(resolveCodexCliJobHelperSource(), 'utf8');
   assert.equal(helperSource.split(resumeCall).length, 2, 'delay must target only the real native resume');
   const written = path.join(directory, 'child-wrote-before-ack.txt');
   const csharpWritten = '@"' + written.replaceAll('"', '""') + '"';
@@ -47,9 +48,14 @@ test('real Windows native helper buffers immediate output through a forced post-
     + `      while(!File.Exists(${csharpWritten})) {\n`
     + '        if(DateTime.UtcNow>=outputWindowDeadline) throw new InvalidOperationException("codex_job_test_output_window_missing");\n'
     + '        System.Threading.Thread.Sleep(10);\n      }';
-  const helperPath = path.join(directory, 'forced-output-window.ps1');
+  const helperSourcePath = path.join(directory, 'forced-output-window.source.ps1');
   // Windows PowerShell 5 must decode a potentially non-ASCII temp path as UTF-8.
-  await fs.writeFile(helperPath, '\ufeff' + instrumentCodexCliHelperStartup(helperSource.replace(/^\ufeff/, '')).replace(resumeCall, resumeCall + delay), 'utf8');
+  await fs.writeFile(helperSourcePath, '\ufeff' + instrumentCodexCliHelperStartup(helperSource.replace(/^\ufeff/, '')).replace(resumeCall, resumeCall + delay), 'utf8');
+  const prepared = await prepareCodexCliJobRuntime({helperSourcePath, outputDirectory: path.join(directory, 'prepared')});
+  const helperPath = prepared.helperPath;
+  const runtimeSource = instrumentCodexCliRuntimeStartup(await fs.readFile(helperPath, 'utf8'));
+  await fs.writeFile(helperPath, runtimeSource, 'utf8');
+  const expectedHelperSha256 = sha(await fs.readFile(helperPath));
   const expectedStdout = 'stdout-before-ack\n';
   const expectedStderr = 'stderr-before-ack\n';
   const script = `const fs=require('node:fs');`
@@ -57,7 +63,7 @@ test('real Windows native helper buffers immediate output through a forced post-
     + `fs.writeFileSync(${JSON.stringify(written)},'both-pipes-written');`;
   const expectedExecutableSha256 = sha(await fs.readFile(process.execPath));
   const runId = crypto.randomUUID();
-  const processController = createCodexCliWindowsProcessController({helperPath});
+  const processController = createCodexCliWindowsProcessController({helperPath, expectedHelperSha256});
   const powershellPath = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
   await withCodexCliStartupObservation({helperPath, powershellPath, report: record => t.diagnostic(JSON.stringify(record))}, async ({readyValidated}) => {
     await withOwnedCodexCliProcess(processController, {
@@ -83,5 +89,5 @@ test('real Windows native helper buffers immediate output through a forced post-
       assert.equal(await fs.readFile(written, 'utf8'), 'both-pipes-written');
     });
   });
-  assert.equal(sha(await fs.readFile(resolveCodexCliJobHelper())), sha(helperSource), 'production helper must stay untouched');
+  assert.equal(sha(await fs.readFile(resolveCodexCliJobHelperSource())), sha(helperSource), 'production helper must stay untouched');
 });

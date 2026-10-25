@@ -40,6 +40,13 @@ late protected seed-profile binding, optional IPC rejection and generated schema
 ACL preservation. See `NATIVE_ADMISSION_READINESS_CONTINUATION.md` for exact
 verification results, source boundaries and the next physical exit gates.
 
+The next continuation, `NATIVE_COLD_START_QUALIFICATION.md`, addresses the
+terminal CI failures on `4e5de5c7fb9d9e0fe34a83c839aab58fca4cdb8e`: Linux display
+setup, Windows capture-fixture directory notifications and runtime C#
+compilation. Moving native helper compilation to the normal build preserves
+the task authority and cleanup requirements above. Its Windows and installed
+results must be read from the new exact source, not inherited from this baseline.
+
 These repairs advance the first admitted native goal in C2. The observed agent,
 Critic, checkpoint, successor and restart steps above remain acceptance gates;
 development assistants and generated tests do not count as installed agents.

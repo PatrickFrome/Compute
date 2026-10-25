@@ -60,6 +60,8 @@ test('packaging enables ASAR plus integrity and ASAR-only fuses while excluding 
   assert.equal(config.electronFuses?.onlyLoadAppFromAsar, true);
   assert.deepEqual(config.files, ['src/**/*', 'package.json', {
     from: '../../infra/client-state-runtime', to: 'infra/client-state-runtime', filter: ['offline-runtime-bundle.mjs'],
+  }, {
+    from: 'native-dist/codex-cli/asar', to: '.', filter: ['native-coding-job-runtime.json'],
   }]);
   assert.equal(config.files.includes('ui/**/*'), false);
 

@@ -1,0 +1,219 @@
+{
+  "schema": "metaengine.ci.failure-triage.v1",
+  "source_sha": "4e5de5c7fb9d9e0fe34a83c839aab58fca4cdb8e",
+  "jobs": [
+    {
+      "job_id": 121235488885,
+      "name": "exact-integrated-source (ubuntu-24.04)",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/40215449977/job/121235488885",
+      "conclusion": "failure",
+      "diagnostics": [
+        "ℹ tests 124",
+        "ℹ pass 124",
+        "ℹ fail 0",
+        "ℹ skipped 0",
+        "ℹ tests 633",
+        "ℹ pass 614",
+        "ℹ fail 0",
+        "ℹ skipped 19",
+        "✖ real Electron MAIN_PROCESS qualifies physical ASAR bytes while retaining archive package and bridge reads (1027.182854ms)",
+        "ℹ tests 5970",
+        "ℹ pass 5905",
+        "ℹ fail 1",
+        "ℹ skipped 64",
+        "✖ failing tests:",
+        "✖ real Electron MAIN_PROCESS qualifies physical ASAR bytes while retaining archive package and bridge reads (1027.182854ms)",
+        "  Error: real Electron observer regression failed: [13278:1025/171806.078564:ERROR:ui/ozone/platform/x11/ozone_platform_x11.cc:257] Missing X server or $DISPLAY"
+      ]
+    },
+    {
+      "job_id": 121235488752,
+      "name": "exact-integrated-source (windows-2025)",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/40215449977/job/121235488752",
+      "conclusion": "failure",
+      "diagnostics": [
+        "ℹ tests 124",
+        "ℹ pass 124",
+        "ℹ fail 0",
+        "ℹ skipped 0",
+        "ℹ tests 633",
+        "ℹ pass 633",
+        "ℹ fail 0",
+        "ℹ skipped 0",
+        "✖ real Windows controller starts suspended in its job and transports exact arguments without a model (30143.642ms)",
+        "✖ real Windows deadline kills the exact job and its descendant without any model call (30141.3928ms)",
+        "✖ actual current Windows boot sequence and PID4 kernel creation are stable across independent native reads (12044.863ms)",
+        "✖ real Windows native helper buffers immediate output through a forced post-resume pre-ack window (30172.8375ms)",
+        "ℹ {\"schema\":\"metaengine.codex-cli.test-startup-phases.v1\",\"helper_variant\":\"FORCED_OUTPUT_WINDOW\",\"startup_deadline_ms\":30000,\"helper_spawns_observed\":1,\"spawn_event_elapsed_ms\":6,\"ready_validated_elapsed_ms\":null,\"close_elapsed_ms\":30044,\"stages\":[{\"stage\":\"PS_ENTER\",\"elapsed_ms\":254},{\"stage\":\"ADD_TYPE_BEGIN\",\"elapsed_ms\":265}],\"unknown_stderr_bytes\":0,\"phase_stream_invalid\":false,\"phase_stream_overflow\":false,\"body_failed\":true,\"phase_timing_observation_only\":true,\"contention_proven\":false,\"native_qualification_proven\":false}",
+        "Assertion failed: !_wcsnicmp(filename, dir, dirlen), file src\\win\\fs-event.c, line 72",
+        "✖ test\\windows-capture-fixture-qualification.test.mjs (532.1444ms)",
+        "Assertion failed: !_wcsnicmp(filename, dir, dirlen), file src\\win\\fs-event.c, line 72",
+        "✖ test\\windows-local-computer-executor.test.mjs (6714.7332ms)",
+        "ℹ tests 5935",
+        "ℹ pass 5922",
+        "ℹ fail 6",
+        "ℹ skipped 7",
+        "✖ failing tests:",
+        "✖ real Windows controller starts suspended in its job and transports exact arguments without a model (30143.642ms)",
+        "  Error: codex_cli_process_CONTROLLER_STARTUP_TIMEOUT",
+        "✖ real Windows deadline kills the exact job and its descendant without any model call (30141.3928ms)",
+        "  Error: codex_cli_process_CONTROLLER_STARTUP_TIMEOUT",
+        "✖ actual current Windows boot sequence and PID4 kernel creation are stable across independent native reads (12044.863ms)",
+        "✖ real Windows native helper buffers immediate output through a forced post-resume pre-ack window (30172.8375ms)",
+        "  Error: codex_cli_process_CONTROLLER_STARTUP_TIMEOUT",
+        "✖ test\\windows-capture-fixture-qualification.test.mjs (532.1444ms)",
+        "✖ test\\windows-local-computer-executor.test.mjs (6714.7332ms)"
+      ]
+    },
+    {
+      "job_id": 121235624122,
+      "name": "full-browser-node-test-suite",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/40215449840/job/121235624122",
+      "conclusion": "failure",
+      "diagnostics": [
+        "✖ actual current Windows boot sequence and PID4 kernel creation are stable across independent native reads (12037.9947ms)",
+        "ℹ {\"schema\":\"metaengine.codex-cli.test-startup-phases.v1\",\"helper_variant\":\"FORCED_OUTPUT_WINDOW\",\"startup_deadline_ms\":30000,\"helper_spawns_observed\":1,\"spawn_event_elapsed_ms\":5,\"ready_validated_elapsed_ms\":25425,\"close_elapsed_ms\":25526,\"stages\":[{\"stage\":\"PS_ENTER\",\"elapsed_ms\":237},{\"stage\":\"ADD_TYPE_BEGIN\",\"elapsed_ms\":248},{\"stage\":\"ADD_TYPE_END\",\"elapsed_ms\":25196},{\"stage\":\"REQUEST_READ_BEGIN\",\"elapsed_ms\":25196},{\"stage\":\"REQUEST_READ_END\",\"elapsed_ms\":25218},{\"stage\":\"NATIVE_RUN_ENTER\",\"elapsed_ms\":25262},{\"stage\":\"IMAGE_DIGEST_CHECKED\",\"elapsed_ms\":25414},{\"stage\":\"CHILD_JOB_BOUND\",\"elapsed_ms\":25422},{\"stage\":\"IDENTITY_READBACK_COMPLETE\",\"elapsed_ms\":25424},{\"stage\":\"READY_WRITE_BEGIN\",\"elapsed_ms\":25424},{\"stage\":\"READY_FLUSH_RETURNED\",\"elapsed_ms\":25426}],\"unknown_stderr_bytes\":0,\"phase_stream_invalid\":false,\"phase_stream_overflow\":false,\"body_failed\":false,\"phase_timing_observation_only\":true,\"contention_proven\":false,\"native_qualification_proven\":false}",
+        "ℹ tests 5979",
+        "ℹ pass 5971",
+        "ℹ fail 1",
+        "ℹ skipped 7",
+        "✖ failing tests:",
+        "✖ actual current Windows boot sequence and PID4 kernel creation are stable across independent native reads (12037.9947ms)"
+      ]
+    },
+    {
+      "job_id": 121235488907,
+      "name": "shell-contract",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/40215450015/job/121235488907",
+      "conclusion": "failure",
+      "diagnostics": [
+        "✖ real Electron MAIN_PROCESS qualifies physical ASAR bytes while retaining archive package and bridge reads (1105.389787ms)",
+        "ℹ tests 5970",
+        "ℹ pass 5905",
+        "ℹ fail 1",
+        "ℹ skipped 64",
+        "✖ failing tests:",
+        "✖ real Electron MAIN_PROCESS qualifies physical ASAR bytes while retaining archive package and bridge reads (1105.389787ms)",
+        "  Error: real Electron observer regression failed: [10372:1025/171836.624755:ERROR:ui/ozone/platform/x11/ozone_platform_x11.cc:257] Missing X server or $DISPLAY"
+      ]
+    },
+    {
+      "job_id": 121235489071,
+      "name": "windows-final-runtime-activation",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/40215449998/job/121235489071",
+      "conclusion": "failure",
+      "diagnostics": [
+        "ℹ tests 20",
+        "ℹ pass 20",
+        "ℹ fail 0",
+        "ℹ skipped 0",
+        "{\"schema\":\"metaengine.browser.installer-provenance-error.v1\",\"code\":\"installer_provenance_producer_failed\",\"run_id\":\"40215449880\",\"run_number\":3905,\"run_attempt\":1,\"conclusion\":\"failure\"}"
+      ]
+    },
+    {
+      "job_id": 121235489098,
+      "name": "windows-installed-chat-qualification",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/40215449972/job/121235489098",
+      "conclusion": "failure",
+      "diagnostics": [
+        "ℹ tests 6",
+        "ℹ pass 6",
+        "ℹ fail 0",
+        "ℹ skipped 0",
+        "{\"schema\":\"metaengine.browser.installer-provenance-error.v1\",\"code\":\"installer_provenance_producer_failed\",\"run_id\":\"40215449880\",\"run_number\":3905,\"run_attempt\":1,\"conclusion\":\"failure\"}"
+      ]
+    },
+    {
+      "job_id": 121235488133,
+      "name": "windows-shell-first-dirty-profile",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/40215449849/job/121235488133",
+      "conclusion": "failure",
+      "diagnostics": [
+        "ℹ tests 15",
+        "ℹ pass 15",
+        "ℹ fail 0",
+        "ℹ skipped 0",
+        "{\"schema\":\"metaengine.browser.installer-provenance-error.v1\",\"code\":\"installer_provenance_producer_failed\",\"run_id\":\"40215449880\",\"run_number\":3905,\"run_attempt\":1,\"conclusion\":\"failure\"}"
+      ]
+    },
+    {
+      "job_id": 121235488773,
+      "name": "browser-mechanics (windows-2025)",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/40215449941/job/121235488773",
+      "conclusion": "failure",
+      "diagnostics": [
+        "✖ slow advisory capture cannot starve the scheduler-owned DevOS turn (2014.2133ms)",
+        "ℹ tests 1",
+        "ℹ pass 0",
+        "ℹ fail 1",
+        "ℹ skipped 0",
+        "✖ failing tests:",
+        "✖ slow advisory capture cannot starve the scheduler-owned DevOS turn (2014.2133ms)",
+        "ℹ tests 14",
+        "ℹ pass 14",
+        "ℹ fail 0",
+        "ℹ skipped 0",
+        "ℹ tests 5",
+        "ℹ pass 5",
+        "ℹ fail 0",
+        "ℹ skipped 0",
+        "✖ real Windows controller starts suspended in its job and transports exact arguments without a model (30136.3694ms)",
+        "✖ actual current Windows boot sequence and PID4 kernel creation are stable across independent native reads (12023.8331ms)",
+        "ℹ {\"schema\":\"metaengine.codex-cli.test-startup-phases.v1\",\"helper_variant\":\"FORCED_OUTPUT_WINDOW\",\"startup_deadline_ms\":30000,\"helper_spawns_observed\":1,\"spawn_event_elapsed_ms\":5,\"ready_validated_elapsed_ms\":595,\"close_elapsed_ms\":685,\"stages\":[{\"stage\":\"PS_ENTER\",\"elapsed_ms\":185},{\"stage\":\"ADD_TYPE_BEGIN\",\"elapsed_ms\":194},{\"stage\":\"ADD_TYPE_END\",\"elapsed_ms\":410},{\"stage\":\"REQUEST_READ_BEGIN\",\"elapsed_ms\":410},{\"stage\":\"REQUEST_READ_END\",\"elapsed_ms\":428},{\"stage\":\"NATIVE_RUN_ENTER\",\"elapsed_ms\":458},{\"stage\":\"IMAGE_DIGEST_CHECKED\",\"elapsed_ms\":587},{\"stage\":\"CHILD_JOB_BOUND\",\"elapsed_ms\":593},{\"stage\":\"IDENTITY_READBACK_COMPLETE\",\"elapsed_ms\":594},{\"stage\":\"READY_WRITE_BEGIN\",\"elapsed_ms\":594},{\"stage\":\"READY_FLUSH_RETURNED\",\"elapsed_ms\":595}],\"unknown_stderr_bytes\":0,\"phase_stream_invalid\":false,\"phase_stream_overflow\":false,\"body_failed\":false,\"phase_timing_observation_only\":true,\"contention_proven\":false,\"native_qualification_proven\":false}",
+        "ℹ tests 134",
+        "ℹ pass 131",
+        "ℹ fail 2",
+        "ℹ skipped 1",
+        "✖ failing tests:",
+        "✖ real Windows controller starts suspended in its job and transports exact arguments without a model (30136.3694ms)",
+        "  Error: codex_cli_process_CONTROLLER_STARTUP_TIMEOUT",
+        "✖ actual current Windows boot sequence and PID4 kernel creation are stable across independent native reads (12023.8331ms)",
+        "ℹ {\"schema\":\"metaengine.codex-cli.test-startup-phases.v1\",\"helper_variant\":\"FORCED_OUTPUT_WINDOW\",\"startup_deadline_ms\":30000,\"helper_spawns_observed\":1,\"spawn_event_elapsed_ms\":8,\"ready_validated_elapsed_ms\":784,\"close_elapsed_ms\":864,\"stages\":[{\"stage\":\"PS_ENTER\",\"elapsed_ms\":260},{\"stage\":\"ADD_TYPE_BEGIN\",\"elapsed_ms\":269},{\"stage\":\"ADD_TYPE_END\",\"elapsed_ms\":551},{\"stage\":\"REQUEST_READ_BEGIN\",\"elapsed_ms\":551},{\"stage\":\"REQUEST_READ_END\",\"elapsed_ms\":573},{\"stage\":\"NATIVE_RUN_ENTER\",\"elapsed_ms\":614},{\"stage\":\"IMAGE_DIGEST_CHECKED\",\"elapsed_ms\":775},{\"stage\":\"CHILD_JOB_BOUND\",\"elapsed_ms\":781},{\"stage\":\"IDENTITY_READBACK_COMPLETE\",\"elapsed_ms\":783},{\"stage\":\"READY_WRITE_BEGIN\",\"elapsed_ms\":783},{\"stage\":\"READY_FLUSH_RETURNED\",\"elapsed_ms\":784}],\"unknown_stderr_bytes\":0,\"phase_stream_invalid\":false,\"phase_stream_overflow\":false,\"body_failed\":false,\"phase_timing_observation_only\":true,\"contention_proven\":false,\"native_qualification_proven\":false}",
+        "ℹ tests 5979",
+        "ℹ pass 5972",
+        "ℹ fail 0",
+        "ℹ skipped 7",
+        "{\"schema\":\"metaengine.ci.native-read-duration-observation.v1\",\"reader\":\"kernel_boot\",\"observed_at\":\"2026-10-25T17:29:14.563Z\",\"elapsed_ms\":728,\"production_timeout_ms\":12000,\"diagnostic_timeout_ms\":60000,\"transport_calls\":1,\"outcome\":\"READ_RETURNED\",\"original_probe_result_replaced\":false,\"authority_effect\":false,\"native_qualification_proven\":false,\"causal_attribution_proven\":false}",
+        "{\"schema\":\"metaengine.ci.native-read-duration-observation.v1\",\"reader\":\"own_process\",\"observed_at\":\"2026-10-25T17:29:15.129Z\",\"elapsed_ms\":565,\"production_timeout_ms\":15000,\"diagnostic_timeout_ms\":60000,\"transport_calls\":1,\"outcome\":\"READ_RETURNED\",\"original_probe_result_replaced\":false,\"authority_effect\":false,\"native_qualification_proven\":false,\"causal_attribution_proven\":false}"
+      ]
+    },
+    {
+      "job_id": 121236584316,
+      "name": "windows-nsis-package-smoke",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/40215449880/job/121236584316",
+      "conclusion": "failure",
+      "diagnostics": [
+        "{\"schema\":\"metaengine.browser.package-build-reservation-error.v1\",\"code\":\"PACKAGE_IDENTITY_VERSION_ALREADY_RESERVED\",\"message\":\"package_identity_version_already_reserved\",\"details\":{\"package_version\":\"0.7.0-dev.1107139874594.1\",\"source_head\":\"4e5de5c7fb9d9e0fe34a83c839aab58fca4cdb8e\",\"current_run_id\":40215449880,\"prior_artifact_id\":12604992808,\"prior_run_id\":40208669264,\"prior_source_head\":\"602d4b07f755f7cd61a6da3af06985d4384b859a\"},\"authority_effect\":false}"
+      ]
+    },
+    {
+      "job_id": 121236309774,
+      "name": "windows-published-n-to-one-build-target",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/40215449898/job/121236309774",
+      "conclusion": "failure",
+      "diagnostics": [
+        "{\"schema\":\"metaengine.browser.installer-provenance-error.v1\",\"code\":\"size_mismatch\",\"provenance_bytes\":27,\"actual_bytes\":18}",
+        "{\"schema\":\"metaengine.browser.installer-provenance-error.v1\",\"code\":\"producer_run_attempt_mismatch\",\"provenance_run_attempt\":2,\"expected_run_attempt\":3}",
+        "{\"schema\":\"metaengine.browser.installer-provenance-error.v1\",\"code\":\"build_identity_external_invalid\",\"message\":\"dependency_resolution_proof_unreadable\"}",
+        "ℹ tests 13",
+        "ℹ pass 13",
+        "ℹ fail 0",
+        "ℹ skipped 0",
+        "ℹ tests 10",
+        "ℹ pass 10",
+        "ℹ fail 0",
+        "ℹ skipped 0",
+        "{\"schema\":\"metaengine.browser.installer-provenance-error.v1\",\"code\":\"installer_provenance_producer_failed\",\"run_id\":\"40215449880\",\"run_number\":3905,\"run_attempt\":1,\"conclusion\":\"failure\"}"
+      ]
+    },
+    {
+      "job_id": 121239783993,
+      "name": "installed-ui-72-activation-race-soak",
+      "url": "https://github.com/PatrickFrome/Compute/actions/runs/40215449961/job/121239783993",
+      "conclusion": "failure",
+      "diagnostics": [
+        "{\"schema\":\"metaengine.browser.installer-provenance-error.v1\",\"code\":\"installer_provenance_producer_failed\",\"run_id\":\"40215449880\",\"run_number\":3905,\"run_attempt\":1,\"conclusion\":\"failure\"}"
+      ]
+    }
+  ]
+}

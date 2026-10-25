@@ -42,6 +42,10 @@ jobs:
       - name: Install locked Browser dependencies
         working-directory: apps/metaengine-browser
         run: npm ci --no-audit --no-fund
+      - name: Build the native job helper before Windows runtime contracts
+        if: runner.os == 'Windows'
+        working-directory: apps/metaengine-browser
+        run: node scripts/prepare-codex-cli-job-runtime.mjs
       - name: Provision locked official Electron before timed Windows qualification
         if: runner.os == 'Windows'
         working-directory: apps/metaengine-browser

@@ -1,10 +1,11 @@
 import childProcess from 'node:child_process';
 import {syncBuiltinESMExports} from 'node:module';
 import {performance} from 'node:perf_hooks';
+import {CODEX_CLI_JOB_ASSEMBLY_LOAD_PREFIX, CODEX_CLI_JOB_ASSEMBLY_LOAD_SUFFIX} from '../../scripts/prepare-codex-cli-job-runtime.mjs';
 
 // Disposable-helper diagnostics only. These labels carry no native authority,
 // and neither helper stderr nor process arguments/environment are exported.
-export const CODEX_STARTUP_STAGES = Object.freeze(['PS_ENTER', 'ADD_TYPE_BEGIN', 'ADD_TYPE_END',
+export const CODEX_STARTUP_STAGES = Object.freeze(['PS_ENTER', 'ASSEMBLY_LOAD_BEGIN', 'ASSEMBLY_LOAD_END',
   'REQUEST_READ_BEGIN', 'REQUEST_READ_END', 'NATIVE_RUN_ENTER', 'IMAGE_DIGEST_CHECKED',
   'CHILD_JOB_BOUND', 'IDENTITY_READBACK_COMPLETE', 'READY_WRITE_BEGIN', 'READY_FLUSH_RETURNED']);
 const prefix = 'ME_CODEX_STARTUP_V1 ';
@@ -14,11 +15,10 @@ const invalidSource = () => Error('native_startup_observation_source_anchor_inva
 
 export function instrumentCodexCliHelperStartup(source) {
   if (typeof source !== 'string' || source.includes(prefix)) throw invalidSource();
+  if (source.split("Add-Type -TypeDefinition @'").length !== 2) throw invalidSource();
   const eol = source.includes('\r\n') ? '\r\n' : '\n';
   const insertions = [
     ["$ErrorActionPreference = 'Stop'", ps('PS_ENTER'), false],
-    ["Add-Type -TypeDefinition @'", ps('ADD_TYPE_BEGIN'), false],
-    ["\n'@\ntry {", '\n  ' + ps('ADD_TYPE_END').trimEnd(), true],
     ['  $request = [Console]::In.ReadLine() | ConvertFrom-Json', '  ' + ps('REQUEST_READ_BEGIN'), false],
     ['  $request = [Console]::In.ReadLine() | ConvertFrom-Json', '\n  ' + ps('REQUEST_READ_END').trimEnd(), true],
     ['  public static void Run(string exe,string[] args,string cwd,string runId,uint timeout,string expectedSha,string absoluteDeadlineMs) {', '\n' + cs('NATIVE_RUN_ENTER').trimEnd(), true],
@@ -39,6 +39,20 @@ export function instrumentCodexCliHelperStartup(source) {
     source = source.slice(0, edit.at) + edit.text + source.slice(edit.at);
   }
   return source;
+}
+
+// Apply after the normal producer compiles the instrumented C# template. The
+// timed helper observes an assembly load, never an Add-Type compilation proxy.
+export function instrumentCodexCliRuntimeStartup(source) {
+  if (typeof source !== 'string' || source.includes(prefix + 'ASSEMBLY_LOAD_') || source.includes('Add-Type -TypeDefinition')) throw invalidSource();
+  const eol = source.includes('\r\n') ? '\r\n' : '\n';
+  const lines = source.split(eol), loaders = lines.filter(line => line.startsWith(CODEX_CLI_JOB_ASSEMBLY_LOAD_PREFIX)
+    && line.endsWith(CODEX_CLI_JOB_ASSEMBLY_LOAD_SUFFIX));
+  if (loaders.length !== 1) throw invalidSource();
+  const loader = loaders[0], bytes = loader.slice(CODEX_CLI_JOB_ASSEMBLY_LOAD_PREFIX.length, -CODEX_CLI_JOB_ASSEMBLY_LOAD_SUFFIX.length);
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(bytes)) throw invalidSource();
+  return source.replace(loader, ps('ASSEMBLY_LOAD_BEGIN').replaceAll('\n', eol) + loader
+    + eol + ps('ASSEMBLY_LOAD_END').trimEnd());
 }
 
 export function createCodexCliStartupPhaseParser({now = () => performance.now(), startedAt = now()} = {}) {

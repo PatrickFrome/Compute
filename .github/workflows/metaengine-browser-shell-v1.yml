@@ -68,7 +68,8 @@ jobs:
 
       - name: Contract tests
         working-directory: apps/metaengine-browser
-        run: npm test
+        # Preserve real Electron MAIN_PROCESS coverage on this headless runner.
+        run: xvfb-run -a npm test
 
       - name: Security static gate
         run: |

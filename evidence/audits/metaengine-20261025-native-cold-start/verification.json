@@ -1,0 +1,89 @@
+{
+  "schema": "metaengine.native-cold-start.verification.v1",
+  "baseline_source": "4e5de5c7fb9d9e0fe34a83c839aab58fca4cdb8e",
+  "branch": "work/native-admission-readiness-20261025",
+  "platform": "Linux",
+  "node": "24.22.1",
+  "full_browser": {
+    "tests": 5986,
+    "passed": 5921,
+    "failed": 0,
+    "skipped": 65,
+    "mode": "MAIN_PROCESS",
+    "command": "xvfb-run -a node --test --test-concurrency=4 'test/*.test.mjs'",
+    "log": "full-browser-regressions.txt",
+    "subsequent_change": "Explicit npm pretest and --if-windows CLI integration, covered by final_build_integration; native runtime unchanged."
+  },
+  "final_build_integration": {
+    "tests": 29,
+    "passed": 28,
+    "failed": 0,
+    "skipped": 1,
+    "command": "npm run pretest && node --test test/codex-cli-job-runtime-build.test.mjs test/codex-cli-job-runtime.test.mjs test/live-mechanics-native-probe-workflow.test.mjs test/source-check-runner.test.mjs",
+    "log": "native-build-integration.txt"
+  },
+  "source_checks": {
+    "passed": 240,
+    "command": "node scripts/check-source.mjs"
+  },
+  "ci_train": {
+    "passed": 4,
+    "failed": 0,
+    "skipped": 0,
+    "log": "ci-train-regressions.txt"
+  },
+  "native_template_sha256": "0c817a654c14217e4c9292766386a88107d0a9dd7e69ab01e8b6296017f2e54f",
+  "native_template_unchanged": true,
+  "source_and_test_sha256": {
+    ".github/workflows/client-live-mechanics-recovery-v1.yml": "e7bb53fb2476a8c88df73d5e0304d59f6d8ef1bed88e357d70e9b861bca48799",
+    ".github/workflows/client-source-candidate-w73.yml": "84f088cdcc145feb5690a14ae4cfdfda8702f91cabae5fad54badc2423f451be",
+    ".github/workflows/metaengine-browser-shell-v1.yml": "1a32c883e8e673962845e7ca41daa1f69a5b4b52cedf56b2d7430c59524ecdf7",
+    "apps/metaengine-browser/electron-builder.test.json": "001d3b1727fea5280eec8fdbe14de451cfd41db0d00f8f2627009ef87e7893cd",
+    "apps/metaengine-browser/package.json": "db067c727264b0fab1d60bd27a946776efa100de9d5f92e4c550f1e9d9f28bdd",
+    "apps/metaengine-browser/scripts/check-source.mjs": "7c84fd5d36e686bac3954d28cfef3ae6e6d6cff4c96e45e0d6beecb10f43fa7a",
+    "apps/metaengine-browser/scripts/electron-builder-before-pack.cjs": "3908c91701b22b570aea62c7b443b13b79c40b43e92dc6ca1d84dc922d01841f",
+    "apps/metaengine-browser/scripts/prepare-codex-cli-job-runtime.mjs": "d89c659cb361d836f92e4e2fd48d38da076a3ae4965d6feac4f05e35957efb58",
+    "apps/metaengine-browser/src/codex-cli-sandbox-probe.mjs": "fdfe16f6b00e2d92d6fb5e42976138713a56a5ac73d7779da0321d63282e42ea",
+    "apps/metaengine-browser/src/codex-cli-windows-process-controller.mjs": "83f2e9503f98a158e2663569d44645d22aca1eb5ab9e853c5fa0437fc30ad891",
+    "apps/metaengine-browser/test/browser-guardian-native-staging-contract.test.mjs": "a07dd0ba82f4a18dd2f4c5d6ddcae1fbccce0317cb358f3a649ecaceb47b522b",
+    "apps/metaengine-browser/test/browser-quiescent-zero-tab-contract.test.mjs": "8f7136a5aab1705e5859e558b93096414eceb47ee5f31fb518ffba8f9d72bee4",
+    "apps/metaengine-browser/test/codex-cli-job-runtime-build.test.mjs": "1f2d656cff4c52b58295ed8e1001f3425c2e2cb208571ffc4d9b46ba6fcccc2c",
+    "apps/metaengine-browser/test/codex-cli-job-runtime.test.mjs": "3de13aa98951d1e99a99274c57262e334a4c4d938f88d457d6a3269b61231f64",
+    "apps/metaengine-browser/test/codex-cli-runner.test.mjs": "a3d793ae1a501a0f90fc5b27df9dba04de3989ffcfef8848aab9c55873725a79",
+    "apps/metaengine-browser/test/codex-cli-startup-observation.test.mjs": "862358b7a3d8b25c324a26dc7956ca652c71fb04c1cb842b9a7da4fc7a3bab3e",
+    "apps/metaengine-browser/test/codex-cli-windows-job-birth-physical.test.mjs": "62ff046d32bc5eedd04b5ed1ee9152c2adcf00cb64b033fff2adb63277a4b14f",
+    "apps/metaengine-browser/test/codex-cli-windows-job-birth.test.mjs": "3992c10d347b5479a13c1e00aa8ea79a9ccf57cb6a09654e5dabca9b735f3ee1",
+    "apps/metaengine-browser/test/codex-cli-windows-output-order.test.mjs": "9d11e949dc076398c10cec294ca06b42bfb11d3690f45309deb70d7e5b399d13",
+    "apps/metaengine-browser/test/codex-cli-windows-process-controller-failures.test.mjs": "ed053ecf28450dcc272a74f8f0a7483bdfe65a619ec7ef9b29cd1ff5647ccad6",
+    "apps/metaengine-browser/test/emergency-maintenance-trust-root.test.mjs": "489c750a6530d9b0f4a3e38d8c1a6527e4ccfc9e0fefea43cf58138208c2e904",
+    "apps/metaengine-browser/test/fixtures/codex-cli-startup-observation.mjs": "c3a324c8514c0bb807d035ae756eb68c7bcdfb1b9370071395b383c002486427",
+    "apps/metaengine-browser/test/helpers/windows-capture-fixture.mjs": "cbe075c24fdd8c7e2986c45277a9131fe507e7167693dfe35f5a368164e91dbc",
+    "apps/metaengine-browser/test/windows-capture-fixture-qualification.test.mjs": "1e2a32795dcf2920cfc6e1b23f0de977df26f915c316e32ed3a2dbb159cc7302",
+    "apps/metaengine-browser/test/windows-capture-profile-isolation.test.mjs": "cc155744df8cf28f431c5b62c9e4869e9e7d91de2fb2450b8566f9e5e63e0b82",
+    "apps/metaengine-browser/test/windows-native-read-environment.test.mjs": "64f4417d279da6991ec77a311bd32b82f56cc3a35c6c6985bb45f4c3d139d918"
+  },
+  "windows_build_qualified": false,
+  "windows_runtime_qualified": false,
+  "installed_goal_execution_proven": false,
+  "production_qualified": false,
+  "package_built_for_this_source": false,
+  "installed_client_modified": false,
+  "main_merged": false,
+  "windows_readback": {
+    "device_online_listing": true,
+    "terminal_result_received": false,
+    "call_id_received": false,
+    "waiting_interrupted_after_seconds": 1012,
+    "retained_background_calls": 0,
+    "mutation_commands_sent": false
+  },
+  "source_preflight": {
+    "tested_local_commit": "69a83f93a524b1f662b493af15056f54042fea18",
+    "tests": 124,
+    "passed": 124,
+    "failed": 0,
+    "skipped": 0,
+    "log": "source-preflight.txt",
+    "scope": "Complete current/historical source preflight; only this receipt and audit text added afterwards."
+  }
+}

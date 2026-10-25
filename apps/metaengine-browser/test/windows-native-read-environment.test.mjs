@@ -104,7 +104,7 @@ test('context rejects DOS device components/extensions and documented console al
   }
 });
 
-test('boot reader uses shared fixed context with unchanged script identity and12s budget', async t => {
+test('boot reader emits a fixed in-memory native binding without a C# compiler and retains the12s read budget', async t => {
   controlledEnvironment(t); let call;
   const value = await readWindowsSandboxHostBoot({platform: 'win32', exec: async (exe, args, options) => {
     call = {exe, args, options}; return {stdout: JSON.stringify(boot())};
@@ -112,6 +112,10 @@ test('boot reader uses shared fixed context with unchanged script identity and12
   const script = assertInvocation(call, 12000, 8192, expectedEnvironment);
   assert.match(script, /NtQueryInformationProcess/); assert.match(script, /ProcessId=4/);
   assert.match(script, /kernel_boot_changed/); assert.doesNotMatch(script, /O'Connor|private-token|RUNNER~1/);
+  assert.match(script, /DefinePInvokeMethod\('NtQueryInformationProcess','C:\\Windows\\System32\\ntdll\.dll','NtQueryInformationProcess'/);
+  assert.match(script, /AssemblyBuilderAccess\]::Run\)/);
+  assert.match(script, /MethodImplAttributes\]::PreserveSig/);
+  assert.doesNotMatch(script, /Add-Type|CodeDom|CompileAssembly|LoadFrom|LoadFile|WriteAll|Start-Process/);
   assert.deepEqual(value, boot());
 });
 

@@ -58,7 +58,7 @@ test('convergence product head contains no temporary patch authority and package
   assert.deepEqual(builder.extraResources, [
     { from: 'src', to: 'native-coding/agent-mcp',
       filter: ['native-coding-agent-mcp-entry.mjs', 'native-coding-agent-mcp-broker.mjs', 'native-coding-agent-mcp-stdio.mjs'] },
-    { from: 'scripts/codex-cli-job-runner.ps1', to: 'native-coding/codex-cli-job-runner.ps1' },
+    { from: 'native-dist/codex-cli/codex-cli-job-runner.ps1', to: 'native-coding/codex-cli-job-runner.ps1' },
     { from: 'client-state-runtime-dist', to: 'client-state-runtime', filter: ['**/*'] },
     { from: 'native-dist/guardian', to: 'guardian-native', filter: ['**/*'] },
     { from: 'native-dist/guardian-bootstrap', to: 'guardian-bootstrap', filter: ['**/*'] },

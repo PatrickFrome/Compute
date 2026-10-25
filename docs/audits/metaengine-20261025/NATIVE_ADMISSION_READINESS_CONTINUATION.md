@@ -7,6 +7,10 @@ readback requirements. This increment repairs the route from an explicit user
 goal to existing native Host admission. Installed cooperative autonomy still
 requires the physical run described in `AUTONOMY_ACCEPTANCE.md`.
 
+The subsequent terminal CI analysis and cold native startup repair are tracked
+in `NATIVE_COLD_START_QUALIFICATION.md`. The validation below records this
+preceding admission increment; later source commits need their own qualification.
+
 ## Verified starting point
 
 - Frozen QA candidate `.4594`: `602d4b07f755f7cd61a6da3af06985d4384b859a`,

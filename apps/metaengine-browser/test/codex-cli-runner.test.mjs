@@ -9,13 +9,14 @@ import { promisify } from 'node:util';
 import { PassThrough } from 'node:stream';
 import { pathToFileURL } from 'node:url';
 import { buildCodexCliArgv, codexCliEnvironment, codexCliTemporaryEnvironment, createCodexCliRunner } from '../src/codex-cli-runner.mjs';
-import { createCodexCliWindowsProcessController, resolveCodexCliJobHelper } from '../src/codex-cli-windows-process-controller.mjs';
+import { createCodexCliWindowsProcessController, resolveCodexCliJobHelper, resolveCodexCliJobHelperSource } from '../src/codex-cli-windows-process-controller.mjs';
 import { CODEX_CLI_RESULT_SCHEMA, validateCodexCliResult } from '../src/codex-cli-result-schema.mjs';
 import {prepareNativeCodingAgentRunBridge} from '../src/native-coding-agent-run-bridge.mjs';
 import {agentBridgePins} from './fixtures/native-coding-agent-bridge-pins.mjs';
 import {connectNativeCodingAgentMcpBroker} from '../src/native-coding-agent-mcp-broker.mjs';
 import {NATIVE_AGENT_MCP_ENV} from '../src/native-coding-agent-mcp-entry.mjs';
 import {withOwnedCodexCliProcess} from './fixtures/with-owned-codex-cli-process.mjs';
+import {prepareCodexCliJobRuntime} from '../scripts/prepare-codex-cli-job-runtime.mjs';
 
 const exec = promisify(execFile);
 const sha = value => crypto.createHash('sha256').update(value).digest('hex');
@@ -30,7 +31,7 @@ test('packaged PowerShell helper resolves outside ASAR and is explicitly shipped
   assert.equal(resolveCodexCliJobHelper({ moduleUrl, resourcesPath }), path.join(resourcesPath, 'native-coding', 'codex-cli-job-runner.ps1'));
   assert.throws(() => resolveCodexCliJobHelper({ moduleUrl, resourcesPath: undefined }), /packaged_resources_required/);
   const config = JSON.parse(await fs.readFile(new URL('../electron-builder.test.json', import.meta.url), 'utf8'));
-  assert.ok(config.extraResources.some(value => value.from === 'scripts/codex-cli-job-runner.ps1' && value.to === 'native-coding/codex-cli-job-runner.ps1'));
+  assert.ok(config.extraResources.some(value => value.from === 'native-dist/codex-cli/codex-cli-job-runner.ps1' && value.to === 'native-coding/codex-cli-job-runner.ps1'));
 });
 
 async function fixture(t) {
@@ -336,7 +337,7 @@ test('real Windows pre-RESUME cancellations never execute a canary and bind sepa
 test('real Windows fault-injected disposable helpers never attest suspended cleanup after a native operation fails', { skip: process.platform !== 'win32', timeout: 180000 }, async t => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-codex-cancel-fault-'));
   t.after(async () => { assert.ok(path.resolve(directory).startsWith(path.resolve(os.tmpdir()) + path.sep)); await fs.rm(directory, { recursive: true, force: true }); });
-  const source = await fs.readFile(resolveCodexCliJobHelper(), 'utf8');
+  const source = await fs.readFile(resolveCodexCliJobHelperSource(), 'utf8');
   const expectedExecutableSha256 = sha(await fs.readFile(process.execPath));
   // These copies deliberately pass invalid native handles; production helper
   // bytes and OS policy stay untouched. This is failure-path evidence only.
@@ -348,9 +349,10 @@ test('real Windows fault-injected disposable helpers never attest suspended clea
   ];
   for (const [index, [before, after]] of faults.entries()) {
     assert.equal(source.split(before).length, 2, 'each fault must target exactly one suspended cleanup operation');
-    const helperPath = path.join(directory, `fault-${index}.ps1`), canary = path.join(directory, `must-not-exist-${index}.txt`);
-    await fs.writeFile(helperPath, source.replace(before, after), 'utf8');
-    const processController = createCodexCliWindowsProcessController({ helperPath });
+    const helperSourcePath = path.join(directory, `fault-${index}.ps1`), canary = path.join(directory, `must-not-exist-${index}.txt`);
+    await fs.writeFile(helperSourcePath, source.replace(before, after), 'utf8');
+    const prepared = await prepareCodexCliJobRuntime({helperSourcePath, outputDirectory: path.join(directory, `prepared-${index}`)});
+    const processController = createCodexCliWindowsProcessController({ helperPath: prepared.helperPath, expectedHelperSha256: prepared.manifest.helper_sha256 });
     await withOwnedCodexCliProcess(processController, { executablePath: process.execPath, expectedExecutableSha256,
       args: ['-e', `require('node:fs').writeFileSync(${JSON.stringify(canary)},'ran')`],
       cwd: directory, env: codexCliEnvironment(path.join(directory, 'unused-auth')), timeoutMs: 10000, runId: crypto.randomUUID() }, async handle => {

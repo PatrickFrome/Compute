@@ -227,6 +227,7 @@ export const SOURCE_CHECK_FILES = Object.freeze([
   "supabase/a2-browser-native-supervisor-v1/managed-project-routes.mjs",
   "supabase/a2-browser-native-supervisor-v1/project-continuity-routes.mjs",
   "scripts/configure-managed-project-repository.mjs",
+  "scripts/prepare-codex-cli-job-runtime.mjs",
   "scripts/qualify-installed-client-launch.mjs",
   "scripts/run-managed-project.mjs",
   "src/development-verification-runtime.mjs",

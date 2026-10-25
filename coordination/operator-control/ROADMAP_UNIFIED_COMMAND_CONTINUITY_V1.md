@@ -511,3 +511,28 @@ then qualify a distinct immutable package and one real Critic-verified coding
 task with durable restart. No installed Browser/Guardian/PG mutation, effect
 replay, production signing, package-version reuse or main merge is authorized
 by these source receipts.
+
+
+## 2026-10-25 — Native cold-start continuation after PR #1347
+
+Terminal CI on `4e5de5c7fb9d9e0fe34a83c839aab58fca4cdb8e` is now observed: 44
+successful job checks, 11 failures and one skip. Current/historical source seals
+and own-PG/runtime contracts passed; remaining failures separated into missing
+Linux X display, Windows fixture directory-watch aborts, native C# cold compilation
+and the correct refusal to reuse the frozen `.4594` package identity.
+
+The continuation retains C2/R1 and the existing task/lease authority. It provides
+real Linux MAIN_PROCESS display setup, bounded nonce-bound fixture file reads,
+a compiler-free fixed native boot read, and explicit normal-build compilation
+of the unchanged Job Object helper. Runtime launches verify prepared helper bytes
+against the packaged in-ASAR manifest; no task-time compiler/cache fallback,
+automatic retry, new scheduler or hosted backend is introduced. See
+`docs/audits/metaengine-20261025/NATIVE_COLD_START_QUALIFICATION.md` and its
+`evidence/audits/metaengine-20261025-native-cold-start/` receipts.
+
+This source work does not close installed cooperative autonomy or promote
+W49/W57/W65 acceptance. New exact-source Windows compiler/runtime/capture CI, a
+new uniquely reserved normal package, installed goal/Critic/own-PG checkpoint
+and restart continuation remain required. The running user device was listed
+online but did not return the read-only terminal request; its actual state is
+UNKNOWN. Preserve the original uncertain Supervisor send for reconciliation.

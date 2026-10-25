@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
-import {resolveCodexCliJobHelper} from '../src/codex-cli-windows-process-controller.mjs';
+import {resolveCodexCliJobHelperSource} from '../src/codex-cli-windows-process-controller.mjs';
 
 // Source contracts and their generated negative controls only. These tests do
 // not compile PowerShell/C#, create native processes, or qualify crash cleanup.
@@ -50,7 +50,7 @@ function assertJobBirthContract(source) {
 }
 
 test('native child is created suspended with a checked Job-list attribute before any ready or resume', async () => {
-  assertJobBirthContract(await fs.readFile(resolveCodexCliJobHelper(), 'utf8'));
+  assertJobBirthContract(await fs.readFile(resolveCodexCliJobHelperSource(), 'utf8'));
 });
 
 for (const [name, mutate] of [
@@ -65,7 +65,7 @@ for (const [name, mutate] of [
   ['freed Job-list value before attribute deletion', source => source.replace(markers.freeValue, '').replace(markers.deletion, markers.freeValue + '\n' + markers.deletion)],
   ['early ready before membership readback', source => source.replace(markers.membership, '').replace(markers.authorization, markers.membership + '\n' + markers.authorization)],
 ]) test(`native birth contract rejects ${name}`, async () => {
-  const source = await fs.readFile(resolveCodexCliJobHelper(), 'utf8');
+  const source = await fs.readFile(resolveCodexCliJobHelperSource(), 'utf8');
   assert.notEqual(mutate(source), source, 'negative control must alter the source');
   assert.throws(() => assertJobBirthContract(mutate(source)), assert.AssertionError);
 });
