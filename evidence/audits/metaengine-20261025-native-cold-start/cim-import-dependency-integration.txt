@@ -1,0 +1,340 @@
+TAP version 13
+# Subtest: writer and critic require different physical write outcomes and never confer authority
+ok 1 - writer and critic require different physical write outcomes and never confer authority
+  ---
+  duration_ms: 1.814037
+  type: 'test'
+  ...
+# Subtest: a no-op or fake writer without an actual allowed workspace write fails
+ok 2 - a no-op or fake writer without an actual allowed workspace write fails
+  ---
+  duration_ms: 0.160551
+  type: 'test'
+  ...
+# Subtest: critic write denial must be verified by host file readback
+ok 3 - critic write denial must be verified by host file readback
+  ---
+  duration_ms: 0.159189
+  type: 'test'
+  ...
+# Subtest: a creator which wrote outside the workspace cannot pass by claiming access denied
+ok 4 - a creator which wrote outside the workspace cannot pass by claiming access denied
+  ---
+  duration_ms: 0.27304
+  type: 'test'
+  ...
+# Subtest: an unchanged outside file alone does not prove an access-denied boundary
+ok 5 - an unchanged outside file alone does not prove an access-denied boundary
+  ---
+  duration_ms: 0.171397
+  type: 'test'
+  ...
+# Subtest: native PID reuse and birth mismatch fail closed
+ok 6 - native PID reuse and birth mismatch fail closed
+  ---
+  duration_ms: 0.149555
+  type: 'test'
+  ...
+# Subtest: a former boot process cannot be reused as current sandbox evidence
+ok 7 - a former boot process cannot be reused as current sandbox evidence
+  ---
+  duration_ms: 0.259019
+  type: 'test'
+  ...
+# Subtest: kernel boot identity survives diagnostic wall-clock drift, rejects missing boot sequence or replaced System process
+ok 8 - kernel boot identity survives diagnostic wall-clock drift, rejects missing boot sequence or replaced System process
+  ---
+  duration_ms: 0.482575
+  type: 'test'
+  ...
+# Subtest: actual current Windows boot sequence and PID4 kernel creation are stable across independent native reads
+ok 9 - actual current Windows boot sequence and PID4 kernel creation are stable across independent native reads # SKIP
+  ---
+  duration_ms: 0.398359
+  type: 'test'
+  ...
+# Subtest: self-reported identity and same-user process cannot prove the elevated sandbox account
+ok 10 - self-reported identity and same-user process cannot prove the elevated sandbox account
+  ---
+  duration_ms: 0.267752
+  type: 'test'
+  ...
+# Subtest: an unconfirmed process tree exit blocks even after the canary succeeded
+ok 11 - an unconfirmed process tree exit blocks even after the canary succeeded
+  ---
+  duration_ms: 0.1061
+  type: 'test'
+  ...
+# Subtest: wrong mode or missing report cannot be reused as evidence for a critic
+ok 12 - wrong mode or missing report cannot be reused as evidence for a critic
+  ---
+  duration_ms: 0.092549
+  type: 'test'
+  ...
+# Subtest: probe CLI forces bounded sandbox permissions without a model request or bypass flags
+ok 13 - probe CLI forces bounded sandbox permissions without a model request or bypass flags
+  ---
+  duration_ms: 0.230096
+  type: 'test'
+  ...
+# Subtest: unsupported sandbox modes and relative executable paths are refused
+ok 14 - unsupported sandbox modes and relative executable paths are refused
+  ---
+  duration_ms: 0.183606
+  type: 'test'
+  ...
+# Subtest: image qualification happens once before issuer timestamps and every observation has a fresh native guard
+ok 15 - image qualification happens once before issuer timestamps and every observation has a fresh native guard
+  ---
+  duration_ms: 33.350845
+  type: 'test'
+  ...
+# Subtest: physical image guard permanently fences file-bytes
+ok 16 - physical image guard permanently fences file-bytes
+  ---
+  duration_ms: 11.677942
+  type: 'test'
+  ...
+# Subtest: physical image guard permanently fences added-entry
+ok 17 - physical image guard permanently fences added-entry
+  ---
+  duration_ms: 12.717674
+  type: 'test'
+  ...
+# Subtest: physical image guard permanently fences deleted-entry
+ok 18 - physical image guard permanently fences deleted-entry
+  ---
+  duration_ms: 8.411612
+  type: 'test'
+  ...
+# Subtest: physical image guard permanently fences file-replaced
+ok 19 - physical image guard permanently fences file-replaced
+  ---
+  duration_ms: 16.484907
+  type: 'test'
+  ...
+# Subtest: mutation during expensive byte verification cannot seed the prepared inventory
+ok 20 - mutation during expensive byte verification cannot seed the prepared inventory
+  ---
+  duration_ms: 7.623228
+  type: 'test'
+  ...
+# Subtest: a failed full verifier is fenced without silently attesting a later retry
+ok 21 - a failed full verifier is fenced without silently attesting a later retry
+  ---
+  duration_ms: 4.979584
+  type: 'test'
+  ...
+# Subtest: current kernel image mismatch fences previously qualified bytes
+ok 22 - current kernel image mismatch fences previously qualified bytes
+  ---
+  duration_ms: 11.412122
+  type: 'test'
+  ...
+# Subtest: protected JSON requires affirmative ACL readback and hashes exact physical bytes
+ok 23 - protected JSON requires affirmative ACL readback and hashes exact physical bytes
+  ---
+  duration_ms: 3.722685
+  type: 'test'
+  ...
+# Subtest: private permit roster is bound to current enrolled device, project and permit row
+ok 24 - private permit roster is bound to current enrolled device, project and permit row
+  ---
+  duration_ms: 0.756807
+  type: 'test'
+  ...
+# Subtest: duplicate, revoked, stale and foreign device bindings cannot select a provider
+ok 25 - duplicate, revoked, stale and foreign device bindings cannot select a provider
+  ---
+  duration_ms: 0.413421
+  type: 'test'
+  ...
+# Subtest: only privately registered, still suspended native workers can be signed and resumed
+ok 26 - only privately registered, still suspended native workers can be signed and resumed
+  ---
+  duration_ms: 1.168076
+  type: 'test'
+  ...
+# Subtest: PID reuse or changed owner cannot become a suspended job observation
+ok 27 - PID reuse or changed owner cannot become a suspended job observation
+  ---
+  duration_ms: 0.569566
+  type: 'test'
+  ...
+# Subtest: worker shutdown retains unconfirmed native cleanup as unknown
+ok 28 - worker shutdown retains unconfirmed native cleanup as unknown
+  ---
+  duration_ms: 0.981214
+  type: 'test'
+  ...
+# Subtest: worker shutdown retains rejected native cleanup as unknown
+ok 29 - worker shutdown retains rejected native cleanup as unknown
+  ---
+  duration_ms: 4.000322
+  type: 'test'
+  ...
+# Subtest: worker shutdown retains missing native cleanup as unknown
+ok 30 - worker shutdown retains missing native cleanup as unknown
+  ---
+  duration_ms: 0.33275
+  type: 'test'
+  ...
+# Subtest: only explicit native tree cleanup permits a confirmed worker drain
+ok 31 - only explicit native tree cleanup permits a confirmed worker drain
+  ---
+  duration_ms: 0.312039
+  type: 'test'
+  ...
+# Subtest: shutdown captures a suspended native handle that arrives after close and forbids duplicate pending spawn
+ok 32 - shutdown captures a suspended native handle that arrives after close and forbids duplicate pending spawn
+  ---
+  duration_ms: 2.093326
+  type: 'test'
+  ...
+# Subtest: spawn rejection without a returned native handle cannot establish cleanup
+ok 33 - spawn rejection without a returned native handle cannot establish cleanup
+  ---
+  duration_ms: 0.357728
+  type: 'test'
+  ...
+# Subtest: unknown native handles cannot be evicted to admit additional physical work
+ok 34 - unknown native handles cannot be evicted to admit additional physical work
+  ---
+  duration_ms: 1.89615
+  type: 'test'
+  ...
+# Subtest: independent Critic subject resolves only exact immutable author receipt, patch and process
+ok 35 - independent Critic subject resolves only exact immutable author receipt, patch and process
+  ---
+  duration_ms: 16.120779
+  type: 'test'
+  ...
+# Subtest: sandbox reader binds exact CLI, worktree, current boot and raw logs including empty stderr
+ok 36 - sandbox reader binds exact CLI, worktree, current boot and raw logs including empty stderr
+  ---
+  duration_ms: 15.112033
+  type: 'test'
+  ...
+# Subtest: native Windows process inventory independently reads this test process without executing a model
+ok 37 - native Windows process inventory independently reads this test process without executing a model # SKIP
+  ---
+  duration_ms: 0.329335
+  type: 'test'
+  ...
+# Subtest: fixed native read context restores only validated profile/temp data and pins executable/module discovery
+ok 38 - fixed native read context restores only validated profile/temp data and pins executable/module discovery
+  ---
+  duration_ms: 2.329311
+  type: 'test'
+  ...
+# Subtest: unapproved environment values are never read, including executable/module overrides and credentials
+ok 39 - unapproved environment values are never read, including executable/module overrides and credentials
+  ---
+  duration_ms: 0.474703
+  type: 'test'
+  ...
+# Subtest: missing context has fixed OS fallbacks; key casing and ordinary local separators cannot inject duplicate variables
+ok 40 - missing context has fixed OS fallbacks; key casing and ordinary local separators cannot inject duplicate variables
+  ---
+  duration_ms: 1.515868
+  type: 'test'
+  ...
+# Subtest: each inherited context field rejects nonlocal/ambiguous/control/ADS/device/oversized values without leaking them
+ok 41 - each inherited context field rejects nonlocal/ambiguous/control/ADS/device/oversized values without leaking them
+  ---
+  duration_ms: 1.127204
+  type: 'test'
+  ...
+# Subtest: context rejects DOS device components/extensions and documented console aliases while retaining ordinary Unicode/spaces
+ok 42 - context rejects DOS device components/extensions and documented console aliases while retaining ordinary Unicode/spaces
+  ---
+  duration_ms: 11.979555
+  type: 'test'
+  ...
+# Subtest: boot reader emits a fixed in-memory native binding without a C\# compiler and retains the12s read budget
+ok 43 - boot reader emits a fixed in-memory native binding without a C\# compiler and retains the12s read budget
+  ---
+  duration_ms: 3.395053
+  type: 'test'
+  ...
+# Subtest: boot read closes unused input before awaiting completion and preserves transport refusal
+ok 44 - boot read closes unused input before awaiting completion and preserves transport refusal
+  ---
+  duration_ms: 1.198421
+  type: 'test'
+  ...
+# Subtest: process reader uses shared fixed context, validated PID and15s budget while retaining stdin close and identity validation
+ok 45 - process reader uses shared fixed context, validated PID and15s budget while retaining stdin close and identity validation
+  ---
+  duration_ms: 2.011433
+  type: 'test'
+  ...
+# Subtest: invalid inherited context and unverified inventory SystemRoot refuse before launching a reader
+ok 46 - invalid inherited context and unverified inventory SystemRoot refuse before launching a reader
+  ---
+  duration_ms: 0.986113
+  type: 'test'
+  ...
+# Subtest: DOS device contexts refuse before either native reader launches
+ok 47 - DOS device contexts refuse before either native reader launches
+  ---
+  duration_ms: 1.343529
+  type: 'test'
+  ...
+# Subtest: diagnostic instrumentation preserves transport scope, owned child, production budgets and private data boundaries
+ok 48 - diagnostic instrumentation preserves transport scope, owned child, production budgets and private data boundaries
+  ---
+  duration_ms: 2.89444
+  type: 'test'
+  ...
+# Subtest: a changed or duplicated native script anchor refuses before executing, including CRLF commands
+ok 49 - a changed or duplicated native script anchor refuses before executing, including CRLF commands
+  ---
+  duration_ms: 1.320776
+  type: 'test'
+  ...
+# Subtest: phase parsing separates fixed stages, rejects repeats/time reversal, and cannot export private stderr
+ok 50 - phase parsing separates fixed stages, rejects repeats/time reversal, and cannot export private stderr
+  ---
+  duration_ms: 0.677128
+  type: 'test'
+  ...
+# Subtest: timed-out diagnostic retains bounded stage timings but never private transport errors
+ok 51 - timed-out diagnostic retains bounded stage timings but never private transport errors
+  ---
+  duration_ms: 2.436962
+  type: 'test'
+  ...
+# Subtest: failed diagnostics are not promoted, leaked, or allowed to suppress the other fixed reader
+ok 52 - failed diagnostics are not promoted, leaked, or allowed to suppress the other fixed reader
+  ---
+  duration_ms: 0.715946
+  type: 'test'
+  ...
+# Subtest: observation refuses non-Windows, arbitrary transport targets, changed production budgets and repeated transports
+ok 53 - observation refuses non-Windows, arbitrary transport targets, changed production budgets and repeated transports
+  ---
+  duration_ms: 0.911059
+  type: 'test'
+  ...
+# Subtest: caught refused or failed transports cannot manufacture a returned native observation
+ok 54 - caught refused or failed transports cannot manufacture a returned native observation
+  ---
+  duration_ms: 0.815776
+  type: 'test'
+  ...
+# Subtest: read-duration diagnostics run only after a failed Windows probe, never replace it or suppress full coverage
+ok 55 - read-duration diagnostics run only after a failed Windows probe, never replace it or suppress full coverage
+  ---
+  duration_ms: 7.218209
+  type: 'test'
+  ...
+1..55
+# tests 55
+# suites 0
+# pass 53
+# fail 0
+# cancelled 0
+# skipped 2
+# todo 0
+# duration_ms 285.480644

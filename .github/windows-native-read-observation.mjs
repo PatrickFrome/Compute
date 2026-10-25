@@ -25,8 +25,8 @@ export function instrumentWindowsNativeReadScript(reader, source) {
   if(typeof source!=='string'||!Object.hasOwn(phaseStages,reader)||source.includes('metaengineReadObservationClock')||source.includes(phasePrefix))throw invalid();
   const eol=source.includes('\r\n')?'\r\n':'\n';
   const edits=reader==='kernel_boot'?[
-    [cimImport,phase('MODULE_IMPORT_BEGIN'),false],
-    [utilityImport,phase('MODULE_IMPORT_END'),true],
+    [utilityImport,phase('MODULE_IMPORT_BEGIN'),false],
+    [cimImport,phase('MODULE_IMPORT_END'),true],
     ["$native=$type.CreateType()",phase('NATIVE_BIND_READY'),true],
     ["$boot=Read-KernelBootId",phase('BOOT_FIRST_READ'),true],
     ["$system=Get-CimInstance Win32_Process -Filter 'ProcessId=4'",phase('SYSTEM_CIM_BEGIN'),false],
@@ -39,7 +39,7 @@ export function instrumentWindowsNativeReadScript(reader, source) {
     ["@{schema='metaengine.windows.kernel-boot.v1';kernel_boot_id=$boot;",phase('JSON_BEGIN'),false],
     ["last_boot_at=$os.LastBootUpTime.ToUniversalTime().ToString('o');os_version=$os.Version}|ConvertTo-Json -Depth 4 -Compress",phase('JSON_END'),true],
   ]:[
-    [cimImport,phase('MODULE_IMPORT_BEGIN'),false],
+    [utilityImport,phase('MODULE_IMPORT_BEGIN'),false],
     [cimImport,phase('MODULE_IMPORT_END'),true],
     ["if($p.Handle -eq [IntPtr]::Zero -or $p.Id -ne $n){throw 'native_process_handle'}",phase('PROCESS_HANDLE_READY'),true],
     ["$birth=$p.StartTime.ToUniversalTime(); $image=$p.MainModule.FileName",phase('PROCESS_IMAGE_READY'),true],

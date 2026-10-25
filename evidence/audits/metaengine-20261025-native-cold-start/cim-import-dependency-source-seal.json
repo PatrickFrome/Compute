@@ -1,0 +1,23 @@
+{
+  "schema": "metaengine.native-cold-start.source-seal-followup.v1",
+  "baseline_source": "1bf3c63dc4e8590f0e1b171943a6e2e25bdcc237",
+  "sealed_paths": 577,
+  "updated_entries": [
+    {
+      "path": ".github/windows-native-read-observation.mjs",
+      "prior_blob": "902a97601a5d6aa20154fe9e20a3878e2fd545e7",
+      "current_blob": "69f28764cb97f632bf3a37ba2363a9b6189699de"
+    },
+    {
+      "path": "apps/metaengine-browser/src/codex-cli-sandbox-probe.mjs",
+      "prior_blob": "96e02c19509582ffe0fc463d80b51992b7e3bc17",
+      "current_blob": "b2aa5c79ee9ee2fcd49fb76cd82e4be6aaabe8cf"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-host-observers.mjs",
+      "prior_blob": "34e51a02c089fb3c06964eef7fcf343cba10a95c",
+      "current_blob": "72b9234cbe651c5db4b5c9bc2f6b353ea9d3343a"
+    }
+  ],
+  "all_other_manifest_fields_unchanged": true
+}

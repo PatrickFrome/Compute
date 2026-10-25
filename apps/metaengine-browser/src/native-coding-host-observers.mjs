@@ -65,6 +65,7 @@ export async function readNativeCodingWindowsProcess(pid,{exec=run,platform=proc
   if(platform!=='win32'||!Number.isSafeInteger(pid)||pid<1||pid>0x7fffffff)fail('native_pid_invalid');
   const script=`$ErrorActionPreference='Stop'
 $PSModuleAutoLoadingPreference='None'
+Microsoft.PowerShell.Core\\Import-Module -Name 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules\\Microsoft.PowerShell.Utility\\Microsoft.PowerShell.Utility.psd1' -ErrorAction Stop
 Microsoft.PowerShell.Core\\Import-Module -Name 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules\\CimCmdlets\\CimCmdlets.psd1' -ErrorAction Stop
 $n=[int]$env:METAENGINE_NATIVE_CODING_PID
 $p=[Diagnostics.Process]::GetProcessById($n)

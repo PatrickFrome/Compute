@@ -391,6 +391,46 @@ Primary references for the narrow import choice:
 - [Windows PowerShell startup and module search paths](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_psmodulepath?view=powershell-7.6#windows-powershell-startup).
 - [Module-qualified command resolution](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_command_precedence?view=powershell-5.1#use-module-qualified-names).
 
+## Confirmed Windows PowerShell CIM import dependency
+
+The exact-source diagnostic for
+`1bf3c63dc4e8590f0e1b171943a6e2e25bdcc237` proved that the prepared helper
+could import Utility in **60 ms**, read stdin in **2 ms** and parse JSON in
+**18 ms**. Ready was validated after **657 ms**, and the real output-order
+test passed in 745 ms. Both readers instead failed during the explicit CIM
+import, before any CIM query; these were immediate import errors, not new
+timeouts. `native-stage-explicit-import-ci.json` retains both outcomes.
+
+The complete early six-file Windows artifact identifies the primary error:
+`Import-Module` raised `CommandNotFoundException` for `Set-Alias`. That stage
+finished with **131 passes, two failures, one skip and zero cancelled tests**
+(134 total); only the boot and process readers failed. Both physical birth
+scenarios, suspended-cleanup faults, output ordering and capture passed.
+The digest-verified artifact and failure details are recorded in
+`native-stage-import-dependency-ci.json`.
+
+The historical Microsoft CIM initializer calls `Set-Alias` from its import
+callback. Windows PowerShell 5.1 provides that command through Utility.
+With automatic discovery disabled, importing CIM before Utility exposed this
+dependency. The actual Windows exception is the evidence for this repair;
+the older public source explains it without claiming that modern PowerShell
+has an identical initializer.
+
+The narrow follow-up imports **Utility before CimCmdlets in both readers**:
+one existing import is reordered in the boot reader, and one prerequisite
+import is added to process inventory. The diagnostic brackets the complete
+two-module sequence so its timing includes both imports. The helper, compiler,
+C# bytes, queries, identity checks, environment and 12/15-second production
+deadlines are unchanged. Existing reader/environment/diagnostic regressions
+passed **53 of 55 tests, zero failures and two Windows-only skips**; 240 source
+parser checks passed. Native success and timing still require a fresh Windows
+run of this follow-up source.
+
+Primary references for the confirmed prerequisite:
+
+- [Historical Microsoft CIM import initializer](https://github.com/PowerShell/PowerShell/blob/v6.0.0-alpha.9/src/Microsoft.Management.Infrastructure.CimCmdlets/CimCmdletModuleInitialize.cs).
+- [Windows PowerShell 5.1 Set-Alias module](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.utility/set-alias?view=powershell-5.1).
+
 ## Acceptance still required
 
 This continuation must be qualified on its own final source commit. Portable

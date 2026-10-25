@@ -1,0 +1,250 @@
+{
+  "schema": "metaengine.ci.windows-native-import-dependency.v1",
+  "source_head_sha": "1bf3c63dc4e8590f0e1b171943a6e2e25bdcc237",
+  "workflow": "Client Live Mechanics Recovery",
+  "run_id": 40238747338,
+  "run_attempt": 1,
+  "run_url": "https://github.com/PatrickFrome/Compute/actions/runs/40238747338",
+  "job_id": 121305803503,
+  "job_url": "https://github.com/PatrickFrome/Compute/actions/runs/40238747338/job/121305803503",
+  "job_status_when_artifact_read": "in_progress",
+  "job_conclusion_when_artifact_read": null,
+  "full_job_terminal_result_included": false,
+  "stage": {
+    "name": "Isolated Windows native diagnostic (not contention proof)",
+    "status": "completed",
+    "conclusion": "failure",
+    "started_at": "2026-10-25T22:12:47Z",
+    "completed_at": "2026-10-25T22:15:33Z",
+    "wall_duration_seconds": 166,
+    "configured_timeout_minutes": 10,
+    "completion_kind": "COMPLETE_TEST_SUMMARY",
+    "final_summary_present": true,
+    "tests": 134,
+    "pass": 131,
+    "fail": 2,
+    "cancelled": 0,
+    "skipped": 1,
+    "duration_ms": 165835.6748
+  },
+  "artifact": {
+    "id": 12616275521,
+    "name": "windows-native-probe-1bf3c63dc4e8590f0e1b171943a6e2e25bdcc237-40238747338-1",
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/actions/artifacts/12616275521",
+    "created_at": "2026-10-25T22:15:34Z",
+    "upload_step_conclusion": "success",
+    "archive_length_bytes": 9614,
+    "archive_sha256": "173e44844340ce7fd1b671653b9bca442da5fa2313e2f4ab2f2372bd67cfac52",
+    "archive_digest_verified": true,
+    "log_length_bytes": 41012,
+    "log_sha256": "9dbd99ca8a55ad3c6edf218af34879f15dc0eb8e53344a453de82f4ec6964a3a"
+  },
+  "failures": [
+    {
+      "status": "failed",
+      "test": "actual current Windows boot sequence and PID4 kernel creation are stable across independent native reads",
+      "duration_ms": 393.266,
+      "file": "apps/metaengine-browser/test/codex-cli-sandbox-probe.test.mjs",
+      "observed_error": "Import-Module: The term 'Set-Alias' is not recognized as the name of a cmdlet, function, script file, or operable program.",
+      "primary_import_exception_exposed": true
+    },
+    {
+      "status": "failed",
+      "test": "native Windows process inventory independently reads this test process without executing a model",
+      "duration_ms": 217.4281,
+      "file": "apps/metaengine-browser/test/native-coding-host-observers.test.mjs",
+      "observed_error": "native_coding_observer_native_process_unavailable",
+      "primary_import_exception_exposed": false
+    }
+  ],
+  "verified_primary_import_failure": {
+    "evidence_source": "kernel boot test failure in the verified artifact",
+    "operation": "Microsoft.PowerShell.Core\\Import-Module",
+    "module_being_imported": "CimCmdlets",
+    "missing_command": "Set-Alias",
+    "error_type": "CommandNotFoundException",
+    "category_info": "ObjectNotFound: (Set-Alias:String) [Import-Module], CommandNotFoundException",
+    "fully_qualified_error_id": "CommandNotFoundException,Microsoft.PowerShell.Commands.ImportModuleCommand",
+    "script_line": 3,
+    "module_autoload_preference": "None",
+    "prerequisite_module": "Microsoft.PowerShell.Utility",
+    "prerequisite_command_reference": "https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.utility/set-alias?view=powershell-5.1",
+    "failure_cause_proven": true,
+    "corrective_import_order": [
+      "Microsoft.PowerShell.Utility",
+      "CimCmdlets"
+    ],
+    "corrective_order_windows_success_proven": false,
+    "own_process_test_exposes_same_underlying_exception": false
+  },
+  "physical_passes": [
+    {
+      "status": "passed",
+      "test": "real Windows controller starts suspended in its job and transports exact arguments without a model",
+      "duration_ms": 448.1097
+    },
+    {
+      "status": "passed",
+      "test": "real Windows deadline kills the exact job and its descendant without any model call",
+      "duration_ms": 697.7697
+    },
+    {
+      "status": "passed",
+      "test": "native absolute deadline can be shortened at resume and stops the real child before relative timeout",
+      "duration_ms": 1091.7483
+    },
+    {
+      "status": "passed",
+      "test": "an expired native deadline cannot resume a suspended child and cancellation still proves exact cleanup",
+      "duration_ms": 414.2791
+    },
+    {
+      "status": "passed",
+      "test": "real Windows pre-RESUME cancellations never execute a canary and bind separate native identities and cancellation IDs",
+      "duration_ms": 741.9018
+    },
+    {
+      "status": "passed",
+      "test": "real Windows fault-injected disposable helpers never attest suspended cleanup after a native operation fails",
+      "duration_ms": 1331.0837
+    },
+    {
+      "status": "passed",
+      "test": "Windows native suspended cleanup fault fixtures",
+      "duration_ms": 3532.4498
+    },
+    {
+      "status": "passed",
+      "test": "real Windows inner Job kills the exact suspended birth-window child before ready, independently of the outer cleanup guard",
+      "duration_ms": 20383.2305
+    },
+    {
+      "status": "passed",
+      "test": "real Windows unassigned INNER control survives helper death until later exact owned cleanup",
+      "duration_ms": 18012.6553
+    },
+    {
+      "status": "passed",
+      "test": "real Windows native helper buffers immediate output through a forced post-resume pre-ack window",
+      "duration_ms": 369.924
+    },
+    {
+      "status": "passed",
+      "test": "fixed Windows PowerShell bridge physically parses and serves STATUS",
+      "duration_ms": 13080.1441
+    },
+    {
+      "status": "passed",
+      "test": "fixed Windows bridge physically captures an exact window with raw pixel digest",
+      "duration_ms": 42359.131
+    },
+    {
+      "status": "passed",
+      "test": "fixed Windows bridge physically reads foreground status without overwriting the automatic PID variable",
+      "duration_ms": 13455.912
+    }
+  ],
+  "output_order_startup_observation": {
+    "schema": "metaengine.codex-cli.test-startup-phases.v1",
+    "helper_variant": "FORCED_OUTPUT_WINDOW",
+    "startup_deadline_ms": 30000,
+    "helper_spawns_observed": 1,
+    "spawn_event_elapsed_ms": 3,
+    "ready_validated_elapsed_ms": 307,
+    "close_elapsed_ms": 366,
+    "stages": [
+      {
+        "stage": "PS_ENTER",
+        "elapsed_ms": 131
+      },
+      {
+        "stage": "ASSEMBLY_LOAD_BEGIN",
+        "elapsed_ms": 138
+      },
+      {
+        "stage": "ASSEMBLY_LOAD_END",
+        "elapsed_ms": 142
+      },
+      {
+        "stage": "MODULE_IMPORT_BEGIN",
+        "elapsed_ms": 142
+      },
+      {
+        "stage": "MODULE_IMPORT_END",
+        "elapsed_ms": 173
+      },
+      {
+        "stage": "REQUEST_READ_BEGIN",
+        "elapsed_ms": 173
+      },
+      {
+        "stage": "REQUEST_LINE_READ",
+        "elapsed_ms": 174
+      },
+      {
+        "stage": "REQUEST_JSON_BEGIN",
+        "elapsed_ms": 174
+      },
+      {
+        "stage": "REQUEST_JSON_END",
+        "elapsed_ms": 187
+      },
+      {
+        "stage": "REQUEST_READ_END",
+        "elapsed_ms": 187
+      },
+      {
+        "stage": "NATIVE_RUN_ENTER",
+        "elapsed_ms": 211
+      },
+      {
+        "stage": "IMAGE_DIGEST_CHECKED",
+        "elapsed_ms": 300
+      },
+      {
+        "stage": "CHILD_JOB_BOUND",
+        "elapsed_ms": 305
+      },
+      {
+        "stage": "IDENTITY_READBACK_COMPLETE",
+        "elapsed_ms": 306
+      },
+      {
+        "stage": "READY_WRITE_BEGIN",
+        "elapsed_ms": 306
+      },
+      {
+        "stage": "READY_FLUSH_RETURNED",
+        "elapsed_ms": 307
+      }
+    ],
+    "unknown_stderr_bytes": 0,
+    "phase_stream_invalid": false,
+    "phase_stream_overflow": false,
+    "body_failed": false,
+    "phase_timing_observation_only": true,
+    "contention_proven": false,
+    "native_qualification_proven": false
+  },
+  "other_test_outcomes": {
+    "pass": 131,
+    "cancelled": 0,
+    "skipped": 1,
+    "skip_scope": "Non-Windows production bridge refusal contract"
+  },
+  "diagnostic_test_stage": true,
+  "qualified": false,
+  "original_probe_result_replaced": false,
+  "authority_effect": false,
+  "release_authority": false,
+  "native_qualification_proven": false,
+  "cold_start_performance_cause_proven": false,
+  "contention_proven": false,
+  "raw_stderr_included": false,
+  "limits": [
+    "The artifact contains a complete six-file test report while the full Browser suite in the same job was still running. It does not contain a full-job terminal qualification.",
+    "The kernel boot test exposes the exact Set-Alias command-not-found exception inside CimCmdlets import. The process reader reports its fixed opaque unavailable error; its separate short diagnostic also stops inside CIM import, but does not expose the underlying exception.",
+    "Utility-before-Cim is grounded in the observed missing command and its documented module. Success of that correction still requires physical Windows validation at a new exact source head.",
+    "Only a fixed, identified exception excerpt and fields are retained. The full raw stderr and encoded PowerShell command are excluded. Earlier general cold-start latency has no causal attribution from this import-order failure alone."
+  ]
+}
