@@ -440,3 +440,23 @@ test('Host loss revokes a prepared MCP bridge before joining a still-pending run
   assert.equal(stopped.shutdown_state,'DRAINED');assert.equal(stopped.worker_cleanup_confirmed,true);
   assert.equal(stopped.execution_outcomes_reconciled,false);assert.equal(bridgeClosed,1);
 });
+
+test('runtime drain joins an in-flight private commit before journals and Host may retire',async t=>{
+  const f=fixture();t.after(()=>f.runtime.close());let release,enteredResolve,writes=0,finished=false;
+  const entered=new Promise(resolve=>{enteredResolve=resolve;}),gate=new Promise(resolve=>{release=resolve;});
+  const row={project_id:ids.project,checkpoint_id:ids.run,checkpoint_sha256:'a'.repeat(64),writer_task_id:ids.task,
+    writer_lease_generation:1,critic_task_id:ids.permit,critic_lease_generation:2};
+  const flags={production_qualified:false,automatic_retry_allowed:false,authority_effect:false,successor_admitted:false};
+  const runtime=createNativeCodingRuntime({...f.args,ownPostgres:{...f.args.ownPostgres,
+    readFinishCheckpoint:async query=>({schema:'metaengine.native-coding.host-commit-service.v1',...query,...flags,
+      checkpoint_id:row.checkpoint_id,state:'PENDING_COMMIT',git_readback:{schema:'metaengine.native-coding.git-commit-receipt.v1',
+        ...query,checkpoint_id:row.checkpoint_id,state:'NOT_ATTEMPTED',...flags}}),
+    finishCheckpoint:async()=>{writes++;enteredResolve();await gate;return {state:'SQL_FINALIZE_UNKNOWN'};},
+  }});t.after(()=>runtime.close());
+  runtime.observeProjectCommits([row]);await entered;
+  const closing=runtime.close().then(value=>{finished=true;return value;});
+  await new Promise(resolve=>setImmediate(resolve));assert.equal(finished,false);
+  assert.equal(runtime.snapshot().shutdown_state,'DRAINING');assert.equal(runtime.snapshot().project_commits.readback_required,1);
+  release();const result=await closing;assert.equal(result.shutdown_state,'DRAINED');assert.equal(writes,1);
+  assert.equal(result.execution_outcomes_reconciled,false);
+});

@@ -72,8 +72,12 @@ export class AutonomousProjectTaskRuntime {
     const candidates=value.projects.filter(project=>project.native_checkpoint_pending===true)
       .map(project=>({...project.native_checkpoint_candidate,project_id:project.project_id}));
     const nativeCheckpoints=this.#nativeCodingRuntime?.observeProjectCheckpoints(candidates)??null;
+    const commitCandidates=value.projects.filter(project=>project.native_commit_pending===true)
+      .map(project=>({...project.native_commit_candidate,project_id:project.project_id}));
+    if(commitCandidates.length&&typeof this.#nativeCodingRuntime?.observeProjectCommits!=='function')fail('native_commit_runtime_required');
+    const nativeCommits=this.#nativeCodingRuntime?.observeProjectCommits?.(commitCandidates)??null;
     this.#last = { schema: AUTONOMOUS_PROJECT_RUNTIME_SCHEMA, state: 'PROJECTS_RECONCILED', projects_reconciled: value.projects.length,
-      native_checkpoints:nativeCheckpoints,...flags };
+      native_checkpoints:nativeCheckpoints,native_commits:nativeCommits,...flags };
     return this.snapshot();
   }
   async #post(operation, body) {

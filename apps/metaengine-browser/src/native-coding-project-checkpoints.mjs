@@ -89,6 +89,7 @@ export function createNativeCodingProjectCheckpointObserver({ownPostgres,maxEntr
       }
       return snapshot();
     },snapshot,
-    close(){closed=true;return snapshot();},
+    close(){closed=true;for(const row of entries.values())if(row.write_attempted&&row.state!=='CHECKPOINTED_PENDING_COMMIT')row.state='READBACK_REQUIRED';return snapshot();},
+    drain(){return running||Promise.resolve();},
   });
 }

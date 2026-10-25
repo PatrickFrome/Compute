@@ -1,4 +1,6 @@
 import {createNativeCodingHostCommitService} from './native-coding-host-commit-service.mjs';
+import {createNativeCodingProjectCommitObserver} from '../../apps/metaengine-browser/src/native-coding-project-commits.mjs';
+import {AutonomousProjectTaskRuntime} from '../../apps/metaengine-browser/src/autonomous-project-task-runtime.mjs';
 import {createNativeCodingCommitGitFixture} from './test/native-coding-host-commit-git-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -220,7 +222,20 @@ test('real Git and PostgreSQL join protected checkpoint to the next W30 lease th
     const transport={unsafe:sql.unsafe.bind(sql),begin:async(isolation,operation)=>{
       commits++;const value=await sql.begin(isolation,operation);if(lostAck){lostAck=false;throw Error('GENERATED_ACK_LOST_AFTER_REAL_PG_COMMIT');}return value;}};
     const make=()=>createNativeCodingHostCommitService({sql:transport,...x.callbacks}),service=await make();
-    t.after(()=>service.close());const result=await service.FINISH_CHECKPOINT(query);
+    t.after(()=>service.close());let result,dispatches=0;
+    const observer=createNativeCodingProjectCommitObserver({ownPostgres:{
+      readFinishCheckpoint:request=>service.READ_FINISH_CHECKPOINT(request),
+      finishCheckpoint:async request=>{dispatches++;result=await service.FINISH_CHECKPOINT(request);return result;},
+    }});
+    const projectRuntime=new AutonomousProjectTaskRuntime({journal:{find(){},begin(){},confirm(){}},materializeProject:async()=>{},
+      request:async()=>{const [row]=await sql.unsafe('select public.h205f22_project_reconcile_v1($1,null,$2,$3,1)as value',
+        [k.workspace_id,f.p.device_id,f.generated.clientId]);return row.value;}});
+    projectRuntime.bindNativeCodingRuntime({observeProjectCheckpoints:()=>null,observeProjectCommits:rows=>observer.observe(rows)});
+    t.after(async()=>{observer.close();await projectRuntime.close();});
+    const tick=await projectRuntime.tick();assert.equal(tick.native_commits.running,true);
+    const deadline=Date.now()+30000;
+    while(observer.snapshot().running&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,20));
+    assert.equal(observer.snapshot().running,false);assert.equal(observer.snapshot().successors_observed,1);assert.equal(dispatches,1);
     assert.equal(result.state,'SUCCESSOR_ADMITTED');assert.equal(result.successor_admitted,true);assert.equal(commits,1);
     const value=result.commit,newHead=(await physical.git(['rev-parse','HEAD'])).trim();
     assert.notEqual(newHead,previousHead);assert.equal(value.head,newHead);assert.equal(value.previous_head,previousHead);
@@ -254,7 +269,8 @@ test('real Git and PostgreSQL join protected checkpoint to the next W30 lease th
       postgres_system_identifier:cluster,project_id:k.project_id,checkpoint_id:k.checkpoint_id,checkpoint_sha256:x.staged.checkpointSha,
       previous_head:previousHead,head:newHead,tree:value.tree,commit_receipt_sha256:value.commit_receipt_sha256,
       successor_task_id:lease.task_id,successor_lease_generation:Number(lease.lease_generation),sql_finalization_dispatches:commits,
-      real_git_commit:true,real_pg_transaction:true,real_w30_lease:true,model_calls:0,installed_autonomy_proven:false,
+      real_git_commit:true,real_pg_transaction:true,real_w30_lease:true,existing_project_heartbeat_drives_commit:true,
+      heartbeat_commit_dispatches:dispatches,model_calls:0,installed_autonomy_proven:false,
       os_callbacks_are_generated_fixtures:true,windows_acl_qualified:false,authority_effect:false},null,2));
   });
   await subtest('post-review file changes cannot become a Git commit or a SQL successor',async t=>{
