@@ -220,9 +220,19 @@ function admissionSql(changes = {}) {
 test('API catalog probe admits zero-membership direct credentials with explicit per-column and RPC grants only', async () => {
   const result = await inspectAttachedApiAdmission({ sql: admissionSql(), apiLogin: 'restricted_api' });
   assert.equal(result.memberships, 0); assert.equal(result.api_role_mode, 'direct'); assert.equal(result.api_login_service_role_grants_modified, false);
-  assert.equal(result.rpc_names_granted, 50); assert.equal(result.tables_granted, 5);
+  assert.equal(result.rpc_names_granted, RPC_ALLOWLIST.length); assert.equal(result.tables_granted, 5);
   assert.equal(result.database_sql_privileges_exact_allowlist, false); assert.equal(result.application_rows_read, false);
   assert.equal(result.insert_columns_granted, 7);
+});
+
+test('API probe requires explicit direct grants for both native coding context RPCs', async () => {
+  for (const name of ['native_coding_admission_context_v1', 'native_coding_execution_context_v1']) {
+    assert.ok(RPC_ALLOWLIST.includes(name));
+    for (const changes of [{ missingRpc: name }, { deniedRpc: name }, { publicOnlyRpc: name }]) {
+      await assert.rejects(inspectAttachedApiAdmission({ sql: admissionSql(changes), apiLogin: 'restricted_api' }),
+        { code: changes.missingRpc ? 'attached_onboarding_api_rpc_catalog_incomplete' : 'attached_onboarding_api_rpc_grants_unattested' });
+    }
+  }
 });
 
 test('API probe rejects elevated roles, SET memberships, missing signatures and PUBLIC-only or excessive grants', async () => {
@@ -318,3 +328,4 @@ test('negative, excessive and invalid postmaster timestamp drift cannot mutate a
   }
   assert.equal(postmasterPidStartEpochMatchesLive(epoch,'invalid'),false);
 });
+
