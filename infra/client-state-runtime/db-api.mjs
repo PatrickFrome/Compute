@@ -9,6 +9,8 @@ import { admitOwnPg17LedgerReadback } from './operator-pg17-restart-admission.mj
 import { ApiError, authenticated, compileTableRequest, compileRpcRequest, RPC_ALLOWLIST, RPC_CATALOG_QUERY, TABLE_ALLOWLIST, databaseError } from './db-api-core.mjs';
 
 const MAX_BODY_BYTES = 1024 * 1024;
+const APPLICATION_REQUEST_CAPACITY = 6;
+const HEALTH_REQUEST_CAPACITY = 1;
 const CLAIMS = JSON.stringify({ role: 'service_role', aud: 'authenticated', iss: 'local-state-runtime' });
 
 async function readBody(request) {
@@ -73,7 +75,9 @@ export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port
     if (!['postgres:', 'postgresql:'].includes(db.protocol) || !['127.0.0.1', 'localhost', '[::1]'].includes(db.hostname)) throw new Error('local_state_loopback_database_required');
   }
   const sql = injectedSql || postgres(databaseUrl, {
-    max: 6, prepare: false, connect_timeout: 5, idle_timeout: 30, max_lifetime: 1800,
+    // The reserved HTTP health admission must also have a physical SQL slot.
+    max: APPLICATION_REQUEST_CAPACITY + HEALTH_REQUEST_CAPACITY,
+    prepare: false, connect_timeout: 5, idle_timeout: 30, max_lifetime: 1800,
     types: { bigint: { to: 20, from: [20], serialize: String, parse(value) {
       const number = Number(value);
       if (!Number.isSafeInteger(number)) throw new Error('local_state_integer_out_of_range');
@@ -154,10 +158,10 @@ export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port
       // Health must still inspect the DB when all six application requests
       // are busy. It has one separate bounded read slot, with the same auth.
       if(url.pathname==='/health'&&request.method==='GET'&&!url.search) {
-        if(activeHealthRequests>=1) throw new ApiError(503,'local_state_health_busy');
+        if(activeHealthRequests>=HEALTH_REQUEST_CAPACITY) throw new ApiError(503,'local_state_health_busy');
         activeHealthRequests++;healthAdmitted=true;
       } else {
-        if (activeRequests >= 6) throw new ApiError(503, 'local_state_api_busy');
+        if (activeRequests >= APPLICATION_REQUEST_CAPACITY) throw new ApiError(503, 'local_state_api_busy');
         activeRequests += 1;admitted = true;
       }
       if (url.pathname === '/operator/v1/context') {

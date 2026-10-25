@@ -10,6 +10,8 @@ import {promisify} from 'node:util';
 import {inspectPostgres} from './launcher.mjs';
 import {startOwnedWindowsPostgres} from './owned-postgres-process.mjs';
 import {createPostgresContinuityInspector} from './postgres-continuity-inspector.mjs';
+import {startDbApi} from './db-api.mjs';
+import postgres from 'postgres';
 
 const execute=promisify(execFile),bin=process.env.LOCAL_STATE_TEST_PG_BIN_DIR;
 const executable=name=>path.join(bin,name+'.exe');
@@ -58,5 +60,38 @@ test('real PG17 continuity uses the same JSON identity as independent psql and o
   assert.deepEqual(await inspectPostgres(config),startup,'independent psql identity remains unchanged');
   await inspector.close();inspector=null;
   assert.equal(await sql("select count(*) from pg_stat_activity where application_name='metaengine-runtime-continuity'"),'0');
+  // Exercise the production API driver's actual pool, without a mocked SQL
+  // pool that could hide health starvation behind six open transactions.
+  await sql("create role service_role nologin; create role continuity_api_login login password '"+password+"'; "+
+    "grant service_role to continuity_api_login; "+
+    "create function public.devos_environment_state_v1() returns jsonb language plpgsql as $body$ "+
+    "begin perform pg_advisory_xact_lock(7718045821); return '{\"fixture\":true}'::jsonb; end $body$; "+
+    "create function public.devos_runtime_capabilities_v1() returns jsonb language sql as $body$ select '{\"fixture\":true}'::jsonb $body$");
+  const holder=postgres(config.inspectDatabaseUrl,{max:1,prepare:false,connect_timeout:3});
+  let api=null,pending=[];
+  try{
+    await holder.unsafe('select pg_advisory_lock(7718045821)');
+    const key=randomBytes(32).toString('hex');
+    api=await startDbApi({databaseUrl:`postgresql://continuity_api_login:${password}@127.0.0.1:${port}/postgres`,apiKey:key,port:0});
+    const headers={apikey:key,'content-type':'application/json'};
+    pending=Array.from({length:6},()=>fetch(api.address+'/rest/v1/rpc/devos_environment_state_v1',
+      {method:'POST',headers,body:'{}'}));
+    const deadline=Date.now()+6000;let occupied='0';
+    do{
+      occupied=await sql("select count(*) from pg_stat_activity where usename='continuity_api_login' and wait_event='advisory'");
+      if(occupied==='6')break;await new Promise(resolve=>setTimeout(resolve,25));
+    }while(Date.now()<deadline);
+    assert.equal(occupied,'6','all six application transactions physically occupy their SQL connections');
+    const response=await fetch(api.address+'/health',{headers:{apikey:key},signal:AbortSignal.timeout(5000)});
+    const body=await response.json();
+    // The intentionally minimal catalog cannot assert runtime readiness. It
+    // must nevertheless execute its DB read while the six app reads are held.
+    assert.equal(response.status,503);assert.equal(body.schema,'metaengine.client-state.health.v1');
+    assert.deepEqual(body.runtime_capabilities,{fixture:true});assert.equal(body.error,undefined);
+    assert.equal(await sql("select count(*) from pg_stat_activity where usename='continuity_api_login'"),'7');
+  }finally{
+    await holder.unsafe('select pg_advisory_unlock_all()');
+    await Promise.allSettled(pending);await api?.close();await holder.end({timeout:5});
+  }
   finished=true;
 });
