@@ -1,0 +1,53 @@
+{
+  "schema": "metaengine.reviewed-current-source-seal-refresh.v1",
+  "functional_source": "cff3496e8510223f0b98d585a83bfc42d9f63c8d",
+  "previous_manifest_blob": "5a88226c5c4895c22118cf33dfd36ef74b02a694",
+  "current_manifest_sha256": "90f47818b2623d5dab2fab021d9bce2c660e91372bceb713bb09d37dbc5cec9b",
+  "updated_existing_paths": [
+    "apps/me2-ui/package.json",
+    "apps/me2-ui/src/components/me2/shell/me2-shell.tsx",
+    "apps/metaengine-browser/scripts/check-source.mjs",
+    "apps/metaengine-browser/src/client-native-coding-goal.mjs",
+    "apps/metaengine-browser/test/client-native-coding-goal.test.mjs",
+    "apps/metaengine-browser/test/local-runtime-recovery-fixture.mjs",
+    "apps/metaengine-browser/test/native-coding-host-ipc.test.mjs",
+    "apps/metaengine-browser/test/native-coding-host-observers-asar.test.mjs",
+    "infra/client-state-runtime/attached-bundled-runtime.integration.test.mjs",
+    "infra/client-state-runtime/local-runtime-migrations.integration.test.mjs",
+    "infra/client-state-runtime/native-coding-host-authority-review.test.mjs",
+    "infra/client-state-runtime/native-coding-host-ipc.mjs",
+    "infra/client-state-runtime/package.json",
+    "infra/client-state-runtime/runtime-host.mjs"
+  ],
+  "newly_sealed_paths": [
+    ".github/workflows/metaengine-client-w23-me2-typecheck.yml",
+    "apps/me2-ui/src/lib/goal-submission-mode-observer.d.mts",
+    "apps/me2-ui/src/lib/goal-submission-mode-observer.mjs",
+    "apps/me2-ui/src/lib/goal-submission-mode-observer.test.mjs",
+    "apps/me2-ui/src/lib/goal-submission-mode-observer.ui.test.mjs",
+    "apps/metaengine-browser/src/fleet-provisioner-core.mjs",
+    "apps/metaengine-browser/test/fleet-operator-target-persistence.test.mjs",
+    "apps/metaengine-browser/test/supervisor-rollover-capacity-settlement.test.mjs",
+    "infra/client-state-runtime/native-coding-host-seed-binding.mjs",
+    "infra/client-state-runtime/native-coding-host-seed-binding.test.mjs"
+  ],
+  "total_sealed_files": 571,
+  "all_non_blob_manifest_fields_unchanged": true,
+  "historical_ledgers_unchanged": true,
+  "package_version_changed": false,
+  "qualification_promoted": false,
+  "test_assertions_changed": false,
+  "authority_effect": false,
+  "validation": {
+    "summary": {
+      "tests": 124,
+      "pass": 124,
+      "fail": 0,
+      "skipped": 0
+    },
+    "log_file": "source-seal-regressions.txt",
+    "log_sha256": "6fcdf21e920a8e4492d80d490514406e5d61748f5c03c3319d034c2438269591",
+    "uses_full_git_history": true,
+    "assertions_unchanged": true
+  }
+}

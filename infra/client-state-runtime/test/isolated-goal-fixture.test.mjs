@@ -25,12 +25,21 @@ test('goal integration opts in with pinned archive and no caller-supplied connec
   assert.throws(() => goalFixtureConfig({ ...config(), LOCAL_STATE_TEST_GOAL_DUMP_SHA256: 'not-a-digest' }), /dump_digest_invalid/);
 });
 
-test('schema-only archive plan excludes data, triggers and external connectors', () => {
-  const toc = '; Dumped from database version: 17.6\n' + [
+test('schema-only archive plan preserves ACLs while excluding data, triggers and external connectors', () => {
+  const schemaEntries = [
     '1; 2615 1 SCHEMA - public postgres',
+    '4; 1259 4 TABLE public synthetic postgres',
+    '12; 1255 11 FUNCTION public h205f22_a2_browser_cognitive_accept_v1(uuid, text, text, uuid, bigint, bigint, jsonb, boolean) postgres',
+  ];
+  const aclEntries = [
+    '13; 0 0 ACL - SCHEMA public postgres',
+    '14; 0 0 ACL public TABLE synthetic postgres',
+    '15; 0 0 ACL public FUNCTION h205f22_a2_browser_cognitive_accept_v1(uuid, text, text, uuid, bigint, bigint, jsonb, boolean) postgres',
+    '16; 826 12 DEFAULT ACL public DEFAULT PRIVILEGES FOR FUNCTIONS postgres',
+  ];
+  const excludedEntries = [
     '2; 2615 2 SCHEMA - extensions postgres',
     '3; 3079 3 EXTENSION - supabase_vault ',
-    '4; 1259 4 TABLE public synthetic postgres',
     '5; 0 4 TABLE DATA public synthetic postgres',
     '6; 0 5 SEQUENCE SET public synthetic_id_seq postgres',
     '7; 0 6 MATERIALIZED VIEW DATA public cached postgres',
@@ -38,10 +47,11 @@ test('schema-only archive plan excludes data, triggers and external connectors',
     '9; 2328 8 SERVER - remote postgres',
     '10; 6100 9 SUBSCRIPTION - remote postgres',
     '11; 0 10 BLOB - 100 postgres',
-  ].join('\n');
+  ];
+  const toc = ['; Dumped from database version: 17.6', ...schemaEntries, ...excludedEntries, ...aclEntries].join('\n');
   const plan = schemaOnlyRestorePlan(toc);
-  assert.equal(plan.selected.length, 2);
-  assert.equal(plan.omitted.length, 9);
+  assert.deepEqual(plan.selected, [...schemaEntries, ...aclEntries]);
+  assert.deepEqual(plan.omitted, excludedEntries);
   assert.equal(plan.table_data_restored, false);
   assert.equal(plan.sequence_values_restored, false);
   assert.throws(() => schemaOnlyRestorePlan('; Dumped from database version: 16.9'), /pg17_archive_required/);

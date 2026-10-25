@@ -68,7 +68,9 @@ jobs:
 
       - name: Contract tests
         working-directory: apps/metaengine-browser
-        run: npm test
+        # The ASAR regression starts a real Electron main process. Give the
+        # complete suite the same virtual display as the renderer diagnostic.
+        run: xvfb-run -a npm test
 
       - name: Security static gate
         run: |

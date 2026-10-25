@@ -41,18 +41,18 @@ export function instrumentCodexCliHelperStartup(source) {
   return source;
 }
 
-export function createCodexCliStartupPhaseParser({now = () => performance.now(), startedAt = now()} = {}) {
+export function createNativePhaseParser({stageNames, markerPrefix, now = () => performance.now(), startedAt = now()}) {
   const stages = []; let pending = '', lineBytes = 0, discardedLine = false, bytes = 0, unknownBytes = 0;
   let lastStage = -1, invalid = false, overflow = false;
   const elapsed = () => Math.max(0, Math.round(now() - startedAt));
   const line = () => {
     const value = pending.endsWith('\r') ? pending.slice(0, -1) : pending;
-    const index = CODEX_STARTUP_STAGES.indexOf(value.slice(prefix.length));
-    if (!discardedLine && value.startsWith(prefix) && index > lastStage) {
-      lastStage = index; stages.push({stage: CODEX_STARTUP_STAGES[index], elapsed_ms: elapsed()});
+    const index = stageNames.indexOf(value.slice(markerPrefix.length));
+    if (!discardedLine && value.startsWith(markerPrefix) && index > lastStage) {
+      lastStage = index; stages.push({stage: stageNames[index], elapsed_ms: elapsed()});
     } else {
       unknownBytes = Math.min(65537, unknownBytes + lineBytes);
-      if (value.startsWith(prefix)) invalid = true;
+      if (value.startsWith(markerPrefix)) invalid = true;
     }
     pending = ''; lineBytes = 0; discardedLine = false;
   };
@@ -75,9 +75,15 @@ export function createCodexCliStartupPhaseParser({now = () => performance.now(),
   };
 }
 
+export function createCodexCliStartupPhaseParser(options = {}) {
+  return createNativePhaseParser({...options, stageNames: CODEX_STARTUP_STAGES, markerPrefix: prefix});
+}
+
 let observationActive = false;
 
-export async function withCodexCliStartupObservation({helperPath, powershellPath, report, now = () => performance.now()}, body) {
+export async function withCodexCliStartupObservation({helperPath, powershellPath, report,
+  helperVariant = 'FORCED_OUTPUT_WINDOW', now = () => performance.now()}, body) {
+  if (!['FORCED_OUTPUT_WINDOW', 'FIRST_NATIVE_RUN'].includes(helperVariant)) throw Error('native_startup_observation_variant_invalid');
   if (observationActive) throw Error('native_startup_observation_scope_already_active');
   const originalSpawn = childProcess.spawn, owned = [];
   let readyAt = null, primary, result;
@@ -108,7 +114,7 @@ export async function withCodexCliStartupObservation({helperPath, powershellPath
     await Promise.all(owned.map(item => item.closed));
     childProcess.spawn = originalSpawn; syncBuiltinESMExports(); observationActive = false;
     const first = owned[0], elapsed = value => first && value !== null ? Math.max(0, Math.round(value - first.startedAt)) : null;
-    const record = {schema: 'metaengine.codex-cli.test-startup-phases.v1', helper_variant: 'FORCED_OUTPUT_WINDOW',
+    const record = {schema: 'metaengine.codex-cli.test-startup-phases.v1', helper_variant: helperVariant,
       startup_deadline_ms: 30000, helper_spawns_observed: owned.length,
       spawn_event_elapsed_ms: elapsed(first?.spawnedAt ?? null), ready_validated_elapsed_ms: elapsed(readyAt),
       close_elapsed_ms: elapsed(first?.closedAt ?? null),

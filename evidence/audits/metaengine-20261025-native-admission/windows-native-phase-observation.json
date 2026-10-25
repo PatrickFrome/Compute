@@ -1,0 +1,99 @@
+{
+  "schema": "metaengine.windows.native-phase-ci-observation.v1",
+  "source_head": "05ea407df6b6d95ec310cc13edcdb1b29f0a97e0",
+  "workflow_run_id": 40215358257,
+  "workflow_job_id": 121235237262,
+  "job_url": "https://github.com/PatrickFrome/Compute/actions/runs/40215358257/job/121235237262",
+  "suite": {
+    "tests": 5985,
+    "pass": 5975,
+    "fail": 3,
+    "skipped": 7,
+    "cancelled": 0
+  },
+  "phase_receipts": [
+    {
+      "schema": "metaengine.codex-cli.test-startup-phases.v1",
+      "helper_variant": "FIRST_NATIVE_RUN",
+      "startup_deadline_ms": 30000,
+      "helper_spawns_observed": 1,
+      "spawn_event_elapsed_ms": 4,
+      "ready_validated_elapsed_ms": null,
+      "close_elapsed_ms": 30028,
+      "stages": [
+        {
+          "stage": "PS_ENTER",
+          "elapsed_ms": 220
+        },
+        {
+          "stage": "ADD_TYPE_BEGIN",
+          "elapsed_ms": 230
+        }
+      ],
+      "unknown_stderr_bytes": 0,
+      "phase_stream_invalid": false,
+      "phase_stream_overflow": false,
+      "body_failed": true,
+      "phase_timing_observation_only": true,
+      "contention_proven": false,
+      "native_qualification_proven": false
+    },
+    {
+      "schema": "metaengine.codex-cli.test-boot-read-phases.v1",
+      "reader_variant": "FIRST_NATIVE_BOOT_READ",
+      "production_timeout_ms": 12000,
+      "transport_calls": 1,
+      "spawn_event_elapsed_ms": 8,
+      "close_elapsed_ms": 12030,
+      "stages": [
+        {
+          "stage": "SCRIPT_ENTER",
+          "elapsed_ms": 247
+        },
+        {
+          "stage": "ADD_TYPE_BEGIN",
+          "elapsed_ms": 248
+        }
+      ],
+      "unknown_stderr_bytes": 0,
+      "phase_stream_invalid": false,
+      "phase_stream_overflow": false,
+      "outcome": "READ_FAILED",
+      "owned_transport_closed": true,
+      "phase_timing_observation_only": true,
+      "causal_attribution_proven": false,
+      "native_qualification_proven": false
+    },
+    {
+      "schema": "metaengine.codex-cli.test-startup-phases.v1",
+      "helper_variant": "FORCED_OUTPUT_WINDOW",
+      "startup_deadline_ms": 30000,
+      "helper_spawns_observed": 1,
+      "spawn_event_elapsed_ms": 6,
+      "ready_validated_elapsed_ms": null,
+      "close_elapsed_ms": 30038,
+      "stages": [
+        {
+          "stage": "PS_ENTER",
+          "elapsed_ms": 238
+        },
+        {
+          "stage": "ADD_TYPE_BEGIN",
+          "elapsed_ms": 249
+        }
+      ],
+      "unknown_stderr_bytes": 0,
+      "phase_stream_invalid": false,
+      "phase_stream_overflow": false,
+      "body_failed": true,
+      "phase_timing_observation_only": true,
+      "contention_proven": false,
+      "native_qualification_proven": false
+    }
+  ],
+  "internal_add_type_cause_proven": false,
+  "installed_qualification": false,
+  "production_qualification": false,
+  "automatic_retry_authorized": false,
+  "authority_effect": false
+}

@@ -9,6 +9,7 @@ import { promisify } from 'node:util';
 import test from 'node:test';
 import postgres from 'postgres';
 import { inspectAttachedApiAdmission, onboardAttachedPostgres } from './attached-postgres-onboarding.mjs';
+import { RPC_ALLOWLIST } from './db-api-core.mjs';
 import { startDbApi } from './db-api.mjs';
 import { loadLocalRuntimeMigrationPlan } from './local-runtime-migrations.mjs';
 import { initializeLocalVaultKey } from './local-vault-key.mjs';
@@ -94,7 +95,7 @@ test('direct API role works on a disposable schema-only copy of an explicitly pi
     apiLogin: login, apiPassword: password, apiPort: port === 35433 ? 35435 : 35433, edgePort: port === 35434 ? 35436 : 35434,
   }, { verifyBundle: async () => ({ manifest: { bundle_sha256: bundlePin } }) });
   assert.equal(setup.state, 'CONFIGURED_UNQUALIFIED');
-  assert.equal(setup.restricted_api_admission.rpc_names_granted, 50);
+  assert.equal(setup.restricted_api_admission.rpc_names_granted, RPC_ALLOWLIST.length);
   const config = JSON.parse(await fs.readFile(configFile, 'utf8'));
   assert.equal(config.postgres_mode, 'attached');
   assert.equal(config.api_role_mode, 'direct');
@@ -103,7 +104,7 @@ test('direct API role works on a disposable schema-only copy of an explicitly pi
   direct = postgres({ host: '127.0.0.1', port, database: 'postgres', username: login, password, max: 1, prepare: false, onnotice: () => {} });
   const admission = await inspectAttachedApiAdmission({ sql: direct, apiLogin: login });
   assert.equal(admission.restricted_login, true);
-  assert.equal(admission.rpc_names_granted, 50);
+  assert.equal(admission.rpc_names_granted, RPC_ALLOWLIST.length);
   await assert.rejects(direct.unsafe('SET ROLE service_role'), error => error.code === '42501');
   const key = randomBytes(32).toString('hex'), client = 'schema-direct-' + randomUUID();
   runtime = await startDbApi({ databaseUrl: `postgres://${login}:${password}@127.0.0.1:${port}/postgres`, apiKey: key, roleMode: 'direct', port: 0 });

@@ -7,7 +7,8 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { RPC_ALLOWLIST, RPC_CATALOG_QUERY, TABLE_ALLOWLIST } from './db-api-core.mjs';
 import { localApiRolePolicyName } from './db-api-grants.mjs';
-import { inspectAttachedApiAdmission, onboardAttachedPostgres, postmasterPidStartEpochMatchesLive, readAttachedOnboardingOptionsFile,
+import { formatAttachedOnboardingDiagnostic } from './test/attached-onboarding-diagnostic.mjs';
+import { attachedOnboardingFailureReceipt, inspectAttachedApiAdmission, onboardAttachedPostgres, postmasterPidStartEpochMatchesLive, readAttachedOnboardingOptionsFile,
   secureAttachedPrivateFile } from './attached-postgres-onboarding.mjs';
 
 const admission = { restricted_login: true, api_role_mode: 'direct', memberships: 0,
@@ -187,18 +188,87 @@ test('existing runtime ownership lock blocks schema setup and preserves the acti
   assert.equal(f.events.includes('provision'), false); await assertDataPreserved(f);
 });
 
-test('migration or transactional role admission failure rolls back and retains review lock without exposing raw errors', async t => {
-  for (const phase of ['applyMigrations', 'provisionApiLogin', 'inspectApiAdmission']) {
+test('transaction failure reports its fixed stage while retaining the review lock and redacting raw diagnostics', async t => {
+  for (const [phase, stage] of [['applyMigrations', 'migration'], ['provisionApiLogin', 'role_provision'],
+    ['inspectApiAdmission', 'transaction_admission']]) {
     const f = await fixture(t);
     await assert.rejects(onboardAttachedPostgres(f.options, { ...f.hooks,
-      [phase]: async () => { throw new Error(f.options.apiPassword + ' raw postgres diagnostic'); } }),
-    error => error.message === 'attached_onboarding_incomplete_review_required' && !error.message.includes(f.options.apiPassword));
+      [phase]: async () => { throw Object.assign(new Error(f.options.apiPassword + ' raw postgres diagnostic'), {
+        code: 'attached_onboarding_' + f.options.apiPassword, stage: 'cleanup', category: f.options.adminDatabaseUrl,
+        query: 'CREATE ROLE private_login PASSWORD ' + f.options.apiPassword,
+      }); } }), error => {
+      assert.equal(error.message, 'attached_onboarding_incomplete_review_required');
+      assert.equal(error.stage, stage);
+      assert.deepEqual(attachedOnboardingFailureReceipt(error), { event: 'attached_postgres_onboarding_failed',
+        code: 'attached_onboarding_incomplete_review_required', stage, category: 'unclassified' });
+      assert.equal('cause' in error, false);
+      assert.equal(JSON.stringify(error).includes(f.options.apiPassword), false);
+      assert.equal(JSON.stringify(error).includes(f.options.adminDatabaseUrl), false);
+      return true;
+    });
     assert.ok(f.events.includes('rollback')); assert.equal(f.events.includes('commit'), false);
     assert.equal(f.events.includes('secure-empty-config'), false);
     await assert.rejects(fs.stat(f.options.runtimeConfigFile), { code: 'ENOENT' });
     assert.equal((await fs.stat(path.join(f.options.stateDirectory, 'runtime-host-lock.json'))).isFile(), true);
     await assertDataPreserved(f);
   }
+});
+
+test('only the exact Cognitive ACL guard and SQLSTATE during migration receive a public diagnostic category', async t => {
+  const message = 'cognitive_direct_api_public_execution_requires_review';
+  for (const [phase, code, rawMessage, category] of [
+    ['applyMigrations', '55000', message, 'cognitive_rpc_public_execution_requires_review'],
+    ['applyMigrations', '42501', message, 'unclassified'],
+    ['applyMigrations', '55000', message + ': private diagnostic', 'unclassified'],
+    ['provisionApiLogin', '55000', message, 'unclassified'],
+  ]) {
+    const f = await fixture(t);
+    await assert.rejects(onboardAttachedPostgres(f.options, { ...f.hooks,
+      [phase]: async () => { throw Object.assign(new Error(rawMessage), { code, detail: f.options.apiPassword }); },
+    }), error => {
+      assert.equal(error.code, 'attached_onboarding_incomplete_review_required');
+      const receipt = attachedOnboardingFailureReceipt(error);
+      assert.equal(receipt.stage, phase === 'applyMigrations' ? 'migration' : 'role_provision');
+      assert.equal(receipt.category, category);
+      assert.equal(JSON.stringify(receipt).includes(f.options.apiPassword), false);
+      assert.equal(JSON.stringify(receipt).includes('private diagnostic'), false);
+      const parsedReceipt = JSON.parse(JSON.stringify(receipt));
+      const diagnostic = formatAttachedOnboardingDiagnostic(parsedReceipt.code, parsedReceipt);
+      assert.equal(diagnostic, `attached_onboarding_incomplete_review_required; stage=${receipt.stage}; category=${category}`);
+      assert.throws(() => assert.deepEqual({ code: 1, signal: null }, { code: 0, signal: null }, diagnostic), failure => {
+        assert(failure.message.includes(diagnostic), 'the real fixture assertion must preserve the sanitized metadata');
+        assert.equal(failure.message.includes(f.options.apiPassword), false);
+        return true;
+      });
+      // Even a caller that changes enumerable error fields cannot alter the CLI receipt.
+      Object.assign(error, { code: f.options.apiPassword, stage: f.options.adminDatabaseUrl, category: 'forged' });
+      assert.deepEqual(attachedOnboardingFailureReceipt(error), receipt);
+      return true;
+    });
+    assert.equal(f.events.filter(event => event === 'begin').length, 1);
+    assert.equal(f.events.filter(event => event === 'rollback').length, 1);
+    assert.equal(f.events.includes('commit'), false);
+    assert.equal(f.events.includes('provision'), false);
+    await assert.rejects(fs.stat(f.options.runtimeConfigFile), { code: 'ENOENT' });
+    assert.equal((await fs.stat(path.join(f.options.stateDirectory, 'runtime-host-lock.json'))).isFile(), true);
+    await assertDataPreserved(f);
+  }
+});
+
+test('fixture diagnostic supports older CLI receipts and excludes arbitrary SQL, URLs and metadata', () => {
+  const code = 'attached_onboarding_incomplete_review_required';
+  const unknown = `${code}; stage=unknown; category=unclassified`;
+  assert.equal(formatAttachedOnboardingDiagnostic(code, { code }), unknown);
+  assert.equal(formatAttachedOnboardingDiagnostic(code, null), unknown);
+  const privateSql = 'CREATE ROLE secret LOGIN PASSWORD private_password';
+  const privateUrl = 'postgres://private_user:private_password@127.0.0.1:35432/private_db';
+  assert.equal(formatAttachedOnboardingDiagnostic(code, { stage: privateSql, category: privateUrl, detail: privateSql }), unknown);
+  assert.equal(formatAttachedOnboardingDiagnostic(code, { stage: 'migration', category: privateUrl }),
+    `${code}; stage=migration; category=unclassified`);
+  assert.equal(formatAttachedOnboardingDiagnostic(code, { stage: 'cleanup', category: 'cognitive_rpc_public_execution_requires_review' }),
+    `${code}; stage=cleanup; category=unclassified`);
+  assert.equal(formatAttachedOnboardingDiagnostic(privateUrl, { stage: 'migration', category: privateSql }),
+    'attached_bundle_fixture_onboarding_failure_unattested; stage=unknown; category=unclassified');
 });
 
 test('failed independent reconnect or postcommit drift retains lock and never publishes credentials', async t => {
@@ -210,7 +280,11 @@ test('failed independent reconnect or postcommit drift retains lock and never pu
       if (input.sql === f.apiSql) await fs.writeFile(path.join(f.options.pgDataDirectory, 'postmaster.pid'), f.original.get('postmaster.pid') + 'changed\n');
       return result;
     };
-    await assert.rejects(onboardAttachedPostgres(f.options, hooks), /api_reconnect_admission_unattested|existing_cluster_files_changed/);
+    await assert.rejects(onboardAttachedPostgres(f.options, hooks), error => {
+      assert.match(error.message, /api_reconnect_admission_unattested|existing_cluster_files_changed/);
+      assert.equal(attachedOnboardingFailureReceipt(error).stage, 'api_reconnect');
+      return true;
+    });
     assert.ok(f.events.includes('commit')); await assert.rejects(fs.stat(f.options.runtimeConfigFile), { code: 'ENOENT' });
     assert.equal((await fs.stat(path.join(f.options.stateDirectory, 'runtime-host-lock.json'))).isFile(), true);
   }
@@ -220,9 +294,29 @@ test('concurrent configuration publication cannot replace an existing file after
   const f = await fixture(t); const competingBytes = 'concurrent private config';
   await assert.rejects(onboardAttachedPostgres(f.options, { ...f.hooks, beforePublish: async () => {
     await fs.writeFile(f.options.runtimeConfigFile, competingBytes, { flag: 'wx' });
-  } }), /private_publication_conflict_review_required/);
+  } }), error => {
+    assert.match(error.message, /private_publication_conflict_review_required/);
+    assert.equal(attachedOnboardingFailureReceipt(error).stage, 'publish_config');
+    return true;
+  });
   assert.equal(await fs.readFile(f.options.runtimeConfigFile, 'utf8'), competingBytes);
   assert.equal((await fs.readdir(f.options.stateDirectory)).some(file => file.endsWith('.tmp')), false);
+  await assertDataPreserved(f);
+});
+
+test('post-publication lock drift reports cleanup without removing the changed lock or published config', async t => {
+  const f = await fixture(t); const lockFile = path.join(f.options.stateDirectory, 'runtime-host-lock.json');
+  await assert.rejects(onboardAttachedPostgres(f.options, { ...f.hooks, secureFile: async file => {
+    await f.hooks.secureFile(file);
+    await fs.writeFile(lockFile, 'changed-private-setup-lock');
+  } }), error => {
+    assert.deepEqual(attachedOnboardingFailureReceipt(error), { event: 'attached_postgres_onboarding_failed',
+      code: 'attached_onboarding_setup_lock_changed_review_required', stage: 'cleanup', category: 'unclassified' });
+    return true;
+  });
+  assert.equal(f.events.filter(event => event === 'commit').length, 1);
+  assert.equal(await fs.readFile(lockFile, 'utf8'), 'changed-private-setup-lock');
+  assert.equal((await fs.stat(f.options.runtimeConfigFile)).isFile(), true);
   await assertDataPreserved(f);
 });
 
@@ -315,8 +409,18 @@ test('CLI argument failure emits a fixed code and never echoes arbitrary credent
   const result = spawnSync(process.execPath, [fileURLToPath(new URL('./attached-postgres-onboarding.mjs', import.meta.url)), '--secret-password', 'private-leak-marker'],
     { encoding: 'utf8', windowsHide: true, timeout: 10000 });
   assert.equal(result.status, 1); assert.equal(result.stdout, '');
-  assert.deepEqual(JSON.parse(result.stderr), { event: 'attached_postgres_onboarding_failed', code: 'attached_onboarding_private_options_file_argument_required' });
+  assert.deepEqual(JSON.parse(result.stderr), { event: 'attached_postgres_onboarding_failed',
+    code: 'attached_onboarding_private_options_file_argument_required', stage: 'preflight', category: 'unclassified' });
   assert.doesNotMatch(result.stderr, /private-leak-marker/);
+});
+
+test('failure receipt rejects forged public-looking error codes and metadata', () => {
+  const error = Object.assign(new Error('private-leak-marker'), {
+    code: 'attached_onboarding_private-leak-marker', stage: 'migration',
+    category: 'cognitive_rpc_public_execution_requires_review', cause: 'private-leak-marker',
+  });
+  assert.deepEqual(attachedOnboardingFailureReceipt(error), { event: 'attached_postgres_onboarding_failed',
+    code: 'attached_onboarding_failed', stage: 'preflight', category: 'unclassified' });
 });
 
 test('SQL-visible startup may follow its exact postmaster.pid epoch by at most two seconds', async t => {

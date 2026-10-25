@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import {buildCodexSandboxProbeArgs,evaluateCodexSandboxProbe,windowsSandboxBootIdentity,readWindowsSandboxHostBoot} from '../src/codex-cli-sandbox-probe.mjs';
+import {readWindowsBootWithPhaseObservation} from './fixtures/codex-cli-boot-observation.mjs';
 
 const denied = () => ({ outcome: 'ERROR', access_denied: true, error_type: 'System.UnauthorizedAccessException' });
 const written = () => ({ outcome: 'WRITTEN', access_denied: false });
@@ -80,8 +81,9 @@ test('kernel boot identity survives diagnostic wall-clock drift, rejects missing
 
 test('actual current Windows boot sequence and PID4 kernel creation are stable across independent native reads',{
   skip:process.platform!=='win32',timeout:35000,
-},async()=>{
-  const before=await readWindowsSandboxHostBoot(),after=await readWindowsSandboxHostBoot();
+},async t=>{
+  const before=await readWindowsBootWithPhaseObservation({report:record=>t.diagnostic(JSON.stringify(record))});
+  const after=await readWindowsSandboxHostBoot();
   assert.equal(windowsSandboxBootIdentity(before),windowsSandboxBootIdentity(after));assert.equal(before.system_process.pid,4);
   assert.ok(before.kernel_boot_id>0);assert.ok(Date.parse(before.system_process.created_at)<=Date.now());
 });

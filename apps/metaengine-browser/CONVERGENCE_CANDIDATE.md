@@ -1,4 +1,6 @@
-Reserved package identity is `0.7.0-dev.1107139874594.1`.
+Reserved package identity is `0.7.0-dev.1269944506140.1`.
+
+2026-10-25: this distinct QA successor includes native admission readiness, preserved generated PostgreSQL ACLs, bounded onboarding/Windows diagnostics and the Linux Electron test display correction. Functional parent `f8fb240ca74965227f901a4ade941a4c0e81deae`. The old `.4594` identity stays consumed. The ordinary producer must reserve this exact version/source once; Windows source, package and installed qualification remain pending. No ambiguous Supervisor or native send is replayed by this candidate.
 
 2026-10-25: this distinct QA candidate removes fixed agent roster and two-worker ceilings, pages private scope and rotates bounded signed admission windows. It includes the PostgreSQL upgrade and restores NSIS blockmap emission required by provenance. Functional parent `f952ea2cc9ac355459f8afc95d1e30f0e72ff720`. Exact-head packaging and installed qualification are pending. Fresh-PC automatic provisioning remains under development and is not claimed by this candidate.
 

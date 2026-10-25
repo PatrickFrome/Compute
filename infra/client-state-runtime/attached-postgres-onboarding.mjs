@@ -9,7 +9,27 @@ import { applyLocalRuntimeMigrations, loadLocalRuntimeMigrationPlan } from './lo
 import { verifyOfflineRuntimeBundle } from './offline-runtime-bundle.mjs';
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const fail = code => { throw Object.assign(new Error('attached_onboarding_' + code), { code: 'attached_onboarding_' + code }); };
+const failureMetadata = new WeakMap();
+function onboardingFailure(code, stage = 'preflight', category = 'unclassified') {
+  const metadata = Object.freeze({ code, stage, category });
+  const error = Object.assign(new Error(code), metadata);
+  failureMetadata.set(error, metadata);
+  return error;
+}
+const fail = code => { throw onboardingFailure('attached_onboarding_' + code); };
+
+// Only module-owned metadata reaches the CLI. Driver messages, SQL, credentials,
+// forged error fields and raw causes are never included in this public receipt.
+export function attachedOnboardingFailureReceipt(error) {
+  return Object.freeze({ event: 'attached_postgres_onboarding_failed',
+    ...(failureMetadata.get(error) || { code: 'attached_onboarding_failed', stage: 'preflight', category: 'unclassified' }) });
+}
+
+function failureCategory(error, stage) {
+  return stage === 'migration' && error?.code === '55000'
+    && error?.message === 'cognitive_direct_api_public_execution_requires_review'
+    ? 'cognitive_rpc_public_execution_requires_review' : 'unclassified';
+}
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const sha = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 const timestampKey = value => {
@@ -285,6 +305,7 @@ export async function onboardAttachedPostgres(options = {}, hooks = {}) {
   let lockBytes;
   let effectsPossible = false;
   let configPublished = false;
+  let stage = 'preflight';
   try {
     const [bundle, state, data, configFile, source] = await Promise.all([
       privatePath(options.bundleDirectory, 'directory'), privatePath(options.stateDirectory, 'directory'),
@@ -335,6 +356,7 @@ export async function onboardAttachedPostgres(options = {}, hooks = {}) {
     const lock = await fs.open(lockFile, 'wx', 0o600);
     try { await lock.writeFile(lockBytes); await lock.sync(); } finally { await lock.close(); }
     effectsPossible = true;
+    stage = 'migration';
     const migrationReceipt = await sql.begin(async tx => {
       await tx.unsafe("SET LOCAL lock_timeout = '3s'");
       await tx.unsafe("SET LOCAL statement_timeout = '60s'");
@@ -351,6 +373,7 @@ export async function onboardAttachedPostgres(options = {}, hooks = {}) {
       const transaction = { unsafe: tx.unsafe.bind(tx), begin: run => run(tx) };
       const receipt = await (hooks.applyMigrations || applyLocalRuntimeMigrations)({ sql: transaction, expectedMigrationSourcesSha256: options.expectedMigrationSourcesSha256 });
       if (receipt?.source_manifest_sha256 !== options.expectedMigrationSourcesSha256) fail('migration_receipt_unattested');
+      stage = 'role_provision';
       if (upgrading) {
         await (hooks.refreshApiRpcGrants || refreshLocalApiRpcGrants)({ sql: transaction, databaseName: admin.pathname.slice(1),
           login: options.apiLogin, roleMode: 'direct' });
@@ -358,11 +381,13 @@ export async function onboardAttachedPostgres(options = {}, hooks = {}) {
         await (hooks.provisionApiLogin || provisionLocalApiLogin)({ sql: transaction, databaseName: admin.pathname.slice(1),
           login: options.apiLogin, password: options.apiPassword, roleMode: 'direct' });
       }
+      stage = 'transaction_admission';
       await tx.unsafe('SET LOCAL ROLE "' + options.apiLogin + '"');
       await (hooks.inspectApiAdmission || inspectAttachedApiAdmission)({ sql: tx, apiLogin: options.apiLogin, expectedSessionLogin: decodeURIComponent(admin.username) });
       await tx.unsafe('RESET ROLE');
       return receipt;
     });
+    stage = 'api_reconnect';
     apiSql ||= connect(api.href);
     const admission = await (hooks.inspectApiAdmission || inspectAttachedApiAdmission)({ sql: apiSql, apiLogin: options.apiLogin });
     if (admission?.restricted_login !== true || admission.api_role_mode !== 'direct' || admission.memberships !== 0
@@ -371,6 +396,7 @@ export async function onboardAttachedPostgres(options = {}, hooks = {}) {
     if (!(await stableBytes(versionFile, 16)).equals(versionBytes) || !(await stableBytes(vaultFile, 128)).equals(vaultBytes)
       || !(await stableBytes(pidFile, 16384)).equals(pidBytes)) fail('existing_cluster_files_changed');
     await (hooks.verifyBundle || verifyOfflineRuntimeBundle)({ bundleDirectory: bundle, expectedBundleDigest: options.expectedBundleDigest });
+    stage = 'publish_config';
     if (hooks.beforePublish) await hooks.beforePublish();
     if (!equal(await privatePath(state, 'directory'), state) || !equal(await privatePath(path.dirname(configFile), 'directory'), path.dirname(configFile))) fail('private_layout_changed');
     await publishConfig(configFile, { schema: 'compute.runtime-host-config.v1', version: 1, bundle_directory: bundle,
@@ -379,6 +405,7 @@ export async function onboardAttachedPostgres(options = {}, hooks = {}) {
       postgres_mode: 'attached', api_role_mode: 'direct', database_url: api.href, inspect_database_url: admin.href,
       api_port: options.apiPort, edge_port: options.edgePort, startup_timeout_ms: startupTimeoutMs }, hooks.secureFile || secureAttachedPrivateFile);
     configPublished = true;
+    stage = 'cleanup';
     if (!(await stableBytes(lockFile)).equals(Buffer.from(lockBytes))) fail('setup_lock_changed_review_required');
     await fs.unlink(lockFile);
     lockFile = null;
@@ -390,9 +417,12 @@ export async function onboardAttachedPostgres(options = {}, hooks = {}) {
       migrations: migrationReceipt.migrations, restricted_api_admission: admission, runtime_ready: false, owner_profile_written: false,
       installed_socket_ui_smoke_required: true, automatic_cloud_fallback: false, authority_effect: false });
   } catch (error) {
-    if (error?.code?.startsWith('attached_onboarding_')) throw error;
-    if (error?.code === 'EEXIST') fail(effectsPossible ? 'private_publication_conflict_review_required' : 'exclusive_setup_conflict');
-    fail(configPublished ? 'configured_cleanup_requires_review' : effectsPossible ? 'incomplete_review_required' : 'preflight_failed');
+    const known = failureMetadata.get(error);
+    if (known) throw onboardingFailure(known.code, stage, known.category);
+    const code = error?.code === 'EEXIST'
+      ? effectsPossible ? 'private_publication_conflict_review_required' : 'exclusive_setup_conflict'
+      : configPublished ? 'configured_cleanup_requires_review' : effectsPossible ? 'incomplete_review_required' : 'preflight_failed';
+    throw onboardingFailure('attached_onboarding_' + code, stage, failureCategory(error, stage));
   } finally {
     await Promise.allSettled([sql?.end?.({ timeout: 5 }), apiSql?.end?.({ timeout: 5 })]);
     // Any possible DB effect retains the exclusive setup lock on failure.
@@ -409,8 +439,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     } });
     console.log(JSON.stringify(receipt));
   } catch (error) {
-    const code = error?.code?.startsWith('attached_onboarding_') ? error.code : 'attached_onboarding_failed';
-    console.error(JSON.stringify({ event: 'attached_postgres_onboarding_failed', code }));
+    console.error(JSON.stringify(attachedOnboardingFailureReceipt(error)));
     process.exitCode = 1;
   }
 }
