@@ -6,6 +6,7 @@ import {CODEX_CLI_JOB_ASSEMBLY_LOAD_PREFIX, CODEX_CLI_JOB_ASSEMBLY_LOAD_SUFFIX} 
 // Disposable-helper diagnostics only. These labels carry no native authority,
 // and neither helper stderr nor process arguments/environment are exported.
 export const CODEX_STARTUP_STAGES = Object.freeze(['PS_ENTER', 'ASSEMBLY_LOAD_BEGIN', 'ASSEMBLY_LOAD_END',
+  'MODULE_IMPORT_BEGIN', 'MODULE_IMPORT_END',
   'REQUEST_READ_BEGIN', 'REQUEST_LINE_READ', 'REQUEST_JSON_BEGIN', 'REQUEST_JSON_END', 'REQUEST_READ_END',
   'NATIVE_RUN_ENTER', 'IMAGE_DIGEST_CHECKED',
   'CHILD_JOB_BOUND', 'IDENTITY_READBACK_COMPLETE', 'READY_WRITE_BEGIN', 'READY_FLUSH_RETURNED']);
@@ -52,6 +53,8 @@ export function instrumentCodexCliRuntimeStartup(source) {
   if (loaders.length !== 1) throw invalidSource();
   const loader = loaders[0], bytes = loader.slice(CODEX_CLI_JOB_ASSEMBLY_LOAD_PREFIX.length, -CODEX_CLI_JOB_ASSEMBLY_LOAD_SUFFIX.length);
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(bytes)) throw invalidSource();
+  const moduleImport = String.raw`  Microsoft.PowerShell.Core\Import-Module -Name 'C:\Windows\System32\WindowsPowerShell\v1.0\Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1' -ErrorAction Stop`;
+  if (source.split(moduleImport).length !== 2) throw invalidSource();
   const request = '  $request = [Console]::In.ReadLine() | ConvertFrom-Json';
   if (source.split(request).length !== 2 || source.includes('$metaengineStartupRequestLine')) throw invalidSource();
   // Only the disposable prepared helper separates the same input and parser
@@ -64,7 +67,10 @@ export function instrumentCodexCliRuntimeStartup(source) {
     '  ' + ps('REQUEST_JSON_END').trimEnd(),
   ].join(eol);
   return source.replace(loader, ps('ASSEMBLY_LOAD_BEGIN').replaceAll('\n', eol) + loader
-    + eol + ps('ASSEMBLY_LOAD_END').trimEnd()).replace(request, observedRequest);
+    + eol + ps('ASSEMBLY_LOAD_END').trimEnd())
+    .replace(moduleImport, '  ' + ps('MODULE_IMPORT_BEGIN').trimEnd() + eol + moduleImport
+      + eol + '  ' + ps('MODULE_IMPORT_END').trimEnd())
+    .replace(request, observedRequest);
 }
 
 export function createCodexCliStartupPhaseParser({now = () => performance.now(), startedAt = now()} = {}) {

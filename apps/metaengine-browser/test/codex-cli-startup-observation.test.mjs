@@ -44,7 +44,7 @@ test('startup instrumentation has exact source anchors and never changes the pro
   const crlf = instrumentCodexCliHelperStartup(source.replaceAll('\n', '\r\n'));
   assert.equal(crlf.replaceAll('\r\n', '\n'), traced);
   assert.ok(!crlf.replaceAll('\r\n', '').includes('\n'), 'injected labels retain the disposable helper newline form');
-  for (const stage of CODEX_STARTUP_STAGES.filter(stage => !stage.startsWith('ASSEMBLY_LOAD_')
+  for (const stage of CODEX_STARTUP_STAGES.filter(stage => !stage.startsWith('ASSEMBLY_LOAD_') && !stage.startsWith('MODULE_IMPORT_')
     && !['REQUEST_LINE_READ', 'REQUEST_JSON_BEGIN', 'REQUEST_JSON_END'].includes(stage))) assert.equal(traced.split(prefix + stage).length, 2, stage);
   assert.ok(traced.indexOf(prefix + 'PS_ENTER') < traced.indexOf("$ErrorActionPreference = 'Stop'"));
   assert.doesNotMatch(traced, /ME_CODEX_STARTUP_V1 (?:ADD_TYPE|ASSEMBLY_LOAD)_/);
@@ -63,27 +63,33 @@ test('startup instrumentation has exact source anchors and never changes the pro
   }
 });
 
-test('prepared-helper instrumentation reuses the assembly and separates input wait from JSON parsing without exporting input', () => {
+test('prepared-helper instrumentation reuses the assembly and separates explicit import, input wait and JSON parsing without exporting input', () => {
   const loader = CODEX_CLI_JOB_ASSEMBLY_LOAD_PREFIX + 'c3ludGhldGljLWJ5dGVz' + CODEX_CLI_JOB_ASSEMBLY_LOAD_SUFFIX;
+  const moduleImport = String.raw`  Microsoft.PowerShell.Core\Import-Module -Name 'C:\Windows\System32\WindowsPowerShell\v1.0\Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1' -ErrorAction Stop`;
   const request = '  $request = [Console]::In.ReadLine() | ConvertFrom-Json';
   for (const eol of ['\n', '\r\n']) {
-    const source = ['# generated protocol fixture, not a native assembly', loader, 'try {', request, '}'].join(eol);
+    const source = ['# generated protocol fixture, not a native assembly', loader, 'try {', moduleImport, request, '}'].join(eol);
     const traced = instrumentCodexCliRuntimeStartup(source);
     assert.ok(traced.indexOf(prefix + 'ASSEMBLY_LOAD_BEGIN') < traced.indexOf(loader));
     assert.ok(traced.indexOf(prefix + 'ASSEMBLY_LOAD_END') > traced.indexOf(loader));
     assert.equal(traced.split(loader).length, 2);
+    const importBegin = traced.indexOf(prefix + 'MODULE_IMPORT_BEGIN'), importEnd = traced.indexOf(prefix + 'MODULE_IMPORT_END');
+    assert.ok(traced.indexOf(prefix + 'ASSEMBLY_LOAD_END') < importBegin && importBegin < traced.indexOf(moduleImport)
+      && traced.indexOf(moduleImport) < importEnd);
+    assert.equal(traced.split(moduleImport).length, 2, 'the same fixed module import executes once');
     const lineRead = traced.indexOf('$metaengineStartupRequestLine = [Console]::In.ReadLine()');
     const lineReadMarker = traced.indexOf(prefix + 'REQUEST_LINE_READ');
     const jsonBegin = traced.indexOf(prefix + 'REQUEST_JSON_BEGIN');
     const parse = traced.indexOf('$request = $metaengineStartupRequestLine | ConvertFrom-Json');
     const jsonEnd = traced.indexOf(prefix + 'REQUEST_JSON_END');
-    assert.ok(lineRead >= 0 && lineRead < lineReadMarker && lineReadMarker < jsonBegin && jsonBegin < parse && parse < jsonEnd);
+    assert.ok(importEnd < lineRead && lineRead < lineReadMarker && lineReadMarker < jsonBegin && jsonBegin < parse && parse < jsonEnd);
     assert.equal(traced.split('[Console]::In.ReadLine()').length, 2, 'input is read once');
     assert.equal(traced.split('ConvertFrom-Json').length, 2, 'the same parser is invoked once');
     for (const line of traced.split(eol).filter(line => line.includes('[Console]::Error.WriteLine')))
       assert.doesNotMatch(line, /\$request|\$metaengineStartupRequestLine/);
     if (eol === '\r\n') assert.ok(!traced.replaceAll('\r\n', '').includes('\n'));
     for (const bad of [traced, source + eol + loader, source.replace(loader, ''), source + "\nAdd-Type -TypeDefinition @'",
+      source.replace(moduleImport, ''), source + eol + moduleImport,
       source.replace(request, ''), source + eol + request, source + eol + '$metaengineStartupRequestLine = "collision"'])
       assert.throws(() => instrumentCodexCliRuntimeStartup(bad), /source_anchor_invalid/);
   }
@@ -95,12 +101,15 @@ test('startup parser accepts split ASCII/CRLF markers and exports only allowlist
   parser.write(Buffer.from('private compiler error with prompt/env/path\nME_CODEX_START'));
   clock = 107; parser.write(Buffer.from('UP_V1 PS_ENTER\r\n'));
   clock = 113; parser.write(Buffer.from(prefix + 'ASSEMBLY_LOAD_BEGIN\n'));
+  clock = 114; parser.write(Buffer.from(prefix + 'MODULE_IMPORT_BEGIN\n'));
+  clock = 118; parser.write(Buffer.from(prefix + 'MODULE_IMPORT_END\n'));
   clock = 120; parser.write(Buffer.from(prefix + 'REQUEST_READ_BEGIN\n'));
   clock = 123; parser.write(Buffer.from(prefix + 'REQUEST_LINE_READ\n'));
   clock = 124; parser.write(Buffer.from(prefix + 'REQUEST_JSON_BEGIN\n'));
   clock = 150; parser.write(Buffer.from(prefix + 'REQUEST_JSON_END\n'));
   const record = parser.snapshot();
   assert.deepEqual(record.stages, [{stage: 'PS_ENTER', elapsed_ms: 7}, {stage: 'ASSEMBLY_LOAD_BEGIN', elapsed_ms: 13},
+    {stage: 'MODULE_IMPORT_BEGIN', elapsed_ms: 14}, {stage: 'MODULE_IMPORT_END', elapsed_ms: 18},
     {stage: 'REQUEST_READ_BEGIN', elapsed_ms: 20}, {stage: 'REQUEST_LINE_READ', elapsed_ms: 23},
     {stage: 'REQUEST_JSON_BEGIN', elapsed_ms: 24}, {stage: 'REQUEST_JSON_END', elapsed_ms: 50}]);
   assert.ok(record.unknown_stderr_bytes > 0);

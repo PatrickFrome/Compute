@@ -325,6 +325,72 @@ are present; the full runner timeout message was not yet available. It is
 recorded separately in `early-native-partial-ci.json`, not treated as a normal
 terminal qualification or combined with the completed 28b results.
 
+## Fixed system-module imports after stage localization
+
+The independent Windows diagnostic on
+`6adb7836ffcc5e9424747759d14701e2d0efcd02` completed normally. It measured
+**2 ms stdin read, 8 ms assembly load and 23,024 ms JSON parsing** in the
+prepared helper. The boot reader's first `Get-CimInstance` took **30,999 ms**;
+its following CIM reads took 31 and 22 ms. The process reader's first CIM call
+took **22,462 ms**, followed by a 21-ms owner lookup. Both extended readers
+returned valid identities, but exceeded their production deadlines. These
+receipts are in `native-stage-localization-ci.json`; they localize the slow
+calls without proving that module discovery, rather than module/provider
+initialization, accounts for every millisecond.
+
+On another runner for the same source, the complete isolated six-file stage
+passed **132 tests, failed one, skipped one, cancelled zero**. Both physical
+birth scenarios, suspended-cleanup faults, output ordering and capture passed.
+Only boot identity exceeded 12 seconds. The process read and JSON parsing were
+faster under those different conditions, so that observation is not attributed
+to the later import change. `native-fixture-windows-ci.json` records that
+completed stage separately from its still-running containing full-suite job.
+
+That containing job later completed normally: its full Browser suite passed
+**5,996 tests, zero failures, eight skips, zero cancelled** (6,004 total), in
+179,591 ms. Later reads on that runner took only 565/459 ms. The job still
+failed because its earlier isolated boot read exceeded 12 seconds. This is
+direct evidence that a later successful full suite does not repair the earlier
+cold-read failure; the terminal follow-up is retained separately in
+`native-fixture-windows-full-ci.json`.
+
+The next narrow repair disables automatic module discovery inside each fixed
+PowerShell session and explicitly imports the required OS manifests from the
+fixed `C:\Windows\System32\WindowsPowerShell\v1.0\Modules` directory. The boot
+reader imports CimCmdlets and Utility; process inventory imports CimCmdlets;
+the prepared helper imports Utility inside its existing controlled-error
+`try` block. The build driver imports Utility, Management and Security for its
+existing JSON, path and Authenticode commands. Missing modules fail at import;
+there is no alternative path or task retry.
+
+The PowerShell variable affects this session only. No `$env:PSModulePath`,
+profile, registry or child environment is modified. WMI queries, CIM date
+handling, owner SID, boot double read, JSON parser and request fields are
+unchanged. All existing 12/15/30-second runtime deadlines include module import.
+The build's 180-second ceiling, compiler signature checks and process custody
+also remain unchanged.
+
+The C# bytes are exactly preserved: **16,766 bytes**, SHA-256
+`b93bc3707d783890434912e0ee3af93215073107d4481f3eb9c4d3f39987883e`.
+Only the two PowerShell trailer lines change the source template digest to
+`60f70fdb0ff5ddab3f61efb46060931e862cb71d8601a5ad3d3b1c19868ec5d6`.
+An explicit rebuild and the unchanged template/helper/manifest checks still
+bind the prepared runtime. Disposable observations now measure module import
+as a separate stage, so moving a delay into import cannot appear as an overall
+startup improvement.
+
+Local combined regressions passed **204 of 217 tests, zero failures and 13
+Windows-only skips**; 240 source parser checks passed. Portable checks do not
+establish Windows performance. A fresh exact-source Windows run is required
+before this candidate can retire either native-read blocker or select a new
+package identity.
+
+Primary references for the narrow import choice:
+
+- [Windows PowerShell module import by file path](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/import-module?view=powershell-5.1).
+- [Windows PowerShell startup and module search paths](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_psmodulepath?view=powershell-7.6#windows-powershell-startup).
+- [Module-qualified command resolution](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_command_precedence?view=powershell-5.1#use-module-qualified-names).
+
 ## Acceptance still required
 
 This continuation must be qualified on its own final source commit. Portable

@@ -86,6 +86,9 @@ export async function readWindowsSandboxHostBoot({exec=execFileAsync,platform=pr
   // read path. The native API, telemetry layout and double-read fence stay the
   // same; no assembly file, cache, caller-selected DLL or fallback is loaded.
   const script=`$ErrorActionPreference='Stop'
+$PSModuleAutoLoadingPreference='None'
+Microsoft.PowerShell.Core\\Import-Module -Name 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules\\CimCmdlets\\CimCmdlets.psd1' -ErrorAction Stop
+Microsoft.PowerShell.Core\\Import-Module -Name 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules\\Microsoft.PowerShell.Utility\\Microsoft.PowerShell.Utility.psd1' -ErrorAction Stop
 $assembly=[AppDomain]::CurrentDomain.DefineDynamicAssembly([Reflection.AssemblyName]::new('MetaengineKernelBoot'),[Reflection.Emit.AssemblyBuilderAccess]::Run)
 $module=$assembly.DefineDynamicModule('Native')
 $type=$module.DefineType('MetaengineKernelBoot.Native',[Reflection.TypeAttributes]::Public -bor [Reflection.TypeAttributes]::Abstract -bor [Reflection.TypeAttributes]::Sealed)

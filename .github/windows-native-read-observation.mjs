@@ -9,12 +9,14 @@ import {readNativeCodingWindowsProcess} from '../apps/metaengine-browser/src/nat
 const diagnosticDeadline = 60000;
 const phasePrefix = 'ME_NATIVE_READ_STAGE_V1 ';
 const phaseStages = Object.freeze({
-  kernel_boot: Object.freeze(['PS_ENTER','NATIVE_BIND_READY','BOOT_FIRST_READ','SYSTEM_CIM_BEGIN','SYSTEM_CIM_END',
+  kernel_boot: Object.freeze(['PS_ENTER','MODULE_IMPORT_BEGIN','MODULE_IMPORT_END','NATIVE_BIND_READY','BOOT_FIRST_READ','SYSTEM_CIM_BEGIN','SYSTEM_CIM_END',
     'OS_CIM_BEGIN','OS_CIM_END','SYSTEM_CONFIRM_BEGIN','SYSTEM_CONFIRM_END','BOOT_CONFIRM_END','JSON_BEGIN','JSON_END']),
-  own_process: Object.freeze(['PS_ENTER','PROCESS_HANDLE_READY','PROCESS_IMAGE_READY','PROCESS_CIM_BEGIN','PROCESS_CIM_END',
+  own_process: Object.freeze(['PS_ENTER','MODULE_IMPORT_BEGIN','MODULE_IMPORT_END','PROCESS_HANDLE_READY','PROCESS_IMAGE_READY','PROCESS_CIM_BEGIN','PROCESS_CIM_END',
     'PROCESS_OWNER_BEGIN','PROCESS_OWNER_END','OUTPUT_BEGIN','OUTPUT_END']),
 });
 const phase = label => `[Console]::Error.WriteLine('${phasePrefix}${label} '+$metaengineReadObservationClock.ElapsedMilliseconds);[Console]::Error.Flush()`;
+const cimImport = String.raw`Microsoft.PowerShell.Core\Import-Module -Name 'C:\Windows\System32\WindowsPowerShell\v1.0\Modules\CimCmdlets\CimCmdlets.psd1' -ErrorAction Stop`;
+const utilityImport = String.raw`Microsoft.PowerShell.Core\Import-Module -Name 'C:\Windows\System32\WindowsPowerShell\v1.0\Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1' -ErrorAction Stop`;
 
 // Instrument only the two fixed diagnostic commands, with exact unique anchors.
 // No stdout, query, binding, identity check or production script is changed.
@@ -23,6 +25,8 @@ export function instrumentWindowsNativeReadScript(reader, source) {
   if(typeof source!=='string'||!Object.hasOwn(phaseStages,reader)||source.includes('metaengineReadObservationClock')||source.includes(phasePrefix))throw invalid();
   const eol=source.includes('\r\n')?'\r\n':'\n';
   const edits=reader==='kernel_boot'?[
+    [cimImport,phase('MODULE_IMPORT_BEGIN'),false],
+    [utilityImport,phase('MODULE_IMPORT_END'),true],
     ["$native=$type.CreateType()",phase('NATIVE_BIND_READY'),true],
     ["$boot=Read-KernelBootId",phase('BOOT_FIRST_READ'),true],
     ["$system=Get-CimInstance Win32_Process -Filter 'ProcessId=4'",phase('SYSTEM_CIM_BEGIN'),false],
@@ -35,6 +39,8 @@ export function instrumentWindowsNativeReadScript(reader, source) {
     ["@{schema='metaengine.windows.kernel-boot.v1';kernel_boot_id=$boot;",phase('JSON_BEGIN'),false],
     ["last_boot_at=$os.LastBootUpTime.ToUniversalTime().ToString('o');os_version=$os.Version}|ConvertTo-Json -Depth 4 -Compress",phase('JSON_END'),true],
   ]:[
+    [cimImport,phase('MODULE_IMPORT_BEGIN'),false],
+    [cimImport,phase('MODULE_IMPORT_END'),true],
     ["if($p.Handle -eq [IntPtr]::Zero -or $p.Id -ne $n){throw 'native_process_handle'}",phase('PROCESS_HANDLE_READY'),true],
     ["$birth=$p.StartTime.ToUniversalTime(); $image=$p.MainModule.FileName",phase('PROCESS_IMAGE_READY'),true],
     ["$c=Get-CimInstance Win32_Process -Filter ('ProcessId='+$n)",phase('PROCESS_CIM_BEGIN'),false],

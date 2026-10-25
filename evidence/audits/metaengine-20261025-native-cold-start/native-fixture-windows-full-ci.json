@@ -1,0 +1,181 @@
+{
+  "schema": "metaengine.ci.windows-native-full-suite-receipt.v1",
+  "source_head_sha": "6adb7836ffcc5e9424747759d14701e2d0efcd02",
+  "workflow": "Client Live Mechanics Recovery",
+  "run_id": 40237661456,
+  "run_attempt": 1,
+  "run_url": "https://github.com/PatrickFrome/Compute/actions/runs/40237661456",
+  "job_id": 121302579424,
+  "job_url": "https://github.com/PatrickFrome/Compute/actions/runs/40237661456/job/121302579424",
+  "job_status": "completed",
+  "job_conclusion": "failure",
+  "job_started_at": "2026-10-25T21:54:47Z",
+  "job_completed_at": "2026-10-25T22:05:25Z",
+  "completion_kind": "NORMAL_TERMINAL",
+  "browser_full_suite": {
+    "step_name": "Exercise all Browser mechanics including real local IPC",
+    "conclusion": "success",
+    "started_at": "2026-10-25T22:02:20Z",
+    "completed_at": "2026-10-25T22:05:20Z",
+    "tests": 6004,
+    "pass": 5996,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 8,
+    "duration_ms": 179590.775
+  },
+  "preceding_isolated_phase": {
+    "conclusion": "failure",
+    "tests": 134,
+    "pass": 132,
+    "fail": 1,
+    "cancelled": 0,
+    "skipped": 1,
+    "sole_failure": "actual current Windows boot sequence and PID4 kernel creation are stable across independent native reads",
+    "failed_test_duration_ms": 12025.8397,
+    "production_timeout_ms": 12000,
+    "detail_receipt": "native-fixture-windows-ci.json",
+    "failure_replaced_by_later_success": false
+  },
+  "post_suite_native_read_observations": [
+    {
+      "schema": "metaengine.ci.native-read-duration-observation.v2",
+      "reader": "kernel_boot",
+      "observed_at": "2026-10-25T22:05:21.510Z",
+      "elapsed_ms": 565,
+      "production_timeout_ms": 12000,
+      "diagnostic_timeout_ms": 60000,
+      "transport_calls": 1,
+      "outcome": "READ_RETURNED",
+      "stages": [
+        {
+          "stage": "PS_ENTER",
+          "elapsed_ms": 1
+        },
+        {
+          "stage": "NATIVE_BIND_READY",
+          "elapsed_ms": 31
+        },
+        {
+          "stage": "BOOT_FIRST_READ",
+          "elapsed_ms": 69
+        },
+        {
+          "stage": "SYSTEM_CIM_BEGIN",
+          "elapsed_ms": 69
+        },
+        {
+          "stage": "SYSTEM_CIM_END",
+          "elapsed_ms": 323
+        },
+        {
+          "stage": "OS_CIM_BEGIN",
+          "elapsed_ms": 329
+        },
+        {
+          "stage": "OS_CIM_END",
+          "elapsed_ms": 350
+        },
+        {
+          "stage": "SYSTEM_CONFIRM_BEGIN",
+          "elapsed_ms": 350
+        },
+        {
+          "stage": "SYSTEM_CONFIRM_END",
+          "elapsed_ms": 365
+        },
+        {
+          "stage": "BOOT_CONFIRM_END",
+          "elapsed_ms": 368
+        },
+        {
+          "stage": "JSON_BEGIN",
+          "elapsed_ms": 368
+        },
+        {
+          "stage": "JSON_END",
+          "elapsed_ms": 387
+        }
+      ],
+      "unknown_stderr_bytes": 614,
+      "phase_stream_invalid": false,
+      "phase_stream_overflow": false,
+      "phase_timing_observation_only": true,
+      "original_probe_result_replaced": false,
+      "authority_effect": false,
+      "native_qualification_proven": false,
+      "causal_attribution_proven": false
+    },
+    {
+      "schema": "metaengine.ci.native-read-duration-observation.v2",
+      "reader": "own_process",
+      "observed_at": "2026-10-25T22:05:21.970Z",
+      "elapsed_ms": 459,
+      "production_timeout_ms": 15000,
+      "diagnostic_timeout_ms": 60000,
+      "transport_calls": 1,
+      "outcome": "READ_RETURNED",
+      "stages": [
+        {
+          "stage": "PS_ENTER",
+          "elapsed_ms": 1
+        },
+        {
+          "stage": "PROCESS_HANDLE_READY",
+          "elapsed_ms": 15
+        },
+        {
+          "stage": "PROCESS_IMAGE_READY",
+          "elapsed_ms": 19
+        },
+        {
+          "stage": "PROCESS_CIM_BEGIN",
+          "elapsed_ms": 19
+        },
+        {
+          "stage": "PROCESS_CIM_END",
+          "elapsed_ms": 272
+        },
+        {
+          "stage": "PROCESS_OWNER_BEGIN",
+          "elapsed_ms": 273
+        },
+        {
+          "stage": "PROCESS_OWNER_END",
+          "elapsed_ms": 286
+        },
+        {
+          "stage": "OUTPUT_BEGIN",
+          "elapsed_ms": 290
+        },
+        {
+          "stage": "OUTPUT_END",
+          "elapsed_ms": 298
+        }
+      ],
+      "unknown_stderr_bytes": 614,
+      "phase_stream_invalid": false,
+      "phase_stream_overflow": false,
+      "phase_timing_observation_only": true,
+      "original_probe_result_replaced": false,
+      "authority_effect": false,
+      "native_qualification_proven": false,
+      "causal_attribution_proven": false
+    }
+  ],
+  "explicit_import_candidate_present": false,
+  "qualified": false,
+  "original_probe_result_replaced": false,
+  "authority_effect": false,
+  "release_authority": false,
+  "native_qualification_proven": false,
+  "causal_attribution_proven": false,
+  "contention_proven": false,
+  "raw_stderr_included": false,
+  "limits": [
+    "This is a normally completed job with a successful later full suite and a failed earlier isolated phase. Its final job conclusion remains failure.",
+    "Later passing tests and the 565ms/459ms extended diagnostic reads do not replace the earlier production-budget kernel boot failure or establish consistent cold-start readiness.",
+    "All results use immutable source 6adb, before the explicit-import candidate. Timing differences within or across runners do not by themselves establish a cause.",
+    "The post-suite native reads retain the separate 60000ms diagnostic ceiling and export only fixed stage labels/timings and unknown-stderr byte counts."
+  ]
+}

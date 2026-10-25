@@ -1,0 +1,43 @@
+{
+  "schema": "metaengine.native-cold-start.source-seal-followup.v1",
+  "baseline_source": "6adb7836ffcc5e9424747759d14701e2d0efcd02",
+  "sealed_paths": 577,
+  "updated_entries": [
+    {
+      "path": ".github/windows-native-read-observation.mjs",
+      "prior_blob": "df09cc2f60c64f1e44cb32ad9312286614dfbd40",
+      "current_blob": "902a97601a5d6aa20154fe9e20a3878e2fd545e7"
+    },
+    {
+      "path": "apps/metaengine-browser/scripts/codex-cli-job-runner.ps1",
+      "prior_blob": "2286e7ba8dff7a2153e934061de3b9e67fc540f3",
+      "current_blob": "0bdbc66d5cbe31bf61a0b8939185ef213d8a4b0e"
+    },
+    {
+      "path": "apps/metaengine-browser/scripts/prepare-codex-cli-job-runtime.mjs",
+      "prior_blob": "f8c4b60c8c12da8327720df75227e7518047d0d8",
+      "current_blob": "1a9575f7880820e2b721d34f88c43144f14dc5a7"
+    },
+    {
+      "path": "apps/metaengine-browser/src/codex-cli-sandbox-probe.mjs",
+      "prior_blob": "bcd09489c0b70f78bb9fafe125e05711067af2ea",
+      "current_blob": "96e02c19509582ffe0fc463d80b51992b7e3bc17"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-host-observers.mjs",
+      "prior_blob": "cd9798d5d936679fa78cbcfcf6c530ff4c2fe8db",
+      "current_blob": "34e51a02c089fb3c06964eef7fcf343cba10a95c"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-startup-observation.test.mjs",
+      "prior_blob": "864c412089b45932df5088c9e23bea50bcc2ef34",
+      "current_blob": "ffd3f10426f4e90c9e15f96af55c8bf39b1542c2"
+    },
+    {
+      "path": "apps/metaengine-browser/test/fixtures/codex-cli-startup-observation.mjs",
+      "prior_blob": "ec87dcf1842c49a1b301bcd0fd9aa4f704fb71d8",
+      "current_blob": "507f284de067147408218824f19a1ce955a1f040"
+    }
+  ],
+  "all_other_manifest_fields_unchanged": true
+}
