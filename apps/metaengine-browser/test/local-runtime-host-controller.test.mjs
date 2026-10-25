@@ -28,8 +28,9 @@ const childSource = [
   '  tokens_absent: !process.env.SUPABASE_SERVICE_ROLE_KEY && !process.env.GITHUB_TOKEN && !process.env.OPENAI_API_KEY,',
   '  browser_identity_absent: !process.env.METAENGINE_STATE_PROVIDER && !process.env.METAENGINE_LOCAL_STATE_INSTANCE_ID,',
   '}));',
-  'process.on("message", value => { if (value?.schema === "compute.runtime-host-control.v1" && value.command === "stop" && config.mode !== "ignore-stop") process.exit(0); });',
-  'process.once("disconnect", () => process.exit(0));',
+  'const terminal = (reason, code = 0) => process.send({schema:"compute.runtime-host-terminal.v1",launch_nonce:process.env.COMPUTE_RUNTIME_HOST_LAUNCH_NONCE,host_pid:process.pid,instance_id:' + JSON.stringify(instance) + ',state:"STOPPED",children_stopped:true,ownership_released:true,reason,authority_effect:false}, () => config.mode === "ignore-stop" ? setTimeout(() => process.exit(code),150) : process.exit(code));',
+  'process.on("message", value => { if (value?.schema === "compute.runtime-host-control.v1" && value.command === "stop") terminal("requested"); });',
+  'process.once("disconnect", () => { if(config.mode !== "ignore-stop") process.exit(0); });',
   'if (config.mode === "failure") {',
   '  process.stderr.write("PRIVATE_FIXTURE_DATABASE_SECRET");',
   '  process.send({ schema:"compute.runtime-host-failure.v1", state:"FAILED", reason:"CONFIGURATION_FAILED", credentials_included:false });',
@@ -37,7 +38,7 @@ const childSource = [
   '  process.send({ schema:"compute.runtime-host-provider.v1", provider:"LOCAL_POSTGRES", endpoint:config.endpoint,',
   '    instance_id:' + JSON.stringify(instance) + ', status_file:config.identity_file, runtime_ready:true,',
   '    automatic_cloud_fallback:false, hosted_supabase_required:false, authority_effect:false, ...config.descriptor_patch });',
-  '  if (config.mode === "crash") setTimeout(() => process.exit(2), 100);',
+  '  if (config.mode === "crash") setTimeout(() => terminal("runtime_health_failed",2), 100);',
   '}',
 ].join('\n');
 
@@ -219,12 +220,12 @@ test('bounded owner cleanup reports unconfirmed before parent disconnect finishe
   assert.equal((await stopOwnedLocalRuntimeHost({ timeoutMs: 2000 })).cleanup_confirmed, true);
 });
 
-test('unexpected host death blocks local readiness without a cloud fallback or replacement writer', async t => {
+test('unexpected clean Host termination blocks readiness without automatically replacing the writer', async t => {
   const f = await fixture(t, { mode: 'crash' });
   await startConfiguredLocalRuntimeHost({ ...f, startupTimeoutMs: FIXTURE_START_TIMEOUT_MS, stopTimeoutMs: 2000 });
   await waitForFixtureExitObservation(f.env);
   assert.equal(f.env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE, 'BLOCKED');
-  assert.equal(f.env.METAENGINE_LOCAL_PROVIDER_BOOT_REASON, 'OWNED_RUNTIME_HOST_EXITED');
+  assert.ok(['OWNED_RUNTIME_HOST_STOPPED', 'OWNED_RUNTIME_HOST_EXITED'].includes(f.env.METAENGINE_LOCAL_PROVIDER_BOOT_REASON));
   assert.equal(localStateProviderConnectionReady(true, f.env), false);
   assert.equal(f.env.METAENGINE_STATE_PROVIDER, 'LOCAL_POSTGRES');
   assert.equal(f.verifications(), 1);
@@ -241,10 +242,14 @@ test('only an exact trusted failure envelope exposes the fixed interrupted-start
     const f=await fixture(t);
     const child=new EventEmitter();
     child.pid=23001;child.connected=true;child.stderr=new EventEmitter();
-    child.send=()=>queueMicrotask(()=>{child.connected=false;child.emit('exit',0);});
+    let launchNonce;
+    child.send=()=>queueMicrotask(()=>{child.emit('message',{schema:'compute.runtime-host-terminal.v1',launch_nonce:launchNonce,
+      host_pid:child.pid,instance_id:null,state:'STOPPED',children_stopped:true,ownership_released:true,reason:'requested',authority_effect:false});
+      child.connected=false;child.emit('exit',0);});
     child.disconnect=()=>{child.connected=false;child.emit('exit',0);};
     await assert.rejects(startConfiguredLocalRuntimeHost({...f,startupTimeoutMs:1000,stopTimeoutMs:100,
-      spawnImpl:()=>{queueMicrotask(()=>child.emit('message',message));return child;},
+      spawnImpl:(_exe,_argv,options)=>{launchNonce=options.env.COMPUTE_RUNTIME_HOST_LAUNCH_NONCE;
+        queueMicrotask(()=>child.emit('message',message));return child;},
     }),error=>error.message===reason&&!error.message.includes('PRIVATE_FIXTURE'));
     assert.equal((await stopOwnedLocalRuntimeHost({timeoutMs:100})).cleanup_confirmed,true);
     assert.notEqual(f.env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE,'READY');
@@ -259,11 +264,13 @@ test('a ready IPC followed by exit before the startup continuation cannot publis
   child.stderr = new EventEmitter();
   await assert.rejects(startConfiguredLocalRuntimeHost({ ...f,
     startupTimeoutMs: FIXTURE_START_TIMEOUT_MS, stopTimeoutMs: 100,
-    spawnImpl: () => {
+    spawnImpl: (_exe, _argv, options) => {
       queueMicrotask(() => {
         child.emit('message', { schema: 'compute.runtime-host-provider.v1', provider: 'LOCAL_POSTGRES',
           endpoint: f.config.base_url, instance_id: instance, status_file: f.config.runtime_identity_file,
           runtime_ready: true, automatic_cloud_fallback: false, hosted_supabase_required: false, authority_effect: false });
+        child.emit('message', {schema:'compute.runtime-host-terminal.v1',launch_nonce:options.env.COMPUTE_RUNTIME_HOST_LAUNCH_NONCE,
+          host_pid:child.pid,instance_id:instance,state:'STOPPED',children_stopped:true,ownership_released:true,reason:'runtime_health_failed',authority_effect:false});
         child.emit('exit', 2);
       });
       return child;

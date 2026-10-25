@@ -215,7 +215,15 @@ export async function readNativeCodingSandboxEvidence({pin,cliPath,worktreePath,
 
 export function createNativeCodingWorkerRegistry({processController,readProcess=readNativeCodingWindowsProcess}={}) {
   if(typeof processController?.spawn!=='function'||typeof readProcess!=='function')fail('worker_dependencies_required');
-  const workers=new Map();let closed=false;
+  const workers=new Map();let closed=false,closePromise=null;
+  const terminate=entry=>{
+    if(!entry.termination)entry.termination=(async()=>{
+      try{await entry.handle.terminate('HOST_RUNTIME_CLOSED');}catch{/* Completion must independently prove cleanup. */}
+      await entry.completion;
+      return entry.cleanup_confirmed===true;
+    })();
+    return entry.termination;
+  };
   return Object.freeze({
     controllerFor(scope) {
       if(closed||!UUID.test(scope?.provider_id||'')||!HASH.test(scope.prompt_sha256||''))fail('worker_scope_invalid');
@@ -223,15 +231,28 @@ export function createNativeCodingWorkerRegistry({processController,readProcess=
       return Object.freeze({async spawn(spec) {
         if(closed||workers.has(spec.runId)||spec.binding?.task_id!==pinned.task_id||spec.binding?.agent_id!==pinned.agent_id
           ||spec.binding?.lease_generation!==pinned.lease_generation)fail('worker_scope_changed');
-        if(workers.size>=128)for(const [id,row] of workers){if(row.state==='EXITED'||row.state==='UNKNOWN')workers.delete(id);if(workers.size<128)break;}
+        if(workers.size>=128)for(const [id,row] of workers){if(row.state==='EXITED'&&row.cleanup_confirmed===true)workers.delete(id);if(workers.size<128)break;}
         if(workers.size>=128)fail('worker_registry_capacity');
-        const handle=await processController.spawn(spec);
-        const entry={handle,spec,scope:pinned,state:'SUSPENDED'};workers.set(spec.runId,entry);
-        handle.completion.then(()=>{entry.state='EXITED';},()=>{entry.state='UNKNOWN';});
-        return Object.freeze({...handle,async resume(prompt,options) {
-          if(closed||entry.state!=='SUSPENDED'||digest(prompt)!==pinned.prompt_sha256)fail('worker_resume_changed');
-          entry.state='RESUMING';await handle.resume(prompt,options);entry.state='RUNNING';
-        }});
+        // Reserve the exact run before awaiting native spawn. Shutdown must
+        // retain a suspended handle that arrives after the close signal.
+        const entry={handle:null,spec,scope:pinned,state:'SPAWNING',cleanup_confirmed:false,spawned:null,completion:null,termination:null};
+        workers.set(spec.runId,entry);
+        entry.spawned=(async()=>{
+          let handle;
+          try{handle=await processController.spawn(spec);}catch(error){entry.state='UNKNOWN';throw error;}
+          entry.handle=handle;entry.state='SUSPENDED';
+          entry.completion=Promise.resolve(handle.completion).then(result=>{
+            entry.cleanup_confirmed=result?.tree_cleanup_confirmed===true;
+            entry.state=entry.cleanup_confirmed?'EXITED':'UNKNOWN';return result;
+          },()=>{entry.state='UNKNOWN';entry.cleanup_confirmed=false;return null;});
+          if(closed){void terminate(entry);fail('worker_closed_during_spawn');}
+          return Object.freeze({...handle,async resume(prompt,options) {
+            if(closed||entry.state!=='SUSPENDED'||digest(prompt)!==pinned.prompt_sha256)fail('worker_resume_changed');
+            entry.state='RESUMING';await handle.resume(prompt,options);
+            if(entry.state==='RESUMING')entry.state='RUNNING';
+          }});
+        })();
+        return entry.spawned;
       }});
     },
     async readNativeWorker(query) {
@@ -243,7 +264,23 @@ export function createNativeCodingWorkerRegistry({processController,readProcess=
         ||proof.job_bound_before_resume!==true||proof.job_id!==entry.spec.runId)fail('worker_native_binding_changed');
       return observe('OS_PROCESS_INVENTORY',{run_id:query.run_id,worker_process:processOnly(actual),job_id:proof.job_id,prompt_sha256:entry.scope.prompt_sha256});
     },
-    async close(){closed=true;await Promise.allSettled([...workers.values()].filter(e=>e.state!=='EXITED').map(e=>e.handle.terminate('HOST_RUNTIME_CLOSED')));},
+    close(){
+      if(closePromise)return closePromise;
+      closed=true;
+      closePromise=(async()=>{
+        const entries=[...workers.values()];
+        const results=await Promise.allSettled(entries.map(async entry=>{
+          if(entry.handle&&entry.cleanup_confirmed!==true)void terminate(entry);
+          await entry.spawned.catch(()=>{});
+          if(entry.cleanup_confirmed===true)return true;
+          return entry.handle?terminate(entry):false;
+        }));
+        const unconfirmed=entries.filter((_entry,index)=>results[index].status!=='fulfilled'||results[index].value!==true).map(entry=>entry.spec.runId);
+        return Object.freeze({schema:'metaengine.native-coding.workers-close.v1',cleanup_confirmed:unconfirmed.length===0,
+          worker_count:entries.length,unconfirmed_runs:Object.freeze(unconfirmed),automatic_retry_allowed:false,authority_effect:false});
+      })();
+      return closePromise;
+    },
   });
 }
 

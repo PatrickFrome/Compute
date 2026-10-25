@@ -178,6 +178,7 @@ export const SOURCE_CHECK_FILES = Object.freeze([
   "../../infra/client-state-runtime/native-coding-host-os-scope.mjs",
   "../../infra/client-state-runtime/native-coding-task-context.mjs",
   "../../infra/client-state-runtime/postgres-continuity-inspector.mjs",
+  "../../infra/client-state-runtime/runtime-host-lifecycle.mjs",
   "src/local-state-provider-policy.mjs",
   "src/local-runtime-host-controller.mjs",
   "src/local-restored-pg17-setup.mjs",

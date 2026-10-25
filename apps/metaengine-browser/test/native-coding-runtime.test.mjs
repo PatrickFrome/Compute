@@ -1,9 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import {fork} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {createNativeCodingRuntime} from '../src/native-coding-runtime.mjs';
 import {nativeCodingEnvelopeSha256} from '../src/native-coding-transport-proof.mjs';
+import {createNativeCodingHostIpcClient} from '../src/native-coding-host-ipc-client.mjs';
 
 // Explicit private-capability fixtures exercise real runtime/executor/pool
 // ordering. No fixture signature, process or receipt is native evidence.
@@ -14,6 +18,7 @@ const agent=`agent_${ids.task}`,hash=s=>createHash('sha256').update(s).digest('h
 const host={pid:123,created_at:'2026-10-22T04:00:00.000Z',process_incarnation_id:'pid:123:created_100ns:134055792000000000'};
 const processProof={process_incarnation_id:'pid:124:created_100ns:134055792000000000',job_id:ids.run};
 function fixture(options={}){
+  const hostListeners=new Set();
   const calls=[],prompt='HOST canonical task: implement the exact leased change.',expiry=new Date(Date.now()+300000).toISOString();
   const role=options.role||'IMPLEMENTER';
   const subject=role==='CRITIC'?{run_id:ids.provider,result_sha256:'d'.repeat(64),git_artifact_sha256:'e'.repeat(64),source_head:'a'.repeat(40)}:null;
@@ -36,19 +41,22 @@ function fixture(options={}){
     read:async scope=>{readCount++;calls.push('read');return options.readback?.({scope,receipt,executionState})||{state:executionState};}};
   const ownPostgres={ledger,readScope:async()=>{},readLease:async()=>({schema:'metaengine.native-coding.own-pg-lease.v1',
       source:'PRIVATE_RUNTIME_HOST_OWN_PG',observed_at:new Date().toISOString(),value:{...lease},task_prompt:options.badPrompt?'changed in transit':prompt}),
+    onUnavailable:options.onUnavailable||((listener)=>{hostListeners.add(listener);return()=>hostListeners.delete(listener);}),
     registerProvider:async envelope=>{calls.push('register-provider');if(options.unknownRegistration)throw Error('fixture_registration_ack_lost');
-      return {registered:true,provider_id:envelope.payload.provider_id,envelope_sha256:nativeCodingEnvelopeSha256(envelope)};}};
+      await options.beforeRegisterAck?.();return {registered:true,provider_id:envelope.payload.provider_id,envelope_sha256:nativeCodingEnvelopeSha256(envelope)};}};
   const issuer={issueProvider:async selector=>{assert(prepared);providerIssues++;calls.push('issue-provider');
       await options.beforeIssueProvider?.(selector,providerIssues);
       return {signature:'FIXTURE_ONLY',payload:{...selector,expires_at:options.providerExpiry?.()||expiry}};},
     issueJob:async query=>{assert(prepared);calls.push('issue-job');return {signature:'FIXTURE_ONLY',payload:{...query,
       schema:'metaengine.codex-cli.job-proof.v1',trust_namespace:'LOCAL_OPERATOR_QA',production_qualified:false,
       target_id:lease.target_id,agent_generation_epoch:1,role,workspace_id:lease.workspace_id,project_id:lease.project_id,permit_id:permit.permit_id,
-      host_process:host,worker_process:processProof,job_id:ids.run,worktree:permit.worktree,expires_at:expiry}};},close:()=>{}};
-  const store={publish:async value=>{calls.push('publish-author');assert.deepEqual(value,receipt);},
+      host_process:host,worker_process:processProof,job_id:ids.run,worktree:permit.worktree,expires_at:expiry}};},close:()=>{calls.push('issuer-close');}};
+  const store={publish:async value=>{calls.push('publish-author');assert.deepEqual(value,receipt);await options.beforePublish?.();},
     resolveRunnerSubject:async query=>{calls.push('resolve-subject');assert.deepEqual(query.verification_subject,subject);
       return {task_id:ids.provider,lease_generation:7,...subject};}};
-  const workers={controllerFor:scope=>{calls.push('private-controller');assert.equal(scope.prompt_sha256,hash(prompt));return {};},close:async()=>{}};
+  const workers={controllerFor:scope=>{calls.push('private-controller');assert.equal(scope.prompt_sha256,hash(prompt));return {};},
+    close:async()=>{calls.push('workers-close');await options.workerClose?.();return {
+      schema:'metaengine.native-coding.workers-close.v1',cleanup_confirmed:options.cleanupConfirmed!==false};}};
   const observers={prepareInstalledImage:async()=>{calls.push('prepare-image');prepared=true;},
     readNativeHost:async()=>({value:{host_process:host,user_sid:permit.user_sid}})};
   const signedRequest=async(url,{payload})=>{
@@ -59,19 +67,21 @@ function fixture(options={}){
       return {ok:true,json:async()=>({task_id:ids.task,state:'RUNNING'})};
     }
     assert(url.endsWith('/complete'));calls.push('complete');assert.equal(executionState,'RESULT_READY');
+    await options.beforeCompleteAck?.();
     assert.equal(nativeCodingEnvelopeSha256(payload.native_coding.receipt),nativeCodingEnvelopeSha256(transitionEvents[1].result_receipt));
     if(options.unknownCompletion)throw Error('fixture_completion_ack_lost');
     const response={task_id:ids.task,state:'RESULT_READY',result_sha256:'0'.repeat(64),native_coding_ack:{state:'RESULT_READY',lease_generation:1,
       result_sha256:options.wrongAck?'0'.repeat(64):receipt.result_sha256}};
     return {ok:true,json:async()=>response};
   };
-  const runnerFactory=({authorizeLease})=>({async run(request){
+  const runnerFactory=({authorizeLease})=>({async run(request,{signal}={}){
     runCount++;calls.push('runner');assert.equal(request.prompt,prompt);
     if(role==='CRITIC')assert.deepEqual(request.subject,{task_id:ids.provider,lease_generation:7,...subject});
     else assert.equal(request.subject,undefined);
     if(options.gate)await options.gate;
     await authorizeLease({phase:'BEFORE_ATTEMPT',binding:request.lease});
     await authorizeLease({phase:'BEFORE_RESUME',binding:request.lease,run_id:ids.run,process:processProof});calls.push('resume');
+    await options.afterResume?.({signal,calls});
     await authorizeLease({phase:'AFTER_EXECUTION',binding:request.lease});
     receipt={schema:'metaengine.codex-cli.run-receipt.v1',provider:'CODEX_CLI',trust_namespace:'LOCAL_OPERATOR_QA',state:'RESULT_READY',
       task_id:ids.task,lease_generation:options.wrongResult?2:1,agent_id:agent,run_id:ids.run,role,result_sha256:'b'.repeat(64),
@@ -80,9 +90,11 @@ function fixture(options={}){
   const args={identity:{snapshot:()=>({})},ownPostgres,signedRequest,observers,issuer,
     runnerOptions:{expectedExecutableSha256:permit.artifact.cli_executable_sha256},resultStore:store,workerRegistry:workers,
     permitRegistry:{listProviderSelectors:async()=>[{provider_id:ids.provider,agent_id:agent}],readProvider:async()=>permit},runnerFactory,
-    physicalSlotBudget:options.physicalSlotBudget||1};
+    physicalSlotBudget:options.physicalSlotBudget||1,...(options.closeTimeoutMs?{closeTimeoutMs:options.closeTimeoutMs}:{})};
   const runtime=createNativeCodingRuntime(args);
-  return {runtime,args,calls,lease,permit,prompt,transitionEvents,get runCount(){return runCount;},get providerIssues(){return providerIssues;},
+  return {runtime,args,calls,lease,permit,prompt,transitionEvents,
+    loseHost(reason='CHILD_EXIT'){for(const listener of [...hostListeners])listener({reason});},
+    get runCount(){return runCount;},get providerIssues(){return providerIssues;},
     get receipt(){return receipt;},get readCount(){return readCount;}};
 }
 async function settled(f){
@@ -255,4 +267,134 @@ test('closing during a hanging issuer prevents a later protected registration',a
 test('missing private ledger capability is rejected at composition, not after a task starts',async t=>{
   const f=fixture();t.after(()=>f.runtime.close());const ownPostgres={...f.args.ownPostgres};delete ownPostgres.ledger;
   assert.throws(()=>createNativeCodingRuntime({...f.args,ownPostgres}),/private_ledger_required/);
+});
+
+test('real private Host disconnect synchronously fences an active fixture worker and drains it without replay',async t=>{
+  const directory=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-native-loss-'));
+  const entry=path.join(directory,'host.mjs');
+  await fs.writeFile(entry,"process.on('disconnect',()=>process.exit(0));process.send({ready:true});\n");
+  const child=fork(entry,[],{execPath:process.execPath,windowsHide:true,stdio:['ignore','ignore','ignore','ipc']});
+  let capability;
+  t.after(async()=>{
+    capability?.close();
+    if(child.exitCode===null&&child.signalCode===null){const exited=new Promise(resolve=>child.once('exit',resolve));child.kill();await exited;}
+    const actual=await fs.realpath(directory),temporary=await fs.realpath(os.tmpdir());
+    assert(actual.startsWith(temporary+path.sep)&&path.basename(actual).startsWith('metaengine-native-loss-'));
+    await fs.rm(actual,{recursive:true,force:true});
+  });
+  await new Promise((resolve,reject)=>{
+    const timer=setTimeout(()=>reject(Error('fixture_host_start_timeout')),5000);
+    child.once('message',()=>{clearTimeout(timer);resolve();});
+    child.once('error',error=>{clearTimeout(timer);reject(error);});
+  });
+  capability=createNativeCodingHostIpcClient({child,hostPid:child.pid,instanceId:ids.run});
+  let aborted=false;
+  const f=fixture({onUnavailable:capability.onUnavailable,afterResume:({signal})=>new Promise((_,reject)=>{
+    signal.addEventListener('abort',()=>{aborted=true;reject(Error('fixture_worker_aborted'));},{once:true});
+  })});
+  t.after(()=>f.runtime.close());
+  f.runtime.dispatchLease(f.lease);
+  for(let i=0;i<100&&!f.calls.includes('resume');i++)await new Promise(resolve=>setImmediate(resolve));
+  assert(f.calls.includes('resume'));assert.equal(aborted,false);
+  const lost=new Promise(resolve=>capability.onUnavailable(resolve));child.disconnect();await lost;
+  assert.equal(aborted,true);assert.equal(f.runtime.snapshot().closed,true);
+  assert.equal(f.runtime.snapshot().host_unavailable_reason,'CHANNEL_CLOSED');
+  assert(f.calls.includes('workers-close'));assert(f.calls.includes('issuer-close'));
+  assert.equal(f.runtime.dispatchLease({...f.lease,task_id:ids.provider}).state,'STOPPED');
+  assert.equal((await f.runtime.observeProviders()).providers.length,0);
+  assert.equal(f.runtime.observeProjectCheckpoints([{malformed:true}]).state,'STOPPED');
+  assert.equal((await f.runtime.completeFromTrustedCommand(f.lease)).state,'STOPPED');
+  const closed=await f.runtime.close();
+  assert.equal(closed.shutdown_state,'DRAINED');assert.equal(closed.jobs[0].state,'READBACK_REQUIRED');
+  assert.equal(closed.occupied_slots,1);assert.equal(closed.execution_outcomes_reconciled,false);
+  assert.equal(f.runCount,1);assert.equal(f.calls.includes('complete'),false);
+});
+
+test('loss immediately after dispatch prevents delayed preparation from reserving or launching',async()=>{
+  const f=fixture();f.runtime.dispatchLease(f.lease);f.loseHost();
+  const closed=await f.runtime.close();assert.equal(closed.shutdown_state,'DRAINED');
+  assert.equal(f.runCount,0);assert.equal(f.calls.includes('reserve'),false);
+  assert.equal(closed.jobs[0].state,'READBACK_REQUIRED');
+});
+
+test('loss hides a cached descriptor and a late registration ACK cannot publish another',async t=>{
+  let release,registered=0;const gate=new Promise(resolve=>{release=resolve;});
+  const f=fixture({physicalSlotBudget:2,beforeRegisterAck:async()=>{if(++registered===2)await gate;}});
+  t.after(async()=>{release();await f.runtime.close();});
+  f.args.permitRegistry.listProviderSelectors=async()=>[{provider_id:ids.provider,agent_id:agent},{provider_id:ids.project,agent_id:agent}];
+  await f.runtime.observeProviders();
+  for(let i=0;i<100&&registered<2;i++)await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(registered,2);assert.equal((await f.runtime.observeProviders()).providers.length,1);
+  f.loseHost('SEND_FAILED');assert.equal((await f.runtime.observeProviders()).providers.length,0);
+  release();await providerRefreshDone(f);await f.runtime.close();
+  for(let i=0;i<3;i++)assert.equal((await f.runtime.observeProviders()).providers.length,0);
+  assert.equal(registered,2);assert.equal(f.providerIssues,2);
+});
+
+test('loss during issuance cannot begin a registration when the issuer later resolves',async()=>{
+  let release;const gate=new Promise(resolve=>{release=resolve;}),f=fixture({beforeIssueProvider:async()=>gate});
+  await f.runtime.observeProviders();
+  for(let i=0;i<100&&!f.providerIssues;i++)await new Promise(resolve=>setImmediate(resolve));
+  f.loseHost();await f.runtime.close();release();await providerRefreshDone(f);
+  assert.equal(f.calls.filter(call=>call==='register-provider').length,0);
+});
+
+test('fencing preserves unknown completion and registration records',async()=>{
+  const f=fixture({unknownCompletion:true,unknownRegistration:true});
+  await f.runtime.observeProviders();await providerRefreshDone(f);
+  f.runtime.dispatchLease(f.lease);await settled(f);await f.runtime.observeLease(f.lease);
+  assert.equal(f.runtime.snapshot().completion_readbacks,1);assert.equal(f.runtime.snapshot().provider_fences,1);
+  f.loseHost();const closed=await f.runtime.close();
+  assert.equal(closed.completion_readbacks,1);assert.equal(closed.provider_fences,1);assert.equal(closed.occupied_slots,1);
+  assert.equal((await f.runtime.completeFromTrustedCommand(f.lease)).state,'STOPPED');
+  assert.equal(f.calls.filter(call=>call==='complete').length,1);assert.equal(f.runCount,1);
+});
+
+test('close is idempotent and bounded while an unresolved worker drain stays explicitly unconfirmed',async()=>{
+  let release;const gate=new Promise(resolve=>{release=resolve;}),f=fixture({workerClose:()=>gate,closeTimeoutMs:20});
+  f.loseHost();const first=await f.runtime.close();
+  assert.equal(first.shutdown_state,'DRAIN_TIMEOUT');assert.equal(first.closed,true);
+  assert.equal(f.calls.filter(call=>call==='workers-close').length,1);
+  assert.equal((await f.runtime.close()).shutdown_state,'DRAIN_TIMEOUT');
+  assert.equal(f.runtime.dispatchLease(f.lease).state,'STOPPED');
+  release();await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(f.runtime.snapshot().shutdown_state,'DRAINED');
+  assert.equal(f.runtime.snapshot().execution_outcomes_reconciled,false);
+});
+
+test('a failed drain remains fenced, and late subscription to an unavailable Host cannot admit work',async()=>{
+  const failed=fixture({workerClose:async()=>{throw Error('fixture_cleanup_unconfirmed');}});
+  failed.loseHost();assert.equal((await failed.runtime.close()).shutdown_state,'DRAIN_FAILED');
+  assert.equal(failed.runtime.dispatchLease(failed.lease).state,'STOPPED');
+  let unsubscribed=0;
+  const late=fixture({onUnavailable:listener=>{listener({reason:'CLIENT_CLOSED'});return()=>{unsubscribed++;};}});
+  assert.equal(late.runtime.snapshot().closed,true);assert.equal(unsubscribed,1);
+  assert.equal(late.runtime.dispatchLease(late.lease).state,'STOPPED');
+  assert.equal((await late.runtime.close()).shutdown_state,'DRAINED');assert.equal(late.runCount,0);
+});
+
+test('terminal Host loss while publishing prevents a new signed completion POST',async()=>{
+  let release;const gate=new Promise(resolve=>{release=resolve;}),f=fixture({beforePublish:()=>gate});
+  f.runtime.dispatchLease(f.lease);await settled(f);const completion=f.runtime.observeLease(f.lease);
+  for(let i=0;i<100&&!f.calls.includes('publish-author');i++)await new Promise(resolve=>setImmediate(resolve));
+  f.loseHost('HOST_TERMINATED');assert.equal(f.runtime.snapshot().completion_readbacks,1);
+  release();assert.equal((await completion).state,'READBACK_REQUIRED');
+  assert.equal(f.calls.includes('complete'),false);assert.equal(f.runtime.snapshot().occupied_slots,1);
+  await f.runtime.close();
+});
+
+for(const unknownAck of [false,true])test(`Host loss retains an already attempted completion while its late ACK is ${unknownAck?'unknown':'successful'}`,async()=>{
+  let release;const gate=new Promise(resolve=>{release=resolve;}),f=fixture({beforeCompleteAck:()=>gate,unknownCompletion:unknownAck});
+  f.runtime.dispatchLease(f.lease);await settled(f);const completion=f.runtime.observeLease(f.lease);
+  for(let i=0;i<100&&!f.calls.includes('complete');i++)await new Promise(resolve=>setImmediate(resolve));
+  assert(f.calls.includes('complete'));f.loseHost();assert.equal(f.runtime.snapshot().completion_readbacks,1);
+  release();assert.equal((await completion).state,'READBACK_REQUIRED');
+  const closed=await f.runtime.close();assert.equal(closed.occupied_slots,1);assert.equal(closed.completion_readbacks,1);
+  assert.equal(f.calls.filter(call=>call==='complete').length,1);
+});
+
+test('fulfilled worker shutdown without positive physical cleanup cannot claim DRAINED',async()=>{
+  const f=fixture({cleanupConfirmed:false});f.loseHost();const closed=await f.runtime.close();
+  assert.equal(closed.shutdown_state,'DRAIN_UNCONFIRMED');assert.equal(closed.worker_cleanup_confirmed,false);
+  assert.equal(f.runtime.dispatchLease(f.lease).state,'STOPPED');
 });

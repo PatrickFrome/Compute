@@ -136,6 +136,67 @@ test('PID reuse or changed owner cannot become a suspended job observation',asyn
   }
 });
 
+for(const outcome of ['unconfirmed','rejected','missing'])test(`worker shutdown retains ${outcome} native cleanup as unknown`,async()=>{
+  const runId=randomUUID(),scope={provider_id:provider,agent_id:agent,task_id:id,lease_generation:1,prompt_sha256:hash('prompt')};
+  let finish,rejectCompletion,terminated=0;
+  const completion=new Promise((resolve,reject)=>{finish=resolve;rejectCompletion=reject;});
+  const registry=createNativeCodingWorkerRegistry({readProcess:async()=>proc,processController:{spawn:async()=>({
+    proof:{...proc,job_id:runId},completion,resume:async()=>{},terminate:async()=>{terminated++;throw Error('fixture_terminate_unconfirmed');}})}});
+  await registry.controllerFor(scope).spawn({runId,binding:scope});
+  if(outcome==='rejected')rejectCompletion(Error('fixture_native_completion_rejected'));
+  else finish(outcome==='missing'?undefined:{exit_code:0,tree_cleanup_confirmed:false});
+  await new Promise(resolve=>setImmediate(resolve));
+  const first=registry.close(),second=registry.close();assert.equal(first,second);
+  const closed=await first;assert.equal(closed.cleanup_confirmed,false);assert.deepEqual(closed.unconfirmed_runs,[runId]);
+  assert.equal(terminated,1);assert.equal(closed.automatic_retry_allowed,false);
+});
+
+test('only explicit native tree cleanup permits a confirmed worker drain',async()=>{
+  const runId=randomUUID(),scope={provider_id:provider,agent_id:agent,task_id:id,lease_generation:1,prompt_sha256:hash('prompt')};
+  let finish,terminated=0;
+  const registry=createNativeCodingWorkerRegistry({readProcess:async()=>proc,processController:{spawn:async()=>({
+    proof:{...proc,job_id:runId},completion:new Promise(resolve=>{finish=resolve;}),resume:async()=>{},
+    terminate:async()=>{terminated++;finish({exit_code:1,tree_cleanup_confirmed:true});}})}});
+  await registry.controllerFor(scope).spawn({runId,binding:scope});
+  const closed=await registry.close();assert.equal(closed.cleanup_confirmed,true);assert.equal(closed.worker_count,1);
+  assert.deepEqual(closed.unconfirmed_runs,[]);assert.equal(terminated,1);
+});
+
+test('shutdown captures a suspended native handle that arrives after close and forbids duplicate pending spawn',async()=>{
+  const runId=randomUUID(),scope={provider_id:provider,agent_id:agent,task_id:id,lease_generation:1,prompt_sha256:hash('prompt')};
+  let release,finish,terminated=0,resumed=0;
+  const pending=new Promise(resolve=>{release=resolve;});
+  const registry=createNativeCodingWorkerRegistry({readProcess:async()=>proc,processController:{spawn:async()=>pending}});
+  const controller=registry.controllerFor(scope),spec={runId,binding:scope};
+  const spawning=controller.spawn(spec);const rejected=assert.rejects(spawning,/closed_during_spawn/);
+  await assert.rejects(controller.spawn(spec),/worker_scope_changed/);
+  const closing=registry.close();let closed=false;closing.then(()=>{closed=true;});
+  await new Promise(resolve=>setImmediate(resolve));assert.equal(closed,false);
+  release({proof:{...proc,job_id:runId},completion:new Promise(resolve=>{finish=resolve;}),resume:async()=>{resumed++;},
+    terminate:async()=>{terminated++;finish({tree_cleanup_confirmed:true});}});
+  await rejected;assert.equal((await closing).cleanup_confirmed,true);assert.equal(terminated,1);assert.equal(resumed,0);
+});
+
+test('spawn rejection without a returned native handle cannot establish cleanup',async()=>{
+  const runId=randomUUID(),scope={provider_id:provider,agent_id:agent,task_id:id,lease_generation:1,prompt_sha256:hash('prompt')};
+  const registry=createNativeCodingWorkerRegistry({readProcess:async()=>proc,processController:{spawn:async()=>{throw Error('fixture_spawn_unknown');}}});
+  await assert.rejects(registry.controllerFor(scope).spawn({runId,binding:scope}),/fixture_spawn_unknown/);
+  const closed=await registry.close();assert.equal(closed.cleanup_confirmed,false);assert.deepEqual(closed.unconfirmed_runs,[runId]);
+});
+
+test('unknown native handles cannot be evicted to admit additional physical work',async()=>{
+  const scope={provider_id:provider,agent_id:agent,task_id:id,lease_generation:1,prompt_sha256:hash('prompt')};
+  let spawned=0;
+  const registry=createNativeCodingWorkerRegistry({readProcess:async()=>proc,processController:{spawn:async()=>{
+    spawned++;return {proof:proc,completion:Promise.resolve({tree_cleanup_confirmed:false}),resume:async()=>{},terminate:async()=>{}};
+  }}});
+  const controller=registry.controllerFor(scope);
+  for(let i=0;i<128;i++)await controller.spawn({runId:randomUUID(),binding:scope});
+  await assert.rejects(controller.spawn({runId:randomUUID(),binding:scope}),/registry_capacity/);
+  assert.equal(spawned,128);const closed=await registry.close();assert.equal(closed.cleanup_confirmed,false);
+  assert.equal(closed.unconfirmed_runs.length,128);
+});
+
 test('independent Critic subject resolves only exact immutable author receipt, patch and process',async t=>{
   const root=await temporary(t),journalRoot=path.join(root,'journal'),indexRoot=path.join(root,'index'),run_id=randomUUID();
   const directory=path.join(journalRoot,hash(JSON.stringify({task_id:id,lease_generation:1,role:'IMPLEMENTER'})));

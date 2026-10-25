@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +14,33 @@ const ENVIRONMENT_KEYS = [
 ];
 let ownedHost = null;
 let startup = null;
+const TERMINAL_KEYS = ['schema', 'launch_nonce', 'host_pid', 'instance_id', 'state',
+  'children_stopped', 'ownership_released', 'reason', 'authority_effect'].sort().join(',');
+
+// Process exit alone does not establish that API/Edge or an owned database
+// stopped. This acknowledgement travels on the exact verified child channel,
+// after the Host persisted its terminal state and released its ownership lock.
+function acceptTerminal(host, value) {
+  const valid = value && Object.keys(value).sort().join(',') === TERMINAL_KEYS
+    && value.schema === 'compute.runtime-host-terminal.v1'
+    && value.launch_nonce === host.launchNonce && value.host_pid === host.child.pid
+    && value.state === 'STOPPED' && value.children_stopped === true
+    && value.ownership_released === true && value.authority_effect === false
+    && /^[a-z][a-z0-9_]{0,119}$/.test(String(value.reason || ''))
+    && (host.summary ? value.instance_id === host.summary.instance_id
+      : value.instance_id === null || LOCAL_STATE_INSTANCE_UUID.test(String(value.instance_id || '')));
+  if (!valid || (host.terminal && JSON.stringify(host.terminal) !== JSON.stringify(value))) {
+    host.terminalRejected = true;
+    return false;
+  }
+  host.terminal = Object.freeze({ ...value });
+  return !host.terminalRejected;
+}
+
+function cleanupConfirmed(host) {
+  return !host || (host.exited && (host.noSpawnEffect === true
+    || (host.terminal && !host.terminalRejected)));
+}
 
 // Native-main capability only. The actual owned ChildProcess and immutable
 // descriptor identity select the channel; no renderer-selected PID/endpoint.
@@ -167,7 +194,7 @@ function waitForExit(host, timeoutMs) {
 }
 
 async function stopHost(host, timeoutMs) {
-  if (!host || host.exited) return true;
+  if (!host || host.exited) return Boolean(cleanupConfirmed(host));
   host.stopping = true;
   host.env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE = 'BLOCKED';
   host.env.METAENGINE_LOCAL_PROVIDER_BOOT_REASON = 'OWNED_RUNTIME_HOST_STOPPING';
@@ -181,7 +208,7 @@ async function stopHost(host, timeoutMs) {
     // if its bounded cleanup cannot confirm that those children stopped.
     try { host.child.disconnect(); } catch {}
   }
-  return exited;
+  return exited && Boolean(cleanupConfirmed(host));
 }
 
 export async function stopOwnedLocalRuntimeHost({ timeoutMs = STOP_TIMEOUT_MS } = {}) {
@@ -189,8 +216,13 @@ export async function stopOwnedLocalRuntimeHost({ timeoutMs = STOP_TIMEOUT_MS } 
   // A quit/installer request can arrive while the pinned host is still starting.
   // Its own startup/failed-start cleanup is bounded; never report NO_OWNED_HOST
   // just because its ready descriptor has not arrived yet.
-  if (startup) await startup.promise.catch(() => {});
-  const host = ownedHost;
+  const pending = startup;
+  if (pending) {
+    pending.cancelled = true;
+    pending.cancel?.();
+    await pending.promise.catch(() => {});
+  }
+  const host = ownedHost || pending?.host;
   const confirmed = await stopHost(host, timeoutMs);
   if (host && confirmed && ownedHost === host) ownedHost = null;
   return Object.freeze({ state: host ? (confirmed ? 'STOPPED' : 'CLEANUP_UNCONFIRMED') : 'NO_OWNED_HOST',
@@ -201,7 +233,9 @@ export function ownedLocalRuntimeHostReady(summary) {
   // HTTP health can finish after shutdown or an unexpected child exit. Bind
   // final Browser admission to the exact still-owned process, without starting
   // a replacement host or trusting the previous READY descriptor alone.
-  return Boolean(summary && ownedHost?.summary === summary && !ownedHost.exited && !ownedHost.stopping);
+  return Boolean(summary && ownedHost?.summary === summary && !ownedHost.exited
+    && !ownedHost.stopping && !ownedHost.terminal && !ownedHost.terminalRejected && !ownedHost.transportFailed
+    && ownedHost.child.connected !== false);
 }
 
 export function installLocalRuntimeHostShutdown(app) {
@@ -211,7 +245,7 @@ export function installLocalRuntimeHostShutdown(app) {
   let finishing = false;
   let pending = false;
   app.on('will-quit', event => {
-    if (finishing || (!startup && (!ownedHost || ownedHost.exited))) return;
+    if (finishing || (!startup && (!ownedHost || cleanupConfirmed(ownedHost)))) return;
     event.preventDefault();
     if (pending) return;
     pending = true;
@@ -246,14 +280,16 @@ export async function startConfiguredLocalRuntimeHost({
     throw new Error('local_runtime_host_timeout_invalid');
   }
   const ownerKey = JSON.stringify(config);
-  if (ownedHost) {
-    if (ownedHost.ownerKey !== ownerKey || ownedHost.exited || ownedHost.stopping) throw new Error('local_runtime_host_existing_owner_conflict');
-    return ownedHost.summary;
-  }
   if (startup) {
-    if (startup.ownerKey !== ownerKey) throw new Error('local_runtime_host_startup_owner_conflict');
+    if (startup.ownerKey !== ownerKey || startup.cancelled) throw new Error('local_runtime_host_startup_owner_conflict');
     return startup.promise;
   }
+  if (ownedHost) {
+    if (ownedHost.ownerKey !== ownerKey || !ownedLocalRuntimeHostReady(ownedHost.summary)) throw new Error('local_runtime_host_existing_owner_conflict');
+    return ownedHost.summary;
+  }
+  const attempt = { ownerKey, promise: null, cancelled: false, cancel: null, host: null };
+  const assertActive = () => { if (attempt.cancelled) throw new Error('local_runtime_host_start_cancelled'); };
   const promise = (async () => {
     const bundleDirectory = await canonicalExisting(config.runtime_host.bundle_directory, 'directory');
     const configFile = await canonicalExisting(config.runtime_host.config_file, 'file');
@@ -261,15 +297,30 @@ export async function startConfiguredLocalRuntimeHost({
     const verified = await verifyBundleImpl({
       bundleDirectory, expectedBundleDigest: config.runtime_host.expected_bundle_sha256,
     });
+    // Quit/installer shutdown can happen while the bundle is being hashed.
+    // A late verifier result must never create a new child after that stop.
+    assertActive();
+    const launchNonce = randomUUID();
     const child = spawnImpl(verified.paths.nodeExecutable, [verified.paths.hostEntry], {
-      cwd: verified.paths.sourceRoot, env: localRuntimeHostEnvironment(configFile, env),
+      cwd: verified.paths.sourceRoot, env: { ...localRuntimeHostEnvironment(configFile, env),
+        COMPUTE_RUNTIME_HOST_LAUNCH_NONCE: launchNonce },
       stdio: ['ignore', 'ignore', 'pipe', 'ipc'], windowsHide: true, shell: false,
     });
-    const host = { child, env, ownerKey, exited: false, stopping: false, summary: null };
+    const host = { child, env, ownerKey, launchNonce, exited: false, stopping: false,
+      noSpawnEffect: false, terminal: null, terminalRejected: false, transportFailed: false, summary: null };
+    attempt.host = host;
+    child.on('message', value => {
+      if (value?.schema !== 'compute.runtime-host-terminal.v1') return;
+      acceptTerminal(host, value);
+      env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE = 'BLOCKED';
+      env.METAENGINE_LOCAL_PROVIDER_BOOT_REASON = host.terminalRejected
+        ? 'OWNED_RUNTIME_HOST_TERMINAL_INVALID' : 'OWNED_RUNTIME_HOST_STOPPED';
+    });
     child.on('error', () => {
+      host.transportFailed = true;
       // spawn errors have no live child and never emit exit. Mark this bounded
       // failure cleaned up instead of retaining an owner for a nonexistent PID.
-      if (!child.pid) host.exited = true;
+      if (!child.pid) { host.exited = true; host.noSpawnEffect = true; }
       // An owned child can also report transport errors after readiness. Those
       // events never expose its private config or gain a hosted fallback.
       if (host.summary && !host.stopping) {
@@ -279,9 +330,18 @@ export async function startConfiguredLocalRuntimeHost({
     });
     let stderrBytes = 0;
     child.stderr?.on('data', bytes => { stderrBytes += bytes.length; });
+    child.once('disconnect', () => {
+      host.transportFailed = true;
+      if (!host.stopping && !host.terminal) {
+        env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE = 'BLOCKED';
+        env.METAENGINE_LOCAL_PROVIDER_BOOT_REASON = 'OWNED_RUNTIME_HOST_DISCONNECTED';
+      }
+    });
     child.once('exit', () => {
       host.exited = true;
-      if (ownedHost === host) ownedHost = null;
+      // Retain an unknown generation. A subsequent bootstrap must not mistake
+      // its disappearance for permission to start a replacement writer.
+      if (ownedHost === host && cleanupConfirmed(host)) ownedHost = null;
       if (host.summary && !host.stopping) {
         env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE = 'BLOCKED';
         env.METAENGINE_LOCAL_PROVIDER_BOOT_REASON = 'OWNED_RUNTIME_HOST_EXITED';
@@ -299,9 +359,11 @@ export async function startConfiguredLocalRuntimeHost({
           child.off('message', onMessage);
           child.off('error', onError);
           child.off('exit', onExit);
+          attempt.cancel = null;
           error ? reject(error) : resolve(value);
         };
         const onMessage = value => {
+          if (value?.schema === 'compute.runtime-host-terminal.v1') return;
           if (value?.schema === 'compute.runtime-host-provider.v1') {
             finish(validProviderDescriptor(value, config) ? null : new Error('local_runtime_host_descriptor_invalid'), value);
           } else if (value?.schema === 'compute.runtime-host-failure.v1') {
@@ -320,9 +382,14 @@ export async function startConfiguredLocalRuntimeHost({
         child.on('message', onMessage);
         child.once('error', onError);
         child.once('exit', onExit);
+        attempt.cancel = () => finish(new Error('local_runtime_host_start_cancelled'));
+        if (attempt.cancelled) attempt.cancel();
       });
       if (host.exited) throw new Error('local_runtime_host_exited_before_ready');
       if (host.stopping) throw new Error('local_runtime_host_stopped_before_ready');
+      if (host.terminal || host.terminalRejected) throw new Error('local_runtime_host_stopped_before_ready');
+      if (host.transportFailed) throw new Error('local_runtime_host_transport_failed_before_ready');
+      assertActive();
       host.summary = Object.freeze({ schema: 'metaengine.browser.runtime-host.v1', state: 'READY',
         instance_id: descriptor.instance_id, endpoint: descriptor.endpoint,
         status_file: descriptor.status_file, pid: child.pid, runtime_owned: true,
@@ -338,6 +405,7 @@ export async function startConfiguredLocalRuntimeHost({
       throw new Error(cleanupConfirmed ? String(error.message) : 'local_runtime_host_cleanup_unconfirmed');
     }
   })();
-  startup = { ownerKey, promise };
+  attempt.promise = promise;
+  startup = attempt;
   try { return await promise; } finally { if (startup?.promise === promise) startup = null; }
 }

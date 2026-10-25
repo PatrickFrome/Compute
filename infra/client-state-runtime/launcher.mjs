@@ -360,7 +360,15 @@ export async function launchClientStateRuntime(input, hooks = {}) {
   };
 
   const stop = async (reason = 'requested') => {
-    if (stopping) return finished;
+    if (stopping) {
+      const outcome = await finished;
+      // Every caller needs the same cleanup result. In particular, startup's
+      // catch may join an abort/child-exit stop already in progress. Returning a
+      // false outcome here would let its original startup error hide surviving
+      // children from the Host's ownership-release and terminal-ack boundary.
+      if (outcome.children_stopped !== true) throw runtimeError('runtime_cleanup_unconfirmed');
+      return outcome;
+    }
     stopping = true;
     clearInterval(monitor);
     config.signal?.removeEventListener('abort', onAbort);

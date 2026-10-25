@@ -10,6 +10,8 @@ import { reconcileAbandonedAttachedRuntimeLock } from './runtime-host-orphan-rec
 import { createNativeCodingHostIpcServer } from './native-coding-host-ipc.mjs';
 import { createNativeCodingHostAuthority } from './native-coding-host-authority.mjs';
 import { createNativeCodingHostOsScope,readNativeCodingOperatorPaths } from './native-coding-host-os-scope.mjs';
+import { requireRuntimeHostLaunchNonce, runtimeHostTerminalMessage, runtimeHostFailureMessage,
+  sendRuntimeHostLifecycleMessage } from './runtime-host-lifecycle.mjs';
 
 const hostEntry = fileURLToPath(import.meta.url);
 const repositoryRoot = path.resolve(path.dirname(hostEntry), '../..');
@@ -359,6 +361,8 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
         reason: confirmed ? String(outcome.reason || 'runtime_ended') : 'runtime_host_cleanup_unconfirmed',
         children_stopped: confirmed, last_health_failure: lastHealthFailure, stopped_at: new Date().toISOString() })); }
       finally { signal?.removeEventListener('abort', onAbort); if (confirmed) await release(); }
+      if (confirmed) await hooks.onTerminal?.({ instance_id: lastStatus.instance_id || null,
+        children_stopped: true, ownership_released: true, reason: outcome.reason });
       return outcome;
     })();
     return terminalPromise;
@@ -408,12 +412,23 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
       try { await persist({ ...baseStatus, state: 'FAILED', last_health_failure: lastHealthFailure,
         reason: /^[a-z0-9_]+$/.test(error.code || '') ? error.code : 'runtime_host_start_failed' }); }
       finally { if (error.code !== 'runtime_cleanup_unconfirmed') await release(); }
+      // launchClientStateRuntime rejects only after its bounded stop has
+      // completed. Cleanup uncertainty has a distinct error and retains the
+      // lock above. FAILED remains the startup status; this receipt proves
+      // resource cleanup, never startup success or permission to retry work.
+      if (error.code !== 'runtime_cleanup_unconfirmed') await hooks.onTerminal?.({ instance_id: null,
+        children_stopped: true, ownership_released: true, reason: 'runtime_host_start_failed' });
     }
     throw error;
   }
 }
 
 async function main() {
+  // Legacy direct qualification callers have IPC but no Browser generation
+  // nonce. They receive no terminal proof. The Browser always supplies a nonce
+  // and requires its matching proof, so absence cannot downgrade its cleanup.
+  const launchNonce = process.send && process.env.COMPUTE_RUNTIME_HOST_LAUNCH_NONCE !== undefined
+    ? requireRuntimeHostLaunchNonce(process.env.COMPUTE_RUNTIME_HOST_LAUNCH_NONCE) : null;
   const controller = new AbortController();
   let host;
   let pendingStop = null;
@@ -426,7 +441,10 @@ async function main() {
     if (message?.schema === 'compute.runtime-host-control.v1' && message.command === 'stop') requestStop('requested');
     else if(nativeCodingIpc) void nativeCodingIpc.handleMessage(message,handle);
   });
-  host = await startManagedRuntimeHost({ configFile: process.env.COMPUTE_RUNTIME_HOST_CONFIG, signal: controller.signal });
+  host = await startManagedRuntimeHost({ configFile: process.env.COMPUTE_RUNTIME_HOST_CONFIG, signal: controller.signal }, {
+    onTerminal: outcome => launchNonce === null ? undefined : sendRuntimeHostLifecycleMessage(process,
+      runtimeHostTerminalMessage({ launchNonce, hostPid: process.pid, outcome })),
+  });
   if(host.nativeCodingAuthority && process.send && process.connected) {
     nativeCodingIpc=createNativeCodingHostIpcServer({instanceId:host.descriptor.instance_id,
       operations:host.nativeCodingAuthority,hostPid:process.pid,parentPid:process.ppid,send:process.send.bind(process)});
@@ -441,11 +459,12 @@ async function main() {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === hostEntry) {
-  main().catch(error => {
+  main().catch(async error => {
     // Child/DB/config errors can contain private connection strings. Emit only a fixed category.
     console.error(JSON.stringify({ schema: 'compute.runtime-host-failure.v1', state: 'FAILED',
       reason: /^[a-z0-9_]+$/.test(error.code || '') ? error.code : 'runtime_host_start_failed', credentials_included: false }));
     process.exitCode = 1;
+    await sendRuntimeHostLifecycleMessage(process, runtimeHostFailureMessage(error));
     if (process.connected) process.disconnect();
   });
 }
