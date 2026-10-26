@@ -36,7 +36,7 @@ const invocation = {
 test('shutdown drains each public operation before closing its journal and fences new work', async t => {
   for (const name of Object.keys(invocation)) await t.test(name, async () => {
     const blocked = gate(); let journalClosed = 0;
-    const journal = { find: async () => null, begin: async () => ({ receipt: null }), confirm: async () => ({}),
+    const journal = { find: async () => null, begin: async () => ({ receipt: null, created: true }), confirm: async () => ({}),
       latestConversationTurn: async () => { if (name === 'latestTurnForLease') await blocked.wait(); return null; },
       pending: async () => { if (name === 'reconcilePending') await blocked.wait(); return []; },
       close: async () => { journalClosed++; } };
