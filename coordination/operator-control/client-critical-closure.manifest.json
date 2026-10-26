@@ -838,7 +838,7 @@
     "infra/client-state-runtime/db-api.mjs": "f89b5381f477d45fd55f7e5009c0461768a69f0c",
     "infra/client-state-runtime/db-api.test.mjs": "af6afa073718810e4bc792a6bd9afea4ba699150",
     "infra/client-state-runtime/fresh-client-provider-cli.mjs": "170df2bf4686b7aa09bbd316a5ab2e8703d1749f",
-    "infra/client-state-runtime/fresh-client-provider.integration.test.mjs": "cd3576b4e32e1387d608098a5659cf12ec7fe422",
+    "infra/client-state-runtime/fresh-client-provider.integration.test.mjs": "e7a56c7046d223421500f11add1958bb6b105a6a",
     "infra/client-state-runtime/fresh-client-provider.mjs": "35750562335f45c87f047e878cf47474818e9b0b",
     "infra/client-state-runtime/fresh-client-provider.test.mjs": "57076050f64b963287ed1c03e53abd0c4a4f2dde",
     "infra/client-state-runtime/fresh-device-owner.integration.test.mjs": "db939d71380c1c84afb6bf1dec4b736d611a21a7",

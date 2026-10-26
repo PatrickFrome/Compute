@@ -10,7 +10,7 @@ import os from 'node:os';
 import net from 'node:net';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
-import {randomBytes} from 'node:crypto';
+import {randomBytes,createHash} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import {populateFreshClientSchema} from './test/fresh-provider-private-loader.mjs';
 import {verifyFreshConnectionIdentity} from './fresh-client-provider.mjs';
@@ -63,12 +63,15 @@ test('factory-owned PG17 uses actual state_owner and independent restricted API 
   const connect=(user,password)=>postgres({host:'127.0.0.1',port,user,password,database:'postgres',max:1,prepare:false,connect_timeout:5,onnotice:()=>{}});
   sql=connect('state_owner',ownerPassword);reserved=await sql.reserve();
   const pidBytes=await fs.readFile(path.join(data,'postmaster.pid'),'utf8');const lines=pidBytes.trim().split(/\r?\n/);
-  const expected={directory:await fs.realpath(data),systemIdentifier:identifier,postmasterStartIdentity:lines[2]};
+  const expected={directory:await fs.realpath(data),systemIdentifier:identifier,postmasterStartIdentity:lines[2],
+   postmasterPid:Number(lines[0]),postmasterPidSha256:createHash('sha256').update(pidBytes).digest('hex')};
   const verifyIdentity=async connection=>{
    assert.equal(await fs.readFile(path.join(data,'postmaster.pid'),'utf8'),pidBytes);
    const [row]=await connection.unsafe(`select current_user as login,session_user as session_login,current_database() as database,current_setting('data_directory') as directory,
-    system_identifier::text,pg_backend_pid() as backend_pid,extract(epoch from pg_postmaster_start_time()) as started_at,current_setting('server_version_num')::integer as version from pg_control_system()`);
-   verifyFreshConnectionIdentity(row,expected);expected.backendPid??=row.backend_pid;
+    system_identifier::text,pg_backend_pid() as backend_pid,extract(epoch from pg_postmaster_start_time()) as started_at,current_setting('server_version_num')::integer as version,
+    pg_read_file('postmaster.pid',0,8192,false) as postmaster_pid_file from pg_control_system()`);
+   row.directory=await fs.realpath(row.directory);
+   verifyFreshConnectionIdentity(row,expected);expected.backendPid??=row.backend_pid;expected.sqlStartedAt??=String(row.started_at);
   };
   const plan=await loadFreshSchemaApplicationPlan();await populateFreshClientSchema({connection:reserved,plan,verifyIdentity,apiPassword});
   api=connect('local_state_api',apiPassword);assert.equal((await inspectAttachedApiAdmission({sql:api,apiLogin:'local_state_api'})).restricted_login,true);
