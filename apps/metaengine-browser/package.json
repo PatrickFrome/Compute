@@ -14,7 +14,7 @@
     "start": "electron .",
     "check": "node scripts/check-source.mjs",
     "pretest": "node scripts/prepare-codex-cli-job-runtime.mjs --if-windows",
-    "test": "node --test test/*.test.mjs",
+    "test": "node scripts/run-isolated-tests.mjs",
     "smoke": "electron . --metaengine-smoke",
     "devplane-smoke": "electron ./smoke/dp"
   },

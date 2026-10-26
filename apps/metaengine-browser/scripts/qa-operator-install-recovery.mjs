@@ -141,15 +141,19 @@ export async function restorePinnedQaImage({installedRoot,snapshotRoot,journalFi
     else assertPreimage(await captureQaImagePreimage(quarantine),expectedPreimagePresence,expectedPreimageSha256);
     record.state='RESTORED_IMAGE_VERIFIED';await durable(journalFile,record);return record;
   }catch(error){
-    if(phase==='QUARANTINED'&&!await exists(installedRoot)
-      &&(await captureQaImagePreimage(quarantine)).preimage_sha256===expectedPreimageSha256){
-      await fs.rename(quarantine,installedRoot);record.state='ABORTED_PREIMAGE_RESTORED';record.installed_mutated=false;
-      await durable(journalFile,record);throw Object.assign(error,{rollbackConfirmed:true});
-    }
-    if(phase==='ABSENT_CONFIRMED'&&!await exists(installedRoot)){
-      record.state='ABORTED_ABSENT_PREIMAGE_PRESERVED';record.installed_mutated=false;
-      await durable(journalFile,record);throw Object.assign(error,{rollbackConfirmed:true});
-    }
+    let confirmed=false;
+    try {
+      if(phase==='QUARANTINED'&&!await exists(installedRoot)
+        &&(await captureQaImagePreimage(quarantine)).preimage_sha256===expectedPreimageSha256){
+        await fs.rename(quarantine,installedRoot);
+        assertPreimage(await captureQaImagePreimage(installedRoot),expectedPreimagePresence,expectedPreimageSha256);
+        record.state='ABORTED_PREIMAGE_RESTORED';record.installed_mutated=false;confirmed=true;
+      } else if(phase==='ABSENT_CONFIRMED'){
+        assertPreimage(await captureQaImagePreimage(installedRoot),'ABSENT',expectedPreimageSha256);
+        record.state='ABORTED_ABSENT_PREIMAGE_PRESERVED';record.installed_mutated=false;confirmed=true;
+      }
+    } catch(rollbackError) { error=new AggregateError([error,rollbackError],'qa_image_rollback_unconfirmed'); }
+    if(confirmed){await durable(journalFile,record);throw Object.assign(error,{rollbackConfirmed:true});}
     record.state='EFFECT_UNKNOWN_REQUIRES_READBACK';await durable(journalFile,record);throw error;
   }
 }
