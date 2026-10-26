@@ -45,6 +45,7 @@ const ACTION_RE = /^[A-Z][A-Z0-9_]{1,31}$/;
 const MAX_REQUESTS_PER_MESSAGE = 4;
 const MAX_PAYLOAD_JSON_CHARS = 2048;
 const MAX_RESULT_SUMMARY_CHARS = 4000;
+const REQUEST_FIELDS = new Set(['request_id', 'action', 'tab_id', 'payload_json']);
 
 function clip(value, max) { return String(value ?? '').slice(0, max); }
 
@@ -69,15 +70,21 @@ export function parseAgentToolRequests(text, { max_requests = MAX_REQUESTS_PER_M
   for (const block of parseFencedBlocks(text)) {
     const lines = block.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
     if (lines[0] !== AGENT_TOOL_REQUEST_MARKER) continue;
-    const fields = {};
+    const fields = Object.create(null);
+    let malformed = false;
     for (const line of lines.slice(1)) {
       const at = line.indexOf('=');
-      if (at <= 0) { invalid.push(clip(block, 120)); continue; }
+      if (at <= 0) { invalid.push('request_field_malformed'); malformed = true; break; }
       const key = line.slice(0, at).trim();
       const value = line.slice(at + 1).trim();
-      if (!/^[a-z_]+$/.test(key)) { invalid.push(clip(line, 120)); continue; }
+      if (!REQUEST_FIELDS.has(key) || Object.hasOwn(fields, key)) {
+        invalid.push('request_field_unknown_or_duplicate'); malformed = true; break;
+      }
       fields[key] = value;
     }
+    // Malformed or ambiguous blocks are untrusted data, never partially
+    // repaired requests. Independent valid blocks can still be processed.
+    if (malformed) continue;
     const requestId = String(fields.request_id || '');
     const action = String(fields.action || '').toUpperCase();
     if (!REQUEST_ID_RE.test(requestId)) { invalid.push(`request_id_invalid:${clip(requestId, 40)}`); continue; }

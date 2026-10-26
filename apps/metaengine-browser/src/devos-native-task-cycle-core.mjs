@@ -1290,6 +1290,7 @@ export class DevOsNativeTaskCycle {
     // and in the agent's next task message.
     if (typeof projectRuntime?.refreshContext === 'function') await projectRuntime.refreshContext(lease);
     const projectLeaseKey = `${lease.task_id}:${lease.lease_generation}`;
+    let projectContinuationConfirmed = false;
     if (typeof projectRuntime?.latestTurnForLease === 'function') {
       const turn = await projectRuntime.latestTurnForLease(lease);
       if (turn?.state === 'AMBIGUOUS') return this.#reportAmbiguous(lease, 'PROJECT_CONTINUATION_EFFECT_UNKNOWN');
@@ -1297,6 +1298,7 @@ export class DevOsNativeTaskCycle {
         if (!Number.isSafeInteger(turn.transcript_floor) || turn.transcript_floor < 0) return this.#reportAmbiguous(lease, 'PROJECT_CONTINUATION_BOUNDARY_INVALID');
         if (this.#projectTranscriptFloor.get(projectLeaseKey) !== turn.transcript_floor) this.#toolHarvest.delete(projectLeaseKey);
         this.#projectTranscriptFloor.set(projectLeaseKey, turn.transcript_floor);
+        projectContinuationConfirmed = true;
       }
     }
     const toolState = await this.#serveAgentTools(lease);
@@ -1312,6 +1314,16 @@ export class DevOsNativeTaskCycle {
       if (childState?.failed) return this.#postCompletionWithReadback(lease, 'BLOCKED', { child_results_failed: true, page_data_authority: false }, 'CHILD_RESULT_FAILED');
       const delivered = this.#projectDeliveredTools.get(`${lease.task_id}:${lease.lease_generation}`) || new Set();
       const projectResults = this.#toolbelt.resultsForLease(lease, { limit: 32 }).filter(row => !delivered.has(row.request_id));
+      // A confirmed parent turn supplies a durable continuation boundary.
+      // Unfinished sibling/proposal status changes alone are not new work for
+      // that parent: another Send would occupy the same scarce worker again.
+      // Only durable confirmation enables this shortcut (including restart).
+      // New tool results still deliver; failed children and unknown turns were
+      // handled above, and terminal children still trigger the normal resume.
+      // This does NOT release its W30 claim or pretend to implement suspension.
+      if (projectContinuationConfirmed && childState?.waiting && projectResults.length === 0) {
+        return { state: 'WAIT_CHILDREN', task_id: lease.task_id, authority_effect: false };
+      }
       const continuationResults = childState?.children?.length || childState?.queued_proposals
         ? [...projectResults, { request_id: 'project:children:status', status: 'COMPLETED', summary: JSON.stringify(childState) }]
         : projectResults;

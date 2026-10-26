@@ -173,6 +173,7 @@ jobs:
             test -x "$METAENGINE_PG_TEST_BIN/initdb"
             test -f "$METAENGINE_PG_TEST_DRIVER"
             "$NODE_BIN" --test infra/client-state-runtime/native-coding-agent-project-tools.integration.test.mjs
+            "$NODE_BIN" --test infra/client-state-runtime/fresh-schema-pg17.integration.test.mjs
           '
 
   w45-physical-pg17:
