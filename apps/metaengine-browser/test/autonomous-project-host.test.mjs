@@ -13,7 +13,7 @@ const projectId = '55555555-5555-4555-8555-555555555555';
 const binding = { ...task, workspace_id: '33333333-3333-4333-8333-333333333333', workspace_generation: 1,
   state: 'RESERVED', lease_current: true, dirty_hold: false, ambiguity_code: null };
 
-async function fixture(t) {
+async function fixture(t, { mutateReceipt = () => {} } = {}) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'autonomous-project-host-')));
   const calls = []; let native = { runtime_control: { state: 'OPEN', continuous_service_allowed: true },
     workspace_bindings: { state: 'AVAILABLE', bindings: [binding] } };
@@ -31,10 +31,16 @@ async function fixture(t) {
     prepareStorage: async () => root, verifyFile: async () => ({ owner_dacl_verified: true }),
     getManagedHost: () => ({ snapshot: () => ({ state: 'READY' }), executeCommand: async command => {
       hostCalls.push(command);
-      return { state: 'PROVEN', authority_effect: false, automatic_retry_allowed: false,
+      const receipt = { schema: 'metaengine.devos.managed-task-project-runtime.v1',
+        idempotency_key: command.payload.idempotency_key,
+        state: 'PROVEN', authority_effect: false, automatic_retry_allowed: false,
         reservation: { workspace_id: command.payload.workspace_id, task_id: task.task_id,
+          workspace_generation: command.payload.workspace_generation,
+          coordination_workspace_id: command.payload.coordination_workspace_id,
           claim_id: task.claim_id, agent_id: task.agent_id, lease_generation: task.lease_generation },
         proof: { head_sha: task.base_sha, locked: true } };
+      mutateReceipt(receipt);
+      return receipt;
     } }),
   });
   t.after(async () => { await host.close(); await fs.rm(root, { recursive: true, force: true }); });
@@ -84,3 +90,29 @@ test('malformed coordination identity and authoritative CLOSED control cannot re
   await assert.rejects(f.host.prepareLease(task), /owner_stopped/);
   assert.equal(f.hostCalls.length, 0);
 });
+
+for (const [field, value] of [
+  ['coordination_workspace_id', '66666666-6666-4666-8666-666666666666'],
+  ['base_sha', 'b'.repeat(40)],
+]) {
+  test(`host refuses a current workspace binding with foreign ${field} before dispatch`, async t => {
+    const f = await fixture(t);
+    f.update({ workspace_bindings: { state: 'AVAILABLE', bindings: [{ ...binding, [field]: value }] } });
+    await assert.rejects(f.host.prepareLease(task), /autonomous_project_workspace_binding_drift/);
+    assert.equal(f.hostCalls.length, 0);
+  });
+}
+
+for (const [name, mutateReceipt] of [
+  ['workspace generation', receipt => { receipt.reservation.workspace_generation += 1; }],
+  ['coordination workspace', receipt => { receipt.reservation.coordination_workspace_id = '66666666-6666-4666-8666-666666666666'; }],
+  ['effect key', receipt => { receipt.idempotency_key += ':foreign'; }],
+  ['receipt schema', receipt => { receipt.schema = 'unrelated.effect.v1'; }],
+]) {
+  test(`host does not accept a PROVEN receipt with mismatched ${name}`, async t => {
+    const f = await fixture(t, { mutateReceipt });
+    await assert.rejects(f.host.prepareLease(task), /autonomous_project_workspace_effect_not_proven/);
+    assert.equal(f.hostCalls.length, 1);
+    assert.equal(f.host.snapshot().state, 'IDLE');
+  });
+}
