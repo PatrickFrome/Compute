@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - work/metaengine-client-wave12-w73-20261015
+      - work/preinstall-closure-20261027
+      - work/preinstall-shared-inputs-20261027
   pull_request:
     paths:
       - '.github/workflows/client-source-candidate-w73.yml'
@@ -51,6 +53,72 @@ jobs:
         if: runner.os == 'Windows'
         working-directory: apps/metaengine-browser
         run: node scripts/prepare-codex-cli-job-runtime.mjs
+      - name: Windows UI physical roots, inert harness and actual W73 registration
+        if: runner.os == 'Windows'
+        working-directory: apps/me2-ui
+        shell: pwsh
+        # Only filesystem/source fixtures and owned inert Node children. The
+        # existing wrapper creates a disposable profile before test imports.
+        # Keep this before the seal: an unsealed branch must still fail below.
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_OS -ne 'Windows' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted') {
+            throw 'w73_ui_windows_hosted_runner_required'
+          }
+          $tap = Join-Path $env:RUNNER_TEMP 'w73-windows-ui-root-contracts.tap'
+          node ../metaengine-browser/scripts/run-isolated-tests.mjs --test-concurrency=1 --test-reporter=tap scripts/ui-runtime-inventory.test.mjs scripts/ui-source-acceptance.test.mjs | Tee-Object -FilePath $tap
+          if ($LASTEXITCODE -ne 0) { throw 'w73_ui_windows_contracts_failed' }
+          @'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          const lines = fs.readFileSync(process.argv[2], 'utf8').split(/\r?\n/);
+          assert.ok(!lines.some(line => /^Bail out!/i.test(line)), 'TAP bailout');
+          const results = lines.flatMap(line => {
+            const match = /^(ok|not ok) \d+ - (.+?)(?: # (SKIP|TODO)(?: .*)?)?$/.exec(line);
+            return match ? [{ status: match[1], name: match[2], directive: match[3] ?? null }] : [];
+          });
+          const requiredPass = [
+            'an initially supplied root symlink or Windows junction is refused',
+            'root rename followed by a symlink or Windows junction cannot retain a PASS',
+            'a byte-identical replacement directory cannot reuse the original physical binding',
+            'a root reached through a symlink or Windows junction ancestor is refused',
+            'a legacy content-only snapshot cannot establish physical-root immutability',
+            'the harness refuses an original root symlink or Windows junction before creating evidence or launching children',
+            'W73 invoked package scripts execute all new UI acceptance regressions',
+          ];
+          // Existing POSIX controls cannot establish Windows ACL/signal proof.
+          // No junction, physical-root or registration case may be skipped.
+          const allowedSkips = new Set([
+            'runtime inventory rejects . mode changes',
+            'runtime inventory rejects empty mode changes',
+            'runtime inventory rejects server.js mode changes',
+            'same-byte link retargeting and file-to-link replacement are detected',
+            'internal absolute links retain relocatable identity without executor paths',
+            'escaping links, directory cycles and dangling links cannot qualify a snapshot',
+            'a running owned server may exit 0 after the harness requests SIGTERM',
+            'a running owned server may exit 143 after the harness requests SIGTERM',
+            'an ordinary owned SIGTERM signal exit is accepted',
+            'a nonzero failure after the owned SIGTERM request is rejected',
+            'SIGKILL cleanup of an unresponsive owned child never qualifies as graceful acceptance',
+          ]);
+          assert.equal(results.length, 32, 'both complete UI fixture files must execute');
+          assert.equal(new Set(results.map(row => row.name)).size, 32, 'duplicate test result');
+          assert.ok(results.every(row => row.status === 'ok' && row.directive !== 'TODO'), 'failed or TODO test');
+          for (const name of requiredPass) {
+            const rows = results.filter(row => row.name === name);
+            assert.equal(rows.length, 1, 'missing required Windows case: ' + name);
+            assert.equal(rows[0].directive, null, 'required Windows case was skipped: ' + name);
+          }
+          const skipped = results.filter(row => row.directive === 'SKIP');
+          assert.equal(skipped.length, allowedSkips.size, 'unexpected Windows skip count');
+          assert.ok(skipped.every(row => allowedSkips.has(row.name)), 'unexpected skipped Windows case');
+          for (const [key, expected] of Object.entries({tests:32, pass:21, fail:0, cancelled:0, skipped:11, todo:0})) {
+            assert.deepEqual(lines.filter(line => line.startsWith('# ' + key + ' ')), ['# ' + key + ' ' + expected], 'TAP summary ' + key);
+          }
+          assert.deepEqual(lines.filter(line => /^\d+\.\.\d+/.test(line)), ['1..32'], 'TAP plan');
+          console.log('W73 Windows UI: 21 PASS, 11 explicitly allowed POSIX skips; all 7 physical-root/harness/registration controls PASS.');
+          '@ | node --input-type=module - $tap
+          if ($LASTEXITCODE -ne 0) { throw 'w73_ui_windows_required_evidence_failed' }
       - name: Immutable W43-W73 historical ledgers and current critical-closure source seal
         shell: bash
         env:
