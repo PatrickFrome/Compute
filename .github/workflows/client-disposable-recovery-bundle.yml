@@ -32,7 +32,9 @@ jobs:
   recovery-bundle:
     name: Two disposable Windows PG17 clusters, vault and cold restart
     runs-on: windows-2025
-    timeout-minutes: 20
+    # Leave room for observed Windows source checks and staging in addition to
+    # the separately bounded 15-minute physical test and its normal cleanup.
+    timeout-minutes: 30
     env:
       EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       RECOVERY_BUNDLE_REQUIRE_PHYSICAL: '1'

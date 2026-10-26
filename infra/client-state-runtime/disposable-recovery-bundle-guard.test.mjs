@@ -118,6 +118,16 @@ test('recovery guard qualifies only bound bundle bytes and isolated fixture path
   });
 });
 
+test('recovery guard preserves Unicode, delimiter and quote characters in physical paths', async t => {
+  const f = await fixture(t);
+  const keyDirectory = path.join(f.root, "ключ;with space's");
+  await fs.rename(f.keyDirectory, keyDirectory);
+  const result = await verifyRecoveryBundle({ ...f.options, keyDirectory });
+  assert.equal(result.state, 'BUNDLE_VERIFIED');
+  assert.equal(result.keyPath, path.join(keyDirectory, 'client-vault.key'));
+  assert.equal((await readRecoveryFile(result.keyPath)).sha256, f.manifest.key.sha256);
+});
+
 test('recovery guard rejects missing independent manifest pin without creating files', async t => {
   const f = await fixture(t);
   const before = await fs.readdir(f.root);

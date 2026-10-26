@@ -138,18 +138,28 @@ async function noNativeReparse(paths) {
     TEMP: safeEnvironment.TEMP || path.win32.join(systemRoot, 'Temp'),
     TMP: safeEnvironment.TMP || path.win32.join(systemRoot, 'Temp'),
     USERPROFILE: safeEnvironment.USERPROFILE || systemRoot,
-    METAENGINE_RECOVERY_GUARD_PATHS: JSON.stringify(paths) };
+    // Standard base64 contains no semicolon. Private UTF-8 paths need neither
+    // shell interpolation nor PowerShell's JSON/module autoload machinery.
+    METAENGINE_RECOVERY_GUARD_PATHS: paths.map(value => Buffer.from(value, 'utf8').toString('base64')).join(';') };
   const script = `$ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 $WarningPreference='Stop'
 [Console]::Out.WriteLine('RECOVERY_REPARSE_PHASE_PARSE')
-foreach($entry in ($env:METAENGINE_RECOVERY_GUARD_PATHS | ConvertFrom-Json)) {
+$frames=[Environment]::GetEnvironmentVariable('METAENGINE_RECOVERY_GUARD_PATHS')
+$utf8=[Text.UTF8Encoding]::new($false,$true)
+foreach($encoded in $frames.Split([char[]]';',[StringSplitOptions]::None)) {
+  $current=$utf8.GetString([Convert]::FromBase64String($encoded))
   [Console]::Out.WriteLine('RECOVERY_REPARSE_PHASE_ITEM')
-  $item=Get-Item -LiteralPath $entry -Force -ErrorAction Stop
+  $attributes=[IO.File]::GetAttributes($current)
   [Console]::Out.WriteLine('RECOVERY_REPARSE_PHASE_ANCESTRY')
-  while($null -ne $item) {
-    if(($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'reparse' }
-    if($item -is [IO.DirectoryInfo]) { $item=$item.Parent } else { $item=$item.Directory }
+  while($null -ne $current) {
+    if(($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'reparse' }
+    $parent=[IO.Directory]::GetParent($current)
+    if($null -eq $parent) { $current=$null }
+    else {
+      $current=$parent.FullName
+      $attributes=[IO.File]::GetAttributes($current)
+    }
   }
 }
 [Console]::Out.WriteLine('RECOVERY_REPARSE_PHASE_COMPLETE')

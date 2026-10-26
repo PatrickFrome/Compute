@@ -17,7 +17,7 @@ exact tested commit and, for CI, its run and attempt before review handoff.
 | PR base | `work/preinstall-closure-20261027` |
 | HEAD_SHA | Exact committed SHA is recorded in the issue handoff and each receipt |
 | Draft PR | Linked from issue #1360 after publication |
-| Source verification | 70 PASS / 0 FAIL / 1 Windows-only SKIP, Linux Node 24.22.1, working tree |
+| Source verification | 71 PASS / 0 FAIL / 1 Windows-only SKIP, Linux Node 24.22.1, working tree |
 | Disposable Windows physical qualification | PENDING |
 | Installed backup / installed runtime qualification | Not established by this work |
 
@@ -289,7 +289,7 @@ acknowledgment. Keep private files out of the report and GitHub artifacts.
 
 | Check | PASS | FAIL | SKIP | Evidence |
 | --- | --- | --- | --- | --- |
-| Guard source tests | 22 | 0 | 0 | Linux Node 24.22.1; includes fixed native-diagnostic and spoofed-error controls |
+| Guard source tests | 23 | 0 | 0 | Linux Node 24.22.1; includes fixed native diagnostics, spoofed-error controls and real Unicode/delimiter/quote paths |
 | Receipt/export source tests | 9 | 0 | 0 | Linux Node 24.22.1; includes real CLI subprocesses |
 | Existing focused fence/backup/restore regression tests | 39 | 0 | 0 | Existing shared authority unchanged |
 | Physical integration entrypoint on Linux | 0 | 0 | 1 | Explicit Windows prerequisite SKIP, not qualification |
@@ -307,6 +307,17 @@ guard's environment is now pinned to Windows PowerShell system modules and
 its diagnostics are restricted to fixed phase/category identifiers. The
 original log did not establish the underlying native cause; successful
 execution on the corrective source is still required.
+
+The diagnostic run on `d216a0c7e30d48aa927f96cd39cf62f105f3d9cd`,
+[40417589575 / attempt 1](https://github.com/PatrickFrome/Compute/actions/runs/40417589575),
+returned **29 PASS / 2 FAIL / 0 SKIP** for the 31 new source controls. Both
+failures hit the 15-second native deadline after the PARSE marker and before
+the first ITEM marker; later native checks took approximately 12 seconds each.
+The step failed before the existing regression suite, PG staging or database
+effects. The focused correction removes cmdlet autoloading from this small
+readback: base64-framed path transport and .NET filesystem APIs retain the
+same native attributes/ancestor checks, exact completion markers and deadline.
+Actual execution on that correction remains required.
 
 The dedicated preparation step and manual entrypoint also pin the WinPS5
 system module path before invoking the unchanged archive preparer. The physical
