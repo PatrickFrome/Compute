@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import { link, lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -10,8 +11,117 @@ import test from 'node:test';
 import { runtimeProviderDescriptor, stageManagedDenoCache, stageManagedDenoExecutable, startManagedRuntimeHost, validateRuntimeHostConfig, validateRuntimeHostPhysicalBoundaries } from './runtime-host.mjs';
 import { protectOwnerOnlyWindowsDirectory, verifyOwnerOnlyWindowsStorage } from '../../apps/metaengine-browser/src/private-windows-storage-acl.mjs';
 import {runtimeRecoveryPostgresProof} from './runtime-recovery-postgres-proof.mjs';
+import { waitForRuntimeHostDescriptor } from './test/runtime-host-readiness.mjs';
+import { runtimeHostFailureMessage, runtimeHostTerminalMessage } from './runtime-host-lifecycle.mjs';
 
 const hostEntry = fileURLToPath(new URL('./runtime-host.mjs', import.meta.url));
+
+test('bundled fixture accepts the concrete production provider, not an arbitrary first IPC message', async t => {
+  const f = await fixture(t);
+  const descriptor = { ...runtimeProviderDescriptor(f.runtime), status_file: path.join(f.config.state_directory, 'runtime-instance.json') };
+  const child = new EventEmitter();
+  const ready = waitForRuntimeHostDescriptor(child, { expectedEndpoint: descriptor.endpoint, expectedStatusFile: descriptor.status_file });
+  child.emit('message', descriptor);
+  assert.equal(await ready, descriptor, 'no unwrapping, default readiness, or substituted authority');
+  for (const event of ['message', 'error', 'close', 'disconnect']) assert.equal(child.listenerCount(event), 0);
+  const terminal = runtimeHostTerminalMessage({ launchNonce: randomUUID(), hostPid: 123,
+    outcome: { instance_id: null, children_stopped: true, ownership_released: true, reason: 'runtime_host_start_failed' } });
+  for (const [value, reason] of [
+    [runtimeHostFailureMessage(null), 'host_failed'],
+    [terminal, 'host_stopped_before_ready'],
+    [{ descriptor }, 'host_descriptor_invalid'],
+    [{ ...descriptor, runtime_ready: undefined }, 'host_descriptor_invalid'],
+    [{ ...descriptor, authority_effect: true }, 'host_descriptor_invalid'],
+    [{ ...descriptor, automatic_cloud_fallback: true }, 'host_descriptor_invalid'],
+    [{ ...descriptor, hosted_supabase_required: true }, 'host_descriptor_invalid'],
+    [{ ...descriptor, provider: 'HOSTED_SUPABASE' }, 'host_descriptor_invalid'],
+    [{ schema: 'unknown', reason: 'private postgres://synthetic:secret@127.0.0.1/private' }, 'host_descriptor_invalid'],
+  ]) {
+    const channel = new EventEmitter();
+    const result = waitForRuntimeHostDescriptor(channel);
+    channel.emit('message', value);
+    channel.emit('message', descriptor); // A later positive cannot erase the first refusal.
+    await assert.rejects(result, { message: 'bundled_runtime_fixture_' + reason });
+    for (const event of ['message', 'error', 'close', 'disconnect']) assert.equal(channel.listenerCount(event), 0);
+  }
+});
+
+test('bundled fixture enforces exact public descriptor fields and contextual endpoint/status bindings', async t => {
+  const f = await fixture(t);
+  const descriptor = { ...runtimeProviderDescriptor(f.runtime), status_file: path.join(f.config.state_directory, 'runtime-instance.json') };
+  const expected = { expectedEndpoint: descriptor.endpoint, expectedStatusFile: descriptor.status_file };
+  const secret = 'postgres://synthetic:do-not-export@127.0.0.1/private';
+  const invalid = [null, [], Object.create(descriptor), { ...descriptor, database_url: secret },
+    Object.defineProperty({ ...descriptor }, 'private', { value: secret }),
+    { ...descriptor, [Symbol('private')]: secret }];
+  for (const key of Object.keys(descriptor)) {
+    const missing = { ...descriptor }; delete missing[key]; invalid.push(missing);
+  }
+  for (const endpoint of [undefined, null, 123, secret, 'not a URL',
+    'http://localhost:25433/a2-browser-native-supervisor-v1',
+    'http://127.1:25433/a2-browser-native-supervisor-v1',
+    'http://127.0.0.1:80/a2-browser-native-supervisor-v1',
+    'https://127.0.0.1:25433/a2-browser-native-supervisor-v1',
+    descriptor.endpoint + '?secret=private', descriptor.endpoint + '#private', descriptor.endpoint + '/',
+    ' ' + descriptor.endpoint, descriptor.endpoint.replace('127.0.0.1', 'private:secret@127.0.0.1'),
+    descriptor.endpoint.replace('/a2-browser-native-supervisor-v1', '/other'),
+  ]) invalid.push({ ...descriptor, endpoint });
+  for (const instance_id of [undefined, null, 123, '', 'a'.repeat(36), secret]) invalid.push({ ...descriptor, instance_id });
+  for (const status_file of [undefined, null, 123, '', 'runtime-instance.json', secret,
+    '//remote/private/runtime-instance.json', '\\\\remote\\private\\runtime-instance.json',
+    descriptor.status_file + '\0', path.parse(descriptor.status_file).root,
+    path.resolve('a'.repeat(2049)),
+  ]) invalid.push({ ...descriptor, status_file });
+  // Even direct test doubles with throwing accessors must not leak exceptions.
+  invalid.push(Object.defineProperty({ ...descriptor }, 'endpoint', { get() { throw new Error(secret); } }));
+  for (const value of invalid) {
+    for (const binding of [{}, expected]) {
+      const child = new EventEmitter();
+      const result = waitForRuntimeHostDescriptor(child, binding);
+      child.emit('message', value);
+      await assert.rejects(result, error => {
+        assert.equal(error.message, 'bundled_runtime_fixture_host_descriptor_invalid');
+        assert.equal(String(error.stack).includes(secret), false);
+        assert.equal(JSON.stringify(error).includes(secret), false);
+        assert.equal(error.cause, undefined);
+        return true;
+      });
+      for (const event of ['message', 'error', 'close', 'disconnect']) assert.equal(child.listenerCount(event), 0);
+    }
+  }
+  for (const value of [
+    { ...descriptor, endpoint: descriptor.endpoint.replace(':25433/', ':25435/') },
+    { ...descriptor, status_file: path.join(f.root, 'other-runtime-instance.json') },
+  ]) {
+    const child = new EventEmitter();
+    const result = waitForRuntimeHostDescriptor(child, expected);
+    child.emit('message', value);
+    await assert.rejects(result, { message: 'bundled_runtime_fixture_host_descriptor_invalid' });
+  }
+  // Existing UUID format permits hex case; impose no new version/authority.
+  const upper = { ...descriptor, instance_id: descriptor.instance_id.toUpperCase() };
+  const child = new EventEmitter();
+  const result = waitForRuntimeHostDescriptor(child, expected);
+  child.emit('message', upper);
+  assert.equal(await result, upper);
+  for (const binding of [{ expectedEndpoint: secret }, { expectedStatusFile: secret }]) {
+    const channel = new EventEmitter();
+    assert.throws(() => waitForRuntimeHostDescriptor(channel, binding), { message: 'bundled_runtime_fixture_host_binding_invalid' });
+    assert.deepEqual(channel.eventNames(), []);
+  }
+});
+
+test('bundled fixture refuses ended, failed, disconnected and silent Host channels without private output', async () => {
+  for (const [event, reason] of [['close', 'ended_before_ready'], ['disconnect', 'disconnected_before_ready'], ['error', 'failed']]) {
+    const child = new EventEmitter();
+    const result = waitForRuntimeHostDescriptor(child);
+    child.emit(event, new Error('private connection string'));
+    await assert.rejects(result, { message: 'bundled_runtime_fixture_host_' + reason });
+  }
+  const child = new EventEmitter();
+  await assert.rejects(waitForRuntimeHostDescriptor(child, { timeoutMs: 1 }), { message: 'bundled_runtime_fixture_host_ready_timeout' });
+  for (const event of ['message', 'error', 'close', 'disconnect']) assert.equal(child.listenerCount(event), 0);
+});
 const configValue = root => ({ schema: 'compute.runtime-host-config.v1', version: 1,
   bundle_directory: path.join(root, 'bundle'), expected_bundle_sha256: 'a'.repeat(64),
   state_directory: path.join(root, 'state'), pg_data_directory: path.join(root, 'state/data'),

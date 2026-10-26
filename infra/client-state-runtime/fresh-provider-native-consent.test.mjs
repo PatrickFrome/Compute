@@ -40,3 +40,31 @@ test('production factory cannot accept injected consent and private mutator is n
  assert.doesNotMatch(source,/options\.(?:consent|confirm|run|verifyIdentity|connection|plan)/);
  assert.match(source,/await confirmFreshProviderNativeConsent\(selected\);[\s\S]*await absent\(selected.root\);await absent\(selected.ownerFile\);/);
 });
+
+test('native consent diagnostics distinguish a pending decision without publishing paths or granting readiness', async () => {
+ const rows=[];const original=console.error;let release;
+ console.error=value=>rows.push(JSON.parse(value));
+ try {
+  const waiting=confirmFreshProviderNativeConsent(selection,{...options,run:()=>new Promise(resolve=>{release=resolve;})});
+  assert.deepEqual(rows.map(row=>row.state),['NATIVE_CONSENT_REQUESTED']);
+  release({stdout:'no private raw output'});
+  await assert.rejects(waiting,/not_confirmed/);
+  assert.deepEqual(rows.map(row=>row.state),['NATIVE_CONSENT_REQUESTED','NATIVE_CONSENT_NOT_CONFIRMED']);
+  for(const row of rows){assert.equal(row.parent_pid,process.pid);assert.equal(row.diagnostic_only,true);
+   assert.equal(row.authority_effect,false);assert.equal(row.browser_runtime_started,false);}
+  assert.doesNotMatch(JSON.stringify(rows),/private raw|consent-test|owner.json|runtime_ready/);
+ }finally{console.error=original;}
+});
+
+test('only a genuine native No receipt and exact unsignaled exit 2 classify as declined', async () => {
+ const declined={code:2,stdout:'METAENGINE_FRESH_NATIVE_OWNER_DECLINED\r\n'};
+ for(const [patch,reason] of [[{},/consent_declined$/],[{code:1},/not_confirmed$/],
+  [{killed:true},/not_confirmed$/],[{signal:'SIGTERM'},/not_confirmed$/],
+  [{stdout:'METAENGINE_FRESH_NATIVE_OWNER_DECLINED\nextra'},/not_confirmed$/],
+  [{stdout:''},/not_confirmed$/]]) {
+  await assert.rejects(confirmFreshProviderNativeConsent(selection,{...options,run:async()=>{throw {...declined,...patch};}}),reason);
+ }
+ const source=await readFile(new URL('./fresh-provider-native-consent.mjs',import.meta.url),'utf8');
+ assert.match(source,/if\(\$result -eq \[System.Windows.Forms.DialogResult\]::No\)\{Write-Output 'METAENGINE_FRESH_NATIVE_OWNER_DECLINED';exit 2\}/);
+ assert.match(source,/if\(\$result -ne \[System.Windows.Forms.DialogResult\]::Yes\)\{exit 3\}/);
+});

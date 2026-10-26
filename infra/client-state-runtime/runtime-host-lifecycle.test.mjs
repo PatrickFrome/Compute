@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { startManagedRuntimeHost } from './runtime-host.mjs';
+import { waitForRuntimeHostDescriptor } from './test/runtime-host-readiness.mjs';
 import { requireRuntimeHostLaunchNonce, runtimeHostTerminalMessage, runtimeHostFailureMessage,
   sendRuntimeHostLifecycleMessage } from './runtime-host-lifecycle.mjs';
 
@@ -147,9 +148,11 @@ test('real failure IPC is finite; legacy missing nonce remains compatible and pr
       stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
     t.after(() => { if (child.exitCode === null) child.kill(); });
     const messages = []; let stderr = '';
+    const readiness = assert.rejects(waitForRuntimeHostDescriptor(child), { message: 'bundled_runtime_fixture_host_failed' });
     child.on('message', message => messages.push(message));
     child.stderr.on('data', bytes => { stderr += bytes.toString('utf8'); if (stderr.length > 4096) child.kill(); });
     const code = await new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve); });
+    await readiness;
     assert.equal(code, 1);
     assert.deepEqual(messages, [runtimeHostFailureMessage(null)]);
     assert.equal(JSON.parse(stderr.trim()).reason === 'runtime_host_launch_nonce_invalid', value === 'invalid');

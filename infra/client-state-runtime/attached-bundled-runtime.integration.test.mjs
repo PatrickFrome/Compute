@@ -15,6 +15,7 @@ import { verifyOfflineRuntimeBundle } from './offline-runtime-bundle.mjs';
 import { normalizeRuntimeHealthFailure } from './launcher.mjs';
 import { schemaOnlyRestorePlan } from './test/isolated-goal-fixture.mjs';
 import { formatAttachedOnboardingDiagnostic } from './test/attached-onboarding-diagnostic.mjs';
+import { waitForRuntimeHostDescriptor } from './test/runtime-host-readiness.mjs';
 import { NATIVE_SUPERVISOR_RUNTIME_CAPABILITIES, probeNativeSupervisorRuntimeCapabilities } from '../../apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/runtime-capabilities.mjs';
 import { assertOwnerConsumerKind, assertOwnerConsumerProof } from '../../apps/metaengine-browser/scripts/qualify-installed-owner-consumer.mjs';
 import { INSTALLED_LAUNCH_QUALIFIER_TIMEOUT_MS, INSTALLED_LAUNCH_FIXTURE_TIMEOUT_MS } from '../../apps/metaengine-browser/scripts/installed-launch-progress.mjs';
@@ -87,7 +88,8 @@ async function assertPortClosed(port) {
   });
 }
 
-function spawnBundled(verified, args, extra = {}, ipc = false, timeoutMs = 180000) {
+function spawnBundled(verified, args, extra = {}, hostReadiness = null, timeoutMs = 180000) {
+  const ipc = Boolean(hostReadiness);
   const child = spawn(verified.paths.nodeExecutable, args, { env: privateEnvironment(extra), windowsHide: true,
     shell: false, ...(ipc ? {} : { timeout: timeoutMs }),
     stdio: ipc ? ['ignore', 'pipe', 'pipe', 'ipc'] : ['ignore', 'pipe', 'pipe'] });
@@ -103,12 +105,7 @@ function spawnBundled(verified, args, extra = {}, ipc = false, timeoutMs = 18000
     child.once('close', (code, signal) => resolve({ code, signal }));
   });
   closed.catch(() => {});
-  const ready = ipc ? new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('attached_bundle_fixture_host_ready_timeout')), 150000);
-    child.once('message', descriptor => { clearTimeout(timer); resolve(descriptor); });
-    child.once('error', () => { clearTimeout(timer); reject(new Error('attached_bundle_fixture_host_failed')); });
-    child.once('close', () => { clearTimeout(timer); reject(new Error('attached_bundle_fixture_host_ended_before_ready')); });
-  }) : null;
+  const ready = ipc ? waitForRuntimeHostDescriptor(child, hostReadiness) : null;
   ready?.catch(() => {});
   return { child, closed, ready, output: () => { assert.equal(oversized, false); return output; } };
 }
@@ -321,11 +318,23 @@ test('verified bundled onboarding and attached host restart preserve an existing
   const instances = [], childPids = [];
   const statusFile = path.join(state, 'runtime-instance.json');
   for (let run = 0; run < 2; run += 1) {
-    const host = spawnBundled(verified, [verified.paths.hostEntry], { COMPUTE_RUNTIME_HOST_CONFIG: configFile }, true);
+    const host = spawnBundled(verified, [verified.paths.hostEntry], { COMPUTE_RUNTIME_HOST_CONFIG: configFile }, {
+      expectedEndpoint: `http://127.0.0.1:${edgePort}/a2-browser-native-supervisor-v1`, expectedStatusFile: statusFile,
+    });
     hosts.push(host);
     let descriptor;
     try { descriptor = await host.ready; }
     catch (error) {
+      // IPC and stderr are independent pipes. A failure frame may arrive
+      // before the finite stderr receipt; allow its owned process to close
+      // before inspecting diagnostics, without treating exit as readiness or
+      // confirmed cleanup. A hung child still reaches the existing cleanup.
+      let receiptTimer;
+      try {
+        await Promise.race([host.closed.catch(() => {}), new Promise(resolve => {
+          receiptTimer = setTimeout(resolve, 5000);
+        })]);
+      } finally { clearTimeout(receiptTimer); }
       // Host output is private even on a failed assertion. Admit only the fixed
       // failure receipt category and sanitized status reason, never raw output.
       let reason = 'runtime_host_failure_receipt_unavailable';

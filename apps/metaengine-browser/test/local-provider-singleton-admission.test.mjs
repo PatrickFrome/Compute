@@ -63,13 +63,13 @@ async function fixture(t, mode = 'ready') {
 
 async function launch(f, { entry, primary = true, flags = [], extraEnv = {}, emitReady = true,
   managedHost, quitAfterBoot = false, installerAfterBoot = false, installerDuringStartup = false,
-  holdQuit = false, firstRunAutoConnect, nativeDrainMode, fixtureDeadlineMs } = {}) {
+  holdQuit = false, firstRunAutoConnect, freshConsentPending, freshConsentDenied, nativeDrainMode, fixtureDeadlineMs } = {}) {
   const env = { ...process.env };
   for (const name of Object.keys(env)) {
     if (/^(?:METAENGINE_|SUPABASE_|DATABASE_URL$|PG(?:HOST|PORT|USER|PASSWORD|DATABASE|DATA|SERVICE)|GITHUB_TOKEN$|GH_TOKEN$|COMPUTE_RUNTIME_HOST_CONFIG$|NODE_OPTIONS$)/.test(name)) delete env[name];
   }
   const options = { entry, primary, flags, userData: f.userData, emitReady, managedHost, quitAfterBoot,
-    installerAfterBoot, installerDuringStartup, holdQuit, firstRunAutoConnect, nativeDrainMode, fixtureDeadlineMs };
+    installerAfterBoot, installerDuringStartup, holdQuit, firstRunAutoConnect, freshConsentPending, freshConsentDenied, nativeDrainMode, fixtureDeadlineMs };
   let output;
   try {
     output = await execute(process.execPath, [runner], {
@@ -174,6 +174,41 @@ for (const entry of entries) {
     assert.equal(result.boot_state, 'BLOCKED');
     assert.equal(f.requests.length, 0);
     assert.match(result.stderr, /LOCAL_PROVIDER_STARTUP_BLOCKED/);
+  });
+
+  test(entry + ': absent descriptor reaches pending native consent without admitting runtime or implying immediate rejection', async t => {
+    const f = await fixture(t);
+    await fs.rm(f.ownerFile);
+    const result = await launch(f, { entry, firstRunAutoConnect: { outcome: 'NO_DESCRIPTOR' },
+      freshConsentPending: true, extraEnv: { ME2_INTEGRATION: '1' } });
+    assert.equal(result.code, 0, result.stderr);
+    assert.ok(eventIndex(result, 'entry-complete') < eventIndex(result, 'ready-emitted'));
+    assert.ok(eventIndex(result, 'fresh-native-consent-pending') > eventIndex(result, 'ready-emitted'));
+    assert.equal(event(result, 'fresh-native-consent-pending')[1], true);
+    for (const kind of ['runtime-import', 'me2-import', 'fetch', 'host-created']) assert.equal(event(result, kind), undefined);
+    assert.equal(f.requests.length, 0);
+    assert.doesNotMatch(result.stderr, /LOCAL_PROVIDER_STARTUP_BLOCKED|RUNTIME_IMPORT_OK/);
+    for (const file of [f.ownerFile, path.join(f.userData, 'metaengine-browser-startup-journal-v1.json'),
+      path.join(f.directory, 'localappdata', 'METAENGINE', 'client-first-run-v1')]) {
+      await assert.rejects(fs.stat(file), { code: 'ENOENT' });
+    }
+    // This is a hermetic reproduction of the obsolete negative expectation,
+    // not a native-dialog, installed launch or successful Owner qualification.
+  });
+
+  test(entry + ': exact declined consent exits denied after cleanup without a second error dialog', async t => {
+    const f = await fixture(t);
+    await fs.rm(f.ownerFile);
+    const result = await launch(f, { entry, firstRunAutoConnect: { outcome: 'NO_DESCRIPTOR' },
+      freshConsentDenied: true, extraEnv: { ME2_INTEGRATION: '1' } });
+    assert.equal(result.code, 1, result.stderr);
+    assert.ok(eventIndex(result, 'fresh-native-consent-declined') > eventIndex(result, 'ready-emitted'));
+    for (const kind of ['runtime-import', 'me2-import', 'fetch', 'host-created', 'dialog']) assert.equal(event(result, kind), undefined);
+    assert.match(result.stderr, /"reason":"installed_fresh_provider_consent_declined"/);
+    assert.match(result.stderr, /"phase":"FRESH_LOCAL_PROVIDER_SETUP"/);
+    assert.equal(f.requests.length, 0);
+    await assert.rejects(fs.stat(f.ownerFile), { code: 'ENOENT' });
+    await assert.rejects(fs.stat(path.join(f.userData, 'metaengine-browser-startup-journal-v1.json')), { code: 'ENOENT' });
   });
 
   test(entry + ': missing attached descriptor cannot import the runtime or ME2',async t=>{

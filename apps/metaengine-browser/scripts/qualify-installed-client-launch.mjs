@@ -16,6 +16,7 @@ import { localAttachedProviderAutoConnectFile, LOCAL_ATTACHED_AUTOCONNECT_SCHEMA
 import { protectOwnerOnlyWindowsDirectory, verifyOwnerOnlyWindowsStorage } from '../src/private-windows-storage-acl.mjs';
 import { qualifyOwnerBackedActivationWave } from './qa-owner-backed-activation-wave.mjs';
 import { createInstalledLaunchProgressReporter } from './installed-launch-progress.mjs';
+import { assertGeneratedFirstRunCi, assertGeneratedFirstRunFixtureRoot, assertNativeConsentDenialInteraction, declineInstalledFreshProviderConsent } from './qa-decline-fresh-provider-consent.mjs';
 
 const execute = promisify(execFile);
 const require = createRequire(import.meta.url);
@@ -32,7 +33,8 @@ export const INSTALLED_LAUNCH_SOURCE_FILES = Object.freeze([
   'src/self-update-transaction-journal.mjs', 'src/durable-json-file.cjs',
   'src/local-state-provider-bootstrap.mjs', 'src/local-state-provider-policy.mjs',
   'src/local-runtime-host-controller.mjs', 'src/local-restored-pg17-setup.mjs',
-  'src/local-restored-pg17-auto-prepare.mjs',
+  'src/local-restored-pg17-auto-prepare.mjs', 'src/installed-fresh-provider-setup.mjs',
+  'src/electron-pre-ready-bootstrap.mjs', 'src/packaged-owner-admission-diagnostic.mjs',
   'src/private-windows-storage-acl.mjs',
   'src/github-repository-connection.mjs', 'src/preload-shell.cjs',
   'src/remote-support-mcp.mjs', 'src/me2/me2-daemon-host.mjs',
@@ -78,10 +80,17 @@ export function assertInstalledLaunchIdentity(pkg, { expectedHead, expectedVersi
     bundle_sha256: pkg.metaengineClientStateRuntime.bundle_sha256 });
 }
 
-export function assertMissingDescriptorAdmissionContract(row, output = '') {
+export function assertMissingDescriptorAdmissionContract(row, output = '', { pid, nativeDenial } = {}) {
+  assertNativeConsentDenialInteraction(nativeDenial, { browserPid: pid });
+  const nativeRows = output.split(/\r?\n/).flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } })
+    .filter(value => value.schema === 'metaengine.browser.fresh-provider-native-consent.v1');
   if (row?.schema !== 'metaengine.browser.provider-startup.v1' || row.state !== 'LOCAL_PROVIDER_STARTUP_BLOCKED'
-    || row.reason !== 'local_state_packaged_owner_not_ready' || row.browser_runtime_started !== false
-    || row.automatic_cloud_fallback !== false || row.authority_effect !== false
+    || row.reason !== 'installed_fresh_provider_consent_declined' || row.phase !== 'FRESH_LOCAL_PROVIDER_SETUP'
+    || row.bootstrap_state !== 'NO_OWNER_CONFIG' || row.attachment_state !== 'NO_DESCRIPTOR'
+    || row.browser_runtime_started !== false || row.automatic_cloud_fallback !== false || row.authority_effect !== false
+    || nativeRows.length !== 2 || nativeRows[0].state !== 'NATIVE_CONSENT_REQUESTED' || nativeRows[1].state !== 'NATIVE_CONSENT_DECLINED'
+    || nativeRows.some(value => value.parent_pid !== pid || value.diagnostic_only !== true
+      || value.browser_runtime_started !== false || value.authority_effect !== false)
     || /RUNTIME_IMPORT_OK|ME2_INTEGRATION_START|DAEMON_HEALTHY|ME2_PRIMARY_SHELL_VISIBLE/.test(output)) {
     fail('missing_descriptor_admission_contract_invalid');
   }
@@ -274,7 +283,10 @@ export function startInstalledQualificationProcess(executable, args, env, cwd, {
   const alive = () => {
     if (spawnError || child.exitCode !== null || child.signalCode !== null) fail('process_ended_before_readback');
   };
-  return { child, closed, alive, output: () => output };
+  const status = () => ({ pid: child.pid ?? null, spawn_error: spawnError !== null,
+    exit_code: child.exitCode, signal: child.signalCode,
+    alive: !spawnError && child.exitCode === null && child.signalCode === null });
+  return { child, closed, alive, status, output: () => output };
 }
 const start = startInstalledQualificationProcess;
 
@@ -296,7 +308,7 @@ export async function waitUntil(action, launch, timeoutMs = 60000) {
       // A current-boot terminal failure cannot become healthy through polling.
       // Preserve it instead of consuming the whole startup/outer deadline.
       if (['installed_launch_normal_runtime_import_failed',
-        'installed_launch_normal_primary_window_journal_failed'].includes(error?.message)) throw error;
+        'installed_launch_normal_primary_window_journal_failed', 'installed_launch_process_ended_before_readback'].includes(error?.message)) throw error;
       lastError = error;
     }
     await delay(200);
@@ -537,10 +549,25 @@ export async function qualifyInstalledOfflineSuccessor({ executable, archive, di
 }
 
 export async function qualifyInstalledFirstRun({ executable, directory, identity }) {
-  const appData = path.join(directory, 'first-run', 'Roaming');
-  const localAppData = path.join(directory, 'first-run', 'Local');
-  const temporaryDirectory = path.join(directory, 'first-run', 'Temp');
-  for (const target of [appData, localAppData, temporaryDirectory]) await fs.mkdir(target, { recursive: true });
+  assertGeneratedFirstRunCi();
+  const fixtureRoot = path.join(directory, 'first-run');
+  assertGeneratedFirstRunFixtureRoot(fixtureRoot);
+  let ancestor = path.parse(path.resolve(directory)).root;
+  for (const part of path.relative(ancestor, path.resolve(directory)).split(path.sep).filter(Boolean)) {
+    ancestor = path.join(ancestor, part);
+    const stat = await fs.lstat(ancestor);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) fail('native_no_fixture_alias_forbidden');
+  }
+  // Never reuse or adopt an existing profile. Native No automation is allowed
+  // only in this exclusively created, nonce-bound disposable CI namespace.
+  await fs.mkdir(fixtureRoot);
+  const nonce = randomUUID();
+  await fs.writeFile(path.join(fixtureRoot, 'generated-first-run-fixture.json'), JSON.stringify({
+    schema: 'metaengine.browser.generated-first-run-fixture.v1', nonce }), { flag: 'wx', mode: 0o600 });
+  const appData = path.join(fixtureRoot, 'Roaming');
+  const localAppData = path.join(fixtureRoot, 'Local');
+  const temporaryDirectory = path.join(fixtureRoot, 'Temp');
+  for (const target of [appData, localAppData, temporaryDirectory]) await fs.mkdir(target);
   const ports = [];
   while (ports.length < 3) { const port = await freePort(); if (!ports.includes(port)) ports.push(port); }
   const [uiPort, gatewayPort, daemonPort] = ports;
@@ -548,29 +575,80 @@ export async function qualifyInstalledFirstRun({ executable, directory, identity
   const descriptorFile = localAttachedProviderAutoConnectFile({ env, platform: 'win32' });
   await assert.rejects(fs.stat(descriptorFile), { code: 'ENOENT' });
   const profile = await profileProbe(executable, env, directory);
-  // Missing trust input must block ordinary startup. A separate real-runtime
-  // Owner run proves successful automatic attachment and the primary UI.
-  const launch = start(executable, ['--user-data-dir=' + profile.user_data_path], env, directory);
-  let proof;
+  const absentFiles = [descriptorFile,
+    path.join(appData, '@metaengine', 'browser-shell', 'metaengine-state-provider-v1.json'),
+    path.join(localAppData, 'METAENGINE', 'client-first-run-v1'),
+    ...['metaengine-browser-startup-journal-v1.json', 'metaengine-browser-sentinel-v1.json',
+      'runtime-host-lock.json', 'metaengine-native-supervisor-device-v1.json'].map(name => path.join(profile.user_data_path, name))];
+  for (const file of absentFiles) await assert.rejects(fs.lstat(file), { code: 'ENOENT' });
+  // Absence now offers genuine native consent, not the removed legacy wizard.
+  // Only the native No control of this exact generated process tree is chosen.
+  // The separate Owner phase still must prove real runtime and visible UI.
+  const startedMs = Date.now(), deadlineMs = startedMs + 90000;
+  const launch = start(executable, ['--user-data-dir=' + profile.user_data_path], env, directory, { visibleGui: true });
+  let proof, nativeDenial = null, beforeCleanup = null, cleanup = null, failureCode = null;
+  const readBlocked = () => launch.output().split(/\r?\n/).flatMap(line => {
+    try { return [JSON.parse(line)]; } catch { return []; }
+  }).find(row => row.schema === 'metaengine.browser.provider-startup.v1' && row.state === 'LOCAL_PROVIDER_STARTUP_BLOCKED');
   try {
-    const blocked = await waitUntil(async () => launch.output().split(/\r?\n/).flatMap(line => {
-      try { return [JSON.parse(line)]; } catch { return []; }
-    }).find(row => row.schema === 'metaengine.browser.provider-startup.v1' && row.state === 'LOCAL_PROVIDER_STARTUP_BLOCKED'), null, 90000);
-    assertMissingDescriptorAdmissionContract(blocked, launch.output());
-    for (const file of [path.join(appData, '@metaengine', 'browser-shell', 'metaengine-state-provider-v1.json'),
-      path.join(profile.user_data_path, 'metaengine-browser-startup-journal-v1.json')]) {
-      await assert.rejects(fs.stat(file), { code: 'ENOENT' });
-    }
-    proof = { schema: 'metaengine.browser.installed-first-run-proof.v2', ...identity,
+    nativeDenial = await declineInstalledFreshProviderConsent({ browserPid: launch.child.pid, executable,
+      fixtureRoot, nonce, startedMs, deadlineMs });
+    const blocked = await waitUntil(() => {
+      const row = readBlocked();
+      // Read a terminal denial first: a legitimate No can exit between polls.
+      if (row) return row;
+      launch.alive();
+      return null;
+    }, null, Math.max(1, deadlineMs - Date.now()));
+    assertMissingDescriptorAdmissionContract(blocked, launch.output(), { pid: launch.child.pid, nativeDenial });
+    for (const file of absentFiles) await assert.rejects(fs.lstat(file), { code: 'ENOENT' });
+    const closed = await Promise.race([launch.closed, deadline(Math.max(1, deadlineMs - Date.now()), 'first_run_denial_exit_timeout')]);
+    if (closed.code !== 1 || closed.signal) fail('first_run_denial_exit_invalid');
+    proof = { schema: 'metaengine.browser.installed-first-run-proof.v3', ...identity,
       launch: 'NORMAL_INSTALLED_ENTRY', profile_isolated: true, database_wizard_removed: true,
       descriptor_absent: true, missing_descriptor_admission_fence_verified: true,
-      owner_profile_written: false, browser_runtime_admitted: false, automatic_cloud_fallback: false,
+      native_consent_required: true, native_consent_declined: true, native_denial_receipt_verified: true,
+      native_denial_interaction: nativeDenial, primary_pid: launch.child.pid, primary_exit_code: closed.code,
+      owner_profile_written: false, protected_device_identity_written: false, fresh_setup_storage_created: false,
+      browser_runtime_admitted: false, automatic_cloud_fallback: false,
+      fresh_database_provisioning_qualified: false, normal_ui_boot_verified: false,
       owner_boot_qualified: false, production_ready: false, authority_effect: false };
+  } catch (error) {
+    const failureCodes = new Set(['native_no_generated_ci_required','native_no_fixture_unbound',
+      'native_no_fixture_alias_forbidden','native_no_browser_binding_invalid','native_no_process_unavailable',
+      'native_no_process_binding_changed','native_no_dialog_ambiguous','native_no_control_unconfirmed',
+      'native_no_dialog_timeout','native_no_readback_unavailable','native_no_arguments_invalid','native_no_interaction_unbound',
+      'first_run_denial_exit_timeout','first_run_denial_exit_invalid','missing_descriptor_admission_contract_invalid',
+      'process_ended_before_readback','readback_timeout_unavailable']);
+    const code = String(error?.message || '').replace(/^installed_launch_/, '');
+    failureCode = failureCodes.has(code) ? 'installed_launch_' + code : 'installed_launch_first_run_contract_unproven';
+    throw error;
   } finally {
-    await stop(launch);
-    await fs.writeFile(path.join(directory, 'installed-first-run.log'), launch.output());
+    beforeCleanup = launch.status();
+    try { await stop(launch); cleanup = launch.status(); }
+    finally {
+      await fs.writeFile(path.join(directory, 'installed-first-run.log'), launch.output());
+      // Fixed, secret-free liveness is separate from startup-journal binding:
+      // the negative phase must never create that runtime journal.
+      const phases = launch.output().split(/\r?\n/).flatMap(line => {
+        try { const row = JSON.parse(line);
+          const allowed = new Set(['RESOURCE_VERIFICATION_STARTED','RESOURCE_VERIFICATION_COMPLETED',
+            'ELECTRON_READY_AWAITED','ELECTRON_READY_OBSERVED','NATIVE_OPERATOR_ENTERED',
+            'NATIVE_CONSENT_REQUESTED','NATIVE_CONSENT_DECLINED','NATIVE_CONSENT_CONFIRMED','NATIVE_CONSENT_NOT_CONFIRMED']);
+          return ['metaengine.browser.fresh-provider-setup.v1','metaengine.browser.fresh-provider-native-consent.v1'].includes(row.schema)
+            && allowed.has(row.state) ? [{ schema: row.schema, state: row.state }] : [];
+        } catch { return []; }
+      });
+      await fs.writeFile(path.join(directory, 'installed-first-run-diagnostic.json'), JSON.stringify({
+        schema: 'metaengine.browser.installed-first-run-diagnostic.v1', ...identity, primary_pid: launch.child.pid ?? null,
+        outcome: proof ? 'DENIAL_VERIFIED' : 'HOLD', failure_code: failureCode,
+        before_cleanup: beforeCleanup, after_cleanup: cleanup ?? launch.status(), observed_setup_phases: phases,
+        native_no_interaction_observed: nativeDenial !== null, diagnostic_only: true,
+        qualification_proven: false, production_ready: false, authority_effect: false }, null, 2) + '\n');
+    }
     for (const port of ports) await assertPortClosed(port);
   }
+  for (const file of absentFiles) await assert.rejects(fs.lstat(file), { code: 'ENOENT' });
   return Object.freeze({ ...proof, process_cleanup_confirmed: true });
 }
 

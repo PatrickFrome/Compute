@@ -191,6 +191,23 @@ if(options.firstRunAutoConnect){
     'globalThis.__traceEntrypoint("me2-import"); export function startMe2Integration() { globalThis.__traceEntrypoint("me2-start"); }',
   ));
 }
+if (options.freshConsentPending || options.freshConsentDenied) {
+  // Only the native operator boundary is inert. Real main-entry must finish
+  // ESM evaluation, wait for readiness and retain provider/runtime admission.
+  mocks.set(new URL('installed-fresh-provider-setup.mjs', src).href, dataModule([
+    'export async function setupInstalledFreshProvider({app}) {',
+    ' globalThis.__traceEntrypoint("fresh-setup-entered", app.isReady());',
+    ' await app.whenReady();',
+    ...(options.freshConsentDenied ? [
+      ' globalThis.__traceEntrypoint("fresh-native-consent-declined", app.isReady());',
+      ' throw new Error("installed_fresh_provider_consent_declined");',
+    ] : []),
+    ' globalThis.__traceEntrypoint("fresh-native-consent-pending", app.isReady());',
+    ' await new Promise(() => {});',
+    ' throw new Error("fixture_consent_must_never_be_granted");',
+    '}',
+  ].join('\n')));
+}
 if (options.managedHost) {
   globalThis.__singletonTestRuntimePaths = options.managedHost;
   mocks.set(offlineVerifier, dataModule([
@@ -224,7 +241,7 @@ try {
     app.emit('ready');
     app.emit('ready'); // A one-shot primary continuation must survive duplicate delivery.
   }
-  if(options.firstRunAutoConnect){
+  if(options.firstRunAutoConnect && !options.freshConsentPending){
     await globalThis.__METAENGINE_PRIMARY_PROVIDER_PREPARATION__?.catch(()=>{});
     trace('deferred-provider-settled');
   }

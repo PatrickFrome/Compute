@@ -411,7 +411,11 @@ export async function provisionFreshClientProvider(options={}) {
       ...(enrollment?{device_id:enrollment.device_id,client_id:enrollment.client_id,key_fingerprint_sha256:enrollment.key_fingerprint_sha256,request_id:enrollment.request_id}:{}),
       guardian_ready:false,runtime_ready:false,
       automatic_retry_allowed:false,automatic_cloud_fallback:false,authority_effect:false});
-  }catch {
+  }catch(error) {
+    // Preserve only the exact native No while still wholly before mutation.
+    // Cleanup below still runs and any uncertainty overrides this category.
+    if(error?.message==='fresh_provider_native_consent_declined'&&!journal&&!rootIdentity&&!deviceIdentity
+      &&!owned&&!sql&&!api&&!reserved&&!hostAttempted)throw error;
     // No raw SQL/driver/native diagnostic reaches logs or the renderer.
     try{if(journal)await record('OUTCOME_REQUIRES_REVIEW');}catch{}
     fail('setup_requires_review');

@@ -59,3 +59,12 @@ test('source uses bounded diagnostic only on the existing fail-closed startup pa
   assert.match(entry, /browser_runtime_started: false/);
   assert.match(entry, /automatic_cloud_fallback: false/);
 });
+
+test('fresh setup failures retain the exact allowlisted phase without exposing private data', () => {
+  const value = projectPackagedOwnerAdmissionDiagnostic({phase:'FRESH_LOCAL_PROVIDER_SETUP',
+    bootstrapState:'NO_OWNER_CONFIG',attachmentState:'NO_DESCRIPTOR'});
+  assert.equal(value.phase,'FRESH_LOCAL_PROVIDER_SETUP');
+  assert.equal(value.bootstrap_state,'NO_OWNER_CONFIG');
+  assert.equal(value.attachment_state,'NO_DESCRIPTOR');
+  assert.equal(value.authority_effect,false);
+});

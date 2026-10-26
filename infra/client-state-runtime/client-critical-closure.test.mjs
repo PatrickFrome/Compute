@@ -3,11 +3,80 @@ import test from 'node:test';
 import {execFileSync,spawnSync} from 'node:child_process';
 import fs from 'node:fs';
 import {createHash} from 'node:crypto';
+import os from 'node:os';
+import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 const root=fileURLToPath(new URL('../../',import.meta.url));
 const git=(...args)=>execFileSync('git',['-C',root,...args],{encoding:'utf8'}).trim();
 const read=p=>fs.readFileSync(new URL(p,new URL('../../',import.meta.url)),'utf8');
 const manifest=JSON.parse(read('coordination/operator-control/client-critical-closure.manifest.json'));
+
+function assertCommittedAuditPrefix(repository,parent,current,file) {
+ // Compare entire canonical Git blobs, including trailing whitespace/newlines.
+ // Checkout EOL conversion is handled by Git, never by normalizing proof bytes.
+ const bytes=revision=>execFileSync('git',['-C',repository,'show',revision+':'+file]);
+ const previous=bytes(parent),next=bytes(current);
+ assert.ok(next.length>=previous.length&&next.subarray(0,previous.length).equals(previous),
+  'all dated predecessor audit records remain byte-exact in committed history');
+}
+
+test('real autocrlf checkout preserves canonical append-only history and rejects committed prior-record mutations',()=>{
+ const fixture=fs.mkdtempSync(path.join(os.tmpdir(),'metaengine-audit-history-'));
+ const run=(...args)=>execFileSync('git',['-C',fixture,...args],{stdio:['ignore','pipe','pipe']});
+ const text=(...args)=>run(...args).toString('utf8').trim();
+ const auditPath='audit.md';
+ const evidencePath='evidence/audits/metaengine-20261026-package-source-successor/live-artifact-observation.json';
+ const previous='# Dated record\n\nRetained record.  \n\n';
+ const suffix='## Prepared successor\n\nNew record.\n';
+ const commit=message=>{run('add','--all');run('-c','user.name=Source contract fixture',
+  '-c','user.email=source-contract-fixture@invalid','commit','--quiet','--no-gpg-sign','-m',message);return text('rev-parse','HEAD');};
+ try {
+  run('init','--quiet');
+  run('config','core.autocrlf','true');
+  fs.mkdirSync(path.join(fixture,'empty-hooks'));
+  run('config','core.hooksPath',path.join(fixture,'empty-hooks'));
+  fs.writeFileSync(path.join(fixture,'.gitattributes'),read('.gitattributes'));
+  fs.writeFileSync(path.join(fixture,auditPath),previous);
+  fs.mkdirSync(path.dirname(path.join(fixture,evidencePath)),{recursive:true});
+  const observation=fs.readFileSync(path.join(root,evidencePath));
+  fs.writeFileSync(path.join(fixture,evidencePath),observation);
+  const parent=commit('retain exact dated record');
+  fs.writeFileSync(path.join(fixture,auditPath),previous+suffix);
+  const successor=commit('append successor record');
+  fs.unlinkSync(path.join(fixture,auditPath));
+  fs.unlinkSync(path.join(fixture,evidencePath));
+  run('checkout','HEAD','--',auditPath,evidencePath);
+  const checkedOut=fs.readFileSync(path.join(fixture,auditPath));
+  const canonical=run('show','HEAD:'+auditPath);
+  assert.ok(checkedOut.includes(Buffer.from('\r\n')),'positive control: Git actually materialized CRLF');
+  assert.ok(!canonical.includes(Buffer.from('\r\n')),'Git blob retains canonical LF');
+  assert.notDeepEqual(checkedOut,canonical,'the test must exercise real checkout conversion');
+  assertCommittedAuditPrefix(fixture,parent,'HEAD',auditPath);
+  assert.equal(text('hash-object',auditPath),text('rev-parse','HEAD:'+auditPath),'Git-filtered worktree seal stays exact');
+  const observedCheckout=fs.readFileSync(path.join(fixture,evidencePath));
+  assert.ok(!observedCheckout.includes(Buffer.from('\r\n')),'only byte-hashed observation is explicitly LF-pinned');
+  assert.deepEqual(observedCheckout,observation,'raw evidence hash must survive checkout without proof-byte normalization');
+
+  fs.writeFileSync(path.join(fixture,auditPath),previous+suffix.replace('New record.','Uncommitted mutation.'));
+  assertCommittedAuditPrefix(fixture,parent,'HEAD',auditPath);
+  assert.throws(()=>assert.equal(text('hash-object',auditPath),text('rev-parse','HEAD:'+auditPath)),
+   {code:'ERR_ASSERTION'},'the separate worktree seal still rejects uncommitted mutation');
+  run('checkout',successor,'--',auditPath);
+
+  for(const mutated of [
+   previous.replace('Retained record.','Changed record.')+suffix,
+   previous.replace('record.  \n','record.\n')+suffix,
+   previous.slice(0,-1)+suffix,
+  ]) {
+   fs.writeFileSync(path.join(fixture,auditPath),mutated);
+   commit('negative prior-record mutation');
+   assert.throws(()=>assertCommittedAuditPrefix(fixture,parent,'HEAD',auditPath),
+    {code:'ERR_ASSERTION'},'committed record content, trailing whitespace and final newline must remain exact');
+  }
+ } finally {
+  fs.rmSync(fixture,{recursive:true,force:true});
+ }
+});
 
 function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion) {
  const fixed={
@@ -624,7 +693,7 @@ test('new QA source seal retains time-bound planning evidence and pending exact-
  const parent='88eb062b09bd456d430bd0da37cb21baaddcee6d';
  const auditPath='coordination/operator-control/AUDIT_CLOSURE_EXECUTION_REGISTER_20261018.md';
  const audit=read(auditPath);
- assert.ok(audit.startsWith(git('show',parent+':'+auditPath)), 'all dated predecessor audit records remain unchanged');
+ assertCommittedAuditPrefix(root,parent,'HEAD',auditPath);
  const parse=source=>{
   const section=source.replace(/\r\n/g,'\n').split('## QA source seal — 0.7.0-dev.1359740117434.1\n')[1];
   assert.ok(section,'new prepared QA source record required');

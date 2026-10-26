@@ -13,7 +13,8 @@ $identity=[System.Security.Principal.WindowsIdentity]::GetCurrent()
 if($self.SessionId -eq 0 -or $parent.SessionId -ne $self.SessionId -or -not $identity.IsAuthenticated -or $identity.IsSystem){throw 'interactive_owner_required'}
 $text="Create a NEW private METAENGINE PostgreSQL 17 database, application schema, Vault key and private credentials?"+[Environment]::NewLine+[Environment]::NewLine+"Protected database storage: "+$env:METAENGINE_CONSENT_STATE+[Environment]::NewLine+"Owner profile: "+$env:METAENGINE_CONSENT_OWNER+[Environment]::NewLine+[Environment]::NewLine+"Existing databases and device identities will not be replaced. For installed Browser setup, also register this Browser's protected device key as the FIRST local ADMIN using a signed request and private approval in this new database. Command-line schema setup alone does not register a device. ADMIN is not execution permission: Guardian verification, project admission and native execution permits remain separate. Interrupted setup requires review and will not be replayed automatically."
 $result=[System.Windows.Forms.MessageBox]::Show($text,'METAENGINE — confirm private database creation',[System.Windows.Forms.MessageBoxButtons]::YesNo,[System.Windows.Forms.MessageBoxIcon]::Question,[System.Windows.Forms.MessageBoxDefaultButton]::Button2)
-if($result -ne [System.Windows.Forms.DialogResult]::Yes){exit 2}
+if($result -eq [System.Windows.Forms.DialogResult]::No){Write-Output 'METAENGINE_FRESH_NATIVE_OWNER_DECLINED';exit 2}
+if($result -ne [System.Windows.Forms.DialogResult]::Yes){exit 3}
 $parent.Refresh()
 if($parent.HasExited -or $parent.SessionId -ne $self.SessionId){throw 'owner_process_changed'}
 Write-Output 'METAENGINE_FRESH_NATIVE_OWNER_CONFIRMED'
@@ -27,12 +28,26 @@ export async function confirmFreshProviderNativeConsent({stateDirectory,ownerFil
     ||[env.SystemRoot,env.SYSTEMROOT,env.WINDIR].some(value=>value!==undefined&&String(value).toLowerCase()!==root.toLowerCase())
     ||![stateDirectory,ownerFile].every(p=>typeof p==='string'&&path.isAbsolute(p)&&!/[\x00-\x1f]/.test(p)))throw Error('fresh_provider_native_consent_unavailable');
   const executable=path.win32.join(root,'System32','WindowsPowerShell','v1.0','powershell.exe');
+  // This row observes an attempted native decision, not consent or admission.
+  // Keep paths and native subprocess output private; only fixed phases escape.
+  const observe=state=>console.error(JSON.stringify({schema:'metaengine.browser.fresh-provider-native-consent.v1',
+    state,parent_pid:process.pid,diagnostic_only:true,browser_runtime_started:false,authority_effect:false}));
   let result;
+  observe('NATIVE_CONSENT_REQUESTED');
   try {result=await run(executable,['-NoLogo','-NoProfile','-STA','-NonInteractive','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')],{
     env:{SystemRoot:root,SYSTEMROOT:root,WINDIR:root,
       PSModulePath:path.win32.join(root,'System32','WindowsPowerShell','v1.0','Modules'),
       METAENGINE_CONSENT_PARENT_PID:String(process.pid),METAENGINE_CONSENT_STATE:stateDirectory,METAENGINE_CONSENT_OWNER:ownerFile},
     cwd:path.win32.join(root,'System32'),shell:false,windowsHide:true,timeout:300000,maxBuffer:1024});
-  }catch {throw Error('fresh_provider_native_consent_not_confirmed');}
-  if(String(result.stdout).trim()!=='METAENGINE_FRESH_NATIVE_OWNER_CONFIRMED')throw Error('fresh_provider_native_consent_not_confirmed');
+  }catch(error) {
+    if(error?.code===2&&error.killed!==true&&!error.signal
+      &&String(error.stdout||'').trim()==='METAENGINE_FRESH_NATIVE_OWNER_DECLINED') {
+      observe('NATIVE_CONSENT_DECLINED');throw Error('fresh_provider_native_consent_declined');
+    }
+    observe('NATIVE_CONSENT_NOT_CONFIRMED');throw Error('fresh_provider_native_consent_not_confirmed');
+  }
+  if(String(result.stdout).trim()!=='METAENGINE_FRESH_NATIVE_OWNER_CONFIRMED'){
+    observe('NATIVE_CONSENT_NOT_CONFIRMED');throw Error('fresh_provider_native_consent_not_confirmed');
+  }
+  observe('NATIVE_CONSENT_CONFIRMED');
 }

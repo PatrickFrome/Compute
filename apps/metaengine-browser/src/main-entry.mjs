@@ -203,6 +203,7 @@ if (guard.installer_shutdown_control) {
     if (globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__ !== true) {
     const reason = String(error?.message || error).slice(0, 240);
     const staleOwnerBinding = reason === 'packaged_local_runtime_owner_digest_mismatch';
+    const freshConsentDeclined = reason === 'installed_fresh_provider_consent_declined';
     console.error(JSON.stringify({
       schema: 'metaengine.browser.provider-startup.v1',
       state: 'LOCAL_PROVIDER_STARTUP_BLOCKED',
@@ -217,7 +218,9 @@ if (guard.installer_shutdown_control) {
       authority_effect: false,
     }));
     try {
-      dialog.showErrorBox(
+      // A real native No is an intentional cancellation, not a second modal
+      // error. Admission remains denied and the same owned cleanup is required.
+      if (!freshConsentDeclined) dialog.showErrorBox(
         'METAENGINE Browser — local runtime unavailable',
         staleOwnerBinding ? ('The installed Browser package identifies a runtime generation different from the preserved Owner profile.\nDo not delete the Owner profile or PostgreSQL database. Use a reviewed Owner/runtime upgrade procedure.\n\nDiagnostic: ' + reason) : `The selected local state runtime could not be verified.\nStart or repair that runtime and open the Browser again.\n\nDiagnostic: ${reason}`,
       );

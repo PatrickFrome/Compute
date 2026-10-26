@@ -6,6 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { verifyOfflineRuntimeBundle } from './offline-runtime-bundle.mjs';
 import { assertFixturePortsClosed, createIsolatedGoalFixture, goalFixtureConfig } from './test/isolated-goal-fixture.mjs';
+import { waitForRuntimeHostDescriptor } from './test/runtime-host-readiness.mjs';
 
 const fixtureConfig = goalFixtureConfig();
 const bundleDirectory = process.env.LOCAL_STATE_TEST_OFFLINE_BUNDLE_DIRECTORY;
@@ -19,7 +20,7 @@ function hostEnvironment(configFile) {
   return { ...env, COMPUTE_RUNTIME_HOST_CONFIG: configFile };
 }
 
-function spawnHost(verified, configFile) {
+function spawnHost(verified, { configFile, endpoint, statusFile }) {
   const child = spawn(verified.paths.nodeExecutable, [verified.paths.hostEntry], { env: hostEnvironment(configFile),
     windowsHide: true, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
   let output = '';
@@ -30,12 +31,7 @@ function spawnHost(verified, configFile) {
     child.once('error', reject);
     child.once('close', (code, signal) => resolve({ code, signal }));
   });
-  const ready = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('bundled_host_ready_timeout')), 90000);
-    child.once('message', descriptor => { clearTimeout(timer); resolve(descriptor); });
-    child.once('error', error => { clearTimeout(timer); reject(error); });
-    child.once('close', () => { clearTimeout(timer); reject(new Error('bundled_host_ended_before_ready:' + output)); });
-  });
+  const ready = waitForRuntimeHostDescriptor(child, { timeoutMs: 90000, expectedEndpoint: endpoint, expectedStatusFile: statusFile });
   // Attach an observer immediately; readiness failures are awaited by the test.
   ready.catch(() => {});
   return { child, ready, closed, output: () => output };
@@ -77,7 +73,7 @@ test('real bundled host starts, releases every owned child and restarts against 
   const incarnations = [];
   let sourceDigest;
   for (let run = 0; run < 2; run += 1) {
-    const host = spawnHost(verified, prepared.configFile);
+    const host = spawnHost(verified, prepared);
     hosts.push(host);
     const descriptor = await host.ready;
     assert.deepEqual(Object.keys(descriptor).sort(), ['schema', 'provider', 'endpoint', 'instance_id', 'runtime_ready',
