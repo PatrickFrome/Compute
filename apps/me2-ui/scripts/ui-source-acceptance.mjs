@@ -9,7 +9,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { verifyMe2UiBundle } from '../../metaengine-browser/scripts/verify-me2-ui-bundle.mjs';
-import { inventoryUiRuntime, verifyUiRuntime } from './ui-runtime-inventory.mjs';
+import { assertUiRuntimePhysicalRoot, inventoryUiRuntime, verifyUiRuntime } from './ui-runtime-inventory.mjs';
 
 // Source-only acceptance. The Next server and Chromium are real processes; the
 // typed renderer bridge below is an inert fixture, never an Owner/PG receipt.
@@ -293,8 +293,9 @@ async function browserMatrix(browser, origin, evidenceDir, report) {
 export async function runSourceAcceptance(options) {
   assert.match(options['expected-sha'] || '', /^[0-9a-f]{40}$/, 'acceptance_expected_sha_required');
   for (const name of ['root', 'evidence-dir', 'chromium', 'playwright-module']) assert.ok(options[name], `acceptance_${name}_required`);
-  const root = realpathSync(options.root);
-  const evidenceDir = outputDirectory(options['evidence-dir'], root);
+  const root = path.resolve(options.root);
+  const rootIdentity = assertUiRuntimePhysicalRoot(root);
+  const evidenceDir = outputDirectory(options['evidence-dir'], rootIdentity.canonical_root);
   const chromiumPath = realpathSync(options.chromium);
   const playwrightPath = realpathSync(options['playwright-module']);
   const report = { schema: 'metaengine.ui.source-acceptance.v1', status: 'RUNNING', expected_source_sha: options['expected-sha'],
@@ -332,6 +333,7 @@ export async function runSourceAcceptance(options) {
     manifestBytes = readFileSync(path.join(root, 'me2-ui-manifest.json'));
     assert.equal(sha256(manifestBytes), bundle.manifest_sha256, 'acceptance_manifest_changed_before_launch');
     before = captureInventory('before');
+    assert.deepEqual(before.root_binding, rootIdentity.binding, 'acceptance_root_changed_before_launch');
     const port = await freePort();
     const origin = `http://127.0.0.1:${port}`;
     // An allowlist prevents ambient override/audit variables from changing the

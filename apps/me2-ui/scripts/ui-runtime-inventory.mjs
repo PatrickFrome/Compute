@@ -4,19 +4,46 @@ import { closeSync, fstatSync, lstatSync, openSync, readFileSync, readdirSync, r
 import path from 'node:path';
 
 export const UI_RUNTIME_HASH_SCHEME = 'path-kind-mode-content-link-v1';
+export const UI_RUNTIME_ROOT_BINDING_SCHEME = 'me2.ui-runtime-physical-root.v1';
 const sha256 = value => createHash('sha256').update(value).digest('hex');
 const mode = stat => Number(stat.mode & 0o7777n);
 const sameStat = (a, b) => ['dev', 'ino', 'mode', 'nlink', 'size', 'mtimeNs', 'ctimeNs'].every(key => a[key] === b[key]);
+const sameRoot = (a, b) => ['dev', 'ino', 'birthtimeNs'].every(key => a[key] === b[key]);
+
+// Inspect the supplied path before dereferencing it. A root junction/symlink
+// must not be silently converted into a different physical-root assertion.
+// This binding is deliberately separate from the relocatable content digest.
+export function assertUiRuntimePhysicalRoot(directory) {
+  assert.ok(typeof directory === 'string' && directory.length > 0 && !directory.includes('\0'), 'me2_ui_runtime_root_invalid');
+  const requested = path.resolve(directory);
+  const before = lstatSync(requested, { bigint: true });
+  assert.ok(before.isDirectory() && !before.isSymbolicLink() && before.ino > 0n, 'me2_ui_runtime_root_not_physical');
+  for (let ancestor = path.dirname(requested);; ancestor = path.dirname(ancestor)) {
+    const stat = lstatSync(ancestor, { bigint: true });
+    assert.ok(stat.isDirectory() && !stat.isSymbolicLink(), 'me2_ui_runtime_root_ancestor_not_physical');
+    if (ancestor === path.dirname(ancestor)) break;
+  }
+  const canonical = realpathSync(requested);
+  const target = lstatSync(canonical, { bigint: true });
+  const after = lstatSync(requested, { bigint: true });
+  assert.ok(target.isDirectory() && !target.isSymbolicLink() && sameRoot(before, target)
+    && !after.isSymbolicLink() && sameStat(before, after) && sameRoot(before, after), 'me2_ui_runtime_root_changed');
+  return { canonical_root: canonical, binding: Object.freeze({
+    schema: UI_RUNTIME_ROOT_BINDING_SCHEME, canonical_path_sha256: sha256(canonical),
+    device: before.dev.toString(), file_id: before.ino.toString(), birthtime_ns: before.birthtimeNs.toString(),
+  }) };
+}
 
 // Acceptance evidence, separate from the production package content manifest.
 // Includes the root, empty directories, links, modes and the manifest itself.
-// mtime/ctime/inodes detect concurrent changes but are not stable content identity.
+// mtime/ctime/inodes detect concurrent changes but are not content identity.
+// root_binding additionally pins the original physical root between observations.
 // Windows mode bits do not describe ACLs, alternate streams or reparse metadata.
 // This is a sampled tree observation, not an atomic filesystem snapshot or proof
 // that a transient write never occurred between observations.
 export function inventoryUiRuntime(directory) {
-  const root = realpathSync(directory);
-  assert.ok(lstatSync(root).isDirectory(), 'me2_ui_runtime_root_not_directory');
+  const requested = path.resolve(directory);
+  const { canonical_root: root, binding: rootBinding } = assertUiRuntimePhysicalRoot(requested);
   const entries = [];
   const names = new Set();
   const observed = [];
@@ -89,19 +116,25 @@ export function inventoryUiRuntime(directory) {
   // Also detect a previously read file being replaced while later files were
   // read. A readonly filesystem remains the stronger runtime write guard.
   for (const record of observed) unchanged(record);
-  assert.equal(realpathSync(directory), root, 'me2_ui_runtime_root_changed');
+  assert.deepEqual(assertUiRuntimePhysicalRoot(requested).binding, rootBinding, 'me2_ui_runtime_root_changed');
   entries.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
-  return { runtime_hash_scheme: UI_RUNTIME_HASH_SCHEME, entries, size_bytes: sizeBytes, tree_sha256: sha256(JSON.stringify(entries)) };
+  return { runtime_hash_scheme: UI_RUNTIME_HASH_SCHEME, entries, size_bytes: sizeBytes, tree_sha256: sha256(JSON.stringify(entries)),
+    root_binding: rootBinding };
 }
 
 // Pin the original in-memory snapshot before launching the owned child, then
 // call during the probe and again after child exit. A fresh on-disk manifest
 // must not be allowed to redefine the expected inventory after startup.
+// For two independently staged images, compare entries/size/tree_sha256 instead;
+// verifyUiRuntime deliberately requires the same original physical root.
 export function verifyUiRuntime(directory, expected) {
   assert.equal(expected?.runtime_hash_scheme, UI_RUNTIME_HASH_SCHEME, 'me2_ui_runtime_scheme_invalid');
   assert.ok(Array.isArray(expected.entries) && expected.entries.length > 0, 'me2_ui_runtime_inventory_missing');
   assert.equal(expected.tree_sha256, sha256(JSON.stringify(expected.entries)), 'me2_ui_runtime_expected_digest_invalid');
+  assert.equal(expected.root_binding?.schema, UI_RUNTIME_ROOT_BINDING_SCHEME, 'me2_ui_runtime_root_binding_missing');
+  assert.deepEqual(assertUiRuntimePhysicalRoot(directory).binding, expected.root_binding, 'me2_ui_runtime_root_binding_mismatch');
   const observed = inventoryUiRuntime(directory);
+  assert.deepEqual(observed.root_binding, expected.root_binding, 'me2_ui_runtime_root_binding_mismatch');
   assert.deepEqual(observed.entries, expected.entries, 'me2_ui_runtime_inventory_mismatch');
   assert.equal(observed.size_bytes, expected.size_bytes, 'me2_ui_runtime_size_mismatch');
   assert.equal(observed.tree_sha256, expected.tree_sha256, 'me2_ui_runtime_digest_mismatch');

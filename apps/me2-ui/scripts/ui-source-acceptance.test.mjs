@@ -1,8 +1,22 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
-import { stopOwnedChild } from './ui-source-acceptance.mjs';
+import { runSourceAcceptance, stopOwnedChild } from './ui-source-acceptance.mjs';
+
+test('the harness refuses an original root symlink or Windows junction before creating evidence or launching children', async t => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'me2-source-root-'));
+  t.after(() => fs.rmSync(temporary, {recursive:true,force:true}));
+  const root = path.join(temporary, 'bundle'), alias = path.join(temporary, 'alias'), evidence = path.join(temporary, 'evidence');
+  fs.mkdirSync(root);
+  fs.symlinkSync(root, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  await assert.rejects(runSourceAcceptance({root:alias,'expected-sha':'a'.repeat(40),'evidence-dir':evidence,
+    chromium:'must-not-be-resolved','playwright-module':'must-not-be-resolved'}), /me2_ui_runtime_root_not_physical/);
+  assert.equal(fs.existsSync(evidence), false);
+});
 
 // Real inert children establish the shutdown observations. No Next runtime,
 // browser, network listener, user installation or unrelated process is used.

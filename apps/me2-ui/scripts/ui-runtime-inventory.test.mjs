@@ -5,7 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { inventoryUiContent } from './ui-content-inventory.mjs';
-import { inventoryUiRuntime, verifyUiRuntime } from './ui-runtime-inventory.mjs';
+import { assertUiRuntimePhysicalRoot, inventoryUiRuntime, verifyUiRuntime } from './ui-runtime-inventory.mjs';
+
+const contentObservation = ({ root_binding: _physicalRoot, ...content }) => content;
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'me2-ui-runtime-inventory-'));
@@ -29,13 +31,17 @@ test('runtime inventory includes root, empty directories and the original manife
   assert.deepEqual(verifyUiRuntime(bundle, before), before);
 });
 
-test('runtime identity is stable after relocation and mtime-only changes', t => {
+test('relocatable content identity is separate from the original physical-root binding', t => {
   const { root, bundle } = fixture(t);
   const before = inventoryUiRuntime(bundle);
   fs.utimesSync(path.join(bundle, 'server.js'), new Date(1), new Date(1));
   fs.cpSync(bundle, path.join(root, 'relocated'), { recursive: true });
   assert.deepEqual(inventoryUiRuntime(bundle), before);
-  assert.deepEqual(inventoryUiRuntime(path.join(root, 'relocated')), before);
+  const relocated = inventoryUiRuntime(path.join(root, 'relocated'));
+  assert.deepEqual(contentObservation(relocated), contentObservation(before));
+  assert.notDeepEqual(relocated.root_binding, before.root_binding);
+  assert.throws(() => verifyUiRuntime(path.join(root, 'relocated'), before), /me2_ui_runtime_root_binding_mismatch/);
+  assert.deepEqual(verifyUiRuntime(path.join(root, 'relocated'), relocated), relocated);
   assert.ok(!JSON.stringify(before).includes(root));
 });
 
@@ -97,7 +103,7 @@ test('internal absolute links retain relocatable identity without executor paths
   fs.cpSync(bundle, relocated, { recursive: true, verbatimSymlinks: true });
   fs.unlinkSync(path.join(relocated, 'link.js'));
   fs.symlinkSync(path.join(relocated, 'server.js'), path.join(relocated, 'link.js'));
-  assert.deepEqual(inventoryUiRuntime(relocated), before);
+  assert.deepEqual(contentObservation(inventoryUiRuntime(relocated)), contentObservation(before));
   assert.ok(!JSON.stringify(before).includes(root));
 });
 
@@ -165,4 +171,63 @@ test('the original expected inventory must keep its own digest', t => {
   const before = inventoryUiRuntime(bundle);
   before.entries[0].mode ^= 0o020;
   assert.throws(() => verifyUiRuntime(bundle, before), /me2_ui_runtime_expected_digest_invalid/);
+});
+
+// Directory junctions on Windows do not need symlink-creation privilege. These
+// mandatory root controls run on Windows as junction tests, without a skip.
+test('an initially supplied root symlink or Windows junction is refused', t => {
+  const { root, bundle } = fixture(t);
+  const alias = path.join(root, 'alias');
+  fs.symlinkSync(bundle, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  assert.throws(() => assertUiRuntimePhysicalRoot(alias), /me2_ui_runtime_root_not_physical/);
+  assert.throws(() => inventoryUiRuntime(alias), /me2_ui_runtime_root_not_physical/);
+});
+
+test('root rename followed by a symlink or Windows junction cannot retain a PASS', t => {
+  const { root, bundle } = fixture(t);
+  const before = inventoryUiRuntime(bundle);
+  const moved = path.join(root, 'moved');
+  fs.renameSync(bundle, moved);
+  fs.symlinkSync(moved, bundle, process.platform === 'win32' ? 'junction' : 'dir');
+  assert.equal(inventoryUiRuntime(moved).tree_sha256, before.tree_sha256);
+  assert.throws(() => verifyUiRuntime(bundle, before), /me2_ui_runtime_root_not_physical/);
+});
+
+test('a byte-identical replacement directory cannot reuse the original physical binding', t => {
+  const { root, bundle } = fixture(t);
+  const before = inventoryUiRuntime(bundle);
+  const retired = path.join(root, 'retired');
+  fs.renameSync(bundle, retired);
+  fs.cpSync(retired, bundle, { recursive: true });
+  const replacement = inventoryUiRuntime(bundle);
+  assert.deepEqual(contentObservation(replacement), contentObservation(before));
+  assert.notEqual(replacement.root_binding.file_id, before.root_binding.file_id);
+  assert.throws(() => verifyUiRuntime(bundle, before), /me2_ui_runtime_root_binding_mismatch/);
+});
+
+test('a root reached through a symlink or Windows junction ancestor is refused', t => {
+  const { root, bundle } = fixture(t);
+  const alias = path.join(root, 'ancestor-alias');
+  fs.symlinkSync(bundle, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  assert.throws(() => inventoryUiRuntime(path.join(alias, 'empty')), /me2_ui_runtime_root_ancestor_not_physical/);
+});
+
+test('a legacy content-only snapshot cannot establish physical-root immutability', t => {
+  const { bundle } = fixture(t);
+  assert.throws(() => verifyUiRuntime(bundle, contentObservation(inventoryUiRuntime(bundle))), /me2_ui_runtime_root_binding_missing/);
+});
+
+test('W73 invoked package scripts execute all new UI acceptance regressions', () => {
+  const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  const workflow = fs.readFileSync(new URL('../../../.github/workflows/client-source-candidate-w73.yml', import.meta.url), 'utf8');
+  const scripts = [...new Set([...workflow.matchAll(/^\s+bun run (test:[a-z-]+)\s*$/gm)].map(match => match[1]))];
+  assert.ok(scripts.length > 0, 'W73 must invoke UI test scripts');
+  const invokedFiles = scripts.flatMap(name => {
+    assert.match(pkg.scripts[name], /^node --test /, name);
+    return pkg.scripts[name].split(/\s+/).slice(2);
+  });
+  for (const required of ['src/lib/goal-journal-readback.ui.test.mjs', 'src/lib/client-runtime-resource.test.mjs',
+    'scripts/ui-runtime-inventory.test.mjs', 'scripts/ui-source-acceptance.test.mjs']) {
+    assert.equal(invokedFiles.filter(file => file === required).length, 1, required + ' must execute once in W73');
+  }
 });
