@@ -355,7 +355,7 @@
     "apps/metaengine-browser/scripts/qa-soak-startup-readback.mjs": "d015fb36a412b3581f35dbf9e271601b5121d525",
     "apps/metaengine-browser/scripts/qualified-electron-runtime.mjs": "0b06e212ef36f8691bf142e7304b1c6cadedc9eb",
     "apps/metaengine-browser/scripts/qualify-installed-client-launch.mjs": "baf653ef38ebee275ec53ef5eded63133e3467c1",
-    "apps/metaengine-browser/scripts/qualify-installed-owner-consumer.mjs": "5e6b7d369823fee0f6ab908237f806f3dcee0f96",
+    "apps/metaengine-browser/scripts/qualify-installed-owner-consumer.mjs": "fa89d025d510bb2d0176fb02193fe9f7956481f5",
     "apps/metaengine-browser/scripts/qualify-r97-electron-w78.mjs": "2c12105c23157f4d419400238a412b7c19522975",
     "apps/metaengine-browser/scripts/release-proof-producer-w77.mjs": "95f4b80e373a19ec8703a47c6620dfa4730dc67e",
     "apps/metaengine-browser/scripts/stage-client-state-runtime.mjs": "6e26343a5d85e60ccb4623f14b0dfa5ce9bfc7f1",
@@ -1006,7 +1006,8 @@
     "evidence/audits/metaengine-20261026-seed-recovery/live-artifact-observation.json": "1883354f43351350cd202506b1fc8e50d70a57d3",
     "evidence/audits/metaengine-20261026-edge-health-recovery/live-artifact-observation.json": "91d8801477b94524c9e82445b6bd9ca34760a532",
     "apps/metaengine-browser/test/isolated-test-electron-mode.test.mjs": "e0e14645d48528bc5e097a36f79e9c4f58bc7902",
-    "evidence/audits/metaengine-20261026-health-observer-recovery/live-artifact-observation.json": "60b4b53c71a0414fe082fc5d5802118986c29511"
+    "evidence/audits/metaengine-20261026-health-observer-recovery/live-artifact-observation.json": "60b4b53c71a0414fe082fc5d5802118986c29511",
+    "apps/metaengine-browser/test/installed-owner-soak-failure-code.test.mjs": "4127f9f37d30d1248c97440ecc54e8ac24315a0e"
   },
   "parent_checks_not_transitive": true,
   "proof_levels": {

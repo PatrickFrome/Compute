@@ -23,6 +23,44 @@ const { assertPackagedOfflineRuntimeBinding } = require('./offline-runtime-packa
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const fail = reason => { throw new Error('installed_owner_consumer_' + reason); };
 export const OWNER_CONSUMERS = Object.freeze(['FINAL_RUNTIME_ACTIVATION', 'SHELL_FIRST_DIRTY_PROFILE', 'AUTONOMOUS_SESSION_SOAK']);
+const SOAK_FAILURE_CODES = new Set([
+  'packaged_browser_missing', 'proof_missing', 'activation_count_invalid', 'concurrent_burst_invalid',
+  'activation_p95_budget_invalid', 'resource_budget_invalid', 'profile_probe_timeout', 'profile_probe_exit',
+  'profile_probe_output_missing', 'profile_probe_contract_invalid', 'normal_ui_exited_early',
+  'runtime_import_failed', 'normal_ui_not_stable_visible', 'runtime_import_success_missing',
+  'startup_always_on_control_state_invalid', 'runtime_genesis_contract_invalid', 'runtime_genesis_initial_tabs_invalid',
+  'normal_ui_exited_before_resource_baseline', 'startup_resource_baseline_unsettled',
+  'zero_topology_startup_created_initial_tab', 'zero_topology_startup_started_initial_remote_load',
+  'normal_ui_exited_before_me2_settle', 'me2_runtime_degraded', 'me2_runtime_not_settled',
+  'normal_ui_exited_before_resource_plateau', 'me2_resource_baseline_not_stable',
+  'secondary_timeout', 'secondary_exit', 'secondary_ack_missing', 'secondary_ack_invalid', 'duplicate_launch_id',
+  'primary_activation_missing', 'activation_sequence_not_monotonic', 'activation_ack_sequence_drift',
+  'activation_sequence_duplicate', 'primary_died_after_activation', 'burst_secondary_timeout',
+  'burst_secondary_exit', 'burst_secondary_ack_missing', 'burst_secondary_ack_invalid', 'burst_duplicate_launch_id',
+  'burst_primary_activation_missing', 'burst_activation_ack_sequence_drift', 'burst_activation_sequence_duplicate',
+  'primary_died_during_post_activation_hold', 'runtime_import_failed_after_activation_burst',
+  'redundant_durable_second_instance_marker_present', 'activation_p95_budget_exceeded',
+  'working_set_growth_budget_exceeded', 'handle_growth_budget_exceeded', 'concurrent_burst_budget_exceeded',
+  'activation_count_mismatch', 'shutdown_signal_timeout', 'shutdown_signal_failed', 'shutdown_primary_timeout',
+  'primary_cleanup_unconfirmed',
+]);
+// Diagnostic only. Never forward the child command, stderr, suffix values or
+// private paths, and never turn a classified failure into a successful proof.
+export function ownerSessionSoakFailureCode(error) {
+  const fallback = 'session_soak_physical_failed';
+  if (error?.code === 'ETIMEDOUT') return 'session_soak_process_timeout';
+  if (error?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') return 'session_soak_output_limit';
+  if (error?.killed === true) return 'session_soak_process_terminated';
+  if (typeof error?.stderr !== 'string' || Buffer.byteLength(error.stderr) > 1024 * 1024) return fallback;
+  const reasons = new Set();
+  for (const match of error.stderr.matchAll(/^\s*(?:\+\s*)?FullyQualifiedErrorId\s*:\s*soak_([a-z0-9_]+)(?=[:\s]|$)/gm)) {
+    const code = match[1].replace(/^profile_probe_exit_\d+$/, 'profile_probe_exit');
+    if (!SOAK_FAILURE_CODES.has(code)) return fallback;
+    reasons.add(code);
+  }
+  if (reasons.size !== 1) return fallback;
+  return 'session_soak_' + [...reasons][0];
+}
 const contained = (root, target) => {
   const relative = path.relative(path.resolve(root), path.resolve(target));
   return relative !== '' && relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative);
@@ -260,7 +298,7 @@ export async function qualifyInstalledOwnerConsumer({ consumer, installRoot, sou
       } catch { /* wait only while the bounded physical runner is alive */ }
       if (!finished) await delay(250);
     }
-    try { await task; } catch { fail('session_soak_physical_failed'); }
+    try { await task; } catch (error) { fail(ownerSessionSoakFailureCode(error)); }
     const soak = assertOwnerSessionSoak(JSON.parse((await regularBytes(proofFile)).toString('utf8').replace(/^\uFEFF/,'')),{sourceHead:expectedHead,version:expectedVersion});
     if (!current || nativeWindow?.pid !== soak.primary_pid || nativeWindow.visible!==true) fail('session_soak_attestation_missing');
     assertOwnerConsumerRuntime({previous,current,health:attestedHealth,owner,pid:soak.primary_pid,postgresPid});
