@@ -54,6 +54,8 @@ export async function createAutonomousProjectHost({ userDataPath, supervisor, ge
         const workspaceId = `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-8${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
         const row = rows[0] || { workspace_id: workspaceId, workspace_generation: 1,
           coordination_workspace_id: snapshot?.coordination_workspace_id, base_sha: lease.base_sha };
+        if (row.coordination_workspace_id !== snapshot?.coordination_workspace_id || row.base_sha !== lease.base_sha)
+          throw new Error('autonomous_project_workspace_binding_drift');
         if (row.state === 'FROZEN' || row.dirty_hold || row.ambiguity_code) throw new Error('autonomous_project_workspace_fenced');
         const host = getManagedHost();
         if (host?.snapshot()?.state !== 'READY') throw new Error('autonomous_project_managed_host_unavailable');
@@ -62,8 +64,12 @@ export async function createAutonomousProjectHost({ userDataPath, supervisor, ge
           workspace_id: row.workspace_id, workspace_generation: row.workspace_generation };
         payload.idempotency_key = managedProjectEffectKey(payload);
         const receipt = await host.executeCommand({ action: 'PROJECT_CREATE', issued_by: 'autonomous-project-host', payload });
-        if (receipt?.state !== 'PROVEN' || receipt.authority_effect !== false || receipt.automatic_retry_allowed !== false
+        if (receipt?.schema !== 'metaengine.devos.managed-task-project-runtime.v1'
+          || receipt.idempotency_key !== payload.idempotency_key
+          || receipt.state !== 'PROVEN' || receipt.authority_effect !== false || receipt.automatic_retry_allowed !== false
           || receipt.reservation?.workspace_id !== row.workspace_id || receipt.reservation?.task_id !== lease.task_id
+          || receipt.reservation?.workspace_generation !== row.workspace_generation
+          || receipt.reservation?.coordination_workspace_id !== row.coordination_workspace_id
           || receipt.reservation?.claim_id !== claim_id || receipt.reservation?.agent_id !== lease.agent_id
           || receipt.reservation?.lease_generation !== lease.lease_generation || receipt.proof?.head_sha !== row.base_sha
           || receipt.proof?.locked !== true) throw new Error('autonomous_project_workspace_effect_not_proven');

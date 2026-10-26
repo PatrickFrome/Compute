@@ -445,3 +445,140 @@ for(const tamper of ['children','wire_id','hash','flags','claim','generation','r
  assert.equal((await f.journal.find(f.key)).receipt,null);
  assert.equal(await f.journal.find(f.key.replace(projectId,otherProject)),null);
 });
+
+for (const sameRequest of [true, false]) {
+  test(`concurrent continuation contenders receive one durable send barrier (same request=${sameRequest})`, async t => {
+    const f = await fixture(t);
+    const competingJournal = createAutonomousProjectJournal({ filePath: f.journalPath });
+    const competing = f.own(new AutonomousProjectTaskRuntime({ journal: competingJournal,
+      request: input => f.provider.request(input), materializeProject: async () => ({ state: 'NOT_REQUIRED' }) }));
+    let observed = 0, release;
+    const bothObserved = new Promise(resolve => { release = resolve; });
+    const boundary = { observeTranscriptFloor: async () => {
+      if (++observed === 2) release();
+      await bothObserved;
+      return 100;
+    } };
+    let sends = 0;
+    const send = async () => { sends++; return { effect_state: 'PROVEN_COMPOSER_CLEARED' }; };
+    const first = [{ request_id: 'fixture:concurrent:first', status: 'COMPLETED', summary: 'verified result' }];
+    const second = sameRequest ? first : [{ ...first[0], request_id: 'fixture:concurrent:second' }];
+    const results = await Promise.all([
+      f.runtime.continueConversation(rootTask(), first, send, boundary),
+      competing.continueConversation(rootTask(), second, send, boundary),
+    ]);
+    assert.equal(sends, 1, 'only the transaction that acquires the current continuation barrier may send');
+    assert.deepEqual(results.map(row => row.state).sort(), ['AMBIGUOUS', 'DELIVERED']);
+    assert.ok(results.every(row => row.automatic_retry_allowed === false));
+    assert.equal((await f.journal.pending()).length, 0, 'a losing contender must not create another intent');
+  });
+}
+
+test('a delayed transcript observation cannot adopt a predecessor confirmed after that observation began', async t => {
+  const f = await fixture(t);
+  const journal = createAutonomousProjectJournal({ filePath: f.journalPath });
+  const competing = f.own(new AutonomousProjectTaskRuntime({ journal,
+    request: input => f.provider.request(input), materializeProject: async () => ({ state: 'NOT_REQUIRED' }) }));
+  let enter, release;
+  const entered = new Promise(resolve => { enter = resolve; });
+  const delayed = new Promise(resolve => { release = resolve; });
+  let sends = 0;
+  const send = async () => { sends++; return { effect_state: 'PROVEN_COMPOSER_CLEARED' }; };
+  const result = id => [{ request_id: id, status: 'COMPLETED', summary: 'observed result' }];
+  const losingTurn = competing.continueConversation(rootTask(), result('fixture:delayed:successor'), send,
+    { observeTranscriptFloor: async () => { enter(); await delayed; return 100; } });
+  await entered;
+  const winner = await f.runtime.continueConversation(rootTask(), result('fixture:delayed:first'), send,
+    { observeTranscriptFloor: async () => 100 });
+  const confirmed = await f.journal.latestConversationTurn(rootTask());
+  release();
+  const loser = await losingTurn;
+  assert.equal(winner.state, 'DELIVERED');
+  assert.equal(loser.state, 'AMBIGUOUS', 'the predecessor must be pinned before the asynchronous floor observation');
+  assert.equal(sends, 1);
+  assert.deepEqual(await f.journal.latestConversationTurn(rootTask()), confirmed);
+});
+
+test('restart preserves an uncertain turn HOLD when a different successor request arrives', async t => {
+  const f = await fixture(t);
+  let sends = 0;
+  const uncertain = [{ request_id: 'fixture:prior:unknown', status: 'COMPLETED', summary: 'observed result' }];
+  await assert.rejects(f.runtime.continueConversation(rootTask(), uncertain, async () => {
+    sends++;
+    throw new Error('fixture_process_loss_after_send');
+  }, { observeTranscriptFloor: async () => 90 }), /fixture_process_loss_after_send/);
+  const pendingTurn = await f.journal.latestConversationTurn(rootTask());
+  await f.runtime.close();
+  const journal = createAutonomousProjectJournal({ filePath: f.journalPath });
+  const restarted = f.own(new AutonomousProjectTaskRuntime({ journal,
+    request: input => f.provider.request(input), materializeProject: async () => ({ state: 'NOT_REQUIRED' }) }));
+  const result = await restarted.continueConversation(rootTask(),
+    [{ request_id: 'fixture:new:successor', status: 'COMPLETED', summary: 'another observed result' }],
+    async () => { sends++; return { effect_state: 'PROVEN_COMPOSER_CLEARED' }; },
+    { observeTranscriptFloor: async () => 120 });
+  assert.equal(result.state, 'AMBIGUOUS', 'new request bytes cannot supersede unresolved physical delivery');
+  assert.equal(sends, 1);
+  assert.equal(result.automatic_retry_allowed, false);
+  assert.deepEqual(await journal.latestConversationTurn(rootTask()), pendingTurn);
+  assert.equal((await restarted.latestTurnForLease(rootTask())).state, 'AMBIGUOUS');
+});
+
+test('an older UNKNOWN turn remains fenced after a pre-fix journal already recorded a newer confirmed turn', async t => {
+  const f = await fixture(t);
+  const results = [{ request_id: 'fixture:legacy:unknown', status: 'COMPLETED', summary: 'observed result' }];
+  let sends = 0;
+  await assert.rejects(f.runtime.continueConversation(rootTask(), results, async () => {
+    sends++; throw new Error('fixture_process_loss_after_send');
+  }, { observeTranscriptFloor: async () => 30 }), /fixture_process_loss_after_send/);
+  const unknown = await f.journal.latestConversationTurn(rootTask());
+  // Model a journal produced by the old implementation, which could append
+  // and confirm another turn despite the unresolved predecessor. No new
+  // physical send is simulated for this historical fixture record.
+  const laterKey = `turn:${rootTask().task_id}:1:legacy-later`;
+  const laterIntent = { ...unknown.intent, transcript_floor: 60 };
+  await f.journal.begin(laterKey, laterIntent);
+  await f.journal.confirm(laterKey, { effect_state: 'PROVEN_COMPOSER_CLEARED',
+    prompt_sha256: laterIntent.prompt_sha256, transcript_floor: 60 });
+  await f.runtime.close();
+  const journal = createAutonomousProjectJournal({ filePath: f.journalPath });
+  const restarted = f.own(new AutonomousProjectTaskRuntime({ journal,
+    request: input => f.provider.request(input), materializeProject: async () => ({ state: 'NOT_REQUIRED' }) }));
+  const result = await restarted.continueConversation(rootTask(),
+    [{ ...results[0], request_id: 'fixture:legacy:successor' }],
+    async () => { sends++; return { effect_state: 'PROVEN_COMPOSER_CLEARED' }; },
+    { observeTranscriptFloor: async () => 90 });
+  assert.equal(result.state, 'AMBIGUOUS');
+  assert.equal(sends, 1);
+  assert.equal((await journal.latestConversationTurn(rootTask())).effect_key, laterKey);
+  assert.deepEqual(await journal.find(unknown.effect_key), unknown, 'old UNKNOWN custody stays immutable');
+  assert.equal((await journal.pending()).length, 1);
+});
+
+for (const foreign of ['agent_id', 'project_id']) {
+  test(`a successor refuses hash-valid predecessor history from a foreign ${foreign} before transcript observation`, async t => {
+    const f = await fixture(t);
+    const key = `turn:${rootTask().task_id}:1:foreign-history`;
+    const intent = { schema: 'metaengine.devos.project-conversation-turn.v1',
+      project_id: projectId, task_id: rootTask().task_id, agent_id: rootTask().agent_id,
+      lease_generation: 1, transcript_floor: 100, prompt_sha256: 'a'.repeat(64),
+      delivered_tool_results: [{ request_id: 'fixture:foreign:delivered', result_sha256: 'b'.repeat(64) }],
+      unresolved_tool_effects: ['fixture:foreign:unknown'], delivery_history_complete: true,
+      authority_effect: false, scheduler_authority: false, second_scheduler_loop: false, automatic_retry_allowed: false };
+    intent[foreign] = foreign === 'agent_id' ? 'agent_foreign-fixture-001' : '33333333-3333-4333-8333-333333333333';
+    // The generic journal correctly hashes these bytes. Integrity of the local
+    // record alone does not bind another agent/project's history to this lease.
+    await f.journal.begin(key, intent);
+    await f.journal.confirm(key, { effect_state: 'PROVEN_COMPOSER_CLEARED',
+      prompt_sha256: intent.prompt_sha256, transcript_floor: intent.transcript_floor });
+    const before = await f.journal.latestConversationTurn(rootTask());
+    let observations = 0, sends = 0;
+    await assert.rejects(f.runtime.continueConversation(rootTask(),
+      [{ request_id: 'fixture:bound:successor', status: 'COMPLETED', summary: 'observed result' }],
+      async () => { sends++; return { effect_state: 'PROVEN_COMPOSER_CLEARED' }; },
+      { observeTranscriptFloor: async () => { observations++; return 120; } }), /continuation_binding_drift/);
+    assert.equal(observations, 0);
+    assert.equal(sends, 0);
+    assert.deepEqual(await f.journal.latestConversationTurn(rootTask()), before,
+      'foreign delivered identities and unresolved custody must not be inherited into a new turn');
+  });
+}

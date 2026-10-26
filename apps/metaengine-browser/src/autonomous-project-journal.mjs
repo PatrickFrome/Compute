@@ -125,13 +125,33 @@ export function createAutonomousProjectJournal({ filePath, maxEntries = 10000 } 
         cursor:{after_key,next_key:entries.at(-1)?.effect_key ?? after_key,has_more:rows.length>limit},
         automatic_retry_allowed:false,authority_effect:false };
     },
-    async begin(effectKey, intent) {
+    async begin(effectKey, intent, { previous_turn_key } = {}) {
       available(); key(effectKey); const text = encode(intent); const digest = digestPayload(text);
       db.exec('BEGIN IMMEDIATE');
       try {
         const prior = decode(db.prepare('SELECT * FROM project_effects WHERE effect_key=?').get(effectKey));
         if (prior && prior.binding_sha256 !== digest) fail('binding_conflict');
         if (!prior) {
+          if (previous_turn_key !== undefined) {
+            if (intent?.schema !== 'metaengine.devos.project-conversation-turn.v1'
+                || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(intent.task_id || '')
+                || !Number.isSafeInteger(intent.lease_generation) || intent.lease_generation < 1) fail('conversation_binding_invalid');
+            const prefix = `turn:${intent.task_id}:${intent.lease_generation}:`;
+            if (!effectKey.startsWith(prefix)
+                || (previous_turn_key !== null && !key(previous_turn_key).startsWith(prefix))) fail('conversation_binding_invalid');
+            const latest = decode(db.prepare('SELECT * FROM project_effects WHERE effect_key GLOB ? ORDER BY rowid DESC LIMIT 1').get(`${prefix}*`));
+            const pending = db.prepare('SELECT 1 FROM project_effects WHERE effect_key GLOB ? AND receipt IS NULL LIMIT 1').get(`${prefix}*`);
+            // The observed predecessor and absence of UNKNOWN turns must
+            // still hold inside the same transaction that grants send custody.
+            // Different request bytes and other runtime processes cannot leap
+            // over an unfinished physical turn or race a second send into it.
+            if ((latest?.effect_key ?? null) !== previous_turn_key || pending
+                || (latest && (!Number.isSafeInteger(latest.intent.transcript_floor)
+                  || latest.intent.transcript_floor < 0 || latest.receipt?.transcript_floor !== latest.intent.transcript_floor))) {
+              db.exec('COMMIT');
+              return { created: false, continuation_blocked: true };
+            }
+          }
           if (db.prepare('SELECT count(*) count FROM project_effects').get().count >= maxEntries) fail('capacity_exceeded');
           db.prepare('INSERT INTO project_effects VALUES(?,?,?,NULL,NULL)').run(effectKey, digest, text);
         }

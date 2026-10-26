@@ -276,9 +276,19 @@ export class AutonomousProjectTaskRuntime {
     }
     this.#active(current.snapshot);
     if (typeof observeTranscriptFloor !== 'function') fail('continuation_boundary_required');
+    // Pin the predecessor before observing the physical transcript. A turn
+    // completed while this observation is in flight invalidates its boundary;
+    // the journal transaction below must compare this same predecessor.
+    const previous = await this.#journal.latestConversationTurn?.(lease);
+    if (previous && (previous.intent?.project_id !== current.snapshot.project_id
+        || previous.intent.task_id !== lease.task_id || previous.intent.agent_id !== lease.agent_id
+        || previous.intent.lease_generation !== lease.lease_generation)) fail('continuation_binding_drift');
+    if (previous && (!previous.receipt || !Number.isSafeInteger(previous.intent.transcript_floor)
+        || previous.intent.transcript_floor < 0 || previous.receipt.transcript_floor !== previous.intent.transcript_floor)) {
+      return { state: 'AMBIGUOUS', physical_effect_replayed: false, ...flags };
+    }
     const transcript_floor = await observeTranscriptFloor();
     if (!Number.isSafeInteger(transcript_floor) || transcript_floor < 0) fail('continuation_boundary_invalid');
-    const previous = await this.#journal.latestConversationTurn?.(lease);
     const delivered = new Map((previous?.intent?.delivered_tool_results || []).map(row => [row.request_id, row]));
     for (const row of results.slice(0, 8)) {
       const reference = { request_id: row.request_id, result_sha256: digest({ request_id: row.request_id, status: row.status, summary: row.summary }) };
@@ -290,7 +300,11 @@ export class AutonomousProjectTaskRuntime {
     for(const row of results.slice(0,8)) if(row.effect_unknown===true) unresolved.add(row.request_id);
     const intent = { ...binding, transcript_floor, delivered_tool_results: [...delivered.values()], unresolved_tool_effects:[...unresolved],
       delivery_history_complete: !previous || previous.intent?.delivery_history_complete === true };
-    await this.#journal.begin(effectKey, intent);
+    const begun = await this.#journal.begin(effectKey, intent, { previous_turn_key: previous?.effect_key ?? null });
+    // A prior read is only an observation. Exactly one durable transaction may
+    // acquire this physical send; identical and different concurrent requests
+    // must not treat an existing or superseded intent as a dispatch permit.
+    if (begun.created !== true) return { state: 'AMBIGUOUS', physical_effect_replayed: false, ...flags };
     const receipt = await send(prompt);
     if (!['PROVEN_COMPOSER_CLEARED', 'PROVEN_NEW_CONVERSATION', 'PROVEN_GENERATING'].includes(receipt?.effect_state)) fail('continuation_effect_ambiguous');
     await this.#journal.confirm(effectKey, { effect_state: receipt.effect_state, prompt_sha256: intent.prompt_sha256, transcript_floor, ...flags });
