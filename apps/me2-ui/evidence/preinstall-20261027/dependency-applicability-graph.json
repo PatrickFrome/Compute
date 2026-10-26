@@ -1,0 +1,265 @@
+{
+  "source_sha": "9d7527683060e314eb1d39fec9ce2304a57103c4",
+  "lock_sha256": "a679ce0049ba42eb9513c58407a546b01028e723d7e7159e59356c6d6e94a31d",
+  "method": "Dependency and optional-dependency edges plus peer edges whose named records resolve in the lock; nested keys searched from issuer toward root, preserving @scope/name as one package segment; no registry requests. Declared reachability is not packaged runtime tracing.",
+  "total_records": 714,
+  "prod_reachable_records": 339,
+  "dev_reachable_records": 395,
+  "union_reachable_records": 714,
+  "unresolved_edges": [
+    {
+      "from": "framer-motion",
+      "kind": "peerDependencies",
+      "name": "@emotion/is-prop-valid",
+      "range": "*"
+    },
+    {
+      "from": "next",
+      "kind": "peerDependencies",
+      "name": "@opentelemetry/api",
+      "range": "^1.1.0"
+    },
+    {
+      "from": "next",
+      "kind": "peerDependencies",
+      "name": "@playwright/test",
+      "range": "^1.51.1"
+    },
+    {
+      "from": "next",
+      "kind": "peerDependencies",
+      "name": "babel-plugin-react-compiler",
+      "range": "*"
+    },
+    {
+      "from": "next",
+      "kind": "peerDependencies",
+      "name": "sass",
+      "range": "^1.3.0"
+    },
+    {
+      "from": "next-auth",
+      "kind": "peerDependencies",
+      "name": "@auth/core",
+      "range": "0.34.3"
+    },
+    {
+      "from": "next-auth",
+      "kind": "peerDependencies",
+      "name": "nodemailer",
+      "range": "^7.0.7"
+    },
+    {
+      "from": "pg",
+      "kind": "peerDependencies",
+      "name": "pg-native",
+      "range": ">=3.0.1"
+    },
+    {
+      "from": "ws",
+      "kind": "peerDependencies",
+      "name": "bufferutil",
+      "range": "^4.0.1"
+    },
+    {
+      "from": "ws",
+      "kind": "peerDependencies",
+      "name": "utf-8-validate",
+      "range": ">=5.0.2"
+    },
+    {
+      "from": "eslint-import-resolver-typescript",
+      "kind": "peerDependencies",
+      "name": "eslint-plugin-import-x",
+      "range": "*"
+    }
+  ],
+  "packages": [
+    {
+      "key": "@babel/core",
+      "identity": "@babel/core@7.29.6",
+      "production_path": null,
+      "development_path": [
+        "eslint-config-next",
+        "eslint-plugin-react-hooks",
+        "@babel/core"
+      ]
+    },
+    {
+      "key": "@humanfs/node",
+      "identity": "@humanfs/node@0.16.8",
+      "production_path": null,
+      "development_path": [
+        "eslint",
+        "@humanfs/node"
+      ]
+    },
+    {
+      "key": "ajv",
+      "identity": "ajv@6.14.0",
+      "production_path": null,
+      "development_path": [
+        "eslint",
+        "ajv"
+      ]
+    },
+    {
+      "key": "baseline-browser-mapping",
+      "identity": "baseline-browser-mapping@2.11.33",
+      "production_path": [
+        "next",
+        "baseline-browser-mapping"
+      ],
+      "development_path": [
+        "eslint-config-next",
+        "eslint-plugin-react-hooks",
+        "@babel/core",
+        "@babel/helper-compilation-targets",
+        "browserslist",
+        "baseline-browser-mapping"
+      ]
+    },
+    {
+      "key": "brace-expansion",
+      "identity": "brace-expansion@1.1.21",
+      "production_path": null,
+      "development_path": [
+        "eslint",
+        "minimatch",
+        "brace-expansion"
+      ]
+    },
+    {
+      "key": "browserslist",
+      "identity": "browserslist@4.29.4",
+      "production_path": null,
+      "development_path": [
+        "eslint-config-next",
+        "eslint-plugin-react-hooks",
+        "@babel/core",
+        "@babel/helper-compilation-targets",
+        "browserslist"
+      ]
+    },
+    {
+      "key": "flatted",
+      "identity": "flatted@3.4.4",
+      "production_path": null,
+      "development_path": [
+        "eslint",
+        "file-entry-cache",
+        "flat-cache",
+        "flatted"
+      ]
+    },
+    {
+      "key": "js-yaml",
+      "identity": "js-yaml@4.3.2",
+      "production_path": null,
+      "development_path": [
+        "eslint",
+        "@eslint/eslintrc",
+        "js-yaml"
+      ]
+    },
+    {
+      "key": "minimatch",
+      "identity": "minimatch@3.1.4",
+      "production_path": null,
+      "development_path": [
+        "eslint",
+        "minimatch"
+      ]
+    },
+    {
+      "key": "@typescript-eslint/typescript-estree/minimatch",
+      "identity": "minimatch@10.2.6",
+      "production_path": null,
+      "development_path": [
+        "eslint-config-next",
+        "typescript-eslint",
+        "@typescript-eslint/typescript-estree",
+        "@typescript-eslint/typescript-estree/minimatch"
+      ]
+    },
+    {
+      "key": "nanoid",
+      "identity": "nanoid@3.3.20",
+      "production_path": [
+        "next",
+        "postcss",
+        "nanoid"
+      ],
+      "development_path": [
+        "@tailwindcss/postcss",
+        "postcss",
+        "nanoid"
+      ]
+    },
+    {
+      "key": "picomatch",
+      "identity": "picomatch@4.0.7",
+      "production_path": [
+        "next-intl",
+        "@parcel/watcher",
+        "picomatch"
+      ],
+      "development_path": [
+        "eslint-config-next",
+        "eslint-import-resolver-typescript",
+        "tinyglobby",
+        "picomatch"
+      ]
+    },
+    {
+      "key": "micromatch/picomatch",
+      "identity": "picomatch@2.3.2",
+      "production_path": null,
+      "development_path": [
+        "eslint-config-next",
+        "@next/eslint-plugin-next",
+        "fast-glob",
+        "micromatch",
+        "micromatch/picomatch"
+      ]
+    },
+    {
+      "key": "postcss",
+      "identity": "postcss@8.5.23",
+      "production_path": [
+        "next",
+        "postcss"
+      ],
+      "development_path": [
+        "@tailwindcss/postcss",
+        "postcss"
+      ]
+    },
+    {
+      "key": "source-map-js",
+      "identity": "source-map-js@1.2.2",
+      "production_path": [
+        "next",
+        "postcss",
+        "source-map-js"
+      ],
+      "development_path": [
+        "@tailwindcss/postcss",
+        "@tailwindcss/node",
+        "source-map-js"
+      ]
+    },
+    {
+      "key": "@typescript-eslint/typescript-estree/minimatch/brace-expansion",
+      "identity": "brace-expansion@5.0.12",
+      "production_path": null,
+      "development_path": [
+        "eslint-config-next",
+        "typescript-eslint",
+        "@typescript-eslint/typescript-estree",
+        "@typescript-eslint/typescript-estree/minimatch",
+        "@typescript-eslint/typescript-estree/minimatch/brace-expansion"
+      ]
+    }
+  ]
+}
