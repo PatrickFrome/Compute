@@ -1,0 +1,106 @@
+name: Client Disposable Recovery Bundle
+
+on:
+  push:
+    branches: [work/preinstall-recovery-20261027]
+  pull_request:
+    branches: [work/preinstall-closure-20261027]
+    paths:
+      - 'infra/client-state-runtime/test/disposable-recovery-bundle*'
+      - 'infra/client-state-runtime/disposable-recovery-bundle*'
+      - 'infra/client-state-runtime/local-vault-key.mjs'
+      - 'infra/client-state-runtime/local-vault-compat.sql'
+      - 'infra/client-state-runtime/owned-postgres-process.mjs'
+      - 'infra/client-state-runtime/pg17-backup-effect-barrier.mjs'
+      - 'infra/client-state-runtime/pg17-one-shot-disposable-dump-executor.mjs'
+      - 'infra/client-state-runtime/upgrade-backup-gate.mjs'
+      - 'infra/client-state-runtime/upgrade-backup-restore-gate.mjs'
+      - 'apps/metaengine-browser/scripts/stage-client-state-runtime.mjs'
+      - '.github/prepare-runtime-contract-pg17.mjs'
+      - '.github/workflows/client-disposable-recovery-bundle.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never cancel an owned process cleanup to replace it with a newer attempt.
+concurrency:
+  group: disposable-recovery-bundle-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  recovery-bundle:
+    name: Two disposable Windows PG17 clusters, vault and cold restart
+    runs-on: windows-2025
+    timeout-minutes: 20
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      RECOVERY_BUNDLE_REQUIRE_PHYSICAL: '1'
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify source identity and fresh evidence directory
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ((git rev-parse HEAD) -ne $env:EXPECTED_SHA) { throw 'recovery_source_mismatch' }
+          if ($LASTEXITCODE -ne 0) { throw 'recovery_source_unavailable' }
+          $proof = Join-Path $env:RUNNER_TEMP 'recovery-bundle-proof'
+          if (Test-Path -LiteralPath $proof) { throw 'recovery_evidence_directory_exists' }
+          New-Item -ItemType Directory -Path $proof | Out-Null
+          $receipt = Join-Path $proof 'receipt.json'
+          ('RECOVERY_BUNDLE_RECEIPT_PATH=' + $receipt) >> $env:GITHUB_ENV
+
+      - name: Setup frozen Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Install frozen runtime test dependency
+        working-directory: infra/client-state-runtime
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Verify receipt and source controls
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node --test --test-concurrency=1 infra/client-state-runtime/test/disposable-recovery-bundle-receipt.test.mjs infra/client-state-runtime/disposable-recovery-bundle-guard.test.mjs infra/client-state-runtime/pg17-backup-effect-barrier.test.mjs infra/client-state-runtime/upgrade-backup-gate.test.mjs infra/client-state-runtime/upgrade-backup-restore-gate.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'recovery_receipt_tests_failed' }
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'recovery_diff_check_failed' }
+
+      - name: Stage existing SHA256-pinned PostgreSQL 17.11 binaries
+        run: node .github/prepare-runtime-contract-pg17.mjs prepare
+
+      - name: Qualify physical fixture and require unskipped evidence
+        id: physical
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $privateTap = Join-Path $env:RUNNER_TEMP 'disposable-recovery-bundle-private.tap'
+          $proofTap = Join-Path (Split-Path -Parent $env:RECOVERY_BUNDLE_RECEIPT_PATH) 'physical-proof.tap'
+          if (Test-Path -LiteralPath $privateTap) { throw 'recovery_private_tap_exists' }
+          node --test --test-reporter=tap --test-concurrency=1 infra/client-state-runtime/disposable-recovery-bundle.integration.test.mjs *> $privateTap
+          $testExit = $LASTEXITCODE
+          node infra/client-state-runtime/test/disposable-recovery-bundle-receipt.mjs verify $env:RECOVERY_BUNDLE_RECEIPT_PATH $privateTap $proofTap
+          $gateExit = $LASTEXITCODE
+          if (Test-Path -LiteralPath $proofTap) { 'sanitized=true' >> $env:GITHUB_OUTPUT }
+          if ($testExit -ne 0 -or $gateExit -ne 0) { throw 'recovery_physical_qualification_failed' }
+
+      - name: Upload only schema-checked fixture receipt and sanitized TAP
+        if: always() && steps.physical.outputs.sanitized == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: disposable-recovery-bundle-${{ env.EXPECTED_SHA }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.RECOVERY_BUNDLE_RECEIPT_PATH }}
+            ${{ runner.temp }}/recovery-bundle-proof/physical-proof.tap
+          if-no-files-found: error
+          retention-days: 14
+          include-hidden-files: false
