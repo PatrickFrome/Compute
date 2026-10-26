@@ -792,6 +792,7 @@ jobs:
           git diff --exit-code HEAD -- .
 
       - name: Publish immutable candidate for parallel downstream qualification
+        id: immutable_candidate
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: metaengine-browser-windows-candidate-${{ github.event.pull_request.head.sha || github.sha }}
@@ -903,7 +904,68 @@ jobs:
           $proof | Add-Member -NotePropertyName guardian_native_manifest_sha256 -NotePropertyValue ([string]$guardian.manifest_sha256) -Force
           $proof | Add-Member -NotePropertyName guardian_native_staging_verified -NotePropertyValue $true -Force
           $proof | ConvertTo-Json -Depth 6 | Set-Content $proofPath -Encoding utf8
+          # Retain the actual successful bounded install result for the separate
+          # sidecar. This does not amend the already published candidate artifact.
+          @{
+            schema='metaengine.browser.forward-fresh-install-readback.v1'
+            source_head=[string]$proof.source_head
+            package_version=[string]$proof.package_version
+            repository=$env:GITHUB_REPOSITORY
+            workflow='.github/workflows/browser-windows-package-smoke.yml'
+            run_id=[string]$env:GITHUB_RUN_ID
+            run_number=[int64]$env:GITHUB_RUN_NUMBER
+            run_attempt=[int]$env:GITHUB_RUN_ATTEMPT
+            event=$env:GITHUB_EVENT_NAME
+            install=$installProof
+          } | ConvertTo-Json -Depth 6 | Set-Content "$env:RUNNER_TEMP\forward-fresh-install-readback.json" -Encoding utf8
           Write-Host ($proof | ConvertTo-Json -Compress)
+
+      - name: Capture same-producer forward candidate image after successful fresh install
+        id: forward_sidecar_capture
+        timeout-minutes: 12
+        working-directory: apps/metaengine-browser
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORWARD_SOURCE_HEAD: ${{ needs.package_identity_preflight.outputs.source_head }}
+          FORWARD_PACKAGE_VERSION: ${{ needs.package_identity_preflight.outputs.package_version }}
+          FORWARD_CANDIDATE_ARTIFACT_ID: ${{ steps.immutable_candidate.outputs.artifact-id }}
+          FORWARD_CANDIDATE_ARTIFACT_DIGEST: ${{ steps.immutable_candidate.outputs.artifact-digest }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node scripts/qa-forward-candidate-evidence.mjs capture
+          if ($LASTEXITCODE -ne 0) { throw 'forward_candidate_evidence_capture_failed' }
+
+      - name: Publish immutable forward candidate sidecar
+        id: forward_sidecar_artifact
+        if: success() && steps.forward_sidecar_capture.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: metaengine-browser-windows-forward-sidecar-${{ needs.package_identity_preflight.outputs.source_head }}
+          path: ${{ runner.temp }}/forward-candidate-sidecar/
+          # Only the vetted packaged tree and public manifest are staged here.
+          # Inventory records restore empty dirs omitted by upload-artifact.
+          include-hidden-files: true
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 30
+          compression-level: 0
+
+      - name: Record forward sidecar pins pending terminal producer success
+        shell: pwsh
+        env:
+          FORWARD_SIDECAR_ARTIFACT_ID: ${{ steps.forward_sidecar_artifact.outputs.artifact-id }}
+          FORWARD_SIDECAR_ARTIFACT_DIGEST: ${{ steps.forward_sidecar_artifact.outputs.artifact-digest }}
+          FORWARD_SIDECAR_MANIFEST_SHA256: ${{ steps.forward_sidecar_capture.outputs.manifest_sha256 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          @(
+            'Forward migration sidecar: CAPTURED_PENDING_PRODUCER_COMPLETION',
+            "Artifact ID: $env:FORWARD_SIDECAR_ARTIFACT_ID",
+            "Artifact ZIP SHA-256: $env:FORWARD_SIDECAR_ARTIFACT_DIGEST",
+            "Manifest SHA-256: $env:FORWARD_SIDECAR_MANIFEST_SHA256",
+            'Consumers must independently require this exact producer run/attempt to finish SUCCESS.'
+          ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
 
       - name: Qualify normal installed first-run and exact installed UI host in isolated profiles
         timeout-minutes: 8
