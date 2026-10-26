@@ -417,3 +417,257 @@ export async function materializeForwardSidecar({archiveFile, archiveSha256, des
       installer_contract_verification_required: true, production_authorized: false, authority_effect: false});
   } finally { await handle.close(); }
 }
+
+// Generic consumers share the exact parser and bounded entry reader
+// above. No generic receipt confers installer, producer or schema authority.
+async function withPinnedForwardArchive({archiveFile, archiveSha256, limits: overrides}, read) {
+  if (!SHA.test(archiveSha256 || '')) fail('archive_digest_required');
+  const limits = boundedLimits(overrides), archive = localAbsolute(archiveFile);
+  const archiveParents = await pinAncestors(path.dirname(archive));
+  const before = await fs.lstat(archive, {bigint: true});
+  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n || before.ino <= 0n)
+    fail('archive_not_regular');
+  if (before.size < 22n || before.size > BigInt(limits.maxArchiveBytes)) fail('archive_size_limit');
+  const size = Number(before.size), handle = await fs.open(archive, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
+  const assertArchive = async () => {
+    await checkPins(archiveParents);
+    const [opened, named] = await Promise.all([handle.stat({bigint: true}), fs.lstat(archive, {bigint: true})]);
+    if (!opened.isFile() || !named.isFile() || named.isSymbolicLink() || named.nlink !== 1n
+      || !equalFile(before, opened) || !equalFile(before, named)) fail('archive_changed');
+  };
+  try {
+    await assertArchive();
+    if (await digestHandle(handle, size) !== archiveSha256) fail('archive_digest_mismatch');
+    const entries = await parseEntries(handle, size, limits);
+    await assertArchive();
+    const result = await read({handle, size, limits, entries, assertArchive});
+    await assertArchive();
+    if (await digestHandle(handle, size) !== archiveSha256) fail('archive_digest_changed');
+    // The final archive scan can be long. Retain target-file and directory
+    // custody through that scan, then recheck it immediately before return.
+    if (result.fence) await result.fence();
+    await assertArchive();
+    return result.receipt;
+  } finally { await handle.close(); }
+}
+
+function genericForwardExpectations(entries, addedDirectories, limits) {
+  if (!Array.isArray(addedDirectories) || addedDirectories.length > limits.maxEntries)
+    fail('added_directories_invalid');
+  const expected = new Map(), folded = new Map();
+  const put = (name, directory, entry) => {
+    validateForwardRelativePath(name);
+    if (name.split('/').length > limits.maxDepth) fail('zip_depth_limit');
+    const key = forwardPathCollisionKey(name), priorName = folded.get(key), prior = expected.get(name);
+    if (priorName !== undefined && priorName !== name) fail('added_directory_alias');
+    if (prior && prior.directory !== directory) fail('added_directory_file_collision');
+    if (!prior) {
+      expected.set(name, {directory, entry}); folded.set(key, name);
+      if (expected.size > limits.maxEntries) fail('inventory_entry_count_limit');
+    }
+  };
+  const putParents = name => {
+    const parts = name.split('/');
+    for (let depth = 1; depth < parts.length; depth++) put(parts.slice(0, depth).join('/'), true);
+  };
+  for (const entry of entries) {
+    putParents(entry.name); put(entry.name, entry.directory, entry);
+  }
+  let previous = null;
+  for (const name of addedDirectories) {
+    validateForwardRelativePath(name);
+    if (previous !== null && previous >= name) fail('added_directories_order_or_duplicate');
+    previous = name; putParents(name); put(name, true);
+  }
+  let files = 0, bytes = 0;
+  for (const item of expected.values()) if (!item.directory) {
+    if (++files > limits.maxFiles || item.entry.size > limits.maxFileBytes) fail('inventory_file_limit');
+    bytes += item.entry.size;
+    if (!Number.isSafeInteger(bytes) || bytes > limits.maxBytes) fail('inventory_total_size_limit');
+  }
+  if (!files) fail('inventory_empty');
+  return expected;
+}
+
+function genericForwardRows(expected, hashes) {
+  return [...expected].map(([name, wanted]) => {
+    if (wanted.directory) return [name, 'DIRECTORY'];
+    const sha256 = hashes.get(name);
+    if (!SHA.test(sha256 || '')) fail('payload_digest_missing');
+    return [name, wanted.entry.size, sha256];
+  }).sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+}
+
+async function genericForwardReadback(directory, expected, hashes, limits) {
+  const captured = await captureForwardInventory(directory, {limits});
+  if (JSON.stringify(captured.files) !== JSON.stringify(genericForwardRows(expected, hashes)))
+    fail('materialized_inventory_mismatch');
+  return captured;
+}
+
+/**
+ * Materialize a generic pinned archive into an absent physical directory.
+ * Implicit ZIP parent directories are created; extra directory restoration is
+ * the separate source-trusted caller's responsibility. Partial output stays
+ * present on failure and must never be retried or treated as qualification.
+ */
+export async function materializeForwardArchive({archiveFile, archiveSha256, destination, limits} = {}) {
+  const target = localAbsolute(destination), destinationPins = await pinAncestors(path.dirname(target));
+  try { await fs.lstat(target); fail('destination_exists'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  return withPinnedForwardArchive({archiveFile, archiveSha256, limits}, async ({handle, size, limits, entries, assertArchive}) => {
+    const expected = genericForwardExpectations(entries, [], limits), hashes = new Map();
+    await assertArchive(); await checkPins(destinationPins);
+    await fs.mkdir(target, {mode: 0o700});
+    destinationPins.set(target, await directoryInfo(target));
+    const directories = [...expected].filter(([, item]) => item.directory).map(([name]) => name)
+      .sort((a, b) => a.split('/').length - b.split('/').length || (a < b ? -1 : a > b ? 1 : 0));
+    for (const relative of directories) {
+      const file = path.join(target, ...relative.split('/'));
+      await checkPins(destinationPins, path.dirname(file));
+      await fs.mkdir(file, {mode: 0o700});
+      destinationPins.set(file, await directoryInfo(file));
+    }
+    for (const entry of entries) {
+      if (entry.directory) continue;
+      const file = path.join(target, ...entry.name.split('/'));
+      await checkPins(destinationPins, path.dirname(file));
+      const output = await fs.open(file, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW || 0), 0o600);
+      try {
+        const opened = await output.stat({bigint: true});
+        if (!opened.isFile() || opened.nlink !== 1n || opened.ino <= 0n) fail('destination_not_regular');
+        hashes.set(entry.name, await consumeEntry(handle, entry, size, async chunk => {
+          let offset = 0;
+          while (offset < chunk.length) {
+            const {bytesWritten} = await output.write(chunk, offset, chunk.length - offset);
+            if (!bytesWritten) fail('file_write_incomplete');
+            offset += bytesWritten;
+          }
+        }));
+        await output.sync();
+        const [named, end] = await Promise.all([fs.lstat(file, {bigint: true}), output.stat({bigint: true})]);
+        if (!named.isFile() || named.isSymbolicLink() || named.nlink !== 1n || !end.isFile() || end.nlink !== 1n
+          || !equalIdentity(opened, named) || !equalIdentity(opened, end)
+          || Number(named.size) !== entry.size || Number(end.size) !== entry.size) fail('destination_file_changed');
+      } finally { await output.close(); }
+      await checkPins(destinationPins, path.dirname(file));
+    }
+    const held = await holdGenericForwardTree(target, expected);
+    const captured = await genericForwardReadback(target, expected, hashes, limits);
+    await held.fence(); await checkPins(destinationPins); await assertArchive();
+    return {fence: held.fence, receipt: Object.freeze({schema: 'metaengine.browser.forward-archive-materialization.v1',
+      archive_sha256: archiveSha256, directory: target, tree_sha256: captured.tree_sha256,
+      file_count: captured.file_count, total_bytes: captured.total_bytes, files: captured.files,
+      full_archive_file_membership_verified: true, producer_qualification_required: true,
+      production_authorized: false, authority_effect: false})};
+  });
+}
+
+async function holdGenericForwardTree(directory, expected) {
+  const pins = await pinAncestors(directory), directories = new Map(), files = new Map(), actual = new Set(), physical = new Set();
+  const holdDirectory = async (full, relative) => {
+    const before = await directoryInfo(full), key = `${before.dev}:${before.ino}`;
+    if (physical.has(key)) fail('materialized_physical_alias');
+    physical.add(key); directories.set(full, before); pins.set(full, before);
+    const listing = await fs.opendir(full);
+    for await (const row of listing) {
+      const name = relative ? relative + '/' + row.name : row.name;
+      validateForwardRelativePath(name);
+      const wanted = expected.get(name);
+      if (!wanted || actual.has(name)) fail('materialized_unlisted_entry');
+      actual.add(name);
+      const file = path.join(full, row.name), info = await fs.lstat(file, {bigint: true});
+      if (info.isSymbolicLink()) fail('materialized_link_or_reparse');
+      if (wanted.directory) {
+        if (!info.isDirectory()) fail('materialized_directory_required');
+        await holdDirectory(file, name);
+      } else {
+        if (!info.isFile() || info.nlink !== 1n || info.ino <= 0n || Number(info.size) !== wanted.entry.size)
+          fail('materialized_regular_file_required');
+        const key = `${info.dev}:${info.ino}`;
+        if (physical.has(key)) fail('materialized_physical_alias');
+        physical.add(key); files.set(name, {file, info});
+      }
+    }
+    if (!equalFile(before, await directoryInfo(full))) fail('materialized_directory_changed');
+  };
+  await holdDirectory(directory, '');
+  if (actual.size !== expected.size) fail('materialized_entry_missing');
+  const fence = async () => {
+    await checkPins(pins);
+    for (const [full, held] of directories) if (!equalFile(held, await directoryInfo(full))) fail('materialized_directory_changed');
+    for (const {file, info} of files.values()) {
+      const named = await fs.lstat(file, {bigint: true});
+      if (!named.isFile() || named.isSymbolicLink() || named.nlink !== 1n || !equalFile(info, named))
+        fail('materialized_file_changed');
+    }
+  };
+  await fence();
+  return {pins, files, fence};
+}
+
+/**
+ * Read-only ZIP-to-files binding. addedDirectories MUST come from the caller's
+ * independently authenticated original manifest; it is never an observed-tree
+ * exception. Every listed directory must already exist. The complete file set
+ * and all archive bytes remain exact. This function never creates or repairs.
+ */
+export async function verifyForwardArchiveFiles({archiveFile, archiveSha256, directory,
+  addedDirectories = [], limits} = {}) {
+  const target = localAbsolute(directory);
+  return withPinnedForwardArchive({archiveFile, archiveSha256, limits}, async ({handle, size, limits, entries, assertArchive}) => {
+    const expected = genericForwardExpectations(entries, addedDirectories, limits);
+    const held = await holdGenericForwardTree(target, expected), hashes = new Map();
+    const buffer = Buffer.allocUnsafe(CHUNK);
+    for (const entry of entries) {
+      if (entry.directory) continue;
+      const {file, info} = held.files.get(entry.name);
+      await checkPins(held.pins, path.dirname(file));
+      const input = await fs.open(file, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
+      try {
+        const opened = await input.stat({bigint: true});
+        if (!opened.isFile() || opened.nlink !== 1n || !equalFile(info, opened)) fail('materialized_file_changed');
+        hashes.set(entry.name, await consumeEntry(handle, entry, size, async chunk => {
+          let offset = 0;
+          while (offset < chunk.length) {
+            const length = Math.min(buffer.length, chunk.length - offset);
+            const {bytesRead} = await input.read(buffer, 0, length, null);
+            if (!bytesRead || !buffer.subarray(0, bytesRead).equals(chunk.subarray(offset, offset + bytesRead)))
+              fail('materialized_bytes_changed');
+            offset += bytesRead;
+          }
+        }));
+        if ((await input.read(buffer, 0, 1, null)).bytesRead) fail('materialized_size_changed');
+        const [end, named] = await Promise.all([input.stat({bigint: true}), fs.lstat(file, {bigint: true})]);
+        if (!end.isFile() || end.nlink !== 1n || !named.isFile() || named.isSymbolicLink() || named.nlink !== 1n
+          || !equalFile(info, end) || !equalFile(info, named)) fail('materialized_file_changed');
+      } finally { await input.close(); }
+    }
+    await held.fence();
+    const captured = await genericForwardReadback(target, expected, hashes, limits);
+    await held.fence(); await assertArchive();
+    return {fence: held.fence, receipt: Object.freeze({schema: 'metaengine.browser.forward-archive-files-readback.v1',
+      archive_sha256: archiveSha256, directory: target, tree_sha256: captured.tree_sha256,
+      file_count: captured.file_count, total_bytes: captured.total_bytes, files: captured.files,
+      added_directories: Object.freeze([...addedDirectories]), full_archive_file_membership_verified: true,
+      production_authorized: false, authority_effect: false})};
+  });
+}
+
+/** A bounded raw member read, sharing all ZIP metadata/CRC/digest guards. */
+export async function readForwardArchiveMember({archiveFile, archiveSha256, memberName,
+  maxBytes = FORWARD_SIDECAR_LIMITS.maxManifestBytes, limits} = {}) {
+  validateForwardRelativePath(memberName);
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > FORWARD_SIDECAR_LIMITS.maxManifestBytes)
+    fail('member_byte_limit_invalid');
+  return withPinnedForwardArchive({archiveFile, archiveSha256, limits}, async ({handle, size, limits, entries}) => {
+    // Generic ceilings include every member and implied directory. The shared
+    // sidecar parser deliberately allows its own manifest/image overhead; a
+    // bounded generic member read must not inherit those extra allowances.
+    genericForwardExpectations(entries, [], limits);
+    const entry = entries.find(row => row.name === memberName && !row.directory);
+    if (!entry || entry.size > maxBytes || entry.size > limits.maxManifestBytes) fail('member_missing_or_oversize');
+    const chunks = [], sha256 = await consumeEntry(handle, entry, size, async chunk => { chunks.push(Buffer.from(chunk)); });
+    return {receipt: Object.freeze({archive_sha256: archiveSha256, name: memberName, size: entry.size,
+      sha256, bytes: Buffer.concat(chunks)})};
+  });
+}
