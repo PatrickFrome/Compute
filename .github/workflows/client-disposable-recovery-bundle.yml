@@ -77,7 +77,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'recovery_diff_check_failed' }
 
       - name: Stage existing SHA256-pinned PostgreSQL 17.11 binaries
-        run: node .github/prepare-runtime-contract-pg17.mjs prepare
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:PSModulePath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\Modules'
+          node .github/prepare-runtime-contract-pg17.mjs prepare
+          if ($LASTEXITCODE -ne 0) { throw 'recovery_pg17_preparation_failed' }
 
       - name: Qualify physical fixture and require unskipped evidence
         id: physical

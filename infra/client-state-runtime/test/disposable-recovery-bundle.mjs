@@ -109,10 +109,26 @@ async function sql(bin, env, input) {
   ], { env, input, stage: 'sql', timeoutMs: 30000 })).trim();
 }
 
+// Existing key helpers spawn Windows PowerShell with process.env. A Node child
+// of pwsh7 otherwise forwards incompatible PS7 module paths to WinPS5. Pin only
+// around these serial fixture calls and restore the caller's environment.
+async function withWindowsPowerShellModules(operation) {
+  const systemRoot = process.env.SystemRoot || process.env.SYSTEMROOT || '';
+  requireProof(process.platform === 'win32' && /^[A-Za-z]:\\Windows$/i.test(systemRoot),
+    'windows_root_unconfirmed');
+  const previous = process.env.PSModulePath;
+  process.env.PSModulePath = path.win32.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'Modules');
+  try { return await operation(); }
+  finally {
+    if (previous === undefined) delete process.env.PSModulePath;
+    else process.env.PSModulePath = previous;
+  }
+}
+
 async function privateWrite(filename, bytes) {
   const handle = await fs.open(filename, 'wx', 0o600);
   try {
-    await secureAttachedPrivateFile(filename); // Protect while still empty.
+    await withWindowsPowerShellModules(() => secureAttachedPrivateFile(filename)); // Protect while still empty.
     await handle.writeFile(bytes); await handle.sync();
   } finally { await handle.close(); }
 }
@@ -405,7 +421,7 @@ export async function runDisposableRecoveryBundle({ pgBinDir = process.env.LOCAL
     requireProof(sourcePort !== targetPort, 'ports_not_distinct');
     ports.add(sourcePort); ports.add(targetPort);
     const sourceEnv = pgEnvironment(sourcePort, sourcePassword), targetEnv = pgEnvironment(targetPort, targetPassword);
-    const vault = await initializeLocalVaultKey({ dataDirectory: from });
+    const vault = await withWindowsPowerShellModules(() => initializeLocalVaultKey({ dataDirectory: from }));
     requireProof(vault.created === true && vault.plaintext_key_logged === false, 'source_key_not_fresh');
     const sourceKey = vault.key_file;
     const originalKey = await readRecoveryFile(sourceKey);
@@ -472,7 +488,7 @@ export async function runDisposableRecoveryBundle({ pgBinDir = process.env.LOCAL
       /^backup_effect_(archive_existing|write_ambiguous)$/);
     receipt.negatives.lost_backup_ack = 'REJECTED';
     receipt.observations.backup_effect_once = true;
-    await secureAttachedPrivateFile(archivePath);
+    await withWindowsPowerShellModules(() => secureAttachedPrivateFile(archivePath));
     const archive = await readRecoveryFile(archivePath);
     const toc = await command(path.join(bin, 'pg_restore.exe'), ['--list', archivePath],
       { env: targetEnv, stage: 'toc', rejectWarnings: true });

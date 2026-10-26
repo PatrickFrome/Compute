@@ -255,13 +255,19 @@ that the checkout matches it, and use a new temporary directory outside the
 checkout. Execute the preparation once and use its returned binary directory:
 
 ```powershell
+$ErrorActionPreference = 'Stop'
+$PSNativeCommandUseErrorActionPreference = $false
 $env:EXPECTED_SHA = '<reviewed full 40-character worker HEAD_SHA>'
 if ((git rev-parse HEAD).Trim() -ne $env:EXPECTED_SHA) { throw 'source_mismatch' }
 $work = Join-Path ([IO.Path]::GetTempPath()) ('metaengine-recovery-entry-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $work -ErrorAction Stop | Out-Null
 $env:RUNNER_TEMP = $work
-$preparedJson = & node .github/prepare-runtime-contract-pg17.mjs prepare
-if ($LASTEXITCODE -ne 0) { throw 'pg17_preparation_failed' }
+$recoveryModulePath = $env:PSModulePath
+try {
+  $env:PSModulePath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\Modules'
+  $preparedJson = & node .github/prepare-runtime-contract-pg17.mjs prepare
+  if ($LASTEXITCODE -ne 0) { throw 'pg17_preparation_failed' }
+} finally { $env:PSModulePath = $recoveryModulePath }
 $prepared = ($preparedJson -join "`n") | ConvertFrom-Json
 $env:LOCAL_STATE_TEST_PG_BIN_DIR = $prepared.bin_directory
 $env:RECOVERY_BUNDLE_REQUIRE_PHYSICAL = '1'
@@ -301,6 +307,16 @@ guard's environment is now pinned to Windows PowerShell system modules and
 its diagnostics are restricted to fixed phase/category identifiers. The
 original log did not establish the underlying native cause; successful
 execution on the corrective source is still required.
+
+The dedicated preparation step and manual entrypoint also pin the WinPS5
+system module path before invoking the unchanged archive preparer. The physical
+harness pins that variable only during its serial calls to the unchanged
+key/private-file helpers, then restores the previous environment value. This
+addresses the documented PowerShell 7 -> intermediate Node -> Windows
+PowerShell module-autoload incompatibility; it does not assert that this was
+the cause of the first generic UNKNOWN. See Microsoft's
+[PSModulePath process-tree guidance](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_psmodulepath?view=powershell-7.3#starting-windows-powershell-from-powershell-7).
+No shared helper, native permission rule, fence or cleanup deadline is changed.
 
 Exact combined local command (temporary files outside the checkout):
 
