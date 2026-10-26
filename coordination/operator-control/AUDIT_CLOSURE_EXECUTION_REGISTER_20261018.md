@@ -517,3 +517,46 @@ OWNER_BOUND сохраняется. Это намеренный безопасн
 успешной новой native-регистрации. Portable C++ consumer компилируется и
 исполняется в тесте; полная Windows service/actuator сборка остаётся UNQUALIFIED.
 Следующее действие: общий source seal и точные агрегатные локальные проверки.
+
+
+## QA source seal — 0.7.0-dev.1359740117434.1
+
+```json
+{
+  "schema": "metaengine.client.qa-source-seal.v1",
+  "functional_source_parent": "88eb062b09bd456d430bd0da37cb21baaddcee6d",
+  "package_version": "0.7.0-dev.1359740117434.1",
+  "classification": "QA_SOURCE_PREPARED_NOT_INSTALLED_QUALIFIED",
+  "global_version_absence": "TIME_BOUND_API_OBSERVATION_ONLY",
+  "reservation_state": "PENDING_IMMUTABLE_PRODUCER_PREFLIGHT",
+  "metadata_observation_completed_at": "2026-10-26T12:14:11.276Z",
+  "metadata_observation_source_head": "88eb062b09bd456d430bd0da37cb21baaddcee6d",
+  "minimum_package_version": "0.7.0-dev.1269944506140.1",
+  "minimum_package_version_exclusive": true,
+  "metadata_observation_path": "evidence/audits/metaengine-20261026-package-source-successor/live-artifact-observation.json",
+  "metadata_observation_sha256": "7e5c8c1a1c462fa483690ab7e334e7717dcd9270d52036efc0e8afb74df7a12a",
+  "observation_does_not_reserve_version": true,
+  "immutable_producer_preflight_required": true,
+  "artifact_qualification": "NOT_ESTABLISHED",
+  "known_blockers": [
+    "EXACT_SUCCESSOR_SOURCE_CI_PENDING",
+    "EXACT_WINDOWS_PACKAGE_AND_NATIVE_QUALIFICATION_PENDING",
+    "LEGACY_INSTALLED_UPGRADE_QUALIFICATION_HOLD",
+    "LIVE_NATIVE_AGENT_AND_CONTINUOUS_AUTONOMY_UNQUALIFIED",
+    "PRODUCTION_RELEASE_SIGNING_AND_SIDECAR_PLACEMENT_UNQUALIFIED"
+  ],
+  "installed_qualification": "NOT_QUALIFIED",
+  "live_qualification": "NOT_QUALIFIED",
+  "continuous_autonomy_qualification": "NOT_QUALIFIED",
+  "production_ready": false,
+  "promotion_authorized": false,
+  "automatic_effect_retry_allowed": false,
+  "authority_effect": false
+}
+```
+
+Prepared on 2026-10-26 from the frozen functional source `88eb062b09bd456d430bd0da37cb21baaddcee6d` (tree `cc9db3282897bab4670f84e169e06f085a9cb45b`). Only package identity, its documentary history, regression expectations and source-blob seal change. No package is built or reserved by this source record. The planner metadata records actual token-free HTTP 200 GET responses, not synthetic artifact arrays or an inferred absence from connector errors. Absence was observed at the recorded time only; the final versioned commit has a different SHA and requires its own normal immutable producer preflight.
+
+The old `.4594` reservation remains consumed: artifact `12604992808`, run `40208669264`, source `602d4b07f755f7cd61a6da3af06985d4384b859a`. The higher sibling `.1269944506140.1` remains consumed: artifact `12608018072`, run `40217087847`, source `cf547d7e5f973517fa9bd1e206892e3a108ad1ea`. It is a monotonic floor and burned identity, not an invented ancestor transition. The current source-line transition is `.4594` → `.1359740117434.1` with the actual functional parent above. The immutable baseline `ea405d926568508eac53ebb408e941c94faeadcf`, previous transition records and W43–W73 historical manifest bytes remain unchanged.
+
+The existing installed `.4594` migration remains HOLD. The inherited fresh-install-only diagnostic path is not an upgrade waiver. Required exact-source CI, Windows native/own-PG/restore and installed upgrade evidence are not replaced by the earlier functional source checks. No signing/root-sidecar capability, live native Agent completion, continuous autonomy or production READY is asserted. Physical receipts belong outside this frozen source so later evidence cannot silently change the artifact it purports to qualify.

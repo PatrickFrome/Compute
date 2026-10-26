@@ -80,15 +80,16 @@ test('shared installer consumers automatically fence the dedicated physical line
   assert.match(source, /producer_event/);
 });
 
-test('physical package identity is exact across package, lock and candidate reservation', async () => {
+test('prepared source identity is exact across package, lock and candidate without claiming physical reservation', async () => {
   const pkg = JSON.parse(await repoFile('apps/metaengine-browser/package.json'));
   const lock = JSON.parse(await repoFile('apps/metaengine-browser/package-lock.json'));
   const doc = await repoFile('apps/metaengine-browser/CONVERGENCE_CANDIDATE.md');
-  const reserved = doc.match(/Reserved package identity is `([^`]+)`\./)?.[1];
-  assert.match(reserved || '', /^0\.7\.0-dev\.[1-9][0-9]*\.1$/);
-  assert.equal(pkg.version, reserved);
-  assert.equal(lock.version, reserved);
-  assert.equal(lock.packages[''].version, reserved);
+  const prepared = doc.match(/^Prepared source package identity is `([^`]+)`\./)?.[1];
+  assert.match(prepared || '', /^0\.7\.0-dev\.[1-9][0-9]*\.1$/);
+  assert.equal(pkg.version, prepared);
+  assert.equal(lock.version, prepared);
+  assert.equal(lock.packages[''].version, prepared);
+  assert.match(doc, /Physical package-version reservation is pending\./);
 });
 
 test('dirty-profile acquire and terminal wait both receive a job-scoped GitHub token', async () => {
