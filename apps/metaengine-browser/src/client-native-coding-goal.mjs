@@ -172,6 +172,10 @@ export function createClientNativeCodingGoalRouter({journal,request,projectSnaps
     },
     async refresh(entry){
       if(entry?.kind!=='NATIVE_CODING')fail('kind_invalid');
+      const durable=journal.get(entry.request_id);
+      // A terminal, validated pre-dispatch rejection has no running project to
+      // observe. It remains readable after Host/profile replacement or offline.
+      if(durable?.kind==='NATIVE_CODING'&&durable.state==='FAILED'&&durable.native_rejection)return durable;
       try{return await observe(entry,await request('READ_SEED',{request_id:entry.request_id,objective:entry.goal}));}
       catch(error){await journal.recordProjectError(entry.request_id,'Native goal observation unavailable').catch(()=>{});throw error;}
     },

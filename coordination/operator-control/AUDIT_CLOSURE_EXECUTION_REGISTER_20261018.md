@@ -601,3 +601,13 @@ A targeted HTTP regression reproduced 503 for Edge capability attestation while 
 API regression suite: 21 PASS. Actual current-source API on an ephemeral loopback port, using the existing restricted PG login: ATTESTED / EXACT_DB_SOURCE_MATCH in 415 ms including startup, zero model calls. This is read-only component evidence, not installed runtime or autonomous-work qualification.
 
 The prior prepared .150 identity is retired from reuse because it omits this necessary runtime repair. New read-only candidate metadata: evidence/audits/metaengine-20261026-edge-health-recovery/live-artifact-observation.json. The new exact package still requires Windows qualification, installation and useful autonomous-agent execution.
+
+## Installed .164 health observer contention repair
+
+The exact bb2d27d9 .164 installer completed with exit 0 on the operator PC; all 3426 files matched its candidate. Local pre-install attached-runtime attestation and clean shutdown passed. Its CI Owner activation wave exceeded the 1000 ms latency budget, so this remains unsigned LOCAL QA, not fully CI-qualified or production-ready.
+
+The installed Browser reached READY, but concurrent authenticated capability reads occupied the single health HTTP admission. Three API health HTTP 503 responses stopped Host/API/Edge. PostgreSQL and Guardian remained alive. No new goal or model execution occurred. The failed rejection from the earlier .148 attempt remains preserved.
+
+A real HTTP regression reproduced 503 for an API health probe while Edge held the same capability read. Overlapping authenticated health observers now share only an in-flight read-only SQL transaction, with at most 16 HTTP observers and one reserved physical SQL connection. Completed results are not cached; failure releases the shared read and admission. Ordinary application capacity remains six. Authentication, input validation and fail-closed health attestation remain unchanged. API/native-goal regression: 67 PASS. Actual restricted-login PostgreSQL: 64 overlapping API/Edge reads across eight waves, all attested in 804 ms. This component evidence is not installed autonomy proof.
+
+Terminal rejected goals now remain readable offline from the validated durable journal, without requesting admission from a replacement Host or wrongly reporting reconciliation required. The isolated Electron test-mode repair is also integrated. A fresh package identity and another installed trial are required. Activation performance and useful autonomous-agent execution remain unqualified.

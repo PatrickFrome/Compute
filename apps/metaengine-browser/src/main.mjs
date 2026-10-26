@@ -808,6 +808,8 @@ async function refreshClientGoal(rawRequestId) {
   if (!entry) throw new Error('client_goal_request_unknown');
   if(entry.kind==='NATIVE_CODING'){
     const observed=await createNativeGoalRouter(journal).refresh(entry);
+    if(observed.state==='FAILED'&&observed.native_rejection)return {schema:'metaengine.client.native-coding-goal-progress.v1',request_id:requestId,found:false,
+      terminal:true,reconciliation_required:false,physical_execution_proven:false,automatic_retry_allowed:false,authority_effect:false};
     return observed.state!=='RECONCILE_REQUIRED'&&observed.progress||{schema:'metaengine.client.native-coding-goal-progress.v1',request_id:requestId,found:false,
       terminal:false,reconciliation_required:true,automatic_retry_allowed:false,authority_effect:false};
   }

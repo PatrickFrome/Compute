@@ -48,9 +48,12 @@ test('confirmed pre-dispatch rejection survives restart and never replays the ol
  const next=createClientNativeCodingGoalRouter({journal:restored,request,projectSnapshot:async()=>f.snapshot});
  await assert.rejects(next.submit({request_id:f.input.request_id,goal:f.input.objective}),/already_recorded/);assert.equal(calls.length,1);
  // A new explicit user request is possible; refresh never causes it.
- await next.refresh(restored.latest());assert.deepEqual(calls,['SEED_GOAL','READ_SEED']);
+ await next.refresh(restored.latest());assert.deepEqual(calls,['SEED_GOAL']);
+ const offline=createClientNativeCodingGoalRouter({journal:restored,request:async()=>{throw Error('HOST_REPLACED');},projectSnapshot:async()=>{throw Error('NO_PROJECT');}});
+ assert.equal((await offline.refresh(restored.latest())).state,'FAILED');
+ assert.equal(restored.latest().project_error,null);
  await assert.rejects(next.submit({request_id:randomUUID(),goal:'A new explicit request after the fix'}));
- assert.deepEqual(calls,['SEED_GOAL','READ_SEED','SEED_GOAL']);assert.equal(restored.snapshot().entries.length,2);
+ assert.deepEqual(calls,['SEED_GOAL','SEED_GOAL']);assert.equal(restored.snapshot().entries.length,2);
 });
 test('rejection requires matching objective, durable request and affirmative absence observations',()=>{
  const f=fixture(),valid=rejectionResult(f.input);assert.equal(normalizeNativeCodingSeedResult(valid,f.input).state,'REJECTED_BEFORE_DISPATCH');
