@@ -197,7 +197,7 @@
     ".github/browser-ci-resource-observation.mjs": "2f08876c2e5dc850b60709aac7df1577c7561226",
     ".github/client-c5-reference-source-identity.test.mjs": "41c1e2edd6801c8e310b826549c2403090856bed",
     ".github/client-ci-train-w82.test.mjs": "65eb75036876fd29c5a14b5c4af1d3327ec67845",
-    ".github/client-state-runtime-contract-budget.test.mjs": "9718e7f8237cc032d8ece2d4d7f89d66b78ed261",
+    ".github/client-state-runtime-contract-budget.test.mjs": "e3b867989a0f9067bf7123ee3680fe1cbdb55494",
     ".github/windows-native-read-observation.mjs": "69f28764cb97f632bf3a37ba2363a9b6189699de",
     ".github/workflows/browser-agent-result-installer-source-qualification.yml": "15e727b23e5ba431482cb2dbe25cfb39362d9aee",
     ".github/workflows/browser-critical-audit-v1.yml": "213c619e9af5fb129a0d98f0297622f525931674",
@@ -225,7 +225,7 @@
     ".github/workflows/client-source-candidate-w59.yml": "554ad9d24ba49d4f1f76c8f142895d4c7178c729",
     ".github/workflows/client-source-candidate-w66.yml": "b1acf9bf8271585c485c90106995f03b4a0e0f0f",
     ".github/workflows/client-source-candidate-w73.yml": "3f63eead0ef35dab430e65140f457c3ee4390ea8",
-    ".github/workflows/client-state-runtime-contract.yml": "42bfd09c4748e835cd8ac88ee7ca0f8023b37e61",
+    ".github/workflows/client-state-runtime-contract.yml": "7daa04d383ed168326822046d9175b3697fe52ba",
     ".github/workflows/client-v1-c5-reference-useful-work.yml": "e80e2727331459c8975576e0feb664ca0a69b355",
     ".github/workflows/client-wave10-w62-source-r97.yml": "e141ee86a037bf6dc5a89e1e5be919fade6b0eaf",
     ".github/workflows/client-wave11-w68-release-provenance.yml": "ddd5f838ae05530bc990bb2f44c2a81200e13014",
@@ -925,7 +925,7 @@
     "infra/client-state-runtime/package-lock.json": "b0431aa6689b330450fd13318b45a59d6be1b4e2",
     "infra/client-state-runtime/package-runtime-resources.mjs": "453eab0bb9f05e338233c3cecc8510cfed3dff84",
     "infra/client-state-runtime/package-runtime-resources.test.mjs": "2570f8b837e894a01177d30125944aaa19a3850b",
-    "infra/client-state-runtime/package.json": "1570fa26f977ce10cb5e6b7f5177d93591086cab",
+    "infra/client-state-runtime/package.json": "436c0484c4ce76aab5d7da89417071d0c1586f68",
     "infra/client-state-runtime/postgres-continuity-inspector.integration.test.mjs": "d6fc0b8092a18de76b9df915c215ed618d30c259",
     "infra/client-state-runtime/postgres-continuity-inspector.mjs": "07d15496e7787a3f4ddbfe1c9cf09d5eec604286",
     "infra/client-state-runtime/postgres-continuity-inspector.test.mjs": "be6e4471787f081b023b7d2e10782c72ea4102a9",
@@ -1008,7 +1008,8 @@
     "apps/metaengine-browser/test/isolated-test-electron-mode.test.mjs": "e0e14645d48528bc5e097a36f79e9c4f58bc7902",
     "evidence/audits/metaengine-20261026-health-observer-recovery/live-artifact-observation.json": "60b4b53c71a0414fe082fc5d5802118986c29511",
     "apps/metaengine-browser/test/installed-owner-soak-failure-code.test.mjs": "4127f9f37d30d1248c97440ecc54e8ac24315a0e",
-    "infra/client-state-runtime/pg17-one-shot-disposable-dump-executor.test.mjs": "46d79df5edae499195e60b9b29586f3de504ed69"
+    "infra/client-state-runtime/pg17-one-shot-disposable-dump-executor.test.mjs": "e0f421c60d2b100d5d8837b8745e8034ff1613da",
+    "infra/client-state-runtime/pg17-backup-effect-barrier.test.mjs": "9cf22d58a329a5e1b68976b58106e5c9d21d0e5f"
   },
   "parent_checks_not_transitive": true,
   "proof_levels": {

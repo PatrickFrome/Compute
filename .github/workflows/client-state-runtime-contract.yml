@@ -125,6 +125,10 @@ jobs:
       - name: Verify qualification budgets and complete suite coverage
         run: node --test .github/client-state-runtime-contract-budget.test.mjs
 
+      - name: Verify disposable operator and backup guards before the full suite
+        working-directory: infra/client-state-runtime
+        run: node ../../apps/metaengine-browser/scripts/run-isolated-tests.mjs --test-concurrency=1 native-coding-git-commit-operator.test.mjs pg17-backup-effect-barrier.test.mjs pg17-one-shot-disposable-dump-executor.test.mjs
+
       - name: Verify API, owned processes and private archive
         working-directory: infra/client-state-runtime
         run: npm test

@@ -7,7 +7,7 @@ import path from 'node:path';
 import {buildBackupEffectIntent,publishBackupEffectIntent,
   crossBackupEffectBarrier,readBackupEffectFence} from './pg17-backup-effect-barrier.mjs';
 async function fixture(t){
-  const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-one-shot-backup-'));
+  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-one-shot-backup-')));
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
   const intent=buildBackupEffectIntent({
     intentId:randomUUID(),ownerPid:111,keeperPid:222,

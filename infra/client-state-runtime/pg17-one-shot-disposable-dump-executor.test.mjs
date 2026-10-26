@@ -9,7 +9,9 @@ import {executeDisposableOneShotPg17Dump}
   from './pg17-one-shot-disposable-dump-executor.mjs';
 
 async function fixture(t){
-  const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-safe-dump-exec-'));
+  // The protected journal rejects aliases. Canonicalize the directory we just
+  // created, rather than weakening that check for Windows TEMP short names.
+  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-safe-dump-exec-')));
   t.after(()=>fs.rm(root,{force:true,recursive:true}));
   const source=path.join(root,'data');
   await fs.mkdir(source);

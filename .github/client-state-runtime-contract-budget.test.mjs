@@ -11,6 +11,8 @@ const compatibility = ['client-local-contracts-w38', 'explicit-local-supervisor-
   'r83-edge-v14-canary-source-binding', 'me2-ui-local-profile-outbound-guard', 'client-owned-state-hosted-workflow-guard',
   'package-build-reservation-workflow'].map(name => 'test/' + name + '.test.mjs');
 const listener = ['test/me2-ui-loopback-host.test.mjs', 'test/verify-windows-tcp-listener.test.mjs'];
+const disposableGuards = ['native-coding-git-commit-operator.test.mjs',
+  'pg17-backup-effect-barrier.test.mjs', 'pg17-one-shot-disposable-dump-executor.test.mjs'];
 
 function contracts(source) {
   const start = source.indexOf('\n  contracts:\n');
@@ -38,6 +40,24 @@ function assertFullCoverage(source) {
     ['Verify normal UI host pins its child listener to loopback', listener],
   ]) assert.match(step(job, name), new RegExp('^        run: node --test ' + files.join(' ').replaceAll('.', '\\.') + '$', 'm'));
 }
+function assertDisposablePreflight(source, script) {
+  const job = contracts(source);
+  const name = 'Verify disposable operator and backup guards before the full suite';
+  const command = 'node ../../apps/metaengine-browser/scripts/run-isolated-tests.mjs --test-concurrency=1 ' + disposableGuards.join(' ');
+  assert.ok(step(job, name).includes('        run: ' + command + '\n'));
+  assert.ok(job.indexOf('- name: ' + name) < job.indexOf('run: npm test'));
+  for (const file of disposableGuards) assert.equal(script.split(' ').filter(value => value === file).length, 1,
+    file + ' must remain in the full suite as well as the early preflight');
+}
+
+test('cheap disposable guards run early without removing their full-suite coverage', () => {
+  const script = JSON.parse(readFileSync(new URL('../infra/client-state-runtime/package.json', import.meta.url), 'utf8')).scripts.test;
+  assertDisposablePreflight(workflow, script);
+  for (const file of disposableGuards) {
+    assert.throws(() => assertDisposablePreflight(workflow.replace(' ' + file, ''), script), {code:'ERR_ASSERTION'});
+    assert.throws(() => assertDisposablePreflight(workflow, script.replace(' ' + file, '')), {code:'ERR_ASSERTION'});
+  }
+});
 
 test('StateContracts budgets only Windows physical qualification at 30 minutes and retains Linux at 10', () => assertBudgets(workflow));
 test('StateContracts retains the two-platform fail-fast and workflow concurrency strategy', () => {
