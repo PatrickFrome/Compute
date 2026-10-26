@@ -209,13 +209,6 @@ export async function sendBootstrapHeartbeat({ identity, fetchImpl, getState, ve
   });
 }
 
-function delay(ms) {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    timer.unref?.();
-  });
-}
-
 export class NativeSupervisorClient extends BaseNativeSupervisorClient {
   #devosTaskCycle;
   #lastDevosError = null;

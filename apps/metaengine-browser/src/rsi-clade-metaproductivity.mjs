@@ -71,17 +71,6 @@ function assertZeroAuthority(value, label) {
   if (value?.automatic_retry_allowed !== false) throw new Error(`rsi_clade_${label}_automatic_retry_invalid`);
 }
 
-function createZeroAuthority(extra = {}) {
-  return Object.freeze({
-    ...extra,
-    execution_authority: false,
-    production_mutation_authority: false,
-    promotion_authority: false,
-    self_update_authority: false,
-    automatic_retry_allowed: false,
-    authority_effect: false,
-  });
-}
 
 export function createRsiCladeNode({
   node_id,

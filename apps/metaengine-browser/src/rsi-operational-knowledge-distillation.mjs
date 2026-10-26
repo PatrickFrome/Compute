@@ -45,9 +45,6 @@ function refs(value){
   if(!Array.isArray(value)||value.length<1||value.length>MAX_REFS)throw new Error('rsi_distill_evidence_refs_invalid');
   const s=new Set();return Object.freeze(value.map(v=>{const x=boundedId(v,'evidence_ref');if(s.has(x))throw new Error('rsi_distill_evidence_ref_duplicate');s.add(x);return x;}).sort());
 }
-function zeroAuthority(extra={}){
-  return Object.freeze({...extra,execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,scheduler_authority:false,signing_authority:false,direct_tool_execution_authority:false,automatic_retry_allowed:false,authority_effect:false});
-}
 function assertZeroAuthority(value,label){
   for(const f of ['execution_authority','production_mutation_authority','promotion_authority','self_update_authority','scheduler_authority','signing_authority','direct_tool_execution_authority','authority_effect'])if(value?.[f]!==false)throw new Error(`rsi_distill_${label}_${f}_invalid`);
   if(value?.automatic_retry_allowed!==false)throw new Error(`rsi_distill_${label}_automatic_retry_invalid`);

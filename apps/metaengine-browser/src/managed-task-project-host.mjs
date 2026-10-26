@@ -4,7 +4,7 @@ import { createManagedTaskProjectCommandAdapter, MANAGED_PROJECT_COMMAND_ACTIONS
 import { createManagedTaskProjectSqliteJournal } from './managed-task-project-sqlite-journal.mjs';
 import { createShellFreeGitExecutor } from './managed-task-project-runtime.mjs';
 import { protectOwnerOnlyWindowsDirectory, verifyOwnerOnlyWindowsStorage } from './private-windows-storage-acl.mjs';
-import { assertManagedProjectPhysicalDirectory, prepareManagedTaskProjectStorage, verifyManagedProjectPrivateFile } from './managed-task-project-storage.mjs';
+import { prepareManagedTaskProjectStorage, verifyManagedProjectPrivateFile } from './managed-task-project-storage.mjs';
 import { readManagedTaskProjectRepository } from './managed-task-project-repository.mjs';
 import { normalizeManagedProjectAuthorityRequest, managedProjectEffectKey } from './managed-task-project-authority-resolver.mjs';
 

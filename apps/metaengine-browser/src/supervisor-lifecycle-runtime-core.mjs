@@ -4,7 +4,7 @@ import path from 'node:path';
 import durableJson from './durable-json-file.cjs';
 import { isChatAuthRedirectUrl } from './chatgpt-auth-readback.mjs';
 import { ChatGptSessionMonitor } from './chatgpt-session-monitor.mjs';
-import { AGENT_PLATFORM_HOME_URL, AGENT_PLATFORM_ID, classifyAgentPlatformSurface, isAgentPlatformConversationUrl, resolveAgentPlatformComposer } from './browser-agent-platform.mjs';
+import { AGENT_PLATFORM_HOME_URL, classifyAgentPlatformSurface, isAgentPlatformConversationUrl, resolveAgentPlatformComposer } from './browser-agent-platform.mjs';
 import { chatGptControlMatches, uniqueChatGptControl } from './chatgpt-ui-controls.mjs';
 import { submitFencedChatGptPrompt } from './chatgpt-fenced-submit.mjs';
 import { classifyRetryDecision, REQUEST_EFFECT_CLASS } from './chatgpt-retry-policy.mjs';
@@ -70,10 +70,6 @@ const provablyBlankFrame = (frame) => frame != null
 
 function generating(frame) {
   return Boolean(frame?.semantic_targets?.some((x) => x?.role === 'button' && chatGptControlMatches('STOP', x?.name)));
-}
-function unique(frame, role) {
-  const rows = (frame?.semantic_targets || []).filter((x) => x?.role === role);
-  return rows.length === 1 ? rows[0] : null;
 }
 // D-K1 (live 2026-09-19): the signed-in chat.z.ai conversation surface renders
 // an auxiliary unnamed textbox next to the real composer, so an exactly-one
@@ -1226,7 +1222,7 @@ export class SupervisorLifecycleRuntime {
       if ((CHAT_ROOT_RE.test(String(frame?.url || '')) || CHAT_RE.test(String(frame?.url || ''))) && composerMatches(frame, message)) composerMatchesRows.push({ tab, frame });
     }
     if (composerMatchesRows.length !== 1 || this.#canActuate() !== true) return false;
-    const { tab, frame } = composerMatchesRows[0];
+    const { tab } = composerMatchesRows[0];
     if (!attempt.tab_id) await this.#keepalive.bindRolloverAttemptTab(tab.tab_id).catch(() => {});
     // An exact retained draft is not positive evidence that an ambiguous Send
     // never executed. Rollover recovery observes existing markers only; a new

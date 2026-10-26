@@ -3,6 +3,10 @@ import { createFinalRuntimeActivation } from './final-runtime-activation.mjs';
 export const FINAL_RUNTIME_ACTIVATION_REGISTRY_SCHEMA = 'metaengine.browser.final-runtime-activation-registry.v1';
 
 let developmentPlane = null;
+// Retain ownership across an intentional stop: only this latest explicitly
+// registered instance may reclaim the vacant slot on readiness. An older
+// instance's delayed start must never replace its successor.
+let developmentPlaneOwner = null;
 let supervisor = null;
 let supervisorConfig = null;
 let supervisorStarted = false;
@@ -105,6 +109,13 @@ async function stopActivation(reason = 'STOPPED') {
 }
 
 async function ensureActivation() {
+  // A pending start may belong to the lifetime being drained. Never join it
+  // (or return its READY snapshot) as the result of a newer start. Re-enter
+  // after the drain so dependency changes and concurrent starts are rechecked.
+  if (activationStopPromise) {
+    await activationStopPromise;
+    return ensureActivation();
+  }
   if (!supervisorStarted || !supervisor || !supervisorConfig) {
     state = 'WAITING_FOR_SUPERVISOR';
     return registrySnapshot();
@@ -115,7 +126,6 @@ async function ensureActivation() {
   }
   if (activationStartPromise) return activationStartPromise;
   if (activation && lastActivation?.state === 'READY') return registrySnapshot();
-  if (activationStopPromise) await activationStopPromise;
 
   const currentGeneration = ++generation;
   state = 'STARTING';
@@ -169,10 +179,16 @@ async function ensureActivation() {
 
 export function registerFinalRuntimeDevelopmentPlane(instance) {
   if (!instance || typeof instance.request !== 'function') throw new Error('final_runtime_registry_development_plane_invalid');
+  developmentPlaneOwner = instance;
   if (developmentPlane && developmentPlane !== instance) void stopActivation('DEVELOPMENT_PLANE_REPLACED');
   developmentPlane = instance;
   if (supervisorStarted) void ensureActivation().catch(() => {});
   return registrySnapshot();
+}
+
+export function resumeFinalRuntimeDevelopmentPlane(instance) {
+  if (developmentPlaneOwner !== instance) return registrySnapshot();
+  return registerFinalRuntimeDevelopmentPlane(instance);
 }
 
 export function unregisterFinalRuntimeDevelopmentPlane(instance) {

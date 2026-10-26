@@ -6,11 +6,6 @@ export const BROWSER_BRAIN_REALTIME_OBSERVATION_BRIDGE_SCHEMA = 'metaengine.brow
 const TAB_ID_RE = /^tab_[0-9a-f-]{36}$/i;
 const CENSUS_EVENT_TYPES = new Set(['METRICS_SAMPLE', 'PROCESS_CENSUS_REFRESHED']);
 
-function positiveInt(value) {
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
-}
-
 function sequence(value) {
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;

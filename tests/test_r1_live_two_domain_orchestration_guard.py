@@ -15,7 +15,6 @@ from controller.r1.live_two_domain_orchestration_guard import (
     EXPECTED_REPOSITORY_ID,
     EXPECTED_SOURCE_WORKFLOW_PATH,
     OrchestrationError,
-    _canonical_bytes,
     _sha256_json,
     evaluate_results,
     validate_b2_authorization,

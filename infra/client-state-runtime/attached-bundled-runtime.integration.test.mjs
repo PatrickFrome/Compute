@@ -14,6 +14,7 @@ import { RPC_ALLOWLIST } from './db-api-core.mjs';
 import { verifyOfflineRuntimeBundle } from './offline-runtime-bundle.mjs';
 import { normalizeRuntimeHealthFailure } from './launcher.mjs';
 import { schemaOnlyRestorePlan } from './test/isolated-goal-fixture.mjs';
+import { formatAttachedOnboardingDiagnostic } from './test/attached-onboarding-diagnostic.mjs';
 import { NATIVE_SUPERVISOR_RUNTIME_CAPABILITIES, probeNativeSupervisorRuntimeCapabilities } from '../../apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/runtime-capabilities.mjs';
 import { assertOwnerConsumerKind, assertOwnerConsumerProof } from '../../apps/metaengine-browser/scripts/qualify-installed-owner-consumer.mjs';
 import { INSTALLED_LAUNCH_QUALIFIER_TIMEOUT_MS, INSTALLED_LAUNCH_FIXTURE_TIMEOUT_MS } from '../../apps/metaengine-browser/scripts/installed-launch-progress.mjs';
@@ -293,9 +294,10 @@ test('verified bundled onboarding and attached host restart preserve an existing
   await assert.rejects(fs.lstat(path.join(state, 'runtime-host-lock.json')), { code: 'ENOENT' });
   t.diagnostic('wrong live cluster binding rejected before API role and private config publication');
   const setup = await runOnboarding(options);
-  const setupFailure = setup.receipt?.event === 'attached_postgres_onboarding_failed'
+  const setupFailureCode = setup.receipt?.event === 'attached_postgres_onboarding_failed'
     && /^attached_onboarding_[a-z0-9_]{1,160}$/.test(setup.receipt.code || '')
     ? setup.receipt.code : 'attached_bundle_fixture_onboarding_failure_unattested';
+  const setupFailure = formatAttachedOnboardingDiagnostic(setupFailureCode, setup.receipt);
   if (setup.closed.code !== 0) t.diagnostic('bundled attached onboarding failure: ' + setupFailure);
   assert.deepEqual(setup.closed, { code: 0, signal: null }, setupFailure);
   assert.equal(setup.receipt.state, 'CONFIGURED_UNQUALIFIED');

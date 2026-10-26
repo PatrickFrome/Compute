@@ -23,7 +23,6 @@ const NAMES = Object.freeze({
   bundle: 'installer-slsa-provenance.bundle.json',
   evidence: 'browser-package-slsa-provenance-evidence.json',
 });
-const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const exact = (obj, fields) => isObject(obj) &&

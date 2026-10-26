@@ -1,4 +1,3 @@
-import copy
 import unittest
 
 from controller.w1.aws_provider_reboot_live_guard import (

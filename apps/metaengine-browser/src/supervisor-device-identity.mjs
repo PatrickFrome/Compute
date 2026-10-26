@@ -481,7 +481,7 @@ export class SupervisorDeviceIdentity {
     const { buildAgentContextTokenMaterial, issueAgentContextToken, AGENT_CONTEXT_TOKEN_DEFAULT_TTL_SECONDS } = await import('./agent-context-token.mjs');
     // Canonical-material validation runs first so binding errors surface as
     // agent_context_token_* vocabulary before any key operation.
-    const material = buildAgentContextTokenMaterial({
+    buildAgentContextTokenMaterial({
       client_id: String(client_id || state.client_id || ''),
       agent_id, role, generation_epoch, mission_digest,
       issued_at,

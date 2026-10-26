@@ -15,7 +15,7 @@ import { loadNativeSupervisorControlState } from './native-supervisor-control-st
 import { ensureRuntimeGenesis } from './runtime-genesis.mjs';
 import { FleetProvisioner, classifyFleetReconcileOutcome } from './fleet-provisioner.mjs';
 import { createFleetTargetLocalObserver } from './fleet-target-local-observer.mjs';
-import { retireEligibleFleetAgents } from './fleet-elastic-governor.mjs';
+import './fleet-elastic-governor.mjs';
 import { HumanTakeoverController } from './human-takeover.mjs';
 import { OwnerSafetyGateRegistry, bindGlobalOwnerSafetyGateRegistry } from './owner-safety-gate-registry.mjs';
 import { captureSemanticFrame, captureTranscript, captureViewThumbnail, executeSemanticCommand } from './native-browser-control.mjs';
@@ -266,7 +266,6 @@ let startupRetryAttempt = 0;
 let startupInFlight = false;
 let browserRuntimeReady = false;
 let startupFailurePresented = false;
-let startupControlState = null;
 let runtimeGenesisState = null;
 let computeHealthCache = { value: null, observed_ms: 0, promise: null };
 let lastComputeHealthState = null;
@@ -3306,7 +3305,7 @@ ipcMain.handle('metaengine:client:resume-admission', async (event) => {
   return resumeClientAdmissionOnce();
 });
 
-const githubRepositoryConnection = installGithubRepositoryConnection({ app, ipcMain, safeStorage, assertShellSender,
+installGithubRepositoryConnection({ app, ipcMain, safeStorage, assertShellSender,
   changed: (status) => console.log(JSON.stringify({ ...status, event: 'GITHUB_REPOSITORY_CONNECTION' })),
 });
 
@@ -3494,7 +3493,7 @@ ipcMain.handle('metaengine:shell:presentation-focus:clear', async (event) => {
 async function startAfterReady() {
   await registerRecoveryProtocol();
   runtimeGenesisState = await ensureRuntimeGenesis({ userDataPath: app.getPath('userData') });
-  startupControlState = await loadNativeSupervisorControlState(supervisorControlStatePath());
+  await loadNativeSupervisorControlState(supervisorControlStatePath());
   await initDevOSSessionLayouts();
   await ensureClientGoalJournal();
   await ensureClientAdmissionRecoveryJournal();

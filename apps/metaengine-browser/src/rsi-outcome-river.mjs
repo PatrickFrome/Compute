@@ -46,7 +46,6 @@ function exactDigest(v, l) { const o = String(v || '').trim().toLowerCase(); if 
 function boundedId(v, l) { const o = String(v || '').trim(); if (!SAFE_ID_RE.test(o)) throw new Error(`rsi_outcome_river_${l}_invalid`); return o; }
 function token(v, l) { const o = String(v || '').trim().toUpperCase(); if (!SAFE_TOKEN_RE.test(o)) throw new Error(`rsi_outcome_river_${l}_invalid`); return o; }
 function agentId(v, l) { const o = String(v || '').trim().toLowerCase(); if (!AGENT_ID_RE.test(o)) throw new Error(`rsi_outcome_river_${l}_invalid`); return o; }
-function iso(v, l) { const raw = String(v || '').trim(); if (!raw || Number.isNaN(Date.parse(raw))) throw new Error(`rsi_outcome_river_${l}_invalid`); return new Date(raw).toISOString(); }
 
 // Issuer contract: any queued-command issuer (brain, daemon, agent toolbelt)
 // declares that a command executes on behalf of a task trajectory by embedding

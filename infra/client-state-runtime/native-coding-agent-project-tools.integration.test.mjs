@@ -31,7 +31,7 @@ test('native agent project tools preserve scope, full messages and existing chil
    const timer=setTimeout(()=>{child.kill();reject(Error('disposable_pg_command_timeout'));},90000);
    child.once('error',e=>{clearTimeout(timer);reject(e);});child.once('exit',code=>{clearTimeout(timer);code===0?resolve():reject(Error('disposable_pg_command_failed_'+name));});
  });
- let started=false,sql,cluster,passed=0,appliedMigrationSha=null;
+ let started=false,sql,cluster,passed=0,appliedMigrationSha=null,currentAdmission=false;
  try {
   await command('initdb',['-D',data,'--username=state_owner','--auth=trust','--no-locale','--encoding=UTF8','--no-sync']);
   started=true;await command('pg_ctl',['-D',data,'-l',log,'-o',`-h 127.0.0.1 -p ${port}`,'-w','start']);
@@ -52,7 +52,7 @@ test('native agent project tools preserve scope, full messages and existing chil
     create table public.qa_native_environment(workspace_id uuid primary key,enabled boolean default true);
     create function public.devos_environment_state_v1(p_workspace uuid)returns jsonb language sql as
       $$select jsonb_build_object('refill_enabled',coalesce((select enabled from public.qa_native_environment where workspace_id=p_workspace),false),
-        'supervisor_admission_enabled',coalesce((select enabled from public.qa_native_environment where workspace_id=p_workspace),false))$$;
+        'supervisor_admission_enabled',coalesce((select enabled from public.qa_native_environment where workspace_id=p_workspace),false),'generation_floor',0)$$;
     create function destruktion_meta.devos_normalize_native_supervisor_state_h205f22(value jsonb)returns jsonb language sql immutable as $$select value$$;`);
   const bootstrap=await source('20260929010000_client_v1_fresh_project_bootstrap_v1.sql');
   const start=bootstrap.indexOf('create table if not exists destruktion_meta.devos_fleet_task_h205f22');
@@ -115,8 +115,29 @@ test('native agent project tools preserve scope, full messages and existing chil
       const [r]=await sql.unsafe('update destruktion_meta.project_run_h205f22 set total_tasks=total_tasks+1 where project_id=$1 returning total_tasks',[p.project_id]);
       await sql.unsafe('insert into destruktion_meta.project_task_h205f22 values($1,$2,$3,$4,$5,1)',[taskId,p.project_id,r.total_tasks,task,parent]);
     }
+    async function heartbeat(jobs=[],budget=1) {
+      // SQL-only generated witness fixture. Production ES256 verification stays
+      // in the Host; this does not claim an installed/signed native execution.
+      const rows=await sql.unsafe(`select p.permit_id,p.provider_id,p.agent_id,p.permit->>'role' as role,p.agent_generation_epoch,r.envelope_sha256
+        from destruktion_meta.native_coding_operator_permit_h205f22 p join destruktion_meta.native_coding_provider_registration_h205f22 r using(permit_id)
+        where p.workspace_id=$1 and p.revoked_at is null order by p.permit_id`,[p.workspace_id]);
+      const body={host_instance_id:generated.permit.project_id,host_pid:generated.jobPayload.host_process.pid,operation:'SERVICE_HEARTBEAT',input:{
+        schema:'metaengine.native-coding.service-heartbeat.v1',workspace_id:p.workspace_id,host_process:generated.jobPayload.host_process,
+        artifact:p.artifact,postgres:p.postgres,control:{supervisor_mode:'CONTROL',armed:true,interrupted_setup_recovery_fenced:false,runtime_control_generation:0},
+        runtime:{schema:'metaengine.native-coding.runtime.v1',physical_slot_budget:budget,occupied_slots:jobs.length,closed:false,shutdown_state:'OPEN',host_unavailable_reason:null,jobs},
+        providers:rows.map(row=>({...row,agent_generation_epoch:Number(row.agent_generation_epoch)})),production_qualified:false,automatic_retry_allowed:false,authority_effect:false}};
+      await sql.unsafe('select pg_sleep(0.002)');
+      const headers={'content-type':'application/json','x-a2-device-profile':'A2_DEVICE_HTTP_SIGNATURE_V1','x-a2-device-id':p.device_id,
+        'x-a2-chat-bridge-client':generated.clientId,'x-a2-device-body-sha256':sha(body),'x-a2-device-signature':'A'.repeat(86),
+        'x-a2-device-nonce':randomUUID().replaceAll('-',''),'x-a2-device-timestamp':new Date().toISOString()};
+      return sql.begin('isolation level serializable',async tx=>{
+        await tx.unsafe('set local synchronous_commit=on');
+        return tx.unsafe('select destruktion_meta.native_coding_service_heartbeat_v1($1,$2,1,$3,$4,$5::text::jsonb,$5::text,$6::text::jsonb)',
+          [p.device_id,generated.clientId,body.host_instance_id,body.host_pid,canonical(body),canonical(headers)]);
+      });
+    }
     async function lease(permit) {
-      await register(permit);await sql.unsafe('update public.compute_fabric_a2_browser_supervisor_state_h205f22 set last_seen_at=clock_timestamp() where workspace_id=$1',[p.workspace_id]);
+      await register(permit);if(currentAdmission)await heartbeat();await sql.unsafe('update public.compute_fabric_a2_browser_supervisor_state_h205f22 set last_seen_at=clock_timestamp() where workspace_id=$1',[p.workspace_id]);
       const [r]=await sql.unsafe(`select public.devos_fleet_lease_v1($1,$2,$3,$4,$5,1,900)as value`,
         [permit.workspace_id,permit.agent_id,permit.role,'native-coding:'+permit.provider_id,'codex-cli:'+permit.provider_id]);assert.equal(r.value.leased,true);return r.value;
     }
@@ -156,17 +177,17 @@ test('native agent project tools preserve scope, full messages and existing chil
       return {scope,job,receipt,subject:{run_id:run,result_sha256:receipt.result_sha256,git_artifact_sha256:artifact,source_head:permit.worktree.base_sha}};
     }
     const reconcile=async()=>{const [r]=await sql.unsafe('select public.h205f22_project_reconcile_v1($1,$2,$3,$4,1)as value',[p.workspace_id,p.project_id,p.device_id,generated.clientId]);return r.value;};
-    return {p,generated,writer,critic,task,seed,link,lease,reserve,finish,reconcile,advance,addPermit,register};
+    return {p,generated,writer,critic,task,seed,link,lease,reserve,finish,reconcile,advance,addPermit,register,heartbeat};
   }
   async function subtest(name,callback){await t.test(name,async()=>{await callback();passed++;});}
-  async function startRun(f) {
-    const leased=await f.lease(f.writer),scope=await f.reserve(f.writer,leased),run=randomUUID();
-    const job=f.generated.envelope({...f.generated.jobPayload,...f.writer,schema:'metaengine.codex-cli.job-proof.v1',task_id:f.task,
-      target_id:'codex-cli:'+f.writer.provider_id,lease_generation:1,run_id:run,host_process:f.generated.jobPayload.host_process});
+  async function startRun(f,permit=f.writer,subject=null) {
+    const leased=await f.lease(permit),scope=await f.reserve(permit,leased),run=randomUUID();
+    const job=f.generated.envelope({...f.generated.jobPayload,...permit,schema:'metaengine.codex-cli.job-proof.v1',task_id:leased.task_id,
+      target_id:'codex-cli:'+permit.provider_id,lease_generation:1,run_id:run,host_process:f.generated.jobPayload.host_process,subject});
     await sql.unsafe(`insert into destruktion_meta.native_coding_job_registration_h205f22(task_id,lease_generation,permit_id,run_id,job_envelope,canonical_job_envelope,job_envelope_sha256)
-      values($1,1,$2,$3,$4,$5,$6)`,[f.task,f.writer.permit_id,run,sql.json(job),canonical(job),sha(job)]);
+      values($1,1,$2,$3,$4,$5,$6)`,[leased.task_id,permit.permit_id,run,sql.json(job),canonical(job),sha(job)]);
     await f.advance(scope,'RESERVED','ATTEMPTED',sha(job));
-    await sql.unsafe(`select public.devos_fleet_mark_running_v1($1,$2,1,$3,$4,1,$5)`,[f.task,f.writer.agent_id,'native-coding:'+f.writer.provider_id,'codex-cli:'+f.writer.provider_id,
+    await sql.unsafe(`select public.devos_fleet_mark_running_v1($1,$2,1,$3,$4,1,$5)`,[leased.task_id,permit.agent_id,'native-coding:'+permit.provider_id,'codex-cli:'+permit.provider_id,
       sql.json({schema:'metaengine.native-coding.mark-running.v1',job_proof_sha256:sha(job),authority_effect:false})]);
     return {f,run,scope};
   }
@@ -263,7 +284,54 @@ test('native agent project tools preserve scope, full messages and existing chil
       body_sha256=encode(extensions.digest(convert_to($1::jsonb::text,'UTF8'),'sha256'),'hex')where run_id=$2 and request_id=$3`,
       [sql.json({message:'tampered',target_agent_id:target.permit.agent_id}),x.run,request]),/intent_immutable/);
   });
-  assert.equal(passed,8);
+  // Extend the SAME real-PG fixture through every later native migration,
+  // including current overrides. Historical isolated tests above intentionally
+  // reproduce their original stage; the regression below exercises deployment.
+  for(const name of ['20261015123000_project_unbounded_defaults_v1.sql',
+    '20261025100000_native_coding_checkpoint_commit_rotation_v1.sql','20261025110000_native_coding_initial_goal_seed_v1.sql',
+    '20261025120000_native_coding_service_heartbeat_admission_v1.sql'])await sql.unsafe(await source(name));
+  await sql.begin(async tx=>tx.unsafe(await fs.readFile(new URL('./native-agent-count-unbounded-v2.sql',import.meta.url),'utf8')));
+  currentAdmission=true;
+  await subtest('current chain authorizes the exact running critic without granting another physical slot',async()=>{
+    const f=await fixture(),writer=await f.finish(f.writer,await f.lease(f.writer));await f.reconcile();
+    const x=await startRun(f,f.critic,writer.subject);
+    await f.heartbeat([{task_id:x.scope.task_id,lease_generation:Number(x.scope.lease_generation),state:'RUNNING'}]);
+    const context='select destruktion_meta.native_coding_agent_context_v1($1)as value';
+    await assert.rejects(sql.unsafe(context,[x.run]),/native_agent_worktree_fenced/);
+    const upgrade=await fs.readFile(new URL('./native-coding-running-agent-scope-v1.sql',import.meta.url),'utf8');
+    await sql.begin(tx=>tx.unsafe(upgrade));await sql.begin(tx=>tx.unsafe(upgrade));
+    await assert.rejects(sql.begin(async tx=>{
+      await tx.unsafe('alter function destruktion_meta.native_coding_running_critic_admissible_v1(uuid,uuid) security definer');
+      await tx.unsafe(upgrade);
+    }),/requires_review/);
+    const [bound]=await sql.unsafe(context,[x.run]);assert.equal(bound.value.run_id,x.run);
+    assert.equal((await overview(x.run)).caller_task_id,x.scope.task_id);await history(x.run);
+    const [gates]=await sql.unsafe(`select destruktion_meta.native_coding_service_admissible_v1($1)as fresh,
+      destruktion_meta.native_coding_worktree_admissible_v1($2,$3)as new_claim,
+      destruktion_meta.native_coding_running_critic_admissible_v1($2,$3)as running`,[f.critic.permit_id,f.p.workspace_id,x.scope.task_id]);
+    assert.deepEqual(gates,{fresh:false,new_claim:false,running:true});
+    await assert.rejects(sql.unsafe(context,[randomUUID()]),/run_not_current/);
+    const denied=async(change,args,pattern=/native_agent_|native_coding_/)=>assert.rejects(sql.begin(async tx=>{
+      await tx.unsafe(change,args);await tx.unsafe(context,[x.run]);
+    }),pattern);
+    await denied("update destruktion_meta.devos_fleet_claim_h205f22 set expires_at=clock_timestamp()-interval '1 second' where task_id=$1",[x.scope.task_id],/run_not_current/);
+    await denied("update destruktion_meta.native_coding_service_heartbeat_h205f22 set proven_at=statement_timestamp()-interval '60 seconds',expires_at=statement_timestamp()-interval '30 seconds' where workspace_id=$1",[f.p.workspace_id]);
+    await denied('update destruktion_meta.native_coding_operator_permit_h205f22 set revoked_at=clock_timestamp() where permit_id=$1',[f.critic.permit_id]);
+    await denied("update destruktion_meta.native_coding_worktree_fence_h205f22 set root_identity_sha256=repeat('a',64) where project_id=$1",[f.p.project_id],/worktree_fenced/);
+    await denied('update destruktion_meta.devos_fleet_claim_h205f22 set agent_generation_epoch=agent_generation_epoch+1 where task_id=$1',[x.scope.task_id],/run_not_current/);
+    const foreign=await fixture();
+    await denied('update destruktion_meta.project_task_h205f22 set project_id=$1 where task_id=$2',[foreign.p.project_id,x.scope.task_id],/project_fenced/);
+    await denied(`with changed as (select permit_id,jsonb_set(envelope,'{payload,host_process,pid}','123456'::jsonb)as value
+        from destruktion_meta.native_coding_provider_registration_h205f22 where permit_id=$1)
+      update destruktion_meta.native_coding_provider_registration_h205f22 r set envelope=c.value,canonical_envelope=c.value::text,
+        envelope_sha256=encode(extensions.digest(convert_to(c.value::text,'UTF8'),'sha256'),'hex') from changed c where r.permit_id=c.permit_id`,[f.critic.permit_id],/worktree_fenced/);
+    await denied('update public.qa_native_environment set enabled=false where workspace_id=$1',[f.p.workspace_id]);
+    const [permissions]=await sql.unsafe(`select has_function_privilege('service_role','destruktion_meta.native_coding_running_critic_admissible_v1(uuid,uuid)','execute')as api,
+      has_function_privilege('anon','destruktion_meta.native_coding_running_critic_admissible_v1(uuid,uuid)','execute')as anon`);
+    assert.deepEqual(permissions,{api:false,anon:false});
+    assert.equal((await overview(x.run)).caller_task_id,x.scope.task_id);
+  });
+  assert.equal(passed,9);
   await fs.writeFile(path.join(directory,'receipt.json'),JSON.stringify({schema:'metaengine.native-coding.agent-project-tools.disposable-qa.v1',state:'PASS',
     postgres_version_num:identity.version,postgres_system_identifier:cluster,port,subtests:passed,migration_sha256:appliedMigrationSha,
     source_classification:'REAL_DISPOSABLE_PG_WITH_GENERATED_NATIVE_JOB_AND_RECEIPT_FIXTURES',installed_keeper_used:false,model_calls:0,

@@ -2,7 +2,6 @@
   'use strict';
 
   const COMPUTE_BRIDGE_STORAGE_KEY = 'a2ComputeBridgeConfigV1';
-  const DEFAULT_COMPUTE_BRIDGE_URL = '';
 
   async function loadConfig() {
     try {

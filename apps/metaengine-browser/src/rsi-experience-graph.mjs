@@ -90,11 +90,6 @@ function positiveInt(value, label, max = Number.MAX_SAFE_INTEGER) {
   return out;
 }
 
-function nonNegativeInt(value, label, max = Number.MAX_SAFE_INTEGER) {
-  const out = Number(value);
-  if (!Number.isSafeInteger(out) || out < 0 || out > max) throw new Error(`rsi_exg_${label}_invalid`);
-  return out;
-}
 
 function unitInterval(value, label) {
   const out = Number(value);
@@ -109,17 +104,6 @@ function assertZeroAuthority(value, label) {
   if (value?.automatic_retry_allowed !== false) throw new Error(`rsi_exg_${label}_automatic_retry_invalid`);
 }
 
-function zeroAuthority(extra = {}) {
-  return Object.freeze({
-    ...extra,
-    execution_authority: false,
-    production_mutation_authority: false,
-    promotion_authority: false,
-    self_update_authority: false,
-    automatic_retry_allowed: false,
-    authority_effect: false,
-  });
-}
 
 function normalizeTokens(value, label, { min = 0, max = MAX_TAGS } = {}) {
   if (!Array.isArray(value) || value.length < min || value.length > max) throw new Error(`rsi_exg_${label}_invalid`);

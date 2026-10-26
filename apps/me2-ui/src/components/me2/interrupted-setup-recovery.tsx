@@ -33,33 +33,45 @@ const bridge = () => (window as Window & { metaengineClient?: RecoveryBridge }).
 
 export function InterruptedSetupRecovery() {
   const [status, setStatus] = useState<RecoveryStatus | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
   const operation = useRef(false);
   const mounted = useRef(false);
-  const inspect = useCallback(async () => {
-    if (operation.current) return;
-    operation.current = true; setBusy(true);
+  const observationGeneration = useRef(0);
+  const readStatus = useCallback(async (generation: number) => {
     try {
-      const next = await bridge()?.inspectInterruptedSetupRecovery?.();
-      if (mounted.current) setStatus(next?.schema === "metaengine.client.interrupted-setup-status.v1"
+      // Always settle through the external-read promise, including synchronous
+      // bridge failures; initial loading is represented by initial state.
+      const next = await Promise.resolve().then(() => bridge()?.inspectInterruptedSetupRecovery?.());
+      if (mounted.current && generation === observationGeneration.current) setStatus(next?.schema === "metaengine.client.interrupted-setup-status.v1"
         && next.previous_effect_outcome === "UNKNOWN" ? next : null);
-    } catch { if (mounted.current) { setStatus(null); setMessage("Session state could not be checked. Try reading it again."); } }
-    finally { operation.current = false; if (mounted.current) setBusy(false); }
+    } catch { if (mounted.current && generation === observationGeneration.current) { setStatus(null); setMessage("Session state could not be checked. Try reading it again."); } }
+    finally { if (generation === observationGeneration.current) { operation.current = false; if (mounted.current) setBusy(false); } }
   }, []);
-  useEffect(() => { mounted.current = true; void inspect(); return () => { mounted.current = false; }; }, [inspect]);
+  const inspect = useCallback(() => {
+    if (!mounted.current || operation.current) return;
+    operation.current = true; setBusy(true);
+    void readStatus(++observationGeneration.current);
+  }, [readStatus]);
+  useEffect(() => {
+    mounted.current = true;
+    operation.current = true;
+    void readStatus(++observationGeneration.current);
+    return () => { mounted.current = false; observationGeneration.current += 1; };
+  }, [readStatus]);
   const start = async () => {
-    if (operation.current || !status?.eligible || !/^[a-f0-9]{64}$/.test(status.expected_recovery_sha256 || "")) return;
+    if (!mounted.current || operation.current || !status?.eligible || !/^[a-f0-9]{64}$/.test(status.expected_recovery_sha256 || "")) return;
+    const generation = observationGeneration.current;
     operation.current = true; setBusy(true); setMessage(null);
     try {
       const result = await bridge()?.startFreshSetup?.({ schema: "metaengine.client.interrupted-setup-request.v1",
         action: "ARCHIVE_INTERRUPTED_SETUP_AND_START_NEW", operator_initiated: true,
         expected_recovery_sha256: status.expected_recovery_sha256! });
       if (result?.state !== "FRESH_SETUP_PREPARED" || result.previous_effect_outcome !== "UNKNOWN" || result.previous_effect_replayed !== false) throw new Error("readback_unconfirmed");
-      if (mounted.current) { setStatus(null); setMessage("Interrupted setup archived. New sessions are being prepared; their readiness will be checked independently."); }
+      if (mounted.current && generation === observationGeneration.current) { setStatus(null); setMessage("Interrupted setup archived. New sessions are being prepared; their readiness will be checked independently."); }
       await refreshClientRuntimeStatus();
-    } catch { if (mounted.current) setMessage("A new setup was not confirmed. Read the current session state before taking another action."); }
-    finally { operation.current = false; if (mounted.current) setBusy(false); }
+    } catch { if (mounted.current && generation === observationGeneration.current) setMessage("A new setup was not confirmed. Read the current session state before taking another action."); }
+    finally { if (generation === observationGeneration.current) { operation.current = false; if (mounted.current) setBusy(false); } }
   };
   return <section className="mt-4 rounded-xl bg-zinc-900/60 p-4" data-testid="interrupted-setup-recovery" aria-labelledby="interrupted-setup-title">
     <h3 id="interrupted-setup-title" className="text-[13px] font-medium text-zinc-200">Interrupted session setup</h3>

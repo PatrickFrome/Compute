@@ -63,10 +63,6 @@ function liveCellCount(value, present = true) {
   return Math.min(512, value);
 }
 
-function higherBand(a, b) {
-  return BAND_ORDER[Math.max(BAND_RANK[a], BAND_RANK[b])];
-}
-
 function metricRank(value, yellow, orange, red) {
   if (value >= red) return BAND_RANK.RED;
   if (value >= orange) return BAND_RANK.ORANGE;

@@ -2,13 +2,14 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createHash } from 'node:crypto';
-import { readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
+import { verifyUiContent } from '../../me2-ui/scripts/ui-content-inventory.mjs';
 import { verifyWindowsTcpListener } from './verify-windows-tcp-listener.mjs';
 
 // Verify the installed copy, not merely a source manifest or extraResources entry.
@@ -27,22 +28,8 @@ export function verifyMe2UiBundle(directory, expectedSha) {
   assert.equal(manifest.build_id, readFileSync(path.join(root, '.next/BUILD_ID'), 'utf8').trim(), 'me2_ui_build_id_mismatch');
   assert.ok(Number.isSafeInteger(manifest.size_bytes) && manifest.size_bytes > 0, 'me2_ui_manifest_size_invalid');
 
-  // pack-me2-ui computes size_bytes before writing me2-ui-manifest.json, so the
-  // installed tree excluding that manifest must retain exactly the same total bytes.
-  let installedSizeBytes = 0;
-  const stack = [root];
-  const manifestPath = path.join(root, 'me2-ui-manifest.json');
-  while (stack.length) {
-    const current = stack.pop();
-    for (const name of readdirSync(current)) {
-      const absolute = path.join(current, name);
-      if (absolute === manifestPath) continue;
-      const stat = statSync(absolute);
-      if (stat.isDirectory()) stack.push(absolute);
-      else installedSizeBytes += stat.size;
-    }
-  }
-  assert.equal(installedSizeBytes, manifest.size_bytes, `me2_ui_installed_size_mismatch:${installedSizeBytes}:${manifest.size_bytes}`);
+  const content = verifyUiContent(root, manifest);
+  const installedSizeBytes = content.size_bytes;
 
   const require = createRequire(path.join(root, 'server.js'));
   const dependencies = {};
@@ -59,6 +46,9 @@ export function verifyMe2UiBundle(directory, expectedSha) {
     manifest_sha256: createHash('sha256').update(manifestBytes).digest('hex'),
     manifest_size_bytes: manifest.size_bytes,
     installed_size_bytes: installedSizeBytes,
+    content_sha256: content.content_sha256,
+    content_hash_scheme: content.content_hash_scheme,
+    content_file_count: content.content_files.length,
     dependencies,
     runtime_smoke: 'NOT_RUN',
   };

@@ -11,7 +11,7 @@ const manifest=JSON.parse(read('coordination/operator-control/client-critical-cl
 function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion) {
  const fixed={
   classification:'SOURCE_ONLY_NO_CURRENT_PACKAGE',
-  branch:'work/fix-native-rpc-onboarding-contract-20261025',
+  branch:'work/full-integration-audit-20261025',
   source_parent:'ea405d926568508eac53ebb408e941c94faeadcf',
   package_version:'0.7.0-dev.1107139874594.1',
   historical_package_version:'0.7.0-dev.202610152359.1',

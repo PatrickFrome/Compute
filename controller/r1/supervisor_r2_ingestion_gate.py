@@ -147,7 +147,7 @@ def _load_package(package_path: Path, receipt_path: Path) -> tuple[dict[str, byt
     receipt = _read_json(receipt_path, "step08_package_receipt")
     if not isinstance(receipt, dict) or receipt.get("schema") != RECEIPT_SCHEMA:
         raise SupervisorGateError("step08_receipt_schema_invalid")
-    receipt_sha = _verify_self_hash(receipt, "receipt_sha256", "step08_receipt")
+    _verify_self_hash(receipt, "receipt_sha256", "step08_receipt")
     if receipt.get("package_sha256") != _sha_bytes(package) or receipt.get("package_bytes") != len(package):
         raise SupervisorGateError("step08_package_identity_mismatch")
     if any(receipt.get(k) is not False for k in ("database_write_performed", "provider_call_performed", "canonical", "authority_effect", "r2_proven", "r3_proven", "persisted_seal_allowed")):

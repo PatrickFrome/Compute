@@ -27,7 +27,6 @@ function boundedToken(v,l){const o=String(v||'').trim().toUpperCase();if(!SAFE_T
 function positiveInt(v,l,max=Number.MAX_SAFE_INTEGER){const o=Number(v);if(!Number.isSafeInteger(o)||o<1||o>max)throw new Error(`rsi_proxy_${l}_invalid`);return o}
 function probability(v,l,{allowZero=true,allowOne=true}={}){const o=Number(v);if(!Number.isFinite(o)||(allowZero?o<0:o<=0)||(allowOne?o>1:o>=1))throw new Error(`rsi_proxy_${l}_invalid`);return o}
 function refs(v){if(!Array.isArray(v)||v.length<1||v.length>MAX_REFS)throw new Error('rsi_proxy_evidence_refs_invalid');const s=new Set();return v.map(x=>{const r=boundedId(x,'evidence_ref');if(s.has(r))throw new Error('rsi_proxy_evidence_ref_duplicate');s.add(r);return r}).sort()}
-function zeroAuthority(extra={}){return Object.freeze({...extra,execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,automatic_retry_allowed:false,authority_effect:false})}
 function assertZeroAuthority(v,l){for(const f of ['execution_authority','production_mutation_authority','promotion_authority','self_update_authority','authority_effect'])if(v?.[f]!==false)throw new Error(`rsi_proxy_${l}_${f}_invalid`);if(v?.automatic_retry_allowed!==false)throw new Error(`rsi_proxy_${l}_automatic_retry_invalid`)}
 
 function wilson(successes,total,z=1.96){

@@ -47,7 +47,6 @@ const FORBIDDEN_RAW_KEYS = new Set([
 
 const object = (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : null;
 const positiveInteger = (value) => Number.isSafeInteger(value) && value > 0;
-const nonNegativeInteger = (value) => Number.isSafeInteger(value) && value >= 0;
 const digest = (value) => typeof value === 'string' && SHA256_RE.test(value);
 const zeroAuthority = (value) => object(value) && ZERO_AUTHORITY_KEYS.every((key) => value[key] === false);
 

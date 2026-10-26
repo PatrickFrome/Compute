@@ -75,11 +75,6 @@ function positiveInt(value, label, max = Number.MAX_SAFE_INTEGER) {
   return out;
 }
 
-function nonNegativeInt(value, label, max = Number.MAX_SAFE_INTEGER) {
-  const out = Number(value);
-  if (!Number.isSafeInteger(out) || out < 0 || out > max) throw new Error(`rsi_depth_${label}_invalid`);
-  return out;
-}
 
 function boundedScore(value, label) {
   const out = Number(value);
@@ -104,19 +99,6 @@ function exactKeys(value, required, optional, label) {
   }
 }
 
-function zeroAuthority(extra = {}) {
-  return Object.freeze({
-    ...extra,
-    execution_authority: false,
-    production_mutation_authority: false,
-    promotion_authority: false,
-    self_update_authority: false,
-    scheduler_authority: false,
-    signing_authority: false,
-    automatic_retry_allowed: false,
-    authority_effect: false,
-  });
-}
 
 function assertZeroAuthority(value, label) {
   for (const field of [

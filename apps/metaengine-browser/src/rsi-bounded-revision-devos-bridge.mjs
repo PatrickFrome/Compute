@@ -51,9 +51,6 @@ function mutations(value,maxFiles){
     return Object.freeze({path,change});
   }).sort((a,b)=>a.path.localeCompare(b.path)||a.change.localeCompare(b.change)));
 }
-function branchSlug(value){
-  return String(value||'').toLowerCase().replace(/[^a-z0-9-]+/g,'-').replace(/^-+|-+$/g,'').replace(/-{2,}/g,'-').slice(0,120)||'revision';
-}
 
 export function createRsiBoundedRevisionDevosBridge({
   envelope,

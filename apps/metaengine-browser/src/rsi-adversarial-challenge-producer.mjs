@@ -95,17 +95,6 @@ function assertZeroAuthority(value, label) {
   if (value?.automatic_retry_allowed !== false) throw new Error(`rsi_challenge_${label}_automatic_retry_invalid`);
 }
 
-function zeroAuthority(extra = {}) {
-  return Object.freeze({
-    ...extra,
-    execution_authority: false,
-    production_mutation_authority: false,
-    promotion_authority: false,
-    self_update_authority: false,
-    automatic_retry_allowed: false,
-    authority_effect: false,
-  });
-}
 
 function evidenceRefs(value) {
   if (!Array.isArray(value) || value.length < 1 || value.length > MAX_EVIDENCE_REFS) throw new Error('rsi_challenge_evidence_refs_invalid');

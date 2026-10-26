@@ -13,8 +13,6 @@ const positive = x => Number.isSafeInteger(x) && x > 0;
 const time = x => typeof x === 'string' && Number.isFinite(Date.parse(x));
 const fresh = (x, now) => time(x) && Date.parse(x) >= now - 30000 && Date.parse(x) <= now + 5000;
 const sameBirth = (a,b) => a.pid === b.pid && Date.parse(a.created_at) === Date.parse(b.created_at);
-const sameOwner = (a,b) => ['owner_id','device_id','project_id','pid','created_at',
-  'process_incarnation_id','generation','epoch'].every(k => a[k] === b[k]);
 const fixture = x => x?.fixture_classification != null ||
   x?.synthetic === true || x?.staging === true || x?.untrusted === true;
 const clone = x => Object.freeze({ ...x });

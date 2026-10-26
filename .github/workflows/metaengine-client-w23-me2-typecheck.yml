@@ -38,12 +38,21 @@ jobs:
       - name: Exactly scoped Observatory seven-view falsification suite
         working-directory: apps/me2-ui
         run: bun run test:operator-observatory
+      - name: ME2 UI lint and unreachable-code guards
+        working-directory: apps/me2-ui
+        run: bun run lint
       - name: Full strict ME2 TypeScript typecheck
         working-directory: apps/me2-ui
         run: bun run typecheck
       - name: Admission status concurrency and readonly recovery
         working-directory: apps/me2-ui
         run: bun run test:goal-admission
+      - name: Task-scoped project history lifecycle
+        working-directory: apps/me2-ui
+        run: bun run test:project-history
+      - name: Interrupted setup observation lifecycle
+        working-directory: apps/me2-ui
+        run: bun run test:recovery
       - name: Next production package build
         working-directory: apps/me2-ui
         run: bun run build

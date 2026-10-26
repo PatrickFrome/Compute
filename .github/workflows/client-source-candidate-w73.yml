@@ -144,6 +144,9 @@ jobs:
           bun install --frozen-lockfile
           bun run test:operator-observatory
           bun run test:operator-primary
+          bun run test:goal-admission
+          bun run test:project-history
+          bun run test:recovery
           bun run typecheck
           bun run build
           bun run pack

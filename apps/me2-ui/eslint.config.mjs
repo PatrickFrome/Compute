@@ -43,8 +43,14 @@ const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
     "no-unreachable": "off",
     "no-useless-escape": "off",
   },
+} , {
+  files: ["src/**/*.{ts,tsx}"],
+  rules: {
+    "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
+    "no-unreachable": "error",
+  },
 }, {
-  ignores: ["node_modules/**", ".next/**", "out/**", "build/**", "next-env.d.ts", "examples/**", "skills", "rsi-work/**", "hostsrc/**", "pigsty/**", "mini-services/**", "a2-capsule/**", "download/**", "db/**", "desktop/dist/**", "desktop/node_modules/**", "desktop/release/**", "src-tauri/**"]
+  ignores: ["node_modules/**", ".next/**", "me2-ui-dist/**", "out/**", "build/**", "next-env.d.ts", "examples/**", "skills", "rsi-work/**", "hostsrc/**", "pigsty/**", "mini-services/**", "a2-capsule/**", "download/**", "db/**", "desktop/dist/**", "desktop/node_modules/**", "desktop/release/**", "src-tauri/**"]
 }];
 
 export default eslintConfig;

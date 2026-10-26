@@ -1,8 +1,7 @@
 import crypto from 'node:crypto';
-import fs from 'node:fs/promises';
 import path from 'node:path';
 import { atomicJsonWrite, readJson } from './security.mjs';
-import { RECEIPT_STATUS, validateReceipt, receiptSha256, canonicalReceiptBytes } from '../../browser-shared/receipt-contract.mjs';
+import { validateReceipt, receiptSha256 } from '../../browser-shared/receipt-contract.mjs';
 
 const RECEIPTS_FILE = 'receipts.json';
 

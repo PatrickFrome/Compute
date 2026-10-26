@@ -43,7 +43,6 @@ function boundedId(v, l) { const o = String(v || '').trim(); if (!SAFE_ID_RE.tes
 function token(v, l) { const o = String(v || '').trim().toUpperCase(); if (!SAFE_TOKEN_RE.test(o)) throw new Error(`rsi_steering_${l}_invalid`); return o; }
 function scope(v) { const o = token(v, 'scope'); if (!SCOPES.includes(o)) throw new Error('rsi_steering_scope_invalid'); return o; }
 function decisionKind(v) { const o = token(v, 'kind'); if (!DECISION_KINDS.includes(o)) throw new Error('rsi_steering_decision_kind_invalid'); return o; }
-function iso(v) { const raw = String(v || '').trim(); if (!raw || Number.isNaN(Date.parse(raw))) throw new Error('rsi_steering_timestamp_invalid'); return new Date(raw).toISOString(); }
 
 function zero(extra = {}) {
   return Object.freeze({

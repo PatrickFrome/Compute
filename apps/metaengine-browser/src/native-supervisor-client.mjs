@@ -3,7 +3,6 @@ import { nativeSupervisorRuntimeUrl } from './native-supervisor-endpoints.mjs';
 import { createNativeOwnerVerifierW52, missingNativeOwnerProtocolsW52 } from './native-owner-verifier-w52.mjs';
 import {
   NativeSupervisorClient as CoreNativeSupervisorClient,
-  NATIVE_SUPERVISOR_BASE,
   NATIVE_SUPERVISOR_RUNTIME_PATH,
   createBoundedSupervisorFetch,
 } from './native-supervisor-client-core.mjs';

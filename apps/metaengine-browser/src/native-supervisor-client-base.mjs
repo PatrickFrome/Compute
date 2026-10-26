@@ -1676,7 +1676,6 @@ export class NativeSupervisorClient {
   async #nextCommands() {
     if (this.#batchTransport !== 'UNAVAILABLE') {
       this.#markLeaseAttempt();
-      const waitStartedAt = Date.now();
       let leaseResult = null;
       try {
         leaseResult = await this.#leaseWaitBatchOrLegacy();

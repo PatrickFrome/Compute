@@ -34,7 +34,6 @@ function stable(v){if(Array.isArray(v))return v.map(stable);if(!v||typeof v!=='o
 function digest(v){return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stable(v)),'utf8').digest('hex')}`;}
 function exactSha(v,l){const x=String(v||'').trim().toLowerCase();if(!SHA40_RE.test(x))throw new Error(`rsi_outcome_frontier_${l}_sha_invalid`);return x;}
 function exactDigest(v,l){const x=String(v||'').trim().toLowerCase();if(!SHA256_RE.test(x))throw new Error(`rsi_outcome_frontier_${l}_digest_invalid`);return x;}
-function optionalDigest(v,l){return v==null?null:exactDigest(v,l);}
 function id(v,l){const x=String(v||'').trim();if(!SAFE_ID_RE.test(x))throw new Error(`rsi_outcome_frontier_${l}_invalid`);return x;}
 function positiveInt(v,l,max=Number.MAX_SAFE_INTEGER){const n=Number(v);if(!Number.isSafeInteger(n)||n<1||n>max)throw new Error(`rsi_outcome_frontier_${l}_invalid`);return n;}
 function tags(v,l){

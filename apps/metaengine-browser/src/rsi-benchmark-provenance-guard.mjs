@@ -30,7 +30,6 @@ function boundedId(v,l){const o=String(v||'').trim();if(!SAFE_ID_RE.test(o))thro
 function positiveInt(v,l,max=Number.MAX_SAFE_INTEGER){const o=Number(v);if(!Number.isSafeInteger(o)||o<1||o>max)throw new Error(`rsi_benchmark_${l}_invalid`);return o}
 function iso(v,l){const o=String(v||'');if(!Number.isFinite(Date.parse(o)))throw new Error(`rsi_benchmark_${l}_invalid`);return new Date(o).toISOString()}
 function refs(v){if(!Array.isArray(v)||v.length<1||v.length>MAX_REFS)throw new Error('rsi_benchmark_evidence_refs_invalid');const s=new Set();return v.map(x=>{const r=boundedId(x,'evidence_ref');if(s.has(r))throw new Error('rsi_benchmark_evidence_ref_duplicate');s.add(r);return r}).sort()}
-function zero(extra={}){return Object.freeze({...extra,execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,automatic_retry_allowed:false,authority_effect:false})}
 function assertZero(v,l){for(const f of ['execution_authority','production_mutation_authority','promotion_authority','self_update_authority','authority_effect'])if(v?.[f]!==false)throw new Error(`rsi_benchmark_${l}_${f}_invalid`);if(v?.automatic_retry_allowed!==false)throw new Error(`rsi_benchmark_${l}_automatic_retry_invalid`)}
 
 export function createRsiBenchmarkProvenancePolicy({

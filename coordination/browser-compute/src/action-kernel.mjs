@@ -1,5 +1,4 @@
 import crypto from 'node:crypto';
-import fs from 'node:fs/promises';
 import path from 'node:path';
 import { atomicJsonWrite, readJson } from './security.mjs';
 import { validateActionIntent, validateLeaseEnvelope, ACTION_KINDS } from '../../browser-shared/action-contract.mjs';
@@ -239,7 +238,7 @@ export class ActionKernel {
     if (!intent?.locator?.semantic_id) throw new Error('semantic_id_required');
     const revalidation = await this._liveRevalidate({ profileId: intent.profile_id, targetId: intent.target_id, semanticId: intent.locator.semantic_id, framePath: intent.locator.frame_path });
     const entry = this._runningEntry(intent.profile_id);
-    const binding = this._liveBinding(entry, intent.target_id);
+    this._liveBinding(entry, intent.target_id);
     const layout = await this._cdp().call('Page.getLayoutMetrics', {}, { sessionId: revalidation.sessionId });
     const viewport = layout?.cssVisualViewport || layout?.cssLayoutViewport || { width: 1280, height: 720 };
     const bounds = [Math.round(viewport.width / 2), Math.round(viewport.height / 2), 10, 10];
