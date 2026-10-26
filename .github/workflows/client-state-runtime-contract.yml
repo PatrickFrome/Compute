@@ -16,6 +16,8 @@ on:
       - 'apps/me2-ui/src/lib/pg.ts'
       - '.github/workflows/client-state-runtime-contract.yml'
       - '.github/client-state-runtime-contract-budget.test.mjs'
+      - '.github/prepare-runtime-contract-pg17.mjs'
+      - 'apps/metaengine-browser/scripts/stage-client-state-runtime.mjs'
   push:
     paths:
       - 'infra/client-state-runtime/**'
@@ -31,6 +33,8 @@ on:
       - 'apps/me2-ui/src/lib/pg.ts'
       - '.github/workflows/client-state-runtime-contract.yml'
       - '.github/client-state-runtime-contract-budget.test.mjs'
+      - '.github/prepare-runtime-contract-pg17.mjs'
+      - 'apps/metaengine-browser/scripts/stage-client-state-runtime.mjs'
   workflow_dispatch:
 
 permissions:
@@ -122,12 +126,20 @@ jobs:
         working-directory: infra/client-state-runtime
         run: npm ci --ignore-scripts --no-audit --no-fund
 
+      - name: Prepare pinned PostgreSQL 17 binaries for disposable guards
+        run: node .github/prepare-runtime-contract-pg17.mjs prepare
+
       - name: Verify qualification budgets and complete suite coverage
         run: node --test .github/client-state-runtime-contract-budget.test.mjs
 
       - name: Verify disposable operator and backup guards before the full suite
         working-directory: infra/client-state-runtime
-        run: node ../../apps/metaengine-browser/scripts/run-isolated-tests.mjs --test-concurrency=1 native-coding-git-commit-operator.test.mjs pg17-backup-effect-barrier.test.mjs pg17-one-shot-disposable-dump-executor.test.mjs
+        shell: bash
+        run: |
+          set -euo pipefail
+          proof="$RUNNER_TEMP/runtime-negative-guards.tap"
+          node ../../apps/metaengine-browser/scripts/run-isolated-tests.mjs --test-reporter=tap --test-concurrency=1 native-coding-git-commit-operator.test.mjs pg17-backup-effect-barrier.test.mjs pg17-one-shot-disposable-dump-executor.test.mjs | tee "$proof"
+          node ../../.github/prepare-runtime-contract-pg17.mjs verify "$proof"
 
       - name: Verify API, owned processes and private archive
         working-directory: infra/client-state-runtime

@@ -159,6 +159,7 @@ export function createClientNativeCodingGoalRouter({journal,request,projectSnaps
         const entry=await journal.begin({request_id,goal,kind:'NATIVE_CODING'});
         try{
           const observed=await observe(entry,await request('SEED_GOAL',{request_id,objective:entry.goal}));
+          if(observed.native_rejection)fail('rejected_before_dispatch:'+request_id);
           if(!observed.receipt)fail('seed_readback_required');
           return observed.receipt;
         }catch(error){

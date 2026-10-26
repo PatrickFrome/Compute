@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
 import {ownerSessionSoakFailureCode} from '../scripts/qualify-installed-owner-consumer.mjs';
 
 test('fixed PowerShell error categories survive without raw command or suffix data', () => {
@@ -35,7 +37,29 @@ test('missing, unrecognized, ambiguous and oversized stderr stays unclassified',
 test('process failures are not confused with inner soak assertions', () => {
   assert.equal(ownerSessionSoakFailureCode({code:'ETIMEDOUT'}), 'session_soak_process_timeout');
   assert.equal(ownerSessionSoakFailureCode({code:'ERR_CHILD_PROCESS_STDIO_MAXBUFFER',killed:true}), 'session_soak_output_limit');
-  assert.equal(ownerSessionSoakFailureCode({killed:true}), 'session_soak_process_terminated');
+  assert.equal(ownerSessionSoakFailureCode({killed:true}), 'session_soak_process_terminated_or_timed_out');
+});
+
+test('real execFile timeout retains the unproven termination origin', {timeout:5000}, async () => {
+  await assert.rejects(promisify(execFile)(process.execPath,
+    ['-e','setInterval(() => {}, 1000)'], {timeout:100, maxBuffer:1024, windowsHide:true}), error => {
+    assert.equal(error.killed, true);
+    assert.equal(ownerSessionSoakFailureCode(error), 'session_soak_process_terminated_or_timed_out');
+    return true;
+  });
+});
+
+test('explicit child termination does not acquire a false timeout diagnosis', {timeout:5000}, async () => {
+  const task = promisify(execFile)(process.execPath,
+    ['-e','setInterval(() => {}, 1000)'], {timeout:4000, maxBuffer:1024, windowsHide:true});
+  const stop = setTimeout(() => task.child.kill(), 100);
+  try {
+    await assert.rejects(task, error => {
+      assert.equal(error.killed, true);
+      assert.equal(ownerSessionSoakFailureCode(error), 'session_soak_process_terminated_or_timed_out');
+      return true;
+    });
+  } finally { clearTimeout(stop); }
 });
 
 test('every literal soak failure remains classified and preserves the outer failure boundary', async () => {

@@ -50,7 +50,10 @@ export function ownerSessionSoakFailureCode(error) {
   const fallback = 'session_soak_physical_failed';
   if (error?.code === 'ETIMEDOUT') return 'session_soak_process_timeout';
   if (error?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') return 'session_soak_output_limit';
-  if (error?.killed === true) return 'session_soak_process_terminated';
+  // execFile reports its own timeout with killed:true and no ETIMEDOUT code,
+  // exactly as an explicit kill. Preserve that uncertainty without changing
+  // the native timeout, process lifecycle or failure boundary.
+  if (error?.killed === true) return 'session_soak_process_terminated_or_timed_out';
   if (typeof error?.stderr !== 'string' || Buffer.byteLength(error.stderr) > 1024 * 1024) return fallback;
   const reasons = new Set();
   for (const match of error.stderr.matchAll(/^\s*(?:\+\s*)?FullyQualifiedErrorId\s*:\s*soak_([a-z0-9_]+)(?=[:\s]|$)/gm)) {

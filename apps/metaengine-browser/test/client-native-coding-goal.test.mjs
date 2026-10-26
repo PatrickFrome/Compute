@@ -40,7 +40,7 @@ function rejectionResult(input,profile_id=randomUUID()){
 test('confirmed pre-dispatch rejection survives restart and never replays the old request',async()=>{
  const f=fixture(),calls=[],request=async(op,input)=>{calls.push(op);return rejectionResult(input,f.receipt.profile_id);};
  const router=createClientNativeCodingGoalRouter({journal:f.journal,request,projectSnapshot:async()=>{throw Error('NO_PROJECT');},onAdmitted:async()=>{throw Error('NO_EXECUTION');}});
- await assert.rejects(router.submit({request_id:f.input.request_id,goal:f.input.objective}));
+ await assert.rejects(router.submit({request_id:f.input.request_id,goal:f.input.objective}), /rejected_before_dispatch:/);
  assert.equal(f.journal.latest().state,'FAILED');assert.equal(f.journal.latest().receipt,null);assert.deepEqual(calls,['SEED_GOAL']);
  const restored=new ClientGoalJournal(f.storage);await restored.load();assert.equal(restored.latest().native_rejection.admission_absent,true);
  await restored.markReconcileRequired(f.input.request_id,'late transport failure');assert.equal(restored.latest().state,'FAILED');

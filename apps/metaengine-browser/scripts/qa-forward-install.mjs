@@ -21,7 +21,7 @@ import {readUpgradeAsarPackage,readUpgradeAsarVerifier,stableUpgradeRead,makeUpg
 import {captureInstalledTreeFingerprint} from './qa-installed-tree-fingerprint.mjs';
 import {compareQaInstalledImage} from './qa-operator-install-recovery.mjs';
 import {observeWindowsNsisEffects} from './qa-nsis-external-effects.mjs';
-import {forwardDigest as sha,writeForwardEvidence as write,retireForwardImage,assertForwardScope} from './qa-forward-install-policy.mjs';
+import {forwardDigest as sha,writeForwardEvidence as write,retireForwardImage,assertForwardScope,assertForwardPreservedPaths,writeForwardPreservedGate} from './qa-forward-install-policy.mjs';
 import {QA_UPGRADE_ADMISSION_SCHEMA} from '../src/local-provider-upgrade-admission.mjs';
 
 const exec=promisify(execFile),require=createRequire(import.meta.url);
@@ -116,10 +116,22 @@ async function oldState(plan){
     ||status.bundle_sha256!==config.expected_bundle_sha256||!Array.isArray(status.children))fail('predecessor_binding_invalid');
   return {file,bytes,owner,config,configBytes,status,statusBytes};
 }
+function preservedPathScope(plan,old,pg){
+  return {
+    installedRoot:path.join(process.env.LOCALAPPDATA,'Programs','METAENGINE Browser Test'),
+    stateDirectory:plan.state_directory,retiredRoot:path.join(plan.state_directory,'retired-installation'),
+    keeperExecutable:pg.exe_path,pgDataDirectory:old.config.pg_data_directory,
+    candidateRoot:plan.candidate_root,installerFile:plan.installer_file,
+    ownerFile:old.file,configFile:old.owner.runtime_host.config_file,
+    statusFile:old.owner.runtime_identity_file,predecessorStateDirectory:old.config.state_directory,
+  };
+}
 export async function prepareForwardInstall(plan,{resume=false}={}){
   validatePlan(plan);if(!resume)await absent(plan.state_directory);
   const checked=await candidate(plan),old=await oldState(plan);await quiescent(old.config,old.status);
   const pg=await keeper(old.config),installedRoot=path.join(process.env.LOCALAPPDATA,'Programs','METAENGINE Browser Test');
+  const preservedPaths=preservedPathScope(plan,old,pg),preserve=()=>assertForwardPreservedPaths(preservedPaths);
+  await preserve();
   const oldPkg=await readUpgradeAsarPackage(path.join(installedRoot,'resources','app.asar'));
   const predecessor=await captureInstalledTreeFingerprint(installedRoot);
   const nsis=await observeWindowsNsisEffects({expectedVersion:oldPkg.version});
@@ -137,17 +149,20 @@ export async function prepareForwardInstall(plan,{resume=false}={}){
       if(!row?.ExecutablePath)fail('resume_process_census_unknown');
       for(const root of [plan.candidate_root,plan.state_directory]){const rel=path.relative(root,row.ExecutablePath);if(!rel||(!rel.startsWith('..')&&!path.isAbsolute(rel)))fail('resume_owned_process_present');}
     }
+    await preserve();
     await write(path.join(plan.state_directory,'failed-qualification-readback.json'),{state:'FAILED_STARTUP_QUIESCENT',prior_status_sha256:sha(failedBytes),host_pid:failed.host_pid,owned_executable_processes_absent:true,ports_absent:true,automatic_retry_allowed:false,authority_effect:false});
     await fs.rename(path.join(plan.state_directory,'qualification-host.stderr'),path.join(plan.state_directory,'first-qualification-host.stderr'));
   }else{
+    await preserve();
     await fs.mkdir(plan.state_directory,{mode:0o700});await protectOwnerOnlyWindowsDirectory(plan.state_directory);await acl(plan.state_directory,true);
     await write(path.join(plan.state_directory,'input-plan.json'),plan);
     gateBytes=Buffer.from(JSON.stringify({schema:'metaengine.operator.forward-install-gate.v1',nonce:randomUUID(),pid:process.pid,owner_sha256:plan.owner_sha256,source_head:plan.source_head})+'\n');
-    await write(gate,gateBytes);await acl(gate);
+    await writeForwardPreservedGate(gate,gateBytes,preservedPaths);await acl(gate);
   }
   // Retain the legacy READY snapshot unchanged. The existing runtime reconciler
   // proves every recorded process and endpoint absent before retiring its lock.
   let reconciliation;
+  await preserve();
   if(old.status.state==='READY')reconciliation=await reconcileAbandonedAttachedRuntimeLock({config:old.config});
   else if(old.status.state==='STOPPED'&&old.status.children_stopped===true&&old.status.runtime_ready===false){await absent(path.join(old.config.state_directory,'runtime-host-lock.json'));reconciliation={state:'ALREADY_STOPPED'};}
   else fail('predecessor_custody_unverified');
@@ -157,7 +172,9 @@ export async function prepareForwardInstall(plan,{resume=false}={}){
   else{await write(configFile,configs.final);await write(qualificationFile,configs.qualification);}
   await acl(configFile);await acl(qualificationFile);
   const proposed=validateLocalStateProviderConfig({...old.owner,runtime_identity_file:path.join(plan.state_directory,'runtime-instance.json'),runtime_host:{bundle_directory:configs.final.bundle_directory,expected_bundle_sha256:checked.binding.bundle_sha256,config_file:configFile}});
+  await preserve();
   const runtime=await qualifyForwardRuntime({verified:checked.verified,configFile:qualificationFile,owner:proposed,stateDirectory:plan.state_directory});
+  await preserve();
   await quiescent(old.config,old.status);await keeperSame(old.config,pg);
   if(sha(await stableUpgradeRead(old.file))!==plan.owner_sha256||!old.configBytes.equals(await stableUpgradeRead(old.owner.runtime_host.config_file))||!old.statusBytes.equals(await stableUpgradeRead(old.owner.runtime_identity_file)))fail('predecessor_changed');
   const registration=JSON.parse(await runPs(['-File',script('qa-forward-registration.ps1'),'-Mode','Observe','-StateDirectory',plan.state_directory,'-ExpectedVersion',oldPkg.version]));
@@ -171,7 +188,8 @@ export async function installForwardQualified({proofFile,expectedProofSha256}){
   const old=await oldState(plan),checked=await candidate(plan),state=plan.state_directory;
   if(checked.image.tree_sha256!==proof.candidate.tree_sha256||checked.binding.bundle_sha256!==proof.bundle_sha256)fail('candidate_changed');
   if(await hash(plan.installer_file)!==plan.installer_sha256)fail('installer_changed');
-  const verify=async()=>{await quiescent(old.config,old.status);await keeperSame(old.config,proof.keeper);if(sha(await stableUpgradeRead(proof.gate_file))!==proof.gate_sha256)fail('gate_changed');};
+  const preservedPaths=preservedPathScope(plan,old,proof.keeper);
+  const verify=async()=>{await assertForwardPreservedPaths(preservedPaths);await quiescent(old.config,old.status);await keeperSame(old.config,proof.keeper);if(sha(await stableUpgradeRead(proof.gate_file))!==proof.gate_sha256)fail('gate_changed');await assertForwardPreservedPaths(preservedPaths);};
   await verify();
   if(sha(old.configBytes)!==proof.old_config_sha256||sha(old.statusBytes)!==proof.old_status_sha256)fail('predecessor_changed');
   const stopped=JSON.parse(await stableUpgradeRead(proof.proposed.runtime_identity_file));
@@ -179,7 +197,7 @@ export async function installForwardQualified({proofFile,expectedProofSha256}){
   const installedRoot=path.join(process.env.LOCALAPPDATA,'Programs','METAENGINE Browser Test');
   const registrationArgs=['-File',script('qa-forward-registration.ps1'),'-StateDirectory',state,'-ExpectedVersion',proof.old_version];
   const reg=JSON.parse(await runPs([...registrationArgs,'-Mode','Observe']));if(reg.digest!==proof.registration.digest)fail('registration_changed');
-  await retireForwardImage({installedRoot,stateDirectory:state,retiredRoot:path.join(state,'retired-installation'),expectedTreeSha256:proof.predecessor.tree_sha256},{verify});
+  await retireForwardImage({installedRoot,stateDirectory:state,retiredRoot:path.join(state,'retired-installation'),expectedTreeSha256:proof.predecessor.tree_sha256,preservedPaths},{verify});
   await verify();
   const retired=JSON.parse(await runPs([...registrationArgs,'-Mode','Retire','-ExpectedDigest',reg.digest]));if(retired.state!=='RETIRED_VERIFIED'||retired.digest!==reg.digest)fail('registration_retirement_unconfirmed');
   await write(path.join(state,'installer-attempt.json'),{state:'EFFECT_PENDING',installer_sha256:plan.installer_sha256,automatic_retry_allowed:false});
@@ -210,10 +228,12 @@ export async function finalizeForwardAfterInstallerReadback({proofFile,expectedP
   const stopped=JSON.parse(await stableUpgradeRead(proof.proposed.runtime_identity_file));
   if(stopped.state!=='STOPPED'||stopped.children_stopped!==true||stopped.instance_id!==proof.runtime.instance_id||stopped.host_pid!==proof.runtime.host_pid)fail('qualification_changed');
   const verify=async()=>{
+    await assertForwardPreservedPaths(preservedPathScope(plan,old,proof.keeper));
     await quiescent(old.config,old.status);await keeperSame(old.config,proof.keeper);
     if(sha(await stableUpgradeRead(proof.gate_file))!==proof.gate_sha256)fail('gate_changed');
     const rows=JSON.parse(await runPs(['-Command',"$ErrorActionPreference='Stop'; @(Get-CimInstance Win32_Process -Filter \"Name LIKE 'METAENGINE%Setup%' OR Name LIKE 'Uninstall METAENGINE%'\" | Select-Object ProcessId,Name) | ConvertTo-Json -Compress"] )||'[]');
     if((Array.isArray(rows)?rows:[rows]).length!==0)fail('installer_process_still_present');
+    await assertForwardPreservedPaths(preservedPathScope(plan,old,proof.keeper));
   };
   await verify();
   await write(path.join(state,'installer-readback-attempt.json'),{state:'READBACK_PENDING',installer_exit_code:null,installer_replayed:false,automatic_retry_allowed:false,authority_effect:false});
@@ -230,7 +250,7 @@ async function finalizeForwardPayload({proof,plan,old,expectedProofSha256,verify
   const nextBytes=Buffer.from(JSON.stringify(proof.proposed,null,2)+'\n'),staged=path.join(state,'pending-owner.json');await write(staged,nextBytes);await acl(staged);
   await publishOwnerFile({ownerFile:old.file,stagedFile:staged,oldBytes:old.bytes,nextBytes,rollbackFile:path.join(state,'owner-publication-preimage.json')},{verifyPublished:verify});
   const receipt={schema:'metaengine.operator.forward-install-receipt.v1',state:'INSTALLED_VERIFIED',proof_sha256:expectedProofSha256,source_head:plan.source_head,package_version:plan.package_version,owner_sha256:sha(nextBytes),bundle_sha256:proof.bundle_sha256,installed_asar_sha256:plan.asar_sha256,installed_image:image,nsis_effects:nsis,keeper:proof.keeper,installed_payload_verified:true,production_authorized:false,provenance_verified:false,historical_effects_reconciled:false,automatic_retry_allowed:false,authority_effect:false};
-  const postVerify=async()=>{await quiescent(old.config,old.status);await keeperSame(old.config,proof.keeper);if((await captureInstalledTreeFingerprint(installedRoot)).tree_sha256!==image.installed_tree_sha256)fail('installed_image_changed');};
+  const postVerify=async()=>{await assertForwardPreservedPaths(preservedPathScope(plan,old,proof.keeper));await quiescent(old.config,old.status);await keeperSame(old.config,proof.keeper);if((await captureInstalledTreeFingerprint(installedRoot)).tree_sha256!==image.installed_tree_sha256)fail('installed_image_changed');await assertForwardPreservedPaths(preservedPathScope(plan,old,proof.keeper));};
   const completed=await completeUpgradeFiles({ownerFile:old.file,gateFile:proof.gate_file,terminalFile:path.join(state,'forward-installed.json'),retiredGateFile:path.join(state,'completed-upgrade-gate.json'),expectedOwnerSha256:sha(nextBytes),expectedGateSha256:proof.gate_sha256,receipt},{verify:postVerify,protect:acl});
   const completionFile=path.join(state,'forward-completed.json'),completionSha=await write(completionFile,completed);
   const admission={schema:QA_UPGRADE_ADMISSION_SCHEMA,state:'INSTALLED_VERIFIED',owner_sha256:sha(nextBytes),bundle_sha256:proof.bundle_sha256,proof_sha256:expectedProofSha256,completed_receipt_sha256:completionSha,source_head:plan.source_head,package_version:plan.package_version,installed_asar_sha256:plan.asar_sha256,installed_tree_sha256:image.installed_tree_sha256,publication_gate_sha256:proof.gate_sha256,launch_allowed:true,gate_retired:true,production_authorized:false,provenance_verified:false,automatic_retry_allowed:false,authority_effect:false};

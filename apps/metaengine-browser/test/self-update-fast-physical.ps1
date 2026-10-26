@@ -220,6 +220,26 @@ try {
   $env:METAENGINE_SELF_UPDATE_SMOKE_TRACE = Join-Path $temp 'self-update-smoke.jsonl'
   Remove-Item $env:METAENGINE_SELF_UPDATE_SMOKE_TRACE -Force -ErrorAction SilentlyContinue
 
+  # Failure diagnostics are established only from this verified disposable
+  # baseline profile. They grant no install/retry authority and cannot fail E2E.
+  try {
+    $failureContext = [ordered]@{
+      schema = 'metaengine.self-update.failure-context.v1'
+      source_head = $head
+      profile_path = $userData
+      installed_asar_path = Join-Path (Split-Path -Parent $app) 'resources\app.asar'
+      baseline_version = $baseline
+      target_version = $target
+      baseline_asar_sha256 = (Get-FileHash (Join-Path (Split-Path -Parent $app) 'resources\app.asar') -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+    [System.IO.File]::WriteAllText(
+      (Join-Path $temp 'self-update-failure-context.json'),
+      (($failureContext | ConvertTo-Json -Compress) + "`n"),
+      [System.Text.UTF8Encoding]::new($false)
+    )
+  } catch { # A missing diagnostic witness must never change the physical verdict.
+  }
+
   $smokeOut = Join-Path $temp 'self-update-smoke.out'; $smokeErr = Join-Path $temp 'self-update-smoke.err'
   $source = Start-CapturedProcess -FilePath $app -Arguments '--metaengine-self-update-smoke' -OutPath $smokeOut -ErrPath $smokeErr
   $sourcePid = $source.Process.Id
