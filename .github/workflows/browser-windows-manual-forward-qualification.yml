@@ -61,8 +61,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
-          node --test --test-reporter=tap apps/metaengine-browser/test/qa-forward-*.test.mjs > "$RUNNER_TEMP/manual-forward-source-tests.tap"
-          cat "$RUNNER_TEMP/manual-forward-source-tests.tap"
+          node --test --test-reporter=tap apps/metaengine-browser/test/qa-forward-*.test.mjs | tee "$RUNNER_TEMP/manual-forward-source-tests.tap"
           git diff --exit-code HEAD -- .
       - name: Upload source tests separately from physical evidence
         if: always()

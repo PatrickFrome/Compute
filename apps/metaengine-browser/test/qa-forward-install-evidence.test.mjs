@@ -153,6 +153,45 @@ test('rewriting the extracted sidecar and payload together cannot escape the pin
   v.uninstaller.sha256=sha;await json(path.join(root,'candidate','sidecar','forward-install-sidecar.json'),v);
   await assert.rejects(verifyForwardArtifactImage({pin:p.candidate,roleRoot:path.join(root,'candidate')}),/sidecar_archive_binding_mismatch/);
 });
+test('unrelated concurrent sibling creation cannot masquerade as ancestor replacement',async t=>{
+  const root=await temp(t),file=path.join(root,'artifact.zip');await fs.writeFile(file,'pinned archive bytes');
+  const originalRealpath=fs.realpath;let siblingCreated=false;
+  t.mock.method(fs,'realpath',async (...args)=>{
+    if(path.resolve(args[0])===root&&!siblingCreated){
+      siblingCreated=true;
+      // A concurrent test or hosted-runner process may legitimately create a
+      // sibling while this verifier checks the shared ancestor's file identity.
+      await fs.mkdir(path.join(root,'unrelated-sibling'));
+    }
+    return originalRealpath(...args);
+  });
+  assert.equal(await hashForwardInputFile(file),hash('pinned archive bytes'));
+  assert.equal(siblingCreated,true);
+});
+test('actual ancestor replacement between identity reads is still refused',async t=>{
+  const root=await temp(t),boundary=path.join(root,'input');await fs.mkdir(boundary);
+  const file=path.join(boundary,'artifact.zip');await fs.writeFile(file,'same bytes');
+  const originalRealpath=fs.realpath;let replaced=false;
+  t.mock.method(fs,'realpath',async (...args)=>{
+    if(path.resolve(args[0])===boundary&&!replaced){
+      replaced=true;await fs.rename(boundary,path.join(root,'retained-original'));
+      await fs.mkdir(boundary);await fs.writeFile(file,'same bytes');
+    }
+    return originalRealpath(...args);
+  });
+  await assert.rejects(hashForwardInputFile(file),/qa_forward_inputs_path_changed/);
+  assert.equal(replaced,true);
+});
+test('regular-file mutation between identity reads is still refused',async t=>{
+  const root=await temp(t),file=path.join(root,'artifact.zip');await fs.writeFile(file,'original');
+  const originalRealpath=fs.realpath;let changed=false;
+  t.mock.method(fs,'realpath',async (...args)=>{
+    if(path.resolve(args[0])===file&&!changed){changed=true;await fs.appendFile(file,'changed');}
+    return originalRealpath(...args);
+  });
+  await assert.rejects(hashForwardInputFile(file),/qa_forward_inputs_path_changed/);
+  assert.equal(changed,true);
+});
 test('hardlinked installer and physical directory alias are refused',async t=>{
   const {root,p}=await inputFixture(t),r=await verifyForwardInputDirectory({pins:p,inputRoot:root,expectedSourceHead:head});
   const linked=path.join(root,'hardlink');await fs.link(r.candidate.installer_file,linked);

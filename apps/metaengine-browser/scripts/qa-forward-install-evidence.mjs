@@ -26,7 +26,8 @@ const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
 const fail=code=>{const error=new Error('qa_forward_inputs_'+code);error.code=error.message;throw error;};
 const record=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
 const keys=(value,allowed)=>record(value)&&Object.keys(value).every(k=>allowed.includes(k));
-const sameInfo=(a,b)=>a.dev===b.dev&&a.ino===b.ino&&a.size===b.size&&a.mtimeNs===b.mtimeNs&&a.nlink===b.nlink;
+const sameIdentity=(a,b)=>a.dev===b.dev&&a.ino===b.ino&&a.birthtimeNs===b.birthtimeNs;
+const sameInfo=(a,b)=>sameIdentity(a,b)&&a.size===b.size&&a.mtimeNs===b.mtimeNs&&a.nlink===b.nlink;
 
 function relativeName(value){
   return typeof value==='string'&&value.length>0&&value.length<=512&&value.split('/').length<=40
@@ -149,7 +150,11 @@ export async function assertForwardInputPath(absolute,{directory=false,missingLe
     const dir=i<parts.length||directory;
     if(before.isSymbolicLink()||(dir?!before.isDirectory():!before.isFile())||before.ino<=0n||(!dir&&before.nlink!==1n))fail('path_alias_forbidden');
     const real=await fs.realpath(current),other=await fs.lstat(real,{bigint:true}),after=await fs.lstat(current,{bigint:true});
-    if(other.isSymbolicLink()||after.isSymbolicLink()||before.dev!==other.dev||before.ino!==other.ino||!sameInfo(before,after))fail('path_changed');
+    // Shared ancestors legitimately change mtime/size/link count when another
+    // runner task creates a sibling. Directory custody is its stable kernel
+    // identity and physical type; regular-file byte metadata remains strict.
+    if(other.isSymbolicLink()||after.isSymbolicLink()||!sameIdentity(before,other)||!sameIdentity(before,after)
+      ||(dir?(!other.isDirectory()||!after.isDirectory()):(!other.isFile()||!after.isFile()||other.nlink!==1n||!sameInfo(before,after))))fail('path_changed');
   }
 }
 export async function hashForwardInputFile(file,{maxBytes=MAX_BYTES}={}){
