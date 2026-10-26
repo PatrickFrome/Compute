@@ -581,3 +581,13 @@ The existing installed `.4594` migration remains HOLD. The inherited fresh-insta
 ```
 
 Repairs bind fresh PG17 OS and SQL identities independently; protect update journals across processes; preserve concurrent Owner publications; and require physical readback before claiming image restoration. Local verification: 252 self-update tests passed, 60 Owner/image/CAS tests passed, and native PG17 enrollment passed with independent API and lost-ack cases. Default Browser tests now use a disposable OS profile. These source checks do not establish installed or continuous-agent readiness. The preceding .135 identity remains consumed by run 40324805522; this preparation does not reserve its successor.
+
+## Installed seed recovery successor — 0.7.0-dev.1508254192075.1
+
+Functional source: c784151343015a1d93f84ac8a8eae8a4b453a0bb. Installed predecessor 0.7.0-dev.1485366478478.1 / 7f4c74f421fd27d49fc4b2e3acb645106ef6c9ec has a visible native window, READY Host/API/Edge and preserved PG17 incarnation. Its first native goal request reached the protected intent but created no seed, task or execution; the semantic fence is absent. Installed autonomous work remains unproven.
+
+The successor recognizes a pre-dispatch rejection only after the protected exact intent, absent semantic fence, a second PostgreSQL admission read after that absence, unchanged private profile and durable rejection receipt. Unknown SQL dispatch remains fenced; refresh never repeats a write. The UI preserves the rejected request and permits a new explicit goal. Sandbox evidence reuses the private qualified CLI byte guard, which still rejects identity/metadata/hardlink changes, rather than hashing the large CLI once per role inside the observation window.
+
+Focused source tests: 76 PASS. Isolated PostgreSQL seed integration: 16 PASS, including unknown transaction outcome and a racing committed admission. No model executions in these tests. The installer operator now supports complete readback after an unknown installer exit and waits up to 1800 seconds; it does not replay the installer or manufacture an exit code.
+
+Live GitHub artifact metadata and read-only candidate plan: evidence/audits/metaengine-20261026-seed-recovery/live-artifact-observation.json. This commit prepares a distinct source version; CI/package/installed qualification for the successor remains pending. No production signing, promotion, automatic replay or unlimited physical concurrency is claimed.
