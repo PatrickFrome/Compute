@@ -4,8 +4,12 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
 import {captureInstalledTreeFingerprint} from '../scripts/qa-installed-tree-fingerprint.mjs';
-import {assertForwardScope,assertForwardPreservedPaths,writeForwardPreservedGate,retireForwardImage} from '../scripts/qa-forward-install-policy.mjs';
+import {assertForwardScope,assertForwardPreservedPaths,writeForwardPreservedGate,retireForwardImage,
+  forwardDigest,writeForwardEvidence,assertForwardArtifactsUnchanged,assertForwardInstallNotAttempted,
+  runForwardEffect,publishForwardOwner} from '../scripts/qa-forward-install-policy.mjs';
 
 async function fixture(t){
   const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'forward-install-')));
@@ -164,4 +168,171 @@ test('post-retirement custody change retains the pending fence without claiming 
   assert.equal(await fs.readFile(path.join(f.retiredRoot,'app.bin'),'utf8'),'old installation');
   assert.equal(JSON.parse(await fs.readFile(path.join(f.stateDirectory,'image-retirement-attempt.json'),'utf8')).state,'EFFECT_PENDING');
   await assert.rejects(fs.lstat(path.join(f.stateDirectory,'image-retirement-completed.json')),{code:'ENOENT'});
+});
+
+async function artifactFixture(t){
+  const f=await fixture(t),candidateRoot=f.preservedPaths.candidateRoot,installerFile=f.preservedPaths.installerFile;
+  const runtimeFile=path.join(candidateRoot,'runtime.bin');await fs.writeFile(runtimeFile,'pinned runtime');
+  const pins={candidateRoot,installerFile,expectedTreeSha256:(await captureInstalledTreeFingerprint(candidateRoot)).tree_sha256,
+    expectedInstallerSha256:forwardDigest(await fs.readFile(installerFile))};
+  return {...f,pins,runtimeFile};
+}
+const readJson=async file=>JSON.parse(await fs.readFile(file,'utf8'));
+const missing=file=>assert.rejects(fs.lstat(file),{code:'ENOENT'});
+test('effect byte pins reject a candidate change after a successful verification',async t=>{
+  const f=await artifactFixture(t);
+  assert.equal(await assertForwardArtifactsUnchanged(f.pins),true);
+  await fs.writeFile(f.runtimeFile,'changed runtime');
+  await assert.rejects(assertForwardArtifactsUnchanged(f.pins),/candidate_changed/);
+});
+test('effect byte pins reject a hardlinked candidate child',async t=>{
+  const f=await artifactFixture(t);await fs.link(f.runtimeFile,path.join(f.env.LOCALAPPDATA,'runtime-alias'));
+  await assert.rejects(assertForwardArtifactsUnchanged(f.pins),/nonregular_or_hardlinked_file/);
+});
+for(const field of ['installerFile','runtimeFile'])test(field+' changes after intent: HOLD without an effect or retry',async t=>{
+  const f=await artifactFixture(t);let invokes=0;
+  const options={stateDirectory:f.stateDirectory,effect:'installer',identity:{installer_sha256:f.pins.expectedInstallerSha256}};
+  const callbacks={verifyBefore:()=>assertForwardArtifactsUnchanged(f.pins),invoke:async()=>{invokes++;return {installer_exit_code:0};},
+    write:async(file,value)=>{
+      const result=await writeForwardEvidence(file,value);
+      if(file.endsWith('installer-attempt.json'))await fs.writeFile(field==='installerFile'?f.pins.installerFile:f.runtimeFile,'late substitution');
+      return result;
+    }};
+  await assert.rejects(runForwardEffect(options,callbacks),/installer_hold_requires_readback/);
+  assert.equal(invokes,0);
+  const hold=await readJson(path.join(f.stateDirectory,'installer-hold.json'));
+  assert.equal(hold.state,'HOLD');assert.equal(hold.invocation_started,false);assert.equal(hold.effect_outcome,'NOT_INVOKED');
+  await missing(path.join(f.stateDirectory,'installer-completed.json'));
+  await assert.rejects(runForwardEffect(options,callbacks),/existing_attempt_requires_readback/);
+  assert.equal(invokes,0);
+});
+test('lost installer acknowledgement retains a durable HOLD and refuses the next invocation',async t=>{
+  const f=await fixture(t),effectFile=path.join(f.stateDirectory,'simulated-installer-effect');let invokes=0;
+  const options={stateDirectory:f.stateDirectory,effect:'installer',identity:{installer_sha256:'a'.repeat(64)}};
+  const callbacks={invoke:async()=>{invokes++;await fs.writeFile(effectFile,'effect occurred');throw Error('lost exit observation');}};
+  await assert.rejects(runForwardEffect(options,callbacks),/installer_hold_requires_readback/);
+  assert.equal(await fs.readFile(effectFile,'utf8'),'effect occurred');
+  const hold=await readJson(path.join(f.stateDirectory,'installer-hold.json'));
+  assert.deepEqual([hold.state,hold.invocation_started,hold.effect_outcome,hold.completion_verified,hold.automatic_retry_allowed],['HOLD',true,'UNKNOWN',false,false]);
+  assert.equal(Object.hasOwn(hold,'installer_exit_code'),false);
+  await missing(path.join(f.stateDirectory,'installer-completed.json'));
+  await assert.rejects(runForwardEffect(options,callbacks),/existing_attempt_requires_readback/);
+  assert.equal(invokes,1);
+});
+test('a fresh process cannot repeat an installer with a durable ambiguous intent',async t=>{
+  const f=await fixture(t),effectFile=path.join(f.stateDirectory,'effect-count'),readbackFile=path.join(f.stateDirectory,'fresh-process-readback.json');
+  const options={stateDirectory:f.stateDirectory,effect:'installer',identity:{}};
+  await assert.rejects(runForwardEffect(options,{invoke:async()=>{
+    await fs.writeFile(effectFile,'one');throw Error('lost acknowledgement');
+  }}),/installer_hold_requires_readback/);
+  const moduleUrl=new URL('../scripts/qa-forward-install-policy.mjs',import.meta.url).href;
+  const code=`import fs from 'node:fs/promises';
+    import {runForwardEffect} from ${JSON.stringify(moduleUrl)};
+    try {await runForwardEffect(${JSON.stringify(options)},{invoke:async()=>{
+      await fs.appendFile(${JSON.stringify(effectFile)},'replayed');return {};
+    }});process.exitCode=2;}catch(error){
+      if(!/existing_attempt_requires_readback/.test(error.message))throw error;
+      await fs.writeFile(${JSON.stringify(readbackFile)},JSON.stringify({state:'HOLD_NO_REPLAY',pid:process.pid}),{flag:'wx'});
+    }`;
+  await promisify(execFile)(process.execPath,['--input-type=module','-e',code],{timeout:10000,windowsHide:true});
+  const readback=await readJson(readbackFile);
+  assert.equal(readback.state,'HOLD_NO_REPLAY');assert.notEqual(readback.pid,process.pid);assert.equal(await fs.readFile(effectFile,'utf8'),'one');
+  await missing(path.join(f.stateDirectory,'installer-completed.json'));
+});
+test('successful child exit with failed readback cannot create completion',async t=>{
+  const f=await fixture(t);let invokes=0;
+  const options={stateDirectory:f.stateDirectory,effect:'installer',identity:{}};
+  const callbacks={invoke:async()=>{invokes++;return {installer_exit_code:0};},verifyAfter:async()=>{throw Error('payload mismatch');}};
+  await assert.rejects(runForwardEffect(options,callbacks),/installer_hold_requires_readback/);
+  await missing(path.join(f.stateDirectory,'installer-completed.json'));
+  await assert.rejects(runForwardEffect(options,callbacks),/existing_attempt_requires_readback/);
+  assert.equal(invokes,1);
+});
+test('failed durable intent prevents invocation without claiming a recorded HOLD',async t=>{
+  const f=await fixture(t);let invokes=0;
+  await assert.rejects(runForwardEffect({stateDirectory:f.stateDirectory,effect:'installer',identity:{}}, {
+    invoke:async()=>{invokes++;},write:async()=>{throw Error('intent disk failure');}}),/intent disk failure/);
+  assert.equal(invokes,0);
+  await missing(path.join(f.stateDirectory,'installer-attempt.json'));await missing(path.join(f.stateDirectory,'installer-hold.json'));
+});
+test('failed HOLD persistence is reported separately while the original intent fences retry',async t=>{
+  const f=await fixture(t);let invokes=0;
+  const options={stateDirectory:f.stateDirectory,effect:'installer',identity:{}};
+  await assert.rejects(runForwardEffect(options,{
+    invoke:async()=>{invokes++;throw Error('effect observation lost');},
+    write:async(file,value)=>{if(file.endsWith('-hold.json'))throw Error('hold disk failure');return writeForwardEvidence(file,value);},
+  }),error=>error instanceof AggregateError&&/hold_not_recorded/.test(error.message)&&error.errors.length===2);
+  assert.equal((await readJson(path.join(f.stateDirectory,'installer-attempt.json'))).state,'EFFECT_PENDING');
+  await missing(path.join(f.stateDirectory,'installer-hold.json'));await missing(path.join(f.stateDirectory,'installer-completed.json'));
+  await assert.rejects(runForwardEffect(options,{invoke:async()=>{invokes++;}}),/existing_attempt_requires_readback/);
+  assert.equal(invokes,1);
+});
+for(const effect of ['image-retirement','registration-retirement','installer','owner-publication'])test(effect+' intent prevents install reentry',async t=>{
+  const f=await fixture(t);await assertForwardInstallNotAttempted(f.stateDirectory);
+  await fs.writeFile(path.join(f.stateDirectory,effect+'-attempt.json'),'unreadable or incomplete intent');
+  await assert.rejects(assertForwardInstallNotAttempted(f.stateDirectory),/existing_attempt_requires_readback/);
+});
+async function ownerFixture(t){
+  const f=await fixture(t),ownerFile=f.preservedPaths.ownerFile,stagedFile=path.join(f.stateDirectory,'pending-owner.json');
+  const oldBytes=Buffer.from('{"owner":"previous"}\n'),nextBytes=Buffer.from('{"owner":"successor"}\n');
+  await fs.writeFile(ownerFile,oldBytes);await fs.writeFile(stagedFile,nextBytes);
+  const gate=ownerFile+'.qa-upgrade-gate.json';await fs.writeFile(gate,'publication blocked');
+  return {...f,gate,publication:{stateDirectory:f.stateDirectory,ownerFile,stagedFile,oldBytes,nextBytes}};
+}
+test('forward Owner publication preserves preimage and leaves admission gated',async t=>{
+  const f=await ownerFixture(t),p=f.publication;
+  const r=await publishForwardOwner(p);
+  assert.equal(r.state,'PUBLISHED_VERIFIED');assert.equal(r.automatic_rollback_attempted,false);
+  assert.deepEqual(await fs.readFile(p.ownerFile),p.nextBytes);
+  assert.deepEqual(await fs.readFile(path.join(f.stateDirectory,'owner-publication-custody','preimage.json')),p.oldBytes);
+  assert.equal(await fs.readFile(f.gate,'utf8'),'publication blocked');
+  assert.equal((await fs.lstat(p.ownerFile)).nlink,1);
+  await assert.rejects(publishForwardOwner(p),/existing_attempt_requires_readback/);
+});
+test('lost Owner capture acknowledgement keeps captured bytes, gate and HOLD without restoration',async t=>{
+  const f=await ownerFixture(t),p=f.publication;let renames=0;
+  const filesystem={...fs,rename:async(a,b)=>{renames++;await fs.rename(a,b);throw Error('capture acknowledgement lost');}};
+  await assert.rejects(publishForwardOwner(p,{filesystem}),/owner-publication_hold_requires_readback/);
+  await missing(p.ownerFile);
+  assert.deepEqual(await fs.readFile(path.join(f.stateDirectory,'owner-publication-custody','preimage.json')),p.oldBytes);
+  await missing(path.join(f.stateDirectory,'owner-publication-completed.json'));
+  assert.equal((await readJson(path.join(f.stateDirectory,'owner-publication-hold.json'))).state,'HOLD');
+  assert.equal(await fs.readFile(f.gate,'utf8'),'publication blocked');
+  await assert.rejects(publishForwardOwner(p,{filesystem}),/existing_attempt_requires_readback/);assert.equal(renames,1);
+});
+test('lost Owner link acknowledgement preserves ambiguous links without repeating publication',async t=>{
+  const f=await ownerFixture(t),p=f.publication;let links=0;
+  const filesystem={...fs,link:async(a,b)=>{links++;await fs.link(a,b);throw Error('publication acknowledgement lost');}};
+  await assert.rejects(publishForwardOwner(p,{filesystem}),/owner-publication_hold_requires_readback/);
+  assert.deepEqual(await fs.readFile(p.ownerFile),p.nextBytes);assert.equal((await fs.lstat(p.ownerFile)).nlink,2);
+  await missing(path.join(f.stateDirectory,'owner-publication-completed.json'));
+  assert.equal(await fs.readFile(f.gate,'utf8'),'publication blocked');
+  await assert.rejects(publishForwardOwner(p,{filesystem}),/existing_attempt_requires_readback/);assert.equal(links,1);
+});
+test('post-publication verification failure preserves new Owner without rollback or completion',async t=>{
+  const f=await ownerFixture(t),p=f.publication;let checks=0;
+  await assert.rejects(publishForwardOwner(p,{verify:async()=>{if(++checks===3)throw Error('registry changed');}}),/owner-publication_hold_requires_readback/);
+  assert.deepEqual(await fs.readFile(p.ownerFile),p.nextBytes);
+  assert.deepEqual(await fs.readFile(path.join(f.stateDirectory,'owner-publication-custody','preimage.json')),p.oldBytes);
+  assert.equal((await fs.lstat(p.ownerFile)).nlink,1);
+  await missing(path.join(f.stateDirectory,'owner-publication-completed.json'));
+  await assert.rejects(publishForwardOwner(p),/existing_attempt_requires_readback/);
+});
+test('concurrent Owner publication is never overwritten or rolled back',async t=>{
+  const f=await ownerFixture(t),p=f.publication,foreign=Buffer.from('other operator');
+  const filesystem={...fs,rename:async(a,b)=>{await fs.rename(a,b);await fs.writeFile(p.ownerFile,foreign,{flag:'wx'});}};
+  await assert.rejects(publishForwardOwner(p,{filesystem}),/owner-publication_hold_requires_readback/);
+  assert.deepEqual(await fs.readFile(p.ownerFile),foreign);
+  assert.deepEqual(await fs.readFile(path.join(f.stateDirectory,'owner-publication-custody','preimage.json')),p.oldBytes);
+  await missing(path.join(f.stateDirectory,'owner-publication-completed.json'));
+  await assert.rejects(publishForwardOwner(p),/existing_attempt_requires_readback/);
+});
+test('runtime qualification cannot use a log directory as the custody state directory',async t=>{
+  const f=await fixture(t),configFile=path.join(f.stateDirectory,'config.json');
+  await fs.writeFile(configFile,JSON.stringify({state_directory:f.stateDirectory}));
+  const {qualifyForwardRuntime}=await import('../scripts/qa-forward-install.mjs');
+  let executableAccessed=false;
+  const verified={get paths(){executableAccessed=true;throw Error('must not reach launch');}};
+  await assert.rejects(qualifyForwardRuntime({verified,configFile,owner:{},stateDirectory:f.env.LOCALAPPDATA}),/runtime_state_directory_mismatch/);
+  assert.equal(executableAccessed,false);await missing(path.join(f.env.LOCALAPPDATA,'qualification-host.stderr'));
 });
