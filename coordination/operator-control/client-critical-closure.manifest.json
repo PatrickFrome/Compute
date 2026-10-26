@@ -990,7 +990,7 @@
     "tests/test_r1_supervisor_r2_ingestion_gate.py": "35f8189ac1215b02ba61c2e0db7128a6ceeaaf27",
     "tests/test_w1_aws_provider_reboot_live_guard.py": "abdb9994f43cb227bc0902acb9767f7a003673ea",
     "apps/metaengine-browser/test/self-update-installer-handoff-order.test.mjs": "f090451df8133f191eeb87e8077c21160d482fd9",
-    "apps/metaengine-browser/scripts/run-isolated-tests.mjs": "a4d8297183c3fd9cbdb3284a049c226eee03f613",
+    "apps/metaengine-browser/scripts/run-isolated-tests.mjs": "c7619c8cc0521a29f25bd95da3f0086ff9d64cb0",
     "apps/metaengine-browser/src/durable-json-file.cjs": "d00b80244d7ff1aa1a3e66e92f1c689ef82fbb84",
     "apps/metaengine-browser/src/self-update-transaction-journal.mjs": "ce9ee1f55273f9a8fa511cb3c33165fd141879ec",
     "apps/metaengine-browser/test/durable-json-file-unknown-outcome.generated.test.mjs": "ebda3a5c04e86612c01ccf8c2e7692f795f976a2",
@@ -1004,7 +1004,8 @@
     "apps/metaengine-browser/test/qa-forward-install-policy.test.mjs": "8c9ea62ce40bdf3e67feecf4b2aafb8bc1c7bbf7",
     "apps/metaengine-browser/test/qa-forward-registration.windows.test.mjs": "bf9a0519e4a7b1f384f0183fc5deb57488b7c7e0",
     "evidence/audits/metaengine-20261026-seed-recovery/live-artifact-observation.json": "1883354f43351350cd202506b1fc8e50d70a57d3",
-    "evidence/audits/metaengine-20261026-edge-health-recovery/live-artifact-observation.json": "91d8801477b94524c9e82445b6bd9ca34760a532"
+    "evidence/audits/metaengine-20261026-edge-health-recovery/live-artifact-observation.json": "91d8801477b94524c9e82445b6bd9ca34760a532",
+    "apps/metaengine-browser/test/isolated-test-electron-mode.test.mjs": "e0e14645d48528bc5e097a36f79e9c4f58bc7902"
   },
   "parent_checks_not_transitive": true,
   "proof_levels": {
