@@ -855,8 +855,10 @@
     "infra/client-state-runtime/fresh-schema-candidate-plan.json": "6644fd23eb95700663d1d7e6cc49b75452e6fbe9",
     "infra/client-state-runtime/fresh-schema-pg17.integration.test.mjs": "2a7d8261d57219a488a7dc8b623ff01e45c37813",
     "infra/client-state-runtime/fresh-schema-plan.mjs": "d04560a73b41bb005e1300edad69f9382cc3270b",
-    "infra/client-state-runtime/fresh-schema-plan.test.mjs": "b9daa5719ab32bc5abd92023860ed094c2b21d42",
-    "infra/client-state-runtime/test/fresh-schema-disposable.mjs": "dcf3104fa5975b32ec86c2eb077f4082c7ae512e"
+    "infra/client-state-runtime/fresh-schema-plan.test.mjs": "205d85fd44dc00741f91a8a937260c86edf2d0d9",
+    "infra/client-state-runtime/test/fresh-schema-disposable.mjs": "33a93b103fce6e5799cddcff1b1e325068f031f9",
+    ".github/workflows/client-v1-c5-reference-useful-work.yml": "e80e2727331459c8975576e0feb664ca0a69b355",
+    ".github/client-c5-reference-source-identity.test.mjs": "41c1e2edd6801c8e310b826549c2403090856bed"
   },
   "parent_checks_not_transitive": true,
   "proof_levels": {

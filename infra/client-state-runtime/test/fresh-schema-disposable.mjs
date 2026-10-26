@@ -18,6 +18,13 @@ import { inspectAttachedApiAdmission } from '../attached-postgres-onboarding.mjs
 const root = new URL('../../../', import.meta.url);
 const heartbeat = 'public.h205f22_a2_supervisor_mesh_heartbeat_v1(text,text,text)';
 
+export function assertEmptyApplicationSchema(rows) {
+  // postgres.js returns Result extends Array, whereas PGlite returns Array.
+  // Freshness is determined by rows, never by a driver's result prototype.
+  assert.ok(Array.isArray(rows), 'invalid application schema result');
+  assert.equal(rows.length, 0, 'refuse partial/nonempty application schema');
+}
+
 async function qualifyDisposableFreshSchema({ sql, engine } = {}) {
   if (!['NATIVE_PG17', 'WASM_SQL18_ONLY'].includes(engine)) throw new Error('qualification_engine_required');
   const plan = await loadFreshSchemaCandidatePlan();
@@ -30,7 +37,7 @@ async function qualifyDisposableFreshSchema({ sql, engine } = {}) {
     await tx.unsafe("SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(current_database() || ':compute.local-runtime-migrations.v1', 0))");
     [version] = await tx.unsafe("select current_setting('server_version_num')::int as value");
     assert.equal(Math.floor(Number(version.value) / 10000), engine === 'NATIVE_PG17' ? 17 : 18);
-    assert.deepEqual(await tx.unsafe(FRESH_SCHEMA_OCCUPANCY_QUERY), [], 'refuse partial/nonempty application schema');
+    assertEmptyApplicationSchema(await tx.unsafe(FRESH_SCHEMA_OCCUPANCY_QUERY));
   });
   const tx = sql;
   // Caller provides a newly allocated disposable cluster, never an attached DB.

@@ -2,7 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { loadFreshSchemaCandidatePlan, inspectFreshSchemaCandidate, FRESH_SCHEMA_OCCUPANCY_QUERY } from './fresh-schema-plan.mjs';
-import { qualifyFreshSchemaWasm, assertDisposableIdentity, assertReservedBackend } from './test/fresh-schema-disposable.mjs';
+import { qualifyFreshSchemaWasm, assertDisposableIdentity, assertReservedBackend, assertEmptyApplicationSchema } from './test/fresh-schema-disposable.mjs';
+
+test('empty schema guard accepts driver Result arrays but refuses every occupied or invalid result', () => {
+  class Result extends Array {}
+  assert.doesNotThrow(() => assertEmptyApplicationSchema(new Result()));
+  assert.doesNotThrow(() => assertEmptyApplicationSchema([]));
+  for (const rows of [new Result({kind:'function',object_name:'existing'}), [{kind:'relation',object_name:'existing'}], null, undefined, {length:0}, '']) {
+    assert.throws(() => assertEmptyApplicationSchema(rows), /application schema/);
+  }
+});
 
 test('fresh schema qualification is registered in unit and disposable PG17 CI paths', async () => {
   const packageJson = JSON.parse(await readFile(new URL('./package.json', import.meta.url), 'utf8'));
