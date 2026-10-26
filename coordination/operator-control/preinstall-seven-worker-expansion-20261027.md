@@ -20,7 +20,7 @@ The documentation commit is not a replacement development/package anchor.
 | --- | --- | --- | --- |
 | 5 | [#1360](https://github.com/PatrickFrome/Compute/issues/1360): disposable recovery bundle with vault and restart | work/preinstall-recovery-20261027 | READY_TO_CLAIM |
 | 6 | [#1361](https://github.com/PatrickFrome/Compute/issues/1361): producer-bound migration sidecar and strict consumer | work/preinstall-artifacts-20261027 | READY_TO_CLAIM |
-| 7 | [#1362](https://github.com/PatrickFrome/Compute/issues/1362): native authority revocation/Host replacement negative acceptance | work/preinstall-authority-20261027 | READY_TO_CLAIM |
+| 7 | [#1362](https://github.com/PatrickFrome/Compute/issues/1362): Git-to-SQL checkpoint crash reconciliation without replay | work/preinstall-reconciliation-20261027 | READY_TO_CLAIM |
 
 The three self-contained task files are in `preinstall-tasks/`.
 Creating an issue or preparing its file does not mean that the worker chat is
@@ -40,16 +40,18 @@ additions:
   Any additive change to the shared
   `apps/metaengine-browser/scripts/qualified-installer-consumer.ps1` must first
   be described in a DEPENDENCY_REQUEST.
-- Stream 7 owns new native-authority negative fixtures/tests and its report.
-  Core verifier/service/runtime-host fixes and registration in shared workflows
-  require a concrete dependency request. The goal/continuation code remains
-  owned by Stream 3.
+- Stream 7 owns native-coding-project-commits.mjs, native-coding-host-commit-service.mjs,
+  their focused tests, and new checkpoint-reconciliation fixtures/report. It
+  addresses Stream 3's concrete Git-to-SQL crash-gap request. Changes to shared
+  private Host capability/IPC wiring require a precise dependency request;
+  Stream 3 retains its original goal/autonomous-project source modules.
 
 Stream 6 supplies the candidate-tree/uninstaller sidecar contract required by
 Stream 2 (#1356). Stream 2 owns the actual manual migration composition.
 Stream 5 verifies recovery mechanics separately; its fixture cannot qualify a
-backup of the real installed Keeper. Stream 7 supplies independent negative
-authority evidence to complement Stream 3's useful-work continuity.
+backup of the real installed Keeper. Stream 7 supplies a narrowly typed,
+independently verified checkpoint-reconciliation contract to Stream 3, with
+no repeated Git effect and no retry of an ambiguous SQL finalization.
 
 The coordinator integrates source changes, refreshes source seals, selects and
 reserves a fresh package version, runs one immutable installer producer, and
@@ -67,3 +69,11 @@ Existing user Browser, Owner, PGDATA, Guardian and registry are not fixtures.
 Use disposable Windows/native data only. Keep RequireFreshInstall, no-replay
 fences and all authority boundaries intact. Report concrete failures without
 fabricating successful receipts or exposing secrets.
+
+## Prioritization update
+
+The initially considered native-authority negative-audit assignment was not
+claimed. Before launch, Stream 7 was redirected to the concrete Git-to-SQL
+crash gap reported by Stream 3 in #1354. Issue #1362 and the current Markdown
+file are authoritative. No native-authority worker was launched by the
+coordinator, and no additional eighth worker is implied.
