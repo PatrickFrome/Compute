@@ -303,6 +303,19 @@ async function readOriginalCode(roleRoot) {
   if (manifest.entries.filter(row => row.kind === 'file').length !== CODE_FILE_COUNT) fail('original_code_file_count_mismatch');
   return {file, bytes, manifest};
 }
+
+// Read-only ZIP directory allowances come only from the immutable original
+// W68 bytes. Neither the qualifier's inventory nor its current disk tree can
+// add an exception, and a persisted descriptor cannot supply this list.
+export async function readPredecessorArchiveDirectories({pin, roleRoot}) {
+  validateForwardPredecessorPin(pin);
+  const {manifest} = await readOriginalCode(roleRoot);
+  const directories = [PREDECESSOR_IMAGE_ROOT, ...manifest.entries.filter(row => row.kind === 'directory')
+    .map(row => PREDECESSOR_IMAGE_ROOT + '/' + row.path)].sort();
+  for (const directory of directories) validateForwardRelativePath(directory);
+  return Object.freeze(directories);
+}
+
 async function originalExpectations(roleRoot, code, expectedInstallerTreeSha256) {
   const original = await captureForwardInventory(path.join(roleRoot, 'installer'));
   if (expectedInstallerTreeSha256 !== undefined && original.tree_sha256 !== expectedInstallerTreeSha256)

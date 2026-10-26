@@ -5,8 +5,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import {createHash} from 'node:crypto';
-import {execFile} from 'node:child_process';
-import {promisify} from 'node:util';
+import {zip} from './fixtures/forward-archive-zip.mjs';
 import {FORWARD_INPUT_SCHEMA,FORWARD_REPOSITORY,FORWARD_PRODUCER,
   validateForwardInputPins,assertForwardProducerMetadata,assertForwardArtifactMetadata,
   assertForwardQualifierMetadata,assertForwardArtifactCollection,readForwardInputMetadata,
@@ -17,7 +16,6 @@ const oldHead='601532ca50db02aa9089783dde157a93f484adf2';
 // Immutable original source config captured from the exact oldHead Contents API.
 // This is fixture data, independent of any later consumer-checkout config drift.
 const originalConfigLf=Buffer.from("{\n  \"appId\": \"com.metaengine.browser.test\",\n  \"productName\": \"METAENGINE Browser Test\",\n  \"asar\": true,\n  \"electronFuses\": {\n    \"enableEmbeddedAsarIntegrityValidation\": true,\n    \"onlyLoadAppFromAsar\": true\n  },\n  \"asarUnpack\": [\n    \"src/browser-sentinel-worker.cjs\",\n    \"src/browser-sentinel-liveness.cjs\",\n    \"src/browser-sentinel-action-journal.cjs\",\n    \"src/durable-json-file.cjs\",\n    \"src/compute-bridge-worker.cjs\"\n  ],\n  \"directories\": {\n    \"output\": \"dist-test\"\n  },\n  \"compression\": \"store\",\n  \"files\": [\n    \"src/**/*\",\n    \"package.json\",\n    {\n      \"from\": \"../../infra/client-state-runtime\",\n      \"to\": \"infra/client-state-runtime\",\n      \"filter\": [\"offline-runtime-bundle.mjs\"]\n    },\n    {\n      \"from\": \"native-dist/codex-cli/asar\",\n      \"to\": \".\",\n      \"filter\": [\"native-coding-job-runtime.json\"]\n    }\n  ],\n  \"beforePack\": \"./scripts/electron-builder-before-pack.cjs\",\n  \"afterAllArtifactBuild\": \"./scripts/electron-builder-after-all-artifact-build.cjs\",\n  \"extraResources\": [\n    {\n      \"from\": \"src\",\n      \"to\": \"native-coding/agent-mcp\",\n      \"filter\": [\"native-coding-agent-mcp-entry.mjs\", \"native-coding-agent-mcp-broker.mjs\", \"native-coding-agent-mcp-stdio.mjs\"]\n    },\n    {\n      \"from\": \"native-dist/codex-cli/codex-cli-job-runner.ps1\",\n      \"to\": \"native-coding/codex-cli-job-runner.ps1\"\n    },\n    {\n      \"from\": \"client-state-runtime-dist\",\n      \"to\": \"client-state-runtime\",\n      \"filter\": [\"**/*\"]\n    },\n    {\n      \"from\": \"native-dist/guardian\",\n      \"to\": \"guardian-native\",\n      \"filter\": [\n        \"**/*\"\n      ]\n    },\n    {\n      \"from\": \"native-dist/guardian-bootstrap\",\n      \"to\": \"guardian-bootstrap\",\n      \"filter\": [\n        \"**/*\"\n      ]\n    },\n    {\n      \"from\": \"devos-source-snapshot\",\n      \"to\": \"devos-source-snapshot\",\n      \"filter\": [\n        \"**/*\"\n      ]\n    },\n    {\n      \"from\": \"../../coordination/browser-compute\",\n      \"to\": \"a2-compute-browser\",\n      \"filter\": [\n        \"package.json\",\n        \"protocol-v1.json\",\n        \"engine-lock.json\",\n        \"src/**/*\"\n      ]\n    },\n    {\n      \"from\": \"../../coordination/browser-shared\",\n      \"to\": \"browser-shared\",\n      \"filter\": [\n        \"action-contract.mjs\",\n        \"node-registry.mjs\",\n        \"receipt-contract.mjs\",\n        \"semantic-perception-compiler.mjs\"\n      ]\n    },\n    {\n      \"from\": \"me2-daemon-dist\",\n      \"to\": \"me2-daemon\",\n      \"filter\": [\n        \"**/*\"\n      ]\n    },\n    {\n      \"from\": \"me2-ui-dist\",\n      \"to\": \"me2-ui\",\n      \"filter\": [\n        \"**/*\"\n      ]\n    },\n    {\n      \"from\": \"me2-ui-dist/node_modules\",\n      \"to\": \"me2-ui/node_modules\",\n      \"filter\": [\n        \"**/*\"\n      ]\n    }\n  ],\n  \"publish\": [\n    {\n      \"provider\": \"github\",\n      \"owner\": \"PatrickFrome\",\n      \"repo\": \"Compute\",\n      \"releaseType\": \"prerelease\",\n      \"channel\": \"dev\"\n    }\n  ],\n  \"win\": {\n    \"icon\": \"build/icon.ico\",\n    \"target\": [\n      {\n        \"target\": \"nsis\",\n        \"arch\": [\n          \"x64\"\n        ]\n      }\n    ],\n    \"artifactName\": \"METAENGINE-Browser-Test-Setup-${version}-${arch}.${ext}\"\n  },\n  \"nsis\": {\n    \"differentialPackage\": true,\n    \"installerHeader\": \"build/installerHeader.bmp\",\n    \"installerSidebar\": \"build/installerSidebar.bmp\",\n    \"uninstallerSidebar\": \"build/installerSidebar.bmp\",\n    \"oneClick\": false,\n    \"perMachine\": false,\n    \"allowToChangeInstallationDirectory\": false,\n    \"createDesktopShortcut\": true,\n    \"createStartMenuShortcut\": true,\n    \"shortcutName\": \"METAENGINE Browser Test\",\n    \"runAfterFinish\": true,\n    \"deleteAppDataOnUninstall\": false\n  }\n}\n",'utf8');
-const exec=promisify(execFile),python=process.platform==='win32'?'python':'python3';
 function pins(){return {schema:FORWARD_INPUT_SCHEMA,
   candidate:{source_head:head,package_version:'0.7.0-dev.180.1',producer_run_id:'200',producer_run_attempt:1,
     installer_artifact:{id:'20',name:'metaengine-browser-windows-candidate-'+head,sha256:sha},
@@ -63,18 +61,12 @@ function configResponse(bytes=originalConfigLf){return {type:'file',name:'electr
   path:'apps/metaengine-browser/electron-builder.test.json',encoding:'base64',content:bytes.toString('base64'),size:bytes.length,
   sha:createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex')};}
 async function zipRows(file,rows){
-  const {stdout}=await exec(python,['-c',`import zipfile,sys,json
-with zipfile.ZipFile(sys.argv[1],'x') as z:
- for row in json.loads(sys.argv[2]):
-  info=zipfile.ZipInfo(row[0])
-  # The constructor normalizes backslashes on Windows and NUL on every OS.
-  # Preserve deliberately malicious central-directory bytes in this fixture.
-  info.filename=row[0];info.orig_filename=row[0];info.create_system=3
-  info.external_attr=row[2] if len(row)>2 else 0
-  z.writestr(info,row[1])
-with zipfile.ZipFile(sys.argv[1]) as z:
- print(json.dumps([row.orig_filename for row in z.infolist()]))`,file,JSON.stringify(rows)]);
-  assert.deepEqual(JSON.parse(stdout),rows.map(row=>row[0]),'fixture must retain exact raw ZIP names on every platform');
+  const built=zip(rows.map(([name,bytes,attributes])=>({name,bytes,...(attributes===undefined?{}:{attributes})})));
+  for(let i=0;i<rows.length;i++){
+    const raw=Buffer.from(rows[i][0],'utf8'),start=built.offsets[i].central+46;
+    assert.deepEqual(built.bytes.subarray(start,start+raw.length),raw,'fixture must retain exact raw ZIP names on every platform');
+  }
+  await fs.writeFile(file,built.bytes,{flag:'wx'});
 }
 
 test('v2 separates original producer, independent qualification and canonical schema origins',()=>{

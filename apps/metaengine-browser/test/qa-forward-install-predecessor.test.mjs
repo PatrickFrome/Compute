@@ -10,14 +10,16 @@ import {createRequire} from 'node:module';
 import {writeProvenance, verifyInstaller} from '../scripts/installer-provenance.mjs';
 import {captureForwardInventory, validateForwardInventory} from '../scripts/qa-forward-candidate-sidecar.mjs';
 import {INSTALLED_TREE_SCHEMA} from '../scripts/qa-installed-tree-fingerprint.mjs';
-import {PACKAGE_CODE_FILE_W68} from '../src/installed-package-code-w68.mjs';
+import {PACKAGE_CODE_FILE_W68, PACKAGE_CODE_SCHEMA_W68, serializePackageCodeManifestW68}
+  from '../src/installed-package-code-w68.mjs';
 import {ORIGINAL_PREDECESSOR, PREDECESSOR_DETACHED_PROOFS, PREDECESSOR_QUALIFIER_REFS}
   from '../scripts/qualify-predecessor-materialization.mjs';
 import {PREDECESSOR_MATERIALIZATION_SCHEMA, PREDECESSOR_QUALIFIER_WORKFLOW,
   PREDECESSOR_CONFIG_CONTRACT, PREDECESSOR_CONFIG_SHA256,
   PREDECESSOR_IMAGE_ROOT, PREDECESSOR_ORIGIN, validateForwardPredecessorPin,
   validatePredecessorMaterialization, verifyStrictForwardInstaller,
-  materializePredecessorDirectories, verifyPredecessorMaterialization, verifyPredecessorInstalledImage}
+  readPredecessorArchiveDirectories, materializePredecessorDirectories,
+  verifyPredecessorMaterialization, verifyPredecessorInstalledImage}
   from '../scripts/qa-forward-install-predecessor.mjs';
 
 const require = createRequire(import.meta.url);
@@ -261,6 +263,30 @@ test('tampered original code bytes fail before directory restoration or image re
   await assert.rejects(() => fs.lstat(path.join(root, 'qualification')), {code: 'ENOENT'});
   await assert.rejects(() => verifyPredecessorMaterialization({pin: p, roleRoot: root, ...runs(p),
     materializationSha256: HASH}), /original_code_digest_mismatch/);
+});
+
+test('archive directory allowances cannot be derived from an observed tree or a replacement W68 inventory', async t => {
+  const root = await temp(t), p = pin(), installerRoot = path.join(root, 'installer');
+  await fs.mkdir(installerRoot);
+  const imageRoot = path.join(root, 'qualification', PREDECESSOR_IMAGE_ROOT);
+  await fs.mkdir(path.join(imageRoot, 'observed-extra'), {recursive: true});
+  await assert.rejects(() => readPredecessorArchiveDirectories({pin: p, roleRoot: root}), {code: 'ENOENT'});
+  // Correct W68 schema and original source/version still confer no authority
+  // when the bytes are not the separately pinned original artifact member.
+  const replacement = serializePackageCodeManifestW68({schema: PACKAGE_CODE_SCHEMA_W68,
+    source_sha: p.source_head, package_version: p.package_version, exe_name: 'METAENGINE Browser Test.exe', entries: [
+      {path: 'METAENGINE Browser Test.exe', kind: 'file', size: 1, sha256: HASH},
+      {path: 'observed-extra', kind: 'directory'},
+      {path: 'resources', kind: 'directory'},
+      {path: 'resources/app.asar', kind: 'file', size: 1, sha256: HASH},
+    ]});
+  const codeFile = path.join(installerRoot, PACKAGE_CODE_FILE_W68);
+  await fs.writeFile(codeFile, replacement);
+  await assert.rejects(() => readPredecessorArchiveDirectories({pin: p, roleRoot: root}), /original_code_digest_mismatch/);
+  await assert.rejects(() => readPredecessorArchiveDirectories({pin: {...p, code_manifest_sha256: sha(replacement)}, roleRoot: root}),
+    /original_pin_invalid/);
+  assert.deepEqual(await fs.readFile(codeFile), replacement);
+  assert.deepEqual(await fs.readdir(imageRoot), ['observed-extra']);
 });
 
 test('readback cannot promote a serialized descriptor with a hash taken from the current target', async t => {

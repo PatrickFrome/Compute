@@ -101,8 +101,6 @@ jobs:
           $ErrorActionPreference = 'Stop'
           if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows' -or $env:GITHUB_ACTIONS -ne 'true' -or $env:CI -ne 'true') { throw 'manual_forward_disposable_windows_required' }
           if ($env:GITHUB_REPOSITORY -ne 'PatrickFrome/Compute' -or (git rev-parse HEAD) -ne $env:EXACT_HEAD -or $env:EXACT_HEAD -ne $env:GITHUB_SHA) { throw 'manual_forward_exact_source_required' }
-          python --version
-          if ($LASTEXITCODE -ne 0) { throw 'manual_forward_archive_reader_missing' }
       - name: Acquire exact terminal-success producer artifacts by explicit pins
         working-directory: apps/metaengine-browser
         shell: pwsh

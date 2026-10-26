@@ -5,17 +5,17 @@ import fs from 'node:fs/promises';
 import {createWriteStream} from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
-import {execFile} from 'node:child_process';
-import {promisify} from 'node:util';
 import {Readable,Transform} from 'node:stream';
 import {pipeline} from 'node:stream/promises';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {verifyOfflineRuntimeBundle} from '../../../infra/client-state-runtime/offline-runtime-bundle.mjs';
 import {validateForwardSidecar as validateCandidateManifest,validateForwardSidecarBinding,captureForwardInventory,hashForwardFile,
   validateForwardRelativePath} from './qa-forward-candidate-sidecar.mjs';
-import {materializeForwardSidecar} from './qa-forward-candidate-archive.mjs';
+import {materializeForwardSidecar,materializeForwardArchive,verifyForwardArchiveFiles,
+  readForwardArchiveMember} from './qa-forward-candidate-archive.mjs';
 import {validateForwardPredecessorPin,verifyStrictForwardInstaller,verifyPredecessorMaterialization,
-  materializePredecessorDirectories,PREDECESSOR_CONFIG_SHA256,PREDECESSOR_CONFIG_CONTRACT,PREDECESSOR_ORIGIN} from './qa-forward-install-predecessor.mjs';
+  materializePredecessorDirectories,readPredecessorArchiveDirectories,PREDECESSOR_CONFIG_SHA256,
+  PREDECESSOR_CONFIG_CONTRACT,PREDECESSOR_ORIGIN} from './qa-forward-install-predecessor.mjs';
 import {ORIGINAL_PREDECESSOR,PREDECESSOR_QUALIFIER_REFS} from './qualify-predecessor-materialization.mjs';
 import {validateForwardSchemaPin,assertForwardSchemaQualification,verifyForwardSchemaDirectory,
   FORWARD_SCHEMA_FILES} from './qa-forward-install-schema.mjs';
@@ -206,6 +206,9 @@ export async function verifyForwardInputDirectory({pins,inputRoot,expectedSource
   const predecessorRoot=path.join(inputRoot,'predecessor'),schemaRoot=path.join(inputRoot,'schema-fixture');
   await verifyForwardArchive({archive:path.join(predecessorRoot,'installer.zip'),destination:path.join(predecessorRoot,'installer'),expectedSha256:pins.predecessor.installer_artifact.sha256});
   const qualificationDirectory=path.join(predecessorRoot,'qualification');
+  const addedDirectories=await readPredecessorArchiveDirectories({pin:pins.predecessor,roleRoot:predecessorRoot});
+  await verifyForwardArchive({archive:path.join(predecessorRoot,'qualification.zip'),destination:qualificationDirectory,
+    expectedSha256:pins.predecessor.qualification.artifact.sha256,addedDirectories});
   const materializationSha256=await assertForwardArchiveMember({archive:path.join(predecessorRoot,'qualification.zip'),file:path.join(qualificationDirectory,'predecessor-materialization.json'),
     relative:'predecessor-materialization.json',expectedSha256:pins.predecessor.qualification.artifact.sha256});
   const originalConfigFile=path.join(predecessorRoot,ORIGINAL_CONFIG_FILE);
@@ -213,6 +216,8 @@ export async function verifyForwardInputDirectory({pins,inputRoot,expectedSource
   const predecessor=await verifyPredecessorMaterialization({pin:pins.predecessor,roleRoot:predecessorRoot,materializationSha256,
     producerRun:observed.predecessor.run,qualificationRun:observed.predecessorQualification.run,
     configFile:originalConfigFile});
+  await verifyForwardArchive({archive:path.join(predecessorRoot,'qualification.zip'),destination:qualificationDirectory,
+    expectedSha256:pins.predecessor.qualification.artifact.sha256,addedDirectories});
   await verifyForwardArchive({archive:path.join(predecessorRoot,'installer.zip'),destination:path.join(predecessorRoot,'installer'),expectedSha256:pins.predecessor.installer_artifact.sha256});
   await verifyForwardArchive({archive:path.join(schemaRoot,'qualification.zip'),destination:path.join(schemaRoot,'qualification'),expectedSha256:pins.schema_fixture.qualification.artifact.sha256});
   const schemaManifestSha256=await assertForwardArchiveMember({archive:path.join(schemaRoot,'qualification.zip'),
@@ -232,102 +237,28 @@ export async function verifyForwardInputDirectory({pins,inputRoot,expectedSource
     automatic_self_update_qualified:false,production_authorized:false};
 }
 
-// Python's standard ZIP reader is available on hosted Windows and Linux. Entry
-// validation happens before creating any extracted files; no shell is invoked.
-const READ_MANIFEST_PY=String.raw`
-import sys, zipfile
-with zipfile.ZipFile(sys.argv[1]) as z:
-    matches = [r for r in z.infolist() if r.filename == sys.argv[2]]
-    if len(matches) != 1 or matches[0].orig_filename != matches[0].filename or matches[0].file_size > 32*1024**2: raise RuntimeError('sidecar_entry_invalid')
-    sys.stdout.buffer.write(z.read(matches[0]))
-`;
-const EXTRACT_PY=String.raw`
-import sys, os, stat, zipfile, re, json, hashlib, unicodedata
-mode, archive, target = sys.argv[1:]
-if mode not in ('write','verify'): raise RuntimeError('archive_mode_invalid')
-limit = 12 * 1024**3
-with zipfile.ZipFile(archive) as z:
-    rows = z.infolist()
-    if not rows or len(rows) > 50000: raise RuntimeError('archive_entry_limit')
-    seen, total, prefixes = set(), 0, {}
-    for row in rows:
-        if row.orig_filename != row.filename: raise RuntimeError('archive_path_normalized')
-        name = row.orig_filename[:-1] if row.is_dir() else row.orig_filename
-        parts = name.split('/')
-        if not name or len(name.encode('utf8')) > 1024 or len(parts) > 40 or unicodedata.normalize('NFC',name) != name or any(not p or p in ('.','..') or len(p.encode('utf8')) > 255 or re.search(r'[\\:\x00-\x1f\x7f<>"|?*]',p) or p.endswith(('.', ' ')) or re.match(r'^(con|prn|aux|nul|clock\$|conin\$|conout\$|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)',p,re.I) or re.match(r'^[^.]{1,6}~[1-9][0-9]*(?:\.|$)',p) for p in parts): raise RuntimeError('archive_path_invalid')
-        key = unicodedata.normalize('NFC',name.upper())
-        if key in seen: raise RuntimeError('archive_path_alias')
-        seen.add(key)
-        for depth in range(1,len(parts)+1):
-            prefix = '/'.join(parts[:depth]); folded = unicodedata.normalize('NFC',prefix.upper())
-            kind = 'file' if depth == len(parts) and not row.is_dir() else 'directory'
-            if folded in prefixes and prefixes[folded] != (prefix,kind): raise RuntimeError('archive_prefix_alias')
-            prefixes[folded] = (prefix,kind)
-        kind = stat.S_IFMT(row.external_attr >> 16)
-        if kind not in (0, stat.S_IFREG, stat.S_IFDIR) or (row.external_attr & 0x400): raise RuntimeError('archive_link_forbidden')
-        if row.flag_bits & 1 or row.compress_type not in (zipfile.ZIP_STORED,zipfile.ZIP_DEFLATED): raise RuntimeError('archive_encoding_forbidden')
-        if not row.flag_bits & 0x800 and any(ord(c)>127 for c in name): raise RuntimeError('archive_encoding_forbidden')
-        total += row.file_size
-        if row.file_size > 4*1024**3 or row.file_size > max(1,row.compress_size)*1000 or total > limit: raise RuntimeError('archive_size_limit')
-    if mode == 'write': os.mkdir(target)
-    expected_files, expected_dirs = set(), {p for p,k in prefixes.values() if k == 'directory'}
-    for row in rows:
-        name = row.filename.rstrip('/')
-        destination = os.path.join(target, *name.split('/'))
-        if row.is_dir():
-            if mode == 'write': os.makedirs(destination, exist_ok=True)
-            continue
-        expected_files.add(name)
-        if mode == 'write': os.makedirs(os.path.dirname(destination), exist_ok=True)
-        with z.open(row) as src, open(destination,'xb' if mode == 'write' else 'rb') as dst:
-            before = os.fstat(dst.fileno())
-            if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1: raise RuntimeError('archive_materialized_file_invalid')
-            count = 0
-            while True:
-                block = src.read(262144)
-                if not block: break
-                count += len(block)
-                if count > row.file_size: raise RuntimeError('archive_size_mismatch')
-                if mode == 'write': dst.write(block)
-                elif dst.read(len(block)) != block: raise RuntimeError('archive_materialized_bytes_changed')
-            if count != row.file_size: raise RuntimeError('archive_size_mismatch')
-            if mode == 'verify':
-                after = os.fstat(dst.fileno()); named = os.lstat(destination)
-                if dst.read(1) or any(getattr(before,k)!=getattr(after,k) or getattr(before,k)!=getattr(named,k) for k in ('st_dev','st_ino','st_size','st_mtime_ns','st_ctime_ns','st_nlink')) or not stat.S_ISREG(named.st_mode): raise RuntimeError('archive_materialized_file_changed')
-    if mode == 'verify':
-        actual_files, actual_dirs = set(), set()
-        for current,dirs,files in os.walk(target):
-            for name in dirs: actual_dirs.add(os.path.relpath(os.path.join(current,name),target).replace(os.sep,'/'))
-            for name in files: actual_files.add(os.path.relpath(os.path.join(current,name),target).replace(os.sep,'/'))
-        if actual_files != expected_files or actual_dirs != expected_dirs: raise RuntimeError('archive_materialized_inventory_changed')
-`;
+// All generic archives share Stream6's raw ZIP/ZIP64 parser and physical-file
+// guards. These wrappers preserve consumer diagnostics without a second parser.
 export async function extractForwardArchive({archive,destination,expectedSha256}){
   if(!SHA.test(expectedSha256||''))fail('archive_pin_invalid');
-  await assertForwardInputPath(destination,{directory:true,missingLeaf:true});
-  if(await hashForwardInputFile(archive)!==expectedSha256)fail('archive_digest_mismatch');
-  try{await promisify(execFile)(process.platform==='win32'?'python':'python3',['-c',EXTRACT_PY,'write',archive,destination],{windowsHide:true,shell:false,timeout:300000,maxBuffer:16384});}
+  try{return await materializeForwardArchive({archiveFile:archive,archiveSha256:expectedSha256,destination});}
   catch{fail('archive_extraction_failed');}
-  if(await hashForwardInputFile(archive)!==expectedSha256)fail('archive_changed_during_extraction');
-  await captureForwardInventory(destination);
 }
-export async function verifyForwardArchive({archive,destination,expectedSha256}){
+export async function verifyForwardArchive({archive,destination,expectedSha256,addedDirectories=[]}){
   if(!SHA.test(expectedSha256||''))fail('archive_pin_invalid');
-  const before=await captureForwardInventory(destination);
-  if(await hashForwardInputFile(archive)!==expectedSha256)fail('archive_digest_mismatch');
-  try{await promisify(execFile)(process.platform==='win32'?'python':'python3',['-c',EXTRACT_PY,'verify',archive,destination],{windowsHide:true,shell:false,timeout:300000,maxBuffer:16384});}
+  try{await verifyForwardArchiveFiles({archiveFile:archive,archiveSha256:expectedSha256,directory:destination,addedDirectories});}
   catch{fail('archive_materialization_changed');}
-  if(await hashForwardInputFile(archive)!==expectedSha256||(await captureForwardInventory(destination)).tree_sha256!==before.tree_sha256)fail('archive_changed_during_read');
   return true;
 }
 export async function assertForwardArchiveMember({archive,file,relative,expectedSha256}){
   validateForwardRelativePath(relative);
-  if(await hashForwardInputFile(archive)!==expectedSha256)fail('archive_digest_mismatch');
-  let stdout;
-  try{({stdout}=await promisify(execFile)(process.platform==='win32'?'python':'python3',['-c',READ_MANIFEST_PY,archive,relative],{windowsHide:true,shell:false,timeout:30000,maxBuffer:MAX_JSON,encoding:'buffer'}));}
+  if(!SHA.test(expectedSha256||''))fail('archive_pin_invalid');
+  let member;
+  try{member=await readForwardArchiveMember({archiveFile:archive,archiveSha256:expectedSha256,memberName:relative,maxBytes:MAX_JSON});}
   catch{fail('archive_member_invalid');}
-  if(digest(stdout)!==await hashForwardInputFile(file,{maxBytes:MAX_JSON}))fail('archive_member_changed');
+  if(member.sha256!==await hashForwardInputFile(file,{maxBytes:MAX_JSON}))fail('archive_member_changed');
   if(await hashForwardInputFile(archive)!==expectedSha256)fail('archive_changed_during_read');
-  return digest(stdout);
+  return member.sha256;
 }
 async function githubJson(route,token){
   const response=await fetch('https://api.github.com'+route,{headers:{Authorization:'Bearer '+token,Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'},signal:AbortSignal.timeout(30000),redirect:'error'});
