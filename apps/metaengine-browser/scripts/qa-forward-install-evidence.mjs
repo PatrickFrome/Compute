@@ -227,7 +227,7 @@ const READ_MANIFEST_PY=String.raw`
 import sys, zipfile
 with zipfile.ZipFile(sys.argv[1]) as z:
     matches = [r for r in z.infolist() if r.filename == 'forward-install-sidecar.json']
-    if len(matches) != 1 or matches[0].file_size > 16*1024**2: raise RuntimeError('sidecar_entry_invalid')
+    if len(matches) != 1 or matches[0].orig_filename != matches[0].filename or matches[0].file_size > 16*1024**2: raise RuntimeError('sidecar_entry_invalid')
     sys.stdout.buffer.write(z.read(matches[0]))
 `;
 const EXTRACT_PY=String.raw`
@@ -239,7 +239,11 @@ with zipfile.ZipFile(archive) as z:
     if not rows or len(rows) > 50000: raise RuntimeError('archive_entry_limit')
     seen, total = set(), 0
     for row in rows:
-        name = row.filename[:-1] if row.is_dir() else row.filename
+        # ZipInfo normalizes Windows separators and truncates NUL before exposing
+        # filename. Validate the original central-directory name as well, so the
+        # parser cannot silently turn forbidden metadata into an accepted path.
+        if row.orig_filename != row.filename: raise RuntimeError('archive_path_normalized')
+        name = row.orig_filename[:-1] if row.is_dir() else row.orig_filename
         parts = name.split('/')
         if not name or len(name) > 512 or len(parts) > 40 or any(not p or p in ('.','..') or re.search(r'[\\:\x00-\x1f<>"|?*]',p) or p.endswith(('.', ' ')) or re.match(r'^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)',p,re.I) for p in parts): raise RuntimeError('archive_path_invalid')
         key = name.lower()

@@ -32,11 +32,20 @@ with zipfile.ZipFile(sys.argv[2],'x',compression=zipfile.ZIP_DEFLATED) as z:
  for root,dirs,files in os.walk(sys.argv[1]):
   for name in sorted(dirs+files):
    p=os.path.join(root,name);z.write(p,os.path.relpath(p,sys.argv[1]).replace(os.sep,'/'))`,root,out]);}
-async function zipRows(file,rows){await exec(python,['-c',`import zipfile,sys,json
+async function zipRows(file,rows){
+  const {stdout}=await exec(python,['-c',`import zipfile,sys,json
 with zipfile.ZipFile(sys.argv[1],'x') as z:
  for row in json.loads(sys.argv[2]):
-  info=zipfile.ZipInfo(row[0]);info.external_attr=row[2] if len(row)>2 else 0
-  z.writestr(info,row[1])`,file,JSON.stringify(rows)]);}
+  info=zipfile.ZipInfo(row[0])
+  # The constructor normalizes backslashes on Windows and NUL on every OS.
+  # Preserve deliberately malicious central-directory bytes in this fixture.
+  info.filename=row[0];info.orig_filename=row[0];info.create_system=3
+  info.external_attr=row[2] if len(row)>2 else 0
+  z.writestr(info,row[1])
+with zipfile.ZipFile(sys.argv[1]) as z:
+ print(json.dumps([row.orig_filename for row in z.infolist()]))`,file,JSON.stringify(rows)]);
+  assert.deepEqual(JSON.parse(stdout),rows.map(row=>row[0]),'fixture must retain exact raw ZIP names on every platform');
+}
 async function imageFixture(root,pin){
   const image=path.join(root,'sidecar','win-unpacked');await fs.mkdir(image,{recursive:true});
   const files={
@@ -201,10 +210,11 @@ test('hardlinked installer and physical directory alias are refused',async t=>{
 });
 test('ZIP traversal, case aliases and symlinks are rejected before any payload extraction',async t=>{
   const root=await temp(t);
-  const cases=[[['../escape','x']],[['C:/escape','x']],[['good','x'],['GOOD','y']],[['link','target',0o120777*65536]],[['dir\\escape','x']],[['con.txt','x']]];
+  const cases=[[['../escape','x']],[['C:/escape','x']],[['good','x'],['GOOD','y']],[['link','target',0o120777*65536]],
+    [['dir\\escape','x']],[['con.txt','x']],[['visible\0hidden','x']],[['reparse','target',0x400]]];
   for(let n=0;n<cases.length;n++){
     const archive=path.join(root,`bad-${n}.zip`),destination=path.join(root,`out-${n}`);await zipRows(archive,cases[n]);
-    await assert.rejects(extractForwardArchive({archive,destination,expectedSha256:await hashForwardInputFile(archive)}),/archive_extraction_failed/);
+    await assert.rejects(extractForwardArchive({archive,destination,expectedSha256:await hashForwardInputFile(archive)}),/archive_extraction_failed/,'raw ZIP case '+n+': '+JSON.stringify(cases[n]));
     await assert.rejects(fs.lstat(destination),{code:'ENOENT'});
   }
 });
