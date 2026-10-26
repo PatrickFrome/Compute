@@ -81,7 +81,7 @@ test('real autocrlf checkout preserves canonical append-only history and rejects
 function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion) {
  const fixed={
   classification:'SOURCE_ONLY_NO_CURRENT_PACKAGE',
-  branch:'work/autonomy-continuation-20261026',
+  branch:'work/preinstall-closure-20261027',
   source_parent:'ea405d926568508eac53ebb408e941c94faeadcf',
   package_version:'0.7.0-dev.1784381341133.1',
   historical_package_version:'0.7.0-dev.202610152359.1',
@@ -899,4 +899,23 @@ test('Concurrent health observer recovery successor binds fresh source and metad
  assert.equal(JSON.parse(evidence.queries.at(-1).response_body).total_count,0);
  assert.equal(manifest.current_package_transition.source_parent,prior);assert.equal(manifest.current_source_candidate.package_version,version);
  assertCommittedAuditPrefix(root,prior,'HEAD','coordination/operator-control/AUDIT_CLOSURE_EXECUTION_REGISTER_20261018.md');
+});
+
+test('pre-install repairs and five-stream task contracts are covered by the current source seal',()=>{
+ const required=[
+  ".github/prepare-runtime-contract-pg17.mjs",
+  "apps/metaengine-browser/test/self-update-failure-readback.mjs",
+  "apps/metaengine-browser/test/self-update-failure-readback.pure.test.mjs",
+  "apps/metaengine-browser/test/self-update-failure-readback.test.mjs",
+  "apps/metaengine-browser/test/self-update-fast-physical-ci.ps1",
+  "docs/audits/preinstall-closure-20261027.md",
+  "docs/audits/preinstall-devfleet-wave-20261027.json",
+  "evidence/audits/metaengine-20261027-preinstall/observed-prior-qualification.json",
+  "coordination/operator-control/preinstall-five-streams-20261027.md",
+  "coordination/operator-control/preinstall-tasks/metaengine-stream-1-soak.md",
+  "coordination/operator-control/preinstall-tasks/metaengine-stream-2-migration.md",
+  "coordination/operator-control/preinstall-tasks/metaengine-stream-3-continuity.md",
+  "coordination/operator-control/preinstall-tasks/metaengine-stream-4-ui.md"
+];
+ for(const file of required)assert.match(manifest.current_tree_blobs[file]??'',/^[0-9a-f]{40}$/,file+' must remain source-sealed');
 });
