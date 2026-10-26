@@ -83,7 +83,7 @@ function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion)
   classification:'SOURCE_ONLY_NO_CURRENT_PACKAGE',
   branch:'work/autonomy-continuation-20261026',
   source_parent:'ea405d926568508eac53ebb408e941c94faeadcf',
-  package_version:'0.7.0-dev.1359740117434.1',
+  package_version:'0.7.0-dev.1485366478478.1',
   historical_package_version:'0.7.0-dev.202610152359.1',
   package_build_authorized:false,
   package_version_reuse_authorized:false,
@@ -418,15 +418,26 @@ function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion)
     "production_ready": false,
     "promotion_authorized": false,
     "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "88eb062b09bd456d430bd0da37cb21baaddcee6d",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.1107139874594.1",
+    "distinct_version": "0.7.0-dev.1359740117434.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
   }
 ]);
  const successor=manifest.current_package_transition;
  assert.deepEqual(successor,{
   "schema": "metaengine.client.package-version-successor.v1",
-  "source_parent": "88eb062b09bd456d430bd0da37cb21baaddcee6d",
+  "source_parent": "4b1b0854f918e42494e073f36d96307422617643",
   "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
-  "prior_version": "0.7.0-dev.1107139874594.1",
-  "distinct_version": "0.7.0-dev.1359740117434.1",
+  "prior_version": "0.7.0-dev.1359740117434.1",
+  "distinct_version": "0.7.0-dev.1485366478478.1",
   "preceding_version_burned": true,
   "production_ready": false,
   "promotion_authorized": false,
@@ -472,7 +483,7 @@ test('prepared source package identity is monotonic across known consumed candid
 });
 
 test('prepared successor burns consumed predecessor and sibling without fabricated sibling ancestry',()=>{
- const predecessor='0.7.0-dev.1107139874594.1';
+ const predecessor='0.7.0-dev.1359740117434.1';
  const sibling='0.7.0-dev.1269944506140.1';
  const candidate=manifest.current_source_candidate.package_version;
  assert.ok(manifest.burned_versions.includes(predecessor));
@@ -486,7 +497,7 @@ test('prepared successor burns consumed predecessor and sibling without fabricat
  const transitions=[...manifest.previous_package_transitions,manifest.current_package_transition];
  assert.ok(transitions.every(item=>item.prior_version!==sibling&&item.distinct_version!==sibling),
   'the consumed sibling is not a fictitious source-line transition');
- assert.equal(manifest.current_package_transition.source_parent,'88eb062b09bd456d430bd0da37cb21baaddcee6d');
+ assert.equal(manifest.current_package_transition.source_parent,'4b1b0854f918e42494e073f36d96307422617643');
  assert.equal(manifest.current_package_transition.prior_version,predecessor);
 });
 
@@ -695,7 +706,7 @@ test('new QA source seal retains time-bound planning evidence and pending exact-
  const audit=read(auditPath);
  assertCommittedAuditPrefix(root,parent,'HEAD',auditPath);
  const parse=source=>{
-  const section=source.replace(/\r\n/g,'\n').split('## QA source seal — 0.7.0-dev.1359740117434.1\n')[1];
+  const section=source.replace(/\r\n/g,'\n').split('## QA source seal — 0.7.0-dev.1359740117434.1\n')[1]?.split('\n## ')[0];
   assert.ok(section,'new prepared QA source record required');
   const blocks=[...section.matchAll(/```json\n([\s\S]*?)\n```/g)].map(match=>JSON.parse(match[1]));
   assert.equal(blocks.length,1,'one current QA source record');
@@ -734,8 +745,8 @@ test('new QA source seal retains time-bound planning evidence and pending exact-
   "automatic_effect_retry_allowed": false,
   "authority_effect": false
 });
- assert.equal(seal.functional_source_parent,manifest.current_package_transition.source_parent);
- assert.equal(seal.package_version,manifest.current_source_candidate.package_version);
+ assert.equal(seal.functional_source_parent,manifest.previous_package_transitions.at(-1).source_parent);
+ assert.equal(seal.package_version,manifest.previous_package_transitions.at(-1).distinct_version);
  const observedBytes=fs.readFileSync(new URL(seal.metadata_observation_path,new URL('../../',import.meta.url)));
  assert.equal(createHash('sha256').update(observedBytes).digest('hex'),seal.metadata_observation_sha256);
  assert.match(manifest.current_tree_blobs[seal.metadata_observation_path],/^[a-f0-9]{40}$/,'actual metadata evidence is source sealed');
@@ -800,4 +811,18 @@ test('retained real metadata is advisory only; error, incomplete list and author
   const changed=structuredClone(evidence);mutate(changed);
   assert.throws(()=>assertReadOnlyPackageObservation(changed),{code:'ERR_ASSERTION'});
  }
+});
+
+test('sole-owner successor retains its functional parent and live version observation',()=>{
+ const prior='4b1b0854f918e42494e073f36d96307422617643',version='0.7.0-dev.1485366478478.1';
+ const evidence=JSON.parse(read('evidence/audits/metaengine-20261026-sole-owner-repair/live-artifact-observation.json'));
+ assert.equal(evidence.source_head,prior);assert.equal(evidence.plan.candidate_package_version,version);
+ assert.equal(evidence.plan.minimum_package_version,'0.7.0-dev.1359740117434.1');
+ assert.equal(evidence.reservation_created,false);assert.equal(evidence.package_built,false);assert.equal(evidence.authority_effect,false);
+ assert.equal(evidence.plan.physical_package_build_allowed,false);assert.equal(evidence.plan.promotion_authorized,false);
+ for(const q of evidence.queries){assert.equal(q.status,200);const body=JSON.parse(q.response_body);assert.equal(body.total_count,body.artifacts.length);}
+ assert.equal(JSON.parse(evidence.queries.at(-1).response_body).total_count,0);
+ assert.equal(manifest.current_package_transition.source_parent,prior);
+ assert.equal(manifest.current_source_candidate.package_version,version);
+ assertCommittedAuditPrefix(root,prior,'HEAD','coordination/operator-control/AUDIT_CLOSURE_EXECUTION_REGISTER_20261018.md');
 });

@@ -8,3 +8,5 @@
 # This retained HTTP observation has a raw SHA-256 in the QA source seal.
 # Pin this exact evidence file; do not normalize arbitrary audit/proof bytes.
 /evidence/audits/metaengine-20261026-package-source-successor/live-artifact-observation.json text eol=lf
+
+/evidence/audits/metaengine-20261026-sole-owner-repair/live-artifact-observation.json text eol=lf

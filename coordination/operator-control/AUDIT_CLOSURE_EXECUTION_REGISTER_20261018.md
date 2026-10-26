@@ -560,3 +560,24 @@ Prepared on 2026-10-26 from the frozen functional source `88eb062b09bd456d430bd0
 The old `.4594` reservation remains consumed: artifact `12604992808`, run `40208669264`, source `602d4b07f755f7cd61a6da3af06985d4384b859a`. The higher sibling `.1269944506140.1` remains consumed: artifact `12608018072`, run `40217087847`, source `cf547d7e5f973517fa9bd1e206892e3a108ad1ea`. It is a monotonic floor and burned identity, not an invented ancestor transition. The current source-line transition is `.4594` → `.1359740117434.1` with the actual functional parent above. The immutable baseline `ea405d926568508eac53ebb408e941c94faeadcf`, previous transition records and W43–W73 historical manifest bytes remain unchanged.
 
 The existing installed `.4594` migration remains HOLD. The inherited fresh-install-only diagnostic path is not an upgrade waiver. Required exact-source CI, Windows native/own-PG/restore and installed upgrade evidence are not replaced by the earlier functional source checks. No signing/root-sidecar capability, live native Agent completion, continuous autonomy or production READY is asserted. Physical receipts belong outside this frozen source so later evidence cannot silently change the artifact it purports to qualify.
+
+
+## QA source seal — 0.7.0-dev.1485366478478.1
+
+```json
+{
+  "schema": "metaengine.client.qa-source-seal.v1",
+  "functional_source_parent": "4b1b0854f918e42494e073f36d96307422617643",
+  "package_version": "0.7.0-dev.1485366478478.1",
+  "classification": "QA_SOURCE_PREPARED_NOT_INSTALLED_QUALIFIED",
+  "metadata_observation_path": "evidence/audits/metaengine-20261026-sole-owner-repair/live-artifact-observation.json",
+  "metadata_observation_sha256": "50cb4e17a8426cdbc5b5a198478e3643c62be58ec5dfda4e50a9e44e2be71a99",
+  "reservation_state": "PENDING_IMMUTABLE_PRODUCER_PREFLIGHT",
+  "installed_qualification": "NOT_QUALIFIED",
+  "continuous_autonomy_qualification": "NOT_QUALIFIED",
+  "production_ready": false,
+  "authority_effect": false
+}
+```
+
+Repairs bind fresh PG17 OS and SQL identities independently; protect update journals across processes; preserve concurrent Owner publications; and require physical readback before claiming image restoration. Local verification: 252 self-update tests passed, 60 Owner/image/CAS tests passed, and native PG17 enrollment passed with independent API and lost-ack cases. Default Browser tests now use a disposable OS profile. These source checks do not establish installed or continuous-agent readiness. The preceding .135 identity remains consumed by run 40324805522; this preparation does not reserve its successor.
