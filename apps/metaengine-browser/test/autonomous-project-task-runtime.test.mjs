@@ -23,9 +23,37 @@ async function fixture(t, options = {}) {
   const provider = createAutonomousProjectProviderFixture({ filePath: providerPath, projectId, rootTask: rootTask(), ...options });
   const journal = createAutonomousProjectJournal({ filePath: journalPath });
   const runtime = new AutonomousProjectTaskRuntime({ journal, request: input => provider.request(input), materializeProject: async () => ({ state: 'PROVEN' }) });
-  t.after(async () => { await runtime.close(); provider.close(); await fs.rm(root, { recursive: true, force: true }); });
-  return { root, journalPath, providerPath, provider, journal, runtime };
+  const resources = [runtime];
+  const own = resource => { resources.push(resource); return resource; };
+  // after hooks run in registration order. Reopened SQLite handles belong to
+  // this teardown, not a later hook that would run after directory removal.
+  t.after(async () => {
+    for (const resource of resources.toReversed()) await resource.close();
+    provider.close();
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  return { root, journalPath, providerPath, provider, journal, runtime, own };
 }
+
+test('fixture closes reopened journals and runtimes before removing their directory', async t => {
+  const f = await fixture(t);
+  let restored, runtimeJournal;
+  f.own({ async close() {
+    await assert.rejects(restored.pending(), /autonomous_project_journal_closed/);
+    await assert.rejects(runtimeJournal.pending(), /autonomous_project_journal_closed/);
+    assert.equal((await fs.stat(f.journalPath)).isFile(), true, 'close handles before removing the database');
+  } });
+  await f.runtime.close();
+  restored = f.own(createAutonomousProjectJournal({ filePath: f.journalPath }));
+  runtimeJournal = createAutonomousProjectJournal({ filePath: f.journalPath });
+  f.own(new AutonomousProjectTaskRuntime({ journal: runtimeJournal,
+    request: input => f.provider.request(input), materializeProject: async () => ({ state: 'NOT_REQUIRED' }) }));
+  t.after(async () => {
+    await assert.rejects(restored.pending(), /autonomous_project_journal_closed/);
+    await assert.rejects(runtimeJournal.pending(), /autonomous_project_journal_closed/);
+    await assert.rejects(fs.stat(f.root), { code: 'ENOENT' });
+  });
+});
 
 test('recursive root/child/grandchild admission shares committed history while external ChatGPT creation remains unclaimed', async t => {
   const f = await fixture(t);
@@ -251,7 +279,7 @@ for (const outcome of ['LOST_ACK','HTTP_500','MALFORMED_ACCEPTED']) {
     const results=tools.resultsForLease(lease);assert.equal(results[0].effect_unknown,true);
     await f.runtime.continueConversation(lease,results,async()=>({effect_state:'PROVEN_COMPOSER_CLEARED'}),{observeTranscriptFloor:async()=>12});
     assert.equal((await f.journal.conversationCheckpoint(lease)).state,'UNKNOWN_TOOL_EFFECT_REQUIRES_READBACK');
-    await f.runtime.close();const restored=createAutonomousProjectJournal({filePath:f.journalPath});t.after(()=>restored.close());
+    await f.runtime.close();const restored=f.own(createAutonomousProjectJournal({filePath:f.journalPath}));
     assert.equal(await restored.hasPendingTaskEffect(lease),true,'confirmed display never converts UNKNOWN operation to resolved');
     const suspension=new BrowserParentSuspension({journal:restored,request:async()=>assert.fail('no SQL suspension'),
       transport:{withQuiescentParent:async()=>{captures++;}},readControl:()=>({authoritative:true,state:'OPEN',continuous_service_allowed:true,generation_floor:1}),
@@ -273,7 +301,7 @@ for(const accepted of [false,true]) {
   const requests=[{request_id:'crash:before:continuation',action:'CAPTURE',payload:{}}];await first.serveToolRequests({lease,requests});
   assert.equal((await f.journal.conversationCheckpoint(lease)).state,'PENDING_EFFECT_REQUIRES_READBACK');
   await f.runtime.close();const journal=createAutonomousProjectJournal({filePath:f.journalPath});
-  const runtime=new AutonomousProjectTaskRuntime({journal,request:i=>f.provider.request(i),materializeProject:async()=>({state:'NOT_REQUIRED'})});t.after(()=>runtime.close());
+  const runtime=f.own(new AutonomousProjectTaskRuntime({journal,request:i=>f.provider.request(i),materializeProject:async()=>({state:'NOT_REQUIRED'})}));
   const recovered=new AgentToolbelt({signedRequest:async endpoint=>{assert(!endpoint.includes('issue-tool'),'pending issue is never replayed');
     assert(endpoint.includes(commandId));return {ok:true,status:200,json:async()=>({found:true,terminal:true,status:'COMPLETED',receipt:{result:'exact terminal readback'}})};}});
   recovered.bindProjectRuntime(runtime);await recovered.serveToolRequests({lease,requests});assert.equal(issues,1);
@@ -312,7 +340,7 @@ test('current-parent spawn readback is reachable behind more than8 unrelated dur
 test('parent-scoped pending spawn recovery survives journal restart without duplicate child admission',async t=>{
  const f=await buriedPendingSpawn(t);await f.runtime.close();
  const journal=createAutonomousProjectJournal({filePath:f.journalPath});
- const runtime=new AutonomousProjectTaskRuntime({journal,request:i=>f.provider.request(i),materializeProject:async()=>({state:'NOT_REQUIRED'})});t.after(()=>runtime.close());
+ const runtime=f.own(new AutonomousProjectTaskRuntime({journal,request:i=>f.provider.request(i),materializeProject:async()=>({state:'NOT_REQUIRED'})}));
  await runtime.waitForChildren(rootTask());assert.equal((await journal.find(f.key)).receipt.task_admission_proven,true);
  assert.equal(f.commits(),1);assert.equal(f.provider.read().tasks.length,2);
 });
@@ -343,7 +371,7 @@ for(const restart of [false,true])test(`current lease progresses beyond same-par
  await runtime.waitForChildren(rootTask());assert.equal((await journal.find(f.key)).receipt,null,'first bounded page only sees old leases');
  if(restart) {
   await runtime.close();journal=createAutonomousProjectJournal({filePath:f.journalPath});
-  runtime=new AutonomousProjectTaskRuntime({journal,request:i=>f.provider.request(i),materializeProject:async()=>({state:'NOT_REQUIRED'})});t.after(()=>runtime.close());
+  runtime=f.own(new AutonomousProjectTaskRuntime({journal,request:i=>f.provider.request(i),materializeProject:async()=>({state:'NOT_REQUIRED'})}));
   await runtime.waitForChildren(rootTask());assert.equal((await journal.find(f.key)).receipt,null,'restart safely rescans first page');
  }
  await runtime.waitForChildren(rootTask());assert.equal((await journal.find(f.key)).receipt.task_admission_proven,true);
@@ -357,7 +385,7 @@ test('same-parent scan does not advance past a page when final Owner validation 
  const runtime=new AutonomousProjectTaskRuntime({journal:f.journal,materializeProject:async()=>({state:'NOT_REQUIRED'}),request:async input=>{
   if(input.path.endsWith('/snapshot')&&++snapshots===2&&stopAtEnd)f.provider.update(state=>{state.policy.owner_stop=true;});
   return f.provider.request(input);
- }});t.after(()=>runtime.close());
+ }});f.own(runtime);
  await assert.rejects(runtime.waitForChildren(rootTask()),/owner_stopped/);
  stopAtEnd=false;f.provider.update(state=>{state.policy.owner_stop=false;});
  await runtime.waitForChildren(rootTask());assert.equal((await f.journal.find(f.key)).receipt,null,'failed page cannot advance cursor');
@@ -375,7 +403,7 @@ test('optional caller claim cannot conceal final authoritative claim drift or ad
  const runtime=new AutonomousProjectTaskRuntime({journal:f.journal,materializeProject:async()=>({state:'NOT_REQUIRED'}),request:async input=>{
   if(input.path.endsWith('/snapshot')&&++snapshots===2)f.provider.update(state=>{state.tasks[0].claim_id=999;});
   return f.provider.request(input);
- }});t.after(()=>runtime.close());const lease=rootTask();delete lease.claim_id;
+ }});f.own(runtime);const lease=rootTask();delete lease.claim_id;
  await assert.rejects(runtime.waitForChildren(lease),/parent_claim_drift/);
  f.provider.update(state=>{state.tasks[0].claim_id=rootTask().claim_id;});
  await runtime.waitForChildren(lease);assert.equal((await f.journal.find(f.key)).receipt,null);
@@ -397,7 +425,7 @@ for(const tamper of ['children','wire_id','hash','flags','claim','generation','r
  await f.journal.begin(tamper==='request_id'?key.replace('!','_'):key,intent);
  let posts=0;const runtime=new AutonomousProjectTaskRuntime({journal:f.journal,materializeProject:async()=>({state:'NOT_REQUIRED'}),request:input=>{
   if(input.path.endsWith('/spawn'))posts++;return f.provider.request(input);
- }});t.after(()=>runtime.close());
+ }});f.own(runtime);
  await assert.rejects(runtime.waitForChildren(rootTask()),/spawn_pending_page_invalid|proposal_invalid/);
  assert.equal(posts,0,'whole-page preflight precedes every spawn POST');
  assert.equal((await f.journal.find(f.key)).receipt,null,'earlier valid intent cannot be confirmed before full page validation');
@@ -411,7 +439,7 @@ for(const tamper of ['children','wire_id','hash','flags','claim','generation','r
   if(input.path.endsWith('/snapshot')&&++snapshots===2)f.provider.update(state=>{state.project_id=otherProject;});
   if(input.path.endsWith('/spawn'))posts++;
   return f.provider.request(input);
- }});t.after(()=>runtime.close());
+ }});f.own(runtime);
  await assert.rejects(runtime.waitForChildren(rootTask()),/parent_project_drift/);
  assert.equal(posts,0);assert.equal(f.commits(),1);assert.equal(f.provider.read().tasks.length,2);
  assert.equal((await f.journal.find(f.key)).receipt,null);

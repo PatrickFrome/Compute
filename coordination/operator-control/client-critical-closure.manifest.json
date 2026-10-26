@@ -513,7 +513,7 @@
     "apps/metaengine-browser/test/agent-tool-protocol-malformed.test.mjs": "06dc8b8e5b14638a7eeed302d576c4f1ab1bea83",
     "apps/metaengine-browser/test/agent-toolbelt.test.mjs": "b69deb0a5c8568439ccd0d754b35c5a7658a84a3",
     "apps/metaengine-browser/test/autonomous-development-fabric-logical-work.test.mjs": "35333b55dc98f443eb9968e6708a30d556dda1ce",
-    "apps/metaengine-browser/test/autonomous-project-task-runtime.test.mjs": "d76b9fb84b6dd87834bfea0a3587d72f21e2a135",
+    "apps/metaengine-browser/test/autonomous-project-task-runtime.test.mjs": "79eab79ea20f1d87b2d7f30250bf9b98fe62ce3a",
     "apps/metaengine-browser/test/bootstrap-install-and-launch.test.mjs": "67d9f9641ddfd27a001815a051b05b5ea74d1c70",
     "apps/metaengine-browser/test/browser-agentic-workbench-ui.test.mjs": "424f1ba7d32c5379ea39ab4857d480d79785acf2",
     "apps/metaengine-browser/test/browser-closed-loop-audit-fixes.test.mjs": "03b777c9e6327108f7316c6b3040b2f91b77e3a3",
