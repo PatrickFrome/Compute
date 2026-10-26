@@ -277,7 +277,8 @@ test('real Git and PostgreSQL join protected checkpoint to the next W30 lease th
     const x=await ready(t),before=(await x.physical.git(['rev-parse','HEAD'])).trim();
     await fs.appendFile(path.join(x.physical.root,'reviewed.txt'),'unreviewed late bytes\n');
     const service=await createNativeCodingHostCommitService({sql,...x.callbacks});t.after(()=>service.close());
-    await assert.rejects(service.FINISH_CHECKPOINT(x.query),/native_coding_git_commit_checkpoint_git_changed/);
+    await assert.rejects(service.FINISH_CHECKPOINT(x.query),/native_coding_host_commit_git_readback_reviewed_bytes_changed/);
+    await assert.rejects(fs.lstat(x.physical.journalRoot),error=>error.code==='ENOENT');
     assert.equal((await x.physical.git(['rev-parse','HEAD'])).trim(),before);
     assert.equal((await sql.unsafe('select destruktion_meta.native_coding_read_commit_v1($1)as value',[x.k.checkpoint_id]))[0].value,null);
     assert.equal((await sql.unsafe('select state from destruktion_meta.native_coding_worktree_fence_h205f22 where writer_task_id=$1',[x.f.task]))[0].state,'CHECKPOINTED_PENDING_COMMIT');
