@@ -145,8 +145,24 @@ function publicContinuity(row) {
     pgdata_path_sha256:digest(path.resolve(row.pg_data_directory).toLowerCase())};
 }
 function publicPackage(pkg) {
-  return Object.fromEntries(['source_head','package_version','producer_run_id','producer_run_attempt','installer_sha256',
-    'asar_sha256','uninstaller_sha256','bundle_sha256','image_tree_sha256','pg_tree_sha256'].map(k=>[k,pkg[k]]));
+  const result=Object.fromEntries(['kind','source_head','package_version','producer_run_id','producer_run_attempt','installer_sha256',
+    'asar_sha256','uninstaller_sha256','bundle_sha256','image_tree_sha256','pg_tree_sha256','code_manifest_sha256',
+    'upgrade_sources_sha256'].filter(k=>pkg[k]!==undefined).map(k=>[k,pkg[k]]));
+  if(pkg.qualification)result.independent_qualification=publicQualification(pkg.qualification);
+  return result;
+}
+function publicQualification(origin) {
+  return {...Object.fromEntries(['repository','workflow','source_head','run_id','run_attempt'].map(k=>[k,origin[k]])),
+    artifact:Object.fromEntries(['id','name','sha256'].map(k=>[k,origin.artifact[k]]))};
+}
+export function publicManualForwardSchema(schema) {
+  return {...Object.fromEntries(['schema_source_head','exporter_source_head','source_plan_sha256','upgrade_sources_sha256',
+    'archive_sha256','toc_sha256'].map(k=>[k,schema[k]])),qualification:publicQualification(schema.qualification)};
+}
+export function publicManualForwardConfig(config) {
+  return {schema:config.schema,
+    source:Object.fromEntries(['repository','source_head','path','git_blob_sha1','sha256','bytes'].map(k=>[k,config.source[k]])),
+    materialization:Object.fromEntries(['mode','sha256','bytes'].map(k=>[k,config.materialization[k]]))};
 }
 async function registration(state,version) {
   const result=await powershell(['-File',script('qa-forward-registration.ps1'),'-Mode','Observe','-StateDirectory',state,'-ExpectedVersion',version]);
@@ -163,9 +179,10 @@ async function verifyAdmissionSource(install) {
 
 // No dependency injection in this physical entry. Model tests exercise the
 // observation validators separately and cannot emit this physical receipt.
-export async function qualifyManualForwardPhysical({inputsFile,inputsSha256,evidenceDirectory}) {
+export async function qualifyManualForwardPhysical({inputsFile,inputsSha256,evidenceDirectory,token}) {
   assertManualForwardHostedEnvironment();
-  if(!SHA.test(inputsSha256||'')||![inputsFile,evidenceDirectory].every(p=>typeof p==='string'&&path.isAbsolute(p)))fail('arguments_invalid');
+  if(!SHA.test(inputsSha256||'')||![inputsFile,evidenceDirectory].every(p=>typeof p==='string'&&path.isAbsolute(p))
+    ||typeof token!=='string'||!token)fail('arguments_invalid');
   const temporary=await physical(process.env.RUNNER_TEMP);
   if(!inside(temporary,path.resolve(evidenceDirectory)))fail('evidence_scope_invalid');
   await physical(path.dirname(evidenceDirectory));await absent(evidenceDirectory);
@@ -178,15 +195,18 @@ export async function qualifyManualForwardPhysical({inputsFile,inputsSha256,evid
     const inputBytes=await stableUpgradeRead(inputsFile,1024*1024);
     if(digest(inputBytes)!==inputsSha256)fail('inputs_pin_changed');
     const input=JSON.parse(inputBytes);
+    if(input.schema!=='metaengine.browser.manual-forward-verified-inputs.v2')fail('verified_v2_inputs_required');
     const {verifyForwardInputDirectory}=await import('./qa-forward-install-evidence.mjs');
-    const reverify=()=>verifyForwardInputDirectory({pins:input.pins,inputRoot:input.input_root,expectedSourceHead:process.env.GITHUB_SHA});
+    const reverify=()=>verifyForwardInputDirectory({pins:input.pins,inputRoot:input.input_root,expectedSourceHead:process.env.GITHUB_SHA,token});
     const inputs=await reverify(),candidate=inputs.candidate,predecessor=inputs.predecessor;
     if(candidate.source_head!==process.env.GITHUB_SHA||candidate.source_head===predecessor.source_head
       ||candidate.package_version===predecessor.package_version)fail('transition_identity_invalid');
     const installedRoot=path.join(process.env.LOCALAPPDATA,'Programs','METAENGINE Browser Test');
     const ownerFile=localStateProviderOwnerFile();
-    await phaseRecord('inputs',{schema:'metaengine.browser.manual-forward-input-binding.v1',consumer_source_head:process.env.GITHUB_SHA,
-      inputs_sha256:inputsSha256,artifact_binding_sha256:inputs.artifact_binding_sha256,candidate:publicPackage(candidate),predecessor:publicPackage(predecessor)});
+    await phaseRecord('inputs',{schema:'metaengine.browser.manual-forward-input-binding.v2',consumer_source_head:process.env.GITHUB_SHA,
+      inputs_sha256:inputsSha256,artifact_binding_sha256:inputs.artifact_binding_sha256,candidate:publicPackage(candidate),
+      predecessor:publicPackage(predecessor),schema_fixture:publicManualForwardSchema(inputs.schema_fixture),
+      original_builder_config:publicManualForwardConfig(inputs.original_builder_config)});
     await phaseRecord('preflight',await cleanRunnerPreflight({installedRoot,ownerFile}));
     // Import while there is provably no Owner, before any automatic top-level
     // bootstrap can start a host. Later explicit calls use this exact source,
@@ -202,12 +222,15 @@ export async function qualifyManualForwardPhysical({inputsFile,inputsSha256,evid
       '-ExpectedSha256',predecessor.installer_sha256,'-TimeoutSeconds','1800'],{timeout:1850000});
     if(install.installer_exit_code!==0||install.installer_sha256!==predecessor.installer_sha256
       ||install.process_tree_scoped_job!==true||install.descendant_cleanup_on_job_close!==true)fail('predecessor_install_unconfirmed');
-    const predecessorImage=await compareQaInstalledImage(predecessor.candidate_root,installedRoot,{expectedUninstallerSha256:predecessor.uninstaller_sha256});
+    const {verifyPredecessorInstalledImage}=await import('./qa-forward-install-predecessor.mjs');
+    const predecessorImage=await verifyPredecessorInstalledImage({descriptor:predecessor,installedRoot});
     const predecessorNsis=await observeWindowsNsisEffects({expectedVersion:predecessor.package_version});
     await phaseRecord('predecessor-install-readback',{installer:install,image:predecessorImage,nsis:predecessorNsis});
+    await reverify();
     await phaseIntent('fixture-provision');
     const {provisionForwardFixture}=await import('./qa-forward-install-fixture.mjs');
-    fixture=await provisionForwardFixture({predecessor,installedBundle:path.join(installedRoot,'resources','client-state-runtime'),fixtureRoot,appData:process.env.APPDATA});
+    fixture=await provisionForwardFixture({predecessor,schemaFixture:inputs.schema_fixture,
+      installedBundle:path.join(installedRoot,'resources','client-state-runtime'),fixtureRoot,appData:process.env.APPDATA});
     if(!same(fixture.ownerFile,ownerFile))fail('fixture_owner_route_changed');
     const previousOwner=fixture.owner,previousConfig=fixture.config;
     const before=await fixture.readbackSql();assertManualForwardContinuity(before,before);
@@ -263,7 +286,7 @@ export async function qualifyManualForwardPhysical({inputsFile,inputsSha256,evid
     };
     let priorStatus=stopped;
     const runtimeCycle=async(label,expectedPg,{restart=false}={})=>{
-      await unchanged();await phaseIntent(label+'-start');
+      await unchanged();await reverify();await phaseIntent(label+'-start');
       hostPossiblyRunning=true;hostStopAttempted=false;hostCleanupConfirmed=null;
       let boot;
       try {boot=await bootstrapPersistentLocalProvider({env:privateEnvironment(),ownerFile});}
@@ -305,7 +328,7 @@ export async function qualifyManualForwardPhysical({inputsFile,inputsSha256,evid
       ||pgStop.cluster_system_identifier!==before.cluster_system_identifier||!SHA.test(pgStop.control_readback_sha256||''))fail('postgres_clean_stop_unconfirmed');
     await phaseRecord('postgres-clean-stop-readback',{cleanup_confirmed:true,clean_shutdown_verified:true,
       cluster_system_identifier:pgStop.cluster_system_identifier,control_readback_sha256:pgStop.control_readback_sha256});
-    await phaseIntent('postgres-restart');await fixture.restartPostgres();
+    await reverify();await phaseIntent('postgres-restart');await fixture.restartPostgres();
     const restarted=await fixture.readbackSql();assertManualForwardContinuity(firstRuntime,restarted,{restart:true});
     await runtimeCycle('successor-restart',restarted);
     await phaseIntent('final-postgres-stop');const finalStop=await fixture.stopPostgres();
@@ -314,9 +337,11 @@ export async function qualifyManualForwardPhysical({inputsFile,inputsSha256,evid
     await phaseRecord('final-postgres-stop-readback',{cleanup_confirmed:true,clean_shutdown_verified:true,
       cluster_system_identifier:finalStop.cluster_system_identifier,control_readback_sha256:finalStop.control_readback_sha256});
     await unchanged();await reverify();
-    const receipt={schema:'metaengine.browser.manual-forward-physical-proof.v1',state:'PASSED_DISPOSABLE_WINDOWS_MANUAL_FORWARD',
+    const receipt={schema:'metaengine.browser.manual-forward-physical-proof.v2',state:'PASSED_DISPOSABLE_WINDOWS_MANUAL_FORWARD',
       consumer_source_head:process.env.GITHUB_SHA,consumer_run_id:process.env.GITHUB_RUN_ID,consumer_run_attempt:Number(process.env.GITHUB_RUN_ATTEMPT),
       artifact_binding_sha256:inputs.artifact_binding_sha256,inputs_sha256:inputsSha256,candidate:publicPackage(candidate),predecessor:publicPackage(predecessor),
+      schema_fixture:publicManualForwardSchema(inputs.schema_fixture),
+      original_builder_config:publicManualForwardConfig(inputs.original_builder_config),
       real_nsis_migration_verified:true,exact_registration_and_payload_verified:true,owner_config_status_gate_admission_verified:true,
       pgdata_cluster_sentinel_vault_preserved:true,live_keeper_preserved_during_migration:true,clean_shutdown_and_restart_verified:true,
       fixture_postgres_cleanup_confirmed:true,source_data_rows_restored:0,production_database_modified:false,
@@ -335,7 +360,7 @@ export async function qualifyManualForwardPhysical({inputsFile,inputsSha256,evid
       try {runtimeCleanup=(await stopHost({timeoutMs:45000})).cleanup_confirmed===true;}catch {runtimeCleanup=false;}
     }
     const raw=String(error?.message||''),reason=/^[a-z][a-z0-9_]{0,159}$/.test(raw)?raw:'manual_forward_external_observation_unconfirmed';
-    const result={schema:'metaengine.browser.manual-forward-physical-proof.v1',state:effectStarted?'HOLD':'BLOCKED',phase,reason,
+    const result={schema:'metaengine.browser.manual-forward-physical-proof.v2',state:effectStarted?'HOLD':'BLOCKED',phase,reason,
       consumer_source_head:process.env.GITHUB_SHA,runtime_cleanup_confirmed:runtimeCleanup,physical_qualification_proven:false,
       fixture_retained:true,automatic_retry_allowed:false,automatic_self_update_qualified:false,authority_effect:false};
     try {await phaseRecord('manual-forward-hold',result);}
@@ -345,9 +370,12 @@ export async function qualifyManualForwardPhysical({inputsFile,inputsSha256,evid
 }
 
 if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href) {
+  // Keep read-only GitHub credentials in this verifier only. NSIS, PG and host
+  // children inherit no acquisition token from the process environment.
+  const token=process.env.ME2_GITHUB_TOKEN;delete process.env.ME2_GITHUB_TOKEN;
   try {
     const {values}=parseArgs({options:{inputs:{type:'string'},'inputs-sha256':{type:'string'},evidence:{type:'string'}}});
-    const result=await qualifyManualForwardPhysical({inputsFile:values.inputs,inputsSha256:values['inputs-sha256']||process.env.ME2_FORWARD_INPUTS_SHA256,evidenceDirectory:values.evidence});
+    const result=await qualifyManualForwardPhysical({inputsFile:values.inputs,inputsSha256:values['inputs-sha256']||process.env.ME2_FORWARD_INPUTS_SHA256,evidenceDirectory:values.evidence,token});
     console.log(JSON.stringify(result));
   } catch(error) {
     const reason=/^[a-z][a-z0-9_]{0,159}$/.test(error.message||'')?error.message:'manual_forward_unconfirmed';

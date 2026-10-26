@@ -88,14 +88,11 @@ test('existing destination cannot be overwritten or retried', async t => {
   assert.equal(await fs.readFile(path.join(f.destination, 'hold'), 'utf8'), 'preserve');
 });
 
-test('schema fixture admission requires exact predecessor source, review kind and absence of synthetic RPC bodies', () => {
-  const valid = { file: path.join(os.tmpdir(), 'predecessor-empty-schema.dump'), sha256: sha, source_head: head,
+test('legacy predecessor-sidecar declarations cannot substitute for independently qualified canonical schema', () => {
+  const old = { file: path.join(os.tmpdir(), 'predecessor-empty-schema.dump'), sha256: sha, source_head: head,
     kind: 'REVIEWED_OFFLINE_EMPTY_SCHEMA', source_data_rows: 0, synthetic_rpc_bodies: false };
-  assert.equal(validateForwardSchemaFixture(valid, head).sha256, sha);
-  for (const change of [{ synthetic_rpc_bodies: true }, { source_head: 'c'.repeat(40) }, { source_data_rows: 3 },
-    { kind: 'SYNTHETIC_CATALOG' }, { file: '../untrusted.dump' }, { sha256: 'latest' }]) {
-    assert.throws(() => validateForwardSchemaFixture({ ...valid, ...change }, head), /reviewed_empty_schema_required/);
-  }
+  for (const value of [undefined, null, {}, old, { ...old, source_data_rows: 3 }, { ...old, synthetic_rpc_bodies: true }])
+    assert.throws(() => validateForwardSchemaFixture(value), /reviewed_empty_schema_required/);
 });
 
 test('schema-only restore keeps ACLs while excluding rows, event triggers, connectors and environment extensions', () => {

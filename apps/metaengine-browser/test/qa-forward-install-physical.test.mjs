@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {createHash} from 'node:crypto';
 import {assertManualForwardHostedEnvironment,assertManualForwardContinuity,
-  assertManualForwardOwnerReadback,AUTOMATIC_FORWARD_REMAINS} from '../scripts/qa-forward-install-physical.mjs';
+  assertManualForwardOwnerReadback,publicManualForwardSchema,publicManualForwardConfig,AUTOMATIC_FORWARD_REMAINS} from '../scripts/qa-forward-install-physical.mjs';
 
 const sha=value=>createHash('sha256').update(value).digest('hex');
 const hosted={GITHUB_ACTIONS:'true',CI:'true',RUNNER_ENVIRONMENT:'github-hosted',RUNNER_OS:'Windows',
@@ -95,4 +95,29 @@ test('manual qualification retains an explicit unresolved automatic successor co
   assert(AUTOMATIC_FORWARD_REMAINS.includes('durable_successor_receipt_bound_to_the_same_update_transaction'));
   assert(AUTOMATIC_FORWARD_REMAINS.includes('restart_reconciliation_without_replaying_an_unknown_effect'));
   assert(Object.isFrozen(AUTOMATIC_FORWARD_REMAINS));
+});
+test('public schema evidence retains its independent origin without exporting private fixture inputs',()=>{
+  const qualification={repository:'PatrickFrome/Compute',workflow:'.github/workflows/client-reviewed-empty-schema.yml',
+    source_head:'b'.repeat(40),run_id:'123',run_attempt:1,token:'private-token',
+    artifact:{id:'456',name:'canonical-schema',sha256:'c'.repeat(64),download_url:'private-signed-url'}};
+  const schema={schema_source_head:'a'.repeat(40),exporter_source_head:'b'.repeat(40),
+    source_plan_sha256:'d'.repeat(64),upgrade_sources_sha256:'e'.repeat(64),archive_sha256:'f'.repeat(64),
+    toc_sha256:'0'.repeat(64),qualification,file:'private-dump-path',database_url:'private-database-url'};
+  const result=publicManualForwardSchema(schema);
+  assert.equal(result.schema_source_head,schema.schema_source_head);
+  assert.equal(result.exporter_source_head,result.qualification.source_head);
+  assert.deepEqual(result.qualification.artifact,{id:'456',name:'canonical-schema',sha256:'c'.repeat(64)});
+  assert.equal(result.qualification.run_id,'123');
+  assert.doesNotMatch(JSON.stringify(result),/private-|download_url|token|database_url/);
+  assert.equal(Object.hasOwn(result,'producer_run_id'),false);
+});
+test('public original config evidence distinguishes source bytes from the exact Windows materialization',()=>{
+  const source={repository:'PatrickFrome/Compute',source_head:'a'.repeat(40),path:'apps/metaengine-browser/electron-builder.test.json',
+    git_blob_sha1:'b'.repeat(40),sha256:'c'.repeat(64),bytes:3580,local_file:'private-local-path',token:'private-token'};
+  const materialization={mode:'LF_TO_CRLF_ONLY',sha256:'d'.repeat(64),bytes:3729,contents:'private-contents'};
+  const result=publicManualForwardConfig({schema:'metaengine.browser.forward-original-builder-config.v1',source,materialization});
+  assert.equal(result.source.sha256,source.sha256);assert.equal(result.materialization.sha256,materialization.sha256);
+  assert.notEqual(result.source.sha256,result.materialization.sha256);
+  assert.equal(result.source.bytes,3580);assert.equal(result.materialization.bytes,3729);
+  assert.doesNotMatch(JSON.stringify(result),/private-|local_file|token|contents/);
 });

@@ -14,10 +14,11 @@ import { verifyOfflineRuntimeBundle } from '../../../infra/client-state-runtime/
 import { protectOwnerOnlyWindowsDirectory } from '../src/private-windows-storage-acl.mjs';
 import { localStateProviderOwnerFile, validateLocalStateProviderConfig } from '../src/local-state-provider-policy.mjs';
 import { captureInstalledTreeFingerprint } from './qa-installed-tree-fingerprint.mjs';
+import { validateForwardSchemaFixtureDescriptor, assertForwardSchemaRuntimeCompatibility,
+  validateForwardSchemaToc } from './qa-forward-install-schema.mjs';
 
 const exec = promisify(execFile);
 const SHA = /^[a-f0-9]{64}$/;
-const HEAD = /^[a-f0-9]{40}$/;
 const prefix = 'runtime/postgresql/';
 const repository = fileURLToPath(new URL('../../../', import.meta.url));
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -61,13 +62,9 @@ async function hashFile(file) {
   return hash.digest('hex');
 }
 
-export function validateForwardSchemaFixture(value, sourceHead) {
-  if (!value || value.kind !== 'REVIEWED_OFFLINE_EMPTY_SCHEMA' || !localAbsolute(value.file)
-    || !SHA.test(value.sha256 || '') || !HEAD.test(value.source_head || '')
-    || value.source_head !== sourceHead || value.source_data_rows !== 0
-    || value.synthetic_rpc_bodies !== false) fail('reviewed_empty_schema_required');
-  return Object.freeze({ file: path.resolve(value.file), sha256: value.sha256,
-    source_head: value.source_head, kind: value.kind, source_data_rows: 0, synthetic_rpc_bodies: false });
+export function validateForwardSchemaFixture(value) {
+  try { return validateForwardSchemaFixtureDescriptor(value); }
+  catch { fail('reviewed_empty_schema_required'); }
 }
 
 // This plan is deliberately narrower than a generic pg_restore: data, external
@@ -206,11 +203,11 @@ export function assertForwardPostgresCleanShutdown(output, expectedClusterSystem
     control_readback_sha256: digest(output) });
 }
 
-async function provisionForwardFixtureInternal({ predecessor, installedBundle, fixtureRoot, appData } = {}) {
+async function provisionForwardFixtureInternal({ predecessor, schemaFixture, installedBundle, fixtureRoot, appData } = {}) {
   if (process.platform !== 'win32') fail('windows_required');
   if (!localAbsolute(installedBundle) || !localAbsolute(fixtureRoot) || !localAbsolute(appData)
     || !SHA.test(predecessor?.bundle_sha256 || '') || !SHA.test(predecessor?.pg_tree_sha256 || '')) fail('input_contract_invalid');
-  const schema = validateForwardSchemaFixture(predecessor.schema_fixture, predecessor.source_head);
+  const schema = validateForwardSchemaFixture(schemaFixture);
   const temporary = await physical(os.tmpdir(), 'directory'), parent = await physical(path.dirname(fixtureRoot), 'directory');
   if (!same(parent, temporary) || !/^metaengine-forward-fixture-[a-f0-9-]{36}$/.test(path.basename(fixtureRoot))) fail('disposable_root_required');
   const root = path.join(parent, path.basename(fixtureRoot));
@@ -226,6 +223,11 @@ async function provisionForwardFixtureInternal({ predecessor, installedBundle, f
   const { startOwnedWindowsPostgres } = await bundled('owned-postgres-process.mjs');
   const { loadLocalRuntimeMigrationPlan, LOCAL_VAULT_COMPAT_SQL_RESOURCE } = await bundled('local-runtime-migrations.mjs');
   const migrationPlan = await loadLocalRuntimeMigrationPlan();
+  // These are original installer-pinned source bytes, not the current target's
+  // migration code. Refuse incompatible canonical schema before initdb or any
+  // fixture/PG mutation; a separate schema origin is never a compatibility bypass.
+  try { assertForwardSchemaRuntimeCompatibility(schema, migrationPlan.source_manifest_sha256); }
+  catch { fail('schema_runtime_closure_mismatch'); }
   let stage = 'CREATE_FIXTURE', rootCreated = false;
   try {
     await fs.mkdir(root); rootCreated = true; await protectOwnerOnlyWindowsDirectory(root);
@@ -245,7 +247,7 @@ async function provisionForwardFixtureInternal({ predecessor, installedBundle, f
     const [pgPort, apiPort, edgePort] = [...ports];
     const toolEnv = forwardFixtureEnvironment(process.env, { PGHOST: '127.0.0.1', PGPORT: String(pgPort),
       PGUSER: ownerLogin, PGPASSWORD: ownerPassword, PGDATABASE: 'postgres', PGSSLMODE: 'disable', PGCONNECT_TIMEOUT: '5',
-      PGCLIENTENCODING: 'UTF8', LANG: 'C', LC_ALL: 'C' });
+      PGCLIENTENCODING: 'UTF8', TZ: 'UTC', LANG: 'C', LC_ALL: 'C' });
     const command = (name, args, operation, maximum) => privateExec(path.join(bin, name + '.exe'), args,
       { env: toolEnv, stage: operation, ...(maximum ? { maxBuffer: maximum } : {}) });
     const query = async statement => {
@@ -271,6 +273,8 @@ async function provisionForwardFixtureInternal({ predecessor, installedBundle, f
       + '; CREATE SCHEMA extensions; CREATE SCHEMA vault; CREATE EXTENSION pgcrypto WITH SCHEMA extensions;'], 'compatibility_roles');
     stage = 'RESTORE_EMPTY_SCHEMA';
     const toc = await command('pg_restore', ['--list', schema.file], 'schema_toc');
+    try { validateForwardSchemaToc(toc, schema.toc_sha256, { expectedReceipt: schema.canonical_manifest.qualification.toc }); }
+    catch { fail('schema_toc_mismatch'); }
     const restorePlan = forwardSchemaOnlyRestorePlan(toc);
     if (!/ FUNCTION vault _local_key\(/.test(toc)) await command('psql', ['-X', '-q', '--no-password', '-v', 'ON_ERROR_STOP=1',
       '--file', fileURLToPath(LOCAL_VAULT_COMPAT_SQL_RESOURCE)], 'vault_schema');
@@ -406,8 +410,13 @@ async function provisionForwardFixtureInternal({ predecessor, installedBundle, f
     const baseline = await readbackSql();
     const fixtureEvidence = Object.freeze({ schema: 'metaengine.manual-forward-provisioned-fixture.v1',
       predecessor_source_head: predecessor.source_head, predecessor_bundle_sha256: predecessor.bundle_sha256,
-      schema_fixture_sha256: schema.sha256, schema_fixture_source_head: schema.source_head,
-      schema_fixture_kind: schema.kind, empty_tables_verified: tables.length, source_data_rows_restored: 0,
+      schema_fixture_sha256: schema.sha256, schema_fixture_source_head: schema.schema_source_head,
+      schema_fixture_exporter_source_head: schema.exporter_source_head, schema_fixture_source_plan_sha256: schema.source_plan_sha256,
+      schema_fixture_upgrade_sources_sha256: schema.upgrade_sources_sha256, schema_fixture_toc_sha256: schema.toc_sha256,
+      schema_fixture_manifest_sha256: schema.manifest_sha256,
+      schema_fixture_schema_inputs_sha256: schema.canonical_manifest.schema_inputs_sha256,
+      schema_fixture_exporter_inputs_sha256: schema.canonical_manifest.exporter_inputs_sha256,
+      schema_fixture_kind: schema.canonical_manifest.artifact_kind, empty_tables_verified: tables.length, source_data_rows_restored: 0,
       external_pg_runtime_inventory_verified: true, source_runtime_tree_sha256: copied.source_tree_sha256,
       runtime_tree_sha256: copied.runtime_tree_sha256, normal_attached_onboarding: true, normal_owner_publication: true,
       real_stopped_receipt: true, sentinel_count: baseline.sentinel_count, automatic_retry_allowed: false,
