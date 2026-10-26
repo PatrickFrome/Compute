@@ -320,7 +320,6 @@ async function bundleNegatives(options, receipt) {
     await fs.mkdir(bundle); await fs.mkdir(keys);
     await privateWrite(path.join(bundle, 'postgresql-17-snapshot.dump'), archiveBytes);
     await privateWrite(path.join(bundle, 'manifest.json'), manifestBytes);
-    await verifyPrivateKeys([sourceKey, backupKeyPath, archivePath, path.join(bundle, 'manifest.json')]);
     await privateWrite(path.join(keys, 'client-vault.key'), keyBytes);
     const altered = { ...options, bundleDirectory: bundle, keyDirectory: keys };
     await verifyRecoveryBundle(altered);
@@ -491,6 +490,7 @@ export async function runDisposableRecoveryBundle({ pgBinDir = process.env.LOCAL
     const manifestBytes = Buffer.from(JSON.stringify(manifest) + '\n');
     const expectedManifestSha256 = sha(manifestBytes); // Independent immutable pin.
     await privateWrite(path.join(bundle, 'manifest.json'), manifestBytes);
+    await verifyPrivateKeys([sourceKey, backupKeyPath, archivePath, path.join(bundle, 'manifest.json')]);
     receipt.archive_sha256 = archive.sha256; receipt.key_sha256 = originalKey.sha256;
     receipt.manifest_sha256 = expectedManifestSha256;
     stage = 'target_start';
