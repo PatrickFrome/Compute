@@ -4,6 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
 import {freshClientLayout,FRESH_CLIENT_INSTALL_ACTION,verifyFreshConnectionIdentity,provisionFreshClientProvider} from './fresh-client-provider.mjs';
 import {parseFreshClientArguments} from './fresh-client-provider-cli.mjs';
 const digest='a'.repeat(64);
@@ -20,11 +21,16 @@ test('fixed CLI refuses missing/duplicate/options including credentials and arbi
   assert.deepEqual(parseFreshClientArguments(['--bundle-sha256',digest,'--owner-action',FRESH_CLIENT_INSTALL_ACTION]),{expectedBundleDigest:digest,ownerAction:FRESH_CLIENT_INSTALL_ACTION});
   for(const args of [[],['--sql','select 1'],['--bundle-sha256',digest,'--owner-action','RESTORE'],['--bundle-sha256',digest,'--owner-action',FRESH_CLIENT_INSTALL_ACTION,'--password','secret']])assert.throws(()=>parseFreshClientArguments(args),/arguments_invalid/);
 });
-test('identity rejects SET ROLE impersonation, port/cluster/backend/PGDATA drift and wrong major',()=>{
-  const expected={directory:'/private/pg17',systemIdentifier:'123456789',postmasterStartIdentity:'100',backendPid:123};
-  const row={login:'state_owner',session_login:'state_owner',database:'postgres',directory:'/private/pg17',system_identifier:'123456789',backend_pid:123,started_at:'100.7',version:170004};
+test('identity binds OS pidfile and SQL start independently and rejects role/cluster/backend/incarnation drift',()=>{
+  const pidFile='456\n/private/pg17\n100\n5432\n';
+  const expected={directory:'/private/pg17',systemIdentifier:'123456789',postmasterStartIdentity:'100',postmasterPid:456,
+    postmasterPidSha256:createHash('sha256').update(pidFile).digest('hex'),sqlStartedAt:'101.009461',backendPid:123};
+  const row={login:'state_owner',session_login:'state_owner',database:'postgres',directory:'/private/pg17',system_identifier:'123456789',backend_pid:123,started_at:'101.009461',version:170004,postmaster_pid_file:pidFile};
   verifyFreshConnectionIdentity(row,expected);
-  for(const change of [{session_login:'postgres'},{login:'postgres'},{database:'other'},{directory:'/other'},{system_identifier:'123456788'},{backend_pid:124},{started_at:'101'},{version:180000},{version:160000}])assert.throws(()=>verifyFreshConnectionIdentity({...row,...change},expected),/identity_unconfirmed/);
+  verifyFreshConnectionIdentity(row,{...expected,sqlStartedAt:undefined});
+  for(const change of [{session_login:'postgres'},{login:'postgres'},{database:'other'},{directory:'/other'},{system_identifier:'123456788'},{backend_pid:124},{started_at:'101.009462'},{started_at:'NaN'},{started_at:null},{version:180000},{version:160000},{version:'NaN'},
+    {postmaster_pid_file:undefined},{postmaster_pid_file:pidFile.replace('456','457')},{postmaster_pid_file:pidFile.replace('100','101')},{postmaster_pid_file:pidFile.replace('5432','5433')}])assert.throws(()=>verifyFreshConnectionIdentity({...row,...change},expected),/identity_unconfirmed/);
+  for(const change of [{postmasterPid:457},{postmasterStartIdentity:'101'},{postmasterPidSha256:'f'.repeat(64)},{postmasterPid:NaN}])assert.throws(()=>verifyFreshConnectionIdentity(row,{...expected,...change}),/identity_unconfirmed/);
 });
 test('foreign identity fails before application DDL and rolls back reserved transaction',async()=>{
   const calls=[];const connection={unsafe:async query=>{calls.push(query);return [];}};

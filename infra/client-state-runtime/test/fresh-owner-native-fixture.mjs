@@ -4,9 +4,9 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
-import {execFile} from 'node:child_process';
+import {execFile,spawn} from 'node:child_process';
 import {promisify} from 'node:util';
-import {randomBytes} from 'node:crypto';
+import {randomBytes,createHash} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import {populateFreshClientSchema} from './fresh-provider-private-loader.mjs';
 import {loadFreshSchemaApplicationPlan} from '../fresh-schema-application-plan.mjs';
@@ -18,27 +18,43 @@ export async function withFreshOwnerNativeFixture({bin,driver},exercise) {
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'first-owner-pg17-')),data=path.join(root,'pg17');
   const ownerPassword=randomBytes(32).toString('hex'),apiPassword=randomBytes(32).toString('hex');
   const passwordFile=path.join(root,'initdb-password');await fs.writeFile(passwordFile,ownerPassword+'\n',{flag:'wx',mode:0o600});
-  const command=(name,args)=>exec(path.join(bin,name+(process.platform==='win32'?'.exe':'')),args,
-    {env:Object.fromEntries(Object.entries({...process.env,LC_ALL:'C',LANG:'C'}).filter(([key])=>!/^PG/i.test(key))),shell:false,windowsHide:true,timeout:120000,maxBuffer:65536});
+  const command=(name,args)=>{
+    const executable=path.join(bin,name+(process.platform==='win32'?'.exe':''));
+    const options={env:Object.fromEntries(Object.entries({...process.env,LC_ALL:'C',LANG:'C'}).filter(([key])=>!/^PG/i.test(key))),shell:false,windowsHide:true};
+    if(name!=='pg_ctl')return exec(executable,args,{...options,timeout:120000,maxBuffer:65536});
+    // A daemon can inherit pg_ctl's pipes on Windows. Observe pg_ctl's exit
+    // directly and send server diagnostics to its explicit -l file.
+    return new Promise((resolve,reject)=>{
+      const child=spawn(executable,args,{...options,stdio:'ignore'});
+      const timer=setTimeout(()=>{child.kill();reject(Error('fresh_fixture_pg_ctl_timeout'));},120000);
+      child.once('error',error=>{clearTimeout(timer);reject(error);});
+      child.once('exit',code=>{clearTimeout(timer);code===0?resolve({stdout:''}):reject(Error('fresh_fixture_pg_ctl_exit_'+code));});
+    });
+  };
   let started=false,owner,api,reserved;
   try {
     const listener=net.createServer();await new Promise((resolve,reject)=>{listener.once('error',reject);listener.listen(0,'127.0.0.1',resolve);});
     const port=listener.address().port;await new Promise(resolve=>listener.close(resolve));
     await command('initdb',['-D',data,'--username=state_owner','--auth=scram-sha-256',`--pwfile=${passwordFile}`,'--no-locale','--encoding=UTF8','--no-sync']);
+    // pg_ctl parses -o through the platform shell. Windows preserves POSIX
+    // single quotes as a literal directory, so use PostgreSQL's config syntax.
+    await fs.appendFile(path.join(data,'postgresql.conf'),"\nunix_socket_directories = ''\n");
     const identifier=/Database system identifier:\s*([0-9]+)/.exec((await command('pg_controldata',['-D',data])).stdout)?.[1];assert(identifier);
-    started=true;await command('pg_ctl',['-D',data,'-l',path.join(root,'postgres.log'),'-o',`-h 127.0.0.1 -p ${port} -c unix_socket_directories=''`,'-w','start']);
+    started=true;await command('pg_ctl',['-D',data,'-l',path.join(root,'postgres.log'),'-o',`-h 127.0.0.1 -p ${port}`,'-w','start']);
     const postgres=(await import(pathToFileURL(driver))).default;
     const connect=(user,password)=>postgres({host:'127.0.0.1',port,user,password,database:'postgres',max:1,prepare:false,connect_timeout:5,
       onnotice:()=>{},debug:false,onparameter:()=>{}});
     owner=connect('state_owner',ownerPassword);reserved=await owner.reserve();
     const pidBytes=await fs.readFile(path.join(data,'postmaster.pid'),'utf8');
-    const expected={directory:await fs.realpath(data),systemIdentifier:identifier,postmasterStartIdentity:pidBytes.trim().split(/\r?\n/)[2]};
+    const expected={directory:await fs.realpath(data),systemIdentifier:identifier,postmasterStartIdentity:pidBytes.trim().split(/\r?\n/)[2],
+      postmasterPid:Number(pidBytes.split(/\r?\n/)[0]),postmasterPidSha256:createHash('sha256').update(pidBytes).digest('hex')};
     const check=async (connection,identity=expected)=>{
       assert.equal(await fs.readFile(path.join(data,'postmaster.pid'),'utf8'),pidBytes);
       const [row]=await connection.unsafe(`select current_user as login,session_user as session_login,current_database() as database,
         current_setting('data_directory') as directory,system_identifier::text,pg_backend_pid() as backend_pid,
-        extract(epoch from pg_postmaster_start_time()) as started_at,current_setting('server_version_num')::integer as version from pg_control_system()`);
-      row.directory=await fs.realpath(row.directory);verifyFreshConnectionIdentity(row,identity);identity.backendPid??=row.backend_pid;
+        extract(epoch from pg_postmaster_start_time()) as started_at,current_setting('server_version_num')::integer as version,
+        pg_read_file('postmaster.pid',0,8192,false) as postmaster_pid_file from pg_control_system()`);
+      row.directory=await fs.realpath(row.directory);verifyFreshConnectionIdentity(row,identity);identity.backendPid??=row.backend_pid;identity.sqlStartedAt??=String(row.started_at);
     };
     await check(reserved);
     await populateFreshClientSchema({connection:reserved,plan:await loadFreshSchemaApplicationPlan(),apiPassword,verifyIdentity:check});

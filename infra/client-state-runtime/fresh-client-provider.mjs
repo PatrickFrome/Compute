@@ -70,13 +70,24 @@ const databaseUrl=(port,login,password)=>{
 const IDENTITY_SQL=`select current_user as login,session_user as session_login,current_database() as database,
  current_setting('data_directory') as directory,system_identifier::text as system_identifier,
  pg_backend_pid() as backend_pid,extract(epoch from pg_postmaster_start_time()) as started_at,
- current_setting('server_version_num')::integer as version from pg_control_system()`;
+ current_setting('server_version_num')::integer as version,
+ pg_read_file('postmaster.pid',0,8192,false) as postmaster_pid_file from pg_control_system()`;
 export function verifyFreshConnectionIdentity(actual,expected) {
+  const pidFile=actual?.postmaster_pid_file;
+  const lines=typeof pidFile==='string'?pidFile.trim().split(/\r?\n/):[];
+  // postmaster.pid records process creation; pg_postmaster_start_time records
+  // server initialization later. Bind each independently, without a tolerance.
   if(actual?.login!=='state_owner'||actual.session_login!=='state_owner'||actual.database!=='postgres'
     ||!absolute(actual.directory)||!same(actual.directory,expected.directory)
     ||String(actual.system_identifier)!==expected.systemIdentifier
-    ||Number(actual.version)<170000||Number(actual.version)>=180000
-    ||Math.floor(Number(actual.started_at))!==Number(expected.postmasterStartIdentity)
+    ||!Number.isSafeInteger(Number(actual.version))||Number(actual.version)<170000||Number(actual.version)>=180000
+    ||!Number.isFinite(Number(actual.started_at))||Number(actual.started_at)<=0
+    ||(expected.sqlStartedAt!==undefined&&String(actual.started_at)!==expected.sqlStartedAt)
+    ||typeof pidFile!=='string'||!SHA.test(expected.postmasterPidSha256||'')
+    ||createHash('sha256').update(pidFile).digest('hex')!==expected.postmasterPidSha256
+    ||!Number.isSafeInteger(expected.postmasterPid)||expected.postmasterPid<=0||Number(lines[0])!==expected.postmasterPid
+    ||!absolute(lines[1])||!same(lines[1],expected.directory)
+    ||!Number.isSafeInteger(Number(lines[2]))||Number(lines[2])<=0||lines[2]!==String(expected.postmasterStartIdentity)
     ||!Number.isSafeInteger(actual.backend_pid)||actual.backend_pid<=0
     ||(expected.backendPid!==undefined&&actual.backend_pid!==expected.backendPid))fail('connection_identity_unconfirmed');
 }
@@ -342,8 +353,9 @@ export async function provisionFreshClientProvider(options={}) {
     const connect=url=>postgres(url,{max:1,prepare:false,connect_timeout:5,idle_timeout:10,debug:false,onnotice:()=>{},onparameter:()=>{}});
     const ownerUrl=databaseUrl(pgPort,'state_owner',ownerPassword),apiUrl=databaseUrl(pgPort,'local_state_api',apiPassword);
     sql=connect(ownerUrl);reserved=await sql.reserve();
-    const expected={directory:await fs.realpath(selected.pgDataDirectory),systemIdentifier,postmasterStartIdentity:owned.postmasterStartIdentity};
-    const verifyIdentity=async connection=>{requireActiveInstall();await owned.verify();const [row]=await connection.unsafe(IDENTITY_SQL);row.directory=await fs.realpath(row.directory);verifyFreshConnectionIdentity(row,expected);expected.backendPid??=row.backend_pid;};
+    const expected={directory:await fs.realpath(selected.pgDataDirectory),systemIdentifier,postmasterStartIdentity:owned.postmasterStartIdentity,
+      postmasterPid:owned.pid,postmasterPidSha256:createHash('sha256').update(await fs.readFile(path.join(selected.pgDataDirectory,'postmaster.pid'))).digest('hex')};
+    const verifyIdentity=async connection=>{requireActiveInstall();await owned.verify();const [row]=await connection.unsafe(IDENTITY_SQL);row.directory=await fs.realpath(row.directory);verifyFreshConnectionIdentity(row,expected);expected.backendPid??=row.backend_pid;expected.sqlStartedAt??=String(row.started_at);};
     await verifyIdentity(reserved);await record('SCHEMA_OUTCOME_PENDING');
     await populateFreshClientSchema({connection:reserved,plan,verifyIdentity,apiPassword});
     api=connect(apiUrl);await inspectAttachedApiAdmission({sql:api,apiLogin:'local_state_api'});await verifyIdentity(reserved);
@@ -374,12 +386,15 @@ export async function provisionFreshClientProvider(options={}) {
       // Normal runtime restarted PG. Bind a NEW backend to that exact private
       // continuity proof, not to the now-stopped initialization postmaster.
       sql=connect(ownerUrl);reserved=await sql.reserve();
-      const enrollmentExpected={directory:expected.directory,systemIdentifier,
-        postmasterStartIdentity:Math.floor(Date.parse(continuity.started_at)/1000)};
+      const enrollmentPidFile=await fs.readFile(path.join(selected.pgDataDirectory,'postmaster.pid'),'utf8');
+      if(createHash('sha256').update(enrollmentPidFile).digest('hex')!==continuity.postmaster_pid_sha256)fail('device_runtime_incarnation_changed');
+      const enrollmentExpected={directory:expected.directory,systemIdentifier,postmasterPid:continuity.pid,
+        postmasterPidSha256:continuity.postmaster_pid_sha256,postmasterStartIdentity:enrollmentPidFile.trim().split(/\r?\n/)[2]};
       const verifyEnrollmentConnection=async connection=>{
         requireActiveInstall();await checkRoot();const [row]=await connection.unsafe(IDENTITY_SQL);
         row.directory=await fs.realpath(row.directory);verifyFreshConnectionIdentity(row,enrollmentExpected);
         enrollmentExpected.backendPid??=row.backend_pid;
+        enrollmentExpected.sqlStartedAt??=String(row.started_at);
         const proof=await runtimeRecoveryPostgresProof({pgDataDirectory:selected.pgDataDirectory,expectedClusterSystemIdentifier:systemIdentifier,
           identity:{pid:continuity.pid,version:Number(row.version),system_identifier:String(row.system_identifier),
             started_at:new Date(Number(row.started_at)*1000).toISOString(),data_directory:row.directory,port:pgPort}});
