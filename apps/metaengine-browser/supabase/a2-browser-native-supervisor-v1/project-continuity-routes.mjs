@@ -7,6 +7,11 @@ const SPAWN_RPC = 'h205f22_project_spawn_v1';
 const ACTIVITY_RPC = 'h205f22_project_activity_v1';
 const POLICY_RPC = 'h205f22_project_policy_v1';
 const RECONCILE_RPC = 'h205f22_project_reconcile_v1';
+const RETIRE_RPC = 'h205f22_project_release_browser_child_v1';
+const SUSPEND_RPC = 'h205f22_project_suspend_browser_v1';
+const SUSPENSION_READ_RPC = 'h205f22_project_suspension_read_v1';
+const SUSPENSION_LIST_RPC = 'h205f22_project_suspension_list_v1';
+const RESUME_RPC = 'h205f22_project_resume_browser_v1';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' };
 const json = (status, value) => new Response(JSON.stringify(value), { status, headers: JSON_HEADERS });
 const own = (body, fields) => body && typeof body === 'object' && !Array.isArray(body)
@@ -32,14 +37,31 @@ export function createProjectContinuityRoutes({ rpc, workspaceId } = {}) {
   const call = async (name, args) => {
     try {
       const value = await rpc(name, args);
-      const schemas = { [REGISTER_RPC]: 'metaengine.devos.project-registration.v1', [SNAPSHOT_RPC]: 'metaengine.devos.project-snapshot.v1', [HISTORY_RPC]: 'metaengine.devos.project-history.v1', [SPAWN_RPC]: 'metaengine.devos.project-spawn.v1', [ACTIVITY_RPC]: 'metaengine.devos.project-activity.v1', [POLICY_RPC]: 'metaengine.devos.project-policy.v1', [RECONCILE_RPC]: 'metaengine.devos.project-reconcile.v1' };
+      const schemas = { [RETIRE_RPC]: 'metaengine.devos.browser-child-retirement.v1', [SUSPEND_RPC]: 'metaengine.devos.browser-parent-suspension.v1', [SUSPENSION_READ_RPC]: 'metaengine.devos.browser-parent-suspension.v1', [SUSPENSION_LIST_RPC]: 'metaengine.devos.browser-parent-suspension-list.v1', [RESUME_RPC]: 'metaengine.devos.browser-parent-suspension.v1', [REGISTER_RPC]: 'metaengine.devos.project-registration.v1', [SNAPSHOT_RPC]: 'metaengine.devos.project-snapshot.v1', [HISTORY_RPC]: 'metaengine.devos.project-history.v1', [SPAWN_RPC]: 'metaengine.devos.project-spawn.v1', [ACTIVITY_RPC]: 'metaengine.devos.project-activity.v1', [POLICY_RPC]: 'metaengine.devos.project-policy.v1', [RECONCILE_RPC]: 'metaengine.devos.project-reconcile.v1' };
       if (!value || value.schema !== schemas[name] || value.authority_effect !== false || value.automatic_retry_allowed !== false
         || (args.p_project_id != null && value.project_id !== args.p_project_id) || (name === RECONCILE_RPC && args.p_project_id === null && (value.project_id !== null || value.bounded_projects !== 4 || !Array.isArray(value.projects) || value.projects.length > 4))) throw new Error('PROJECT_DB_READBACK_INVALID');
+      if ([SUSPEND_RPC, SUSPENSION_READ_RPC, RESUME_RPC].includes(name)) {
+        if (value.found === false) {
+          if (name !== SUSPENSION_READ_RPC || value.task_id !== args.p_task_id) throw new Error('PROJECT_DB_READBACK_INVALID');
+        } else if (!uuid(value.suspension_id) || !uuid(value.task_id) || !uuid(value.project_id)
+          || !['SUSPENDED', 'RESUMED'].includes(value.status)
+          || !/^[a-f0-9]{64}$/.test(value.checkpoint_sha256 || '')
+          || value.checkpoint?.schema !== 'metaengine.browser.parent-checkpoint.v1'
+          || (args.p_task_id && value.task_id !== args.p_task_id)
+          || (args.p_suspension_id && value.suspension_id !== args.p_suspension_id)) throw new Error('PROJECT_DB_READBACK_INVALID');
+      }
+      if (name === SUSPENSION_LIST_RPC && (!Array.isArray(value.entries) || value.entries.length > args.p_limit
+        || !integer(value.cursor?.next_seq) || value.cursor.next_seq < args.p_after_seq
+        || typeof value.cursor.has_more !== 'boolean')) throw new Error('PROJECT_DB_READBACK_INVALID');
+      if(name===RETIRE_RPC && (value.retired!==true||!uuid(value.retirement_id)||value.claim_class!=='READ_ONLY'
+        ||!['RESULT_READY','COMPLETED'].includes(value.state)
+        ||['task_id','lease_generation','agent_id','tab_id','target_id','agent_generation_epoch'].some(k=>value[k]!==args['p_'+k])))
+        throw new Error('PROJECT_DB_READBACK_INVALID');
       return json(200, value);
     }
     catch (error) {
       const message = String(error?.message || error);
-      const known = message.match(/\bPROJECT_[A-Z0-9_]+\b/);
+      const known = message.match(/\b(?:PROJECT_|BROWSER_SUSPENSION_|BROWSER_RESUME_)[A-Z0-9_]+\b/);
       return fail(known?.[0] || 'PROJECT_CONTINUITY_READ_UNAVAILABLE', known ? 409 : 503);
     }
   };
@@ -49,6 +71,38 @@ export function createProjectContinuityRoutes({ rpc, workspaceId } = {}) {
     if (!device(identity)) return fail('ADMIN_DEVICE_REQUIRED', 403);
     const injected = { p_device_id: identity.device_id, p_client_id: identity.id, p_admin_grant_epoch: identity.admin_grant_epoch };
     try {
+      if (path === '/v1/devos/project/release-browser-child') {
+        if(!own(body,['task_id','lease_generation','agent_id','tab_id','target_id','agent_generation_epoch'])
+          ||!uuid(body.task_id)||!integer(body.lease_generation,1)||!integer(body.agent_generation_epoch,1)
+          ||!/^agent_[a-z0-9-]{8,64}$/.test(body.agent_id||'')||!/^tab_[0-9a-f-]{36}$/.test(body.tab_id||'')
+          ||!/^webcontents:[1-9][0-9]*$/.test(body.target_id||'')) throw new Error('PROJECT_SUSPENSION_REQUEST_INVALID');
+        return call(RETIRE_RPC,{p_workspace_id:workspace,p_task_id:body.task_id,p_lease_generation:body.lease_generation,
+          p_agent_id:body.agent_id,p_tab_id:body.tab_id,p_target_id:body.target_id,p_agent_generation_epoch:body.agent_generation_epoch,...injected});
+      }
+      if (path === '/v1/devos/project/suspend-browser') {
+        if (!own(body, ['project_id','task_id','claim_id','lease_generation','suspension_id','checkpoint'])
+          || !uuid(body.project_id) || !uuid(body.task_id) || !uuid(body.suspension_id)
+          || !integer(body.claim_id, 1) || !integer(body.lease_generation, 1)
+          || body.checkpoint?.schema !== 'metaengine.browser.parent-checkpoint.v1'
+          || JSON.stringify(body.checkpoint).length > 262144) throw new Error('PROJECT_SUSPENSION_REQUEST_INVALID');
+        return call(SUSPEND_RPC, { p_workspace_id: workspace, p_project_id: body.project_id, p_task_id: body.task_id,
+          p_claim_id: body.claim_id, p_lease_generation: body.lease_generation, p_suspension_id: body.suspension_id,
+          p_checkpoint: body.checkpoint, ...injected });
+      }
+      if (path === '/v1/devos/project/suspension-read') {
+        if (!own(body, ['task_id']) || !uuid(body.task_id)) throw new Error('PROJECT_SUSPENSION_REQUEST_INVALID');
+        return call(SUSPENSION_READ_RPC, { p_workspace_id: workspace, p_task_id: body.task_id, ...injected });
+      }
+      if (path === '/v1/devos/project/suspension-list') {
+        if (!own(body, ['after_seq','limit']) || !integer(body.after_seq) || !integer(body.limit, 1) || body.limit > 128) throw new Error('PROJECT_SUSPENSION_REQUEST_INVALID');
+        return call(SUSPENSION_LIST_RPC, { p_workspace_id: workspace, p_after_seq: body.after_seq, p_limit: body.limit, ...injected });
+      }
+      if (path === '/v1/devos/project/resume-browser') {
+        if (!own(body, ['suspension_id','restoration']) || !uuid(body.suspension_id)
+          || body.restoration?.schema !== 'metaengine.devos.browser-parent-restoration.v1'
+          || JSON.stringify(body.restoration).length > 32768) throw new Error('PROJECT_SUSPENSION_REQUEST_INVALID');
+        return call(RESUME_RPC, { p_workspace_id: workspace, p_suspension_id: body.suspension_id, p_restoration: body.restoration, ...injected });
+      }
       if (path === '/v1/devos/project/register') {
         if (!own(body, ['request_id']) || !uuid(body.request_id)) throw new Error('PROJECT_REQUEST_INVALID');
         return call(REGISTER_RPC, { p_workspace_id: workspace, p_request_id: body.request_id, ...injected });

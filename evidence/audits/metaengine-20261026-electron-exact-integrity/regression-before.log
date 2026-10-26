@@ -1,0 +1,51 @@
+✖ Electron qualification rejects a well-formed integrity substitution before package code (materialize=false) (9.131588ms)
+✖ Electron qualification rejects a well-formed integrity substitution before package code (materialize=true) (6.372362ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 0
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 94.919753
+
+✖ failing tests:
+
+test at test/windows-capture-fixture-qualification.test.mjs:64:42
+✖ Electron qualification rejects a well-formed integrity substitution before package code (materialize=false) (9.131588ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /locked_version_invalid/. Input:
+
+  'Error: qualification_electron_binary_not_materialized_run_prerequisite'
+
+      at TestContext.<anonymous> (file:///workspace/shared/metaengine-browser-dependencies/apps/metaengine-browser/test/windows-capture-fixture-qualification.test.mjs:73:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: Error: qualification_electron_binary_not_materialized_run_prerequisite
+        at fail (file:///workspace/shared/metaengine-browser-dependencies/apps/metaengine-browser/scripts/qualified-electron-runtime.mjs:8:32)
+        at resolveQualifiedElectron (file:///workspace/shared/metaengine-browser-dependencies/apps/metaengine-browser/scripts/qualified-electron-runtime.mjs:48:36)
+        at file:///workspace/shared/metaengine-browser-dependencies/apps/metaengine-browser/test/windows-capture-fixture-qualification.test.mjs:73:23
+        at getActual (node:assert:611:5)
+        at strict.throws (node:assert:759:24)
+        at TestContext.<anonymous> (file:///workspace/shared/metaengine-browser-dependencies/apps/metaengine-browser/test/windows-capture-fixture-qualification.test.mjs:73:10)
+        at async Test.run (node:internal/test_runner/test:1409:7)
+        at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3),
+    expected: /locked_version_invalid/,
+    operator: 'throws',
+    diff: 'simple'
+  }
+
+test at test/windows-capture-fixture-qualification.test.mjs:64:42
+✖ Electron qualification rejects a well-formed integrity substitution before package code (materialize=true) (6.372362ms)
+  AssertionError [ERR_ASSERTION]: Missing expected exception.
+      at TestContext.<anonymous> (file:///workspace/shared/metaengine-browser-dependencies/apps/metaengine-browser/test/windows-capture-fixture-qualification.test.mjs:73:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: /locked_version_invalid/,
+    operator: 'throws',
+    diff: 'simple'
+  }

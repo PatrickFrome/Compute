@@ -1,0 +1,20 @@
+{
+  "schema": "metaengine.browser.package-lock-material.v1",
+  "package_name": "@metaengine/browser-shell",
+  "package_version": "0.7.0-dev.1107139874594.1",
+  "lockfile_version": 3,
+  "package_lock_sha256": "6582a21be620b86025e8d6ad345a6bceb9809ef8d032782ecc6b52c78db07084",
+  "package_lock_bytes": 144651,
+  "node_version": "v24.22.1",
+  "npm_version": "11.9.0",
+  "dependency_count": 2,
+  "dev_dependency_count": 4,
+  "optional_dependency_count": 0,
+  "peer_dependency_count": 0,
+  "package_entry_count": 317,
+  "integrity_entry_count": 317,
+  "resolved_entry_count": 317,
+  "optional_entry_count": 23,
+  "platform_restricted_entry_count": 0,
+  "authority_effect": false
+}

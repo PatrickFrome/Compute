@@ -3,3 +3,4 @@
 /supabase/migrations/*.sql text eol=lf
 /infra/client-state-runtime/*.sql text eol=lf
 /infra/client-state-runtime/fresh-schema-candidate-plan.json text eol=lf
+/infra/client-state-runtime/fresh-schema-statement-selection.json text eol=lf

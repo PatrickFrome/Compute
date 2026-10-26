@@ -54,8 +54,12 @@ export function verifyMe2UiBundle(directory, expectedSha) {
   };
 }
 
-export async function smokeMe2UiBundle(directory, runtime = process.execPath, timeoutMs = 30000) {
+export async function smokeMe2UiBundle(directory, runtime = process.execPath, timeoutMs = 30000, expectedSha) {
   const root = realpathSync(directory);
+  const before = verifyMe2UiBundle(root, expectedSha);
+  const manifestBytes = readFileSync(path.join(root, 'me2-ui-manifest.json'));
+  assert.equal(createHash('sha256').update(manifestBytes).digest('hex'), before.manifest_sha256, 'me2_ui_manifest_changed_before_smoke');
+  const pinnedManifest = JSON.parse(manifestBytes);
   const listener = net.createServer();
   listener.listen(0, '127.0.0.1');
   await once(listener, 'listening');
@@ -63,7 +67,8 @@ export async function smokeMe2UiBundle(directory, runtime = process.execPath, ti
   await new Promise((resolve, reject) => listener.close(error => error ? reject(error) : resolve()));
   const child = spawn(runtime, ['server.js'], {
     cwd: root, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, NODE_ENV: 'production', ELECTRON_RUN_AS_NODE: '1', HOSTNAME: '127.0.0.1', PORT: String(port), NODE_PATH: '', NODE_OPTIONS: '' },
+    env: { ...process.env, NODE_ENV: 'production', ELECTRON_RUN_AS_NODE: '1', HOSTNAME: '127.0.0.1', PORT: String(port), NODE_PATH: '', NODE_OPTIONS: '',
+      ME2_HOSTED_BY_BROWSER: '1', ME2_WATCHDOG: 'off', NEXT_TELEMETRY_DISABLED: '1' },
   });
   let output = '';
   let spawnError;
@@ -92,13 +97,23 @@ export async function smokeMe2UiBundle(directory, runtime = process.execPath, ti
         ? await verifyWindowsTcpListener({ port, pid: child.pid }) : null;
       assert.ok(child.exitCode === null && child.signalCode === null, 'me2_ui_server_died_during_listener_probe');
       return { runtime_smoke: 'PASS', html_sha256: createHash('sha256').update(html).digest('hex'), static_path: staticPath, static_sha256: createHash('sha256').update(assetBytes).digest('hex'),
+        post_exit_content_verified: true, post_exit_manifest_sha256: before.manifest_sha256,
         os_listener_verified: osListener !== null, os_listener: osListener,
         os_listener_verification: osListener ? 'PASS' : 'UNSUPPORTED_PLATFORM' };
     }
     throw new Error(`me2_ui_smoke_timeout:${output}`);
   } finally {
     if (child.exitCode === null && child.signalCode === null) child.kill();
-    await exited;
+    const killTimer = setTimeout(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); }, 5000);
+    killTimer.unref();
+    try { await exited; } finally { clearTimeout(killTimer); }
+    // A healthy HTTP response is not proof that package bytes stayed immutable.
+    // Pin the ORIGINAL manifest, including its exact bytes: a child must not
+    // rewrite the inventory to bless its own additions, deletions or mutations.
+    assert.equal(realpathSync(directory), root, 'me2_ui_root_changed_during_smoke');
+    assert.deepEqual(readFileSync(path.join(root, 'me2-ui-manifest.json')), manifestBytes, 'me2_ui_manifest_changed_during_smoke');
+    verifyUiContent(root, pinnedManifest);
+    assert.equal(verifyMe2UiBundle(root, expectedSha).content_sha256, before.content_sha256, 'me2_ui_content_changed_during_smoke');
   }
 }
 
@@ -106,7 +121,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   try {
     const { values } = parseArgs({ options: { root: { type: 'string' }, 'expected-sha': { type: 'string' }, runtime: { type: 'string' }, evidence: { type: 'string' }, smoke: { type: 'boolean' } } });
     const proof = verifyMe2UiBundle(values.root, values['expected-sha']);
-    if (values.smoke) Object.assign(proof, await smokeMe2UiBundle(values.root, values.runtime));
+    if (values.smoke) Object.assign(proof, await smokeMe2UiBundle(values.root, values.runtime, 30000, values['expected-sha']));
     const json = JSON.stringify(proof, null, 2) + '\n';
     if (values.evidence) writeFileSync(values.evidence, json);
     process.stdout.write(json);

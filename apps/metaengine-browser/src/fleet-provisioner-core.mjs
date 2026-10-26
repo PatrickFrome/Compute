@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { AGENT_PLATFORM_HOME_URL, AGENT_PLATFORM_ID, AGENT_PLATFORM_PROVIDER, normalizeAgentPlatformConversationUrl } from './browser-agent-platform.mjs';
 import { globalOwnerGateDisabled } from './owner-safety-gate-registry.mjs';
 import { persistFleetStateTargetRevalidation } from './fleet-state-target-revalidation.mjs';
@@ -9,6 +10,10 @@ export const FLEET_STATES = Object.freeze([
   'PROVISIONING',
   'BOUND_UNVERIFIED',
   'ACTIVE',
+  'COMPLETED_RELEASING',
+  'SUSPENDING',
+  'SUSPENDED',
+  'RESUMING',
   'PROVISIONING_AMBIGUOUS',
   'LOST',
   'RETIRED',
@@ -217,6 +222,11 @@ function sanitizeLoadedState(input, policy) {
       ambiguous_reason: row.ambiguous_reason ? String(row.ambiguous_reason) : null,
       transport_proof: transportProof,
       conversation_url_sha256: conversationClaim(row),
+      parent_suspension: clone(row.parent_suspension || null),
+      parent_restoration: clone(row.parent_restoration || null),
+      parent_completed_release: clone(row.parent_completed_release || null),
+      parent_resumed_receipt: clone(row.parent_resumed_receipt || null),
+      browser_parent_restoration: clone(row.browser_parent_restoration || null),
       automatic_retry_allowed: false,
       authority_effect: false,
     });
@@ -309,7 +319,7 @@ export class FleetProvisioner {
         this.#capacityRetiredAttempts += 1;
         continue;
       }
-      if (agent.tab_id && !this.#tabExists(agent.tab_id) && !['RETIRED', 'PROVISIONING_AMBIGUOUS'].includes(agent.lifecycle_state)) {
+      if (agent.tab_id && !this.#tabExists(agent.tab_id) && !['RETIRED', 'PROVISIONING_AMBIGUOUS', 'COMPLETED_RELEASING', 'SUSPENDING', 'SUSPENDED', 'RESUMING'].includes(agent.lifecycle_state)) {
         agent.lifecycle_state = 'LOST';
         agent.lost_reason = RESTART_STALE_LOST_REASON;
         agent.tab_id = null;
@@ -577,6 +587,10 @@ export class FleetProvisioner {
       if (this.#capacityBackpressure) this.#capacityBackpressure = false;
       const agent = this.#state.agents.find((row) => row.tab_id === String(tabId));
       if (!agent || ['RETIRED', 'PROVISIONING_AMBIGUOUS'].includes(agent.lifecycle_state)) return this.snapshot();
+      if (['COMPLETED_RELEASING', 'SUSPENDING', 'SUSPENDED', 'RESUMING'].includes(agent.lifecycle_state)) {
+        agent.tab_id = null; agent.target_id = null; agent.transport_proof = null;
+        agent.updated_at = iso(this.#clock); await this.#persist(); return this.snapshot();
+      }
       agent.lifecycle_state = 'LOST';
       agent.tab_id = null;
       agent.target_id = null;
@@ -586,6 +600,164 @@ export class FleetProvisioner {
       agent.updated_at = iso(this.#clock);
       await this.#persist();
       return this.snapshot();
+    });
+  }
+
+  // Private host composition only: a signed DB suspension is required before
+  // this method can remove physical capacity. No tool/renderer calls it.
+  async prepareCompletedBrowserRelease(lease, receipt) {
+    return this.#serial(async () => {
+      const agent = this.#requireAgent(lease.agent_id);
+      if (receipt?.schema !== 'metaengine.devos.browser-child-retirement.v1' || receipt.retired !== true
+        || !/^[0-9a-f-]{36}$/.test(receipt.retirement_id || '') || receipt.claim_class !== 'READ_ONLY'
+        || !['RESULT_READY', 'COMPLETED'].includes(receipt?.state) || receipt.task_id !== lease.task_id
+        || receipt.lease_generation !== lease.lease_generation || receipt.authority_effect !== false
+        || receipt.automatic_retry_allowed !== false
+        || ['agent_id','tab_id','target_id','agent_generation_epoch'].some(key=>receipt[key]!==lease[key]))
+        throw Error('fleet_completed_release_receipt_invalid');
+      if (agent.lifecycle_state === 'COMPLETED_RELEASING') {
+        if (!isDeepStrictEqual(agent.parent_completed_release, { lease, receipt })) throw Error('fleet_completed_release_changed');
+        return clone(agent);
+      }
+      if (agent.lifecycle_state !== 'ACTIVE' || agent.tab_id !== lease.tab_id || agent.target_id !== lease.target_id
+        || agent.generation_epoch !== lease.agent_generation_epoch) throw Error('fleet_completed_release_binding_changed');
+      agent.parent_completed_release = clone({ lease, receipt });
+      agent.lifecycle_state = 'COMPLETED_RELEASING'; await this.#persist(); return clone(agent);
+    });
+  }
+
+  async prepareParentSuspension(checkpoint) {
+    return this.#serial(async () => {
+      const agent = this.#requireAgent(checkpoint.agent_id);
+      if (agent.lifecycle_state !== 'ACTIVE' || agent.tab_id !== checkpoint.tab_id
+        || agent.target_id !== checkpoint.target_id || agent.generation_epoch !== checkpoint.agent_generation_epoch
+        || agent.transport_proof?.agent_surface_sha256 !== checkpoint.agent_surface_sha256)
+        throw Error('fleet_parent_prepare_binding_changed');
+      agent.parent_suspension = { checkpoint: clone(checkpoint) };
+      agent.parent_restoration = null; agent.parent_resumed_receipt = null; agent.browser_parent_restoration = null;
+      agent.lifecycle_state = 'SUSPENDING'; await this.#persist(); return clone(agent);
+    });
+  }
+
+  async suspendParent(receipt) {
+    return this.#serial(async () => {
+      this.#assertReady();
+      const c = receipt?.checkpoint;
+      if (receipt?.schema !== 'metaengine.devos.browser-parent-suspension.v1'
+        || receipt.status !== 'SUSPENDED' || !['WAITING_CHILDREN', 'READY_TO_RESUME'].includes(receipt.state)
+        || !/^[a-f0-9-]{36}$/.test(receipt.suspension_id || '') || !/^[a-f0-9]{64}$/.test(receipt.checkpoint_sha256 || '')
+        || c?.schema !== 'metaengine.browser.parent-checkpoint.v1') throw Error('fleet_parent_suspension_receipt_invalid');
+      const agent = this.#requireAgent(c.agent_id);
+      if (agent.lifecycle_state === 'SUSPENDED') {
+        if (agent.parent_suspension?.suspension_id !== receipt.suspension_id
+          || agent.parent_suspension?.checkpoint_sha256 !== receipt.checkpoint_sha256
+          || !isDeepStrictEqual(agent.parent_suspension.checkpoint, c)) throw Error('fleet_parent_suspension_collision');
+        return clone(agent);
+      }
+      const parkedExact = agent.lifecycle_state === 'SUSPENDING' && isDeepStrictEqual(agent.parent_suspension?.checkpoint, c);
+      if (!['ACTIVE', 'SUSPENDING'].includes(agent.lifecycle_state) || (!parkedExact && (agent.tab_id !== c.tab_id || agent.target_id !== c.target_id))
+        || agent.generation_epoch !== c.agent_generation_epoch || agent.conversation_url_sha256 !== c.conversation_url_sha256
+        || (agent.transport_proof?.agent_surface_sha256 || agent.parent_suspension?.checkpoint?.agent_surface_sha256) !== c.agent_surface_sha256)
+        throw Error('fleet_parent_suspension_binding_changed');
+      agent.parent_suspension = clone(receipt); agent.lifecycle_state = 'SUSPENDED';
+      agent.updated_at = iso(this.#clock); await this.#persist();
+      return clone(agent);
+    });
+  }
+
+  async beginParentResume(receipt) {
+    return this.#serial(async () => {
+      this.#assertReady();
+      const c = receipt?.checkpoint, agent = this.#requireAgent(c?.agent_id);
+      if (!['SUSPENDED', 'RESUMED'].includes(receipt?.status) || !['READY_TO_RESUME', 'RESUMED'].includes(receipt.state)
+        || agent.parent_suspension?.suspension_id !== receipt.suspension_id
+        || agent.parent_suspension?.checkpoint_sha256 !== receipt.checkpoint_sha256)
+        throw Error('fleet_parent_resume_receipt_invalid');
+      if (['RESUMING', 'ACTIVE'].includes(agent.lifecycle_state)) {
+        if (!agent.tab_id || !this.#tabExists(agent.tab_id)) throw Error('fleet_parent_resume_physical_readback_required');
+        return clone(agent);
+      }
+      if (receipt.status !== 'SUSPENDED' || agent.lifecycle_state !== 'SUSPENDED' || (agent.tab_id && this.#tabExists(agent.tab_id)))
+        throw Error('fleet_parent_resume_old_tab_not_retired');
+      if (this.#capacityBackpressure) return { ...clone(agent), parent_resume_state: 'CAPACITY_WAIT' };
+      const url = normalizeConversationUrl(c.conversation_url);
+      if (crypto.createHash('sha256').update(url).digest('hex') !== c.conversation_url_sha256)
+        throw Error('fleet_parent_resume_conversation_invalid');
+      agent.lifecycle_state = 'RESUMING'; agent.tab_id = null; agent.target_id = null; agent.transport_proof = null;
+      agent.generation_epoch = Math.max(agent.generation_epoch + 1, c.agent_generation_epoch + 1, this.#generationFloor);
+      agent.updated_at = iso(this.#clock); await this.#persist();
+      let tab;
+      try {
+        tab = await this.#createTab({ url, select: false, load: false, ownership: 'FLEET_OWNED',
+          agent_id: agent.agent_id, created_by_continuity_id: receipt.suspension_id });
+      } catch (error) {
+        // Only the existing proven pre-effect resource denial may be retried.
+        if (isDeterministicPreEffectCapacityError(error)) {
+          this.#capacityBackpressure = true;
+          agent.lifecycle_state = 'SUSPENDED'; await this.#persist();
+          return { ...clone(agent), parent_resume_state: 'CAPACITY_WAIT' };
+        }
+        throw error;
+      }
+      agent.tab_id = String(tab.tab_id); agent.target_id = `webcontents:${String(tab.webcontents_id)}`;
+      agent.updated_at = iso(this.#clock); await this.#persist();
+      await this.#loadTab(agent.tab_id, url);
+      return clone(agent);
+    });
+  }
+
+  async reserveParentRestoration(restoration) {
+    return this.#serial(async () => {
+      const agent = this.#requireAgent(restoration.agent_id), c = agent.parent_suspension?.checkpoint;
+      if (agent.lifecycle_state !== 'RESUMING' || agent.tab_id !== restoration.tab_id
+        || agent.target_id !== restoration.target_id || agent.generation_epoch !== restoration.agent_generation_epoch
+        || restoration.checkpoint_sha256 !== agent.parent_suspension?.checkpoint_sha256
+        || restoration.transcript_sha256 !== c?.transcript_sha256 || restoration.transcript_total_chars !== c?.transcript_total_chars
+        || restoration.conversation_url_sha256 !== c?.conversation_url_sha256 || restoration.agent_surface_sha256 !== c?.agent_surface_sha256)
+        throw Error('fleet_parent_restoration_binding_changed');
+      agent.parent_restoration = clone(restoration);
+      agent.browser_parent_restoration = { schema: 'metaengine.browser.parent-restoration-reservation.v1',
+        authority_effect: false, automatic_retry_allowed: false, suspension_id: agent.parent_suspension.suspension_id,
+        task_id: agent.parent_suspension.task_id, checkpoint_sha256: agent.parent_suspension.checkpoint_sha256 };
+      agent.transport_proof = { schema: 'metaengine.browser.fleet-transport-proof.v1', transport_stage: 'CONVERSATION', provider: AGENT_PLATFORM_PROVIDER,
+        platform: AGENT_PLATFORM_ID, tab_id: agent.tab_id, target_id: agent.target_id, generation_epoch: agent.generation_epoch,
+        conversation_url: c.conversation_url, conversation_url_sha256: c.conversation_url_sha256,
+        agent_surface_sha256: c.agent_surface_sha256, proven_at: restoration.observed_at, authority_effect: false };
+      await this.#persist(); return clone(agent);
+    });
+  }
+
+  async completeParentResume(receipt, restoration) {
+    return this.#serial(async () => {
+      this.#assertReady();
+      const c = receipt?.checkpoint, agent = this.#requireAgent(c?.agent_id), lease = receipt?.lease;
+      if (receipt?.status !== 'RESUMED' || receipt.state !== 'RESUMED'
+        || agent.parent_suspension?.suspension_id !== receipt.suspension_id
+        || agent.parent_suspension?.checkpoint_sha256 !== receipt.checkpoint_sha256
+        || !['RESUMING', 'ACTIVE'].includes(agent.lifecycle_state)
+        || !lease || lease.task_id !== receipt.task_id || lease.lease_generation <= receipt.old_lease_generation
+        || lease.agent_id !== agent.agent_id || lease.tab_id !== agent.tab_id || lease.target_id !== agent.target_id
+        || lease.agent_generation_epoch !== agent.generation_epoch
+        || restoration?.tab_id !== agent.tab_id || restoration?.target_id !== agent.target_id
+        || restoration?.agent_generation_epoch !== agent.generation_epoch
+        || restoration?.transcript_floor !== c.transcript_floor
+        || restoration?.transcript_sha256 !== c.transcript_sha256
+        || restoration?.transcript_total_chars !== c.transcript_total_chars
+        || restoration?.conversation_url_sha256 !== c.conversation_url_sha256
+        || !/^[a-f0-9]{64}$/.test(c.agent_surface_sha256 || '')) throw Error('fleet_parent_resume_ack_unproven');
+      if (this.#state.agents.some(peer => peer.agent_id !== agent.agent_id && peer.lifecycle_state !== 'RETIRED'
+        && peer.conversation_url_sha256 === c.conversation_url_sha256)) throw Error('fleet_parent_resume_conversation_collision');
+      agent.transport_proof = { schema: 'metaengine.browser.fleet-transport-proof.v1', transport_stage: 'CONVERSATION', provider: AGENT_PLATFORM_PROVIDER,
+        platform: AGENT_PLATFORM_ID, tab_id: agent.tab_id, target_id: agent.target_id, generation_epoch: agent.generation_epoch,
+        conversation_url: c.conversation_url, conversation_url_sha256: c.conversation_url_sha256,
+        agent_surface_sha256: c.agent_surface_sha256, proven_at: iso(this.#clock), authority_effect: false };
+      const reservation = agent.browser_parent_restoration;
+      const priorResumedReceipt = agent.parent_resumed_receipt;
+      agent.parent_resumed_receipt = clone(receipt);
+      agent.lifecycle_state = 'ACTIVE'; agent.browser_parent_restoration = null; agent.updated_at = iso(this.#clock);
+      try { await this.#persist(); }
+      catch (error) { agent.lifecycle_state = 'RESUMING'; agent.browser_parent_restoration = reservation; agent.parent_resumed_receipt = priorResumedReceipt; throw error; }
+      return clone(agent);
     });
   }
 
@@ -701,7 +873,7 @@ export class FleetProvisioner {
     const ignoreAmbiguous = globalOwnerGateDisabled('fleet.ambiguous_compensating_fanout');
     return this.#state.agents.filter((a) => (
       activeInferenceIdentity(a)
-      && a.lifecycle_state !== 'RETIRED'
+      && !['RETIRED', 'SUSPENDED'].includes(a.lifecycle_state)
       && !isRestartStaleLost(a)
       && !(ignoreAmbiguous && a.lifecycle_state === 'PROVISIONING_AMBIGUOUS')
     )).length;

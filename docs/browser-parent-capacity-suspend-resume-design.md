@@ -2,13 +2,88 @@
 
 ## Status
 
-The implemented change suppresses unnecessary parent model turns while children
-are still pending. **It does not release the parent worker or fix single-worker
-nested fan-out.** Durable suspension below is a proposed contract, not an
-available API or a readiness claim.
+A production-wired **READ_ONLY parent suspension slice** now extends the existing
+W30/Project continuity path. The earlier quiet-wait regression remains as the
+fallback when no suspension transport is bound. No logical agent-count/depth
+ceiling or second scheduler is introduced. Physical resource admission remains
+finite and separate from the durable task graph.
 
-There is no proposed logical agent-count/depth ceiling or second scheduler.
-Physical resources remain finite and are admitted by the existing resource gate.
+### Implemented contract
+
+1. The existing task cycle first handles failed children, UNKNOWN turns and
+   pending tools. After a confirmed continuation, unchanged waiting parents may
+   request suspension through the private Host runtime (not a model tool).
+2. SQLite preserves the exact continuation floor and complete delivered-result
+   identities. Generic tool issuance has a per-request write-ahead custody
+   record before the network effect. Restart harvests an acknowledged command
+   ID or retains UNKNOWN without reissuing. Delivering an UNAVAILABLE display
+   result does not resolve effect custody. Legacy incomplete histories or
+   pending/UNKNOWN effects retain the claim.
+3. The exact parent view must have no draft/generation/retry state. A private
+   physical-mutation gate plus renderer freeze protects two matching full
+   transcript observations. The fleet durably records `SUSPENDING` before SQL.
+4. Device-signed ADMIN project routes call
+   `h205f22_project_suspend_browser_v1`. SQL verifies current Owner generation,
+   project/device grant, exact claim, original transport proof, READ_ONLY class,
+   no workspace custody, and unfinished nonfailed children. It atomically saves
+   the checkpoint, closes the old claim and marks the task `SUSPENDED`, never
+   `COMPLETED`. Only the exact committed receipt permits destruction of the old
+   view. Registry removal alone is not proof of physical destruction.
+5. Lost acknowledgements use `suspension-read` and immutable checkpoint bindings;
+   they never repeat Send or substitute another checkpoint. The existing
+   heartbeat pages `suspension-list`, not a new polling scheduler.
+6. Completed dependencies permit restoration of the original conversation URL,
+   transcript digest/floor and original Agent-surface provenance. The local
+   view remains frozen `RESUMING`; signed telemetry may publish its exact ACTIVE
+   transport proof **with an exclusive task/checkpoint reservation**. The
+   ordinary allocator skips it, and an additional claim guard refuses unrelated
+   tasks. A durable SQL suspended-agent hold also rejects stale ACTIVE heartbeat
+   allocation before the new physical census arrives. The original W30 admission trigger remains enabled.
+7. `h205f22_project_resume_browser_v1` requires that signed reservation and exact
+   restoration. It creates a new claim/generation and records transport proof
+   without sending the original prompt again. Only confirmed receipt/readback
+   activates the local view. SQLite restores delivered-result identities and
+   the transcript floor into the new generation.
+8. To unwind a single physical slot, an exact completed READ_ONLY child may
+   retire its view only after current authenticated project-task readback proves
+   matching physical binding, `RESULT_READY`/`COMPLETED`, zero ACTIVE claims and
+   zero workspace bindings, with no pending local effects. The idempotent
+   `h205f22_project_release_browser_child_v1` transition then reserves that exact
+   physical incarnation against concurrent claim admission and returns an
+   immutable retirement certificate. Shared agent transaction locks serialize
+   claim admission with suspension and retirement; a snapshot alone never
+   authorizes destruction. Lost certificate ACKs retain a durable local intent
+   and reconcile the exact idempotent transition before any close. Unknown completion
+   is not idle capacity. Interrupted physical destruction remains durably
+   `COMPLETED_RELEASING` and is reconciled by the same heartbeat.
+
+### Evidence and remaining boundaries
+
+- `test/browser-parent-suspension-cycle.test.mjs` composes the real task cycle,
+  project runtime, SQLite journal, fleet and private transport with deterministic
+  database/browser edges: one-slot parent → child → grandchild, journal restart,
+  leaf ACK and original-conversation unwind, no replayed Send.
+- `test/browser-parent-suspension*.test.mjs` cover lost suspension/resume ACKs,
+  stale transcript, pending effects, admission reservation and physical-close
+  proof. Edge route tests verify injected identity and strict readback bindings.
+- `infra/client-state-runtime/browser-parent-suspension.sql.test.mjs` executes
+  the full canonical baseline/runtime stack and the new migration in disposable
+  PGlite, including original admission triggers, claim isolation, rollback,
+  Owner stop, stale epochs and custody readbacks. This is **not native PG17
+  concurrency qualification or installed Electron/ChatGPT proof**.
+- MUTATING parents remain refused: retained worktree custody needs an independent
+  exact-path/head transfer and restored-binding verification. No writable
+  worktree is released by this patch.
+- A missing physical view after uncertain `RESUMING` remains fenced. The client
+  does not fabricate another physical generation or replay the task. Full
+  transcript truncation/drift, expired restoration evidence, Owner generation
+  change and absent durable delivery history also retain explicit fences.
+- Main-process renderer freeze/AX transcript stability and exact destruction
+  must be qualified on the installed Windows/Electron platform. The original
+  root/Agent proof is preserved, not re-created by navigating to a root page.
+
+The remaining design sections below describe the broader custody/recovery
+acceptance target; they are not a claim that the MUTATING slice is implemented.
 
 ## Reproduced boundary
 
@@ -28,8 +103,8 @@ a disabled lease mock.
 
 `fairIdleLeaseCandidates` in
 `apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/devos-routes.mjs`
-correctly excludes agents with active claims. The task cycle's `WAIT_CHILDREN`
-return in `src/devos-native-task-cycle-core.mjs` does not release that claim.
+correctly excludes agents with active claims. The fallback `WAIT_CHILDREN` return in `src/devos-native-task-cycle-core.mjs`
+retains that claim when suspension is unavailable or fenced.
 Reusing the tab without a new authority transition would violate the existing
 task/agent/target/generation binding.
 

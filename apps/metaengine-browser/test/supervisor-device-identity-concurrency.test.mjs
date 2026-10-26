@@ -113,3 +113,83 @@ test('failed shared initialization can recover after secure storage becomes avai
   assert.equal(secureStorage.calls.encrypt, 1);
   await assertEnrollmentSignature(identity, recovered[0]);
 });
+
+
+test('constructor and cancelled setup do not create identity bytes or encrypt a key',async t=>{
+ const statePath=await temporaryState(t),secureStorage=testStorage();
+ const identity=new SupervisorDeviceIdentity({statePath,secureStorage});
+ assert.equal(identity.snapshot(),null);assert.equal(secureStorage.calls.encrypt,0);
+ await assert.rejects(fs.stat(statePath),{code:'ENOENT'});
+});
+
+test('malformed existing identity is never replaced or rekeyed',async t=>{
+ const statePath=await temporaryState(t),secureStorage=testStorage();
+ const bytes=Buffer.from('{broken exact identity bytes');await fs.writeFile(statePath,bytes);
+ const identity=new SupervisorDeviceIdentity({statePath,secureStorage});
+ await assert.rejects(identity.ensure(),SyntaxError);
+ assert.deepEqual(await fs.readFile(statePath),bytes);assert.equal(secureStorage.calls.encrypt,0);
+ assert.equal(identity.snapshot(),null);
+});
+
+test('existing unreadable identity fails without creating a key',async t=>{
+ const statePath=await temporaryState(t),secureStorage=testStorage();await fs.mkdir(statePath);
+ const identity=new SupervisorDeviceIdentity({statePath,secureStorage});
+ await assert.rejects(identity.ensure());assert.equal(secureStorage.calls.encrypt,0);
+ assert((await fs.stat(statePath)).isDirectory());
+});
+
+test('mismatched stored private and public keys never load or rotate',async t=>{
+ const statePath=await temporaryState(t),secureStorage=testStorage();
+ await new SupervisorDeviceIdentity({statePath,secureStorage}).ensure();
+ const other=crypto.generateKeyPairSync('ec',{namedCurve:'prime256v1'}).privateKey.export({type:'pkcs8',format:'pem'});
+ const stored=JSON.parse(await fs.readFile(statePath,'utf8'));
+ stored.encrypted_private_key_b64=secureStorage.encryptString(other).toString('base64');
+ await fs.writeFile(statePath,JSON.stringify(stored));const bytes=await fs.readFile(statePath),calls=secureStorage.calls.encrypt;
+ const identity=new SupervisorDeviceIdentity({statePath,secureStorage});
+ await assert.rejects(identity.ensure(),/private_public_key_mismatch/);
+ assert.equal(identity.snapshot(),null);assert.equal(secureStorage.calls.encrypt,calls);assert.deepEqual(await fs.readFile(statePath),bytes);
+});
+
+test('two distinct first creators cannot overwrite the winning identity',async t=>{
+ const statePath=await temporaryState(t),secureStorage=testStorage();
+ const first=new SupervisorDeviceIdentity({statePath,secureStorage}),second=new SupervisorDeviceIdentity({statePath,secureStorage});
+ const results=await Promise.allSettled([first.ensure(),second.ensure()]);
+ assert(results.some(r=>r.status==='fulfilled'));
+ const stored=JSON.parse(await fs.readFile(statePath,'utf8'));
+ for(const result of results) {
+  if(result.status==='fulfilled')assert.equal(result.value.key_fingerprint_sha256,stored.key_fingerprint_sha256);
+  else assert.equal(result.reason.code,'EEXIST');
+ }
+ const before=await fs.readFile(statePath);
+ const reloaded=await new SupervisorDeviceIdentity({statePath,secureStorage}).ensure();
+ assert.equal(reloaded.client_id,stored.client_id);assert.deepEqual(await fs.readFile(statePath),before);
+});
+
+test('symlink or hard-link identities are refused without modifying their target',async t=>{
+ const statePath=await temporaryState(t),secureStorage=testStorage();
+ await new SupervisorDeviceIdentity({statePath,secureStorage}).ensure();
+ const bytes=await fs.readFile(statePath),calls=secureStorage.calls.encrypt;
+ const linked=statePath+'.linked';await fs.link(statePath,linked);
+ await assert.rejects(new SupervisorDeviceIdentity({statePath:linked,secureStorage}).ensure(),/storage_invalid/);
+ await fs.unlink(linked);
+ if(process.platform!=='win32') {
+  await fs.symlink(statePath,linked);
+  await assert.rejects(new SupervisorDeviceIdentity({statePath:linked,secureStorage}).ensure(),/storage_invalid/);
+ }
+ assert.deepEqual(await fs.readFile(statePath),bytes);assert.equal(secureStorage.calls.encrypt,calls);
+});
+
+test('identity disappearing after initial observation never triggers a replacement key',async t=>{
+ const statePath=await temporaryState(t),secureStorage=testStorage();
+ await new SupervisorDeviceIdentity({statePath,secureStorage}).ensure();
+ const bytes=await fs.readFile(statePath),calls=secureStorage.calls.encrypt,read=fs.readFile;
+ const identity=new SupervisorDeviceIdentity({statePath,secureStorage});
+ fs.readFile=async(file,...args)=>{if(file===statePath)await fs.unlink(statePath);return read.call(fs,file,...args);};
+ try{await assert.rejects(identity.ensure(),/storage_changed/);}finally{fs.readFile=read;}
+ assert.equal(identity.snapshot(),null);assert.equal(secureStorage.calls.encrypt,calls);
+ await assert.rejects(fs.stat(statePath),{code:'ENOENT'});
+ // Only the fixture restores its known original bytes; production never does.
+ await fs.writeFile(statePath,bytes,{flag:'wx'});
+ assert.equal((await identity.ensure()).key_fingerprint_sha256,JSON.parse(bytes).key_fingerprint_sha256);
+ assert.deepEqual(await fs.readFile(statePath),bytes);
+});

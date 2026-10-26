@@ -472,3 +472,48 @@ The immutable baseline remains `ea405d926568508eac53ebb408e941c94faeadcf`. The W
 Predecessor .4592 was consumed by Package Smoke run 40203176070 and failed the stale RPC-count assertion before installer creation. That assertion now follows the canonical 52-function allowlist. RPC shutdown and screenshot readback are repaired and independently exercised with actual sockets and owned Windows windows. Current candidate does not claim fresh-PC automatic provisioning or installed autonomous work.
 
 Predecessor .4593 was consumed by Package Smoke run 40206574127 and stopped after NSIS because differentialPackage=false omitted the required blockmap. This candidate restores actual blockmap emission and removes fixed agent-count ceilings. Large generated rosters and actual isolated PG17 were exercised. Installed model work, restart continuation and fresh-PC automatic provisioning remain unproven.
+
+
+## 2026-10-26 — локальные исправления, отдельные от установленной приёмки
+
+Проверенный опубликованный источник: `4a1d907c1fb6b53d0deccf40cb80fd3cf7321250`,
+Draft #1350; source CI завершён, выпуск нового пакета не выполнен из-за уже
+занятой `.4594`. Замороженный локальный кандидат `19694ae2` (82 файла)
+прошёл 124/124 source и 23/23 native-PG17/WASM проверки. Его публикация ожидает
+отдельного разрешения; новый remote HEAD не создан.
+
+Следующая локальная интеграция к `c2320bbf` включает независимо проверенные:
+- справедливое чтение UNKNOWN-журналов без удаления/повтора эффектов, с полным
+  предварительным разбором страницы и привязкой project/claim/generation;
+- двенадцать наблюдаемых межсоединительных PG17 гонок приостановки, возврата,
+  выделения слотов и остановки; это синтетическая authority, не live-модель;
+- равенство реальной базы privileged/API соединений с отказом от неоднозначно
+  кодированных имён;
+- совместимые зависимости Browser и UI, удаление доказанно неиспользуемого
+  Prisma/SQLite-шаблона и root lock без package manifest;
+- локальную воспроизводимую UI-сборку без неявной отправки registry-аудита;
+- v2-подпись точного инвентаря установленного кода в существующей цепочке
+  provenance (реальный signer/native root/установка всё ещё отсутствуют);
+- приватное погашение Guardian-билета собственной БД с проверками отзыва,
+  гонок, UNKNOWN после COMMIT и ограниченной очистки при Owner-stop.
+
+Результаты и ограничения: `docs/audits/metaengine-20261026/` и
+`docs/INSTALLED_PACKAGE_CODE_RELEASE_PROOF_V2.md`. Нет нового утверждения READY,
+production-qualified, установленной автоматической регистрации Guardian или
+беспрерывной автономной работы. Количества focused/full тестов перекрываются и
+не суммируются. Старые Windows/CI успехи не переносятся на новые исходники.
+
+Следующее действие: закрыть попытку старого hosted native redemption явным
+HOLD без выдачи нового билета, затем зафиксировать точный общий source seal и
+повторить агрегатные проверки. Публикация/remote CI ждут разрешения только на
+соответствующее внешнее действие; независимая локальная разработка продолжается.
+
+
+Дополнение 2026-10-26: источник no-hosted gate `71433d1f` независимо проверен
+и интегрирован отдельно. Старый WinHTTP redemption и доказанно неиспользуемый
+JS-адаптер удалены; новая регистрация получает LOCAL_OWNER_BRIDGE_REQUIRED до
+выдачи билета/повторного probe/сетевого запроса/CAS. Ранее доказанная привязка
+OWNER_BOUND сохраняется. Это намеренный безопасный HOLD, не реализация
+успешной новой native-регистрации. Portable C++ consumer компилируется и
+исполняется в тесте; полная Windows service/actuator сборка остаётся UNQUALIFIED.
+Следующее действие: общий source seal и точные агрегатные локальные проверки.

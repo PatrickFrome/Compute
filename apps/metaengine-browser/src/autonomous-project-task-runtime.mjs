@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { BrowserParentSuspension } from './browser-parent-suspension.mjs';
 
 export const AUTONOMOUS_PROJECT_RUNTIME_SCHEMA = 'metaengine.devos.autonomous-project-runtime.v1';
 export const PROJECT_AGENT_TOOL_ACTIONS = Object.freeze(['PROJECT_SPAWN', 'PROJECT_HISTORY']);
@@ -29,22 +30,35 @@ function childrenProposal(value) {
   });
 }
 
+function spawnIntent(project, taskId, claimId, generation, requestId, childrenValue) {
+  if(!REQUEST.test(requestId||'')||!Number.isSafeInteger(claimId)||claimId<1
+      ||!Number.isSafeInteger(generation)||generation<1)fail('spawn_pending_page_invalid');
+  const children=childrenProposal({children:childrenValue});
+  return {schema:'metaengine.devos.project-spawn-intent.v1',
+    body:{project_id:project,parent_task_id:taskId,claim_id:claimId,lease_generation:generation,
+      request_id:wireRequestId(project,taskId,requestId,'spawn'),children},
+    local_request_id:requestId,proposal_sha256:digest(children),...flags};
+}
+
 /** A stage of the existing Supervisor cycle. It admits child tasks through the
  * same DB queue; FleetProvisioner and DevOsNativeTaskCycle own physical ChatGPT
  * creation/dispatch. This runtime has no timer or provider creation executor. */
 export class AutonomousProjectTaskRuntime {
   #request; #journal; #materialize; #isStopped; #prepared = new Map(); #pending = new Map();
+  #spawnCursors = new Map();
   #operations = new Set(); #closing = false; #closePromise = null;
-  #nativeCodingRuntime = null;
+  #nativeCodingRuntime = null; #browserSuspension;
   #last = { schema: AUTONOMOUS_PROJECT_RUNTIME_SCHEMA, state: 'IDLE', ...flags };
-  constructor({ request, journal, materializeProject, isStopped = () => false } = {}) {
+  constructor({ request, journal, materializeProject, isStopped = () => false, browserParentTransport = null, readRuntimeControl = () => null } = {}) {
     if (typeof request !== 'function' || typeof materializeProject !== 'function' || typeof isStopped !== 'function'
         || !journal || !['find', 'begin', 'confirm'].every(key => typeof journal[key] === 'function')) fail('dependencies_required');
     this.#request = request; this.#journal = journal; this.#materialize = materializeProject; this.#isStopped = isStopped;
+    this.#browserSuspension = new BrowserParentSuspension({ journal, request, transport: browserParentTransport,
+      readControl: readRuntimeControl, taskSnapshot: lease => this.#taskSnapshot(lease) });
     // Track every public async operation, including materialization and
     // conversation turns. Shutdown cannot close SQLite under an active turn.
     for (const name of ['prepareLease', 'waitForChildren', 'refreshContext', 'continueConversation', 'latestTurnForLease',
-      'reconcilePending', 'serveToolRequests', 'recordActivity', 'tick']) {
+      'reconcilePending', 'serveToolRequests', 'recordActivity', 'tick', 'suspendWaitingParent', 'releaseCompletedBrowserChild', 'beginToolEffect', 'ackToolEffect', 'resolveToolEffect']) {
       const operation = this[name].bind(this);
       this[name] = (...args) => {
         if (this.#closing) return Promise.reject(new Error('autonomous_project_closed'));
@@ -56,7 +70,7 @@ export class AutonomousProjectTaskRuntime {
     }
   }
   snapshot() { return structuredClone({ ...this.#last, pending_effects: this.#pending.size, in_flight_operations: this.#operations.size,
-    physical_provider_creation_claimed: false, project_history_source: 'SIGNED_POSTGRESQL' }); }
+    physical_provider_creation_claimed: false, project_history_source: 'SIGNED_POSTGRESQL', browser_parent_suspension: this.#browserSuspension.snapshot() }); }
   bindNativeCodingRuntime(runtime) {
     if(runtime!==null&&typeof runtime?.observeProjectCheckpoints!=='function')fail('native_checkpoint_runtime_invalid');
     this.#nativeCodingRuntime=runtime;
@@ -64,8 +78,41 @@ export class AutonomousProjectTaskRuntime {
   #active(snapshot) {
     if (this.#isStopped() || ['STOPPED', 'CANCELLED'].includes(snapshot?.state) || snapshot?.policy?.owner_stop === true) fail('owner_stopped');
   }
+  #toolEffectKey(lease,requestId) { return `tool-issue:${lease.task_id}:${lease.lease_generation}:${digest(requestId)}`; }
+  async beginToolEffect(lease,request) {
+    const current=await this.#taskSnapshot(lease); if(!current)return {state:'NOT_PROJECT_TASK'};
+    const key=this.#toolEffectKey(lease,request.request_id);
+    const intent={schema:'metaengine.project.tool-effect-intent.v1',task_id:lease.task_id,lease_generation:lease.lease_generation,
+      agent_id:lease.agent_id,request_id:request.request_id,action:request.action,payload_sha256:digest(request.payload||{}),...flags};
+    const prior=await this.#journal.begin(key,intent);
+    if(prior.created===true)return {state:'NEW'};
+    if(prior.receipt)return {state:'RESOLVED',result:prior.receipt.result};
+    const ack=await this.#journal.find(`${key}:accepted`);
+    return ack?.receipt?.command_id ? {state:'PENDING',command_id:ack.receipt.command_id} : {state:'UNKNOWN'};
+  }
+  async ackToolEffect(lease,requestId,commandId) {
+    const key=`${this.#toolEffectKey(lease,requestId)}:accepted`;
+    await this.#journal.begin(key,{schema:'metaengine.project.tool-effect-accepted.v1',task_id:lease.task_id,lease_generation:lease.lease_generation,
+      request_id:requestId,command_id:commandId,...flags});
+    await this.#journal.confirm(key,{command_id:commandId,...flags});
+  }
+  async resolveToolEffect(lease,requestId,result) {
+    const key=this.#toolEffectKey(lease,requestId);
+    if(!await this.#journal.find(key))return; // non-project tasks have no custody record
+    if(result?.effect_unknown===true)fail('unknown_tool_effect_not_resolved');
+    await this.#journal.confirm(key,{result,...flags});
+  }
+  async releaseCompletedBrowserChild(lease, receipt) {
+    if(this.#isStopped()) return {state:'OWNER_STOPPED',...flags};
+    return this.#browserSuspension.releaseCompleted(lease, receipt);
+  }
+  async suspendWaitingParent(lease) {
+    if (this.#isStopped()) return { state: 'OWNER_STOPPED', ...flags };
+    return this.#browserSuspension.suspend(lease);
+  }
   async tick() {
     if (this.#isStopped()) return { schema: AUTONOMOUS_PROJECT_RUNTIME_SCHEMA, state: 'OWNER_STOPPED', ...flags };
+    await this.#browserSuspension.tick();
     const value = await this.#post('reconcile', { project_id: null });
     if (value.schema !== 'metaengine.devos.project-reconcile.v1' || value.project_id !== null
         || !Array.isArray(value.projects) || value.projects.length > 4 || value.bounded_projects !== 4) fail('reconcile_sweep_invalid');
@@ -110,19 +157,56 @@ export class AutonomousProjectTaskRuntime {
   }
   async waitForChildren(lease) {
     let current = await this.#taskSnapshot(lease); if (!current) return null;
+    const initialProject=current.snapshot.project_id,initialClaim=current.task.claim_id;
+    const pinnedLease={...lease,claim_id:initialClaim};
+    let cursorUpdate=null;
     const reconciled = await this.#post('reconcile', { project_id: current.snapshot.project_id });
     if (reconciled.project_id !== current.snapshot.project_id) fail('reconcile_readback_invalid');
-    if (typeof this.#journal.pending === 'function') {
-      for (const entry of await this.#journal.pending({ limit: 8 })) {
+    if (typeof this.#journal.pendingPage === 'function' || typeof this.#journal.pending === 'function') {
+      let pending;
+      if (typeof this.#journal.pendingPage === 'function') {
+        const prefix=`spawn:${current.snapshot.project_id}:${lease.task_id}:`;
+        // Advisory only: restart rescans safely; immutable UNKNOWN rows retain custody.
+        const cursorKey=`${prefix}${current.task.claim_id}:${lease.lease_generation}`;
+        const afterKey=this.#spawnCursors.get(cursorKey)??null;
+        const page=await this.#journal.pendingPage({prefix,after_key:afterKey,limit:8});
+        if(page?.schema!=='metaengine.project.pending-effect-page.v1'||page.authority_effect!==false
+          ||page.automatic_retry_allowed!==false||!Array.isArray(page.entries)||page.entries.length>8
+          ||page.cursor?.after_key!==afterKey||typeof page.cursor.has_more!=='boolean')fail('spawn_pending_page_invalid');
+        let previous=afterKey;
+        for(const entry of page.entries) {
+          if(typeof entry?.effect_key!=='string'||!entry.effect_key.startsWith(prefix)||entry.receipt!==null
+            ||(previous!==null&&entry.effect_key<=previous)||entry.intent?.schema!=='metaengine.devos.project-spawn-intent.v1'
+            ||entry.intent.body?.project_id!==current.snapshot.project_id||entry.intent.body?.parent_task_id!==lease.task_id
+            ||entry.effect_key!==`${prefix}${entry.intent.local_request_id}`)fail('spawn_pending_page_invalid');
+          const canonical=spawnIntent(current.snapshot.project_id,lease.task_id,entry.intent.body.claim_id,
+            entry.intent.body.lease_generation,entry.intent.local_request_id,entry.intent.body.children);
+          if(digest(canonical)!==digest(entry.intent))fail('spawn_pending_page_invalid');
+          previous=entry.effect_key;
+        }
+        if(page.cursor.next_key!==previous||(page.cursor.has_more&&page.entries.length===0))fail('spawn_pending_page_invalid');
+        pending=page.entries;
+        cursorUpdate={key:cursorKey,prefix,next:page.cursor.has_more?page.cursor.next_key:null};
+      } else pending=await this.#journal.pending({limit:8}); // older injected journals only
+      for (const entry of pending) {
         const body = entry.intent?.body;
         if (entry.intent?.schema !== 'metaengine.devos.project-spawn-intent.v1'
             || body?.parent_task_id !== lease.task_id || body.lease_generation !== lease.lease_generation
             || body.claim_id !== current.task.claim_id) continue;
-        await this.#spawn(lease, { request_id: entry.intent.local_request_id, action: 'PROJECT_SPAWN', payload: { children: body.children } });
+        await this.#spawn(pinnedLease, { request_id: entry.intent.local_request_id, action: 'PROJECT_SPAWN', payload: { children: body.children } }, initialProject);
       }
     }
-    current = await this.#taskSnapshot(lease);
+    current = await this.#taskSnapshot(pinnedLease);
     if (!current) fail('project_missing');
+    if(current.snapshot.project_id!==initialProject)fail('parent_project_drift');
+    // No cursor progress after failed global control/current-lease validation.
+    if(cursorUpdate) {
+      // Retire superseded bindings for this parent only; unrelated active parents
+      // keep their progress regardless of how many logical agents exist.
+      for(const key of this.#spawnCursors.keys())if(key.startsWith(cursorUpdate.prefix)&&key!==cursorUpdate.key)this.#spawnCursors.delete(key);
+      if(cursorUpdate.next===null)this.#spawnCursors.delete(cursorUpdate.key);
+      else this.#spawnCursors.set(cursorUpdate.key,cursorUpdate.next);
+    }
     const descendants = Array.isArray(current.snapshot.immediate_children)
       ? current.snapshot.immediate_children : current.snapshot.tasks.filter(row => row.parent_task_id === lease.task_id);
     const proposals = (current.snapshot.proposals || []).filter(row => row.parent_task_id === lease.task_id && row.status !== 'ADMITTED');
@@ -162,7 +246,7 @@ export class AutonomousProjectTaskRuntime {
     // receipts without the boundary also require explicit reconciliation.
     if (!entry.receipt || !Number.isSafeInteger(floor) || floor < 0
         || entry.receipt.transcript_floor !== floor) return { state: 'AMBIGUOUS', ...flags };
-    return { state: 'CONFIRMED', transcript_floor: floor, ...flags };
+    return { state: 'CONFIRMED', transcript_floor: floor, delivered_tool_results: entry.intent.delivered_tool_results || [], ...flags };
   }
   async continueConversation(lease, results, send, { observeTranscriptFloor } = {}) {
     leaseIdentity(lease); if (typeof send !== 'function' || !Array.isArray(results) || !results.length) fail('continuation_invalid');
@@ -182,7 +266,7 @@ export class AutonomousProjectTaskRuntime {
       prompt_sha256: digest(prompt), ...flags };
     const prior = await this.#journal.find(effectKey);
     if (prior) {
-      const { transcript_floor, ...priorBinding } = prior.intent;
+      const { transcript_floor, delivered_tool_results, delivery_history_complete, unresolved_tool_effects, ...priorBinding } = prior.intent;
       if (digest(priorBinding) !== digest(binding)) fail('continuation_binding_drift');
       if (prior.receipt && Number.isSafeInteger(transcript_floor) && transcript_floor >= 0
           && prior.receipt.transcript_floor === transcript_floor) return { state: 'ALREADY_DELIVERED', transcript_floor, physical_effect_replayed: false, ...flags };
@@ -194,7 +278,18 @@ export class AutonomousProjectTaskRuntime {
     if (typeof observeTranscriptFloor !== 'function') fail('continuation_boundary_required');
     const transcript_floor = await observeTranscriptFloor();
     if (!Number.isSafeInteger(transcript_floor) || transcript_floor < 0) fail('continuation_boundary_invalid');
-    const intent = { ...binding, transcript_floor };
+    const previous = await this.#journal.latestConversationTurn?.(lease);
+    const delivered = new Map((previous?.intent?.delivered_tool_results || []).map(row => [row.request_id, row]));
+    for (const row of results.slice(0, 8)) {
+      const reference = { request_id: row.request_id, result_sha256: digest({ request_id: row.request_id, status: row.status, summary: row.summary }) };
+      // The synthetic child-status request intentionally changes with the
+      // frontier. Only actual tool request identities are delivery dedupe keys.
+      if (row.request_id !== 'project:children:status') delivered.set(row.request_id, reference);
+    }
+    const unresolved = new Set(previous?.intent?.unresolved_tool_effects || []);
+    for(const row of results.slice(0,8)) if(row.effect_unknown===true) unresolved.add(row.request_id);
+    const intent = { ...binding, transcript_floor, delivered_tool_results: [...delivered.values()], unresolved_tool_effects:[...unresolved],
+      delivery_history_complete: !previous || previous.intent?.delivery_history_complete === true };
     await this.#journal.begin(effectKey, intent);
     const receipt = await send(prompt);
     if (!['PROVEN_COMPOSER_CLEARED', 'PROVEN_NEW_CONVERSATION', 'PROVEN_GENERATING'].includes(receipt?.effect_state)) fail('continuation_effect_ambiguous');
@@ -252,16 +347,14 @@ export class AutonomousProjectTaskRuntime {
     }
     return { status: 'COMPLETED', summary: JSON.stringify(page) };
   }
-  async #spawn(lease, request) {
+  async #spawn(lease, request, expectedProject = null) {
     const children = childrenProposal(request.payload);
     const current = await this.#taskSnapshot(lease); if (!current) fail('project_missing');
     const project = current.snapshot.project_id;
+    if(expectedProject!==null&&project!==expectedProject)fail('parent_project_drift');
     const effectKey = `spawn:${project}:${lease.task_id}:${request.request_id}`;
-    const requestId = wireRequestId(project, lease.task_id, request.request_id, 'spawn');
-    const body = { project_id: project, parent_task_id: lease.task_id, claim_id: current.task.claim_id,
-      lease_generation: lease.lease_generation, request_id: requestId, children };
-    const intent = { schema: 'metaengine.devos.project-spawn-intent.v1', body,
-      local_request_id: request.request_id, proposal_sha256: digest(children), ...flags };
+    const intent=spawnIntent(project,lease.task_id,current.task.claim_id,lease.lease_generation,request.request_id,children);
+    const body=intent.body,requestId=body.request_id;
     const prior = await this.#journal.begin(effectKey, intent);
     if (prior.receipt) return { status: 'COMPLETED', summary: JSON.stringify(prior.receipt) };
     this.#active(current.snapshot);

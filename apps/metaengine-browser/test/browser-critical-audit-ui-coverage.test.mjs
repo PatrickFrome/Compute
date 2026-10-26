@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import test from 'node:test';
 
 const root = new URL('../../../', import.meta.url);
@@ -66,4 +66,14 @@ test('focused critical contracts run the UI coverage guard before the complete B
   const focused = workflow.split('  focused-critical-contracts:')[1]?.split('\n  full-browser-regression:')[0];
   assert.ok(focused);
   assert.match(focused, /test\/browser-critical-audit-ui-coverage\.test\.mjs/);
+});
+
+test('frozen Bun locks belong to real package roots, not an orphan repository starter', () => {
+  if (existsSync(new URL('bun.lock', root))) {
+    assert.ok(existsSync(new URL('package.json', root)), 'repository root lock has no owning package manifest');
+  }
+  for (const app of ['apps/me2-ui/', 'apps/me2-daemon/']) {
+    assert.ok(statSync(new URL(app+'package.json', root)).isFile());
+    assert.ok(statSync(new URL(app+'bun.lock', root)).isFile());
+  }
 });

@@ -542,3 +542,24 @@ test('a successful complete health probe clears a transient failure before reque
   await runtime.stop();
   assert.deepEqual(await runtime.finished, { reason: 'requested', children_stopped: true });
 });
+
+test('inspection credentials cannot attest a different database on the same PostgreSQL cluster', async () => {
+  const good={mode:'local',postgresMode:'attached',databaseUrl:'postgresql://api:fixture@127.0.0.1:15434/app',
+    pgBinDir:here,pgDataDir:here,denoPath:process.execPath};
+  assert.throws(()=>normalizeLauncherConfig({...good,inspectDatabaseUrl:'postgresql://owner:fixture@127.0.0.1:15434/other'}),/inspection_database_identity_mismatch/);
+  const matching=normalizeLauncherConfig({...good,inspectDatabaseUrl:'postgres://owner:other-fixture@127.0.0.1:15434/app'});
+  assert.equal(matching.inspectDatabase.username,'owner');
+  assert.equal(matching.database.username,'api');
+  assert.equal(decodeURIComponent(matching.inspectDatabase.pathname.slice(1)),'app');
+  const {default:postgres}=await import('postgres');
+  const driver=postgres(matching.databaseUrl,{max:1});
+  assert.equal(driver.options.database,decodeURIComponent(matching.inspectDatabase.pathname.slice(1)));
+  await driver.end();
+  for(const suffix of ['', '/', '/%00', '/bad%0Aname', '/%zz', '/%61pp', '/a%70p', '/name%20with%20spaces']) {
+    assert.throws(()=>normalizeLauncherConfig({...good,databaseUrl:'postgresql://api:fixture@127.0.0.1:15434'+suffix}),/local_database_url_invalid/);
+    assert.throws(()=>normalizeLauncherConfig({...good,inspectDatabaseUrl:'postgresql://owner:fixture@127.0.0.1:15434'+suffix}),/inspection_database_url_invalid/);
+  }
+  assert.throws(()=>normalizeLauncherConfig({...good,
+    databaseUrl:'postgresql://api:fixture@127.0.0.1:15434/%61pp',
+    inspectDatabaseUrl:'postgresql://owner:fixture@127.0.0.1:15434/%61pp'}),/local_database_url_invalid/);
+});

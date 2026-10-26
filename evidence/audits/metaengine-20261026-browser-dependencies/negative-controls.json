@@ -1,0 +1,38 @@
+{
+  "before": {
+    "fast_uri_encoded_scheme": "javascript:alert(1)",
+    "undici_uppercase_sri": "accepted",
+    "content_encoding": {
+      "undici": {
+        "exit_status": 1,
+        "signal": null,
+        "stdout": "fetch-rejected",
+        "stderr": "node:events:505\n    throw er; // Unhandled 'error' event\n    ^\n\nResponseContentLengthMismatchError: Response body length does not match content-length header\n    at Parser.createError (node:internal/deps/undici/undici:7454:18)\n    at Parser.finish (node:internal/deps/undici/undici:7449:21)\n    at Socket.onHttpSocketEnd (node:internal/deps/undici/undici:7872:34)\n    at Socket.emit (node:events:526:24)\n    at endReadableNT (node:internal/streams/readable:1783:12)\n    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)\nEmitted 'error' event on Readable instance at:\n    at emitErrorNT (node:internal/streams/destroy:170:8)\n    at emitErrorCloseNT (node:internal/streams/destroy:129:3)\n    at process.processTicksAndRejections (node:internal/process/task_queues:90:21) {\n  code: 'UND_ERR_RES_CONTENT_LENGTH_MISMATCH'\n}\n\nNode.js v24.22.1"
+      },
+      "node-gyp/node_modules/undici": {
+        "exit_status": 1,
+        "signal": null,
+        "stdout": "fetch-rejected",
+        "stderr": "node:events:505\n    throw er; // Unhandled 'error' event\n    ^\n\nResponseContentLengthMismatchError: Response body length does not match content-length header\n    at Parser.createError (node:internal/deps/undici/undici:7454:18)\n    at Parser.finish (node:internal/deps/undici/undici:7449:21)\n    at Socket.onHttpSocketEnd (node:internal/deps/undici/undici:7872:34)\n    at Socket.emit (node:events:526:24)\n    at endReadableNT (node:internal/streams/readable:1783:12)\n    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)\nEmitted 'error' event on Readable instance at:\n    at emitErrorNT (node:internal/streams/destroy:170:8)\n    at emitErrorCloseNT (node:internal/streams/destroy:129:3)\n    at process.processTicksAndRejections (node:internal/process/task_queues:90:21) {\n  code: 'UND_ERR_RES_CONTENT_LENGTH_MISMATCH'\n}\n\nNode.js v24.22.1"
+      }
+    }
+  },
+  "after": {
+    "fast_uri_encoded_scheme": "%6Aavascript:alert(1)",
+    "undici_uppercase_sri": "rejected:integrity mismatch",
+    "content_encoding": {
+      "undici": {
+        "exit_status": 0,
+        "signal": null,
+        "stdout": "fetch-rejected\nprocess-survived",
+        "stderr": ""
+      },
+      "node-gyp/node_modules/undici": {
+        "exit_status": 0,
+        "signal": null,
+        "stdout": "fetch-rejected\nprocess-survived",
+        "stderr": ""
+      }
+    }
+  }
+}

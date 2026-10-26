@@ -69,6 +69,12 @@ app.setAppUserModelId = () => {};
 app.hasSingleInstanceLock = () => ownsLock;
 app.releaseSingleInstanceLock = () => { trace('release-lock'); ownsLock = false; };
 app.isReady = () => ready;
+app.enableSandbox = () => { if (ready) throw new Error('fixture_sandbox_after_ready'); };
+let schemesRegistered = false;
+const protocol = { registerSchemesAsPrivileged() {
+  if (ready || schemesRegistered) throw new Error('fixture_scheme_registration_not_pre_ready_once');
+  schemesRegistered = true;
+} };
 app.isPackaged = Boolean(options.firstRunAutoConnect || options.packaged);
 app.whenReady = () => ready ? Promise.resolve() : new Promise(resolve => app.once('ready', resolve));
 app.exit = code => { trace('exit', code); process.exit(code); };
@@ -98,6 +104,7 @@ app.requestSingleInstanceLock = data => {
   return ownsLock;
 };
 globalThis.__singletonTestElectron = {
+  protocol,
   app,
   BrowserWindow: class { constructor() { throw new Error('fixture_browser_window_forbidden'); } },
   ipcMain: { handle() { throw new Error('fixture_privileged_ipc_forbidden'); } },
@@ -114,6 +121,7 @@ const electronModule = dataModule([
   'export const BrowserWindow = globalThis.__singletonTestElectron.BrowserWindow;',
   'export const ipcMain = globalThis.__singletonTestElectron.ipcMain;',
   'export const dialog = globalThis.__singletonTestElectron.dialog;',
+  'export const protocol = globalThis.__singletonTestElectron.protocol;',
 ].join('\n'));
 const runtimeModule = dataModule([
   'import { app } from "electron";',

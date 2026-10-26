@@ -1,0 +1,329 @@
+{
+  "schema": "compute.fresh-schema-statement-selection.v1",
+  "mode": "EMPTY_DATABASE_ONLY_ATOMIC",
+  "sources": [
+    {
+      "step": 1,
+      "path": "supabase/migrations/20260825213000_a2_chat_bridge_remote_runtime_v1.sql",
+      "sha256": "e263ff2ce4a7f598c48d6ed85e7e85d6ab0157dba312f06a6418060b3e213168",
+      "exclude": []
+    },
+    {
+      "step": 2,
+      "path": "supabase/migrations/20260827033500_a2_browser_operator_device_identity_v1.sql",
+      "sha256": "860ac4fa96abd65164ded374f141d2ed979cb82af49a4bad0f253bd49737af74",
+      "exclude": []
+    },
+    {
+      "step": 3,
+      "path": "supabase/migrations/20260827034100_a2_browser_operator_device_identity_hardening_v2.sql",
+      "sha256": "98b47ecd28b3f96c3f2160b79617eeb08baa0b8895fa89f8ec26d0bc37d16275",
+      "exclude": []
+    },
+    {
+      "step": 4,
+      "path": "supabase/migrations/20260827043107_a2_browser_supervisor_control_plane_v1.sql",
+      "sha256": "da62f90d524e55a3c2f7f804fca9f0f7f6b444c753940f3eac6f6fc9e19d4c18",
+      "exclude": []
+    },
+    {
+      "step": 5,
+      "path": "supabase/migrations/20260929010000_client_v1_fresh_project_bootstrap_v1.sql",
+      "sha256": "8064ca47424fbf8166ef7a01139900462d69352e18e23b23a4234e4213115c35",
+      "exclude": []
+    },
+    {
+      "step": 6,
+      "path": "supabase/migrations/20260929133000_client_v1_fresh_meta_orchestrator_substrate_v1.sql",
+      "sha256": "cbe03a3e0db60dfe61350c767a8d549c79ed439221f95c43b9df04facad382dd",
+      "exclude": []
+    },
+    {
+      "step": 7,
+      "path": "supabase/migrations/20260827115000_a2_browser_supervisor_idempotent_issuance_v2.sql",
+      "sha256": "fa0ce3cd3ceac149382dfb8e4acc0a7452055918e7846cf3d4aa0381f6866023",
+      "exclude": []
+    },
+    {
+      "step": 8,
+      "path": "supabase/migrations/20260827120215_a2_browser_supervisor_remote_authority_v3.sql",
+      "sha256": "9f359745d7a9db3cb69cb443cd9101eae6c4cf207d4806f989d0ff9d9bb5ba5e",
+      "exclude": []
+    },
+    {
+      "step": 9,
+      "path": "supabase/migrations/20260829192000_a2_browser_autonomous_download_update_actuator_v1.sql",
+      "sha256": "a48b50c89533d30e69c1b4472ec55061518506d04d73bf209449ac554c54406e",
+      "exclude": [
+        {
+          "index": 0,
+          "start": 0,
+          "end": 6,
+          "sha256": "edd65695b320db381bb184e32a5dfcc16b4d4c822f560f090224bb840c63958b",
+          "reason": "OUTER_TRANSACTION_OWNS_BEGIN"
+        },
+        {
+          "index": 6,
+          "start": 14232,
+          "end": 14241,
+          "sha256": "2048627a21c4938609df73051fc8d70555929e6efa7521b286d54a59c7f60fe6",
+          "reason": "OUTER_TRANSACTION_OWNS_COMMIT"
+        }
+      ]
+    },
+    {
+      "step": 10,
+      "path": "supabase/migrations/20260831152000_a2_workspace_binding_registry_v1.sql",
+      "sha256": "201d178500a65cf851640934afd5cd5e6d71f2926e056e5f701ac513533169c2",
+      "exclude": []
+    },
+    {
+      "step": 11,
+      "path": "supabase/migrations/20260902090000_a2_workspace_binding_snapshot_v1.sql",
+      "sha256": "23d2cb2f3896e51ff26e18cb84ed20f31fd4cffdb3b16c891a2337d9b4cd14bb",
+      "exclude": []
+    },
+    {
+      "step": 12,
+      "path": "supabase/migrations/20260906172000_browser_control_plane_fast_lane_release_v1.sql",
+      "sha256": "34bf7ce70f2a0a08d8155e2690d5809f057a81536cdf322e135fc0eb0edd4194",
+      "exclude": []
+    },
+    {
+      "step": 13,
+      "path": "supabase/migrations/20260902205500_supervisor_mesh_terminal_freshness_v1.sql",
+      "sha256": "eb1ad299ce7764e68e3df5a61f11dd7b8d0f7e8c93e1748e54a6d77f616b9684",
+      "exclude": [
+        {
+          "index": 2,
+          "start": 7550,
+          "end": 10102,
+          "sha256": "4c6b390fe341078f0d43ef81c29f589a1c81c22c3d0c9e8352cbf045426db5a0",
+          "reason": "UNREACHABLE_LEGACY_WATCHDOG_REQUIRES_UNINSTALLED_REFILL_PRODUCERS"
+        },
+        {
+          "index": 3,
+          "start": 10102,
+          "end": 10450,
+          "sha256": "3f25dc6bce3c6dd0709776b957a80fe6a351b5d7cbc4e18e5f0992f4723963ee",
+          "reason": "EXISTING_STATE_BACKFILL_NOT_FRESH_CONFIGURATION"
+        },
+        {
+          "index": 4,
+          "start": 10450,
+          "end": 10764,
+          "sha256": "8dd85ecdbc26f6ee4bc968d43758c1f0c7528f413cb90e210524a4ebbdc5f367",
+          "reason": "EXISTING_STATE_BACKFILL_NOT_FRESH_CONFIGURATION"
+        }
+      ]
+    },
+    {
+      "step": 14,
+      "path": "supabase/migrations/20260913163614_devos_environment_reset_generation_fence_v1.sql",
+      "sha256": "67c6edc7e5cc186b3f41b17cfcd55587825bd55fa35bc76c38c7a6a9bfddb023",
+      "exclude": [
+        {
+          "index": 2,
+          "start": 750,
+          "end": 1111,
+          "sha256": "8bd5597a87ed0aceec104a8aed16e826c444cd74b61b05b56217ba732cdb1955",
+          "reason": "EXISTING_WORKSPACE_BACKFILL_NOT_FRESH_CONFIGURATION"
+        },
+        {
+          "index": 8,
+          "start": 2950,
+          "end": 5992,
+          "sha256": "a3da23a72dce1f16a86bc037261bcb043e40b36daaefd7a639d1f42376f67277",
+          "reason": "UNREACHABLE_LEGACY_WATCHDOG_REQUIRES_UNINSTALLED_REFILL_PRODUCERS"
+        },
+        {
+          "index": 12,
+          "start": 6826,
+          "end": 12414,
+          "sha256": "44dda78986d1c70f8695ab417e8cc8c4e157b51e75bfe6adcc594140ad8bc3ca",
+          "reason": "UNREACHABLE_LEGACY_RESET_REQUIRES_UNINSTALLED_PEER_TABLES"
+        },
+        {
+          "index": 13,
+          "start": 12414,
+          "end": 12517,
+          "sha256": "52e146e8e4f42b51aa5bdded1966576bac9809d15897e3bd5b61ad28556fd00e",
+          "reason": "ACL_FOR_EXCLUDED_LEGACY_RESET"
+        },
+        {
+          "index": 14,
+          "start": 12517,
+          "end": 12605,
+          "sha256": "5cadb7990327513edb8fa738daa72062a9fc795ced7c2cc02db22715e1ed3d0b",
+          "reason": "ACL_FOR_EXCLUDED_LEGACY_RESET"
+        }
+      ]
+    },
+    {
+      "step": 15,
+      "path": "supabase/migrations/20260913165258_devos_reset_supervisor_admission_fence_v1.sql",
+      "sha256": "719e3e51fd74ac496db7fe5b6e8573704caeebc6920d60fbeea8a11a867066fc",
+      "exclude": [
+        {
+          "index": 1,
+          "start": 396,
+          "end": 593,
+          "sha256": "d56aab9d517c2550141ef9d5e003f99755f0325f07a0d7d32e0956a425149c19",
+          "reason": "EXISTING_STATE_BACKFILL_NOT_FRESH_CONFIGURATION"
+        },
+        {
+          "index": 7,
+          "start": 2077,
+          "end": 2342,
+          "sha256": "27083748c2f278a63aca088b4f2e170160b1c3b5394de7b11b6c7d14641c0695",
+          "reason": "RENAME_OF_EXCLUDED_LEGACY_RESET"
+        },
+        {
+          "index": 8,
+          "start": 2342,
+          "end": 2473,
+          "sha256": "27bc5cac7d20904a3882823f02c428282174eca09b474bcdca7b5ec4958bd115",
+          "reason": "ACL_FOR_EXCLUDED_LEGACY_RESET"
+        },
+        {
+          "index": 9,
+          "start": 2473,
+          "end": 3340,
+          "sha256": "dc7aea2c49a4fda0c648d60fc9ab6636e019a0b52d053f92539bbc5529d0fd72",
+          "reason": "WRAPPER_FOR_EXCLUDED_LEGACY_RESET"
+        },
+        {
+          "index": 10,
+          "start": 3340,
+          "end": 3445,
+          "sha256": "3c99aa231f5fbcff1a5d5260850666ec62a425e6db1cbd45fd061fe7269329b5",
+          "reason": "ACL_FOR_EXCLUDED_LEGACY_RESET"
+        },
+        {
+          "index": 11,
+          "start": 3445,
+          "end": 3535,
+          "sha256": "461a30f5b9ae0d9daf7845e3568a323327fb2e37c32ead763c7752d4856da33d",
+          "reason": "ACL_FOR_EXCLUDED_LEGACY_RESET"
+        }
+      ]
+    },
+    {
+      "step": 16,
+      "path": "supabase/migrations/20260918150000_devos_transport_promotion_json_null_admission_fix_v1.sql",
+      "sha256": "267cb0c8b4f1708f7e5fceb263485ab144ab6d541b57c55cf757c4ec0e81dd37",
+      "exclude": []
+    },
+    {
+      "step": 17,
+      "path": "supabase/migrations/20260921000000_browser_emergency_lane_and_lease_v1.sql",
+      "sha256": "3ef5a1e5babeec1a788ab4e0d99c31ef3b71f95cfbabee6570640b5395f5fed3",
+      "exclude": []
+    },
+    {
+      "step": 18,
+      "path": "supabase/migrations/20260929010000_client_v1_fresh_project_bootstrap_v1.sql",
+      "sha256": "8064ca47424fbf8166ef7a01139900462d69352e18e23b23a4234e4213115c35",
+      "exclude": []
+    },
+    {
+      "step": 19,
+      "path": "supabase/migrations/20260929020000_client_v1_native_device_enrollment_v1.sql",
+      "sha256": "7d985756117640ebbca015270afcbe184666e7ee4cb31e27acb51e668c151793",
+      "exclude": []
+    },
+    {
+      "step": 20,
+      "path": "supabase/migrations/20260929134500_client_v1_goal_submit_v1.sql",
+      "sha256": "e414ac9865001d72251e814e6dbbb01851e15f8f91e82abdaf6bac2fa8d51fec",
+      "exclude": []
+    },
+    {
+      "step": 21,
+      "path": "supabase/migrations/20260929203000_client_v1_plan_generation_watermark_v1.sql",
+      "sha256": "3476f41dec77834b4f24670de786021e1f8130e82812a354517177d5eeb0c01b",
+      "exclude": []
+    },
+    {
+      "step": 22,
+      "path": "supabase/migrations/20260929211500_client_v1_goal_progress_reconciliation_v1.sql",
+      "sha256": "1a9388630579c234c62e47eaf1778848f1c562e7de71b1d6cee76fd1cdbc1465",
+      "exclude": []
+    },
+    {
+      "step": 23,
+      "path": "supabase/migrations/20260929224500_client_v1_agent_origin_result_proof_v1.sql",
+      "sha256": "a35193659e35826d3f4216583ee70957c0649ca0ed8cd7afebdec8788e3b0de4",
+      "exclude": []
+    },
+    {
+      "step": 24,
+      "path": "supabase/migrations/20260930163000_client_v1_admin_connectivity_v1.sql",
+      "sha256": "d451a6b45c3653e8a3309d285f7b85bac272e83d62462c5a4ecd959434973a0b",
+      "exclude": [
+        {
+          "index": 7,
+          "start": 2052,
+          "end": 2641,
+          "sha256": "44696cd0cff055a745b19c7d2c984cb2e08b7dffc70222b70acbd5525a266209",
+          "reason": "EXISTING_DEVICE_ADMIN_BACKFILL_FORBIDDEN_IN_FRESH_INSTALL"
+        }
+      ]
+    },
+    {
+      "step": 25,
+      "path": "supabase/migrations/20261001033000_browser_guardian_enrollment_ticket_v1.sql",
+      "sha256": "1e8b26d5295947fc4913008cb24a66ebb2b55b493c2adcbcc5ee722c98d02e31",
+      "exclude": []
+    },
+    {
+      "step": 26,
+      "path": "supabase/migrations/20261005080000_browser_computer_authority_plane_v1.sql",
+      "sha256": "78e3eafc53f640300ebc540dad26c5e69d51daa650e393f569ea9ae4bcf7eaf1",
+      "exclude": []
+    },
+    {
+      "step": 27,
+      "path": "supabase/migrations/20261005123000_browser_computer_visual_fence_target_binding_v1.sql",
+      "sha256": "916bc294c5617beaa7abbc36fcdc5378febcb03db9bfe7890322de6d5b69fe2e",
+      "exclude": []
+    },
+    {
+      "step": 28,
+      "path": "supabase/migrations/20261006173000_browser_device_nonce_concurrency_v3.sql",
+      "sha256": "50ffd0afe06f7189e79b8226fccdf22ee1ab01ecd400bba8ae73843a120eca7b",
+      "exclude": []
+    },
+    {
+      "step": 29,
+      "path": "supabase/migrations/20261007061807_native_supervisor_readonly_issuer_parity_v1.sql",
+      "sha256": "6fc19138da0d9d86c1954cd3819858c1ac527f4ca87be93c9913dd6be77586fb",
+      "exclude": []
+    },
+    {
+      "step": 30,
+      "path": "supabase/migrations/20261007061415_cognitive_delta_live_acceptor_v1.sql",
+      "sha256": "6b42f2d69e4f8b5ec413145fe10b3aa070eebf1297ae34d3c8ca546100a0aa4d",
+      "exclude": []
+    },
+    {
+      "step": 31,
+      "path": "supabase/migrations/20261007063940_cognitive_durable_latest_batch_v1.sql",
+      "sha256": "4cee66a109a741d1ee30612fcfa7816bfb77afaaa6a236133b42d7371a44d726",
+      "exclude": []
+    },
+    {
+      "step": 32,
+      "path": "supabase/migrations/20261007064856_meta_task_claim_class_preservation_v1.sql",
+      "sha256": "350726d7025920791d5a1bdd58605001f8896882ddbbd3a65fcac2c3bbddf1dd",
+      "exclude": []
+    }
+  ],
+  "excluded_functions": [
+    "destruktion_meta.devos_fleet_watchdog_h205f22()",
+    "public.devos_environment_reset_v1(uuid,text)",
+    "public.devos_environment_reset_legacy_h205f22(uuid,text)"
+  ],
+  "automatic_population": "REAL_CONFIGURATION_AND_SIGNED_ENROLLMENT_ONLY",
+  "owner_approval_procedure": "public.h205f22_a2_browser_device_enrollment_approve_v1(uuid)"
+}

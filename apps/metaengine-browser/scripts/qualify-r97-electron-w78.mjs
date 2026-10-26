@@ -6,9 +6,9 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 export const PIN = Object.freeze({
-  version: '44.0.0',
-  resolved: 'https://registry.npmjs.org/electron/-/electron-44.0.0.tgz',
-  integrity: 'sha512-FkTqPrFPZYljdPI5b7KORGsJTd6FgUQDefl5MrU3Xz9R87pAj9JLreIjDqcRN8hJIkFHIou0o8kKzvcpT9qiRQ==',
+  version: '44.9.3',
+  resolved: 'https://registry.npmjs.org/electron/-/electron-44.9.3.tgz',
+  integrity: 'sha512-Cv9/yMnZxNWsMlIe8T4v//NKHdUvbeyoTJoXE3BIcRxus2meeFaO9h/P3zB5d4cBXum51IgAYrT2QjpIDWKpJA==',
 });
 const FORBIDDEN_ENV = [
   'ELECTRON_MIRROR', 'ELECTRON_CUSTOM_DIR', 'ELECTRON_CUSTOM_FILENAME',

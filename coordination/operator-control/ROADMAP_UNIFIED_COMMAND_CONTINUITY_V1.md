@@ -4,6 +4,42 @@ Status: ACCEPTED ROADMAP / SOURCE PARTIALLY IMPLEMENTED / INSTALLED CONTINUITY U
 Date: 2026-10-18 (binding closure plan; historical checkpoints retained below)
 Scope: PatrickFrome/Compute / METAENGINE Client + own PostgreSQL + Windows Host
 
+## Latest evidence readback — 2026-10-26 (no installed acceptance)
+
+This evidence update does not replace the accepted stage order or grant authority.
+The published reference is Draft PR #1350 at
+`4a1d907c1fb6b53d0deccf40cb80fd3cf7321250`: its source CI completed, while the
+reserved `.4594` identity correctly prevents a new package. Local candidate
+`19694ae244849dfa7ca3f8c79786867aa616af78` has 124 source checks and 23 combined
+native-PG17/supplemental-WASM checks passing, but is NOT published or remotely
+qualified. Further isolated repairs are recorded through
+`c2320bbf` in the subordinate execution register and
+[followup qualification report](../../docs/audits/metaengine-20261026/AUTONOMY_FOLLOWUP_QUALIFICATION.md).
+
+Source progress includes atomic fresh schema/ACL provisioning, actual signed
+first-device enrollment in disposable PG17, durable parent capacity yield and
+fair pending-effect scans, advisory verified-skill consumption, exact installed
+package-code inventory under the existing release-proof domain, and a private
+DB-only Guardian ticket consume capability. None is accepted as installed
+Guardian/Owner or continuous autonomous execution. The old hosted native
+redemption implementation is removed; new enrollment returns an explicit
+local-bridge-required HOLD before ticket issuance or network/CAS. Existing
+proven bound-owner readback remains. The authenticated local native bridge
+is still unavailable.
+
+G1/G2 installed release/Owner gates, G4/G5 useful installed work after restart,
+G8 live scale and G9 measured governed learning remain UNQUALIFIED/BLOCKED.
+G7 removals now include only independently proven orphan source/dependencies;
+this is not proof that every remaining line is reachable or correct. No new
+logical-agent-count limit or scheduler was introduced. Real signing, placement,
+native verifier/root anchoring, loaded-code custody and Windows qualification
+remain required. W49/W57/W65 acceptance is not promoted by these local results.
+
+A publication-only approval is pending for the frozen local candidate; separate
+registry-audit metadata approval is also pending. Neither pauses independent
+local source repairs/tests. No main merge, live attached-PG mutation, PC install,
+new persistent access or automatic replay is inferred from this update.
+
 ## CURRENT BINDING CHECKPOINT — critical audit closure plan (2026-10-18)
 
 **User-adopted execution sequence, not a new roadmap or execution authority.**

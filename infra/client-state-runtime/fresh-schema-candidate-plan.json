@@ -247,6 +247,10 @@
     {
       "path": "infra/client-state-runtime/fleet-coordination-claim-guard-v1.sql",
       "sha256": "28a56ee05bda697e126b5d49483882c0782723503ff15c798326b936ccebc16b"
+    },
+    {
+      "path": "supabase/migrations/20261026020000_browser_parent_suspension_v1.sql",
+      "sha256": "519b38712d5e66be6004a1ba568c7f5aea003381e9791557b1dbe3cd9c68ce36"
     }
   ],
   "unresolved_dependencies": [
@@ -257,8 +261,6 @@
   ],
   "production_qualified": false,
   "rpc_signatures": [
-    "public.native_coding_admission_context_v1(uuid,text,uuid)",
-    "public.native_coding_execution_context_v1(uuid,text,uuid,bigint)",
     "public.client_v1_device_admin_readback_v1(uuid,text,text)",
     "public.client_v1_goal_execution_proof_v1(uuid,uuid)",
     "public.client_v1_goal_progress_v1(uuid,uuid)",
@@ -290,24 +292,31 @@
     "public.h205f22_a2_browser_supervisor_lease_batch_v1(uuid,text,text,integer,integer,integer)",
     "public.h205f22_a2_browser_supervisor_lease_emergency_v1(uuid,text,integer)",
     "public.h205f22_a2_browser_supervisor_lease_v3(uuid,text,text,integer)",
-    "public.h205f22_a2_supervisor_mesh_sync_v1(text,jsonb)",
     "public.h205f22_a2_managed_project_admission_v1(uuid,uuid,text,bigint,bigint,uuid,bigint,uuid,text,bigint)",
     "public.h205f22_a2_managed_project_binding_effect_v1(uuid,uuid,text,bigint,bigint,uuid,bigint,uuid,text,bigint,text,text,text,boolean,boolean,text)",
     "public.h205f22_a2_managed_project_repository_provision_v1(uuid,uuid,text,bigint,text,text,text)",
-    "public.h205f22_project_register_v1(uuid,uuid,uuid,text,bigint)",
-    "public.h205f22_project_snapshot_v1(uuid,uuid,uuid,bigint,integer,uuid,text,bigint)",
-    "public.h205f22_project_history_v1(uuid,uuid,bigint,bigint,integer,uuid,bigint,text,uuid,text,bigint)",
-    "public.h205f22_project_spawn_v1(uuid,uuid,uuid,bigint,bigint,uuid,jsonb,uuid,text,bigint)",
+    "public.h205f22_a2_supervisor_mesh_sync_v1(text,jsonb)",
+    "public.h205f22_a2_workspace_binding_snapshot_v1(uuid)",
     "public.h205f22_project_activity_v1(uuid,uuid,uuid,bigint,bigint,uuid,text,bigint,text,text,jsonb,bigint,uuid,text,bigint)",
+    "public.h205f22_project_history_v1(uuid,uuid,bigint,bigint,integer,uuid,bigint,text,uuid,text,bigint)",
     "public.h205f22_project_policy_v1(uuid,uuid,bigint,integer,bigint,bigint,uuid,text,bigint)",
     "public.h205f22_project_reconcile_v1(uuid,uuid,uuid,text,bigint)",
-    "public.h205f22_a2_workspace_binding_snapshot_v1(uuid)",
+    "public.h205f22_project_register_v1(uuid,uuid,uuid,text,bigint)",
+    "public.h205f22_project_release_browser_child_v1(uuid,uuid,bigint,text,text,text,bigint,uuid,text,bigint)",
+    "public.h205f22_project_resume_browser_v1(uuid,uuid,jsonb,uuid,text,bigint)",
+    "public.h205f22_project_snapshot_v1(uuid,uuid,uuid,bigint,integer,uuid,text,bigint)",
+    "public.h205f22_project_spawn_v1(uuid,uuid,uuid,bigint,bigint,uuid,jsonb,uuid,text,bigint)",
+    "public.h205f22_project_suspend_browser_v1(uuid,uuid,uuid,bigint,bigint,uuid,jsonb,uuid,text,bigint)",
+    "public.h205f22_project_suspension_list_v1(uuid,uuid,text,bigint,bigint,integer)",
+    "public.h205f22_project_suspension_read_v1(uuid,uuid,uuid,text,bigint)",
     "public.meta_orchestrator_authoritative_inputs_v1(uuid,text)",
     "public.meta_orchestrator_controller_lease_v1(uuid,text,text,integer)",
     "public.meta_orchestrator_frontier_admit_v1(uuid,text,bigint,text[])",
     "public.meta_orchestrator_frontier_admit_v2(uuid,text,bigint,text[],text,bigint)",
     "public.meta_orchestrator_plan_activate_v1(uuid,text,bigint,jsonb)",
     "public.meta_orchestrator_plan_snapshot_v1(uuid,text)",
-    "public.meta_orchestrator_task_admit_v1(uuid,text,bigint,text)"
+    "public.meta_orchestrator_task_admit_v1(uuid,text,bigint,text)",
+    "public.native_coding_admission_context_v1(uuid,text,uuid)",
+    "public.native_coding_execution_context_v1(uuid,text,uuid,bigint)"
   ]
 }

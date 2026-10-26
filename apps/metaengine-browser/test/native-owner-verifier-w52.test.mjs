@@ -20,6 +20,8 @@ const guardian = () => ({schema:'metaengine.browser-guardian.machine-bootstrap-l
   owner_created_at:born,owner_process_incarnation_id:'incarnation-w52',
   observed_at:at(),authority_effect:false});
 const installed = () => ({source:'INSTALLED_EXE_NATIVE_VERIFIER',native_signature_verified:true,
+  release_root_signature_verified:true,slsa_evidence_digest_bound:true,
+  package_code_verified:true,package_code_sha256:'d'.repeat(64),
   exact_bytes_verified:true,owner_id:'owner-w52',owner_epoch:7,owner_generation:11,
   process_incarnation_id:'incarnation-w52',source_sha:'a'.repeat(40),installed_exe_sha256:'b'.repeat(64),
   proof_identity:'c'.repeat(64),observed_at:at(),authority_effect:false});
@@ -73,6 +75,8 @@ test('W52 exact kernel birth/generation + Guardian + signed EXE + PG readback ar
     ['guardian shape only', {readGuardianOwner:async()=>({state:'READY',owner_binding_proven:true,device_binding_proven:true,verified:true})}],
     ['guardian epoch mismatch', {readGuardianOwner:async()=>({...guardian(),owner_generation:12})}],
     ['exe digest without native signature', {readSignedInstalledExecutable:async()=>({...installed(),native_signature_verified:false})}],
+    ['legacy EXE-only proof', {readSignedInstalledExecutable:async()=>({...installed(),package_code_verified:undefined,package_code_sha256:undefined})}],
+    ['package digest changed', {readSignedInstalledExecutable:(()=>{let n=0;return async()=>({...installed(),package_code_sha256:++n===1?'d'.repeat(64):'e'.repeat(64)});})()}],
     ['exe signature flag only', {readSignedInstalledExecutable:async()=>({verified:true,source_sha:'a'.repeat(40)})}],
     ['exe synthetic', {readSignedInstalledExecutable:async()=>({...installed(),fixture_classification:'SYNTHETIC'})}],
     ['exe wrong Owner epoch', {readSignedInstalledExecutable:async()=>({...installed(),owner_epoch:19})}],

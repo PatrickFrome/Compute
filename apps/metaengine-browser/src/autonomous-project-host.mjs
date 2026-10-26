@@ -10,7 +10,7 @@ import { managedProjectEffectKey } from './managed-task-project-authority-resolv
  * remains the only owner of worktree effects and the Supervisor owns dispatch. */
 export async function createAutonomousProjectHost({ userDataPath, supervisor, getManagedHost,
   platform = process.platform, prepareStorage = prepareManagedTaskProjectStorage,
-  verifyFile = verifyManagedProjectPrivateFile, createJournal = createAutonomousProjectJournal } = {}) {
+  verifyFile = verifyManagedProjectPrivateFile, createJournal = createAutonomousProjectJournal, browserParentTransport = null } = {}) {
   if (!supervisor || typeof supervisor.projectContinuityRequest !== 'function'
     || typeof supervisor.snapshot !== 'function' || typeof getManagedHost !== 'function') {
     throw new Error('autonomous_project_host_dependencies_required');
@@ -24,14 +24,14 @@ export async function createAutonomousProjectHost({ userDataPath, supervisor, ge
     if (platform !== 'win32' && !existing) await fs.chmod(filePath, 0o600);
     await verifyFile(filePath, { platform });
     return new AutonomousProjectTaskRuntime({
-      journal,
+      journal, browserParentTransport, readRuntimeControl: () => supervisor.snapshot()?.continuous_service?.runtime_control,
       request: ({ path: requestPath, body }) => {
         const operation = requestPath.replace('/v1/devos/project/', '');
         return supervisor.projectContinuityRequest({ operation, body });
       },
       isStopped: () => {
         const state = supervisor.snapshot();
-        const control = state?.runtime_control;
+        const control = state?.continuous_service?.runtime_control || state?.runtime_control;
         return control?.owner_stop === true || control?.admission_state === 'STOPPED'
           || (control?.authoritative === true && control.continuous_service_allowed === false);
       },

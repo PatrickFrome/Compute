@@ -424,6 +424,7 @@ function stateCore(sourceSha,evidence,routeCount,lastPlanDigest){
 
 export class RsiRuntimeSkillRouter{
   #path;#sourceSha;#evidence=[];#routeCount=0;#lastPlanDigest=null;#initialized=false;
+  #writeTail=Promise.resolve();#writeFailed=false;
   constructor({statePath,source_sha}={}){
     if(!statePath||typeof statePath!=='string')throw new Error('rsi_skill_router_state_path_required');
     this.#path=path.resolve(statePath);this.#sourceSha=exactSha(source_sha,'source');
@@ -452,10 +453,20 @@ export class RsiRuntimeSkillRouter{
     this.#initialized=true;return this.snapshot();
   }
   async #persist(){
-    const state=stateCore(this.#sourceSha,this.#evidence,this.#routeCount,this.#lastPlanDigest);
-    const temp=`${this.#path}.tmp`;const handle=await fs.open(temp,'w',0o600);
-    try{await handle.writeFile(`${JSON.stringify(state)}\n`,'utf8');await handle.sync()}finally{await handle.close()}
-    await fs.rename(temp,this.#path);return state;
+    // The existing task cycle routes multiple leases concurrently. Serialize
+    // this one state-file writer, not task dispatch or physical effects. Freeze
+    // bytes at enqueue time so a later route cannot rewrite an earlier record.
+    const serialized=JSON.stringify(stateCore(this.#sourceSha,this.#evidence,this.#routeCount,this.#lastPlanDigest));
+    const write=this.#writeTail.then(async()=>{
+      if(this.#writeFailed)throw new Error('rsi_skill_router_write_failed_restart_required');
+      try{
+        const temp=`${this.#path}.tmp`;const handle=await fs.open(temp,'w',0o600);
+        try{await handle.writeFile(`${serialized}\n`,'utf8');await handle.sync()}finally{await handle.close()}
+        await fs.rename(temp,this.#path);
+      }catch(error){this.#writeFailed=true;throw error}
+    });
+    this.#writeTail=write.catch(()=>{});
+    return write;
   }
   #assertInit(){if(!this.#initialized)throw new Error('rsi_skill_router_not_initialized')}
   async recordCreditedOutcome({episode,credit_receipt,external_evaluator=false,authored_by_candidate=true}={}){

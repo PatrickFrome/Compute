@@ -45,7 +45,7 @@ function assertProbeAndFull(source) {
 function assertElectronVersionGuard(source) {
   const provision = step(source, 'Provision locked official Electron before timed Windows qualification');
   const pattern = provision.match(/if \(\$productVersion -notmatch '([^']+)'\)/)?.[1];
-  assert.equal(pattern, '^44\\.0\\.0(?:\\.0)?$', 'only canonical locked 44 text or zero revision is accepted');
+  assert.equal(pattern, '^44\\.9\\.3(?:\\.0)?$', 'only canonical locked 44 text or zero revision is accepted');
   assert.match(provision, /\$version\.Revision -notin @\(-1, 0\)/, 'undefined or zero revision only');
   return new RegExp(pattern);
 }
@@ -83,22 +83,22 @@ test('Windows explicitly provisions the locked official Electron before both tim
   assert.match(provision, /qualification_electron_materialization_failed/);
   assert.match(provision, /System\.Diagnostics\.FileVersionInfo/);
   assert.match(provision, /Get-FileHash -Algorithm SHA256/);
-  assert.match(provision, /package_version -ne '44\.0\.0'/);
+  assert.match(provision, /package_version -ne '44\.9\.3'/);
   assert.doesNotMatch(provision, /continue-on-error|--no-sandbox|--version|install\.js/);
   assert.ok(workflow.indexOf('name: Install locked Browser dependencies') < workflow.indexOf('name: Provision locked official Electron'));
   assert.ok(workflow.indexOf('name: Provision locked official Electron') < workflow.indexOf('name: Parse runtime contracts'));
   assertProbeAndFull(workflow);
 });
-test('Electron PE version guard accepts only 44.0.0 or 44.0.0.0 and rejects nonzero revisions and relaxed guards', () => {
+test('Electron PE version guard accepts only 44.9.3 or 44.9.3.0 and rejects nonzero revisions and relaxed guards', () => {
   const allowed = assertElectronVersionGuard(workflow);
-  for (const [version, expected] of [['44.0.0', true], ['44.0.0.0', true], ['44.0.0.999', false],
-    ['44.0.0.1', false], ['44.0.1', false], ['44.0', false], ['44.0.0.00', false],
-    ['44.0.0-beta.1', false], ['44.0.0+metadata', false], ['044.0.0', false]]) {
+  for (const [version, expected] of [['44.9.3', true], ['44.9.3.0', true], ['44.9.3.999', false],
+    ['44.9.3.1', false], ['44.0.1', false], ['44.0', false], ['44.9.3.00', false],
+    ['44.9.3-beta.1', false], ['44.9.3+metadata', false], ['044.9.3', false]]) {
     assert.equal(allowed.test(version), expected, version);
   }
   for (const [before, after] of [
     ['-or $version.Revision -notin @(-1, 0)', ''],
-    ["^44\\.0\\.0(?:\\.0)?$", "^44\\.0\\.0(?:\\.[0-9]+)?$"],
+    ["^44\\.9\\.3(?:\\.0)?$", "^44\\.9\\.3(?:\\.[0-9]+)?$"],
   ]) {
     assert.ok(workflow.includes(before));
     assert.throws(() => assertElectronVersionGuard(workflow.replace(before, after)), { code: 'ERR_ASSERTION' });

@@ -38,6 +38,11 @@ test('DACL operator is a fixed PowerShell program, never a private path assemble
   assert.equal(call.opts.env.LOCALAPPDATA,'C:\\Users\\Example\\AppData\\Local');
   assert.notEqual(call.opts.env.PSModulePath,fakeWindowsEnv.PSModulePath);
   assert.equal(call.opts.timeout,120000);
+  const script=Buffer.from(call.argv.at(-1),'base64').toString('utf16le');
+  assert(script.includes('$final.GetOwner([System.Security.Principal.SecurityIdentifier]).Value'));
+  assert(script.includes("if($owner -notin $allowed){Write-Output 'ACL_DENIAL_OWNER_UNAPPROVED';throw 'owner_unapproved'}"));
+  assert(script.indexOf('GetOwner(')<script.indexOf('$rules=@($final.GetAccessRules'));
+  assert(!script.includes('SetOwner('));
 });
 
 test('a cold child taking longer than 15 seconds can complete its ACL receipt within the bounded attempt',{
@@ -116,7 +121,7 @@ test('fixed native denial markers distinguish a rejected grant from timeout with
   const directory=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-acl-denial-'));
   t.after(()=>fs.rm(directory,{recursive:true,force:true}));
   const args={platform:'win32',env:{SystemRoot:'C:\\Windows'},operation:'VERIFY_DIRECTORY'};
-  for(const reason of ['UNAPPROVED_GRANT','INSUFFICIENT_RIGHTS','DENY_OR_UNKNOWN_ACE']){
+  for(const reason of ['UNAPPROVED_GRANT','INSUFFICIENT_RIGHTS','DENY_OR_UNKNOWN_ACE','OWNER_UNAPPROVED']){
     let attempts=0;
     await assert.rejects(verifyOwnerOnlyWindowsStorage(directory,{...args,run:async()=>{
       attempts++;

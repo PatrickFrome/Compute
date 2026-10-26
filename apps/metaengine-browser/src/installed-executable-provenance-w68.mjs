@@ -1,4 +1,4 @@
-// W68: read-only, release-root-authenticated installed EXE provenance.
+// W68 v2: release-root-authenticated installed EXE AND package-code provenance.
 // Never infer installed/release authority from a JSON "verified" bit,
 // Authenticode Valid alone, an unsigned SLSA receipt, or source build SHA.
 // A signed sidecar lives OUTSIDE the executable to avoid a self-hash cycle.
@@ -8,21 +8,21 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { loadPackagedEmergencyMaintenanceTrustRoot, validateEmergencyMaintenanceTrustRoot } from './emergency-maintenance-trust-root.mjs';
 import { readWindowsSignedExecutableW60 } from './host-native-owner-producers-w60.mjs';
+import { RELEASE_FILES_W68, PACKAGE_CODE_MAX_MANIFEST_BYTES_W68,
+  verifyPackageCodeW68 } from './installed-package-code-w68.mjs';
 
-export const INSTALLED_RELEASE_ENVELOPE_W68 = 'metaengine.browser.installed-release-envelope.v1';
-export const INSTALLED_RELEASE_MANIFEST_W68 = 'metaengine.browser.installed-release-manifest.v1';
+// v1 authenticated only the EXE, not executable JS/native resources. No v1
+// fallback is permitted: it cannot gain package-code authority by upgrading.
+export const INSTALLED_RELEASE_ENVELOPE_W68 = 'metaengine.browser.installed-release-envelope.v2';
+export const INSTALLED_RELEASE_MANIFEST_W68 = 'metaengine.browser.installed-release-manifest.v2';
 // Purpose separation prevents reuse of an emergency command signature as a
 // release authorization under the same pre-existing Ed25519 trust root.
-export const INSTALLED_RELEASE_SIGNATURE_DOMAIN_W68 = 'METAENGINE_INSTALLED_RELEASE_MANIFEST_V1\u0000';
+export const INSTALLED_RELEASE_SIGNATURE_DOMAIN_W68 = 'METAENGINE_INSTALLED_RELEASE_MANIFEST_V2\u0000';
 const SHA40 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const THUMBPRINT = /^[a-f0-9]{40}$/;
 const VERSION = /^0\.7\.0-dev\.[0-9]+\.1$/;
-const NAMES = Object.freeze({
-  envelope: 'metaengine-installed-release-proof.v1.json',
-  bundle: 'installer-slsa-provenance.bundle.json',
-  evidence: 'browser-package-slsa-provenance-evidence.json',
-});
+const NAMES = RELEASE_FILES_W68;
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const exact = (obj, fields) => isObject(obj) &&
@@ -40,15 +40,16 @@ function sameStat(a, b) {
     a.mtimeMs === b.mtimeMs && a.ctimeMs === b.ctimeMs;
 }
 
-async function readFixedRegularFile(file, base, io) {
+async function readFixedRegularFile(file, base, io, maxBytes = 2_000_000) {
   if (path.dirname(file) !== base) return null;
   const before = await io.lstat(file);
-  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1 || before.size > 2_000_000 || before.size < 1) return null;
+  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1 || before.size > maxBytes || before.size < 1) return null;
   const resolved = await io.realpath(file);
   if (resolved.toLowerCase() !== file.toLowerCase()) return null;
   const bytes = await io.readFile(file);
   const after = await io.lstat(file);
-  if (!sameStat(before, after) || bytes.length !== after.size) return null;
+  if (!sameStat(before, after) || bytes.length !== after.size ||
+      (await io.realpath(file)).toLowerCase() !== file.toLowerCase()) return null;
   return { bytes, stat: after };
 }
 
@@ -72,10 +73,11 @@ async function verifyCore({ executable, version, trustRoot, nativeRead, io, stag
     if (!first || first.native_signature_verified !== true || first.exact_bytes_verified !== true ||
         !clean(first.installed_exe_sha256, SHA256) ||
         !clean(first.signer_thumbprint, THUMBPRINT)) return null;
-    const [envelopeFile, bundleFile, evidenceFile] = await Promise.all(
-      Object.values(NAMES).map(name => readFixedRegularFile(path.join(base, name), base, io))
+    const [envelopeFile, bundleFile, evidenceFile, packageCodeFile] = await Promise.all(
+      Object.values(NAMES).map(name => readFixedRegularFile(path.join(base, name), base, io,
+        name === NAMES.packageCode ? PACKAGE_CODE_MAX_MANIFEST_BYTES_W68 : 2_000_000))
     );
-    if (!envelopeFile || !bundleFile || !evidenceFile) return null;
+    if (!envelopeFile || !bundleFile || !evidenceFile || !packageCodeFile) return null;
     const doc = JSON.parse(envelopeFile.bytes.toString('utf8'));
     if (!exact(doc, ['schema', 'manifest', 'signature_base64']) ||
         doc.schema !== INSTALLED_RELEASE_ENVELOPE_W68 ||
@@ -83,13 +85,14 @@ async function verifyCore({ executable, version, trustRoot, nativeRead, io, stag
         !/^[A-Za-z0-9+/]{86}==$/.test(doc.signature_base64)) return null;
     const m = doc.manifest;
     const fields = ['schema','source_sha','package_version','exe_name','exe_sha256',
-      'signer_thumbprint','installer_sha256','slsa_bundle_sha256','slsa_evidence_sha256'];
+      'signer_thumbprint','installer_sha256','slsa_bundle_sha256','slsa_evidence_sha256','package_code_sha256'];
     if (!exact(m, fields) || m.schema !== INSTALLED_RELEASE_MANIFEST_W68 ||
         m.source_sha !== trustRoot.build_sha || m.package_version !== version ||
         m.exe_name !== path.basename(exe) ||
         !clean(m.exe_sha256, SHA256) || !clean(m.signer_thumbprint, THUMBPRINT) ||
         !clean(m.installer_sha256, SHA256) ||
         !clean(m.slsa_bundle_sha256, SHA256) || !clean(m.slsa_evidence_sha256, SHA256) ||
+        !clean(m.package_code_sha256, SHA256) || m.package_code_sha256 !== hash(packageCodeFile.bytes) ||
         m.exe_sha256 !== first.installed_exe_sha256 ||
         m.signer_thumbprint !== first.signer_thumbprint ||
         m.slsa_bundle_sha256 !== hash(bundleFile.bytes) ||
@@ -97,6 +100,9 @@ async function verifyCore({ executable, version, trustRoot, nativeRead, io, stag
     const signature = Buffer.from(doc.signature_base64, 'base64');
     if (signature.length !== 64 || signature.toString('base64') !== doc.signature_base64 ||
         !crypto.verify(null, canon(m), trustRoot.public_key, signature)) return null;
+    const packageCode = await verifyPackageCodeW68(base, packageCodeFile.bytes, {
+      sourceSha: m.source_sha, version, exeName: path.basename(exe),
+    });
 
     // Independently check structure and all release bindings. These two files
     // are ROOT-SIGNED BY DIGEST, not a local "verified:true" trust root.
@@ -117,13 +123,18 @@ async function verifyCore({ executable, version, trustRoot, nativeRead, io, stag
     const exeAfter = await io.lstat(exe);
     const afterDir = await io.lstat(base);
     const sidecarsAfter = await Promise.all(Object.values(NAMES).map(name => io.lstat(path.join(base, name))));
-    if (!sidecarsAfter.every((stat, index) => sameStat([envelopeFile, bundleFile, evidenceFile][index].stat, stat))) return null;
+    if (!sidecarsAfter.every((stat, index) => sameStat([envelopeFile, bundleFile, evidenceFile, packageCodeFile][index].stat, stat))) return null;
     if (!second || second.native_signature_verified !== true || second.exact_bytes_verified !== true ||
         second.installed_exe_sha256 !== first.installed_exe_sha256 ||
         second.signer_thumbprint !== first.signer_thumbprint ||
         !sameStat(exeBefore, exeAfter) ||
         beforeDir.dev !== afterDir.dev || beforeDir.ino !== afterDir.ino ||
-        beforeDir.mtimeMs !== afterDir.mtimeMs) return null;
+        beforeDir.mtimeMs !== afterDir.mtimeMs || beforeDir.ctimeMs !== afterDir.ctimeMs ||
+        !afterDir.isDirectory() || afterDir.isSymbolicLink() ||
+        (await io.realpath(base)).toLowerCase() !== base.toLowerCase()) return null;
+    // Last asynchronous fence includes every directory/file identity and
+    // canonical path, not merely app.asar, after the second OS observation.
+    await packageCode.fence();
     const proofIdentity = hash(Buffer.concat([canon(m), signature]));
     return Object.freeze({
       source: 'INSTALLED_EXE_NATIVE_VERIFIER',
@@ -134,6 +145,12 @@ async function verifyCore({ executable, version, trustRoot, nativeRead, io, stag
       proof_identity: proofIdentity,
       release_root_signature_verified: true,
       slsa_evidence_digest_bound: true,
+      package_code_verified: true,
+      package_code_sha256: m.package_code_sha256,
+      package_code_file_count: packageCode.fileCount,
+      // This is an on-disk observation; only the future independent native
+      // Guardian can bind it to loaded code and enforce post-check custody.
+      loaded_runtime_code_attested: false,
       // "independent SLSA verification" is performed upstream by gh
       // attestation verify; we NEVER derive it from a public JSON claim here.
       independent_slsa_crypto_verified_at_runtime: false,

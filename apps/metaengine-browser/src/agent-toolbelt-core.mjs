@@ -92,6 +92,7 @@ export class AgentToolbelt {
         action: null,
         status: 'UNAVAILABLE',
         summary: `reason=${reason}${effectUnknown ? '; effect=UNKNOWN; readback_required=true; automatic_retry_allowed=false' : ''}`,
+        ...(effectUnknown ? {effect_unknown:true} : {}),
         at: new Date().toISOString(),
         for_agent: agentId,
         command_id: null,
@@ -121,6 +122,22 @@ export class AgentToolbelt {
         } catch { deny(requestId, 'PROJECT_REQUEST_FENCED_OR_AMBIGUOUS', { effectUnknown: true }); }
         continue;
       }
+      // Project suspension requires durable custody BEFORE crossing the issue
+      // barrier. Restart reuses an accepted command ID or holds UNKNOWN; it
+      // never sends an already-journaled request again.
+      let custody = null;
+      if(typeof this.#projectRuntime?.beginToolEffect === 'function') {
+        try { custody=await this.#projectRuntime.beginToolEffect(lease,request); }
+        catch { deny(requestId,'TOOL_EFFECT_CUSTODY_UNAVAILABLE',{effectUnknown:true}); continue; }
+        if(custody?.state==='UNKNOWN') { deny(requestId,'TOOL_EFFECT_READBACK_REQUIRED',{effectUnknown:true});continue; }
+        if(custody?.state==='RESOLVED') {
+          const row={...custody.result,request_id:requestId,action,for_agent:agentId,at:new Date().toISOString()};
+          rows.set(requestId,row);this.#rememberResult(row);continue;
+        }
+        if(custody?.state==='PENDING') {
+          rows.set(requestId,{request_id:requestId,action,command_id:custody.command_id,status:'PENDING',summary:null,at:new Date().toISOString()});continue;
+        }
+      }
       const payload = { ...(request?.payload || {}) };
       if (!payload.tab_id && TAB_RE.test(tabId)) payload.tab_id = tabId;
       try {
@@ -140,9 +157,12 @@ export class AgentToolbelt {
           if (response.status === 404) this.#counters.route_unavailable_streak += 1;
           // A server error or malformed success may follow a committed issue.
           // Report uncertainty rather than claiming that no command exists.
-          deny(requestId, reason, { effectUnknown: response.ok === true || response.status >= 500 });
+          const effectUnknown=response.ok === true || response.status >= 500;
+          deny(requestId, reason, { effectUnknown });
+          if(!effectUnknown && custody?.state==='NEW') await this.#projectRuntime.resolveToolEffect(lease,requestId,rows.get(requestId));
           continue;
         }
+        if(custody?.state==='NEW') await this.#projectRuntime.ackToolEffect(lease,requestId,String(body.command_id));
         this.#counters.route_unavailable_streak = 0;
         const row = {
           request_id: requestId,
@@ -179,11 +199,17 @@ export class AgentToolbelt {
         const body = await response.json().catch(() => ({}));
         if (!response.ok || body?.found !== true) continue;
         if (body?.terminal !== true) continue;
-        const status = String(body.status || '').toUpperCase() === 'FAILED' ? 'FAILED' : 'COMPLETED';
+        const status = String(body.status || '').toUpperCase();
+        // A malformed terminal envelope must not turn UNKNOWN/AMBIGUOUS into
+        // resolved custody merely because it is displayable.
+        if (!['COMPLETED','FAILED'].includes(status)) continue;
         const summaryRaw = body?.receipt?.result ?? body?.receipt?.error ?? null;
         const summary = summaryRaw == null ? '' : (typeof summaryRaw === 'string' ? summaryRaw : JSON.stringify(summaryRaw));
+        const resultSummary=clip(String(summary).replace(/\s+/g, ' ').trim(), RESULT_SUMMARY_CLIP);
+        if(typeof this.#projectRuntime?.resolveToolEffect==='function') await this.#projectRuntime.resolveToolEffect(lease,row.request_id,
+          {request_id:row.request_id,action:row.action,status,summary:resultSummary,command_id:row.command_id});
         row.status = status;
-        row.summary = clip(String(summary).replace(/\s+/g, ' ').trim(), RESULT_SUMMARY_CLIP);
+        row.summary = resultSummary;
         row.at = new Date().toISOString();
         this.#rememberResult({
           request_id: row.request_id,
@@ -228,7 +254,7 @@ export class AgentToolbelt {
     if (!rows) return [];
     const budget = this.#budgetWitnesses.get(key);
     return [...rows.values(), ...(budget ? [budget] : [])].filter(row => ['COMPLETED', 'FAILED', 'UNAVAILABLE'].includes(row.status))
-      .slice(0, limit).map(row => ({ request_id: row.request_id, status: row.status, summary: row.summary }));
+      .slice(0, limit).map(row => ({ request_id: row.request_id, status: row.status, summary: row.summary, ...(row.effect_unknown ? {effect_unknown:true} : {}) }));
   }
 
   snapshot() {

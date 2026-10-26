@@ -214,6 +214,7 @@ export function createHostNativeOwnerReadersW60({
       });
       if (!valid(proof) || fixtures(proof) || proof.source !== 'INSTALLED_EXE_NATIVE_VERIFIER' ||
         proof.release_root_signature_verified !== true || proof.slsa_evidence_digest_bound !== true ||
+        proof.package_code_verified !== true || !HEX64.test(proof.package_code_sha256 || '') ||
         proof.native_signature_verified !== true || proof.exact_bytes_verified !== true ||
         proof.authority_effect !== false || !HEX40.test(proof.source_sha || '') ||
         proof.source_sha.toLowerCase() !== owner.source_sha.toLowerCase() ||

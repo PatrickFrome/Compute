@@ -73,9 +73,57 @@ export function createAutonomousProjectJournal({ filePath, maxEntries = 10000 } 
       return decode(db.prepare('SELECT * FROM project_effects WHERE effect_key GLOB ? ORDER BY rowid DESC LIMIT 1')
         .get(`turn:${task_id}:${lease_generation}:*`));
     },
+    async hasPendingTaskEffect(lease = {}) {
+      available();
+      return db.prepare('SELECT intent,receipt FROM project_effects').all().some(row => {
+        const value = JSON.parse(row.intent);
+        return (!row.receipt || (Array.isArray(value.unresolved_tool_effects) && value.unresolved_tool_effects.length > 0))
+          && (value.task_id === lease.task_id || value.body?.parent_task_id === lease.task_id)
+          && (value.lease_generation === lease.lease_generation || value.body?.lease_generation === lease.lease_generation);
+      });
+    },
+    async conversationCheckpoint(lease = {}) {
+      available();
+      const latest = await this.latestConversationTurn(lease);
+      if (!latest || !latest.receipt || latest.receipt.transcript_floor !== latest.intent.transcript_floor)
+        return { state: 'CONFIRMED_CONTINUATION_REQUIRED' };
+      // Legacy prompts did not persist complete delivered-result identities.
+      // They remain usable, but cannot authorize a destructive hibernation.
+      if (latest.intent.delivery_history_complete !== true || !Array.isArray(latest.intent.delivered_tool_results))
+        return { state: 'DURABLE_DELIVERY_CHECKPOINT_REQUIRED' };
+      if (latest.intent.unresolved_tool_effects?.length) return {state:'UNKNOWN_TOOL_EFFECT_REQUIRES_READBACK'};
+      const pending = db.prepare("SELECT intent FROM project_effects WHERE receipt IS NULL").all();
+      if (pending.some(row => {
+        const value = JSON.parse(row.intent);
+        return (value.task_id === lease.task_id || value.body?.parent_task_id === lease.task_id)
+          && (value.lease_generation === lease.lease_generation || value.body?.lease_generation === lease.lease_generation);
+      })) return { state: 'PENDING_EFFECT_REQUIRES_READBACK' };
+      if (latest.intent.agent_id !== lease.agent_id || latest.intent.lease_generation !== lease.lease_generation)
+        fail('checkpoint_binding_invalid');
+      return { state: 'CONFIRMED', transcript_floor: latest.intent.transcript_floor,
+        confirmed_turn_sha256: digestPayload(encode({ intent: latest.intent, receipt: latest.receipt })),
+        delivered_tool_results: structuredClone(latest.intent.delivered_tool_results) };
+    },
     async pending({ limit = 16 } = {}) {
       available(); if (!Number.isSafeInteger(limit) || limit < 1 || limit > 128) fail('limit_invalid');
       return db.prepare('SELECT * FROM project_effects WHERE receipt IS NULL ORDER BY effect_key LIMIT ?').all(limit).map(decode);
+    },
+    // Read-only keyset scan. A page is an observation, not acknowledgement of
+    // any effect. Prefix selection only bounds this consumer's scan; it cannot
+    // confirm/delete UNKNOWN custody or impose a total logical-work ceiling.
+    async pendingPage({ after_key = null, limit = 16, prefix = null } = {}) {
+      available();
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 128) fail('limit_invalid');
+      if (after_key !== null) key(after_key);
+      if (prefix !== null) key(prefix);
+      const rows = db.prepare(`SELECT * FROM project_effects WHERE receipt IS NULL
+        AND (? IS NULL OR effect_key > ?)
+        AND (? IS NULL OR substr(effect_key,1,length(?)) = ?)
+        ORDER BY effect_key LIMIT ?`).all(after_key,after_key,prefix,prefix,prefix,limit+1);
+      const entries = rows.slice(0,limit).map(decode);
+      return { schema:'metaengine.project.pending-effect-page.v1',entries,
+        cursor:{after_key,next_key:entries.at(-1)?.effect_key ?? after_key,has_more:rows.length>limit},
+        automatic_retry_allowed:false,authority_effect:false };
     },
     async begin(effectKey, intent) {
       available(); key(effectKey); const text = encode(intent); const digest = digestPayload(text);
@@ -87,7 +135,7 @@ export function createAutonomousProjectJournal({ filePath, maxEntries = 10000 } 
           if (db.prepare('SELECT count(*) count FROM project_effects').get().count >= maxEntries) fail('capacity_exceeded');
           db.prepare('INSERT INTO project_effects VALUES(?,?,?,NULL,NULL)').run(effectKey, digest, text);
         }
-        db.exec('COMMIT'); return prior || { effect_key: effectKey, binding_sha256: digest, intent: JSON.parse(text), receipt: null };
+        db.exec('COMMIT'); return { ...(prior || { effect_key: effectKey, binding_sha256: digest, intent: JSON.parse(text), receipt: null }), created: !prior };
       } catch (error) { db.exec('ROLLBACK'); throw error; }
     },
     async confirm(effectKey, receipt) {

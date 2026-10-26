@@ -1094,6 +1094,12 @@ GuardianUpdateActuatorResult handleGuardianUpdateActuatorRequest(
         }
         const GuardianEnrollmentTicketRedemption redemption =
             redeemBrowserGuardianEnrollmentTicket(probe.enrollment_ticket, fingerprint, ownerSidSha256);
+        if (redemption.reason == "LOCAL_OWNER_BRIDGE_REQUIRED" && !redemption.accepted
+            && !redemption.transport_proven && !redemption.device_grant_revalidated) {
+            GuardianUpdateActuatorResult out = baseResult("NO_EFFECT_PROVEN", "LOCAL_OWNER_BRIDGE_REQUIRED", ERROR_ACCESS_DENIED);
+            out.effect_absent_proven = true;
+            return out;
+        }
         if (!redemption.transport_proven) {
             return baseResult("AMBIGUOUS", "OWNER_ENROLLMENT_TICKET_REDEMPTION_TRANSPORT_UNKNOWN");
         }

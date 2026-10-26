@@ -82,14 +82,22 @@ test('migration plan pins deployed sources, unbounded defaults and the opt-in ow
   const extras = plan.migrations.slice(mandatorySources.length+nativeSources.length+2);
   // The W5 DAG guard is an optional source-only integration lane and must
   // never be admitted as an arbitrary migration or silently become installed.
-  assert(extras.length <= 1, 'unrecognized extra migration requires an explicit contract');
-  if (extras.length === 1) {
+  assert.equal(extras.length, 2, 'every extra migration requires an explicit contract');
+  {
     const [guard] = extras;
     assert.equal(guard.source, 'fleet-coordination-claim-guard-v1.sql');
     assert.deepEqual(guard.signatures, ['destruktion_meta.fleet_coordination_claim_gate_v1()']);
     assert.equal(guard.triggers.length, 1);
     assert.equal(guard.triggers[0].name, 'zz_fleet_coordination_claim_gate_v1');
   }
+  const suspension=extras[1];
+  assert.equal(suspension.source,'20261026020000_browser_parent_suspension_v1.sql');
+  assert.equal(suspension.signatures.length,9);
+  assert.equal(suspension.signatures.filter(value=>value.startsWith('public.')).length,5);
+  assert.deepEqual(suspension.relations,['destruktion_meta.browser_parent_suspension_h205f22','destruktion_meta.browser_child_retirement_h205f22']);
+  assert.deepEqual(suspension.triggers.map(row=>row.name),['browser_parent_reserved_claim_trg','browser_child_retirement_immutable_trg']);
+  assert(!suspension.signatures.some(value=>value.includes('devos_fleet_lease_v1(')||value.includes('project_task_projection_h205f22(')),
+    'pre-existing replacement signatures must not make first suspension installation look partial');
   for (const row of plan.migrations) {
     assert.match(row.source_sha256, /^[a-f0-9]{64}$/);
     assert(row.signatures.length >= 1);

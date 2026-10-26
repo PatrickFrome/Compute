@@ -199,7 +199,7 @@ export function createNativeGuardianDeveloperEmergencyUpdateController({
   if (typeof fetchImpl !== 'function') throw new Error('emergency_native_fetch_required');
   if (typeof releaseResolver !== 'function') throw new Error('emergency_native_release_resolver_required');
   if (typeof intakeStager !== 'function') throw new Error('emergency_native_intake_stager_required');
-  const actuatorClient = actuator || new BrowserGuardianUpdateActuatorClient({ identity, fetchImpl });
+  const actuatorClient = actuator || new BrowserGuardianUpdateActuatorClient({ identity });
   if (typeof actuatorClient?.ensureOwnerBound !== 'function'
       || typeof actuatorClient?.dispatch !== 'function'
       || typeof actuatorClient?.observe !== 'function') {

@@ -4,7 +4,8 @@
  *
  * Собирает самодостаточный каталог me2-ui-dist/ из production-сборки Next
  * (output:"standalone"): server.js + .next(+static) + public + обрезанные node_modules.
- * Формат = контракт me2-ui-host браузера (R50): каталог с package.json, спавн `bun run start`,
+ * Формат = контракт me2-ui-host браузера (R50): standalone server.js для embedded Node;
+ * package.json/start сохранён для явного runtime override, не как доказательство его совместимости.
  * health-probe GET / → text/html; при отсутствии каталога — честный фолбэк GET /ui.
  *
  * Паттерн (research/2026/r52-analogues.md): «один SHA → один релиз» (VS Code), каталог как
@@ -47,7 +48,6 @@ const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
 pkg.name = pkg.name || 'me2-ui';
 pkg.scripts = { ...(pkg.scripts || {}), start: 'NODE_ENV=production bun server.js' };
 delete pkg.scripts.dev; delete pkg.scripts.build; delete pkg.scripts.lint;
-delete pkg.scripts['db:push']; delete pkg.scripts['db:generate']; delete pkg.scripts['db:migrate']; delete pkg.scripts['db:reset'];
 writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
 
 // 4) манифест (версия/SHA/размер) — версионируется вместе с релизом (Chromium-паттерн)

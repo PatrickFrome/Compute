@@ -198,7 +198,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $packageVersion = [string](node -p "require('./node_modules/electron/package.json').version")
-          if ($packageVersion -ne '44.0.0') { throw "electron_package_version_drift:$packageVersion" }
+          if ($packageVersion -ne '44.9.3') { throw "electron_package_version_drift:$packageVersion" }
           $electron = Join-Path (Get-Location) 'node_modules\electron\dist\electron.exe'
           if (-not (Test-Path $electron -PathType Leaf)) {
             node .\node_modules\electron\install.js
@@ -208,12 +208,16 @@ jobs:
           $binaryInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($electron)
           $productVersion = ([string]$binaryInfo.ProductVersion).Trim()
           if ([string]::IsNullOrWhiteSpace($productVersion)) { throw 'electron_runtime_product_version_missing' }
+          if ($productVersion -notmatch '^44\.9\.3(?:\.0)?$') {
+            throw "electron_runtime_version_drift:$productVersion"
+          }
           try {
             $parsedProductVersion = [version]$productVersion
           } catch {
             throw "electron_runtime_product_version_invalid:$productVersion"
           }
-          if ($parsedProductVersion.Major -ne 44 -or $parsedProductVersion.Minor -ne 0 -or $parsedProductVersion.Build -ne 0) {
+          if ($parsedProductVersion.Major -ne 44 -or $parsedProductVersion.Minor -ne 9 -or $parsedProductVersion.Build -ne 3 `
+              -or $parsedProductVersion.Revision -notin @(-1, 0)) {
             throw "electron_runtime_version_drift:$productVersion"
           }
           $binarySha256 = ((Get-FileHash -Algorithm SHA256 -LiteralPath $electron).Hash).ToLowerInvariant()
@@ -765,6 +769,7 @@ jobs:
           name: metaengine-browser-windows-candidate-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             ${{ runner.temp }}/METAENGINE-Browser-Test-Setup-*-x64.exe
+            ${{ runner.temp }}/metaengine-installed-package-code.v1.json
             ${{ runner.temp }}/METAENGINE-Browser-Test-Setup-*-x64.exe.blockmap
             ${{ runner.temp }}/installer-provenance.json
             ${{ runner.temp }}/build-identity.json
@@ -1185,6 +1190,7 @@ jobs:
           name: metaengine-browser-windows-package-evidence-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             ${{ runner.temp }}/windows-package-proof.json
+            ${{ runner.temp }}/metaengine-installed-package-code.v1.json
             ${{ runner.temp }}/packaged-build-identity-proof.json
             ${{ runner.temp }}/packaged-client-state-runtime-proof.json
             ${{ github.workspace }}/apps/metaengine-browser/client-state-runtime-dist/offline-runtime-bundle.json

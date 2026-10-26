@@ -99,7 +99,8 @@ jobs:
           test/native-supervisor-batch-deadline-contract.test.mjs
           test/native-supervisor-effect-intent-route.test.mjs
           test/native-supervisor-control-plane-wedge-hardening.test.mjs
-          test/browser-guardian-enrollment-ticket-client.test.mjs
+          test/browser-guardian-update-actuator-enrollment.test.mjs
+          test/browser-guardian-native-ticket-enrollment-contract.test.mjs
           test/client-admission-recovery.test.mjs
           test/meta-orchestrator-effect-deadline.test.mjs
       - name: Complete SelfUpdate source/contract test gate (no package or install)

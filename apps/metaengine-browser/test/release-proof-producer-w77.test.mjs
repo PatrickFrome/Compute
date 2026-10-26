@@ -15,12 +15,14 @@ import {
   verifyStagingInstalledExecutableW68,
 } from '../src/installed-executable-provenance-w68.mjs';
 
+import { capturePackageCodeW68 } from '../src/installed-package-code-w68.mjs';
+
 const VERSION = '0.7.0-dev.999900003.1';
 const SHA = 'a'.repeat(40);
 const THUMB = 'b'.repeat(40);
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const ROOT_SCHEMA = 'metaengine.emergency-maintenance-trust-root.v1';
-function fixture() {
+async function fixture() {
   const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'metaengine-w77-SOURCE-STAGING-')));
   const exe = path.join(dir, 'METAENGINE Browser Test.exe');
   const installer = path.join(dir, 'METAENGINE-Browser-Test-Setup-' + VERSION + '-x64.exe');
@@ -29,6 +31,10 @@ function fixture() {
   const pair = crypto.generateKeyPairSync('ed25519');
   fs.writeFileSync(exe, crypto.randomBytes(1047));
   fs.writeFileSync(installer, crypto.randomBytes(2031));
+  fs.mkdirSync(path.join(dir, 'resources'), {recursive:true});
+  fs.writeFileSync(path.join(dir, 'resources/app.asar'), 'fixture packaged JS');
+  const packageCode = await capturePackageCodeW68(dir, {sourceSha:SHA,version:VERSION,exeName:path.basename(exe)});
+  fs.writeFileSync(path.join(dir, RELEASE_PROOF_FILES_W77.packageCode), packageCode.bytes);
   fs.writeFileSync(bundle, JSON.stringify({
     mediaType:'application/vnd.dev.sigstore.bundle.v0.3+json',
     dsseEnvelope: { signatures: [{ sig: 'synthetic-stage-not-cryptographic-SLSA' }] },
@@ -57,13 +63,13 @@ function fixture() {
     dispose() { fs.rmSync(dir,{recursive:true,force:true}); } };
 }
 async function withFixture(fn) {
-  const f = fixture();
+  const f = await fixture();
   try { await fn(f); } finally { f.dispose(); }
 }
 
 test('producer emits exact W68 external domain/manifests; actual consumer Ed25519 roundtrip is STAGING only', async () => {
   await withFixture(async f => {
-    const stage = f.emit();
+    const stage = await f.emit();
     assert.equal(stage.fixture_classification, 'STAGING');
     assert.equal(stage.release_authorized, false);
     assert.equal(stage.installed_authority, false);
@@ -85,7 +91,7 @@ test('producer emits exact W68 external domain/manifests; actual consumer Ed2551
       crypto.createPublicKey(f.root.ed25519_public_key_pem),
       Buffer.from(envelope.signature_base64,'base64')));
     assert.equal(stage.handoff.final_installer_sha256,hash(fs.readFileSync(f.installer)));
-    assert.equal(stage.handoff.detached_sidecar_files.length,3);
+    assert.equal(stage.handoff.detached_sidecar_files.length,4);
   });
 });
 
@@ -100,14 +106,14 @@ test('production stays BLOCKED absent existing protected signing and external in
 test('two historical reserved versions cannot sign even staging manifests', async () => {
   for (const bad of ['0.7.0-dev.842024784850.1','0.7.0-dev.37781000062.1']) {
     await withFixture(async f => {
-      assert.throws(() => emitStagingReleaseProofW77({...f.args,version:bad}),/source_or_version|reserved_or_invalid_version/);
+      await assert.rejects(() => emitStagingReleaseProofW77({...f.args,version:bad}),/source_or_version|reserved_or_invalid_version/);
     });
   }
 });
 
 test('source, signer, subject, SLSA fields and wrong domain do not pass production-reader roundtrip', async () => {
   await withFixture(async f => {
-    const st=f.emit();
+    const st=await f.emit();
     const original = fs.readFileSync(st.envelope_path,'utf8');
     assert.ok(await f.verify());
     const changes = [
@@ -142,23 +148,23 @@ test('SLSA bundle, evidence, installer, source, package and signer tampering is 
     f => { const e=JSON.parse(fs.readFileSync(f.evidence));e.subject_sha256='f'.repeat(64);
       fs.writeFileSync(f.evidence,JSON.stringify(e)); },
   ]) {
-    await withFixture(async f => { f.emit();action(f);assert.equal(await f.verify(),null); });
+    await withFixture(async f => { await f.emit();action(f);assert.equal(await f.verify(),null); });
   }
   await withFixture(async f => {
     fs.appendFileSync(f.installer,'different artifact');
-    assert.throws(()=>f.emit(),/slsa_semantics/);
+    await assert.rejects(()=>f.emit(),/slsa_semantics/);
   });
   await withFixture(async f => {
-    assert.throws(()=>emitStagingReleaseProofW77({...f.args,signerThumbprint:'f'.repeat(39)}),
+    await assert.rejects(()=>emitStagingReleaseProofW77({...f.args,signerThumbprint:'f'.repeat(39)}),
       /signer_thumbprint/);
   });
 });
 
 test('non-canonical file path, symlink/reparse and pre-existing envelope fail closed', async t => {
   await withFixture(async f => {
-    f.emit();
-    assert.throws(()=>f.emit(),/staging_output_already_exists/);
-    assert.throws(()=>emitStagingReleaseProofW77({
+    await f.emit();
+    await assert.rejects(()=>f.emit(),/staging_output_already_exists/);
+    await assert.rejects(()=>emitStagingReleaseProofW77({
       ...f.args,exePath:path.join(f.dir,'..','METAENGINE Browser Test.exe'),
     }),/file_path/);
   });
@@ -167,7 +173,7 @@ test('non-canonical file path, symlink/reparse and pre-existing envelope fail cl
     fs.renameSync(f.bundle,outside);
     try {fs.symlinkSync(outside,f.bundle,'file');}
     catch(e) {if(['EPERM','EACCES'].includes(e?.code)) return t.skip('symlink creation unavailable');throw e;}
-    assert.throws(()=>f.emit(),/unsafe_artifact_path/);
+    await assert.rejects(()=>f.emit(),/unsafe_artifact_path/);
   });
 });
 
@@ -246,4 +252,17 @@ test('production GH path cannot be reached through synthetic fixture on unsuppor
       packagedTrustRoot:{build_sha:SHA},
     }),/trusted_source_binding/);
   }
+});
+
+test('producer refuses missing or stale code inventory before it can emit even a fixture signature', async () => {
+  await withFixture(async f => {
+    fs.writeFileSync(path.join(f.dir,'resources/app.asar'),'changed packaged JS');
+    await assert.rejects(()=>f.emit(),/tree_mismatch/);
+    assert.equal(fs.existsSync(path.join(f.dir,RELEASE_PROOF_FILES_W77.envelope)),false);
+  });
+  await withFixture(async f => {
+    fs.rmSync(path.join(f.dir,RELEASE_PROOF_FILES_W77.packageCode));
+    await assert.rejects(()=>f.emit(),/ENOENT/);
+    assert.equal(fs.existsSync(path.join(f.dir,RELEASE_PROOF_FILES_W77.envelope)),false);
+  });
 });

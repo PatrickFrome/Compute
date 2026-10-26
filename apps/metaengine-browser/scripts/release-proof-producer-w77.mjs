@@ -9,13 +9,11 @@ import {
   INSTALLED_RELEASE_SIGNATURE_DOMAIN_W68,
 } from '../src/installed-executable-provenance-w68.mjs';
 import { RESERVED_PACKAGE_IDENTITIES_W68 } from '../src/client-package-identity-w68.mjs';
+import { RELEASE_FILES_W68, PACKAGE_CODE_FILE_W68, capturePackageCodeW68,
+  verifyPackageCodeW68 } from '../src/installed-package-code-w68.mjs';
 
-export const RELEASE_PROOF_FILES_W77 = Object.freeze({
-  envelope: 'metaengine-installed-release-proof.v1.json',
-  bundle: 'installer-slsa-provenance.bundle.json',
-  evidence: 'browser-package-slsa-provenance-evidence.json',
-});
-export const RELEASE_PROOF_HANDOFF_SCHEMA_W77 = 'metaengine.browser.release-proof-external-handoff-w77.v1';
+export const RELEASE_PROOF_FILES_W77 = RELEASE_FILES_W68;
+export const RELEASE_PROOF_HANDOFF_SCHEMA_W77 = 'metaengine.browser.release-proof-external-handoff-w77.v2';
 export const RELEASE_PROOF_SIGNER_BLOCK_W77 = 'EXISTING_PROTECTED_RELEASE_ROOT_SIGNING_CAPABILITY_NOT_WIRED';
 const sha40 = /^[a-f0-9]{40}$/;
 const sha256 = /^[a-f0-9]{64}$/;
@@ -23,7 +21,7 @@ const thumb = /^[a-f0-9]{40}$/;
 const versionPattern = /^0\.7\.0-dev\.[1-9][0-9]*\.1$/;
 const fields = Object.freeze([
   'schema','source_sha','package_version','exe_name','exe_sha256',
-  'signer_thumbprint','installer_sha256','slsa_bundle_sha256','slsa_evidence_sha256',
+  'signer_thumbprint','installer_sha256','slsa_bundle_sha256','slsa_evidence_sha256','package_code_sha256',
 ]);
 const digest = b => crypto.createHash('sha256').update(b).digest('hex');
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -41,7 +39,7 @@ export function serializeReleaseManifestW77(manifest) {
       RESERVED_PACKAGE_IDENTITIES_W68.includes(manifest.package_version)) reject('reserved_or_invalid_version');
   if (manifest.exe_name !== 'METAENGINE Browser Test.exe' &&
       manifest.exe_name !== 'METAENGINE-Browser.exe') reject('exe_name');
-  for (const field of ['exe_sha256','installer_sha256','slsa_bundle_sha256','slsa_evidence_sha256']) {
+  for (const field of ['exe_sha256','installer_sha256','slsa_bundle_sha256','slsa_evidence_sha256','package_code_sha256']) {
     if (!valid(manifest[field], sha256)) reject(field);
   }
   if (!valid(manifest.signer_thumbprint, thumb)) reject('signer_thumbprint');
@@ -64,8 +62,28 @@ function checkedFile(filename, parent) {
   const after = fs.lstatSync(filename);
   if (stat.dev !== after.dev || stat.ino !== after.ino || stat.size !== after.size ||
       stat.mtimeMs !== after.mtimeMs || stat.ctimeMs !== after.ctimeMs ||
+      after.isSymbolicLink() || !after.isFile() || after.nlink !== 1 ||
+      fs.realpathSync.native(filename).toLowerCase() !== filename.toLowerCase() ||
       bytes.length !== stat.size) reject('artifact_toctou');
   return bytes;
+}
+
+// Called unconditionally by ordinary Windows afterAllArtifactBuild, after the
+// ASAR/fuses/resource checks. The inventory stays OUTSIDE win-unpacked and the
+// final installer: no recursive hash or invented signing/placement capability.
+export async function writePackagedCodeInventoryW77({ appOutDir, outDir, sourceSha, version, exeName }) {
+  if (!path.isAbsolute(outDir) || path.resolve(outDir) !== outDir ||
+      path.dirname(appOutDir) !== outDir || !fs.lstatSync(outDir).isDirectory() ||
+      fs.lstatSync(outDir).isSymbolicLink()) reject('inventory_output_path');
+  const code = await capturePackageCodeW68(appOutDir, { sourceSha, version, exeName });
+  const outputPath = path.join(outDir, PACKAGE_CODE_FILE_W68);
+  // Existing artifacts are immutable, never silently replaced.
+  fs.writeFileSync(outputPath, code.bytes, { flag: 'wx', mode: 0o600 });
+  await code.fence();
+  if (!checkedFile(outputPath, outDir).equals(code.bytes)) reject('inventory_write_readback');
+  return Object.freeze({ path: outputPath, package_code_sha256: code.sha256,
+    file_count: code.fileCount, size_bytes: code.totalBytes,
+    installed_authority: false, release_authorized: false, authority_effect: false });
 }
 
 // Independently verified SLSA evidence is produced by the EXISTING trusted
@@ -124,6 +142,7 @@ export function createExternalReleaseProofHandoffW77(manifest) {
     package_version: manifest.package_version,
     prepackage_exe_sha256: manifest.exe_sha256,
     final_installer_sha256: manifest.installer_sha256,
+    package_code_sha256: manifest.package_code_sha256,
     detached_sidecar_files: Object.freeze(Object.values(RELEASE_PROOF_FILES_W77)),
     installer_bytes_are_immutable: true,
     never_embed_installer_self_digest: true,
@@ -155,6 +174,7 @@ export function probeProductionReleaseProofW77() {
       'existing protected Ed25519 signing capability matching packaged root',
       'independent gh attestation verify and exact source/run/artifact binding',
       'double signed EXE Authenticode/bytes/path observation',
+      'exact final packaged-code inventory and full installed-tree readback',
       'external sidecar receipt installed by reviewed W78 package handoff',
     ]),
     production_sidecars_emitted: false,
@@ -167,7 +187,7 @@ export function probeProductionReleaseProofW77() {
 // This test emitter accepts a disposable TEST key and never claims it came
 // from the release root. It cannot be used as a production signer. Its output
 // is a cryptographically real Ed25519 fixture for the real W68 reader.
-export function emitStagingReleaseProofW77({ outputDir, exePath, installerPath, bundlePath,
+export async function emitStagingReleaseProofW77({ outputDir, exePath, installerPath, bundlePath,
   evidencePath, sourceSha, version, signerThumbprint, testPrivateKey }) {
   if (!testPrivateKey || testPrivateKey.type !== 'private' ||
       testPrivateKey.asymmetricKeyType !== 'ed25519') reject('staging_key');
@@ -177,13 +197,19 @@ export function emitStagingReleaseProofW77({ outputDir, exePath, installerPath, 
   const installerBytes = checkedFile(installerPath, outputDir);
   const bundleBytes = checkedFile(bundlePath, outputDir);
   const evidenceBytes = checkedFile(evidencePath, outputDir);
+  const packageCodePath = path.join(outputDir, PACKAGE_CODE_FILE_W68);
+  const packageCodeBytes = checkedFile(packageCodePath, outputDir);
   const slsa = validateSlsaEvidenceBytesW77({ evidenceBytes, bundleBytes, installerBytes,
     sourceSha, version, installerName: path.basename(installerPath) });
+  const packageCode = await verifyPackageCodeW68(outputDir, packageCodeBytes, {
+    sourceSha, version, exeName: path.basename(exePath),
+  });
   const manifest = Object.fromEntries(fields.map(key => [key, {
     schema: INSTALLED_RELEASE_MANIFEST_W68, source_sha: sourceSha, package_version: version,
     exe_name: path.basename(exePath), exe_sha256: digest(exeBytes),
     signer_thumbprint: signerThumbprint, installer_sha256: slsa.installer_sha256,
     slsa_bundle_sha256: slsa.bundle_sha256, slsa_evidence_sha256: slsa.evidence_sha256,
+    package_code_sha256: digest(packageCodeBytes),
   }[key]]));
   const signedBytes = serializeReleaseManifestW77(manifest);
   const signature = crypto.sign(null, signedBytes, testPrivateKey).toString('base64');
@@ -191,6 +217,7 @@ export function emitStagingReleaseProofW77({ outputDir, exePath, installerPath, 
     manifest, signature_base64: signature };
   const envelopePath = path.join(outputDir, RELEASE_PROOF_FILES_W77.envelope);
   if (fs.existsSync(envelopePath)) reject('staging_output_already_exists');
+  await packageCode.fence();
   fs.writeFileSync(envelopePath, JSON.stringify(envelope), { flag: 'wx', mode: 0o600 });
   return Object.freeze({ fixture_classification: 'STAGING',
     envelope_path: envelopePath,
@@ -237,18 +264,23 @@ export async function prepareIndependentlyVerifiedReleaseInputsW77({
   const slsaDir = path.join(candidateRoot,'browser-slsa-provenance');
   const bundlePath = path.join(slsaDir,RELEASE_PROOF_FILES_W77.bundle);
   const receiptPath = path.join(slsaDir,'installer-slsa-provenance-receipt.json');
+  const packageCodePath = path.join(candidateRoot,PACKAGE_CODE_FILE_W68);
   const exeParent = path.dirname(exePath || '');
   if (!path.isAbsolute(exePath || '') || path.resolve(exePath) !== exePath ||
       path.basename(exePath) !== 'METAENGINE Browser Test.exe' ||
       fs.lstatSync(exeParent).isSymbolicLink() || fs.lstatSync(slsaDir).isSymbolicLink()) {
     reject('prepackage_exe_path');
   }
-  const stablePaths = [candidateRoot,slsaDir,exeParent,exePath,installerPath,bundlePath,receiptPath];
+  const stablePaths = [candidateRoot,slsaDir,exeParent,exePath,installerPath,bundlePath,receiptPath,packageCodePath];
   const stableBefore = stablePaths.map(file => fs.lstatSync(file));
   const installerBytes = checkedFile(installerPath,candidateRoot);
   const bundleBytes = checkedFile(bundlePath,slsaDir);
   const receiptBytes = checkedFile(receiptPath,slsaDir);
   const exeBytes = checkedFile(exePath,exeParent);
+  const packageCodeBytes = checkedFile(packageCodePath,candidateRoot);
+  const packageCode = await verifyPackageCodeW68(exeParent, packageCodeBytes, {
+    sourceSha, version, exeName: path.basename(exePath),
+  });
   let receipt;
   try { receipt = JSON.parse(receiptBytes.toString('utf8').replace(/^\uFEFF/,'')); }
   catch { reject('receipt_json'); }
@@ -308,7 +340,8 @@ export async function prepareIndependentlyVerifiedReleaseInputsW77({
         digest(checkedFile(exePath,exeParent)) !== first.installed_exe_sha256 ||
         digest(checkedFile(installerPath,candidateRoot)) !== slsa.installer_sha256 ||
         digest(checkedFile(bundlePath,slsaDir)) !== slsa.bundle_sha256 ||
-        digest(checkedFile(receiptPath,slsaDir)) !== digest(receiptBytes)) reject('postverification_toctou');
+        digest(checkedFile(receiptPath,slsaDir)) !== digest(receiptBytes) ||
+        digest(checkedFile(packageCodePath,candidateRoot)) !== packageCode.sha256) reject('postverification_toctou');
     const stableAfter = stablePaths.map(file => fs.lstatSync(file));
     if (!stableBefore.every((before,index) => {
       const after = stableAfter[index];
@@ -316,13 +349,17 @@ export async function prepareIndependentlyVerifiedReleaseInputsW77({
         before.size === after.size && before.nlink === after.nlink &&
         before.mtimeMs === after.mtimeMs && before.ctimeMs === after.ctimeMs &&
         before.isSymbolicLink() === false && after.isSymbolicLink() === false;
-    })) reject('physical_file_or_directory_toctou');    return Object.freeze({
+    })) reject('physical_file_or_directory_toctou');
+    await packageCode.fence();
+    return Object.freeze({
       classification:'VERIFIED_INPUTS_ONLY',
       source_sha:sourceSha, package_version:version,
       exe_sha256:first.installed_exe_sha256,signer_thumbprint:first.signer_thumbprint,
       installer_sha256:slsa.installer_sha256,
       slsa_bundle_sha256:slsa.bundle_sha256,
       slsa_evidence_sha256:slsa.evidence_sha256,
+      package_code_sha256:packageCode.sha256,
+      package_code_bytes:Buffer.from(packageCodeBytes),
       // Only this function executes the actual independent verifier.
       gh_cryptographic_verification_executed:true,
       evidence_bytes:Buffer.from(evidenceBytes),

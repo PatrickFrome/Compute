@@ -12,6 +12,8 @@ import {
   readVerifiedInstalledExecutableW68, verifyStagingInstalledExecutableW68,
 } from '../src/installed-executable-provenance-w68.mjs';
 
+import { capturePackageCodeW68, RELEASE_FILES_W68 } from '../src/installed-package-code-w68.mjs';
+
 const SHA = 'a'.repeat(40);
 const VERSION = '0.7.0-dev.999900001.1';
 const SIGNER = 'b'.repeat(40);
@@ -23,7 +25,7 @@ const rootFor = key => ({
   ed25519_public_key_pem: pem(key),
   public_key_spki_sha256: digest(key.export({ type: 'spki', format: 'der' })),
 });
-function makeFixture() {
+async function makeFixture() {
   const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'me2-w68-release-staging-')));
   const exe = path.join(dir, 'METAENGINE-Browser.exe');
   const exeBytes = crypto.randomBytes(2048);
@@ -41,8 +43,16 @@ function makeFixture() {
   const files = {
     bundle: path.join(dir,'installer-slsa-provenance.bundle.json'),
     evidence: path.join(dir,'browser-package-slsa-provenance-evidence.json'),
-    manifest: path.join(dir,'metaengine-installed-release-proof.v1.json'),
+    manifest: path.join(dir, RELEASE_FILES_W68.envelope),
+    packageCode: path.join(dir, RELEASE_FILES_W68.packageCode),
   };
+  fs.mkdirSync(path.join(dir, 'resources/app.asar.unpacked/src'), { recursive:true });
+  fs.mkdirSync(path.join(dir, 'resources/client-state-runtime'), { recursive:true });
+  fs.writeFileSync(path.join(dir, 'resources/app.asar'), 'staging-asar-bytes');
+  fs.writeFileSync(path.join(dir, 'resources/app.asar.unpacked/src/worker.cjs'), 'staging-worker-code');
+  fs.writeFileSync(path.join(dir, 'resources/client-state-runtime/runtime.exe'), 'staging-runtime-bytes');
+  const packageCode = await capturePackageCodeW68(dir, {sourceSha:SHA, version:VERSION, exeName:path.basename(exe)});
+  fs.writeFileSync(files.packageCode, packageCode.bytes);
   fs.writeFileSync(files.bundle, JSON.stringify(slsaBundle));
   fs.writeFileSync(files.evidence, JSON.stringify(evidence));
   const m = {
@@ -51,6 +61,7 @@ function makeFixture() {
     signer_thumbprint: SIGNER, installer_sha256: evidence.subject_sha256,
     slsa_bundle_sha256: digest(fs.readFileSync(files.bundle)),
     slsa_evidence_sha256: digest(fs.readFileSync(files.evidence)),
+    package_code_sha256: packageCode.sha256,
   };
   function sign(manifest = m, key = privateKey) {
     const signedBytes = Buffer.concat([Buffer.from(INSTALLED_RELEASE_SIGNATURE_DOMAIN_W68), Buffer.from(JSON.stringify(manifest))]);
@@ -80,7 +91,7 @@ function makeFixture() {
   };
 }
 async function withFixture(fn) {
-  const f=makeFixture();try {await fn(f);} finally {f.remove();}
+  const f=await makeFixture();try {await fn(f);} finally {f.remove();}
 }
 
 test('real Ed25519 verification binds EXE digest, signer, source, version and two external proof byte digests; result remains STAGING', async () => {
@@ -93,6 +104,9 @@ test('real Ed25519 verification binds EXE digest, signer, source, version and tw
     assert.equal(proof?.fixture_classification,'STAGING');
     assert.equal(proof?.independent_slsa_crypto_verified_at_runtime,false);
     assert.equal(proof?.release_root_signature_verified,true);
+    assert.equal(proof?.package_code_verified,true);
+    assert.equal(proof?.package_code_sha256,f.m.package_code_sha256);
+    assert.equal(proof?.loaded_runtime_code_attested,false);
     assert.equal(proof?.authority_effect,false);
     assert.match(proof?.proof_identity,/^[a-f0-9]{64}$/);
     assert.equal(f.calls(),2,'kernel/AuthentiCode observations bracket disk reads');
@@ -232,4 +246,48 @@ test('production reader has no caller-supplied signer/root/path and returns null
     isPackaged:true,getVersion:()=>VERSION,
   }),null);
   assert.equal(await verifyStagingInstalledExecutableW68({}),null);
+});
+
+test('signed v1 EXE-only proof is rejected rather than upgraded to package-code authority', async () => {
+  await withFixture(async f => {
+    const manifest = { ...f.m, schema:'metaengine.browser.installed-release-manifest.v1' };
+    delete manifest.package_code_sha256;
+    const bytes = Buffer.concat([Buffer.from('METAENGINE_INSTALLED_RELEASE_MANIFEST_V1\0'), Buffer.from(JSON.stringify(manifest))]);
+    const doc = { schema:'metaengine.browser.installed-release-envelope.v1', manifest,
+      signature_base64:crypto.sign(null,bytes,f.privateKey).toString('base64') };
+    fs.writeFileSync(f.files.manifest, JSON.stringify(doc));
+    assert.equal(await f.verify(), null);
+  });
+});
+
+test('intact signed EXE and release sidecars cannot hide modified app.asar, unpacked worker or runtime', async () => {
+  for (const name of ['resources/app.asar', 'resources/app.asar.unpacked/src/worker.cjs',
+    'resources/client-state-runtime/runtime.exe']) {
+    await withFixture(async f => {
+      const target = path.join(f.dir,name), bytes = fs.readFileSync(target); bytes[0] ^= 1;
+      fs.writeFileSync(target,bytes);
+      assert.equal(await f.verify(),null,name);
+    });
+  }
+  await withFixture(async f => { fs.appendFileSync(f.files.packageCode,' '); assert.equal(await f.verify(),null); });
+  await withFixture(async f => {
+    fs.writeFileSync(path.join(f.dir,'resources/injected.js'),'extra executable code');
+    assert.equal(await f.verify(),null);
+  });
+});
+
+test('package-code bytes and paths are fenced after the second OS observation', async () => {
+  for (const mutate of [
+    f => { const target=path.join(f.dir,'resources/app.asar'); const b=fs.readFileSync(target); b[0]^=1; fs.writeFileSync(target,b); },
+    f => fs.writeFileSync(path.join(f.dir,'resources/late-worker.cjs'),'late injection'),
+    f => fs.renameSync(path.join(f.dir,'resources/app.asar.unpacked'),path.join(f.dir,'resources/moved-unpacked')),
+  ]) {
+    await withFixture(async f => {
+      let count=0;
+      const native=async()=>{ if (++count===2) mutate(f); return f.native(); };
+      assert.equal(await verifyStagingInstalledExecutableW68({executable:f.exe,version:VERSION,
+        testTrustRoot:f.root,testNativeRead:native}),null);
+      assert.equal(count,2);
+    });
+  }
 });

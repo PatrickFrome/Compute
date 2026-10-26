@@ -1,3 +1,8 @@
+import { RsiVerifiedSkillDispatch } from './rsi-verified-skill-dispatch.mjs';
+import { ensureElectronPreReady } from './electron-pre-ready-bootstrap.mjs';
+import { createBrowserParentSuspensionMutationGate } from './browser-parent-suspension-mutation-gate.mjs';
+import { createBrowserParentSuspensionTransport, closeExactBrowserParentView } from './browser-parent-suspension-transport.mjs';
+import { withPersistentBrowserDebugger } from './browser-persistent-cdp-session.mjs';
 import { app, BaseWindow, BrowserWindow, MessageChannelMain, WebContentsView, ipcMain, nativeTheme, protocol, safeStorage, session, shell, utilityProcess } from 'electron';
 import { AGENT_PLATFORM_HOME_URL, AGENT_PLATFORM_ID, AGENT_PLATFORM_MODEL, AGENT_PLATFORM_PROVIDER, isAgentPlatformHost } from './browser-agent-platform.mjs';
 import fs from 'node:fs/promises';
@@ -104,9 +109,8 @@ const COMPUTE_HEALTH_CACHE_MS = 1500;
 const isSmoke = process.argv.includes('--metaengine-smoke');
 const isDevelopmentPlaneSmoke = process.argv.includes('--metaengine-devplane-smoke');
 
-app.enableSandbox();
+ensureElectronPreReady({ app, protocol });
 nativeTheme.themeSource = 'dark';
-protocol.registerSchemesAsPrivileged([{ scheme: 'metaengine', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: false } }]);
 
 const registry = new TabRegistry();
 const views = new ExactBrowserTabViewMap();
@@ -1325,6 +1329,15 @@ function computeDevOSSurfaceGrid() {
   return planDevOSSurfaceGrid({ bounds: shellLayoutPlan.remote_bounds, surfaces, focused_surface_id: focusedSurfaceId, requested_layout: requestedLayout });
 }
 
+const browserParentMutationGate = createBrowserParentSuspensionMutationGate();
+const parentParkedTabs = new Set();
+function parentTabParked(tabId) {
+  return parentParkedTabs.has(String(tabId)) || (fleet?.snapshot?.()?.agents || []).some(row =>
+    row.tab_id === String(tabId) && ['COMPLETED_RELEASING', 'SUSPENDING', 'SUSPENDED', 'RESUMING'].includes(row.lifecycle_state));
+}
+function assertParentTabMutationAllowed(tabId) {
+  if (parentTabParked(tabId) && !browserParentMutationGate.owned()) throw Error('browser_parent_parked_target_fenced');
+}
 function layout() {
   if (!windowRef || windowRef.isDestroyed()) return;
   const { width, height } = windowRef.getContentBounds();
@@ -1347,7 +1360,7 @@ function layout() {
   const browserPaneByTab = new Map((devosSurfaceGridPlan?.browser_panes || []).map((pane) => [String(pane.tab_id || ''), pane]));
   for (const [tabId, view] of views) {
     const pane = browserPaneByTab.get(String(tabId));
-    if (pane && !view.webContents.isDestroyed()) {
+    if (pane && !parentTabParked(tabId) && !view.webContents.isDestroyed()) {
       try { windowRef.contentView.addChildView(view); } catch {}
       view.setBounds(pane.content_bounds);
     } else {
@@ -1373,7 +1386,7 @@ function attachSelected({ force_single_selected = false } = {}) {
     }
     const selected = registry.selected();
     for (const [tabId, view] of views) {
-      if (tabId === selected?.tab_id && !view.webContents.isDestroyed()) {
+      if (tabId === selected?.tab_id && !parentTabParked(tabId) && !view.webContents.isDestroyed()) {
         try { windowRef.contentView.addChildView(view); } catch {}
         view.setBounds(shellLayoutPlan.remote_bounds);
       } else {
@@ -1472,6 +1485,7 @@ async function loadTab(tabId, input) {
 }
 
 async function loadTabWithRecoveryAdmission(tabId, input) {
+  assertParentTabMutationAllowed(tabId);
   const view = views.get(String(tabId));
   if (!view || view.webContents.isDestroyed()) throw new Error('tab_binding_not_live');
   const d = navigationDecision(input);
@@ -1501,6 +1515,7 @@ async function closeTab(tabId) {
 }
 
 async function closeTabWithRecoveryAdmission(tabId) {
+  assertParentTabMutationAllowed(tabId);
   const id = String(tabId);
   const view = views.get(id);
   if (view) {
@@ -1567,7 +1582,8 @@ async function initOwnerSafetyGates() {
 
 async function initFleet() {
   fleet = new FleetProvisioner({
-    createTab: async ({ url, select, load, ownership }) => createTab(url, {
+    createTab: async ({ url, select, load, ownership, created_by_continuity_id }) => createTab(url, {
+      created_by_continuity_id,
       select,
       load,
       role: ownership === 'FLEET_OWNED' ? 'FLEET' : 'USER',
@@ -1662,6 +1678,12 @@ async function initRsiRuntime() {
 // The console is the SINGLE RSI_* surface: it also carries the steering wheel
 // (RSI_PAUSE / RSI_RESUME / RSI_NOMINATE / RSI_APPROVE) via the steering
 // provider and enriches RSI_STATUS with the outcome-river projection.
+// Reuses the existing RSI and DevOS dispatch; no executor or approval writer.
+const rsiVerifiedSkillDispatch = new RsiVerifiedSkillDispatch({
+  ensureRuntime: async () => { await initRsiRuntime(); return rsiRuntime; },
+  allowsRouting: () => rsiOperatorSteering?.allows?.('SKILL_ROUTING') === true,
+});
+
 const rsiOperatorConsole = createRsiOperatorConsole({
   ensureRuntime: async () => {
     await initRsiRuntime();
@@ -1716,7 +1738,7 @@ async function runInterruptedSetupPhysicalMutation(action, operation) {
   assertInterruptedSetupCommandAllowed(action);
   const mutates = classifyNativeSupervisorCommand({ action: String(action || '').toUpperCase() }).read_only !== true;
   if (mutates) interruptedSetupPhysicalMutationsInFlight += 1;
-  try { return await operation(); }
+  try { return await (mutates && !['DISARM', 'TAKEOVER_PAUSE', 'SET_MODE', 'SET_SUPERVISOR_MODE'].includes(String(action).toUpperCase()) ? browserParentMutationGate.mutation(operation) : operation()); }
   finally { if (mutates) interruptedSetupPhysicalMutationsInFlight -= 1; }
 }
 
@@ -1727,6 +1749,7 @@ async function handleCommand(command, payload = {}) {
 async function handleCommandWithRecoveryAdmission(command, payload = {}) {
   const selected = registry.selected();
   const selectedView = selected ? views.get(selected.tab_id) : null;
+  if (['BACK', 'FORWARD', 'RELOAD'].includes(command)) assertParentTabMutationAllowed(selected?.tab_id);
   if (command === 'SHELL_LAYOUT_SET') {
     shellLayoutState = normalizeShellLayoutState(payload);
     layout();
@@ -2055,6 +2078,7 @@ async function executeNativeSupervisorCommandFencedWithRecoveryAdmission(command
     }).catch(() => {});
   }
   const exactMutationTarget = resolveExactNativeSupervisorMutationTarget(command, { registry, views });
+  if (exactMutationTarget && classifyNativeSupervisorCommand({ action }).read_only !== true) assertParentTabMutationAllowed(exactMutationTarget.tab_id);
   if (exactMutationTarget) assertActiveInferenceCommandPolicy(command, { target_url: exactMutationTarget.view?.webContents?.getURL?.() || registry.get(exactMutationTarget.tab_id)?.url });
   if (action === 'POLL') return { ok: true, snapshot: await nativeSupervisorState(), authority_effect: false };
   if (action === 'COMPUTER_STATUS') return computerExecutor.status();
@@ -2102,6 +2126,7 @@ async function executeNativeSupervisorCommandFencedWithRecoveryAdmission(command
   const { tab, view } = exactMutationTarget
     ? assertExactNativeSupervisorMutationTargetCurrent(exactMutationTarget, { views })
     : targetViewForSupervisorRead(command);
+  if (classifyNativeSupervisorCommand({ action }).read_only !== true) assertParentTabMutationAllowed(tab.tab_id);
   if (action === 'CAPTURE') return { ...(await captureSemanticFrame(view.webContents)), tab_id: tab.tab_id };
   if (action === 'READ_TRANSCRIPT') {
     return {
@@ -2535,6 +2560,7 @@ async function initNativeSupervisor() {
     });
   }
   supervisor=nativeSupervisor;assertCurrent();
+  supervisor.bindDevosVerifiedSkillDispatch(rsiVerifiedSkillDispatch);
   // Both remote leased commands and authenticated loopback commands enter the
   // same host adapter. Its dependencies use this client's existing device
   // signature rail; no DB credentials or configurable paths enter a renderer.
@@ -2563,7 +2589,31 @@ async function initNativeSupervisor() {
     let record=null;
     try {
       const candidate = await createAutonomousProjectHost({ userDataPath: app.getPath('userData'),
-        supervisor, getManagedHost: () => {assertCurrent();return managedTaskProjectHost;} });
+        supervisor, getManagedHost: () => {assertCurrent();return managedTaskProjectHost;},
+        browserParentTransport: createBrowserParentSuspensionTransport({
+          gate: browserParentMutationGate, getFleet: () => fleet,
+          readControl: () => supervisor.snapshot()?.continuous_service?.runtime_control,
+          tabExists: tabId => views.has(String(tabId)) && !views.get(String(tabId)).webContents.isDestroyed(),
+          capture: async tabId => ({ ...(await captureSemanticFrame(views.get(String(tabId)).webContents)), tab_id: tabId }),
+          transcript: (tabId, offset) => captureTranscript(views.get(String(tabId)).webContents, { offset, max_chars: 60000 }),
+          freeze: async (tabId, targetId) => {
+            const view = views.get(String(tabId));
+            if (!view || `webcontents:${view.webContents.id}` !== targetId) throw Error('browser_parent_freeze_target_changed');
+            parentParkedTabs.add(String(tabId));
+            windowRef.contentView.removeChildView(view);
+            await withPersistentBrowserDebugger(view.webContents, dbg => dbg.sendCommand('Page.setWebLifecycleState', { state: 'frozen' }));
+          },
+          thaw: async (tabId, targetId) => {
+            const view = views.get(String(tabId));
+            if (!view || `webcontents:${view.webContents.id}` !== targetId) throw Error('browser_parent_thaw_target_changed');
+            await withPersistentBrowserDebugger(view.webContents, dbg => dbg.sendCommand('Page.setWebLifecycleState', { state: 'active' }));
+            parentParkedTabs.delete(String(tabId));
+          },
+          closeTab: async tabId => {
+            await closeExactBrowserParentView({ view: views.get(String(tabId)), tabId, closeTab });
+            parentParkedTabs.delete(String(tabId));
+          },
+        }) });
       record={kind:'AUTONOMOUS',candidate,supervisor};owned.push(record);assertCurrent();
       supervisor.bindDevosProjectRuntime(candidate);assertCurrent();autonomousProjectRuntime=candidate;
     } catch (error) {

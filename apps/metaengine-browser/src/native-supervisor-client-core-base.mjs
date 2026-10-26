@@ -469,6 +469,10 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
     if (typeof this.#devosTaskCycle?.bindMemoryRetriever === 'function') this.#devosTaskCycle.bindMemoryRetriever(fn);
   }
 
+  bindDevosVerifiedSkillDispatch(consumer) {
+    this.#devosTaskCycle?.bindVerifiedSkillDispatch(consumer);
+  }
+
   bindDevosProjectRuntime(runtime) {
     if (typeof this.#devosTaskCycle?.bindProjectRuntime === 'function') this.#devosTaskCycle.bindProjectRuntime(runtime);
   }

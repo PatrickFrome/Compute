@@ -162,6 +162,26 @@ export const LOCAL_RUNTIME_MIGRATIONS = Object.freeze([
     source_url: new URL('./fleet-coordination-claim-guard-v1.sql', import.meta.url),
     triggers: Object.freeze([{ relation: 'destruktion_meta.devos_fleet_claim_h205f22',
       name: 'zz_fleet_coordination_claim_gate_v1', signature: 'destruktion_meta.fleet_coordination_claim_gate_v1()' }]) },
+  { path: '20261026020000_browser_parent_suspension_v1.sql',
+    signature: 'public.h205f22_project_suspend_browser_v1(uuid,uuid,uuid,bigint,bigint,uuid,jsonb,uuid,text,bigint)',
+    signatures: Object.freeze([
+      'public.h205f22_project_suspend_browser_v1(uuid,uuid,uuid,bigint,bigint,uuid,jsonb,uuid,text,bigint)',
+      'public.h205f22_project_suspension_read_v1(uuid,uuid,uuid,text,bigint)',
+      'public.h205f22_project_suspension_list_v1(uuid,uuid,text,bigint,bigint,integer)',
+      'public.h205f22_project_resume_browser_v1(uuid,uuid,jsonb,uuid,text,bigint)',
+      'public.h205f22_project_release_browser_child_v1(uuid,uuid,bigint,text,text,text,bigint,uuid,text,bigint)',
+      'destruktion_meta.browser_parent_suspension_projection_v1(uuid)',
+      'destruktion_meta.browser_parent_reservation_v1(uuid,text)',
+      'destruktion_meta.browser_parent_reserved_claim_v1()',
+      'destruktion_meta.browser_child_retirement_immutable_v1()',
+    ]),
+    source_url: new URL('../../supabase/migrations/20261026020000_browser_parent_suspension_v1.sql', import.meta.url),
+    relations: Object.freeze(['destruktion_meta.browser_parent_suspension_h205f22', 'destruktion_meta.browser_child_retirement_h205f22']),
+    triggers: Object.freeze([
+      { relation: 'destruktion_meta.devos_fleet_claim_h205f22', name: 'browser_parent_reserved_claim_trg', signature: 'destruktion_meta.browser_parent_reserved_claim_v1()' },
+      { relation: 'destruktion_meta.browser_child_retirement_h205f22', name: 'browser_child_retirement_immutable_trg', signature: 'destruktion_meta.browser_child_retirement_immutable_v1()' },
+    ]),
+  },
 ]);
 
 const REQUIRED_COLUMNS = {

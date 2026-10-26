@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { initializeFreshClientPg17 } from './fresh-pg17-initdb.mjs';
+import { initializeFreshClientPg17, runClientInitdb } from './fresh-pg17-initdb.mjs';
 
 const sha = 'a'.repeat(64);
 async function fixture(t) {
@@ -63,6 +63,31 @@ test('without explicit owner action or with wrong digest nothing is written', as
   await assert.rejects(initializeFreshClientPg17({ ...f.input, expectedBundleSha256: 'broken' }, f.hooks), /reviewed_bundle_digest_required/);
   await assert.rejects(fs.stat(f.input.stateDirectory), { code: 'ENOENT' });
   assert.equal(f.calls(), 0);
+});
+
+test('fresh private Host genesis can select actual state_owner without changing legacy default', async t => {
+  for (const databaseOwner of ['postgres', 'state_owner']) {
+    const f = await fixture(t);
+    const initdb = f.hooks.initdb;
+    let observed;
+    const result = await initializeFreshClientPg17({ ...f.input, ...(databaseOwner === 'state_owner' ? { databaseOwner } : {}) }, {
+      ...f.hooks, initdb: async request => { observed = request.databaseOwner; return initdb(request); },
+    });
+    assert.equal(observed, databaseOwner);
+    assert.equal(result.state, 'PG17_INITIALIZED_UNPROVISIONED');
+    assert.equal(result.schema_provisioned, false);
+    assert.equal(result.owner_profile_written, false);
+  }
+});
+
+test('arbitrary database login names are rejected before IO or process launch', async t => {
+  const f = await fixture(t);
+  for (const databaseOwner of ['', 'root', 'state_owner --auth=trust', null, {}]) {
+    await assert.rejects(initializeFreshClientPg17({ ...f.input, databaseOwner }, f.hooks), /database_owner_invalid/);
+    await assert.rejects(runClientInitdb({ databaseOwner }), /database_owner_invalid/);
+  }
+  assert.equal(f.calls(), 0);
+  await assert.rejects(fs.stat(f.input.stateDirectory), { code: 'ENOENT' });
 });
 
 test('existing owner/private state is never adopted or mutated even with owner approval', async t => {

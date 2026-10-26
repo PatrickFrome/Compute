@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PIN } from './qualify-r97-electron-w78.mjs';
 
 const browserRoot = fileURLToPath(new URL('../', import.meta.url));
 const fail = reason => { throw new Error('qualification_electron_' + reason); };
@@ -30,9 +31,11 @@ export function resolveQualifiedElectron({ materialize = false, root = browserRo
   const packagePath = require.resolve('electron/package.json');
   const packageRoot = path.dirname(packagePath);
   const installed = readJson(packagePath);
-  if (manifest.devDependencies?.electron !== '44.0.0' || locked?.version !== '44.0.0'
-      || locked.resolved !== 'https://registry.npmjs.org/electron/-/electron-44.0.0.tgz'
-      || installed.version !== locked.version || !/^sha512-[A-Za-z0-9+/]+=*$/.test(locked.integrity || '')) fail('locked_version_invalid');
+  // Share W78's exact reviewed tarball identity, not just a digest-shaped string.
+  // Reject substitutions before the package resolver can invoke its installer.
+  if (manifest.devDependencies?.electron !== PIN.version || locked?.version !== PIN.version
+      || locked.resolved !== PIN.resolved || locked.integrity !== PIN.integrity
+      || installed.version !== locked.version) fail('locked_version_invalid');
   const dist = path.join(packageRoot, 'dist');
   const resolveInstalled = () => {
     const relative = fs.readFileSync(path.join(packageRoot, 'path.txt'), 'utf8');

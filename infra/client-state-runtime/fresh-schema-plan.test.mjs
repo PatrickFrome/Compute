@@ -28,7 +28,7 @@ test('fresh schema qualification is registered in unit and disposable PG17 CI pa
 test('candidate pins all exact bytes and current upgrade order without declaring readiness', async () => {
   const plan = await loadFreshSchemaCandidatePlan();
   assert.equal(plan.baseline.length, 32); assert.equal(new Set(plan.baseline.map(r=>r.path)).size, 31);
-  assert.equal(plan.rpc_signatures.length, 52); assert.equal(plan.production_qualified, false);
+  assert.equal(plan.rpc_signatures.length, 57); assert.equal(plan.production_qualified, false);
   assert.equal(plan.authority_effect, false); assert.equal(plan.automatic_population_required, true);
   assert.equal(plan.unresolved_dependencies.length, 4);
 });
@@ -50,7 +50,7 @@ test('fresh candidate PostgreSQL18 WASM supplemental qualification (not PG17)', 
   skip: !process.env.METAENGINE_PGLITE_MODULE || !process.env.METAENGINE_PGLITE_PGCRYPTO_MODULE, timeout: 120000,
 }, async () => {
   const receipt=await qualifyFreshSchemaWasm({moduleUrl:process.env.METAENGINE_PGLITE_MODULE,pgcryptoModuleUrl:process.env.METAENGINE_PGLITE_PGCRYPTO_MODULE});
-  assert.equal(receipt.exact_rpc_signatures,52); assert.equal(receipt.rest_tables,5);
+  assert.equal(receipt.exact_rpc_signatures,57); assert.equal(receipt.rest_tables,5);
   assert.equal(receipt.atomic_baseline,false);
   assert.equal(receipt.cleanup_required,'DESTROY_FACTORY_OWNED_DISPOSABLE_CLUSTER');
   console.log(JSON.stringify(receipt));

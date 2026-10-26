@@ -174,6 +174,7 @@ jobs:
             test -f "$METAENGINE_PG_TEST_DRIVER"
             "$NODE_BIN" --test infra/client-state-runtime/native-coding-agent-project-tools.integration.test.mjs
             "$NODE_BIN" --test infra/client-state-runtime/fresh-schema-pg17.integration.test.mjs
+            "$NODE_BIN" --test infra/client-state-runtime/fresh-schema-application-plan.test.mjs infra/client-state-runtime/fresh-client-provider.integration.test.mjs infra/client-state-runtime/browser-parent-suspension.sql.test.mjs infra/client-state-runtime/browser-parent-suspension.concurrency.test.mjs infra/client-state-runtime/guardian-owner-consume.integration.test.mjs infra/client-state-runtime/fresh-device-owner.integration.test.mjs
           '
 
   w45-physical-pg17:

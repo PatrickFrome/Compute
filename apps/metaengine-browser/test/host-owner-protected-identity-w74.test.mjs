@@ -61,6 +61,7 @@ test('W74 protected device identity record survives restart without promoting ST
         proof_identity:'b'.repeat(64),installed_exe_sha256:'c'.repeat(64),
         exact_bytes_verified:true,native_signature_verified:true,
         release_root_signature_verified:true,slsa_evidence_digest_bound:true,
+        package_code_verified:true,package_code_sha256:'d'.repeat(64),
         observed_at:time(),authority_effect:false,fixture_classification:'STAGING'}),
       readNativeKernel:async()=>({
         pid,created_at:birth,observed_at:time(),source:'OS_PROCESS_INVENTORY'}),
