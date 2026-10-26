@@ -12,6 +12,8 @@ const exec=promisify(execFile);
 const script=fileURLToPath(new URL('../scripts/qa-disposable-nsis-effects.ps1',import.meta.url));
 const ps=path.win32.join(process.env.SystemRoot||'C:\\Windows','System32','WindowsPowerShell','v1.0','powershell.exe');
 const prefix=['-NoLogo','-NoProfile','-NonInteractive'];
+const desktopLocation=String.raw`$desktop=[Environment]::GetFolderPath([Environment+SpecialFolder]::Desktop,[Environment+SpecialFolderOption]::DoNotVerify)
+if([string]::IsNullOrWhiteSpace($desktop) -or -not [IO.Path]::IsPathRooted($desktop)){throw 'live_guard_desktop_path_unknown'}`;
 const setup=String.raw`$ErrorActionPreference='Stop'
 $id=$env:METAENGINE_NSIS_FIXTURE_ID
 if($id -cnotmatch '^[a-f0-9]{32}$'){throw 'fixture_id_invalid'}
@@ -86,8 +88,11 @@ if($root){
     }
   }finally{$root.Dispose()}
 }
+# A disposable profile need not have a physical Desktop directory. Ask Windows
+# for its configured location without creating it or substituting a guessed path.
+${desktopLocation}
 foreach($file in @((Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\METAENGINE Browser Test.lnk'),
-                  (Join-Path ([Environment]::GetFolderPath('Desktop')) 'METAENGINE Browser Test.lnk'))){
+                  (Join-Path $desktop 'METAENGINE Browser Test.lnk'))){
   if([IO.File]::Exists($file)){$items+=[ordered]@{link_bytes=[Convert]::ToBase64String([IO.File]::ReadAllBytes($file))}}
   else{$items+=[ordered]@{link_bytes='ABSENT'}}
 }
@@ -145,6 +150,22 @@ async function prepared(t){
   return {...f,capture:capture.proof,preimage:changed.proof.external_effects_sha256,
     options:{snapshot:capture.proof.snapshot_sha256,preimage:changed.proof.external_effects_sha256}};
 }
+test('Windows configured Desktop lookup is read-only when the profile has no physical Desktop',
+  {skip:process.platform!=='win32',timeout:30000},async()=>{
+  const command=String.raw`$ErrorActionPreference='Stop'
+${desktopLocation}
+$before=[IO.Directory]::Exists($desktop)
+$ordinary=[Environment]::GetFolderPath([Environment+SpecialFolder]::Desktop)
+${desktopLocation}
+[ordered]@{rooted=[IO.Path]::IsPathRooted($desktop);existed_before=$before;exists_after=[IO.Directory]::Exists($desktop);ordinary_empty=[string]::IsNullOrEmpty($ordinary)}|ConvertTo-Json -Compress`;
+  const pending=exec(ps,[...prefix,'-EncodedCommand',Buffer.from(command,'utf16le').toString('base64')],
+    {windowsHide:true,shell:false,timeout:25000,maxBuffer:4096});
+  pending.child.stdin?.end();
+  const result=JSON.parse((await pending).stdout.trim());
+  assert.equal(result.rooted,true);
+  assert.equal(result.exists_after,result.existed_before,'lookup must never create a Desktop directory');
+  if(!result.existed_before)assert.equal(result.ordinary_empty,true,'positive control: ordinary lookup cannot resolve an absent directory');
+});
 test('physical Windows NSIS external rollback on fresh private HKCU key and two real .lnk files',
   {skip:process.platform!=='win32'?'Windows native registry/COM proof unavailable (UNKNOWN)':false,timeout:180000},
   async t=>{

@@ -15,7 +15,10 @@ test('real Windows registry retirement preserves captured values and rejects rep
   const id=randomUUID().replaceAll('-',''),state=await fs.mkdtemp(path.join(os.tmpdir(),'qa-forward-reg-'));
   const base='Software\\METAENGINE\\ForwardInstallFixture\\'+id,version='0.7.0-dev.123.1';
   t.after(async()=>{await code(`$b='${base}';if($b -notmatch '^Software\\\\METAENGINE\\\\ForwardInstallFixture\\\\[a-f0-9]{32}$'){throw 'scope'};[Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($b,$false)`);await fs.rm(state,{recursive:true,force:true});});
-  await code(`$ErrorActionPreference='Stop';$b='${base}';$g='c32f3891-2b9e-5a4a-bd4f-5173b65b39bb';$install=Join-Path $env:LOCALAPPDATA 'Programs\\METAENGINE Browser Test';$k=[Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($b+'\\Install\\'+$g);$k.SetValue('InstallLocation',$install);$k.Dispose();$k=[Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($b+'\\Uninstall\\'+$g);$k.SetValue('DisplayVersion','${version}');$k.SetValue('DisplayName','METAENGINE Browser Test ${version}');$k.SetValue('UninstallString','"'+(Join-Path $install 'Uninstall METAENGINE Browser Test.exe')+'" /currentuser');$k.Dispose()`);
+  // Match the helper's canonical path construction. CI TEMP can contain an
+  // 8.3 profile alias which .NET Framework GetFullPath expands; raw Join-Path
+  // would write different InstallLocation and UninstallString fixture bytes.
+  await code(`$ErrorActionPreference='Stop';$b='${base}';$g='c32f3891-2b9e-5a4a-bd4f-5173b65b39bb';$install=[IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Programs\\METAENGINE Browser Test'));$k=[Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($b+'\\Install\\'+$g);$k.SetValue('InstallLocation',$install);$k.Dispose();$k=[Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($b+'\\Uninstall\\'+$g);$k.SetValue('DisplayVersion','${version}');$k.SetValue('DisplayName','METAENGINE Browser Test ${version}');$k.SetValue('UninstallString','"'+(Join-Path $install 'Uninstall METAENGINE Browser Test.exe')+'" /currentuser');$k.Dispose()`);
   const args=['-File',helper,'-StateDirectory',state,'-ExpectedVersion',version,'-FixtureId',id];
   const observation=JSON.parse(await run([...args,'-Mode','Observe']));
   assert.equal(observation.state,'OBSERVED');
