@@ -3,6 +3,7 @@
 // forward-only: retain uncertain effects, never restore or retry them blindly.
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {createReadStream} from 'node:fs';
 import {createHash, randomUUID} from 'node:crypto';
 import {captureInstalledTreeFingerprint} from './qa-installed-tree-fingerprint.mjs';
 
@@ -30,6 +31,8 @@ const within = (root,file) => {
   return relative===''||(!path.isAbsolute(relative)&&relative!=='..'&&!relative.startsWith('..'+path.sep));
 };
 const sameIdentity = (a,b) => a?.dev===b?.dev&&a?.ino===b?.ino;
+const sameFile = (a,b) => sameIdentity(a,b)&&a.size===b.size&&a.mtimeNs===b.mtimeNs
+  &&a.ctimeNs===b.ctimeNs&&a.birthtimeNs===b.birthtimeNs&&a.nlink===b.nlink;
 // Resolve every existing ancestor, not just the leaf: a junction above an
 // apparently external PGDATA/Owner can otherwise point into the retired image.
 // Missing suffixes are permitted only for effect destinations. Permission,
@@ -87,6 +90,106 @@ export async function assertForwardPreservedPaths(scope,{env=process.env,filesys
     if(Object.values(targets).some(target=>overlaps(preserved,target)))fail('preserved_path_overlap_'+name);
   }
   return true;
+}
+// Re-read the actual bytes at effect boundaries, not only the input plan or
+// pathname. The tree verifier rejects linked children and unstable file reads.
+export async function assertForwardArtifactsUnchanged({candidateRoot,installerFile,expectedTreeSha256,expectedInstallerSha256}) {
+  if(![expectedTreeSha256,expectedInstallerSha256].every(x=>/^[a-f0-9]{64}$/.test(x||'')))fail('artifact_pin_invalid');
+  await physicalForwardPath(candidateRoot,{required:true,kind:'directory',filesystem:fs});
+  await physicalForwardPath(installerFile,{required:true,kind:'file',filesystem:fs});
+  const before=await fs.lstat(installerFile,{bigint:true}),hash=createHash('sha256');
+  for await(const chunk of createReadStream(installerFile))hash.update(chunk);
+  const after=await fs.lstat(installerFile,{bigint:true});
+  if(!sameFile(before,after)||!after.isFile()||after.isSymbolicLink()||after.nlink!==1n
+    ||hash.digest('hex')!==expectedInstallerSha256)fail('installer_changed');
+  if((await captureInstalledTreeFingerprint(candidateRoot)).tree_sha256!==expectedTreeSha256)fail('candidate_changed');
+  return true;
+}
+async function absentForward(file,filesystem=fs) {
+  try {await filesystem.lstat(file);}catch(error){if(error?.code==='ENOENT')return;throw error;}
+  fail('existing_attempt_requires_readback');
+}
+export async function assertForwardInstallNotAttempted(stateDirectory) {
+  for(const name of ['image-retirement','registration-retirement','installer','owner-publication'])
+    await absentForward(path.join(stateDirectory,name+'-attempt.json'));
+}
+// An exclusive durable intent is consumed once, including across process
+// restarts. A missing acknowledgement never authorizes repeating the callback.
+// HOLD describes only what this process observed; it does not invent an exit.
+export async function runForwardEffect({stateDirectory,effect,identity},
+  {verifyBefore=async()=>{},invoke,verifyAfter=async()=>{},write=writeForwardEvidence}={}) {
+  if(!['installer','owner-publication'].includes(effect)||!path.isAbsolute(stateDirectory||'')
+    ||typeof invoke!=='function')fail('effect_arguments_invalid');
+  await physicalForwardPath(stateDirectory,{required:true,kind:'directory',filesystem:fs});
+  const file=suffix=>path.join(stateDirectory,effect+'-'+suffix+'.json');
+  await absentForward(file('attempt'));await absentForward(file('completed'));await absentForward(file('hold'));
+  await verifyBefore();
+  await write(file('attempt'),{...identity,schema:'metaengine.operator.forward-effect.v1',effect,
+    state:'EFFECT_PENDING',automatic_retry_allowed:false,authority_effect:false});
+  let invocationStarted=false;
+  try {
+    await verifyBefore();
+    invocationStarted=true;
+    const result=await invoke();
+    await verifyAfter(result);
+    await write(file('completed'),result);
+    return result;
+  }catch(cause){
+    const hold={schema:'metaengine.operator.forward-effect.v1',effect,state:'HOLD',
+      invocation_started:invocationStarted,effect_outcome:invocationStarted?'UNKNOWN':'NOT_INVOKED',
+      completion_verified:false,automatic_retry_allowed:false,authority_effect:false};
+    try{await write(file('hold'),hold);}
+    catch(recordError){throw new AggregateError([cause,recordError],'qa_forward_install_'+effect+'_hold_not_recorded');}
+    throw new Error('qa_forward_install_'+effect+'_hold_requires_readback',{cause});
+  }
+}
+async function readForwardDescriptor(file,filesystem=fs) {
+  await physicalForwardPath(file,{required:true,kind:'file',filesystem});
+  const before=await filesystem.lstat(file,{bigint:true});
+  if(before.size<1n||before.size>65536n)fail('descriptor_size_invalid');
+  const bytes=await filesystem.readFile(file),after=await filesystem.lstat(file,{bigint:true});
+  if(!sameFile(before,after)||BigInt(bytes.length)!==before.size)fail('descriptor_changed');
+  return bytes;
+}
+// Forward-only publication retains the captured descriptor on any ambiguity.
+// Unlike generic runtime-upgrade recovery, it never automatically restores an
+// old Owner after the old installation has been retired.
+export async function publishForwardOwner({stateDirectory,ownerFile,stagedFile,oldBytes,nextBytes},
+  {verify=async()=>{},filesystem=fs}={}) {
+  if(![stateDirectory,ownerFile,stagedFile].every(x=>typeof x==='string'&&path.isAbsolute(x))
+    ||!same(path.dirname(stagedFile),stateDirectory)||!Buffer.isBuffer(oldBytes)||!Buffer.isBuffer(nextBytes)
+    ||path.parse(stagedFile).root.toLowerCase()!==path.parse(ownerFile).root.toLowerCase())fail('publication_scope_invalid');
+  const custody=path.join(stateDirectory,'owner-publication-custody'),captured=path.join(custody,'preimage.json');
+  const verifyBefore=async()=>{
+    await absentForward(custody,filesystem);
+    if(!(await readForwardDescriptor(ownerFile,filesystem)).equals(oldBytes))fail('owner_preimage_changed');
+    if(!(await readForwardDescriptor(stagedFile,filesystem)).equals(nextBytes))fail('owner_stage_changed');
+    await verify();
+  };
+  return runForwardEffect({stateDirectory,effect:'owner-publication',identity:{
+    old_owner_sha256:forwardDigest(oldBytes),next_owner_sha256:forwardDigest(nextBytes),custody_file:captured}}, {
+    verifyBefore,
+    invoke:async()=>{
+      await filesystem.mkdir(custody,{mode:0o700});
+      await filesystem.rename(ownerFile,captured);
+      if(!(await readForwardDescriptor(captured,filesystem)).equals(oldBytes))fail('captured_owner_changed');
+      // link is an atomic absent-only publication; a concurrent descriptor is
+      // never overwritten. This temporary two-link pair is checked explicitly.
+      await filesystem.link(stagedFile,ownerFile);
+      const a=await filesystem.lstat(stagedFile,{bigint:true}),b=await filesystem.lstat(ownerFile,{bigint:true});
+      if(!a.isFile()||a.isSymbolicLink()||!b.isFile()||b.isSymbolicLink()||a.nlink!==2n||b.nlink!==2n
+        ||!sameIdentity(a,b)||!(await filesystem.readFile(stagedFile)).equals(nextBytes)
+        ||!(await filesystem.readFile(ownerFile)).equals(nextBytes))fail('publication_effect_unknown');
+      await filesystem.unlink(stagedFile);
+      return {schema:'metaengine.operator.forward-owner-publication.v1',state:'PUBLISHED_VERIFIED',
+        owner_sha256:forwardDigest(nextBytes),old_owner_sha256:forwardDigest(oldBytes),
+        automatic_rollback_attempted:false,automatic_retry_allowed:false,authority_effect:false};
+    },
+    verifyAfter:async()=>{
+      if(!(await readForwardDescriptor(ownerFile,filesystem)).equals(nextBytes))fail('publication_effect_unknown');
+      await verify();
+    },
+  });
 }
 // Keep the first publication fence subject to the same physical custody check
 // as image retirement. Invalid preserved paths must not leave even a gate.

@@ -17,11 +17,11 @@ import {localRuntimeHostEnvironment} from '../src/local-runtime-host-controller.
 import {protectOwnerOnlyWindowsDirectory,verifyOwnerOnlyWindowsStorage} from '../src/private-windows-storage-acl.mjs';
 import {readWindowsKernelProcessW60} from '../src/host-native-owner-producers-w60.mjs';
 import {verifyWindowsTcpListener} from './verify-windows-tcp-listener.mjs';
-import {readUpgradeAsarPackage,readUpgradeAsarVerifier,stableUpgradeRead,makeUpgradeConfigs,publishOwnerFile,completeUpgradeFiles,commitUpgradeAdmission,assertKeeperIncarnation} from './qa-owner-runtime-upgrade.mjs';
+import {readUpgradeAsarPackage,readUpgradeAsarVerifier,stableUpgradeRead,makeUpgradeConfigs,completeUpgradeFiles,commitUpgradeAdmission,assertKeeperIncarnation} from './qa-owner-runtime-upgrade.mjs';
 import {captureInstalledTreeFingerprint} from './qa-installed-tree-fingerprint.mjs';
 import {compareQaInstalledImage} from './qa-operator-install-recovery.mjs';
 import {observeWindowsNsisEffects} from './qa-nsis-external-effects.mjs';
-import {forwardDigest as sha,writeForwardEvidence as write,retireForwardImage,assertForwardScope,assertForwardPreservedPaths,writeForwardPreservedGate} from './qa-forward-install-policy.mjs';
+import {forwardDigest as sha,writeForwardEvidence as write,retireForwardImage,assertForwardScope,assertForwardPreservedPaths,writeForwardPreservedGate,assertForwardArtifactsUnchanged,assertForwardInstallNotAttempted,runForwardEffect,publishForwardOwner} from './qa-forward-install-policy.mjs';
 import {QA_UPGRADE_ADMISSION_SCHEMA} from '../src/local-provider-upgrade-admission.mjs';
 
 const exec=promisify(execFile),require=createRequire(import.meta.url);
@@ -34,6 +34,8 @@ async function acl(file,directory=false){if((await verifyOwnerOnlyWindowsStorage
 async function runPs(args,timeout=90000){const p=exec(ps,['-NoLogo','-NoProfile','-NonInteractive',...args],{windowsHide:true,shell:false,timeout,maxBuffer:16384,env:{...process.env,PSModulePath:'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules'}});p.child.stdin?.end();return (await p).stdout;}
 async function noBrowser(){const count=await runPs(['-Command',"$ErrorActionPreference='Stop'; @(Get-CimInstance Win32_Process -Filter \"Name='METAENGINE Browser Test.exe'\" -ErrorAction Stop).Count"]);if(count.trim()!=='0')fail('browser_must_be_closed');}
 async function absent(file){await fs.lstat(file).then(()=>fail('path_must_be_absent'),e=>{if(e.code!=='ENOENT')throw e;});}
+const artifactPins=(plan,image)=>({candidateRoot:plan.candidate_root,installerFile:plan.installer_file,
+  expectedTreeSha256:image.tree_sha256,expectedInstallerSha256:plan.installer_sha256});
 async function candidate(plan){
   const resources=path.join(plan.candidate_root,'resources'),archive=path.join(resources,'app.asar');
   if(await hash(archive)!==plan.asar_sha256)fail('candidate_asar_mismatch');
@@ -58,18 +60,32 @@ async function quiescent(config,status){
   for(const pid of [status.host_pid,...status.children.map(c=>c.pid)])if(runtimeHostPidState(pid)!=='ABSENT')fail('old_process_presence_unresolved');
   for(const port of [config.api_port,config.edge_port])if(await runtimeHostTcpPortState(port)!=='ABSENT')fail('endpoint_presence_unresolved');
 }
-export async function qualifyForwardRuntime({verified,configFile,owner,stateDirectory}){
-  let child,exited=false,exitCode,terminal=null;
+export async function qualifyForwardRuntime({verified,configFile,owner,stateDirectory,logDirectory=stateDirectory}){
+  const config=JSON.parse(await stableUpgradeRead(configFile));
+  if(!path.isAbsolute(stateDirectory||'')||!path.isAbsolute(config.state_directory||'')
+    ||!same(config.state_directory,stateDirectory)||!path.isAbsolute(logDirectory||''))fail('runtime_state_directory_mismatch');
+  let child,exited=false,exitCode,terminal=null,stopAttempt=null;
   const nonce=randomUUID();
-  const stop=async()=>{
-    if(exited)return;
-    if(child?.connected)child.send({schema:'compute.runtime-host-control.v1',command:'stop'},()=>{});
-    await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('qa_forward_install_host_stop_timeout')),45000);child.once('exit',()=>{clearTimeout(timer);resolve();});});
+  const stop=()=>{
+    // A timeout remains an unknown stop outcome. Cleanup must await the same
+    // attempt, never send another stop or restart its 45-second deadline.
+    if(stopAttempt)return stopAttempt;
+    stopAttempt=(async()=>{
+      if(exited)return;
+      await new Promise((resolve,reject)=>{
+        const onExit=()=>{clearTimeout(timer);resolve();};
+        const timer=setTimeout(()=>{child.off('exit',onExit);reject(Error('qa_forward_install_host_stop_timeout'));},45000);
+        child.once('exit',onExit);
+        if(exited)onExit();
+        else if(child.connected)child.send({schema:'compute.runtime-host-control.v1',command:'stop'},()=>{});
+      });
+    })();
+    return stopAttempt;
   };
   try{
     child=spawn(verified.paths.nodeExecutable,[verified.paths.hostEntry],{cwd:verified.paths.sourceRoot,env:{...localRuntimeHostEnvironment(configFile),COMPUTE_RUNTIME_HOST_LAUNCH_NONCE:nonce},stdio:['ignore','ignore','pipe','ipc'],windowsHide:true,shell:false});
     child.once('exit',c=>{exited=true;exitCode=c;});
-    const log=await fs.open(path.join(stateDirectory,'qualification-host.stderr'),'wx',0o600);let logBytes=0;
+    const log=await fs.open(path.join(logDirectory,'qualification-host.stderr'),'wx',0o600);let logBytes=0;
     child.stderr.on('data',b=>{if((logBytes+=b.length)<262144)void log.write(b).catch(()=>{});});
     child.once('exit',()=>void log.close());
     child.on('message',v=>{if(v?.schema==='compute.runtime-host-terminal.v1')terminal=v;});
@@ -82,7 +98,6 @@ export async function qualifyForwardRuntime({verified,configFile,owner,stateDire
     });
     const status=JSON.parse(await stableUpgradeRead(owner.runtime_identity_file)),identity=validateLocalStateRuntimeIdentity(status,owner.base_url);
     if(status.host_pid!==child.pid||descriptor.instance_id!==identity.instance_id||descriptor.runtime_ready!==true||descriptor.status_file!==owner.runtime_identity_file||descriptor.authority_effect!==false||exited)fail('candidate_identity_unverified');
-    const config=JSON.parse(await stableUpgradeRead(configFile));
     for(const c of status.children){const port=c.name==='api'?config.api_port:c.name==='edge'?config.edge_port:null;if(!port)fail('candidate_child_invalid');await verifyWindowsTcpListener({port,pid:c.pid});}
     const response=await fetch(owner.base_url+'/health',{signal:AbortSignal.timeout(12000)}),health=await response.json();
     if(!response.ok||!localStateProviderHealthAttested(health,identity.instance_id)||exited)fail('candidate_health_unattested');
@@ -129,6 +144,7 @@ function preservedPathScope(plan,old,pg){
 export async function prepareForwardInstall(plan,{resume=false}={}){
   validatePlan(plan);if(!resume)await absent(plan.state_directory);
   const checked=await candidate(plan),old=await oldState(plan);await quiescent(old.config,old.status);
+  await assertForwardArtifactsUnchanged(artifactPins(plan,checked.image));
   const pg=await keeper(old.config),installedRoot=path.join(process.env.LOCALAPPDATA,'Programs','METAENGINE Browser Test');
   const preservedPaths=preservedPathScope(plan,old,pg),preserve=()=>assertForwardPreservedPaths(preservedPaths);
   await preserve();
@@ -173,23 +189,42 @@ export async function prepareForwardInstall(plan,{resume=false}={}){
   await acl(configFile);await acl(qualificationFile);
   const proposed=validateLocalStateProviderConfig({...old.owner,runtime_identity_file:path.join(plan.state_directory,'runtime-instance.json'),runtime_host:{bundle_directory:configs.final.bundle_directory,expected_bundle_sha256:checked.binding.bundle_sha256,config_file:configFile}});
   await preserve();
+  await assertForwardArtifactsUnchanged(artifactPins(plan,checked.image));
   const runtime=await qualifyForwardRuntime({verified:checked.verified,configFile:qualificationFile,owner:proposed,stateDirectory:plan.state_directory});
   await preserve();
+  await assertForwardArtifactsUnchanged(artifactPins(plan,checked.image));
   await quiescent(old.config,old.status);await keeperSame(old.config,pg);
   if(sha(await stableUpgradeRead(old.file))!==plan.owner_sha256||!old.configBytes.equals(await stableUpgradeRead(old.owner.runtime_host.config_file))||!old.statusBytes.equals(await stableUpgradeRead(old.owner.runtime_identity_file)))fail('predecessor_changed');
   const registration=JSON.parse(await runPs(['-File',script('qa-forward-registration.ps1'),'-Mode','Observe','-StateDirectory',plan.state_directory,'-ExpectedVersion',oldPkg.version]));
-  const proof={schema:'metaengine.operator.forward-install-proof.v1',state:'QUALIFIED_AND_STOPPED',plan,old_version:oldPkg.version,owner_file:old.file,old_config_sha256:sha(old.configBytes),old_status_sha256:sha(old.statusBytes),old_nsis:nsis,registration,predecessor,keeper:pg,reconciliation,runtime,candidate:checked.image,proposed,bundle_sha256:checked.binding.bundle_sha256,gate_file:gate,gate_sha256:sha(gateBytes),production_authorized:false,automatic_retry_allowed:false,authority_effect:false};
+  const proof={schema:'metaengine.operator.forward-install-proof.v1',state:'QUALIFIED_AND_STOPPED',plan,old_version:oldPkg.version,owner_file:old.file,old_config_sha256:sha(old.configBytes),old_status_sha256:sha(old.statusBytes),old_nsis:nsis,registration,predecessor,keeper:pg,reconciliation,runtime,candidate:checked.image,proposed,bundle_sha256:checked.binding.bundle_sha256,config_sha256:sha(await stableUpgradeRead(configFile)),qualification_config_sha256:sha(await stableUpgradeRead(qualificationFile)),runtime_status_sha256:sha(await stableUpgradeRead(proposed.runtime_identity_file)),gate_file:gate,gate_sha256:sha(gateBytes),production_authorized:false,automatic_retry_allowed:false,authority_effect:false};
   const proofFile=path.join(plan.state_directory,'forward-qualification.json'),proofSha=await write(proofFile,proof);await acl(proofFile);
   return {state:proof.state,proof_file:proofFile,proof_sha256:proofSha,provider_published:false,installed:false};
+}
+async function successorUnchanged(proof,old){
+  const plan=proof.plan,state=plan.state_directory,installedRoot=path.join(process.env.LOCALAPPDATA,'Programs','METAENGINE Browser Test');
+  const expected=makeUpgradeConfigs(old.config,{stateDirectory:state,candidateBundle:path.join(plan.candidate_root,'resources','client-state-runtime'),installedBundle:path.join(installedRoot,'resources','client-state-runtime'),bundleDigest:proof.bundle_sha256});
+  const configFile=path.join(state,'installed-runtime-config.json'),qualificationFile=path.join(state,'qualification-config.json');
+  const proposed=validateLocalStateProviderConfig({...old.owner,runtime_identity_file:path.join(state,'runtime-instance.json'),runtime_host:{bundle_directory:expected.final.bundle_directory,expected_bundle_sha256:proof.bundle_sha256,config_file:configFile}});
+  if(JSON.stringify(proposed)!==JSON.stringify(proof.proposed))fail('successor_binding_changed');
+  for(const [file,pin,value] of [[configFile,proof.config_sha256,expected.final],[qualificationFile,proof.qualification_config_sha256,expected.qualification]]){
+    const bytes=await stableUpgradeRead(file);await acl(file);
+    if(sha(bytes)!==pin||JSON.stringify(JSON.parse(bytes))!==JSON.stringify(value))fail('successor_config_changed');
+  }
+  const bytes=await stableUpgradeRead(proposed.runtime_identity_file),stopped=JSON.parse(bytes);
+  if(sha(bytes)!==proof.runtime_status_sha256||stopped.state!=='STOPPED'||stopped.runtime_ready!==false
+    ||stopped.children_stopped!==true||stopped.instance_id!==proof.runtime.instance_id
+    ||stopped.host_pid!==proof.runtime.host_pid||stopped.bundle_sha256!==proof.bundle_sha256)fail('qualification_changed');
+  await absent(path.join(state,'runtime-host-lock.json'));
 }
 export async function installForwardQualified({proofFile,expectedProofSha256}){
   const proofBytes=await stableUpgradeRead(proofFile,262144);await acl(proofFile);if(sha(proofBytes)!==expectedProofSha256)fail('proof_pin_mismatch');
   const proof=JSON.parse(proofBytes),plan=validatePlan(proof.plan);if(proof.state!=='QUALIFIED_AND_STOPPED')fail('proof_state_invalid');
+  await assertForwardInstallNotAttempted(plan.state_directory);
   const old=await oldState(plan),checked=await candidate(plan),state=plan.state_directory;
   if(checked.image.tree_sha256!==proof.candidate.tree_sha256||checked.binding.bundle_sha256!==proof.bundle_sha256)fail('candidate_changed');
   if(await hash(plan.installer_file)!==plan.installer_sha256)fail('installer_changed');
   const preservedPaths=preservedPathScope(plan,old,proof.keeper);
-  const verify=async()=>{await assertForwardPreservedPaths(preservedPaths);await quiescent(old.config,old.status);await keeperSame(old.config,proof.keeper);if(sha(await stableUpgradeRead(proof.gate_file))!==proof.gate_sha256)fail('gate_changed');await assertForwardPreservedPaths(preservedPaths);};
+  const verify=async()=>{await assertForwardPreservedPaths(preservedPaths);await quiescent(old.config,old.status);await keeperSame(old.config,proof.keeper);if(sha(await stableUpgradeRead(proof.gate_file))!==proof.gate_sha256)fail('gate_changed');await successorUnchanged(proof,old);await assertForwardPreservedPaths(preservedPaths);};
   await verify();
   if(sha(old.configBytes)!==proof.old_config_sha256||sha(old.statusBytes)!==proof.old_status_sha256)fail('predecessor_changed');
   const stopped=JSON.parse(await stableUpgradeRead(proof.proposed.runtime_identity_file));
@@ -197,15 +232,18 @@ export async function installForwardQualified({proofFile,expectedProofSha256}){
   const installedRoot=path.join(process.env.LOCALAPPDATA,'Programs','METAENGINE Browser Test');
   const registrationArgs=['-File',script('qa-forward-registration.ps1'),'-StateDirectory',state,'-ExpectedVersion',proof.old_version];
   const reg=JSON.parse(await runPs([...registrationArgs,'-Mode','Observe']));if(reg.digest!==proof.registration.digest)fail('registration_changed');
+  await assertForwardArtifactsUnchanged(artifactPins(plan,proof.candidate));
   await retireForwardImage({installedRoot,stateDirectory:state,retiredRoot:path.join(state,'retired-installation'),expectedTreeSha256:proof.predecessor.tree_sha256,preservedPaths},{verify});
   await verify();
   const retired=JSON.parse(await runPs([...registrationArgs,'-Mode','Retire','-ExpectedDigest',reg.digest]));if(retired.state!=='RETIRED_VERIFIED'||retired.digest!==reg.digest)fail('registration_retirement_unconfirmed');
-  await write(path.join(state,'installer-attempt.json'),{state:'EFFECT_PENDING',installer_sha256:plan.installer_sha256,automatic_retry_allowed:false});
-  await verify();
-  const installed=JSON.parse(await runPs(['-File',script('install-package-bounded.ps1'),'-InstallerPath',plan.installer_file,'-ExpectedSha256',plan.installer_sha256,'-TimeoutSeconds','1800'],1850000));
-  if(installed.installer_exit_code!==0||installed.installer_sha256!==plan.installer_sha256)fail('installer_result_unconfirmed');
-  await write(path.join(state,'installer-completed.json'),installed);
-  await verify();
+  await runForwardEffect({stateDirectory:state,effect:'installer',identity:{installer_sha256:plan.installer_sha256}}, {
+    verifyBefore:async()=>{await verify();await assertForwardArtifactsUnchanged(artifactPins(plan,proof.candidate));},
+    invoke:async()=>JSON.parse(await runPs(['-File',script('install-package-bounded.ps1'),'-InstallerPath',plan.installer_file,'-ExpectedSha256',plan.installer_sha256,'-TimeoutSeconds','1800'],1850000)),
+    verifyAfter:async installed=>{
+      if(installed.installer_exit_code!==0||installed.installer_sha256!==plan.installer_sha256)fail('installer_result_unconfirmed');
+      await verify();await assertForwardArtifactsUnchanged(artifactPins(plan,proof.candidate));
+    },
+  });
   return finalizeForwardPayload({proof,plan,old,expectedProofSha256,verify});
 }
 // Explicit operator readback after an interrupted installer. Never run NSIS
@@ -231,6 +269,7 @@ export async function finalizeForwardAfterInstallerReadback({proofFile,expectedP
     await assertForwardPreservedPaths(preservedPathScope(plan,old,proof.keeper));
     await quiescent(old.config,old.status);await keeperSame(old.config,proof.keeper);
     if(sha(await stableUpgradeRead(proof.gate_file))!==proof.gate_sha256)fail('gate_changed');
+    await successorUnchanged(proof,old);
     const rows=JSON.parse(await runPs(['-Command',"$ErrorActionPreference='Stop'; @(Get-CimInstance Win32_Process -Filter \"Name LIKE 'METAENGINE%Setup%' OR Name LIKE 'Uninstall METAENGINE%'\" | Select-Object ProcessId,Name) | ConvertTo-Json -Compress"] )||'[]');
     if((Array.isArray(rows)?rows:[rows]).length!==0)fail('installer_process_still_present');
     await assertForwardPreservedPaths(preservedPathScope(plan,old,proof.keeper));
@@ -241,16 +280,26 @@ export async function finalizeForwardAfterInstallerReadback({proofFile,expectedP
 }
 async function finalizeForwardPayload({proof,plan,old,expectedProofSha256,verify,readback=false}){
   const state=plan.state_directory,installedRoot=path.join(process.env.LOCALAPPDATA,'Programs','METAENGINE Browser Test');
+  await assertForwardArtifactsUnchanged(artifactPins(plan,proof.candidate));
+  await successorUnchanged(proof,old);
   const image=await compareQaInstalledImage(plan.candidate_root,installedRoot,{expectedUninstallerSha256:plan.uninstaller_sha256});
   const actual=await candidate({...plan,candidate_root:installedRoot});if(actual.binding.bundle_sha256!==proof.bundle_sha256)fail('installed_bundle_changed');
   const nsis=await observeWindowsNsisEffects({expectedVersion:plan.package_version});
+  const registrationArgs=['-File',script('qa-forward-registration.ps1'),'-Mode','Observe','-StateDirectory',state,'-ExpectedVersion',plan.package_version];
+  const registration=JSON.parse(await runPs(registrationArgs));
+  const verifyPayload=async()=>{
+    await verify();
+    if((await captureInstalledTreeFingerprint(installedRoot)).tree_sha256!==image.installed_tree_sha256)fail('installed_image_changed');
+    if(JSON.parse(await runPs(registrationArgs)).digest!==registration.digest)fail('installed_registration_changed');
+  };
   await verify();
   if(readback)await write(path.join(state,'installer-readback-completed.json'),{state:'COMPLETE_PAYLOAD_AND_REGISTRATION_VERIFIED',installed_image:image,nsis_effects:nsis,installer_exit_code:null,installer_replayed:false,automatic_retry_allowed:false,authority_effect:false});
   if(sha(await stableUpgradeRead(old.file))!==plan.owner_sha256)fail('owner_changed_before_publication');
   const nextBytes=Buffer.from(JSON.stringify(proof.proposed,null,2)+'\n'),staged=path.join(state,'pending-owner.json');await write(staged,nextBytes);await acl(staged);
-  await publishOwnerFile({ownerFile:old.file,stagedFile:staged,oldBytes:old.bytes,nextBytes,rollbackFile:path.join(state,'owner-publication-preimage.json')},{verifyPublished:verify});
-  const receipt={schema:'metaengine.operator.forward-install-receipt.v1',state:'INSTALLED_VERIFIED',proof_sha256:expectedProofSha256,source_head:plan.source_head,package_version:plan.package_version,owner_sha256:sha(nextBytes),bundle_sha256:proof.bundle_sha256,installed_asar_sha256:plan.asar_sha256,installed_image:image,nsis_effects:nsis,keeper:proof.keeper,installed_payload_verified:true,production_authorized:false,provenance_verified:false,historical_effects_reconciled:false,automatic_retry_allowed:false,authority_effect:false};
-  const postVerify=async()=>{await assertForwardPreservedPaths(preservedPathScope(plan,old,proof.keeper));await quiescent(old.config,old.status);await keeperSame(old.config,proof.keeper);if((await captureInstalledTreeFingerprint(installedRoot)).tree_sha256!==image.installed_tree_sha256)fail('installed_image_changed');await assertForwardPreservedPaths(preservedPathScope(plan,old,proof.keeper));};
+  await assertForwardArtifactsUnchanged(artifactPins(plan,proof.candidate));
+  await publishForwardOwner({stateDirectory:state,ownerFile:old.file,stagedFile:staged,oldBytes:old.bytes,nextBytes},{verify:verifyPayload});
+  const receipt={schema:'metaengine.operator.forward-install-receipt.v1',state:'INSTALLED_VERIFIED',proof_sha256:expectedProofSha256,source_head:plan.source_head,package_version:plan.package_version,owner_sha256:sha(nextBytes),bundle_sha256:proof.bundle_sha256,installed_asar_sha256:plan.asar_sha256,installed_image:image,nsis_effects:nsis,registration,keeper:proof.keeper,installed_payload_verified:true,production_authorized:false,provenance_verified:false,historical_effects_reconciled:false,automatic_retry_allowed:false,authority_effect:false};
+  const postVerify=async()=>{await assertForwardPreservedPaths(preservedPathScope(plan,old,proof.keeper));await quiescent(old.config,old.status);await keeperSame(old.config,proof.keeper);await successorUnchanged(proof,old);if((await captureInstalledTreeFingerprint(installedRoot)).tree_sha256!==image.installed_tree_sha256)fail('installed_image_changed');if(JSON.parse(await runPs(registrationArgs)).digest!==registration.digest)fail('installed_registration_changed');await assertForwardPreservedPaths(preservedPathScope(plan,old,proof.keeper));};
   const completed=await completeUpgradeFiles({ownerFile:old.file,gateFile:proof.gate_file,terminalFile:path.join(state,'forward-installed.json'),retiredGateFile:path.join(state,'completed-upgrade-gate.json'),expectedOwnerSha256:sha(nextBytes),expectedGateSha256:proof.gate_sha256,receipt},{verify:postVerify,protect:acl});
   const completionFile=path.join(state,'forward-completed.json'),completionSha=await write(completionFile,completed);
   const admission={schema:QA_UPGRADE_ADMISSION_SCHEMA,state:'INSTALLED_VERIFIED',owner_sha256:sha(nextBytes),bundle_sha256:proof.bundle_sha256,proof_sha256:expectedProofSha256,completed_receipt_sha256:completionSha,source_head:plan.source_head,package_version:plan.package_version,installed_asar_sha256:plan.asar_sha256,installed_tree_sha256:image.installed_tree_sha256,publication_gate_sha256:proof.gate_sha256,launch_allowed:true,gate_retired:true,production_authorized:false,provenance_verified:false,automatic_retry_allowed:false,authority_effect:false};
