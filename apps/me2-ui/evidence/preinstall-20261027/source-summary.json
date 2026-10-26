@@ -1,0 +1,114 @@
+{
+  "schema": "metaengine.ui.stream4-handoff.v1",
+  "date": "2026-10-27",
+  "date_timezone": "Europe/Moscow",
+  "base_sha": "9d7527683060e314eb1d39fec9ce2304a57103c4",
+  "application_source_sha": "ff91a1d8fa2df70e33e35d6267ae4194c32ca7da",
+  "branch": "work/preinstall-ui-20261027",
+  "pr_base": "work/preinstall-closure-20261027",
+  "source_status": "READY_FOR_REVIEW",
+  "installed_qualification": "BLOCKED",
+  "central_installer": null,
+  "real_owner_qualified": false,
+  "embedded_node_binary_qualified": false,
+  "fixture_bridge": true,
+  "harness_sha256": "e506f94236fc10eb4aa3f2f7104a7771dec16709c05ca253a56914f8392fbff4",
+  "evidence_archive": {
+    "file": "source-proof-ff91a1d8.zip",
+    "sha256": "7b66786cbac0db3d67d68275643d24e270ae3b7e8bf6f401d49946a5598d302b",
+    "size_bytes": 1552029,
+    "entries": 67
+  },
+  "tests": {
+    "exact_application_ui": {
+      "pass": 110,
+      "fail": 0,
+      "skip": 0
+    },
+    "focused_browser": {
+      "pass": 43,
+      "fail": 0,
+      "skip": 0
+    },
+    "handoff_ui_including_harness": {
+      "pass": 117,
+      "fail": 0,
+      "skip": 0
+    },
+    "typescript": "PASS",
+    "eslint": "PASS",
+    "closure_seal": {
+      "pass": 16,
+      "fail": 1,
+      "skip": 0,
+      "disposition": "EXPECTED_COORDINATOR_RESEAL_REQUIRED; guard unchanged"
+    }
+  },
+  "offline_builds": {
+    "clean_build_successes": 2,
+    "external_connects_per_build": [
+      0,
+      0
+    ],
+    "dependencies_preprovisioned": true,
+    "bit_identical_output_claimed": false
+  },
+  "runtime_source_probes": {
+    "first_build_writable": "PASS",
+    "first_build_readonly": "PASS",
+    "second_build_fresh_readonly_hardened": "PASS",
+    "read_only_write_probe": "EROFS",
+    "sampled_inventory_entries": 1495
+  },
+  "final_bundle": {
+    "git_sha": "ff91a1d8fa2df70e33e35d6267ae4194c32ca7da",
+    "build_id": "ZoItmCaxunmNlwbN7iHJw",
+    "manifest_sha256": "f901dd7452451f71666860214c9957fcdc8d3341e59d2b949e05f7f807e3937e",
+    "content_sha256": "32039d2bb797fb5bb45cc5847ecebc6183ab21d5a8f40f0ccb4d56aad2e1cf22",
+    "content_file_count": 1254
+  },
+  "final_snapshots": {
+    "before": {
+      "file": "inventory-before.json",
+      "sha256": "796bf4d77293883fb0997bcbe8afbcc9a4228de8da885e123f69a7e38b201aef",
+      "tree_sha256": "5bf0ee2cc7cb8da4f4efd28a26ab7884abd2ee32e04c1fe3b44b3da1354623ce",
+      "entry_count": 1495,
+      "size_bytes": 57111241
+    },
+    "running": {
+      "file": "inventory-running.json",
+      "sha256": "796bf4d77293883fb0997bcbe8afbcc9a4228de8da885e123f69a7e38b201aef",
+      "tree_sha256": "5bf0ee2cc7cb8da4f4efd28a26ab7884abd2ee32e04c1fe3b44b3da1354623ce",
+      "entry_count": 1495,
+      "size_bytes": 57111241
+    },
+    "after": {
+      "file": "inventory-after.json",
+      "sha256": "796bf4d77293883fb0997bcbe8afbcc9a4228de8da885e123f69a7e38b201aef",
+      "tree_sha256": "5bf0ee2cc7cb8da4f4efd28a26ab7884abd2ee32e04c1fe3b44b3da1354623ce",
+      "entry_count": 1495,
+      "size_bytes": 57111241
+    }
+  },
+  "final_network": {
+    "standalone_connect": 0,
+    "standalone_sendto": 0,
+    "standalone_sendmsg": 0,
+    "chromium_nonloopback_connect_attempts": 38,
+    "chromium_nonloopback_connect_results": "All ENETUNREACH",
+    "page_external_requests": [],
+    "page_errors": [],
+    "all_process_tree_zero_external_attempts": false,
+    "raw_chromium_send_destinations_not_decoded": true
+  },
+  "retained_failed_observation": {
+    "file": "postpack-2-mutation-observation.json",
+    "status": "REJECTED_INVENTORY_MISMATCH",
+    "extra_files": 3,
+    "writer_identified": false,
+    "packer_defect_proven": false,
+    "replacement_fresh_staging_passed": true
+  },
+  "dependencies": "Bounded known-advisory applicability; no confirmed blocker, no updates/bulk audit; historical 37-entry audit JSON unavailable.",
+  "next": "Coordinator review/integration/reseal; one fresh-version exact-source producer; disposable Windows UI/Owner/embedded-runtime consumer."
+}
