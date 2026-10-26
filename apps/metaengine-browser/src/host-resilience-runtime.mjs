@@ -59,6 +59,8 @@ export function buildSentinelWorkerFailureEvidence(recovery = null, {
 export class HostResilienceRuntime {
   #electron; #onResume; #platform; #spawn; #sentinelFactory;
   #blockerId = null; #resumeHandler = null; #sentinel = null; #progressLease = null; #progressTimer = null; #resilienceTickPromise = null;
+  #transitionOperations = new Set();
+  #startPromise = null; #stopPromise = null; #ordinaryQuitFence = null; #stopLatched = false; #shutdownProgressOnly = false; #stopQuitFence = null;
   #app = null; #stopRequested = true; #lastLoginCheckMs = 0; #sentinelStatePath = null; #sentinelBootstrapRetrySafe = false; #sentinelBootstrapAttempts = 0;
   #state = {
     state: 'UNINITIALIZED', open_at_login: false, executable_will_launch_at_login: false,
@@ -97,6 +99,8 @@ export class HostResilienceRuntime {
       pid_liveness_alone_sufficient: false,
       terminal_requires_external_stop: true,
       external_stop_requested: this.#stopRequested,
+      shutdown_latched: this.#stopLatched,
+      shutdown_parent_progress_only: this.#shutdownProgressOnly,
       sentinel_recovery_requires_exact_old_pid_absence: true,
       sentinel_bootstrap_retry_requires_proven_no_spawn_effect: true,
       sentinel_recovery_uses_existing_progress_tick: true,
@@ -226,6 +230,7 @@ export class HostResilienceRuntime {
     let spawnInvoked = false;
     let spawnReturned = false;
     const trackedSpawn = (...args) => {
+      if (this.#stopLatched) throw new Error('host_resilience_stop_latched_fresh_generation_required');
       spawnInvoked = true;
       const child = this.#spawn(...args);
       spawnReturned = true;
@@ -248,7 +253,8 @@ export class HostResilienceRuntime {
       await candidate.start({ app });
       this.#sentinel = candidate;
       const healthy = await candidate.waitUntilHealthy(5_000);
-      this.#progressLease = new BrowserParentProgressLease({ statePath: this.#sentinelStatePath, getBinding: () => this.#sentinel?.snapshot?.() || null });
+      this.#progressLease = new BrowserParentProgressLease({ statePath: this.#sentinelStatePath, getBinding: () =>
+        candidate.parentProgressBinding ? candidate.parentProgressBinding() : candidate.snapshot?.() || null });
       await this.#progressLease.mark({ kind: 'HOST_RESILIENCE_STARTED' });
       this.#state.parent_progress = this.#progressLease.snapshot();
       this.#state.sentinel_worker_healthy = true;
@@ -286,7 +292,7 @@ export class HostResilienceRuntime {
   }
 
   async #markParentProgress({ kind = 'EVENT_LOOP_HEARTBEAT', detail = null } = {}) {
-    if (this.#stopRequested || !this.#progressLease) return null;
+    if ((this.#stopRequested && !this.#shutdownProgressOnly) || !this.#progressLease) return null;
     const progress = await this.#progressLease.mark({ kind, detail });
     this.#state.parent_progress = progress;
     return progress;
@@ -297,9 +303,11 @@ export class HostResilienceRuntime {
     this.#resilienceTickPromise = (async () => {
       if (this.#stopRequested) return this.snapshot();
       await this.#verifyLoginStart({ force: forceLoginCheck });
+      if (this.#stopRequested) return this.snapshot();
 
       if (!this.#sentinel && this.#sentinelBootstrapRetrySafe) await this.#bootstrapSentinel();
 
+      if (this.#stopRequested) return this.snapshot();
       if (this.#sentinel?.recoverWorkerIfProvenAbsent) {
         try {
           const recovery = await this.#sentinel.recoverWorkerIfProvenAbsent();
@@ -329,7 +337,7 @@ export class HostResilienceRuntime {
   }
 
   #startResiliencePump() {
-    if (this.#progressTimer || this.#stopRequested) return;
+    if (this.#progressTimer || (this.#stopRequested && !this.#shutdownProgressOnly)) return;
     this.#progressTimer = setInterval(() => {
       // The useful-progress write and slower recovery work intentionally share one
       // timer but not one promise. An indefinitely pending OS read or Sentinel
@@ -338,23 +346,34 @@ export class HostResilienceRuntime {
       void this.#markParentProgress({ kind: 'EVENT_LOOP_HEARTBEAT' }).catch((error) => {
         this.#state.last_error = `parent_progress:${String(error?.message || error).slice(0, 200)}`;
       });
-      void this.#resilienceTick().catch((error) => {
+      if (!this.#stopRequested) void this.#resilienceTick().catch((error) => {
         this.#state.last_error = `resilience_tick:${String(error?.message || error).slice(0, 200)}`;
       });
     }, PARENT_PROGRESS_HEARTBEAT_MS);
     this.#progressTimer.unref?.();
   }
 
-  async start() {
+  start() {
+    if (this.#stopLatched) return Promise.reject(new Error('host_resilience_stop_latched_fresh_generation_required'));
+    if (this.#startPromise) return this.#startPromise;
+    const operation = this.#startLifetime().finally(() => { if (this.#startPromise === operation) this.#startPromise = null; });
+    this.#startPromise = operation;
+    return operation;
+  }
+
+  async #startLifetime() {
     this.#stopRequested = false;
     try {
       const electron = this.#electron || await import('electron');
       const { app, powerSaveBlocker, powerMonitor } = electron;
       this.#app = app || null;
       if (!app?.isPackaged) { this.#state.state = 'DISABLED_UNPACKAGED'; return this.snapshot(); }
+      this.#installOrdinaryQuitFence();
       this.#state.state = 'ACTIVE';
       await this.#verifyLoginStart({ force: true });
+      if (this.#stopLatched) throw new Error('host_resilience_stop_latched_fresh_generation_required');
       await this.#bootstrapSentinel();
+      if (this.#stopLatched) throw new Error('host_resilience_stop_latched_fresh_generation_required');
       this.#startResiliencePump();
       if (process.env.METAENGINE_ALLOW_SUSPEND !== '1' && powerSaveBlocker) {
         this.#blockerId = powerSaveBlocker.start('prevent-app-suspension');
@@ -362,6 +381,7 @@ export class HostResilienceRuntime {
       }
       if (powerMonitor?.on && !this.#resumeHandler) {
         this.#resumeHandler = () => {
+          if (this.#stopRequested) return;
           this.#state.last_resume_at = new Date().toISOString();
           Promise.resolve(this.#onResume())
             .then(async () => {
@@ -377,6 +397,7 @@ export class HostResilienceRuntime {
       if (this.#state.login_start_required && !this.#state.login_start_verified) this.#state.state = 'DEGRADED_LOGIN_START';
       else if (this.#sentinelRequired() && this.#sentinel?.snapshot?.()?.worker_ready !== true) this.#state.state = 'DEGRADED_SENTINEL';
     } catch (e) {
+      if (this.#stopLatched) throw new Error('host_resilience_stop_latched_fresh_generation_required');
       this.#state.state = 'ERROR';
       this.#state.sentinel_worker_healthy = false;
       this.#state.last_error = String(e?.message || e).slice(0, 240);
@@ -388,7 +409,7 @@ export class HostResilienceRuntime {
   async markProgress({ kind = 'CONTROL_PLANE_CYCLE', detail = null } = {}) {
     try {
       await this.#markParentProgress({ kind, detail });
-      void this.#resilienceTick().catch((error) => {
+      if (!this.#stopRequested) void this.#resilienceTick().catch((error) => {
         this.#state.last_error = `resilience_tick:${String(error?.message || error).slice(0, 200)}`;
       });
       return this.snapshot();
@@ -398,34 +419,107 @@ export class HostResilienceRuntime {
     }
   }
 
-  async prepareExpectedRestart(reason = 'SELF_UPDATE') {
-    if (this.#sentinelRequired() && this.#sentinel?.snapshot?.()?.worker_ready !== true) throw new Error('host_resilience_sentinel_not_ready_for_expected_restart');
-    if (this.#sentinel) await this.#sentinel.prepareExpectedRestart(reason);
-    return this.snapshot();
+  #runTransition(operation) {
+    if (this.#stopLatched) return Promise.reject(new Error('host_resilience_stop_latched_fresh_generation_required'));
+    const pending = Promise.resolve().then(() => {
+      if (this.#stopLatched) throw new Error('host_resilience_stop_latched_fresh_generation_required');
+      return operation();
+    }).finally(() => { this.#transitionOperations.delete(pending); });
+    this.#transitionOperations.add(pending);
+    return pending;
   }
 
-  async prepareRuntimeRecovery(ticket) {
-    if (this.#sentinelRequired() && this.#sentinel?.snapshot?.()?.worker_ready !== true) throw new Error('host_resilience_sentinel_not_ready_for_runtime_recovery');
-    if (!this.#sentinel || typeof this.#sentinel.prepareRuntimeRecovery !== 'function') throw new Error('host_resilience_runtime_recovery_sentinel_unavailable');
-    await this.#sentinel.prepareRuntimeRecovery(ticket);
-    return this.snapshot();
+  prepareExpectedRestart(reason = 'SELF_UPDATE') {
+    return this.#runTransition(async () => {
+      if (this.#sentinelRequired() && this.#sentinel?.snapshot?.()?.worker_ready !== true) throw new Error('host_resilience_sentinel_not_ready_for_expected_restart');
+      if (this.#sentinel) await this.#sentinel.prepareExpectedRestart(reason);
+      return this.snapshot();
+    });
   }
 
-  async prepareInstallerHandoff(reason = 'SELF_UPDATE') {
-    if (this.#sentinelRequired() && this.#sentinel?.snapshot?.()?.worker_ready !== true) throw new Error('host_resilience_sentinel_not_ready_for_installer_handoff');
-    if (this.#sentinel) await this.#sentinel.prepareInstallerHandoff(reason);
-    return this.snapshot();
+  prepareRuntimeRecovery(ticket) {
+    return this.#runTransition(async () => {
+      if (this.#sentinelRequired() && this.#sentinel?.snapshot?.()?.worker_ready !== true) throw new Error('host_resilience_sentinel_not_ready_for_runtime_recovery');
+      if (!this.#sentinel || typeof this.#sentinel.prepareRuntimeRecovery !== 'function') throw new Error('host_resilience_runtime_recovery_sentinel_unavailable');
+      await this.#sentinel.prepareRuntimeRecovery(ticket);
+      return this.snapshot();
+    });
   }
 
-  async stop() {
+  prepareInstallerHandoff(reason = 'SELF_UPDATE') {
+    return this.#runTransition(async () => {
+      if (this.#sentinelRequired() && this.#sentinel?.snapshot?.()?.worker_ready !== true) throw new Error('host_resilience_sentinel_not_ready_for_installer_handoff');
+      if (this.#sentinel) await this.#sentinel.prepareInstallerHandoff(reason);
+      return this.snapshot();
+    });
+  }
+
+  #installOrdinaryQuitFence() {
+    if (this.#ordinaryQuitFence || typeof this.#app?.on !== 'function') return;
+    const app = this.#app;
+    this.#ordinaryQuitFence = event => {
+      event?.preventDefault?.();
+      // A failed/pending quit is a retained fence, not a trigger to replay stop.
+      if (this.#stopLatched) return;
+      void this.stop().then(() => app.quit?.()).catch(() => {});
+    };
+    const add = app.prependListener || app.on;
+    add.call(app, 'before-quit', this.#ordinaryQuitFence);
+  }
+
+  #holdQuitDuringStop() {
+    if (this.#stopQuitFence || typeof this.#app?.on !== 'function') return;
+    this.#stopQuitFence = event => event?.preventDefault?.();
+    const add = this.#app.prependListener || this.#app.on;
+    add.call(this.#app, 'before-quit', this.#stopQuitFence);
+  }
+
+  stop() {
+    if (this.#stopPromise) return this.#stopPromise;
+    if (this.#state.state === 'STOPPED') return Promise.resolve(this.snapshot());
     this.#stopRequested = true;
+    this.#stopLatched = true;
+    this.#shutdownProgressOnly = Boolean(this.#progressLease);
+    this.#state.state = 'STOPPING';
+    this.#holdQuitDuringStop();
+    const operation = this.#stopLifetime().finally(() => { if (this.#stopPromise === operation) this.#stopPromise = null; });
+    this.#stopPromise = operation;
+    return operation;
+  }
+
+  async #stopLifetime() {
     try {
+      // No recovery/boot may start after the latch. An older asynchronous bind
+      // must settle before the final planned marker, or it can re-arm Sentinel.
+      // While waiting (or after failure), keep ONLY exact-parent heartbeats.
+      await this.#startPromise?.catch(() => {});
+      this.#holdQuitDuringStop();
+      this.#shutdownProgressOnly = Boolean(this.#progressLease);
+      this.#startResiliencePump();
+      await this.#resilienceTickPromise;
+      await Promise.all([...this.#transitionOperations]);
       const electron = this.#electron || await import('electron');
       if (this.#resumeHandler && electron.powerMonitor?.removeListener) electron.powerMonitor.removeListener('resume', this.#resumeHandler);
       if (this.#blockerId != null && electron.powerSaveBlocker?.isStarted?.(this.#blockerId)) electron.powerSaveBlocker.stop(this.#blockerId);
-      if (this.#progressTimer) clearInterval(this.#progressTimer);
       await this.#sentinel?.stop?.();
-    } catch {}
+      // Only a confirmed terminal marker permits heartbeat admission to stop.
+      // Join older writes before returning custody to a possible fresh lifetime.
+      this.#shutdownProgressOnly = false;
+      if (this.#progressTimer) clearInterval(this.#progressTimer);
+      await this.#progressLease?.drain();
+      if (this.#stopQuitFence && this.#app?.removeListener) this.#app.removeListener('before-quit', this.#stopQuitFence);
+      if (this.#ordinaryQuitFence && this.#app?.removeListener) this.#app.removeListener('before-quit', this.#ordinaryQuitFence);
+    } catch {
+      // A failed planned-shutdown write can leave the exact Sentinel armed.
+      // Keep its custody and the stop fence; never authorize quit from a
+      // synthetic STOPPED snapshot or silently create a replacement worker.
+      this.#state.state = 'STOP_UNCONFIRMED';
+      this.#state.last_error = 'host_resilience_stop_unconfirmed';
+      throw new Error('host_resilience_stop_unconfirmed');
+    }
+    this.#shutdownProgressOnly = false;
+    this.#stopQuitFence = null;
+    this.#ordinaryQuitFence = null;
     this.#blockerId = null;
     this.#resumeHandler = null;
     this.#progressTimer = null;

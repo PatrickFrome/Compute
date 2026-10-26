@@ -65,6 +65,10 @@ export class BrowserParentProgressLease {
     return this.snapshot();
   }
 
+  // The owner must first stop admitting marks. Settling the existing tail is
+  // quiescence, not replay or a claim that a rejected heartbeat succeeded.
+  async drain() { await this.#writeTail; }
+
   mark({ kind = 'CONTROL_PLANE_CYCLE', detail = null } = {}) {
     const operation = this.#writeTail.then(() => this.#markOne({ kind, detail }));
     this.#writeTail = operation.catch(() => {});

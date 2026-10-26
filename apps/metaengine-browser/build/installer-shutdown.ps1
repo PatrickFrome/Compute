@@ -1,24 +1,19 @@
 param(
   [Parameter(Mandatory = $true)]
   [string]$InstalledExe,
-  [int]$GraceSeconds = 12,
-  [int]$ForceSeconds = 8,
-  [int]$ManagedGraceSeconds = 240
+  [switch]$RequireFreshInstall,
+  [string]$InstallRegistryKey = '',
+  [string]$UninstallRegistryKey = '',
+  [string]$UninstallRegistryKey2 = ''
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-if ($GraceSeconds -lt 1 -or $GraceSeconds -gt 30) { throw 'installer_shutdown_grace_seconds_invalid' }
-if ($ForceSeconds -lt 1 -or $ForceSeconds -gt 30) { throw 'installer_shutdown_force_seconds_invalid' }
-if ($ManagedGraceSeconds -lt 240 -or $ManagedGraceSeconds -gt 300) { throw 'installer_shutdown_managed_grace_seconds_invalid' }
-
 $target = [System.IO.Path]::GetFullPath($InstalledExe)
 $targetName = [System.IO.Path]::GetFileName($target)
 $managedRuntimeRoot = Join-Path ([System.IO.Path]::GetDirectoryName($target)) 'resources\client-state-runtime'
-# Resource presence marks the managed generation even if its manifest is corrupt.
-# An uncertain package identity must never enable the legacy forced-kill path.
-$managedPackage = Test-Path -LiteralPath $managedRuntimeRoot
+# Query expected runtime paths even when package resources are missing/corrupt.
 $managedExecutablePaths = @(
   (Join-Path $managedRuntimeRoot 'runtime\node\node.exe'),
   (Join-Path $managedRuntimeRoot 'runtime\deno\deno.exe'),
@@ -29,35 +24,85 @@ $managedExecutablePaths = @(
   (Join-Path $managedRuntimeRoot 'runtime\postgresql\bin\pg_config.exe')
 )
 
+# Existing installers can execute their bundled OLD uninstaller after this
+# hook. Its shutdown/credential effects are not authenticated by an empty process
+# list. The install path is therefore fresh-only until a reviewed migration exists.
+function Test-ExactRegistryKeyPresent($hive, $view, [string]$keyName) {
+  $base = $null
+  $key = $null
+  try {
+    $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey($hive, $view)
+    $key = $base.OpenSubKey($keyName, $false)
+    return $null -ne $key
+  } catch {
+    throw 'installer_transition_registry_presence_unknown'
+  } finally {
+    if ($null -ne $key) { $key.Dispose() }
+    if ($null -ne $base) { $base.Dispose() }
+  }
+}
+
+if ($RequireFreshInstall) {
+  if (-not $InstallRegistryKey -or -not $UninstallRegistryKey) { throw 'installer_transition_registry_identity_missing' }
+  $registryKeys = @($InstallRegistryKey, $UninstallRegistryKey, $UninstallRegistryKey2 | Where-Object { $_ } | Select-Object -Unique)
+  foreach ($keyName in $registryKeys) {
+    if (-not $keyName.StartsWith('Software\', [StringComparison]::OrdinalIgnoreCase) -or $keyName.Contains(':') -or $keyName.Contains('..')) {
+      throw 'installer_transition_registry_identity_invalid'
+    }
+  }
+  $installationRoot = [System.IO.Path]::GetDirectoryName($target)
+  if (Test-Path -LiteralPath $installationRoot) {
+    if (-not (Test-Path -LiteralPath $installationRoot -PathType Container)) { throw 'installer_transition_existing_installation_unqualified' }
+    if (@(Get-ChildItem -LiteralPath $installationRoot -Force -ErrorAction Stop | Select-Object -First 1).Count -ne 0) {
+      [Console]::Error.WriteLine('installer_transition_existing_installation_unqualified')
+      exit 23
+    }
+  }
+  foreach ($hive in @([Microsoft.Win32.RegistryHive]::CurrentUser, [Microsoft.Win32.RegistryHive]::LocalMachine)) {
+    foreach ($view in @([Microsoft.Win32.RegistryView]::Registry32, [Microsoft.Win32.RegistryView]::Registry64)) {
+      foreach ($keyName in $registryKeys) {
+        if (Test-ExactRegistryKeyPresent $hive $view $keyName) {
+          [Console]::Error.WriteLine('installer_transition_existing_registration_unqualified')
+          exit 23
+        }
+      }
+    }
+  }
+}
+
 function Get-ExactTargetProcesses {
   $escapedName = $targetName.Replace("'", "''")
   try { $rows = @(Get-CimInstance Win32_Process -Filter "Name = '$escapedName'" -ErrorAction Stop) }
   catch { throw 'installer_shutdown_process_inventory_unavailable' }
   return @($rows | Where-Object {
     $candidate = [string]$_.ExecutablePath
-    if (-not $candidate) { return $false }
+    if (-not $candidate -or -not [System.IO.Path]::IsPathRooted($candidate)) {
+      throw 'installer_shutdown_process_identity_unknown'
+    }
     try {
       return [System.StringComparer]::OrdinalIgnoreCase.Equals(
         [System.IO.Path]::GetFullPath($candidate),
         $target
       )
     } catch {
-      return $false
+      throw 'installer_shutdown_process_identity_unknown'
     }
   })
 }
 
 function Get-ExactInstallationProcesses {
   $browser = @(Get-ExactTargetProcesses)
-  if (-not $managedPackage) { return $browser }
   $names = @($managedExecutablePaths | ForEach-Object { [System.IO.Path]::GetFileName($_) } | Select-Object -Unique)
   $filter = ($names | ForEach-Object { "Name = '$($_.Replace("'", "''"))'" }) -join ' OR '
   try { $rows = @(Get-CimInstance Win32_Process -Filter $filter -ErrorAction Stop) }
   catch { throw 'installer_shutdown_process_inventory_unavailable' }
   $runtime = @($rows | Where-Object {
     $candidate = [string]$_.ExecutablePath
-    if (-not $candidate) { return $false }
-    try { $candidate = [System.IO.Path]::GetFullPath($candidate) } catch { return $false }
+    if (-not $candidate -or -not [System.IO.Path]::IsPathRooted($candidate)) {
+      throw 'installer_shutdown_process_identity_unknown'
+    }
+    try { $candidate = [System.IO.Path]::GetFullPath($candidate) }
+    catch { throw 'installer_shutdown_process_identity_unknown' }
     foreach ($exact in $managedExecutablePaths) {
       if ([System.StringComparer]::OrdinalIgnoreCase.Equals($candidate, $exact)) { return $true }
     }
@@ -66,95 +111,19 @@ function Get-ExactInstallationProcesses {
   return @($browser + $runtime)
 }
 
-function Test-ProcessAlive([int]$ProcessId) {
-  if ($ProcessId -le 0) { return $false }
-  try {
-    $process = Get-Process -Id $ProcessId -ErrorAction Stop
-    return $null -ne $process
-  } catch {
-    return $false
-  }
-}
+# The installer owns installation processes, not canonical user state. A stale
+# daemon PID cannot prove custody of separately published authentication or bridge
+# artifacts. Leave all profile/daemon state to its actual runtime owner.
 
-function Remove-DeadComputeDaemonState {
-  # The Browser Compute runtime owns this canonical PID lock. Reclaim artifacts only
-  # when the lock is well-formed and its recorded owner is proven dead. A live owner
-  # may belong to an independently started Compute service and is never terminated or
-  # modified by the Browser installer.
-  $stateRoot = Join-Path $env:USERPROFILE '.metaengine\a2-compute-browser'
-  $lockPath = Join-Path $stateRoot 'a2-daemon.lock'
-  if (-not (Test-Path -LiteralPath $lockPath -PathType Leaf)) { return }
-
-  $lock = $null
-  try { $lock = Get-Content -LiteralPath $lockPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop } catch { return }
-  $ownerPid = 0
-  try { $ownerPid = [int]$lock.pid } catch { return }
-  if ($ownerPid -le 0 -or (Test-ProcessAlive $ownerPid)) { return }
-
-  Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
-  Remove-Item -LiteralPath (Join-Path $stateRoot 'control-token') -Force -ErrorAction SilentlyContinue
-  Remove-Item -LiteralPath (Join-Path $env:USERPROFILE '.a2\compute-bridge.json') -Force -ErrorAction SilentlyContinue
-}
-
+# This is only a read-only installation-file gate, not a worker-tree drain
+# receipt. The current installed generation may implement the old unsafe forced
+# exit handler. No authenticated shutdown-protocol contract exists in this
+# installer, so invoking that handler and trusting disappearance is forbidden.
+# A separately controlled ordinary quit and independent runtime drain readback
+# must precede replacement. Unclear process identity is HOLD, never absence.
 $existing = @(Get-ExactInstallationProcesses)
-if ($existing.Count -eq 0) {
-  Remove-DeadComputeDaemonState
-  exit 0
-}
-
-# New Browser builds understand this local installer-only signal. The primary
-# stops HostResilience/Sentinel first and then performs a planned app.quit().
-# Older installed builds safely ignore the flag; the bounded exact-path fallback
-# below is the one-time migration path for those versions.
-try {
-  if (Test-Path -LiteralPath $target -PathType Leaf) {
-    Start-Process -FilePath $target -ArgumentList '--metaengine-installer-shutdown' -WindowStyle Hidden | Out-Null
-  }
-} catch {
-  # A launch failure does not authorize a broad process kill. Continue only with
-  # exact ExecutablePath identities already bound to this installation.
-}
-
-$graceDeadline = (Get-Date).ToUniversalTime().AddSeconds($GraceSeconds)
-if ($managedPackage) { $graceDeadline = (Get-Date).ToUniversalTime().AddSeconds($ManagedGraceSeconds) }
-do {
-  if (@(Get-ExactInstallationProcesses).Count -eq 0) {
-    Remove-DeadComputeDaemonState
-    exit 0
-  }
-  Start-Sleep -Milliseconds 200
-} while ((Get-Date).ToUniversalTime() -lt $graceDeadline)
-
-# The managed primary waits for its provider preflight and child cleanup before
-# it quits. Browser disappearance alone cannot prove Node/Deno/Postgres stopped.
-# Preserve live processes and abort before file replacement if cleanup is unclear.
-if ($managedPackage) {
-  [Console]::Error.WriteLine('installer_shutdown_managed_cleanup_unconfirmed')
+if ($existing.Count -ne 0) {
+  [Console]::Error.WriteLine('installer_shutdown_controlled_quit_required')
   exit 23
 }
-
-# Migration fallback for legacy resident builds: terminate only processes whose
-# Win32_Process.ExecutablePath exactly equals the installed Browser executable.
-# Re-enumerate until stable because the legacy Sentinel can briefly relaunch its
-# parent after an unexpected death. Never use image-name-wide taskkill.
-$forceDeadline = (Get-Date).ToUniversalTime().AddSeconds($ForceSeconds)
-do {
-  $rows = @(Get-ExactTargetProcesses)
-  if ($rows.Count -eq 0) {
-    Remove-DeadComputeDaemonState
-    exit 0
-  }
-  foreach ($row in $rows) {
-    try { Stop-Process -Id ([int]$row.ProcessId) -Force -ErrorAction Stop } catch {}
-  }
-  Start-Sleep -Milliseconds 250
-} while ((Get-Date).ToUniversalTime() -lt $forceDeadline)
-
-$remaining = @(Get-ExactTargetProcesses)
-if ($remaining.Count -ne 0) {
-  [Console]::Error.WriteLine("installer_shutdown_exact_path_processes_remain:$($remaining.Count)")
-  exit 23
-}
-
-Remove-DeadComputeDaemonState
 exit 0

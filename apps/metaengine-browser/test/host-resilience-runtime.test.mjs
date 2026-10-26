@@ -253,3 +253,34 @@ test('initial sentinel bootstrap retries only when spawn effect is proven absent
   assert.match(source, /host_resilience_sentinel_not_ready_for_installer_handoff/);
   assert.equal((source.match(/setInterval\s*\(/g) || []).length, 1, 'bootstrap recovery must reuse the existing resilience scheduler');
 });
+
+test('failed Sentinel planned shutdown is not STOPPED and retains exact custody for explicit readback', async t => {
+  const old = process.env.METAENGINE_DISABLE_CRASH_SENTINEL;
+  delete process.env.METAENGINE_DISABLE_CRASH_SENTINEL;
+  t.after(() => { if (old === undefined) delete process.env.METAENGINE_DISABLE_CRASH_SENTINEL; else process.env.METAENGINE_DISABLE_CRASH_SENTINEL = old; });
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-sentinel-stop-fence-'));
+  t.after(() => fs.rm(dir, {recursive:true,force:true}));
+  const binding = {schema:'metaengine.browser-sentinel.state.v1',token:'fixture-owned-sentinel',parent_pid:process.pid,worker_pid:4242,
+    worker_ready:true,worker_released:false,lifecycle:'ARMED',expected_restart:false,installer_handoff:false,authority_effect:false};
+  let calls=0, rejectStop=true;
+  const sentinel = {
+    start:async()=>binding, waitUntilHealthy:async()=>binding, snapshot:()=>({...binding}),
+    recoverWorkerIfProvenAbsent:async()=>({state:'HEALTHY',authority_effect:false}),
+    stop:async()=>{calls++;if(rejectStop)throw Error('fixture_sentinel_state_write_failed');binding.lifecycle='PLANNED_SHUTDOWN';return {...binding};},
+  };
+  const electron=fakeElectron();electron.app.getPath=()=>dir;
+  const runtime=new HostResilienceRuntime({electron,platform:'win32',sentinelFactory:()=>sentinel});
+  const started=await runtime.start();
+  assert.equal(started.sentinel_bootstrap.state,'HEALTHY','the negative must exercise the owned Sentinel, not absent setup');
+  await assert.rejects(runtime.stop(), /host_resilience_stop_unconfirmed/);
+  const blocked=runtime.snapshot();
+  assert.equal(blocked.state,'STOP_UNCONFIRMED');
+  assert.equal(blocked.external_stop_requested,true);
+  assert.equal(blocked.sentinel.token,binding.token);
+  assert.equal(blocked.sentinel.lifecycle,'ARMED');
+  assert.equal(blocked.sentinel_bootstrap_retry_pending,false);
+  rejectStop=false;
+  const stopped=await runtime.stop();
+  assert.equal(calls,2,'an explicit retry uses the same Sentinel, not a replacement owner');
+  assert.equal(stopped.state,'STOPPED');
+});

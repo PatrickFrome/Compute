@@ -121,7 +121,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export class BrowserSentinelHost {
   #statePath; #workerScript; #executable; #spawn; #processAlive; #state = null; #child = null; #childExitProof = null;
-  #beforeQuit = null; #app = null; #workerRecoveryPromise = null; #transitionLatch = null;
+  #beforeQuit = null; #plannedShutdownBlocked = false; #app = null; #workerRecoveryPromise = null; #transitionLatch = null;
 
   constructor({ statePath, workerScript, executable = process.execPath, spawnImpl = spawn, processAliveImpl = processAlive } = {}) {
     if (!statePath || !workerScript || !executable) throw new Error('browser_sentinel_paths_required');
@@ -169,6 +169,17 @@ export class BrowserSentinelHost {
       single_writer_parent_state: true,
       authority_effect: false,
     });
+  }
+
+  parentProgressBinding() {
+    // Diagnostic snapshot() may retain cached identity after durable custody is
+    // lost. It must never authorize writes to another generation's heartbeat.
+    const current = readJsonSync(this.#statePath);
+    if (current?.schema !== 'metaengine.browser-sentinel.state.v1' || !this.#state?.token
+      || current.token !== this.#state.token || Number(current.parent_pid) !== process.pid) {
+      throw new Error('browser_parent_progress_binding_unconfirmed');
+    }
+    return structuredClone(current);
   }
 
   async waitUntilHealthy(timeoutMs = 5_000) {
@@ -253,7 +264,17 @@ export class BrowserSentinelHost {
     this.#child.unref?.();
     this.#app = app;
     if (app?.on) {
-      this.#beforeQuit = () => { this.markPlannedShutdownSync(); };
+      this.#beforeQuit = event => {
+        if (event?.defaultPrevented === true) return;
+        if (this.#plannedShutdownBlocked) { event?.preventDefault?.(); return; }
+        try { this.markPlannedShutdownSync(); }
+        catch {
+          // A failed exact planned-state write is not permission to exit while
+          // the persisted Sentinel is ARMED. Ordinary Quit does not replay it.
+          this.#plannedShutdownBlocked = true;
+          event?.preventDefault?.();
+        }
+      };
       app.on('before-quit', this.#beforeQuit);
     }
     return this.snapshot();
@@ -274,7 +295,10 @@ export class BrowserSentinelHost {
 
   #mutateSync(patch) {
     const current = readJsonSync(this.#statePath);
-    if (!current || current.token !== this.#state?.token || Number(current.parent_pid) !== process.pid) return this.snapshot();
+    if (current?.schema !== 'metaengine.browser-sentinel.state.v1'
+      || current.token !== this.#state?.token || Number(current.parent_pid) !== process.pid) {
+      throw new Error('browser_sentinel_planned_shutdown_binding_unconfirmed');
+    }
     this.#state = safeState({
       ...current,
       ...patch,
@@ -527,23 +551,40 @@ export class BrowserSentinelHost {
 
   markPlannedShutdownSync() {
     const current = readJsonSync(this.#statePath);
-    if (!current || current.token !== this.#state?.token) return this.snapshot();
+    if (current?.schema !== 'metaengine.browser-sentinel.state.v1' || !this.#state?.token
+      || current.token !== this.#state.token || Number(current.parent_pid) !== process.pid) {
+      throw new Error('browser_sentinel_planned_shutdown_binding_unconfirmed');
+    }
     const lifecycle = current.lifecycle === 'RUNTIME_RECOVERY' || current.runtime_recovery_ticket
       ? 'RUNTIME_RECOVERY'
       : current.installer_handoff === true
       ? 'INSTALLER_HANDOFF'
       : (current.expected_restart === true ? 'EXPECTED_RESTART' : 'PLANNED_SHUTDOWN');
     this.#latchTransition(lifecycle);
-    return this.#mutateSync({ lifecycle });
+    const result = this.#mutateSync({ lifecycle });
+    // A cached snapshot or a successful rename alone is not a terminal receipt.
+    // Retain custody/quit fences unless the exact durable transition is read back.
+    const committed = readJsonSync(this.#statePath);
+    if (committed?.schema !== 'metaengine.browser-sentinel.state.v1'
+      || committed.token !== current.token || Number(committed.parent_pid) !== process.pid
+      || committed.lifecycle !== lifecycle
+      || Number(committed.state_revision) !== Number(current.state_revision || 0) + 1) {
+      throw new Error('browser_sentinel_planned_shutdown_binding_unconfirmed');
+    }
+    return { ...result, ...committed, authority_effect: false };
   }
 
   async markPlannedShutdown() { return this.markPlannedShutdownSync(); }
 
   async stop() {
+    let result;
+    try { result = this.markPlannedShutdownSync(); }
+    catch (error) { this.#plannedShutdownBlocked = true; throw error; }
+    this.#plannedShutdownBlocked = false;
     if (this.#beforeQuit && this.#app?.removeListener) this.#app.removeListener('before-quit', this.#beforeQuit);
     this.#beforeQuit = null;
     this.#app = null;
-    return this.markPlannedShutdownSync();
+    return result;
   }
 }
 

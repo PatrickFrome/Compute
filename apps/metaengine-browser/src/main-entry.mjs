@@ -114,12 +114,12 @@ if (guard.installer_shutdown_control) {
   let resilienceStartup = null;
   registerPrimaryInstallerShutdownBarrier(app, async () => {
     await primaryPreparation;
-    const controller = await runtimeController;
     // An already-started ready continuation must settle before the guard stops
     // HostResilience. A later ready event is fenced by the installer marker.
     if (resilienceStartup) await resilienceStartup;
-    const cleanup = await controller.stopOwnedLocalRuntimeHost();
-    if (cleanup.cleanup_confirmed !== true) throw new Error('local_runtime_host_cleanup_unconfirmed');
+    // Do not stop the Host here: native worker/checkpoint drains still need its
+    // capability. The canonical before-quit barrier drains those first, then
+    // installLocalRuntimeHostShutdown's will-quit barrier confirms Host cleanup.
   });
   try {
   if (updatedLaunch && app.isPackaged === true) {

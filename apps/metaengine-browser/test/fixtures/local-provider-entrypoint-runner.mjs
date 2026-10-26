@@ -81,6 +81,8 @@ app.exit = code => { trace('exit', code); process.exit(code); };
 app.quit = () => {
   trace('quit-requested');
   let prevented = false;
+  app.emit('before-quit', { get defaultPrevented() { return prevented; }, preventDefault: () => { prevented = true; trace('before-quit-prevented'); } });
+  if (prevented) return;
   app.emit('will-quit', { preventDefault: () => { prevented = true; trace('quit-prevented'); } });
   if (!prevented && !options.holdQuit) app.exit(0);
 };
@@ -123,6 +125,7 @@ const electronModule = dataModule([
   'export const dialog = globalThis.__singletonTestElectron.dialog;',
   'export const protocol = globalThis.__singletonTestElectron.protocol;',
 ].join('\n'));
+globalThis.__readFixtureHostState = () => JSON.parse(fs.readFileSync(options.managedHost.evidenceFile, 'utf8')).state;
 const runtimeModule = dataModule([
   'import { app } from "electron";',
   'import { NATIVE_SUPERVISOR_BASE, NATIVE_SUPERVISOR_STATE_PROVIDER, setNativeSupervisorBase } from ' + JSON.stringify(endpoint) + ';',
@@ -134,6 +137,20 @@ const runtimeModule = dataModule([
   'globalThis.__traceEntrypoint("runtime-barrier", !!globalThis.__METAENGINE_BROWSER_BOOTSTRAP_BARRIER__);',
   'globalThis.__METAENGINE_BROWSER_BOOTSTRAP_BARRIER__?.then(() => globalThis.__traceEntrypoint("barrier-released"));',
   'app.on("activate", () => globalThis.__traceEntrypoint("runtime-activate"));',
+  ...(options.nativeDrainMode ? [
+    'import { drainManagedRuntimeBindings } from ' + JSON.stringify(new URL('managed-runtime-drain.mjs', src).href) + ';',
+    'let drainComplete=false, drainStarted=false;',
+    'app.on("before-quit", event => {',
+    ' if(drainComplete) return; event.preventDefault(); if(drainStarted) return; drainStarted=true;',
+    ' const hostState=globalThis.__readFixtureHostState(); globalThis.__traceEntrypoint("native-drain-start",hostState);',
+    ' void drainManagedRuntimeBindings({coding:{close:async()=>{',
+    '  await new Promise(resolve=>setTimeout(resolve,50));',
+    options.nativeDrainMode === 'pending' ? '  await new Promise(()=>{});' : '',
+    '  return {schema:"metaengine.native-coding.runtime.v1",shutdown_state:' + JSON.stringify(options.nativeDrainMode === 'failed' ? 'DRAIN_UNCONFIRMED' : 'DRAINED') + ',worker_cleanup_confirmed:' + (options.nativeDrainMode === 'failed' ? 'false' : 'true') + '};',
+    ' }}}).then(()=>{drainComplete=true;globalThis.__traceEntrypoint("native-drain-confirmed",globalThis.__readFixtureHostState());app.quit();})',
+    ' .catch(()=>globalThis.__traceEntrypoint("native-drain-blocked"));',
+    '});',
+  ] : []),
 ].join('\n'));
 const hostModule = dataModule([
   'import { NATIVE_SUPERVISOR_STATE_PROVIDER, NATIVE_SUPERVISOR_BASE } from ' + JSON.stringify(endpoint) + ';',
@@ -226,7 +243,7 @@ if (options.installerAfterBoot || options.installerDuringStartup) {
     trace('installer-signal-after-boot');
     app.emit('second-instance', null, ['browser.exe', '--metaengine-installer-shutdown']);
   }, 50);
-  originalSetTimeout(() => process.exit(99), 5000).unref();
+  originalSetTimeout(() => process.exit(99), options.fixtureDeadlineMs || 5000);
 } else {
   setTimeout(() => options.quitAfterBoot ? app.quit()
     : process.exit(awaitingProbeExit ? 99 : process.exitCode || 0), awaitingProbeExit ? 5000 : 200);
