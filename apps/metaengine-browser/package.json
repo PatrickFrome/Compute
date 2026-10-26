@@ -1,6 +1,6 @@
 {
   "name": "@metaengine/browser-shell",
-  "version": "0.7.0-dev.1508254192075.1",
+  "version": "0.7.0-dev.1643171572592.1",
   "private": true,
   "type": "module",
   "description": "METAENGINE client with native coordinated agents, managed projects, own PostgreSQL and guarded runtime recovery",

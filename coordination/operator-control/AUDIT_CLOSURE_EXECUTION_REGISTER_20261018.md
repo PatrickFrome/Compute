@@ -591,3 +591,13 @@ The successor recognizes a pre-dispatch rejection only after the protected exact
 Focused source tests: 76 PASS. Isolated PostgreSQL seed integration: 16 PASS, including unknown transaction outcome and a racing committed admission. No model executions in these tests. The installer operator now supports complete readback after an unknown installer exit and waits up to 1800 seconds; it does not replay the installer or manufacture an exit code.
 
 Live GitHub artifact metadata and read-only candidate plan: evidence/audits/metaengine-20261026-seed-recovery/live-artifact-observation.json. This commit prepares a distinct source version; CI/package/installed qualification for the successor remains pending. No production signing, promotion, automatic replay or unlimited physical concurrency is claimed.
+
+## Edge capability health admission recovery — 0.7.0-dev.1643171572592.1
+
+Functional source: e22178b058065a96d76a76f2c7d29db0a0c87196. A later installed .148 observation found Host/API/Edge STOPPED at 2026-10-26T17:44:33Z with health_capability_db_read_failed after three failures. The same live PostgreSQL and Guardian remained running. This supersedes the earlier time-bound READY observation without rewriting it.
+
+A targeted HTTP regression reproduced 503 for Edge capability attestation while six application requests occupied their admission slots; GET /health still worked. The exact authenticated capability RPC now shares the single reserved health admission and runs in a read-only transaction. Application capacity is unchanged. Authentication, argument validation, one health request maximum, seven physical SQL slots and real DB attestation remain enforced. No cached READY or failure-threshold relaxation.
+
+API regression suite: 21 PASS. Actual current-source API on an ephemeral loopback port, using the existing restricted PG login: ATTESTED / EXACT_DB_SOURCE_MATCH in 415 ms including startup, zero model calls. This is read-only component evidence, not installed runtime or autonomous-work qualification.
+
+The prior prepared .150 identity is retired from reuse because it omits this necessary runtime repair. New read-only candidate metadata: evidence/audits/metaengine-20261026-edge-health-recovery/live-artifact-observation.json. The new exact package still requires Windows qualification, installation and useful autonomous-agent execution.

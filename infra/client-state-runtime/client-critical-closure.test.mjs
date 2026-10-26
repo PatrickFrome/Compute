@@ -83,7 +83,7 @@ function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion)
   classification:'SOURCE_ONLY_NO_CURRENT_PACKAGE',
   branch:'work/autonomy-continuation-20261026',
   source_parent:'ea405d926568508eac53ebb408e941c94faeadcf',
-  package_version:'0.7.0-dev.1508254192075.1',
+  package_version:'0.7.0-dev.1643171572592.1',
   historical_package_version:'0.7.0-dev.202610152359.1',
   package_build_authorized:false,
   package_version_reuse_authorized:false,
@@ -429,27 +429,37 @@ function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion)
     "production_ready": false,
     "promotion_authorized": false,
     "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "4b1b0854f918e42494e073f36d96307422617643",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.1359740117434.1",
+    "distinct_version": "0.7.0-dev.1485366478478.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "c784151343015a1d93f84ac8a8eae8a4b453a0bb",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.1485366478478.1",
+    "distinct_version": "0.7.0-dev.1508254192075.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
   }
-,
-{
-  "schema": "metaengine.client.package-version-successor.v1",
-  "source_parent": "4b1b0854f918e42494e073f36d96307422617643",
-  "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
-  "prior_version": "0.7.0-dev.1359740117434.1",
-  "distinct_version": "0.7.0-dev.1485366478478.1",
-  "preceding_version_burned": true,
-  "production_ready": false,
-  "promotion_authorized": false,
-  "authority_effect": false
-}
 ]);
  const successor=manifest.current_package_transition;
  assert.deepEqual(successor,{
   "schema": "metaengine.client.package-version-successor.v1",
-  "source_parent": "c784151343015a1d93f84ac8a8eae8a4b453a0bb",
+  "source_parent": "e22178b058065a96d76a76f2c7d29db0a0c87196",
   "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
-  "prior_version": "0.7.0-dev.1485366478478.1",
-  "distinct_version": "0.7.0-dev.1508254192075.1",
+  "prior_version": "0.7.0-dev.1508254192075.1",
+  "distinct_version": "0.7.0-dev.1643171572592.1",
   "preceding_version_burned": true,
   "production_ready": false,
   "promotion_authorized": false,
@@ -844,6 +854,20 @@ test('seed recovery successor preserves installed predecessor and uses a fresh o
  const evidence=JSON.parse(read('evidence/audits/metaengine-20261026-seed-recovery/live-artifact-observation.json'));
  assert.equal(evidence.source_head,prior);assert.equal(evidence.plan.candidate_package_version,version);
  assert.equal(evidence.plan.minimum_package_version,'0.7.0-dev.1485366478478.1');
+ assert.equal(evidence.reservation_created,false);assert.equal(evidence.package_built,false);assert.equal(evidence.authority_effect,false);
+ assert.equal(evidence.plan.physical_package_build_allowed,false);assert.equal(evidence.plan.promotion_authorized,false);
+ for(const q of evidence.queries){assert.equal(q.status,200);const body=JSON.parse(q.response_body);assert.equal(body.total_count,body.artifacts.length);}
+ assert.equal(JSON.parse(evidence.queries.at(-1).response_body).total_count,0);
+ assert.equal(manifest.previous_package_transitions.find(item=>item.distinct_version===version).source_parent,prior);
+ assertCommittedAuditPrefix(root,prior,'HEAD','coordination/operator-control/AUDIT_CLOSURE_EXECUTION_REGISTER_20261018.md');
+});
+
+
+test('Edge health recovery successor binds fresh source and metadata without installed qualification',()=>{
+ const prior='e22178b058065a96d76a76f2c7d29db0a0c87196',version='0.7.0-dev.1643171572592.1';
+ const evidence=JSON.parse(read('evidence/audits/metaengine-20261026-edge-health-recovery/live-artifact-observation.json'));
+ assert.equal(evidence.source_head,prior);assert.equal(evidence.plan.candidate_package_version,version);
+ assert.equal(evidence.plan.minimum_package_version,'0.7.0-dev.1508254192075.1');
  assert.equal(evidence.reservation_created,false);assert.equal(evidence.package_built,false);assert.equal(evidence.authority_effect,false);
  assert.equal(evidence.plan.physical_package_build_allowed,false);assert.equal(evidence.plan.promotion_authorized,false);
  for(const q of evidence.queries){assert.equal(q.status,200);const body=JSON.parse(q.response_body);assert.equal(body.total_count,body.artifacts.length);}
