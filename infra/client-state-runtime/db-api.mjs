@@ -155,9 +155,12 @@ export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port
       if (request.headers.host !== expectedHost || request.headers.origin !== undefined) throw new ApiError(403, 'local_service_request_required');
       if (!authenticated(request.headers, apiKey)) throw new ApiError(401, 'local_service_key_required');
       const url = new URL(request.url, `http://${expectedHost}`);
-      // Health must still inspect the DB when all six application requests
-      // are busy. It has one separate bounded read slot, with the same auth.
-      if(url.pathname==='/health'&&request.method==='GET'&&!url.search) {
+      // Edge readiness uses the exact capability RPC. Reserve the same single
+      // authenticated read slot for both health routes so application load
+      // cannot falsely report DB failure and tear down a healthy runtime.
+      const healthRead=!url.search&&((url.pathname==='/health'&&request.method==='GET')
+        ||(url.pathname==='/rest/v1/rpc/devos_runtime_capabilities_v1'&&request.method==='POST'));
+      if(healthRead) {
         if(activeHealthRequests>=HEALTH_REQUEST_CAPACITY) throw new ApiError(503,'local_state_health_busy');
         activeHealthRequests++;healthAdmitted=true;
       } else {
@@ -264,7 +267,7 @@ export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port
         const missing = RPC_ALLOWLIST.filter((name) => !signatures.some((signature) => signature.name === name));
         const unavailableTables = Object.keys(TABLE_ALLOWLIST).filter((name) => !tableAccess.some((table) => table.name === name && table.readable && table.writable));
         const capabilityPlan = compileRpcRequest('devos_runtime_capabilities_v1', {}, signatures);
-        const capabilityRows = await transaction((tx) => tx.unsafe(capabilityPlan.text, driverValues(sql, capabilityPlan.values)));
+        const capabilityRows = await transaction((tx) => tx.unsafe(capabilityPlan.text, driverValues(sql, capabilityPlan.values)),{readOnly:true});
         return send(response, missing.length || unavailableTables.length ? 503 : 200, {
           ok: missing.length === 0 && unavailableTables.length === 0, schema: 'metaengine.client-state.health.v1', mode: 'LOCAL_POSTGRES',
           instance_id: instanceId, version: 1, rpc_catalog: { available: RPC_ALLOWLIST.length - missing.length, allowed: RPC_ALLOWLIST.length, missing },
@@ -283,7 +286,7 @@ export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port
         plan = compileTableRequest({ table: tableMatch[1], method: request.method, params: url.searchParams,
           body: request.method === 'POST' ? await readBody(request) : undefined, prefer: request.headers.prefer });
       } else throw new ApiError(404, 'route_not_found');
-      const rows = await transaction((tx) => tx.unsafe(plan.text, driverValues(sql, plan.values)));
+      const rows = await transaction((tx) => tx.unsafe(plan.text, driverValues(sql, plan.values)),{readOnly:healthAdmitted});
       send(response, plan.status, plan.scalar ? rows[0]?.value ?? null : plan.returning === false ? null : Array.from(rows));
     } catch (error) {
       const mapped = databaseError(error);

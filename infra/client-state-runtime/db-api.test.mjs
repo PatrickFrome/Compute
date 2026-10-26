@@ -111,9 +111,11 @@ function fakeDatabase() {
 
 test('six occupied application requests cannot starve the authenticated DB health read',async()=>{
   const database=fakeDatabase(),rawBegin=database.sql.begin;
-  let release,entered=0;const gate=new Promise(resolve=>{release=resolve;});
+  let release,entered=0,holdHealth=false,healthEntered=false,releaseHealth;
+  const gate=new Promise(resolve=>{release=resolve;}),healthGate=new Promise(resolve=>{releaseHealth=resolve;});
   database.sql.begin=fn=>rawBegin(tx=>fn({...tx,unsafe:async(text,values)=>{
     if(text.startsWith('SELECT "public"."devos_environment_state_v1"')) {entered++;await gate;}
+    if(holdHealth&&text.startsWith('SELECT "public"."devos_runtime_capabilities_v1"')) {healthEntered=true;await healthGate;}
     return tx.unsafe(text,values);
   }}));
   const secret='f'.repeat(64),runtime=await startDbApi({apiKey:secret,port:0,sql:database.sql});
@@ -130,7 +132,23 @@ test('six occupied application requests cannot starve the authenticated DB healt
     assert.equal(value.schema,'metaengine.client-state.health.v1');
     assert.equal(value.error,undefined);
     assert.deepEqual(value.runtime_capabilities,{schema:'test-capabilities'});
-  } finally {release();await Promise.allSettled(pending);await runtime.close();}
+    // Edge health uses this RPC, not GET /health. It must share the reserved
+    // bounded read admission rather than the saturated application lane.
+    const edgeHealth=await fetch(runtime.address+'/rest/v1/rpc/devos_runtime_capabilities_v1',{method:'POST',headers,body:'{}'});
+    assert.equal(edgeHealth.status,200);
+    assert.deepEqual(await edgeHealth.json(),{schema:'test-capabilities'});
+    assert.equal((await fetch(runtime.address+'/rest/v1/rpc/devos_runtime_capabilities_v1',{method:'POST',headers:{'content-type':'application/json'},body:'{}'})).status,401);
+    assert.equal((await fetch(runtime.address+'/rest/v1/rpc/devos_runtime_capabilities_v1',{method:'POST',headers,body:'{"unexpected":true}'})).status,400);
+    assert.equal((await rpc()).status,503,'the health route must not expand application admission');
+    holdHealth=true;
+    const held=fetch(runtime.address+'/rest/v1/rpc/devos_runtime_capabilities_v1',{method:'POST',headers,body:'{}'});pending.push(held);
+    const healthDeadline=Date.now()+5000;while(!healthEntered&&Date.now()<healthDeadline)await new Promise(resolve=>setTimeout(resolve,5));
+    assert.equal(healthEntered,true);
+    assert.equal((await fetch(runtime.address+'/health',{headers:{apikey:secret}})).status,503);
+    assert.equal((await fetch(runtime.address+'/rest/v1/rpc/devos_runtime_capabilities_v1',{method:'POST',headers,body:'{}'})).status,503);
+    releaseHealth();assert.equal((await held).status,200);
+    assert.ok(database.calls.some(call=>call.text==='SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY'));
+  } finally {releaseHealth();release();await Promise.allSettled(pending);await runtime.close();}
 });
 
 test('direct API keeps the login identity while preserving signed protocol claims', async () => {
