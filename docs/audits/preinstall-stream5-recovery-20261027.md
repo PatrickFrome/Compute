@@ -17,7 +17,7 @@ exact tested commit and, for CI, its run and attempt before review handoff.
 | PR base | `work/preinstall-closure-20261027` |
 | HEAD_SHA | Exact committed SHA is recorded in the issue handoff and each receipt |
 | Draft PR | Linked from issue #1360 after publication |
-| Source verification | 67 PASS / 0 FAIL / 1 Windows-only SKIP, Linux Node 24.22.1, working tree |
+| Source verification | 70 PASS / 0 FAIL / 1 Windows-only SKIP, Linux Node 24.22.1, working tree |
 | Disposable Windows physical qualification | PENDING |
 | Installed backup / installed runtime qualification | Not established by this work |
 
@@ -192,9 +192,14 @@ automatic stop or utility retry.
 
 ## SQL ownership and ACL limitations
 
-The existing executor uses `--no-owner --no-acl`; restore retains those
-limitations. The logical archive does not restore role definitions, role
-passwords, object ownership or GRANT/REVOKE state through these options.
+The existing executor uses `--no-owner --no-acl`; restore explicitly retains
+both options. For a custom-format archive, `pg_dump --no-owner` is ignored;
+the harness's `pg_restore --no-owner` is what prevents assignment of the
+original object owners. `--no-acl` excludes GRANT/REVOKE commands, and this
+single-database dump does not supply global role definitions or passwords.
+These limits follow the PostgreSQL 17 documentation for
+[pg_dump](https://www.postgresql.org/docs/17/app-pgdump.html) and
+[pg_restore](https://www.postgresql.org/docs/17/app-pgrestore.html).
 Successful decryption as the disposable administrator is not proof that an
 application role can decrypt, or that an unauthorized role cannot do so.
 
@@ -278,7 +283,7 @@ acknowledgment. Keep private files out of the report and GitHub artifacts.
 
 | Check | PASS | FAIL | SKIP | Evidence |
 | --- | --- | --- | --- | --- |
-| Guard source tests | 19 | 0 | 0 | Linux Node 24.22.1; normal subprocess and no-isolation modes |
+| Guard source tests | 22 | 0 | 0 | Linux Node 24.22.1; includes fixed native-diagnostic and spoofed-error controls |
 | Receipt/export source tests | 9 | 0 | 0 | Linux Node 24.22.1; includes real CLI subprocesses |
 | Existing focused fence/backup/restore regression tests | 39 | 0 | 0 | Existing shared authority unchanged |
 | Physical integration entrypoint on Linux | 0 | 0 | 1 | Explicit Windows prerequisite SKIP, not qualification |
@@ -286,6 +291,16 @@ acknowledgment. Keep private files out of the report and GitHub artifacts.
 | Syntax / `git diff --check` | PASS | 0 | N/A | New modules parsed and diff checked |
 | Windows physical recovery | PENDING | PENDING | PENDING | Exact-source run/attempt and artifact links required |
 | Sanitized receipt/TAP verification | PENDING | PENDING | PENDING | Bound receipt and artifact hashes required |
+
+First Windows source run on `c88a5e1adcde159d8cca26fc384f72b516b5939b`,
+[40416312433 / attempt 1](https://github.com/PatrickFrome/Compute/actions/runs/40416312433),
+returned **57 PASS / 10 FAIL / 0 SKIP** in source controls. All ten failures
+were native path-readback UNKNOWN; no PG preparation or physical database
+operation ran. The existing fence/backup/restore tests passed. The native
+guard's environment is now pinned to Windows PowerShell system modules and
+its diagnostics are restricted to fixed phase/category identifiers. The
+original log did not establish the underlying native cause; successful
+execution on the corrective source is still required.
 
 Exact combined local command (temporary files outside the checkout):
 

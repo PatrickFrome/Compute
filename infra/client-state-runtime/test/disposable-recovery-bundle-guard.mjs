@@ -14,9 +14,16 @@ const SHA = /^[a-f0-9]{64}$/;
 const HEAD = /^[a-f0-9]{40}$/;
 const SYSTEM = /^[1-9][0-9]{9,19}$/;
 const maximumArchiveBytes = 1024 * 1024 * 1024;
-const fail = code => Object.assign(new Error('recovery_bundle_' + code), {
-  code: 'recovery_bundle_' + code,
-});
+const failureCodes = new WeakMap();
+const fail = code => {
+  const safeCode = 'recovery_bundle_' + code;
+  const error = Object.assign(new Error(safeCode), { code: safeCode });
+  failureCodes.set(error, safeCode);
+  return error;
+};
+export function recoveryGuardFailureCode(error) {
+  return error !== null && typeof error === 'object' ? (failureCodes.get(error) || null) : null;
+}
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const canonical = value => process.platform === 'win32' ? value.toLowerCase() : value;
 const same = (left, right) => canonical(left) === canonical(right);
@@ -79,6 +86,38 @@ async function unchangedDirectories(samples) {
   }
 }
 
+const phaseMarker = phase => 'RECOVERY_REPARSE_PHASE_' + phase;
+const nativeReadbackText = value => typeof value === 'string' ? value
+  : Buffer.isBuffer(value) ? value.toString('utf8') : '';
+
+// Bounded classification only. Do not expose stderr, CLIXML, exception text,
+// private paths or caller-controlled fragments through the public error code.
+export function classifyRecoveryNativePathReadback({ stdout, stderr, error = null, pathCount } = {}) {
+  const originalOutput = nativeReadbackText(stdout ?? error?.stdout);
+  const output = originalOutput.slice(-8192);
+  const diagnostic = nativeReadbackText(stderr ?? error?.stderr);
+  const phases = output.split(/\r?\n/).filter(line =>
+    /^RECOVERY_REPARSE_PHASE_(?:PARSE|ITEM|ANCESTRY|COMPLETE)$/.test(line));
+  const phase = (phases.at(-1)?.slice('RECOVERY_REPARSE_PHASE_'.length) || 'NONE').toLowerCase();
+  const code = category => 'native_path_readback_' + category + '_' + phase;
+  if (originalOutput.length > 8192 || diagnostic.length > 8192) return code('output_limit');
+  if (error) {
+    if (error.code === 'ETIMEDOUT') return code('timeout');
+    if (error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') return code('output_limit');
+    // Node execFile can use this same shape for a timer or explicit kill.
+    if (error.killed === true) return code('termination_or_timeout');
+    if (['ENOENT', 'EACCES', 'EPERM'].includes(error.code)) return code('spawn');
+    return code('exit');
+  }
+  if (diagnostic.length) return code('stderr');
+  if (!Number.isSafeInteger(pathCount) || pathCount < 1 || pathCount > 64) return code('marker');
+  const expected = [phaseMarker('PARSE'),
+    ...Array.from({ length: pathCount }, () => [phaseMarker('ITEM'), phaseMarker('ANCESTRY')]).flat(),
+    phaseMarker('COMPLETE'), 'VERIFIED'].join('\n');
+  if (output.replaceAll('\r\n', '\n') !== expected) return code('marker');
+  return null;
+}
+
 // Node detects ordinary symbolic links and junctions. Also reject other native
 // Windows reparse tags instead of assuming every reparse point is a symlink.
 // The private paths travel through an environment variable, never argv or logs.
@@ -86,24 +125,46 @@ async function noNativeReparse(paths) {
   if (process.platform !== 'win32') return;
   const systemRoot = process.env.SystemRoot || process.env.SYSTEMROOT || '';
   if (!/^[A-Za-z]:\\Windows$/i.test(systemRoot)) throw fail('native_path_readback_unknown');
+  // Match private-windows-storage-acl: a pwsh7 parent can supply incompatible
+  // module search paths to Windows PowerShell 5.1. Keep OS discovery inputs,
+  // pin trusted system modules and exclude inherited PostgreSQL credentials.
+  const systemKeys = ['PATH', 'PATHEXT', 'COMSPEC', 'APPDATA', 'LOCALAPPDATA',
+    'HOMEDRIVE', 'HOMEPATH', 'USERPROFILE', 'TEMP', 'TMP', 'ProgramFiles', 'ProgramData'];
+  const safeEnvironment = Object.fromEntries(systemKeys
+    .filter(key => typeof process.env[key] === 'string' && process.env[key].length < 8192)
+    .map(key => [key, process.env[key]]));
+  const env = { ...safeEnvironment, SystemRoot: systemRoot, SYSTEMROOT: systemRoot, WINDIR: systemRoot,
+    PSModulePath: path.win32.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'Modules'),
+    TEMP: safeEnvironment.TEMP || path.win32.join(systemRoot, 'Temp'),
+    TMP: safeEnvironment.TMP || path.win32.join(systemRoot, 'Temp'),
+    USERPROFILE: safeEnvironment.USERPROFILE || systemRoot,
+    METAENGINE_RECOVERY_GUARD_PATHS: JSON.stringify(paths) };
   const script = `$ErrorActionPreference='Stop'
+$ProgressPreference='SilentlyContinue'
+$WarningPreference='Stop'
+[Console]::Out.WriteLine('RECOVERY_REPARSE_PHASE_PARSE')
 foreach($entry in ($env:METAENGINE_RECOVERY_GUARD_PATHS | ConvertFrom-Json)) {
+  [Console]::Out.WriteLine('RECOVERY_REPARSE_PHASE_ITEM')
   $item=Get-Item -LiteralPath $entry -Force -ErrorAction Stop
+  [Console]::Out.WriteLine('RECOVERY_REPARSE_PHASE_ANCESTRY')
   while($null -ne $item) {
     if(($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'reparse' }
     if($item -is [IO.DirectoryInfo]) { $item=$item.Parent } else { $item=$item.Directory }
   }
 }
+[Console]::Out.WriteLine('RECOVERY_REPARSE_PHASE_COMPLETE')
 [Console]::Out.Write('VERIFIED')`;
+  let result;
   try {
-    const result = await exec(path.win32.join(systemRoot, 'System32', 'WindowsPowerShell',
-      'v1.0', 'powershell.exe'), ['-NoProfile', '-NonInteractive', '-EncodedCommand',
+    result = await exec(path.win32.join(systemRoot, 'System32', 'WindowsPowerShell',
+      'v1.0', 'powershell.exe'), ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand',
       Buffer.from(script, 'utf16le').toString('base64')], {
-      env: { ...process.env, METAENGINE_RECOVERY_GUARD_PATHS: JSON.stringify(paths) },
+      env,
       windowsHide: true, shell: false, timeout: 15000, maxBuffer: 8192,
     });
-    if (result.stdout !== 'VERIFIED' || result.stderr) throw fail('native_path_readback_unknown');
-  } catch { throw fail('native_path_readback_unknown'); }
+  } catch (error) { throw fail(classifyRecoveryNativePathReadback({ error })); }
+  const diagnosis = classifyRecoveryNativePathReadback({ ...result, pathCount: paths.length });
+  if (diagnosis) throw fail(diagnosis);
 }
 
 async function inspectFile(filename, { min = 1, max = maximumArchiveBytes, retain = false } = {}) {
@@ -149,7 +210,7 @@ export async function readRecoveryFile(filename) {
     const { sha256, bytes } = await inspectFile(filename);
     return Object.freeze({ sha256, bytes });
   } catch (error) {
-    if (String(error?.code || '').startsWith('recovery_bundle_')) throw error;
+    if (recoveryGuardFailureCode(error)) throw error;
     throw fail('file_read_unconfirmed');
   }
 }
@@ -269,7 +330,7 @@ export async function verifyRecoveryBundle({ fixtureRoot, bundleDirectory, keyDi
     await noNativeReparse([...allPaths, manifestPath, archivePath, keyPath]);
     return Object.freeze({ state: 'BUNDLE_VERIFIED', manifest, archivePath, keyPath });
   } catch (error) {
-    if (String(error?.code || '').startsWith('recovery_bundle_')) throw error;
+    if (recoveryGuardFailureCode(error)) throw error;
     throw fail('readback_unconfirmed');
   }
 }

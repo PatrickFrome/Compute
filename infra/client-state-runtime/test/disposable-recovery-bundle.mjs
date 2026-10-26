@@ -18,7 +18,7 @@ import { verifyInstalledUpgradeBackup } from '../upgrade-backup-gate.mjs';
 import { qualifyIndependentDisposableRestore } from '../upgrade-backup-restore-gate.mjs';
 import { protectOwnerOnlyWindowsDirectory, verifyOwnerOnlyWindowsStorage }
   from '../../../apps/metaengine-browser/src/private-windows-storage-acl.mjs';
-import { readRecoveryFile, recoveryPathDigest, verifyRecoveryBundle }
+import { readRecoveryFile, recoveryPathDigest, recoveryGuardFailureCode, verifyRecoveryBundle }
   from './disposable-recovery-bundle-guard.mjs';
 import { createRecoveryBundleReceipt, validateRecoveryBundleReceipt,
   RECOVERY_BUNDLE_BINARIES, RECOVERY_BUNDLE_PG_ARCHIVE_SHA256 }
@@ -120,8 +120,11 @@ async function privateWrite(filename, bytes) {
 async function powershell(program, extraEnv, stage, timeoutMs = 45000) {
   const systemRoot = process.env.SystemRoot || process.env.SYSTEMROOT || '';
   requireProof(/^[A-Za-z]:\\Windows$/i.test(systemRoot), 'windows_root_unconfirmed');
+  // Suppress only module-initialization progress, which WinPS serializes to
+  // stderr as CLIXML. Actual warnings and errors remain terminating failures.
+  const fixedProgram = "$ProgressPreference='SilentlyContinue'; $WarningPreference='Stop'\n" + program;
   return command(path.win32.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
-    ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(program, 'utf16le').toString('base64')],
+    ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(fixedProgram, 'utf16le').toString('base64')],
     { env: { ...pgEnvironment(60000, ''), ...extraEnv,
       PSModulePath: path.win32.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'Modules') },
     stage, timeoutMs, rejectWarnings: true });
@@ -589,7 +592,7 @@ export async function runDisposableRecoveryBundle({ pgBinDir = process.env.LOCAL
       try { receipt.backup_effect_state = (await readBackupEffectFence(effectContext)).state; }
       catch { receipt.backup_effect_state = 'READBACK_UNKNOWN'; }
     }
-    failed = errors.get(error) || 'recovery_bundle_' + stage + '_failed';
+    failed = errors.get(error) || recoveryGuardFailureCode(error) || 'recovery_bundle_' + stage + '_failed';
   } finally {
     for (const owned of [...handles].reverse()) {
       if (stopAttempts.has(owned)) continue; // Never retry an ambiguous stop.

@@ -6,12 +6,66 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { readRecoveryFile, recoveryPathDigest, verifyRecoveryBundle }
+import { classifyRecoveryNativePathReadback, readRecoveryFile, recoveryGuardFailureCode,
+  recoveryPathDigest, verifyRecoveryBundle }
   from './test/disposable-recovery-bundle-guard.mjs';
 
 const sha = data => createHash('sha256').update(data).digest('hex');
 const fixedFailure = error => typeof error?.code === 'string'
   && /^recovery_bundle_[a-z_]+$/.test(error.code) && error.message === error.code;
+
+const nativeMarkers = ['RECOVERY_REPARSE_PHASE_PARSE', 'RECOVERY_REPARSE_PHASE_ITEM',
+  'RECOVERY_REPARSE_PHASE_ANCESTRY', 'RECOVERY_REPARSE_PHASE_COMPLETE', 'VERIFIED'].join('\r\n');
+
+test('recovery native diagnostics require every stage and exact completion without stderr', () => {
+  assert.equal(classifyRecoveryNativePathReadback({ stdout: nativeMarkers, pathCount: 1 }), null);
+  for (const stdout of ['VERIFIED', nativeMarkers.replace('RECOVERY_REPARSE_PHASE_ITEM\r\n', ''),
+    nativeMarkers + '\r\nunexpected-output']) {
+    assert.match(classifyRecoveryNativePathReadback({ stdout, pathCount: 1 }),
+      /^native_path_readback_marker_(?:none|complete)$/);
+  }
+  assert.equal(classifyRecoveryNativePathReadback({ stdout: nativeMarkers, pathCount: 2 }),
+    'native_path_readback_marker_complete');
+  assert.equal(classifyRecoveryNativePathReadback({ stdout: nativeMarkers, stderr: '#< CLIXML', pathCount: 1 }),
+    'native_path_readback_stderr_complete');
+});
+
+test('recovery native diagnostics preserve a fixed stage without leaking child output', () => {
+  const privateText = 'private-path-and-payload-must-stay-private';
+  const stdout = 'RECOVERY_REPARSE_PHASE_PARSE\r\nRECOVERY_REPARSE_PHASE_ITEM\r\n';
+  for (const [error, expected] of [
+    [{ code: 'ETIMEDOUT' }, 'timeout'],
+    [{ killed: true, signal: 'SIGTERM' }, 'termination_or_timeout'],
+    [{ code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' }, 'output_limit'],
+    [{ code: 'ENOENT' }, 'spawn'],
+    [{ code: 1 }, 'exit'],
+  ]) {
+    assert.equal(classifyRecoveryNativePathReadback({
+      error: { ...error, stdout, stderr: privateText, message: privateText },
+    }), 'native_path_readback_' + expected + '_item');
+  }
+  assert.equal(classifyRecoveryNativePathReadback({
+    error: { code: 1, stdout: 'RECOVERY_REPARSE_PHASE_' + privateText, stderr: privateText },
+  }), 'native_path_readback_exit_none');
+});
+
+test('recovery safe failure getter trusts only errors created by this guard', async () => {
+  const foreign = Object.assign(new Error('private-untrusted-message'), {
+    code: 'recovery_bundle_native_path_readback_exit_item',
+  });
+  assert.equal(recoveryGuardFailureCode(foreign), null);
+  for (const value of [null, undefined, 'private-untrusted-message', 1]) {
+    assert.equal(recoveryGuardFailureCode(value), null);
+  }
+  await assert.rejects(verifyRecoveryBundle({}), error => {
+    const expected = 'recovery_bundle_expected_binding_required';
+    assert.equal(recoveryGuardFailureCode(error), expected);
+    error.code = 'private-untrusted-code';
+    error.message = 'private-untrusted-message';
+    assert.equal(recoveryGuardFailureCode(error), expected);
+    return true;
+  });
+});
 
 async function fixture(t) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'recovery-guard-source-')));
