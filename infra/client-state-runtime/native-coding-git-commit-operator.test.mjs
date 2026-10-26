@@ -19,7 +19,7 @@ test('protected Git operator has a separate fixed file and explicit physical pin
 test('operator cannot add arbitrary commands, ambiguous roots, worker journals or unpinned Git bytes',async()=>{
   for(const mutate of [v=>{v.command='git commit';},v=>{v.bindings.push(structuredClone(v.bindings[0]));},
     v=>{v.journal_root=path.join(v.bindings[0].path,'journal');},v=>{v.git_executable_sha256='';},
-    v=>{v.model_paths_allowed=true;},v=>{v.bindings[0].path+='\\..\\escape';}]){
+    v=>{v.model_paths_allowed=true;},v=>{v.bindings[0].path+=path.sep+'..'+path.sep+'escape';}]){
     const f=fixture();mutate(f.value);await assert.rejects(f.read(),/native_coding_commit_operator_/);
   }
 });
