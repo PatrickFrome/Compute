@@ -543,6 +543,10 @@ test('an older UNKNOWN turn remains fenced after a pre-fix journal already recor
   const journal = createAutonomousProjectJournal({ filePath: f.journalPath });
   const restarted = f.own(new AutonomousProjectTaskRuntime({ journal,
     request: input => f.provider.request(input), materializeProject: async () => ({ state: 'NOT_REQUIRED' }) }));
+  const recovered = await restarted.latestTurnForLease(rootTask());
+  assert.equal(recovered.state, 'AMBIGUOUS', 'older UNKNOWN must hold before the running cycle serves tools');
+  assert.equal(recovered.transcript_floor, undefined);
+  assert.equal(recovered.delivered_tool_results, undefined);
   const result = await restarted.continueConversation(rootTask(),
     [{ ...results[0], request_id: 'fixture:legacy:successor' }],
     async () => { sends++; return { effect_state: 'PROVEN_COMPOSER_CLEARED' }; },
@@ -571,6 +575,10 @@ for (const foreign of ['agent_id', 'project_id']) {
     await f.journal.confirm(key, { effect_state: 'PROVEN_COMPOSER_CLEARED',
       prompt_sha256: intent.prompt_sha256, transcript_floor: intent.transcript_floor });
     const before = await f.journal.latestConversationTurn(rootTask());
+    const recovered = await f.runtime.latestTurnForLease(rootTask());
+    assert.equal(recovered.state, 'AMBIGUOUS');
+    assert.equal(recovered.transcript_floor, undefined, 'foreign history cannot grant a transcript window');
+    assert.equal(recovered.delivered_tool_results, undefined, 'foreign delivered identities cannot be adopted');
     let observations = 0, sends = 0;
     await assert.rejects(f.runtime.continueConversation(rootTask(),
       [{ request_id: 'fixture:bound:successor', status: 'COMPLETED', summary: 'observed result' }],
@@ -580,5 +588,23 @@ for (const foreign of ['agent_id', 'project_id']) {
     assert.equal(sends, 0);
     assert.deepEqual(await f.journal.latestConversationTurn(rootTask()), before,
       'foreign delivered identities and unresolved custody must not be inherited into a new turn');
+  });
+}
+
+for (const pendingCheck of ['MISSING', 'UNPROVEN']) {
+  test(`recovered admission requires a complete proven pending-turn check: ${pendingCheck}`, async t => {
+    const f = await fixture(t);
+    await f.runtime.continueConversation(rootTask(),
+      [{ request_id: 'fixture:admission:known', status: 'COMPLETED', summary: 'observed result' }],
+      async () => ({ effect_state: 'PROVEN_COMPOSER_CLEARED' }), { observeTranscriptFloor: async () => 40 });
+    const before = await f.journal.latestConversationTurn(rootTask());
+    const journal = { ...f.journal, hasPendingConversationTurn: pendingCheck === 'MISSING' ? undefined : async () => 0 };
+    const recoveredRuntime = f.own(new AutonomousProjectTaskRuntime({ journal,
+      request: input => f.provider.request(input), materializeProject: async () => ({ state: 'NOT_REQUIRED' }) }));
+    const recovered = await recoveredRuntime.latestTurnForLease(rootTask());
+    assert.equal(recovered.state, 'AMBIGUOUS');
+    assert.equal(recovered.transcript_floor, undefined);
+    assert.equal(recovered.delivered_tool_results, undefined);
+    assert.deepEqual(await f.journal.latestConversationTurn(rootTask()), before);
   });
 }

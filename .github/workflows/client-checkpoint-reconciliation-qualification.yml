@@ -1,0 +1,371 @@
+name: Windows Checkpoint Reconciliation Source Qualification
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/native-coding-*.mjs'
+      - 'apps/metaengine-browser/src/autonomous-project-*.mjs'
+      - 'apps/metaengine-browser/src/devos-native-task-cycle.mjs'
+      - 'apps/metaengine-browser/src/browser-parent-*.mjs'
+      - 'apps/metaengine-browser/src/private-windows-storage-acl.mjs'
+      - 'apps/metaengine-browser/test/native-coding-*.mjs'
+      - 'apps/metaengine-browser/test/autonomous-project-*.test.mjs'
+      - 'apps/metaengine-browser/test/devos-native-task-cycle.test.mjs'
+      - 'apps/metaengine-browser/test/browser-parent-suspension-cycle.test.mjs'
+      - 'apps/metaengine-browser/test/fixtures/native-coding-*.mjs'
+      - 'apps/metaengine-browser/test/fixtures/autonomous-project-*.mjs'
+      - 'apps/metaengine-browser/test/fixtures/browser-parent-suspension-fixture.mjs'
+      - 'infra/client-state-runtime/native-coding-*.mjs'
+      - 'infra/client-state-runtime/test/native-coding-*.mjs'
+      - 'infra/client-state-runtime/package.json'
+      - 'infra/client-state-runtime/package-lock.json'
+      - 'supabase/migrations/**'
+      - 'apps/metaengine-browser/scripts/stage-client-state-runtime.mjs'
+      - '.github/prepare-runtime-contract-pg17.mjs'
+      - '.github/workflows/client-checkpoint-reconciliation-qualification.yml'
+  push:
+    branches:
+      - 'work/preinstall-shared-inputs-20261027'
+      - 'work/preinstall-closure-20261027'
+    paths:
+      - 'apps/metaengine-browser/src/native-coding-*.mjs'
+      - 'apps/metaengine-browser/src/autonomous-project-*.mjs'
+      - 'apps/metaengine-browser/src/devos-native-task-cycle.mjs'
+      - 'apps/metaengine-browser/src/browser-parent-*.mjs'
+      - 'apps/metaengine-browser/src/private-windows-storage-acl.mjs'
+      - 'apps/metaengine-browser/test/native-coding-*.mjs'
+      - 'apps/metaengine-browser/test/autonomous-project-*.test.mjs'
+      - 'apps/metaengine-browser/test/devos-native-task-cycle.test.mjs'
+      - 'apps/metaengine-browser/test/browser-parent-suspension-cycle.test.mjs'
+      - 'apps/metaengine-browser/test/fixtures/native-coding-*.mjs'
+      - 'apps/metaengine-browser/test/fixtures/autonomous-project-*.mjs'
+      - 'apps/metaengine-browser/test/fixtures/browser-parent-suspension-fixture.mjs'
+      - 'infra/client-state-runtime/native-coding-*.mjs'
+      - 'infra/client-state-runtime/test/native-coding-*.mjs'
+      - 'infra/client-state-runtime/package.json'
+      - 'infra/client-state-runtime/package-lock.json'
+      - 'supabase/migrations/**'
+      - 'apps/metaengine-browser/scripts/stage-client-state-runtime.mjs'
+      - '.github/prepare-runtime-contract-pg17.mjs'
+      - '.github/workflows/client-checkpoint-reconciliation-qualification.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checkpoint-reconciliation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows-source-and-native-pg17:
+    if: github.repository == 'PatrickFrome/Compute' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: windows-2025
+    timeout-minutes: 40
+    env:
+      EXPECTED_SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Require disposable hosted Windows and preserve committed bytes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_ACTIONS -cne 'true' -or $env:CI -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:RUNNER_OS -cne 'Windows' -or $env:RUNNER_ARCH -cne 'X64') { throw 'checkpoint_ci_hosted_windows_x64_required' }
+          if ($env:GITHUB_REPOSITORY -cne 'PatrickFrome/Compute' -or $env:GITHUB_EVENT_NAME -notin @('push','pull_request')) { throw 'checkpoint_ci_event_refused' }
+          if ($env:GITHUB_EVENT_NAME -ceq 'push' -and $env:GITHUB_REF -notin @('refs/heads/work/preinstall-shared-inputs-20261027','refs/heads/work/preinstall-closure-20261027')) { throw 'checkpoint_ci_push_branch_refused' }
+          git config --global core.autocrlf false
+          if ($LASTEXITCODE -ne 0) { throw 'checkpoint_ci_literal_source_setup_failed' }
+
+      - name: Checkout exact candidate source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.EXPECTED_SOURCE_HEAD }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup frozen Node toolchain
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Install frozen runtime driver without lifecycle scripts
+        working-directory: infra/client-state-runtime
+        shell: pwsh
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'checkpoint_ci_frozen_driver_failed' }
+
+      - name: Verify exact source and allocate private fixture boundaries
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:EXPECTED_SOURCE_HEAD -cnotmatch '^[0-9a-f]{40}$') { throw 'checkpoint_ci_source_pin_invalid' }
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -cne $env:EXPECTED_SOURCE_HEAD) { throw 'checkpoint_ci_source_mismatch' }
+          if ($env:GITHUB_EVENT_NAME -ceq 'push' -and $actual -cne $env:GITHUB_SHA) { throw 'checkpoint_ci_push_head_mismatch' }
+          git diff --quiet
+          if ($LASTEXITCODE -ne 0) { throw 'checkpoint_ci_source_dirty' }
+          git diff --cached --quiet
+          if ($LASTEXITCODE -ne 0) { throw 'checkpoint_ci_index_dirty' }
+          if ((node --version).Trim() -cne 'v24.21.0') { throw 'checkpoint_ci_node_version_mismatch' }
+          $work = Join-Path $env:RUNNER_TEMP ('checkpoint-reconciliation-' + $env:GITHUB_RUN_ID + '-' + $env:GITHUB_RUN_ATTEMPT)
+          if (Test-Path -LiteralPath $work) { throw 'checkpoint_ci_work_must_be_absent' }
+          New-Item -ItemType Directory -Path $work | Out-Null
+          foreach ($name in @('private','public','profiles')) { New-Item -ItemType Directory -Path (Join-Path $work $name) | Out-Null }
+          'CHECKPOINT_QA_WORK=' + $work | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Prepare hash-pinned PostgreSQL 17 binaries without starting a database
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $metadata = Join-Path $env:CHECKPOINT_QA_WORK 'private/pg-binaries.json'
+          $diagnostics = Join-Path $env:CHECKPOINT_QA_WORK 'private/pg-prepare.stderr'
+          node .github/prepare-runtime-contract-pg17.mjs prepare 1> $metadata 2> $diagnostics
+          if ($LASTEXITCODE -ne 0) { throw 'checkpoint_ci_pinned_pg_prepare_failed' }
+
+      - name: Require current component cases and native Windows PG17 cases
+        id: qualify
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          @'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs/promises';
+          import path from 'node:path';
+          import {createHash} from 'node:crypto';
+          import {spawn,execFileSync} from 'node:child_process';
+          try {
+          const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
+          const root=await fs.realpath(process.env.GITHUB_WORKSPACE);
+          const work=await fs.realpath(process.env.CHECKPOINT_QA_WORK);
+          const temporary=await fs.realpath(process.env.RUNNER_TEMP);
+          const below=(base,target)=>{const r=path.relative(base,target);return !!r&&!r.startsWith('..')&&!path.isAbsolute(r);};
+          const publicDir=path.join(work,'public'),privateDir=path.join(work,'private'),profilesDir=path.join(work,'profiles');
+          const git=args=>execFileSync('git',args,{cwd:root,encoding:'utf8',windowsHide:true,timeout:30000,stdio:['ignore','pipe','pipe']}).trim();
+          assert.equal(process.platform,'win32');assert.equal(process.arch,'x64');assert.equal(process.version,'v24.21.0');
+          assert.equal(process.env.RUNNER_ENVIRONMENT,'github-hosted');assert.ok(below(temporary,work));assert.ok(!below(root,work));
+          const expected=process.env.EXPECTED_SOURCE_HEAD;assert.match(expected,/^[0-9a-f]{40}$/);assert.equal(git(['rev-parse','HEAD']),expected);
+          const pg=JSON.parse((await fs.readFile(path.join(privateDir,'pg-binaries.json'),'utf8')).replace(/^\uFEFF/,''));
+          assert.equal(pg.schema,'metaengine.runtime-contract-pg17-binaries.v1');assert.equal(pg.database_started,false);assert.equal(pg.installed_state_used,false);
+          assert.match(pg.version,/^17\.[0-9]+(?:\.[0-9]+)?$/);assert.match(pg.archive_sha256,/^[0-9a-f]{64}$/);
+          assert.ok(process.env.LOCAL_STATE_TEST_PG_BIN_DIR,'required_native_pg17_bin_missing');
+          const bin=await fs.realpath(process.env.LOCAL_STATE_TEST_PG_BIN_DIR);
+          assert.equal(bin,await fs.realpath(pg.bin_directory));assert.ok(below(temporary,bin));assert.ok(!below(root,bin));
+          for(const name of ['initdb.exe','pg_ctl.exe','postgres.exe','pg_dump.exe','pg_restore.exe','psql.exe'])assert.ok((await fs.stat(path.join(bin,name))).isFile());
+          const driver=await fs.realpath(path.join(root,'infra/client-state-runtime/node_modules/postgres/src/index.js'));
+          assert.ok(below(path.join(root,'infra/client-state-runtime/node_modules/postgres'),driver));
+          const lock=JSON.parse(await fs.readFile(path.join(root,'infra/client-state-runtime/package-lock.json'),'utf8'));
+          const installedDriver=JSON.parse(await fs.readFile(path.join(root,'infra/client-state-runtime/node_modules/postgres/package.json'),'utf8'));
+          assert.equal(installedDriver.version,lock.packages['node_modules/postgres'].version);
+          const executable=await fs.realpath('C:/Program Files/Git/mingw64/bin/git.exe');assert.ok((await fs.stat(executable)).isFile());
+          const component=[
+            'apps/metaengine-browser/test/native-coding-project-commits.test.mjs',
+            'apps/metaengine-browser/test/native-coding-runtime.test.mjs',
+            'apps/metaengine-browser/test/native-coding-host-ipc.test.mjs',
+            'infra/client-state-runtime/native-coding-host-commit-service.test.mjs',
+            'infra/client-state-runtime/native-coding-checkpoint-verifier.test.mjs',
+            'infra/client-state-runtime/native-coding-checkpoint-authority.test.mjs',
+            'infra/client-state-runtime/native-coding-host-capabilities.test.mjs',
+            'infra/client-state-runtime/native-coding-checkpoint-reconciliation.test.mjs',
+            'apps/metaengine-browser/test/autonomous-project-task-runtime.test.mjs',
+            'apps/metaengine-browser/test/devos-native-task-cycle.test.mjs',
+            'apps/metaengine-browser/test/browser-parent-suspension-cycle.test.mjs',
+          ];
+          const native=[
+            'infra/client-state-runtime/native-coding-checkpoint-reconciliation.integration.test.mjs',
+            'infra/client-state-runtime/native-coding-host-commit.integration.test.mjs',
+            'infra/client-state-runtime/native-coding-host-commit-profile.integration.test.mjs',
+          ];
+          const componentRequired=[
+            'initial READ is physically read-only and never creates journal directories or an anchor',
+            'READ remains eligible after worktree mtime-only change and preserves the exact live index',
+            'committed Git crash permits exactly one first SQL finalization and one fixture successor across two restarts',
+            'durable SQL intent followed by a killed child before SQL stays HOLD with zero SQL dispatches',
+            'committed SQL before killed/lost ACK recovers authoritative receipt without another SQL or Git effect',
+            'two real observer processes racing exclusive SQL intent dispatch only one SQL finalization',
+            'ordinary FINISH after completed Git uses the same SQL-only boundary and never repeats a Git write command',
+            'ordinary FINISH and explicit RECONCILE racing in two Hosts share one first-SQL claim',
+            'unknown SQL intent, missing/replaced journals and changed physical/authority pins preserve HOLD',
+            'real running cycle fences recovered conversation admission before tools and Send: OLDER_PENDING',
+            'real running cycle fences recovered conversation admission before tools and Send: FOREIGN_PROJECT',
+            'real running cycle fences recovered conversation admission before tools and Send: UNRELATED_PENDING',
+            'existing cycle suspends parent and child with one slot, then exact completion and restored receipts unwind without Send replay',
+          ];
+          const nativeRequired=[
+            'native PG17 checkpoint reconciliation: real crash intervals, concurrent first finalize, ACK loss and negative controls',
+            'killed Git-complete child resumes through observer once, repeated selector and second restart are read-only',
+            'two independent Host processes race at exclusive intent creation and invoke native SQL once',
+            'ordinary FINISH and RECONCILE race in separate Hosts without Git writes and finalize SQL once',
+            'killed child after synced intent but before SQL remains HOLD across fresh Hosts',
+            'real PostgreSQL COMMIT followed by killed ACK is recovered without another SQL invocation',
+            'real PostgreSQL COMMIT followed by lost ACK is recovered without another SQL invocation',
+            'mismatched authoritative SQL receipt stays HOLD with no Host SQL or Git replay',
+            'conflicting existing successor rolls back the first SQL transaction and permanently fences its retry',
+            'real Git and PostgreSQL join protected checkpoint to the next W30 lease through Host service',
+            'protected profile authorized before random UI goal joins real seed, Git commit and PG successor',
+          ];
+          const baseline='BASE reproduction: killed child after durable Git receipt leaves COMMITTED/PENDING and observer HOLD';
+          const publicNames=new Set([...componentRequired,...nativeRequired,baseline]);
+          // Unknown test names are hashed: failure diagnostics, generated data,
+          // absolute fixture paths, PG logs and private receipts never escape.
+          const publicName=name=>publicNames.has(name)?name:'test-name-sha256-'+hash(name);
+          function inspectTap(raw,required,allowBaseline){
+            const lines=raw.split(/\r?\n/),records=[],sanitized=['TAP version 13'];
+            const counts={};
+            for(const line of lines){
+              const outcome=/^(\s*)(not ok|ok) (\d+) - (.*?)(?:\s+# (SKIP|TODO)(?:\s.*)?)?$/.exec(line);
+              if(outcome){const [,indent,status,id,name,directive]=outcome;records.push({status,name,directive});sanitized.push(`${indent}${status} ${id} - ${publicName(name)}${directive?' # '+directive:''}`);continue;}
+              const sub=/^(\s*)# Subtest: (.*)$/.exec(line);if(sub){sanitized.push(sub[1]+'# Subtest: '+publicName(sub[2]));continue;}
+              if(/^\s*1\.\.[0-9]+$/.test(line)){sanitized.push(line);continue;}
+              const summary=/^# (tests|suites|pass|fail|cancelled|skipped|todo) ([0-9]+)$/.exec(line);
+              if(summary){counts[summary[1]]=Number(summary[2]);sanitized.push(line);}
+            }
+            const bad=[];for(const field of ['tests','pass','fail','cancelled','skipped','todo'])if(!Number.isSafeInteger(counts[field]))bad.push('summary_missing_'+field);
+            if(!counts.tests||!counts.pass||counts.fail!==0||counts.cancelled!==0||counts.todo!==0)bad.push('tests_not_successful');
+            if(records.some(r=>r.status!=='ok'||r.directive==='TODO'))bad.push('failed_or_todo_case');
+            const skipped=records.filter(r=>r.directive==='SKIP');
+            if(allowBaseline){if(counts.skipped!==1||skipped.length!==1||skipped[0].name!==baseline)bad.push('current_component_case_skipped');}
+            else if(counts.skipped!==0||skipped.length)bad.push('native_case_skipped');
+            for(const name of required)if(!records.some(r=>r.name===name&&r.status==='ok'&&!r.directive))bad.push('required_case_missing_'+hash(name).slice(0,16));
+            return {tap:sanitized.join('\n')+'\n',counts,bad};
+          }
+          // No source test is permitted to discover the caller's installed Owner.
+          // The user's PC/profile is not a test target. Allocate a separate empty
+          // OS profile for EACH suite before its first production-module import.
+          const systemKeys=new Set(['SYSTEMROOT','WINDIR','SYSTEMDRIVE','PATH','PATHEXT','COMSPEC',
+            'NUMBER_OF_PROCESSORS','PROCESSOR_ARCHITECTURE','LANG','LC_ALL','LC_CTYPE','TZ','CI']);
+          const profileFolders={APPDATA:'roaming',LOCALAPPDATA:'local',USERPROFILE:'home',HOME:'home',
+            XDG_CONFIG_HOME:'config',XDG_CACHE_HOME:'cache',XDG_DATA_HOME:'data',XDG_STATE_HOME:'state',
+            TEMP:'tmp',TMP:'tmp',TMPDIR:'tmp'};
+          const samePath=(a,b)=>path.resolve(a).toLowerCase()===path.resolve(b).toLowerCase();
+          async function canonicalDirectory(directory){
+            const stat=await fs.lstat(directory);assert.ok(stat.isDirectory()&&!stat.isSymbolicLink());
+            assert.ok(samePath(await fs.realpath(directory),directory));
+          }
+          async function absent(file){
+            let stat;try{stat=await fs.lstat(file);}catch(error){if(error.code==='ENOENT')return;throw error;}
+            assert.equal(stat,undefined,'isolated_owner_must_be_absent');
+          }
+          async function createSuiteEnvironment(name,nativePg){
+            await canonicalDirectory(work);await canonicalDirectory(profilesDir);
+            const profile=path.join(profilesDir,name);await fs.mkdir(profile);await canonicalDirectory(profile);
+            assert.ok(below(work,profile));assert.ok(!below(root,profile));
+            for(const folder of new Set(Object.values(profileFolders)))await fs.mkdir(path.join(profile,folder));
+            // Allowlist OS necessities; inherited METAENGINE/COMPUTE/PG/LOCAL_STATE,
+            // Git overrides, Electron mode and NODE_OPTIONS/NODE_PATH are dropped.
+            const env=Object.fromEntries(Object.entries(process.env).filter(([key])=>systemKeys.has(key.toUpperCase())));
+            for(const [key,folder] of Object.entries(profileFolders))env[key]=path.join(profile,folder);
+            env.HOMEDRIVE=path.parse(env.USERPROFILE).root.replace(/[\\/]$/,'');
+            env.HOMEPATH=env.USERPROFILE.slice(env.HOMEDRIVE.length);
+            env.GIT_CONFIG_NOSYSTEM='1';env.GIT_CONFIG_GLOBAL='NUL';env.GIT_TERMINAL_PROMPT='0';
+            // Append only these measured test inputs AFTER clearing inherited flags.
+            env.METAENGINE_GIT_TEST_EXECUTABLE=executable;
+            if(nativePg)Object.assign(env,{METAENGINE_PG_TEST_BIN:bin,METAENGINE_PG_TEST_DRIVER:driver,
+              METAENGINE_PG_TEST_BASE:env.TEMP,METAENGINE_REQUIRE_RECONCILIATION_PG17:'1',METAENGINE_RECONCILIATION_SOURCE_SHA:expected});
+            const allowedMeta=new Set(['METAENGINE_GIT_TEST_EXECUTABLE',...(nativePg?[
+              'METAENGINE_PG_TEST_BIN','METAENGINE_PG_TEST_DRIVER','METAENGINE_PG_TEST_BASE',
+              'METAENGINE_REQUIRE_RECONCILIATION_PG17','METAENGINE_RECONCILIATION_SOURCE_SHA']:[])]);
+            assert.ok(Object.keys(env).every(key=>!/^METAENGINE_/i.test(key)||allowedMeta.has(key)));
+            assert.ok(Object.keys(env).every(key=>! /^(?:COMPUTE_|PG|LOCAL_STATE_|NODE_OPTIONS$|NODE_PATH$|ELECTRON_)/i.test(key)));
+            const owner=path.join(env.APPDATA,'@metaengine','browser-shell','metaengine-state-provider-v1.json');
+            const xdgOwner=path.join(env.XDG_CONFIG_HOME,'@metaengine','browser-shell','metaengine-state-provider-v1.json');
+            async function verify(){
+              await canonicalDirectory(profile);
+              for(const key of Object.keys(profileFolders)){await canonicalDirectory(env[key]);assert.ok(below(profile,env[key]));}
+              assert.ok(samePath(env.HOMEDRIVE+env.HOMEPATH,env.USERPROFILE));
+              for(const file of [owner,xdgOwner]){
+                const parents=[];for(let parent=path.dirname(file);below(profile,parent);parent=path.dirname(parent))parents.push(parent);
+                for(const parent of parents.reverse()){
+                  try{await canonicalDirectory(parent);}catch(error){if(error.code!=='ENOENT')throw error;break;}
+                }
+                await absent(file);await absent(file+'.qa-upgrade-gate.json');
+              }
+            }
+            await verify();
+            return {env,verify,evidence:{fresh_profile_created:true,canonical_profile_paths:true,
+              default_owner_absent_before:true,ambient_runtime_discovery_inputs_cleared:true,
+              native_inputs_explicit:nativePg,user_pc_used:false}};
+          }
+          const suites=[];
+          async function runSuite(name,files,required,isolated,allowBaseline){
+            await isolated.verify();const env=isolated.env;
+            const args=['--test','--test-isolation=none','--test-concurrency=1','--test-reporter=tap',...files];
+            const outcome=await new Promise(resolve=>{
+              const child=spawn(process.execPath,args,{cwd:root,env,windowsHide:true,shell:false,stdio:['ignore','pipe','pipe']});
+              const stdout=[],stderr=[];let bytes=0,reason=null;
+              const timer=setTimeout(()=>{reason='TIMEOUT';child.kill();},18*60*1000);
+              const collect=list=>chunk=>{bytes+=chunk.length;if(bytes>24*1024*1024){reason='OUTPUT_LIMIT';child.kill();}else list.push(chunk);};
+              child.stdout.on('data',collect(stdout));child.stderr.on('data',collect(stderr));
+              child.once('error',()=>{clearTimeout(timer);resolve({code:null,reason:'SPAWN_FAILED',stdout:'',stderr:''});});
+              child.once('close',code=>{clearTimeout(timer);resolve({code,reason,stdout:Buffer.concat(stdout).toString('utf8'),stderr:Buffer.concat(stderr).toString('utf8')});});
+            });
+            await fs.writeFile(path.join(privateDir,name+'.raw.tap'),outcome.stdout,{flag:'wx'});
+            await fs.writeFile(path.join(privateDir,name+'.stderr'),outcome.stderr,{flag:'wx'});
+            const checked=inspectTap(outcome.stdout,required,allowBaseline);
+            if(outcome.code!==0||outcome.reason)checked.bad.push(outcome.reason||'PROCESS_FAILED');
+            let profileUnchanged=false;try{await isolated.verify();profileUnchanged=true;}catch{checked.bad.push('isolated_profile_or_owner_changed');}
+            // Separate native output must contain all 9 + 4 + 2 current tests.
+            if(name==='native-pg17'&&checked.counts.tests<15)checked.bad.push('native_test_count_incomplete');
+            await fs.writeFile(path.join(publicDir,name+'.tap'),checked.tap,{flag:'wx'});
+            suites.push({name,state:checked.bad.length?'FAIL':'PASS',counts:checked.counts,refusals:checked.bad,
+              raw_tap_sha256:hash(outcome.stdout),sanitized_tap_sha256:hash(checked.tap),required_cases:required.length,
+              isolation:{...isolated.evidence,default_owner_absent_after:profileUnchanged}});
+          }
+          await runSuite('component',component,componentRequired,await createSuiteEnvironment('component',false),true);
+          await runSuite('native-pg17',native,nativeRequired,await createSuiteEnvironment('native-pg17',true),false);
+          const sourcePaths=[...component,...native,
+            'apps/metaengine-browser/src/native-coding-project-commits.mjs',
+            'apps/metaengine-browser/src/native-coding-host-ipc-client.mjs',
+            'apps/metaengine-browser/src/autonomous-project-journal.mjs',
+            'apps/metaengine-browser/src/autonomous-project-task-runtime.mjs',
+            'apps/metaengine-browser/src/devos-native-task-cycle.mjs',
+            'apps/metaengine-browser/src/browser-parent-suspension-telemetry.mjs',
+            'apps/metaengine-browser/test/fixtures/browser-parent-suspension-fixture.mjs',
+            'infra/client-state-runtime/native-coding-host-commit-service.mjs',
+            'infra/client-state-runtime/native-coding-host-authority.mjs',
+            'infra/client-state-runtime/native-coding-host-ipc.mjs',
+            'infra/client-state-runtime/test/native-coding-checkpoint-reconciliation-child.mjs',
+            'infra/client-state-runtime/test/native-coding-checkpoint-reconciliation-fixture.mjs',
+            'infra/client-state-runtime/test/native-coding-checkpoint-reconciliation-pg-child.mjs',
+            'infra/client-state-runtime/test/native-coding-checkpoint-reconciliation-pg-fixture.mjs',
+            'infra/client-state-runtime/test/native-coding-host-commit-git-fixture.mjs',
+            'infra/client-state-runtime/package-lock.json','.github/prepare-runtime-contract-pg17.mjs',
+            '.github/workflows/client-checkpoint-reconciliation-qualification.yml'];
+          const sources=[];for(const file of sourcePaths)sources.push({path:file,sha256:hash(await fs.readFile(path.join(root,file)))});
+          let unchanged=false;try{assert.equal(git(['rev-parse','HEAD']),expected);git(['diff','--quiet']);git(['diff','--cached','--quiet']);unchanged=true;}catch{}
+          const isolationVerified=suites.length===2&&suites.every(s=>s.isolation.fresh_profile_created
+            &&s.isolation.canonical_profile_paths&&s.isolation.default_owner_absent_before
+            &&s.isolation.default_owner_absent_after&&s.isolation.ambient_runtime_discovery_inputs_cleared);
+          const ok=unchanged&&isolationVerified&&suites.every(s=>s.state==='PASS');
+          const evidence={schema:'metaengine.native-coding.checkpoint-reconciliation.windows-source-ci.v1',
+            state:ok?'SOURCE_TESTS_PASSED':'SOURCE_TESTS_FAILED',source_sha:expected,source_tree:git(['rev-parse','HEAD^{tree}']),source_unchanged:unchanged,
+            event:process.env.GITHUB_EVENT_NAME,run_id:process.env.GITHUB_RUN_ID,run_attempt:process.env.GITHUB_RUN_ATTEMPT,
+            runner_os:'Windows',runner_environment:'github-hosted',node_version:process.version,
+            postgres_version:pg.version,postgres_archive_sha256:pg.archive_sha256,
+            postgres_driver_version:installedDriver.version,git_executable_sha256:hash(await fs.readFile(executable)),
+            suites,sources,scope:'SOURCE_COMPONENT_AND_DISPOSABLE_PG17_FIXTURES',
+            generated_authority_callbacks:true,canonical_empty_schema_qualified:false,windows_acl_qualified:false,
+            isolated_profile_verified:isolationVerified,installed_keeper_used:isolationVerified?false:null,
+            installed_keeper_exclusion_basis:'FRESH_CANONICAL_PROFILE_ABSENT_OWNER_AND_EXPLICIT_NATIVE_FIXTURE_INPUTS',
+            user_pc_boundary:'USER_PC_AND_INSTALLED_PROFILE_ARE_NOT_TEST_TARGETS',
+            installed_autonomy_proven:false,production_qualified:false,authority_effect:false,
+            sanitizer:'TAP_OUTCOMES_AND_COUNTS_ONLY_KNOWN_NAMES_ELSE_SHA256'};
+          await fs.writeFile(path.join(publicDir,'source-facts.json'),JSON.stringify(evidence,null,2)+'\n',{flag:'wx'});
+          console.log(JSON.stringify({state:evidence.state,source_sha:expected,suites:suites.map(({name,state,counts,refusals})=>({name,state,counts,refusals}))}));
+          if(!ok)process.exitCode=1;
+          } catch {
+            // Do not echo assertion payloads or private paths from preflight.
+            console.error('checkpoint_ci_input_or_runner_refused');process.exitCode=1;
+          }
+          '@ | node --input-type=module
+          if ($LASTEXITCODE -ne 0) { throw 'checkpoint_ci_source_qualification_failed' }
+
+      - name: Publish only sanitized TAP and source facts
+        if: always() && steps.qualify.outcome != 'skipped'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
+        with:
+          name: checkpoint-reconciliation-source-${{ env.EXPECTED_SOURCE_HEAD }}-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            ${{ env.CHECKPOINT_QA_WORK }}/public/component.tap
+            ${{ env.CHECKPOINT_QA_WORK }}/public/native-pg17.tap
+            ${{ env.CHECKPOINT_QA_WORK }}/public/source-facts.json

@@ -73,6 +73,15 @@ export function createAutonomousProjectJournal({ filePath, maxEntries = 10000 } 
       return decode(db.prepare('SELECT * FROM project_effects WHERE effect_key GLOB ? ORDER BY rowid DESC LIMIT 1')
         .get(`turn:${task_id}:${lease_generation}:*`));
     },
+    async hasPendingConversationTurn({ task_id, lease_generation } = {}) {
+      available();
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(task_id || '')
+          || !Number.isSafeInteger(lease_generation) || lease_generation < 1) fail('lease_invalid');
+      // An existence query over the complete exact lease: a newer receipt and
+      // unrelated pending pages cannot conceal an older physical turn UNKNOWN.
+      return Boolean(db.prepare('SELECT 1 FROM project_effects WHERE effect_key GLOB ? AND receipt IS NULL LIMIT 1')
+        .get(`turn:${task_id}:${lease_generation}:*`));
+    },
     async hasPendingTaskEffect(lease = {}) {
       available();
       return db.prepare('SELECT intent,receipt FROM project_effects').all().some(row => {

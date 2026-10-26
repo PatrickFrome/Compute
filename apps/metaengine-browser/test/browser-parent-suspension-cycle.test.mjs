@@ -7,7 +7,7 @@ import { fixture,id,hash } from './fixtures/browser-parent-suspension-fixture.mj
 import { DevOsNativeTaskCycle } from '../src/devos-native-task-cycle.mjs';
 import { AutonomousProjectTaskRuntime } from '../src/autonomous-project-task-runtime.mjs';
 import { createAutonomousProjectJournal } from '../src/autonomous-project-journal.mjs';
-import { nativeSupervisorTransportState } from '../src/native-supervisor-client-base.mjs';
+import { browserParentTelemetryFleet } from '../src/browser-parent-suspension-telemetry.mjs';
 const flags={authority_effect:false,automatic_retry_allowed:false};
 // Composite executable regression: real cycle/runtime/SQLite/fleet/transport;
 // the signed database and Electron observers are deterministic test adapters.
@@ -46,20 +46,20 @@ test('existing cycle suspends parent and child with one slot, then exact complet
   if(c.action==='FLEET_RECONCILE')return h.fleet().snapshot();if(c.action==='CAPTURE')return {...await h.capture(c.payload.tab_id),tab_id:c.payload.tab_id};
   if(c.action==='READ_TRANSCRIPT')return {text:'',total_chars:0,has_more:false,census_truncated:false};if(['TYPED_CLICK','SEMANTIC_TYPE'].includes(c.action)){sends++;assert.fail('never replay acknowledged parent Send');}assert.fail(c.action);
  },signedRequest:async(route,{payload}={})=>{
-  if(route==='/v1/devos/cycle'){census=nativeSupervisorTransportState(state()).fleet.agents;const running=[...tasks.values()].filter(t=>t.state==='RUNNING').map(t=>({...t,conversation_url_sha256:h.fleet().snapshot().agents.find(a=>a.agent_id===t.agent_id).transport_proof.conversation_url_sha256}));return Response.json({schema:'metaengine.devos.browser-cycle.v1',backlog:{ready:0,running:running.length},running,leases:[],...flags});}
+  if(route==='/v1/devos/cycle'){census=browserParentTelemetryFleet(state().fleet).agents;const running=[...tasks.values()].filter(t=>t.state==='RUNNING').map(t=>({...t,conversation_url_sha256:h.fleet().snapshot().agents.find(a=>a.agent_id===t.agent_id).transport_proof.conversation_url_sha256}));return Response.json({schema:'metaengine.devos.browser-cycle.v1',backlog:{ready:0,running:running.length},running,leases:[],...flags});}
   if(route==='/v1/devos/complete'){const task=tasks.get(payload.task_id);Object.assign(task,{state:payload.state,active_claim_count:0});return Response.json({task_id:task.task_id,lease_generation:task.lease_generation,state:task.state,...flags});}assert.fail(route);
  }});cycle.bindProjectRuntime(runtime);
- const confirmed=async l=>{h.setTranscript(h.tabs.get(l.tab_id).url,'');await journal.begin(`turn:${l.task_id}:${l.lease_generation}:ack`,{task_id:l.task_id,agent_id:l.agent_id,lease_generation:l.lease_generation,transcript_floor:0,delivery_history_complete:true,delivered_tool_results:[]});await journal.confirm(`turn:${l.task_id}:${l.lease_generation}:ack`,{transcript_floor:0});};
+ const confirmed=async l=>{h.setTranscript(h.tabs.get(l.tab_id).url,'');await journal.begin(`turn:${l.task_id}:${l.lease_generation}:ack`,{project_id:project,task_id:l.task_id,agent_id:l.agent_id,lease_generation:l.lease_generation,transcript_floor:0,delivery_history_complete:true,delivered_tool_results:[]});await journal.confirm(`turn:${l.task_id}:${l.lease_generation}:ack`,{transcript_floor:0});};
  tasks.set(id(20),{task_id:id(20),parent_task_id:parent.task_id,state:'READY',role:parent.role});await confirmed(parent);await cycle.runOnce();assert.equal(tasks.get(parent.task_id).state,'SUSPENDED');assert.equal(h.tabs.size,0);
  const child=enrich(await h.spawn(id(20)),parent.task_id);tasks.set(child.task_id,child);tasks.set(id(30),{task_id:id(30),parent_task_id:child.task_id,state:'READY',role:child.role});await confirmed(child);await cycle.runOnce();assert.equal(child.state,'SUSPENDED');assert.equal(h.tabs.size,0);
  // Real SQLite restart before any restored generation; old parent prompts remain acknowledged.
  await runtime.close();open();cycle.bindProjectRuntime(runtime);
  const leaf=enrich(await h.spawn(id(30)),child.task_id);tasks.set(leaf.task_id,leaf);await runtime.refreshContext(leaf);
  await cycle.completeFromTrustedCommand({...leaf,state:'COMPLETED',summary:{verified_test_fixture:true}});assert.equal(h.tabs.size,0);
- await runtime.tick();assert.equal(h.fleet().snapshot().counts.RESUMING,1);census=nativeSupervisorTransportState(state()).fleet.agents;
+ await runtime.tick();assert.equal(h.fleet().snapshot().counts.RESUMING,1);census=browserParentTelemetryFleet(state().fleet).agents;
  await runtime.tick();const restoredChild=tasks.get(child.task_id);assert.equal(restoredChild.lease_generation,2);assert.equal(h.tabs.size,1);
  await runtime.refreshContext(restoredChild);await cycle.completeFromTrustedCommand({...restoredChild,state:'COMPLETED',summary:{verified_test_fixture:true}});assert.equal(h.tabs.size,0);
- await runtime.tick();census=nativeSupervisorTransportState(state()).fleet.agents;await runtime.tick();
+ await runtime.tick();census=browserParentTelemetryFleet(state().fleet).agents;await runtime.tick();
  assert.equal(tasks.get(parent.task_id).state,'RUNNING');assert.equal(tasks.get(parent.task_id).lease_generation,2);assert.equal(h.tabs.size,1);assert.equal(sends,0);
  assert.equal((await runtime.latestTurnForLease(tasks.get(parent.task_id))).state,'CONFIRMED');
 });

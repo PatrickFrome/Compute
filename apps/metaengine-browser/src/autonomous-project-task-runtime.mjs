@@ -239,8 +239,15 @@ export class AutonomousProjectTaskRuntime {
     if (typeof this.#journal.latestConversationTurn !== 'function') return null;
     const entry = await this.#journal.latestConversationTurn(lease);
     if (!entry) return null;
-    if (entry.intent?.task_id !== lease.task_id || entry.intent.agent_id !== lease.agent_id
-        || entry.intent.lease_generation !== lease.lease_generation) fail('continuation_binding_drift');
+    // This recovery read grants the running cycle a transcript window before
+    // it serves tools. Apply project binding and the complete lease UNKNOWN
+    // fence here; the later send transaction cannot undo an issued tool/spawn.
+    const current = await this.#taskSnapshot(lease);
+    if (!current || entry.intent?.project_id !== current.snapshot.project_id
+        || entry.intent.task_id !== lease.task_id || entry.intent.agent_id !== lease.agent_id
+        || entry.intent.lease_generation !== lease.lease_generation) return { state: 'AMBIGUOUS', ...flags };
+    if (typeof this.#journal.hasPendingConversationTurn !== 'function'
+        || await this.#journal.hasPendingConversationTurn(lease) !== false) return { state: 'AMBIGUOUS', ...flags };
     const floor = entry.intent.transcript_floor;
     // An unfinished physical turn cannot grant a new transcript window. Old
     // receipts without the boundary also require explicit reconciliation.

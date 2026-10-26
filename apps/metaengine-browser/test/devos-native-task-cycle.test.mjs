@@ -61,6 +61,99 @@ const stop = { role: 'button', name: 'Stop generating' };
 const conversationUrl = 'https://chatgpt.com/c/12345678-abcd-4abc-8abc-123456789abc';
 const supervisorTab = 'tab_supervisor';
 
+for (const scenario of ['OLDER_PENDING', 'FOREIGN_PROJECT', 'UNRELATED_PENDING']) {
+  test(`real running cycle fences recovered conversation admission before tools and Send: ${scenario}`, async t => {
+    const fs = await import('node:fs/promises');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const { AutonomousProjectTaskRuntime } = await import('../src/autonomous-project-task-runtime.mjs');
+    const { createAutonomousProjectJournal } = await import('../src/autonomous-project-journal.mjs');
+    const { createAutonomousProjectProviderFixture } = await import('./fixtures/autonomous-project-provider.mjs');
+    const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-turn-admission-')));
+    const journalPath = path.join(directory, 'effects.sqlite');
+    const projectId = '11111111-1111-4111-8111-111111111111';
+    const foreignProject = '44444444-4444-4444-8444-444444444444';
+    const foreignTask = '00000000-0000-4000-8000-000000000001';
+    const projectLease = { ...lease, claim_id: 10, parent_task_id: null, root_task_id: lease.task_id,
+      depth: 0, state: 'RUNNING', conversation_url_sha256: fleetTransportProof.conversation_url_sha256,
+      task_spec: { ...lease.task_spec, project_continuity: { project_id: projectId } } };
+    const provider = createAutonomousProjectProviderFixture({ filePath: path.join(directory, 'provider.sqlite'),
+      projectId, rootTask: projectLease });
+    let journal = createAutonomousProjectJournal({ filePath: journalPath }), runtime;
+    t.after(async () => { if (runtime) await runtime.close(); else await journal.close(); provider.close();
+      await fs.rm(directory, { recursive: true, force: true }); });
+    const intent = { schema: 'metaengine.devos.project-conversation-turn.v1', project_id: projectId,
+      task_id: lease.task_id, agent_id: lease.agent_id, lease_generation: lease.lease_generation,
+      prompt_sha256: 'a'.repeat(64), transcript_floor: 0, delivery_history_complete: true,
+      delivered_tool_results: [], unresolved_tool_effects: [], authority_effect: false,
+      scheduler_authority: false, second_scheduler_loop: false, automatic_retry_allowed: false };
+    // More than a maximum global pending page precedes this task's UNKNOWN.
+    // The admission decision must query the full exact lease, not sample a page.
+    for (let i = 0; i < 129; i++) await journal.begin(`turn:${foreignTask}:1:pending-${i}`,
+      { ...intent, task_id: foreignTask });
+    await journal.begin(`turn:${lease.task_id}:10:other-generation`, { ...intent, lease_generation: 10 });
+    const unknownKey = `turn:${lease.task_id}:1:unknown`;
+    if (scenario === 'OLDER_PENDING') await journal.begin(unknownKey, intent);
+    const confirmedKey = `turn:${lease.task_id}:1:confirmed`;
+    await journal.begin(confirmedKey, { ...intent, project_id: scenario === 'FOREIGN_PROJECT' ? foreignProject : projectId });
+    await journal.confirm(confirmedKey, { effect_state: 'PROVEN_COMPOSER_CLEARED', transcript_floor: 0 });
+    const before = await journal.find(confirmedKey), unknownBefore = await journal.find(unknownKey);
+    assert.equal((await journal.pending({ limit: 128 })).some(row => row.effect_key === unknownKey), false);
+    // Recovery uses a reopened durable journal and the production runtime/cycle.
+    await journal.close(); journal = createAutonomousProjectJournal({ filePath: journalPath });
+    const effects = { issue_tool: 0, project_spawn: 0, send: 0 }, commands = [], completions = [];
+    runtime = new AutonomousProjectTaskRuntime({ journal, materializeProject: async () => {
+      assert.fail('running recovery must not rematerialize a worktree');
+    }, request: input => {
+      if (input.path.endsWith('/spawn')) effects.project_spawn++;
+      return provider.request(input);
+    } });
+    const transcript = [
+      '```tool\nTOOL_REQUEST_V1\nrequest_id=fixture:observe:one\naction=CAPTURE\npayload_json={}\n```',
+      '```tool\nTOOL_REQUEST_V1\nrequest_id=fixture:child:one\naction=PROJECT_SPAWN\npayload_json={"children":[{"objective":"Useful fixture child","role":"CODER"}]}\n```',
+    ].join('\n');
+    const cycle = new DevOsNativeTaskCycle({ getState: async () => state(), executeCommand: async command => {
+      commands.push(command.action);
+      if (command.action === 'FLEET_RECONCILE') return fleet;
+      if (command.action === 'CAPTURE') return frame({ url: conversationUrl });
+      if (command.action === 'READ_TRANSCRIPT') return { text: transcript, total_chars: transcript.length,
+        has_more: false, census_truncated: false };
+      if (command.action === 'SEMANTIC_TYPE') { typedDraft = command.payload.text; return { typed: true }; }
+      if (command.action === 'TYPED_CLICK') { effects.send++; typedDraft = ''; return { effect_state: 'PROVEN_COMPOSER_CLEARED' }; }
+      assert.fail(`unexpected recovery command: ${command.action}`);
+    }, signedRequest: async (endpoint, options) => {
+      if (endpoint === '/v1/devos/cycle') return response(200, { schema: 'metaengine.devos.browser-cycle.v1',
+        backlog: { ready: 0, running: 1 }, running: [projectLease] });
+      if (endpoint === '/v1/commands/issue-tool') { effects.issue_tool++; return response(200, { accepted: true, command_id: 'fixture-command' }); }
+      if (endpoint === '/v1/commands/fixture-command/receipt') return response(200, { found: true,
+        terminal: true, status: 'COMPLETED', receipt: { result: 'Fixture capture completed' } });
+      if (endpoint === '/v1/devos/complete') { completions.push(options.payload); return response(200, { state: options.payload.state }); }
+      assert.fail(`unexpected recovery route: ${endpoint}`);
+    } });
+    cycle.bindProjectRuntime(runtime);
+    let outcome, cycleError;
+    try { outcome = await cycle.runOnce(); } catch (error) { cycleError = error; }
+    if (scenario === 'UNRELATED_PENDING') {
+      assert.ifError(cycleError);
+      assert.deepEqual(effects, { issue_tool: 1, project_spawn: 1, send: 1 }, 'positive control reaches all three effect barriers');
+      assert.equal(outcome.result_ready.state, 'PROJECT_CONTINUING');
+      assert.equal(completions.length, 0);
+    } else {
+      assert.deepEqual(effects, { issue_tool: 0, project_spawn: 0, send: 0 }, 'untrusted recovery must stop before every effect barrier');
+      assert.ifError(cycleError);
+      assert.equal(outcome.result_ready.state, 'AMBIGUOUS');
+      assert.equal(completions.length, 1);
+      assert.equal(completions[0].error, 'PROJECT_CONTINUATION_EFFECT_UNKNOWN');
+      assert.equal(commands.includes('READ_TRANSCRIPT'), false, 'no recovered transcript window is exposed');
+      assert.equal(commands.includes('SEMANTIC_TYPE'), false);
+      assert.equal(provider.read().tasks.length, 1, 'no child was admitted');
+      assert.equal(provider.read().physical_provider_creations, 0);
+    }
+    assert.deepEqual(await journal.find(confirmedKey), before, 'recovery never rewrites a receipt');
+    assert.deepEqual(await journal.find(unknownKey), unknownBefore, 'UNKNOWN custody remains immutable');
+  });
+}
+
 test('project verification sweep advances on the existing heartbeat even when RESULT_READY leaves no running tasks', async () => {
   let swept = 0; const order = [];
   const cycle = new DevOsNativeTaskCycle({ getState: async () => state(),
