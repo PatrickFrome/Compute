@@ -6,10 +6,12 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
 
-const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-node-tests-'));
 const env={...process.env};
+const electronMode=env.METAENGINE_TEST_ELECTRON_MODE;
+if(electronMode!==undefined&&!['MAIN_PROCESS','ASAR_NODE'].includes(electronMode))throw Error('isolated_test_electron_mode_invalid');
+const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-node-tests-'));
 for(const key of Object.keys(env)) {
-  if(key.startsWith('METAENGINE_')&&!/^METAENGINE_(?:PG_TEST_|PGLITE_)/.test(key))delete env[key];
+  if(key.startsWith('METAENGINE_')&&key!=='METAENGINE_TEST_ELECTRON_MODE'&&!/^METAENGINE_(?:PG_TEST_|PGLITE_)/.test(key))delete env[key];
 }
 for(const [key,folder] of Object.entries({APPDATA:'roaming',LOCALAPPDATA:'local',USERPROFILE:'home',HOME:'home',
   XDG_CONFIG_HOME:'config',XDG_CACHE_HOME:'cache',XDG_DATA_HOME:'data',XDG_STATE_HOME:'state',TEMP:'tmp',TMP:'tmp'})) {
