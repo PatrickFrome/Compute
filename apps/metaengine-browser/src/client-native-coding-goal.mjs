@@ -62,7 +62,23 @@ export function normalizeNativeCodingGoalAdmission(value,{request_id,objective}=
   return Object.freeze(structuredClone(value));
 }
 
+export function normalizeNativeCodingSeedRejection(value,input){
+  if(!exact(value,['schema','state','request_id','objective','profile_id','profile_sha256','body_sha256',
+    'admission_absent','semantic_fence_absent','automatic_retry_allowed','authority_effect'])
+    ||value.schema!=='metaengine.native-coding.seed-rejection.v1'||value.state!=='REJECTED_BEFORE_DISPATCH'
+    ||value.request_id!==input.request_id||value.objective!==input.objective
+    ||!UUID.test(value.request_id||'')||!UUID.test(value.profile_id||'')||!SHA.test(value.profile_sha256||'')
+    ||value.body_sha256!==digest(JSON.stringify({objective:input.objective,request_id:input.request_id}))
+    ||value.admission_absent!==true||value.semantic_fence_absent!==true
+    ||value.automatic_retry_allowed!==false||value.authority_effect!==false)fail('rejection_invalid');
+  return Object.freeze(structuredClone(value));
+}
 export function normalizeNativeCodingSeedResult(raw,input){
+  if(raw?.state==='REJECTED_BEFORE_DISPATCH'){
+    if(!exact(raw,['state','admission','rejection','production_qualified','automatic_retry_allowed','authority_effect'])
+      ||raw.admission!==null||['production_qualified','automatic_retry_allowed','authority_effect'].some(k=>raw[k]!==false))fail('seed_rejection_invalid');
+    return normalizeNativeCodingSeedRejection(raw.rejection,input);
+  }
   if(!exact(raw,['state','admission','production_qualified','automatic_retry_allowed','authority_effect'])
     ||!['ADMITTED','READBACK_ONLY','READBACK_REQUIRED'].includes(raw.state)
     ||['production_qualified','automatic_retry_allowed','authority_effect'].some(k=>raw[k]!==false))fail('seed_result_invalid');
@@ -111,6 +127,7 @@ export function createClientNativeCodingGoalRouter({journal,request,projectSnaps
   async function observe(entry,raw){
     const input={request_id:entry.request_id,objective:entry.goal};
     const receipt=normalizeNativeCodingSeedResult(raw,input);
+    if(receipt?.schema==='metaengine.native-coding.seed-rejection.v1')return journal.recordNativeRejection(receipt);
     if(!receipt){await journal.markReconcileRequired(entry.request_id,'native_seed_readback_required');return journal.get(entry.request_id);}
     await journal.recordNativeAdmission(receipt);
     // A receipt proves admission, not that this Browser still has an open
@@ -145,8 +162,10 @@ export function createClientNativeCodingGoalRouter({journal,request,projectSnaps
           if(!observed.receipt)fail('seed_readback_required');
           return observed.receipt;
         }catch(error){
+          if(journal.get(request_id)?.native_rejection)throw error;
           await journal.markReconcileRequired(request_id,error).catch(()=>{});
           try{await observe(entry,await request('READ_SEED',{request_id,objective:entry.goal}));}catch{}
+          if(journal.get(request_id)?.native_rejection)fail('rejected_before_dispatch:'+request_id);
           fail('submit_requires_reconciliation:'+request_id);
         }
       }finally{state.inFlight=false;}

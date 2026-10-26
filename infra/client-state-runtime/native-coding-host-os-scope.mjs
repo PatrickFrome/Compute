@@ -110,7 +110,11 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
     const unchanged=()=>Promise.all([host.exe_path,path.join(resources,'app.asar'),operator.cli_executable].map(file=>image.read(file)));
     if(!includeSandbox){await unchanged();return {...base,artifact,worktree};}
     const sandbox=await readNativeCodingSandboxEvidence({pin:resolveNativeCodingSandboxPin(operator,permit),cliPath:operator.cli_executable,
-      worktreePath:permit.worktree.path,role:permit.role,hostProcessId:parentPid});
+      worktreePath:permit.worktree.path,role:permit.role,hostProcessId:parentPid,
+      // The CLI was byte-qualified before admission. Recheck its exact native
+      // file identity instead of reading hundreds of MB again for every role.
+      // The guard permanently rejects replacement, mutation and hardlinks.
+      readExecutableSha256:file=>image.read(file)});
     await unchanged();return {...base,artifact,worktree,sandbox};
   }
   // Acceptance reads physical current bytes and current Host identity without

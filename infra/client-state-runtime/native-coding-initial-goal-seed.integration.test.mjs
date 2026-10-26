@@ -198,6 +198,32 @@ test('private initial native goal admission is atomic and preserves the W30 auth
     assert.equal((await sql.unsafe('select count(*)::int as n from destruktion_meta.project_event_h205f22 e join destruktion_meta.project_run_h205f22 p using(project_id)where p.workspace_id=$1',[f.profile.workspace_id]))[0].n,0);
    }finally{await sql.unsafe('drop trigger zz_qa_seed_late_failure on destruktion_meta.native_coding_seed_h205f22;drop function destruktion_meta.qa_seed_late_failure()');}passed++;
   });
+  await t.test('pre-dispatch observation failure has an exact durable rejection and no SQL replay',async()=>{
+   let dispatches=0;
+   const binding={unsafe:(...a)=>sql.unsafe(...a),begin:async(...a)=>{dispatches++;return sql.begin(...a);}};
+   const f=await fixture({sqlBinding:binding}),service=await createNativeCodingHostSeedService({...f.options,
+    readNativeScope:async()=>{throw Error('generated_observation_failure');}});
+   await assert.rejects(service.SEED_GOAL(f.input),/generated_observation_failure/);
+   const result=await service.READ_SEED(f.input);assert.equal(result.state,'REJECTED_BEFORE_DISPATCH');
+   assert.equal(result.rejection.request_id,f.input.request_id);assert.equal(result.rejection.admission_absent,true);
+   assert.deepEqual(await service.SEED_GOAL(f.input),result);assert.equal(dispatches,0);
+   assert.deepEqual(await count(f),{seeds:0,projects:0,tasks:0,permits:0,browser_goals:0});service.close();passed++;
+  });
+  await t.test('an unresolved SQL attempt with no seed stays ambiguous and cannot become a pre-dispatch rejection',async()=>{
+   let dispatches=0;const binding={unsafe:(...a)=>sql.unsafe(...a),begin:async()=>{dispatches++;throw Error('generated_unknown_transaction');}};
+   const f=await fixture({sqlBinding:binding}),service=await createNativeCodingHostSeedService(f.options);
+   assert.equal((await service.SEED_GOAL(f.input)).state,'READBACK_REQUIRED');
+   const read=await service.READ_SEED(f.input);assert.equal(read.state,'READBACK_ONLY');assert.equal(read.admission,null);
+   assert.equal((await service.SEED_GOAL(f.input)).state,'READBACK_ONLY');assert.equal(dispatches,1);service.close();passed++;
+  });
+  await t.test('a commit racing the first absent read wins over an absent semantic fence',async()=>{
+   let hide=false;const binding={begin:(...a)=>sql.begin(...a),unsafe:async(text,...args)=>{
+    if(hide&&text.includes('native_coding_seed_read_v1')){hide=false;return[{value:null}];}return sql.unsafe(text,...args);
+   }};
+   const f=await fixture({sqlBinding:binding}),service=await createNativeCodingHostSeedService(f.options);
+   const admitted=await service.SEED_GOAL(f.input);hide=true;const read=await service.READ_SEED(f.input);
+   assert.equal(read.state,'READBACK_ONLY');assert.deepEqual(read.admission,admitted.admission);assert.equal((await count(f)).seeds,1);service.close();passed++;
+  });
   await t.test('lost COMMIT ACK is read back from real PG; changing UUID cannot replay an unresolved semantic intent',async()=>{
    let dispatches=0;const binding={unsafe:(...a)=>sql.unsafe(...a),begin:async(...a)=>{dispatches++;const result=await sql.begin(...a);throw Error('generated_ack_loss_after_real_commit');}};
    const f=await fixture({sqlBinding:binding}),service=await createNativeCodingHostSeedService(f.options),first=await service.SEED_GOAL(f.input);
@@ -267,7 +293,7 @@ test('private initial native goal admission is atomic and preserves the W30 auth
     assert.deepEqual(reply.admission.receipt.logical_policy,{max_depth:null,max_tasks:null,max_children:null});
    }finally{service.close();}passed++;
   });
-  assert.equal(passed,12);
+  assert.equal(passed,15);
   await fs.writeFile(path.join(directory,'receipt.json'),JSON.stringify({schema:'metaengine.native-coding.initial-seed.disposable-qa.v1',state:'PASS',
    postgres_version_num:identity.version,postgres_system_identifier:cluster,port,subtests:passed,migration_sha256:migrationSha,
    source_classification:'REAL_DISPOSABLE_PG_AND_HOST_SERVICE_WITH_GENERATED_ENROLLED_DEVICE_INSTALLED_IMAGE_OS_CANARY_AND_ACL_FIXTURES',

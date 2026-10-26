@@ -237,6 +237,17 @@ async function sandboxFixture(t){
   const options={pin:await save(),cliPath,worktreePath:root,role:'IMPLEMENTER',readProcess:async()=>proc,
     readBoot:async()=>structuredClone(value.host_boot),verifyStorage:yes};return {value,options,save};
 }
+test('prepared sandbox image reader preserves exact bytes and invalidates a changed executable',async t=>{
+  const {createNativeCodingHostImageGuard}=await import('../../../infra/client-state-runtime/native-coding-host-os-scope.mjs');
+  const f=await sandboxFixture(t),guard=createNativeCodingHostImageGuard();
+  await guard.prepare([f.options.cliPath]);
+  const options={...f.options,readExecutableSha256:file=>guard.read(file)};
+  assert.equal((await readNativeCodingSandboxEvidence(options)).mode,'workspace-write');
+  await fs.writeFile(f.options.cliPath,'changed-cli');
+  await assert.rejects(readNativeCodingSandboxEvidence(options),/image_preparation_invalidated/);
+  await assert.rejects(readNativeCodingSandboxEvidence({...f.options,readExecutableSha256:async()=>null}),/image_digest_invalid/);
+  await assert.rejects(readNativeCodingSandboxEvidence({...f.options,readExecutableSha256:async()=> 'f'.repeat(64)}),/scope_mismatch/);
+});
 test('sandbox reader binds exact CLI, worktree, current boot and raw logs including empty stderr',async t=>{
   const f=await sandboxFixture(t);assert.equal((await readNativeCodingSandboxEvidence(f.options)).mode,'workspace-write');
   await assert.rejects(readNativeCodingSandboxEvidence({...f.options,worktreePath:path.join(f.options.worktreePath,'elsewhere')}),/scope_mismatch/);

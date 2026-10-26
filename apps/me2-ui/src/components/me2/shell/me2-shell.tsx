@@ -459,7 +459,9 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
     COMPLETED: "Completed · proof pending", BLOCKED: "Blocked", FAILED: "Failed",
     AMBIGUOUS: "Needs reconciliation", FENCED: "Stopped",
   };
-  const status = error ? "Check task status"
+  const status = journalEntry?.state === "FAILED" && journalEntry.last_error === "native_goal_rejected_before_dispatch"
+    ? "Not started · admission rejected"
+    : error ? "Check task status"
     : proof?.user_goal_to_result_readback === true ? "Result received"
     : journalEntry?.state === "RECONCILE_REQUIRED" ? "Needs reconciliation"
     : isNative&&journalEntry?.project_error?"Native observation unavailable"
