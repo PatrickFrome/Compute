@@ -196,6 +196,8 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
     AGENT_OPERATION:request=>{open();return agentTools.invoke(request);},
     FINISH_CHECKPOINT:query=>finishCheckpoint('FINISH_CHECKPOINT',query),
     READ_FINISH_CHECKPOINT:query=>finishCheckpoint('READ_FINISH_CHECKPOINT',query),
+    ...(typeof commitService?.RECONCILE_FINISH_CHECKPOINT==='function'
+      ?{RECONCILE_FINISH_CHECKPOINT:query=>finishCheckpoint('RECONCILE_FINISH_CHECKPOINT',query)}:{}),
     async READ_SCOPE(query={}) {
       open();await readNativeScope.prepare?.();open();
       const after=query.after_permit_id??'00000000-0000-0000-0000-000000000000';

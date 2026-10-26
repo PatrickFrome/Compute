@@ -47,6 +47,10 @@ const operations={
  READ_FINISH_CHECKPOINT:async value=>({...value,state:'PENDING_COMMIT'}),
  close:()=>{},
 };
+if(['reconciliation-mounted','slow-reconciliation','exit-reconciliation'].includes(mode))operations.RECONCILE_FINISH_CHECKPOINT=async value=>{
+ ++calls;if(mode==='exit-reconciliation')process.exit(19);if(mode==='slow-reconciliation')await delay(180);
+ return {...value,state:'COMMITTED_NO_SUCCESSOR',automatic_retry_allowed:false};
+};
 if(mode==='seed-mounted'||mode==='slow-seed')for(const action of ['SEED_GOAL','READ_SEED','LIST_SEEDS'])operations[action]=async request=>{
  if(action==='SEED_GOAL'){calls++;if(mode==='slow-seed')await delay(180);}
  return {fixture_transport_only:true,operation:action,input:request.body.input};
@@ -129,6 +133,60 @@ test('real private IPC accepts lifecycle close without exposing it and carries o
   await assert.rejects(client.finishCheckpoint({...selector,path:'C:/caller-receipt.json'}),e=>e.reason==='INVALID_PAYLOAD');
   await assert.rejects(client.agentOperation({...request,args:[]}),e=>e.reason==='INVALID_PAYLOAD');
   assert.equal((await stats()).calls,2);
+});
+
+test('optional reconciliation crosses real IPC with exact selectors and no caller evidence',async t=>{
+  const {client,stats}=await setup(t,'reconciliation-mounted');
+  const selector={project_id:id(),checkpoint_sha256:'a'.repeat(64)};
+  assert.deepEqual(await client.reconcileFinishCheckpoint(selector),{...selector,state:'COMMITTED_NO_SUCCESSOR',automatic_retry_allowed:false});
+  for(const extra of [{path:'C:/caller.json'},{receipt:{}},{git_head:'a'.repeat(40)},{sql_intent_absent:true}]){
+    await assert.rejects(client.reconcileFinishCheckpoint({...selector,...extra}),e=>e.reason==='INVALID_PAYLOAD'&&e.effect_outcome==='NONE');
+  }
+  await assert.rejects(client.reconcileFinishCheckpoint({...selector,checkpoint_sha256:'bad'}),e=>e.reason==='INVALID_PAYLOAD');
+  assert.equal((await stats()).calls,1);
+});
+
+test('server independently rejects reconciliation paths and forged evidence before dispatch',async t=>{
+  const {child,instanceId,stats}=await setup(t,'reconciliation-mounted');
+  const selector={project_id:id(),checkpoint_sha256:'a'.repeat(64)};
+  for(const extra of [{path:'C:/caller.json'},{receipt:{}},{git_head:'a'.repeat(40)},{sql_intent_absent:true}]){
+    child.send({schema:'metaengine.native-coding.host-ipc.request.v1',instance_id:instanceId,host_pid:child.pid,
+      request_id:id(),action:'RECONCILE_FINISH_CHECKPOINT',payload:{...selector,...extra}});
+  }
+  const state=await stats();assert.equal(state.calls,0);
+  assert.deepEqual(state.protocolErrors,Array(4).fill('INVALID_PAYLOAD'));
+});
+
+test('absent optional reconciliation gives a correlated refusal with no attempted effect',async t=>{
+  const {client,stats}=await setup(t);
+  await assert.rejects(client.reconcileFinishCheckpoint({project_id:id(),checkpoint_sha256:'a'.repeat(64)}),
+    e=>e.reason==='UNSUPPORTED_ACTION'&&e.effect_outcome==='NONE'&&e.automatic_retry_allowed===false&&e.readback_required===false);
+  assert.equal((await stats()).calls,0);assert.equal(client.snapshot().inflight,0);
+  assert.equal((await client.readScope()).call_count,1);
+});
+
+test('lost reconciliation ACK stays UNKNOWN after timeout without retransmission',async t=>{
+  const {client,stats}=await setup(t,'slow-reconciliation',{timeoutMs:30,serverTimeoutMs:500});
+  await assert.rejects(client.reconcileFinishCheckpoint({project_id:id(),checkpoint_sha256:'a'.repeat(64)}),
+    e=>e.reason==='REQUEST_TIMEOUT'&&e.effect_outcome==='UNKNOWN'&&e.readback_required===true&&e.automatic_retry_allowed===false);
+  await sleep(230);assert.equal((await stats()).calls,1);assert.equal(client.snapshot().inflight,0);
+});
+
+test('closing a reconciliation channel preserves the dispatched write ambiguity',async t=>{
+  const {client,stats}=await setup(t,'slow-reconciliation');
+  const pending=client.reconcileFinishCheckpoint({project_id:id(),checkpoint_sha256:'a'.repeat(64)});
+  const rejected=assert.rejects(pending,e=>e.reason==='CLIENT_CLOSED'&&e.effect_outcome==='UNKNOWN'
+    &&e.readback_required===true&&e.automatic_retry_allowed===false);
+  assert.equal((await stats()).calls,1);client.close();await rejected;
+  await sleep(210);assert.equal((await stats()).calls,1);assert.equal(client.snapshot().inflight,0);
+});
+
+test('Host exit during reconciliation cannot become a safe retry or success',async t=>{
+  const {client}=await setup(t,'exit-reconciliation');
+  await assert.rejects(client.reconcileFinishCheckpoint({project_id:id(),checkpoint_sha256:'a'.repeat(64)}),
+    e=>['CHILD_EXIT','CHANNEL_CLOSED'].includes(e.reason)&&e.effect_outcome==='UNKNOWN'
+      &&e.readback_required===true&&e.automatic_retry_allowed===false);
+  assert.equal(client.snapshot().closed,true);assert.equal(client.snapshot().inflight,0);
 });
 
 function seedRequest(operation,instanceId,hostPid){
