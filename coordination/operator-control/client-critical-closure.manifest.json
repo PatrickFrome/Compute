@@ -1009,7 +1009,7 @@
     "evidence/audits/metaengine-20261026-health-observer-recovery/live-artifact-observation.json": "60b4b53c71a0414fe082fc5d5802118986c29511",
     "apps/metaengine-browser/test/installed-owner-soak-failure-code.test.mjs": "4127f9f37d30d1248c97440ecc54e8ac24315a0e",
     "infra/client-state-runtime/pg17-one-shot-disposable-dump-executor.test.mjs": "e0f421c60d2b100d5d8837b8745e8034ff1613da",
-    "infra/client-state-runtime/pg17-backup-effect-barrier.test.mjs": "9cf22d58a329a5e1b68976b58106e5c9d21d0e5f"
+    "infra/client-state-runtime/pg17-backup-effect-barrier.test.mjs": "eafe10d7f71245d28a9486b6b9fe278a3f281e27"
   },
   "parent_checks_not_transitive": true,
   "proof_levels": {

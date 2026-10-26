@@ -60,16 +60,24 @@ test('cross refuses a changed existing archive and an altered intent payload',as
   await fs.writeFile(intent.archive_path,'');
   await assert.rejects(crossBackupEffectBarrier({journalDirectory:root,intent}),/archive_existing/);
 });
-test('bad source identity and journal alias fail closed',async t=>{
+test('bad source identity fails closed',async t=>{
   const {root,intent}=await fixture(t);
   assert.throws(()=>buildBackupEffectIntent({
     intentId:intent.intent_id,ownerPid:111,keeperPid:111,
     sourceHead:intent.source_head,ownerSha256:intent.owner_sha256,
     postmasterSha256:intent.keeper_postmaster_sha256,archivePath:intent.archive_path,
   }),/backup_effect_intent_invalid/);
+});
+test('physical journal alias fails closed without being relabelled as verified when unavailable',async t=>{
+  const {root,intent}=await fixture(t);
   const alias=path.join(path.dirname(root),'alias-'+randomUUID());
   try{await fs.symlink(root,alias,'junction');}
-  catch(error){if(process.platform==='win32'){t.diagnostic('symlink privilege unavailable');return;}throw error;}
+  catch(error){
+    if(process.platform==='win32'&&['EPERM','EACCES'].includes(error.code)){
+      t.skip('native junction creation denied; alias rejection is not qualified');return;
+    }
+    throw error;
+  }
   t.after(()=>fs.rm(alias,{force:true}));
   await assert.rejects(publishBackupEffectIntent({journalDirectory:alias,intent}),/journal_invalid/);
 });
