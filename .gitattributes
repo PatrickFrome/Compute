@@ -1,0 +1,5 @@
+# SQL resource and stored-function hashes are byte-exact across installer/CI hosts.
+# Do not let Windows core.autocrlf rewrite reviewed SQL or its pinned plan.
+/supabase/migrations/*.sql text eol=lf
+/infra/client-state-runtime/*.sql text eol=lf
+/infra/client-state-runtime/fresh-schema-candidate-plan.json text eol=lf

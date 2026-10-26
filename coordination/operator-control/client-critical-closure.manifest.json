@@ -368,7 +368,7 @@
     "infra/client-state-runtime/operator-readonly-gateway.mjs": "816b3da164d012d6365483bb663f00a2ec32bb16",
     "infra/client-state-runtime/own-postgres-birth-w61.mjs": "4cef06ef8a8a6c9a8e25419879dc442623b707ef",
     "infra/client-state-runtime/own-postgres-birth-w61.test.mjs": "bbb06f95fb9a9c34c9d9f8be2d842e1918d317e5",
-    "infra/client-state-runtime/package.json": "9cd0f71123c84726e81fb06c5f79777d8b32d293",
+    "infra/client-state-runtime/package.json": "8bb6ca09f83635190fc8369f5a6d9e79b71df9ce",
     "infra/client-state-runtime/project-continuity.integration.test.mjs": "4ecf919ce555eab28db32dab8b9eaa56bbbaf22b",
     "infra/client-state-runtime/upgrade-backup-gate.mjs": "90f9f3b0090beb64008b6d63efae1363c010ca34",
     "infra/client-state-runtime/upgrade-backup-gate.test.mjs": "fe6011a9871b9cfa2d349e0b107a1b4d608f7f8b",
@@ -858,7 +858,9 @@
     "infra/client-state-runtime/fresh-schema-plan.test.mjs": "205d85fd44dc00741f91a8a937260c86edf2d0d9",
     "infra/client-state-runtime/test/fresh-schema-disposable.mjs": "33a93b103fce6e5799cddcff1b1e325068f031f9",
     ".github/workflows/client-v1-c5-reference-useful-work.yml": "e80e2727331459c8975576e0feb664ca0a69b355",
-    ".github/client-c5-reference-source-identity.test.mjs": "41c1e2edd6801c8e310b826549c2403090856bed"
+    ".github/client-c5-reference-source-identity.test.mjs": "41c1e2edd6801c8e310b826549c2403090856bed",
+    ".gitattributes": "f03648688169077197fe76b9130f2b97b6494c44",
+    "infra/client-state-runtime/sql-checkout-byte-integrity.test.mjs": "1ef9d0ab75c179fcb8f7c2f530d015ae4654ccd3"
   },
   "parent_checks_not_transitive": true,
   "proof_levels": {
