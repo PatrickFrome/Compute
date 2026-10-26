@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
-import { SelfUpdateRuntime } from '../src/self-update-runtime-v8.mjs';
+// Offline contract probe: importing host resilience must not start an installed
+// local Owner or PostgreSQL before the fake host/updater can be injected.
+process.argv.push('--metaengine-version-probe');
+const { SelfUpdateRuntime } = await import('../src/self-update-runtime-v8.mjs');
 
 class FakeUpdater extends EventEmitter {
   constructor(events) {

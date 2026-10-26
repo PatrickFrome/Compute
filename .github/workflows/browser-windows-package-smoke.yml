@@ -130,6 +130,16 @@ jobs:
           git diff --check
           test -z "$(git status --porcelain --untracked-files=all)"
 
+      - name: Prove native consent denial mechanics before reservation
+        shell: bash
+        run: |
+          set -euo pipefail
+          proof_log="$RUNNER_TEMP/native-consent-mechanics-preflight.tap"
+          node --test --test-concurrency=1 --test-reporter=tap \
+            apps/metaengine-browser/test/native-consent-helper-windows-mechanics.test.mjs | tee "$proof_log"
+          node apps/metaengine-browser/scripts/verify-native-consent-mechanics-proof.mjs "$proof_log" "$GITHUB_WORKSPACE"
+          test -z "$(git status --porcelain --untracked-files=all)"
+
       - name: Refuse duplicate source/version physical build
         working-directory: apps/metaengine-browser
         shell: powershell

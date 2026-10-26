@@ -28,6 +28,7 @@ test('Package Smoke reserves one source/version before dependency install or phy
 
   const guard = workflow.indexOf('- name: Refuse duplicate source/version physical build');
   const sourceContracts = workflow.indexOf('- name: Verify exact Windows source contracts before reservation');
+  const nativeMechanics = workflow.indexOf('- name: Prove native consent denial mechanics before reservation');
   const marker = workflow.indexOf('- name: Publish immutable package-version reservation');
   const seal = workflow.indexOf('- name: Seal package-version reservation before physical build');
   const lockMaterial = workflow.indexOf('- name: Prove frozen package-lock material before dependency install');
@@ -36,7 +37,8 @@ test('Package Smoke reserves one source/version before dependency install or phy
   const candidate = workflow.indexOf('- name: Publish immutable candidate for parallel downstream qualification');
 
   assert.ok(sourceContracts >= 0);
-  assert.ok(guard > sourceContracts);
+  assert.ok(nativeMechanics > sourceContracts);
+  assert.ok(guard > nativeMechanics);
   assert.ok(marker > guard);
   assert.ok(seal > marker);
   assert.ok(lockMaterial > seal);
@@ -54,6 +56,17 @@ test('Package Smoke reserves one source/version before dependency install or phy
   assert.match(workflow, /npm --version\) -ne '11\.19\.0'/);
   assert.match(workflow, /npm ci --no-audit --no-fund/);
   assert.doesNotMatch(workflow, /npm install --no-audit --no-fund --no-package-lock/);
+});
+
+test('native consent mechanics cannot silently skip or claim installed authority before reservation', () => {
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const step = workflow.split('- name: Prove native consent denial mechanics before reservation')[1].split('\n      - name:')[0];
+  assert.match(step, /set -euo pipefail/);
+  assert.match(step, /--test-reporter=tap/);
+  assert.match(step, /native-consent-helper-windows-mechanics\.test\.mjs/);
+  assert.match(step, /verify-native-consent-mechanics-proof\.mjs "\$proof_log" "\$GITHUB_WORKSPACE"/);
+  assert.match(step, /git status --porcelain --untracked-files=all/);
+  assert.doesNotMatch(step, /continue-on-error|if:|npm (?:ci|install)|electron-builder|GITHUB_ACTIONS=/);
 });
 
 test('Windows producer runs full dependency-free source and identity contracts before immutable reservation', () => {
