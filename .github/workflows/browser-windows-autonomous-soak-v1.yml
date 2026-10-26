@@ -13,6 +13,7 @@ on:
       - 'apps/metaengine-browser/test/**'
       - 'apps/metaengine-browser/native/**'
       - 'apps/metaengine-browser/scripts/windows-autonomous-session-soak.ps1'
+      - 'apps/metaengine-browser/scripts/qualify-installed-owner-consumer.mjs'
       - 'apps/metaengine-browser/scripts/installer-provenance.mjs'
       - 'apps/metaengine-browser/scripts/qualified-installer-consumer.ps1'
       - 'apps/metaengine-browser/package.json'
@@ -34,6 +35,49 @@ env:
   EXACT_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
 
 jobs:
+  soak-harness-regression:
+    name: installed-soak-harness-source-regressions
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.EXACT_HEAD }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Prove exact head
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+      - name: Run source regressions with Windows PowerShell
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          POWERSHELL_EXE: powershell.exe
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node --test --test-concurrency=1 --test-reporter=tap `
+            test/windows-autonomous-soak-diagnostics.test.mjs `
+            test/installed-owner-soak-diagnostics.test.mjs `
+            test/installed-owner-soak-failure-code.test.mjs `
+            test/installed-owner-soak-workflow.test.mjs `
+            test/installed-owner-consumer.test.mjs `
+            test/browser-windows-autonomous-soak-contract.test.mjs `
+            2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP/soak-harness-regression.tap"
+          if ($LASTEXITCODE -ne 0) { throw 'soak_harness_source_regression_failed' }
+      - name: Upload exact-source harness regression results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: soak-harness-regression-${{ env.EXACT_HEAD }}
+          path: ${{ runner.temp }}/soak-harness-regression.tap
+          if-no-files-found: error
+          retention-days: 30
+
   continuous-brain:
     name: continuous-brain-100k
     runs-on: windows-2025
@@ -176,10 +220,12 @@ jobs:
           test/browser-brain-adaptive-fanout-runtime.test.mjs
 
   package-session-soak:
+    # Stream 1's source-only PR has no newly issued immutable installer. Its
+    # physical acceptance remains BLOCKED, and must run on the integrated SHA.
     # Do not boot a hosted-default installed client from this local-only PR.
-    if: github.event_name != 'pull_request' || (github.head_ref != 'work/client-owned-state-runtime-v1' && github.head_ref != 'work/client-runtime-restart-singleton-v1' && github.head_ref != 'work/client-restored-pg17-runtime-repair-v1' && github.head_ref != 'work/client-mcp-offline-installer-qualification-v1' && github.head_ref != 'work/client-mcp-db-connect-operator-v1' && github.head_ref != 'work/client-installed-pg17-setup-wizard-v1' && github.head_ref != 'work/client-github-chat-control-v1' && github.head_ref != 'work/client-github-chat-egress-redaction-v1' && github.head_ref != 'work/client-pg17-auto-prepare-durable-v1' && github.head_ref != 'work/client-github-chat-result-egress-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r2-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r3-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r4-v1' && github.head_ref != 'work/client-autonomous-continuity-v1')
+    if: github.event_name != 'pull_request' || (github.head_ref != 'work/preinstall-soak-20261027' && github.head_ref != 'work/client-owned-state-runtime-v1' && github.head_ref != 'work/client-runtime-restart-singleton-v1' && github.head_ref != 'work/client-restored-pg17-runtime-repair-v1' && github.head_ref != 'work/client-mcp-offline-installer-qualification-v1' && github.head_ref != 'work/client-mcp-db-connect-operator-v1' && github.head_ref != 'work/client-installed-pg17-setup-wizard-v1' && github.head_ref != 'work/client-github-chat-control-v1' && github.head_ref != 'work/client-github-chat-egress-redaction-v1' && github.head_ref != 'work/client-pg17-auto-prepare-durable-v1' && github.head_ref != 'work/client-github-chat-result-egress-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r2-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r3-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r4-v1' && github.head_ref != 'work/client-autonomous-continuity-v1')
     name: installed-ui-72-activation-race-soak
-    needs: [continuous-brain, brain-endurance, seeded-fleet-chaos, fleet-scale]
+    needs: [soak-harness-regression, continuous-brain, brain-endurance, seeded-fleet-chaos, fleet-scale]
     runs-on: windows-2025
     timeout-minutes: 90
     steps:
@@ -354,7 +400,15 @@ jobs:
           node --test --test-concurrency=1 attached-bundled-runtime.integration.test.mjs
           if ($LASTEXITCODE -ne 0) { throw 'soak_owner_physical_qualification_failed' }
           $consumer = Get-Content (Join-Path $evidence 'installed-owner-consumer-proof.json') -Raw | ConvertFrom-Json
-          if ($consumer.consumer -ne 'AUTONOMOUS_SESSION_SOAK' -or $consumer.real_local_runtime_attested -ne $true -or $consumer.attached_postgres_incarnation_preserved -ne $true) { throw 'soak_owner_consumer_unproven' }
+          if ($consumer.consumer -ne 'AUTONOMOUS_SESSION_SOAK' `
+              -or $consumer.real_local_runtime_attested -ne $true `
+              -or $consumer.attached_postgres_incarnation_preserved -ne $true `
+              -or $consumer.disposable_pg_cleanup_confirmed -ne $true `
+              -or $consumer.post_exit_ui_integrity_verified -ne $true `
+              -or $consumer.post_exit_runtime_integrity_verified -ne $true `
+              -or $consumer.session_soak.normal_ui_boot_verified -ne $true `
+              -or $consumer.session_soak.second_instance_activations_verified -ne 72 `
+              -or $consumer.session_soak.process_cleanup_confirmed -ne $true) { throw 'soak_owner_consumer_unproven' }
           # Keep producer identity and bundle evidence already established above.
           $proofPath = Join-Path $env:RUNNER_TEMP 'windows-autonomous-soak-proof.json'
           $proof = Get-Content $proofPath -Raw | ConvertFrom-Json
@@ -392,19 +446,13 @@ jobs:
             ${{ runner.temp }}/windows-autonomous-soak-proof.json
             ${{ runner.temp }}/soak-me2-ui-proof.json
             ${{ runner.temp }}/soak-me2-daemon-proof.json
-            ${{ runner.temp }}/browser-startup-journal-soak.json
             ${{ runner.temp }}/soak-normal-ui-readback.json
             ${{ runner.temp }}/soak-owner-evidence-*/installed-owner-consumer-proof.json
             ${{ runner.temp }}/soak-owner-evidence-*/installed-launch-progress.json
             ${{ runner.temp }}/soak-owner-evidence-*/installed-launch-failure.json
             ${{ runner.temp }}/soak-owner-evidence-*/soak-normal-ui-readback.json
-            ${{ runner.temp }}/soak-profile.out
-            ${{ runner.temp }}/soak-profile.err
-            ${{ runner.temp }}/soak-normal-ui.out
-            ${{ runner.temp }}/soak-normal-ui.err
-            ${{ runner.temp }}/soak-secondary-*.out
-            ${{ runner.temp }}/soak-secondary-*.err
-            ${{ runner.temp }}/soak-burst-*.out
-            ${{ runner.temp }}/soak-burst-*.err
+            ${{ runner.temp }}/soak-owner-evidence-*/windows-autonomous-soak-proof.json
+            ${{ runner.temp }}/soak-owner-evidence-*/soak-diagnostics.json
+            ${{ runner.temp }}/soak-owner-evidence-*/soak-terminal-diagnostics.json
           if-no-files-found: warn
           retention-days: 30
