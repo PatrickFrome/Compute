@@ -31,6 +31,16 @@ const activation = () => ({ state: 'READY', host_agent_state: 'READY', signer_st
   second_scheduler: false, automatic_effect_retry_allowed: false, authority_effect: false });
 const activationRow = () => ({ schema: 'metaengine.browser.final-runtime-activation.lifecycle.v1', state: 'READY',
   generation: 3, second_scheduler: false, authority_effect: false, activation: activation() });
+const sessionSoakProof = () => ({schema:'metaengine.browser.windows-autonomous-soak.v3',source_head:sourceHead,package_version:version,
+  normal_ui_boot_verified:true,second_instance_activations_verified:72,resource_budget_evidence_captured:true,
+  process_cleanup_confirmed:true,startup_resource_baseline_settled:true,duplicate_browser_runtime_observed:false,
+  activation_latency_p95_budget_ms:1000,handle_growth_budget:24,working_set_growth_budget_bytes:67108864,
+  concurrent_activation_burst_size:8,signed:false,published:false,promotion_authorized:false,authority_effect:false,
+  activation_latency_p95_ms:1000,handle_growth:24,working_set_growth_bytes:67108864,
+  concurrent_activation_burst_elapsed_ms:8000,primary_pid:410,
+  activation_receipts: Array.from({ length: 72 }, (_, i) => ({ kind: i < 64 ? 'SEQUENTIAL' : 'BURST',
+    index: i < 64 ? i + 1 : i - 63, launch_id: `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`,
+    event_sequence: i + 2, primary_pid: 410, visible: true })) });
 const runtime = () => ({ previous: { instance_id: previousId, state: 'STOPPED', runtime_ready: false, children_stopped: true },
   current: { schema: 'metaengine.client-state.runtime-status.v1', instance_id: currentId, state: 'READY', runtime_ready: true,
     bundle_sha256: bundleSha256, postgres_mode: 'attached', api_role_mode: 'direct',
@@ -49,19 +59,31 @@ test('only reviewed fixed consumers are accepted before paths, processes or prov
 });
 
 test('Owner session soak refuses partial activation, missing cleanup and exceeded physical resource budgets', () => {
-  const proof={schema:'metaengine.browser.windows-autonomous-soak.v3',source_head:sourceHead,package_version:version,
-    normal_ui_boot_verified:true,second_instance_activations_verified:72,resource_budget_evidence_captured:true,
-    process_cleanup_confirmed:true,startup_resource_baseline_settled:true,duplicate_browser_runtime_observed:false,
-    activation_latency_p95_budget_ms:1000,handle_growth_budget:24,working_set_growth_budget_bytes:67108864,
-    concurrent_activation_burst_size:8,signed:false,published:false,promotion_authorized:false,authority_effect:false,
-    activation_latency_p95_ms:1000,handle_growth:24,working_set_growth_bytes:67108864,
-    concurrent_activation_burst_elapsed_ms:8000,primary_pid:410};
+  const proof=sessionSoakProof();
   assert.equal(assertOwnerSessionSoak(proof,{sourceHead,version}),proof);
   for(const [key,value] of [['second_instance_activations_verified',71],['process_cleanup_confirmed',false],
     ['primary_pid',null],['activation_latency_p95_ms',1001],['handle_growth',25],
     ['working_set_growth_bytes',67108865],['concurrent_activation_burst_elapsed_ms',8001],
     ['activation_latency_p95_budget_ms',9999],['authority_effect',true]]) {
     assert.throws(()=>assertOwnerSessionSoak({...proof,[key]:value},{sourceHead,version}),/session_soak/);
+  }
+});
+
+test('72 activation claims require individually bound unique primary receipts for all 64 sequential and 8 burst indexes', () => {
+  for (const mutate of [
+    proof => { proof.activation_receipts.pop(); },
+    proof => { proof.activation_receipts[71] = { ...proof.activation_receipts[70] }; },
+    proof => { proof.activation_receipts[71].launch_id = proof.activation_receipts[0].launch_id; },
+    proof => { proof.activation_receipts[71].event_sequence = proof.activation_receipts[0].event_sequence; },
+    proof => { proof.activation_receipts[0].primary_pid++; },
+    proof => { proof.activation_receipts[0].visible = false; },
+    proof => { proof.activation_receipts[0].launch_id = 'PRIVATE_INVALID_UUID'; },
+    proof => { proof.activation_receipts[0].event_sequence = Number.MAX_SAFE_INTEGER + 1; },
+    proof => { proof.activation_receipts[0].index = 65; },
+    proof => { proof.activation_receipts[71].kind = 'SEQUENTIAL'; },
+  ]) {
+    const proof = sessionSoakProof(); mutate(proof);
+    assert.throws(() => assertOwnerSessionSoak(proof, { sourceHead, version }), /session_soak_activation_receipts_unproven/);
   }
 });
 
@@ -166,6 +188,19 @@ test('consumer receipt cannot promote fixture evidence, change artifact identity
     assert.throws(() => assertOwnerConsumerProof({ ...proof(), ...patch }, expected), /proof_invalid/);
   }
   assert.throws(() => assertOwnerConsumerProof({ ...shell, fleet_degraded: false }, { ...expected, consumer: shell.consumer }), /proof_invalid/);
+  const soak = { ...proof(), consumer: 'AUTONOMOUS_SESSION_SOAK', session_soak: sessionSoakProof(),
+    post_exit_runtime_integrity_verified: true, post_exit_ui_integrity_verified: true,
+    post_exit_runtime_bundle_sha256: bundleSha256,
+    installed_ui_manifest_sha256: '1'.repeat(64), installed_ui_content_sha256: '2'.repeat(64),
+    post_exit_ui_manifest_sha256: '1'.repeat(64), post_exit_ui_content_sha256: '2'.repeat(64) };
+  const soakExpected = { ...expected, consumer: soak.consumer };
+  assert.equal(assertOwnerConsumerProof(soak, soakExpected), soak);
+  for (const patch of [{ post_exit_runtime_integrity_verified: false }, { post_exit_ui_integrity_verified: false },
+    { post_exit_runtime_bundle_sha256: '9'.repeat(64) }, { installed_ui_manifest_sha256: undefined },
+    { installed_ui_content_sha256: undefined }, { post_exit_ui_manifest_sha256: '9'.repeat(64) },
+    { post_exit_ui_content_sha256: '9'.repeat(64) }]) {
+    assert.throws(() => assertOwnerConsumerProof({ ...soak, ...patch }, soakExpected), /session_soak_integrity_unproven/);
+  }
 });
 
 test('physical FinalRuntime and ShellDirty consumers mount a live disposable Owner instead of launching an unprovisioned profile', async () => {
