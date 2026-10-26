@@ -11,7 +11,7 @@ import {
   deriveOriginalPredecessorExpectations, assertPredecessorInstalledRows,
   validatePredecessorRows, predecessorPhysicalPath, capturePredecessorRows,
   materializeVerifiedPredecessor, assertPredecessorBoundedInstall, qualifyPredecessorMaterialization,
-  predecessorFailureSummary,
+  predecessorFailureSummary, materializeOriginalBuilderConfig,
 } from '../scripts/qualify-predecessor-materialization.mjs';
 
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -221,4 +221,105 @@ test('shared CLI failure projection emits no token, raw path or child error deta
   const unrecorded = predecessorFailureSummary({ ...error, effectStarted: true });
   assert.equal(unrecorded.state, 'HOLD_EFFECT_OUTCOME_UNQUALIFIED'); assert.equal(unrecorded.hold_recorded, false);
   assert.equal(predecessorFailureSummary({ effectStarted: true, holdRecorded: true }).hold_recorded, true);
+});
+
+// Exact Git blob at 601532ca, encoded to keep this test vector independent
+// of the test checkout's own LF/CRLF settings. Never parsed/reserialized.
+const ORIGINAL_BUILDER_CONFIG_LF = Buffer.from(
+  'ewogICJhcHBJZCI6ICJjb20ubWV0YWVuZ2luZS5icm93c2VyLnRlc3QiLAogICJwcm9kdWN0TmFtZSI6ICJNRVRBRU5HSU5F' +
+  'IEJyb3dzZXIgVGVzdCIsCiAgImFzYXIiOiB0cnVlLAogICJlbGVjdHJvbkZ1c2VzIjogewogICAgImVuYWJsZUVtYmVkZGVk' +
+  'QXNhckludGVncml0eVZhbGlkYXRpb24iOiB0cnVlLAogICAgIm9ubHlMb2FkQXBwRnJvbUFzYXIiOiB0cnVlCiAgfSwKICAi' +
+  'YXNhclVucGFjayI6IFsKICAgICJzcmMvYnJvd3Nlci1zZW50aW5lbC13b3JrZXIuY2pzIiwKICAgICJzcmMvYnJvd3Nlci1z' +
+  'ZW50aW5lbC1saXZlbmVzcy5janMiLAogICAgInNyYy9icm93c2VyLXNlbnRpbmVsLWFjdGlvbi1qb3VybmFsLmNqcyIsCiAg' +
+  'ICAic3JjL2R1cmFibGUtanNvbi1maWxlLmNqcyIsCiAgICAic3JjL2NvbXB1dGUtYnJpZGdlLXdvcmtlci5janMiCiAgXSwK' +
+  'ICAiZGlyZWN0b3JpZXMiOiB7CiAgICAib3V0cHV0IjogImRpc3QtdGVzdCIKICB9LAogICJjb21wcmVzc2lvbiI6ICJzdG9y' +
+  'ZSIsCiAgImZpbGVzIjogWwogICAgInNyYy8qKi8qIiwKICAgICJwYWNrYWdlLmpzb24iLAogICAgewogICAgICAiZnJvbSI6' +
+  'ICIuLi8uLi9pbmZyYS9jbGllbnQtc3RhdGUtcnVudGltZSIsCiAgICAgICJ0byI6ICJpbmZyYS9jbGllbnQtc3RhdGUtcnVu' +
+  'dGltZSIsCiAgICAgICJmaWx0ZXIiOiBbIm9mZmxpbmUtcnVudGltZS1idW5kbGUubWpzIl0KICAgIH0sCiAgICB7CiAgICAg' +
+  'ICJmcm9tIjogIm5hdGl2ZS1kaXN0L2NvZGV4LWNsaS9hc2FyIiwKICAgICAgInRvIjogIi4iLAogICAgICAiZmlsdGVyIjog' +
+  'WyJuYXRpdmUtY29kaW5nLWpvYi1ydW50aW1lLmpzb24iXQogICAgfQogIF0sCiAgImJlZm9yZVBhY2siOiAiLi9zY3JpcHRz' +
+  'L2VsZWN0cm9uLWJ1aWxkZXItYmVmb3JlLXBhY2suY2pzIiwKICAiYWZ0ZXJBbGxBcnRpZmFjdEJ1aWxkIjogIi4vc2NyaXB0' +
+  'cy9lbGVjdHJvbi1idWlsZGVyLWFmdGVyLWFsbC1hcnRpZmFjdC1idWlsZC5janMiLAogICJleHRyYVJlc291cmNlcyI6IFsK' +
+  'ICAgIHsKICAgICAgImZyb20iOiAic3JjIiwKICAgICAgInRvIjogIm5hdGl2ZS1jb2RpbmcvYWdlbnQtbWNwIiwKICAgICAg' +
+  'ImZpbHRlciI6IFsibmF0aXZlLWNvZGluZy1hZ2VudC1tY3AtZW50cnkubWpzIiwgIm5hdGl2ZS1jb2RpbmctYWdlbnQtbWNw' +
+  'LWJyb2tlci5tanMiLCAibmF0aXZlLWNvZGluZy1hZ2VudC1tY3Atc3RkaW8ubWpzIl0KICAgIH0sCiAgICB7CiAgICAgICJm' +
+  'cm9tIjogIm5hdGl2ZS1kaXN0L2NvZGV4LWNsaS9jb2RleC1jbGktam9iLXJ1bm5lci5wczEiLAogICAgICAidG8iOiAibmF0' +
+  'aXZlLWNvZGluZy9jb2RleC1jbGktam9iLXJ1bm5lci5wczEiCiAgICB9LAogICAgewogICAgICAiZnJvbSI6ICJjbGllbnQt' +
+  'c3RhdGUtcnVudGltZS1kaXN0IiwKICAgICAgInRvIjogImNsaWVudC1zdGF0ZS1ydW50aW1lIiwKICAgICAgImZpbHRlciI6' +
+  'IFsiKiovKiJdCiAgICB9LAogICAgewogICAgICAiZnJvbSI6ICJuYXRpdmUtZGlzdC9ndWFyZGlhbiIsCiAgICAgICJ0byI6' +
+  'ICJndWFyZGlhbi1uYXRpdmUiLAogICAgICAiZmlsdGVyIjogWwogICAgICAgICIqKi8qIgogICAgICBdCiAgICB9LAogICAg' +
+  'ewogICAgICAiZnJvbSI6ICJuYXRpdmUtZGlzdC9ndWFyZGlhbi1ib290c3RyYXAiLAogICAgICAidG8iOiAiZ3VhcmRpYW4t' +
+  'Ym9vdHN0cmFwIiwKICAgICAgImZpbHRlciI6IFsKICAgICAgICAiKiovKiIKICAgICAgXQogICAgfSwKICAgIHsKICAgICAg' +
+  'ImZyb20iOiAiZGV2b3Mtc291cmNlLXNuYXBzaG90IiwKICAgICAgInRvIjogImRldm9zLXNvdXJjZS1zbmFwc2hvdCIsCiAg' +
+  'ICAgICJmaWx0ZXIiOiBbCiAgICAgICAgIioqLyoiCiAgICAgIF0KICAgIH0sCiAgICB7CiAgICAgICJmcm9tIjogIi4uLy4u' +
+  'L2Nvb3JkaW5hdGlvbi9icm93c2VyLWNvbXB1dGUiLAogICAgICAidG8iOiAiYTItY29tcHV0ZS1icm93c2VyIiwKICAgICAg' +
+  'ImZpbHRlciI6IFsKICAgICAgICAicGFja2FnZS5qc29uIiwKICAgICAgICAicHJvdG9jb2wtdjEuanNvbiIsCiAgICAgICAg' +
+  'ImVuZ2luZS1sb2NrLmpzb24iLAogICAgICAgICJzcmMvKiovKiIKICAgICAgXQogICAgfSwKICAgIHsKICAgICAgImZyb20i' +
+  'OiAiLi4vLi4vY29vcmRpbmF0aW9uL2Jyb3dzZXItc2hhcmVkIiwKICAgICAgInRvIjogImJyb3dzZXItc2hhcmVkIiwKICAg' +
+  'ICAgImZpbHRlciI6IFsKICAgICAgICAiYWN0aW9uLWNvbnRyYWN0Lm1qcyIsCiAgICAgICAgIm5vZGUtcmVnaXN0cnkubWpz' +
+  'IiwKICAgICAgICAicmVjZWlwdC1jb250cmFjdC5tanMiLAogICAgICAgICJzZW1hbnRpYy1wZXJjZXB0aW9uLWNvbXBpbGVy' +
+  'Lm1qcyIKICAgICAgXQogICAgfSwKICAgIHsKICAgICAgImZyb20iOiAibWUyLWRhZW1vbi1kaXN0IiwKICAgICAgInRvIjog' +
+  'Im1lMi1kYWVtb24iLAogICAgICAiZmlsdGVyIjogWwogICAgICAgICIqKi8qIgogICAgICBdCiAgICB9LAogICAgewogICAg' +
+  'ICAiZnJvbSI6ICJtZTItdWktZGlzdCIsCiAgICAgICJ0byI6ICJtZTItdWkiLAogICAgICAiZmlsdGVyIjogWwogICAgICAg' +
+  'ICIqKi8qIgogICAgICBdCiAgICB9LAogICAgewogICAgICAiZnJvbSI6ICJtZTItdWktZGlzdC9ub2RlX21vZHVsZXMiLAog' +
+  'ICAgICAidG8iOiAibWUyLXVpL25vZGVfbW9kdWxlcyIsCiAgICAgICJmaWx0ZXIiOiBbCiAgICAgICAgIioqLyoiCiAgICAg' +
+  'IF0KICAgIH0KICBdLAogICJwdWJsaXNoIjogWwogICAgewogICAgICAicHJvdmlkZXIiOiAiZ2l0aHViIiwKICAgICAgIm93' +
+  'bmVyIjogIlBhdHJpY2tGcm9tZSIsCiAgICAgICJyZXBvIjogIkNvbXB1dGUiLAogICAgICAicmVsZWFzZVR5cGUiOiAicHJl' +
+  'cmVsZWFzZSIsCiAgICAgICJjaGFubmVsIjogImRldiIKICAgIH0KICBdLAogICJ3aW4iOiB7CiAgICAiaWNvbiI6ICJidWls' +
+  'ZC9pY29uLmljbyIsCiAgICAidGFyZ2V0IjogWwogICAgICB7CiAgICAgICAgInRhcmdldCI6ICJuc2lzIiwKICAgICAgICAi' +
+  'YXJjaCI6IFsKICAgICAgICAgICJ4NjQiCiAgICAgICAgXQogICAgICB9CiAgICBdLAogICAgImFydGlmYWN0TmFtZSI6ICJN' +
+  'RVRBRU5HSU5FLUJyb3dzZXItVGVzdC1TZXR1cC0ke3ZlcnNpb259LSR7YXJjaH0uJHtleHR9IgogIH0sCiAgIm5zaXMiOiB7' +
+  'CiAgICAiZGlmZmVyZW50aWFsUGFja2FnZSI6IHRydWUsCiAgICAiaW5zdGFsbGVySGVhZGVyIjogImJ1aWxkL2luc3RhbGxl' +
+  'ckhlYWRlci5ibXAiLAogICAgImluc3RhbGxlclNpZGViYXIiOiAiYnVpbGQvaW5zdGFsbGVyU2lkZWJhci5ibXAiLAogICAg' +
+  'InVuaW5zdGFsbGVyU2lkZWJhciI6ICJidWlsZC9pbnN0YWxsZXJTaWRlYmFyLmJtcCIsCiAgICAib25lQ2xpY2siOiBmYWxz' +
+  'ZSwKICAgICJwZXJNYWNoaW5lIjogZmFsc2UsCiAgICAiYWxsb3dUb0NoYW5nZUluc3RhbGxhdGlvbkRpcmVjdG9yeSI6IGZh' +
+  'bHNlLAogICAgImNyZWF0ZURlc2t0b3BTaG9ydGN1dCI6IHRydWUsCiAgICAiY3JlYXRlU3RhcnRNZW51U2hvcnRjdXQiOiB0' +
+  'cnVlLAogICAgInNob3J0Y3V0TmFtZSI6ICJNRVRBRU5HSU5FIEJyb3dzZXIgVGVzdCIsCiAgICAicnVuQWZ0ZXJGaW5pc2gi' +
+  'OiB0cnVlLAogICAgImRlbGV0ZUFwcERhdGFPblVuaW5zdGFsbCI6IGZhbHNlCiAgfQp9Cg==', 'base64');
+
+
+test('the pinned LF Git blob materializes the exact historical CRLF producer config', () => {
+  assert.equal(PIN.builder_config_source_sha256, '001d3b1727fea5280eec8fdbe14de451cfd41db0d00f8f2627009ef87e7893cd');
+  assert.equal(PIN.builder_config_sha256, '021cb1cc27dc7f9e46309c2fea925ef9127799da0bd18df1efab342128b63203');
+  const original = Buffer.from(ORIGINAL_BUILDER_CONFIG_LF);
+  const result = materializeOriginalBuilderConfig(ORIGINAL_BUILDER_CONFIG_LF);
+  assert.deepEqual(ORIGINAL_BUILDER_CONFIG_LF, original, 'pure materialization must not mutate its input');
+  assert.equal(original.length, 3580);
+  assert.equal(result.bytes.length, 3729);
+  assert.equal(hash(result.bytes), PIN.builder_config_sha256);
+  assert.deepEqual(Buffer.from(result.bytes.toString('utf8').replaceAll('\r\n', '\n')), original);
+  assert.equal(result.bytes.filter(byte => byte === 0x0d).length, 149);
+  assert.deepEqual(result.manifest, {
+    source_path: 'apps/metaengine-browser/electron-builder.test.json',
+    source_sha256: '001d3b1727fea5280eec8fdbe14de451cfd41db0d00f8f2627009ef87e7893cd', source_bytes: 3580,
+    materialized_sha256: '021cb1cc27dc7f9e46309c2fea925ef9127799da0bd18df1efab342128b63203', materialized_bytes: 3729,
+    materialization: 'LF_TO_CRLF_ONLY',
+  });
+});
+
+test('wrong raw config bytes or lengths cannot be normalized into the accepted source', () => {
+  const altered = Buffer.from(ORIGINAL_BUILDER_CONFIG_LF); altered[0] ^= 1;
+  for (const raw of [altered, ORIGINAL_BUILDER_CONFIG_LF.subarray(1),
+    Buffer.concat([ORIGINAL_BUILDER_CONFIG_LF, Buffer.from('\n')]), ORIGINAL_BUILDER_CONFIG_LF.toString('utf8')]) {
+    assert.throws(() => materializeOriginalBuilderConfig(raw), /original_builder_config_source_digest/);
+  }
+});
+
+test('already-CRLF or mixed input never receives a fallback or a second CR insertion', () => {
+  const crlf = materializeOriginalBuilderConfig(ORIGINAL_BUILDER_CONFIG_LF).bytes;
+  const firstLf = ORIGINAL_BUILDER_CONFIG_LF.indexOf(0x0a);
+  const mixed = Buffer.concat([ORIGINAL_BUILDER_CONFIG_LF.subarray(0, firstLf), Buffer.from([0x0d]), ORIGINAL_BUILDER_CONFIG_LF.subarray(firstLf)]);
+  for (const raw of [crlf, mixed]) {
+    assert.throws(() => materializeOriginalBuilderConfig(raw), /original_builder_config_source_digest/);
+    // Even an independently repinned unit input cannot authorize CR normalization.
+    assert.throws(() => materializeOriginalBuilderConfig(raw, {...PIN,
+      builder_config_source_sha256: hash(raw), builder_config_source_bytes: raw.length}), /original_builder_config_source_line_endings/);
+  }
+});
+
+test('the unchanged historical effective hash and byte-length pins remain mandatory', () => {
+  assert.throws(() => materializeOriginalBuilderConfig(ORIGINAL_BUILDER_CONFIG_LF,
+    {...PIN, builder_config_sha256: '0'.repeat(64)}), /original_builder_config_materialization_digest/);
+  assert.throws(() => materializeOriginalBuilderConfig(ORIGINAL_BUILDER_CONFIG_LF,
+    {...PIN, builder_config_bytes: PIN.builder_config_bytes + 1}), /original_builder_config_materialization_digest/);
 });

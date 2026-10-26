@@ -47,9 +47,37 @@ export const ORIGINAL_PREDECESSOR = Object.freeze({
   installer_sha256: '018cc4a4adf515b5cfc2b829b765aa14d171eaf1bf0e72ebd6e822df1f52d0dd',
   installer_bytes: 253438108,
   package_code_sha256: '6ad0cf0b0af0affd77888c6881e83784027ecd4a6be7711a656169822c8214c9',
+  builder_config_source_path: 'apps/metaengine-browser/electron-builder.test.json',
+  builder_config_source_sha256: '001d3b1727fea5280eec8fdbe14de451cfd41db0d00f8f2627009ef87e7893cd',
+  builder_config_source_bytes: 3580,
   builder_config_sha256: '021cb1cc27dc7f9e46309c2fea925ef9127799da0bd18df1efab342128b63203',
+  builder_config_bytes: 3729,
   bundle_sha256: 'c80525b60ff2c61e38f40d65f0b05fed38202367971bcfe80c25995d9507e757',
 });
+
+// GitHub serves the original LF Git blob. The historical Windows producer
+// hashed its CRLF checkout bytes. Bind both identities, then insert CR before
+// each LF byte only: no JSON parsing, whitespace normalization or fallback.
+export function materializeOriginalBuilderConfig(sourceBytes, pin = ORIGINAL_PREDECESSOR) {
+  if (!Buffer.isBuffer(sourceBytes) || sourceBytes.length !== pin.builder_config_source_bytes
+    || sha(sourceBytes) !== pin.builder_config_source_sha256) fail('original_builder_config_source_digest');
+  if (sourceBytes.includes(0x0d)) fail('original_builder_config_source_line_endings');
+  const lineFeeds = sourceBytes.reduce((count, byte) => count + Number(byte === 0x0a), 0);
+  const bytes = Buffer.alloc(sourceBytes.length + lineFeeds);
+  let offset = 0;
+  for (const byte of sourceBytes) {
+    if (byte === 0x0a) bytes[offset++] = 0x0d;
+    bytes[offset++] = byte;
+  }
+  if (bytes.length !== pin.builder_config_bytes || sha(bytes) !== pin.builder_config_sha256)
+    fail('original_builder_config_materialization_digest');
+  return { bytes, manifest: {
+    source_path: pin.builder_config_source_path,
+    source_sha256: sha(sourceBytes), source_bytes: sourceBytes.length,
+    materialized_sha256: sha(bytes), materialized_bytes: bytes.length,
+    materialization: 'LF_TO_CRLF_ONLY',
+  } };
+}
 
 function relativeName(name) {
   return typeof name === 'string' && name.length > 0 && name.length <= 1024 && name.split('/').length <= 40
@@ -461,10 +489,10 @@ export async function qualifyPredecessorMaterialization({ workDirectory, outputD
     catch { fail('original_archive_materialization'); }
     validatePredecessorRows(archiveRows);
     if (!isDeepStrictEqual(await capturePredecessorRows(payload), archiveRows) || await hashFile(archive) !== pin.artifact_sha256) fail('original_archive_materialization');
-    const configResponse = await githubJson('/repos/' + pin.repository + '/contents/apps/metaengine-browser/electron-builder.test.json?ref=' + pin.source_head);
+    const configResponse = await githubJson('/repos/' + pin.repository + '/contents/' + pin.builder_config_source_path + '?ref=' + pin.source_head);
     if (configResponse.encoding !== 'base64' || typeof configResponse.content !== 'string') fail('original_builder_config_missing');
-    const configBytes = Buffer.from(configResponse.content.replace(/\s/g, ''), 'base64');
-    if (sha(configBytes) !== pin.builder_config_sha256) fail('original_builder_config_digest');
+    const configSourceBytes = Buffer.from(configResponse.content.replace(/\s/g, ''), 'base64');
+    const { bytes: configBytes, manifest: originalBuilderConfig } = materializeOriginalBuilderConfig(configSourceBytes, pin);
     const config = path.join(work, 'original-builder-config.json'); await fs.writeFile(config, configBytes, { flag: 'wx', mode: 0o600 });
     const strictVerify = async () => {
       const result = JSON.parse(await child(process.execPath, [script('installer-provenance.mjs'), 'verify', '--dir', payload,
@@ -534,6 +562,7 @@ export async function qualifyPredecessorMaterialization({ workDirectory, outputD
       original_artifact: { id: pin.artifact_id, name: pin.artifact_name, sha256: pin.artifact_sha256, bytes: pin.artifact_bytes },
       source_head: pin.source_head, package_version: pin.package_version,
       installer: { name: pin.installer_name, sha256: pin.installer_sha256, bytes: pin.installer_bytes },
+      original_builder_config: originalBuilderConfig,
       original_package_code: { file: 'metaengine-installed-package-code.v1.json', sha256: pin.package_code_sha256,
         original_manifest_verified: true, strict_installer_provenance_verified: true },
       detached_proofs: materialized.proofReadbacks,

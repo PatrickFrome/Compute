@@ -37,7 +37,8 @@ producer/sidecar contract. Only the predecessor may use
 | Installer SHA-256 | 018cc4a4adf515b5cfc2b829b765aa14d171eaf1bf0e72ebd6e822df1f52d0dd |
 | Installer bytes | 253438108 |
 | Original W68 manifest SHA-256 | 6ad0cf0b0af0affd77888c6881e83784027ecd4a6be7711a656169822c8214c9 |
-| Original builder config SHA-256 | 021cb1cc27dc7f9e46309c2fea925ef9127799da0bd18df1efab342128b63203 |
+| Original builder config Git blob SHA-256 / bytes (LF) | 001d3b1727fea5280eec8fdbe14de451cfd41db0d00f8f2627009ef87e7893cd / 3580 |
+| Original builder config producer SHA-256 / bytes (CRLF) | 021cb1cc27dc7f9e46309c2fea925ef9127799da0bd18df1efab342128b63203 / 3729 |
 | Packaged offline bundle digest | c80525b60ff2c61e38f40d65f0b05fed38202367971bcfe80c25995d9507e757 |
 
 The original version is consumed and must not be rebuilt or relabelled. Its
@@ -82,6 +83,7 @@ The writer is the authority for field names; these are the consumer bindings:
 | `original_artifact` | Original ID, name, ZIP SHA-256 and byte size |
 | `source_head`, `package_version`, `installer` | Original source/version and exact installer name/SHA-256/bytes |
 | `original_package_code` | Original authenticated W68 file/SHA-256 and strict verification flags |
+| `original_builder_config` | Immutable source_path/source_sha256/source_bytes, independently pinned materialized_sha256/materialized_bytes, materialization=LF_TO_CRLF_ONLY |
 | `detached_proofs` | Exactly four named original expectations and independent present-or-absent observations |
 | `image` | root=`win-unpacked`, fingerprint schema, tree_sha256, file_count, total_bytes, full ordered `files` rows |
 | `asar_sha256` | Actual image ASAR hash matched to original running-code expectations |
@@ -108,9 +110,23 @@ artifact must also be absent from the installation. No arbitrary exclusion is
 accepted.
 
 Acquire `apps/metaengine-browser/electron-builder.test.json` from the exact
-original source during input acquisition and verify the pinned hash above.
-The strict installer verifier must also bind it to original provenance. Do not
-substitute current-target configuration after source drift.
+original source during input acquisition. The immutable Git blob has 3580
+bytes, 149 LF bytes, no CR bytes and SHA-256 `001d3b1727fea5280eec8fdbe14de451cfd41db0d00f8f2627009ef87e7893cd`.
+After verifying those source bytes, insert exactly one CR byte before each LF
+byte. The resulting historical Windows checkout representation must have 3729
+bytes and SHA-256 `021cb1cc27dc7f9e46309c2fea925ef9127799da0bd18df1efab342128b63203`.
+Pass only those verified materialized bytes to the unchanged strict installer
+verifier, which independently binds the original provenance config digest.
+Record both identities in `original_builder_config`; never substitute the
+current-target configuration, parse/reserialize JSON, normalize arbitrary line
+endings, or accept either digest as a fallback for the other.
+
+The initial writer at `04495c6246160f30e3435f316b4f7db5a5de3c5e` compared the
+LF download directly with the CRLF producer digest. Stream 2 identified that
+deterministic pre-install refusal and the coordinator independently reproduced
+it. A predecessor qualification from that source cannot qualify the required
+input. The corrected writer requires its own new source-bound disposable run;
+this correction does not change the canonical schema writer or its origin.
 
 ## Canonical empty schema writer
 
@@ -203,7 +219,12 @@ exception all refuse. Never retry an uncertain installer, Git or SQL effect.
   alias-creation fixture and unsupported-platform entry check; native Windows
   path controls ran. This did not run PostgreSQL or NSIS.
 - Independent source reviews found no remaining material issue in these
-  writers. The initial event/head mismatch was fixed before the combined run.
+  writers at their reviewed revisions. The initial event/head mismatch was
+  fixed before the combined run. The subsequent exact-source config encoding
+  correction passed 19 / 19 isolated Linux native Node 24.22.1 source controls,
+  including the real immutable LF blob and unchanged historical CRLF digest.
+  That later source result is separate from the earlier Windows result and
+  does not claim an NSIS qualification.
 - Existing anchor Current Source, W59, W66 and seven other source workflows
   completed successfully. New integrated source must be resealed and qualified
   again; old source results do not qualify this changed tree.
