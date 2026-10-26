@@ -67,6 +67,7 @@ function validReadback(value: RuntimeReadback) {
     && typeof work.detail === "string" && work.detail.length <= 320
     && typeof work.heartbeat_fresh === "boolean"
     && (work.state !== "READY" || (work.heartbeat_fresh === true
+      && connection.local_runtime_ready === true
       && connection.admin_ready === true && connection.cloud_control_state === "CONNECTED"
       && Number.isSafeInteger(work.proven_agent_count) && work.proven_agent_count > 0
       && typeof work.generation_floor === "number" && Number.isSafeInteger(work.generation_floor) && work.generation_floor >= 0

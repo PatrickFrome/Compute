@@ -295,13 +295,33 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
   const loadSequence = useRef(0);
 
   const loadLatest = useCallback(async () => {
-    const bridge = clientControlBridge();
-    if (!bridge?.latestGoal) return;
     const sequence = ++loadSequence.current;
-    const latest = await bridge.latestGoal().catch(() => null);
-    if (mounted.current && sequence === loadSequence.current && latest?.schema === "metaengine.client.goal-journal-entry.v1") {
+    try {
+      const bridge = clientControlBridge();
+      if (!bridge?.latestGoal) throw new Error("goal_journal_bridge_unavailable");
+      const latest = await bridge.latestGoal();
+      if (!mounted.current || sequence !== loadSequence.current) return false;
+      if (latest !== null && (latest?.schema !== "metaengine.client.goal-journal-entry.v1"
+        || typeof latest.request_id !== "string" || !latest.request_id
+        || latest.automatic_retry_allowed !== false || latest.authority_effect !== false
+        || (latest.receipt !== null && (latest.receipt?.request_id !== latest.request_id
+          || !["metaengine.client.goal-submission.v1", "metaengine.native-coding.goal-admission.v1"].includes(latest.receipt?.schema)))
+        || (latest.progress !== null && latest.progress?.request_id !== latest.request_id)
+        || (latest.execution_proof !== null && latest.execution_proof?.request_id !== latest.request_id))) {
+        throw new Error("goal_journal_readback_invalid");
+      }
+      // A new rejected request has no receipt; an empty journal has no current
+      // task. Both replace the old presentation instead of inheriting its IDs.
       setJournalEntry(latest);
-      if (latest.receipt?.schema === "metaengine.client.goal-submission.v1"||latest.receipt?.schema === "metaengine.native-coding.goal-admission.v1") setReceipt(latest.receipt);
+      setReceipt(latest?.receipt ?? null);
+      return true;
+    } catch {
+      if (mounted.current && sequence === loadSequence.current) {
+        setError("Task status unavailable. Previously read details may be stale.");
+      }
+      // Mount and failed-submit reconciliation also call this observer. A read
+      // failure is visible but never rejects an unobserved promise or retries.
+      return false;
     }
   }, []);
 
@@ -371,15 +391,15 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
 
   const refreshProgress = useCallback(async () => {
     const bridge = clientControlBridge();
-    const requestId = receipt?.request_id || journalEntry?.request_id || "";
+    const requestId = journalEntry?.request_id || receipt?.request_id || "";
     if (!bridge?.goalStatus || !requestId || operation.current) return;
     operation.current = "read";
     setRefreshing(true);
     try {
       await bridge.goalStatus(requestId);
-      await loadLatest();
+      const observed = await loadLatest();
       await modeObserver.refresh({ fresh: true });
-      if (mounted.current) setError(null);
+      if (mounted.current && observed) setError(null);
     } catch (cause) {
       if (mounted.current) setError(String((cause as Error)?.message || cause || "goal_status_failed").slice(0, 180));
     } finally {
