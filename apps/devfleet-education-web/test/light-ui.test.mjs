@@ -23,6 +23,6 @@ test('Ordinary learning context no longer includes a forced exam/check task',asy
 });
 test('Service-worker version changes without a browser journal rename or deletion',async()=>{
  const sw=await read('public/sw.js'),store=await read('src/storage.mjs');
- assert.match(sw,/light-e12/);assert.match(store,/devfleet-education-web-v1/);
+ assert.match(sw,/pair-e13/);assert.match(store,/devfleet-education-web-v1/);
  assert.ok(!sw.includes('indexedDB.deleteDatabase'));assert.ok(!store.includes('deleteDatabase'));
 });

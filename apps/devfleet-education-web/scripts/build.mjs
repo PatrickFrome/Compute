@@ -1,3 +1,4 @@
+import './pack-link.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 const root=path.resolve(import.meta.dirname,'..');

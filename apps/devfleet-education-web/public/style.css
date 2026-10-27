@@ -14,3 +14,8 @@
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 
 @keyframes fade{from{opacity:0}to{opacity:1}}
+
+.chat-header .pair-button{white-space:nowrap;font-size:12px;flex-shrink:0;color:#587466}.chat-header .pair-button[aria-pressed="true"]{background:#edf1ea}.chat-intro{min-width:0;flex-wrap:wrap}.chat-heading{min-width:0}.chat-heading #chat-topic{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}@media(max-width:520px){.chat-header .pair-button{font-size:11px;padding:6px}.chat-heading #chat-topic{display:none}}
+
+/* Let the compact chat menu rise above the reader without scroll clipping. */
+.chat-panel:has(.action-menu[open]){overflow:visible;position:relative;z-index:35}

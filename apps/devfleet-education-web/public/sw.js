@@ -1,5 +1,5 @@
-const CACHE='devfleet-education-web-light-e12-20261028-1';
-const FILES=['/','/index.html','/style.css','/manifest.webmanifest','/assets/logo.svg','/data/course.json','/src/app.mjs','/src/core.mjs','/src/raster.mjs','/src/storage.mjs','/src/icons.mjs','/src/modules.mjs'];
+const CACHE='devfleet-education-web-pair-e13-v1';
+const FILES=['/','/index.html','/style.css','/manifest.webmanifest','/assets/logo.svg','/data/course.json','/src/app.mjs','/src/pairing.mjs','/src/core.mjs','/src/raster.mjs','/src/storage.mjs','/src/icons.mjs','/src/modules.mjs'];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(FILES)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('devfleet-education-web-')&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
 self.addEventListener('fetch',event=>{
