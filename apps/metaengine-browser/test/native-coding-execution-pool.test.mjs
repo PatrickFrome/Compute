@@ -50,3 +50,26 @@ test('a private request builder cannot switch the assigned agent',async()=>{
   pool.dispatch(lease);await turn();
   assert.equal((await pool.observe(lease)).reason,'NATIVE_REQUEST_BINDING_CHANGED');assert.equal(called,false);
 });
+
+test('one native slot admits child work after exact parent result ACK, never from a waiting hint', async () => {
+  const f = fixture(1);
+  try {
+    f.pool.dispatch(lease); await turn();
+    assert.equal((await f.pool.observe(lease)).state, 'RUNNING');
+    assert.equal(f.pool.dispatch(other).state, 'PHYSICAL_POOL_BUSY');
+    assert.throws(() => f.pool.acknowledge(lease, {
+      state: 'WAIT_CHILDREN', lease_generation: 1, result_sha256: 'a'.repeat(64),
+    }), /ack_unproven/);
+    assert.equal(f.pool.snapshot().occupied_slots, 1);
+    // Native jobs are not browser parent conversations. A real terminal result
+    // followed by W30's exact acknowledgement releases compute, even if the
+    // enclosing project graph still has descendants to execute or verify.
+    f.finish({ state: 'RESULT_READY', result: { result_sha256: 'a'.repeat(64) } });
+    await turn();
+    assert.equal(f.pool.dispatch(other).state, 'PHYSICAL_POOL_BUSY', 'pending ACK retains receipt custody');
+    f.pool.acknowledge(lease, { state: 'RESULT_READY', lease_generation: 1, result_sha256: 'a'.repeat(64) });
+    assert.equal(f.pool.dispatch(other).state, 'PREPARING');
+    await turn();
+    assert.equal(f.calls.filter(call => call === 'execute').length, 2);
+  } finally { await f.pool.stop(); }
+});

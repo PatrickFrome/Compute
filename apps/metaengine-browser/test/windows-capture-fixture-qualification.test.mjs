@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { resolveQualifiedElectron } from '../scripts/qualified-electron-runtime.mjs';
+import { PIN } from '../scripts/qualify-r97-electron-w78.mjs';
 import {
   CAPTURE_FIXTURE_READY_SCHEMA, CAPTURE_FIXTURE_TITLE, CAPTURE_FIXTURE_TIMEOUT_MS, CAPTURE_FIXTURE_FILE_POLL_INTERVAL_MS,
   captureExactFixtureWindow, captureFixtureSource, startCaptureFixture,
@@ -17,13 +18,13 @@ async function temporary(t) {
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   return root;
 }
-async function fakeElectron(t, { version = '44.0.0', resolver = '' } = {}) {
+async function fakeElectron(t, { version = PIN.version, resolver = '' } = {}) {
   const root = await temporary(t);
   const module = path.join(root, 'node_modules', 'electron');
   await fs.mkdir(module, { recursive: true });
-  await fs.writeFile(path.join(root, 'package.json'), JSON.stringify({ devDependencies: { electron: '44.0.0' } }));
+  await fs.writeFile(path.join(root, 'package.json'), JSON.stringify({ devDependencies: { electron: PIN.version } }));
   await fs.writeFile(path.join(root, 'package-lock.json'), JSON.stringify({ packages: {
-    'node_modules/electron': { version: '44.0.0', resolved: 'https://registry.npmjs.org/electron/-/electron-44.0.0.tgz', integrity: 'sha512-YQ==' },
+    'node_modules/electron': { ...PIN },
   } }));
   await fs.writeFile(path.join(module, 'package.json'), JSON.stringify({ name: 'electron', version, main: 'index.cjs' }));
   await fs.writeFile(path.join(module, 'index.cjs'), resolver || `const fs=require('node:fs'),path=require('node:path');
@@ -40,7 +41,7 @@ test('locked Electron provisioning explicitly calls its package resolver once ou
   assert.throws(() => resolveQualifiedElectron({ root, environment: {} }), /binary_not_materialized_run_prerequisite/);
   await assert.rejects(fs.access(path.join(module, 'resolver-called')), { code: 'ENOENT' });
   const runtime = resolveQualifiedElectron({ root, environment: {}, materialize: true });
-  assert.equal(runtime.package_version, '44.0.0');
+  assert.equal(runtime.package_version, PIN.version);
   assert.equal(runtime.executable, path.join(module, 'dist', 'electron.exe'));
   assert.match(runtime.binary_sha256, /^[a-f0-9]{64}$/);
   assert.deepEqual(resolveQualifiedElectron({ root, environment: { MIRROR: 'unrelated-non-electron-setting' } }), runtime);
@@ -57,6 +58,19 @@ test('Electron qualification rejects version and source overrides before invokin
   }
   const { root, module } = await fakeElectron(t, { version: '45.0.0' });
   assert.throws(() => resolveQualifiedElectron({ root, environment: {}, materialize: true }), /locked_version_invalid/);
+  await assert.rejects(fs.access(path.join(module, 'resolver-called')), { code: 'ENOENT' });
+});
+
+for (const materialize of [false, true]) test(`Electron qualification rejects a well-formed integrity substitution before package code (materialize=${materialize})`, async t => {
+  const { root, module } = await fakeElectron(t);
+  const filename = path.join(root, 'package-lock.json');
+  const lock = JSON.parse(await fs.readFile(filename, 'utf8'));
+  const substituted = 'sha512-' + Buffer.alloc(64, 0x61).toString('base64');
+  assert.match(substituted, /^sha512-[A-Za-z0-9+/]+=*$/);
+  assert.notEqual(substituted, PIN.integrity);
+  lock.packages['node_modules/electron'].integrity = substituted;
+  await fs.writeFile(filename, JSON.stringify(lock));
+  assert.throws(() => resolveQualifiedElectron({ root, environment: {}, materialize }), /locked_version_invalid/);
   await assert.rejects(fs.access(path.join(module, 'resolver-called')), { code: 'ENOENT' });
 });
 

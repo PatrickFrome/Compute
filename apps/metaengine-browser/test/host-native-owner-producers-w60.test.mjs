@@ -384,6 +384,7 @@ test('W60: the existing W68 production export supplies release proof under befor
     const proof=()=>({source:'INSTALLED_EXE_NATIVE_VERIFIER',source_sha:source,
       package_version:'0.7.0-dev.1.1',installed_exe_sha256:'b'.repeat(64),signer_thumbprint:'c'.repeat(40),
       proof_identity:'d'.repeat(64),release_root_signature_verified:true,slsa_evidence_digest_bound:true,
+      package_code_verified:true,package_code_sha256:'e'.repeat(64),
       independent_slsa_crypto_verified_at_runtime:false,native_signature_verified:true,
       exact_bytes_verified:true,observed_at:new Date().toISOString(),authority_effect:false});
     let owner={...original},reads=0,fourthReadChange=null,sourceReadback=[];
@@ -416,7 +417,7 @@ test('W60: the existing W68 production export supplies release proof under befor
     assert.ok(verified,'root-authenticated W68 proof must not require nonexistent trust-root fields');
     assert.ok(reads>=4,'must recheck authenticated Owner after W68 completes');
     for(const key of ['source_sha','installed_exe_sha256','proof_identity','observed_at',
-      'release_root_signature_verified','slsa_evidence_digest_bound'])
+      'release_root_signature_verified','slsa_evidence_digest_bound','package_code_verified','package_code_sha256'])
       assert.equal(verified[key],globalThis.fixture.proof[key],key);
     assert.equal(verified.owner_id,original.owner_id);
     assert.equal(verified.owner_epoch,original.epoch);
@@ -426,6 +427,7 @@ test('W60: the existing W68 production export supplies release proof under befor
     assert.ok(Object.isFrozen(verified));
     for(const change of [{fixture_classification:'STAGING'},{synthetic:true},{staging:true},{untrusted:true},
       {release_root_signature_verified:false},{slsa_evidence_digest_bound:false},
+      {package_code_verified:undefined},{package_code_verified:false},{package_code_sha256:'invalid'},
       {native_signature_verified:false},{exact_bytes_verified:false},{authority_effect:true},
       {source:'PUBLIC_JSON'},{source_sha:'e'.repeat(40)},{installed_exe_sha256:'invalid'},
       {proof_identity:'invalid'},{observed_at:new Date(Date.now()-60000).toISOString()}])

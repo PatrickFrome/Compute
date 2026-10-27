@@ -8,6 +8,7 @@ import { launchClientStateRuntime, normalizeLauncherConfig, normalizeRuntimeHeal
 import {runtimeRecoveryPostgresProof} from './runtime-recovery-postgres-proof.mjs';
 import { verifyOfflineRuntimeBundle } from './offline-runtime-bundle.mjs';
 import { reconcileAbandonedAttachedRuntimeLock } from './runtime-host-orphan-reconciliation.mjs';
+import {createOwnedGuardianTicketConsumer,validateGuardianOwnerConsumeEnvelope} from './guardian-owner-consume.mjs';
 import { createNativeCodingHostIpcServer } from './native-coding-host-ipc.mjs';
 import { createNativeCodingHostAuthority } from './native-coding-host-authority.mjs';
 import {createNativeCodingHostCommitService} from './native-coding-host-commit-service.mjs';
@@ -325,6 +326,11 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
   let runtime;
   let terminalPromise;
   let stopPromise;
+  let guardianTicketConsumer = null;
+  let guardianOpening = null;
+  let guardianDrainPromise = null;
+  let guardianCleanupUnconfirmed = false;
+  const guardianAbort = new AbortController();
   let nativeCodingAuthority = null;
   let nativeCodingSql = null;
   let nativeCodingSeedBinding = null;
@@ -355,9 +361,20 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
       await persist(previous => ({ ...previous, last_health_failure: null }));
     }
   };
+  const drainGuardianLane=()=>guardianDrainPromise??=(async()=>{
+    let timer;
+    try{await Promise.race([(async()=>{await guardianOpening;await guardianTicketConsumer?.close();})(),
+      new Promise((_,reject)=>{timer=setTimeout(()=>reject(failure('runtime_host_cleanup_unconfirmed')),6500);})]);}
+    finally{clearTimeout(timer);}
+  })();
   const finalize = outcome => {
+    // Fence private ticket consumption synchronously, before any cleanup await.
+    guardianAbort.abort();
+    void guardianTicketConsumer?.close().catch(()=>{});
     if (!terminalPromise) terminalPromise = (async () => {
-      const confirmed = outcome.children_stopped === true;
+      let confirmed = outcome.children_stopped === true;
+      try{await drainGuardianLane();}catch{guardianCleanupUnconfirmed=true;}
+      if(guardianCleanupUnconfirmed)confirmed=false;
       nativeCodingAuthority?.close();
       nativeCodingSeedBinding?.close();
       if(nativeCodingSql) {await nativeCodingSql.end({timeout:5});nativeCodingSql=null;}
@@ -370,20 +387,52 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
       finally { signal?.removeEventListener('abort', onAbort); if (confirmed) await release(); }
       if (confirmed) await hooks.onTerminal?.({ instance_id: lastStatus.instance_id || null,
         children_stopped: true, ownership_released: true, reason: outcome.reason });
-      return outcome;
+      return confirmed?outcome:{...outcome,children_stopped:false,reason:'runtime_host_cleanup_unconfirmed'};
     })();
     return terminalPromise;
   };
   const stop = (reason = 'requested') => {
+    guardianAbort.abort();
+    const guardianDrain=guardianTicketConsumer?.close();
+    void guardianDrain?.catch(()=>{});
     if (!stopPromise) stopPromise = (async () => {
       let outcome;
+      let guardianClean=true;
+      try{await drainGuardianLane();await guardianDrain;}catch{guardianClean=false;guardianCleanupUnconfirmed=true;}
       try { outcome = await runtime.stop(['requested', 'signal', 'parent_disconnect', 'startup_cancelled'].includes(reason) ? reason : 'requested'); }
       catch { await finalize({ reason: 'runtime_host_cleanup_unconfirmed', children_stopped: false }); throw failure('runtime_host_cleanup_unconfirmed'); }
+      if(!guardianClean){await finalize({...outcome,children_stopped:false});throw failure('runtime_host_cleanup_unconfirmed');}
       return finalize(outcome);
     })();
     return stopPromise;
   };
-  function onAbort() { abortRequested = true; if (runtime) void stop('startup_cancelled').catch(() => {}); }
+  function onAbort() { guardianAbort.abort(); abortRequested = true; if (runtime) void stop('startup_cancelled').catch(() => {}); }
+  // Lazy and private: ordinary startup opens no additional owner connection.
+  // A failed/unsupported acquisition is not retried within this generation.
+  async function handleGuardianTicketMessage(message,handle){
+    if(handle){try{handle.destroy?.();}catch{}return;}
+    if(guardianAbort.signal.aborted||abortRequested||terminalPromise||runtime?.stopped!==false)return;
+    try{validateGuardianOwnerConsumeEnvelope(message,{host_instance_id:runtime.instanceId,host_pid:process.pid,
+      parent_pid:process.ppid,launch_nonce:process.env.COMPUTE_RUNTIME_HOST_LAUNCH_NONCE});}catch{return;}
+    guardianOpening??=(async()=>{
+      const deadline=setTimeout(()=>guardianAbort.abort(),30000),clearDeadline=()=>clearTimeout(deadline);
+      guardianAbort.signal.addEventListener('abort',clearDeadline,{once:true});
+      try{
+        const candidate=await createOwnedGuardianTicketConsumer({runtime,config,signal:guardianAbort.signal});
+        if(guardianAbort.signal.aborted||abortRequested||terminalPromise||runtime.stopped===true)await candidate.close();
+        else guardianTicketConsumer=candidate;
+      }catch(error){
+        if(error?.code==='guardian_owner_consume_cleanup_unconfirmed')guardianCleanupUnconfirmed=true;
+        // Unsupported/legacy/unprotected profiles remain unavailable.
+      }finally{clearTimeout(deadline);guardianAbort.signal.removeEventListener('abort',clearDeadline);}
+    })();
+    let releaseAbort;
+    try{await Promise.race([guardianOpening,new Promise(resolve=>{
+      releaseAbort=()=>resolve();guardianAbort.signal.addEventListener('abort',releaseAbort,{once:true});
+      if(guardianAbort.signal.aborted)resolve();
+    })]);}finally{guardianAbort.signal.removeEventListener('abort',releaseAbort);}
+    if(!guardianAbort.signal.aborted)await guardianTicketConsumer?.handleMessage(message,handle);
+  }
   signal?.addEventListener('abort', onAbort, { once: true });
   try {
     await persist(baseStatus);
@@ -461,7 +510,7 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
       }
     }
     return { descriptor, statusFile: path.join(config.state_directory, 'runtime-instance.json'), stop, finished,
-      nativeCodingAuthority };
+      nativeCodingAuthority, handleGuardianTicketMessage };
   } catch (error) {
     // Also fence a pending optional binding when stop/finalize already has a
     // cached promise. Closing it cannot stop or replace the working PostgreSQL.
@@ -499,6 +548,8 @@ async function main() {
   process.once('disconnect', () => requestStop('parent_disconnect'));
   process.on('message', (message,handle) => {
     if (message?.schema === 'compute.runtime-host-control.v1' && message.command === 'stop') requestStop('requested');
+    else if(message?.body?.schema==='metaengine.private.guardian-owner-consume.v1')
+      void host?.handleGuardianTicketMessage(message,handle);
     else if(nativeCodingIpc) void nativeCodingIpc.handleMessage(message,handle);
   });
   host = await startManagedRuntimeHost({ configFile: process.env.COMPUTE_RUNTIME_HOST_CONFIG, signal: controller.signal }, {

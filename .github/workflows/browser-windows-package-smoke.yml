@@ -91,7 +91,8 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 1
+          # The pre-reservation source seal verifies real predecessor blobs and ancestry.
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Prove exact candidate head
@@ -111,6 +112,33 @@ jobs:
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: '1.3.3'
+
+      - name: Verify exact Windows source contracts before reservation
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          node --test --test-concurrency=1 \
+            infra/client-state-runtime/client-critical-closure.test.mjs \
+            apps/metaengine-browser/test/package-identity-candidates.test.mjs \
+            apps/metaengine-browser/test/package-build-reservation.test.mjs \
+            apps/metaengine-browser/test/package-build-reservation-workflow.test.mjs \
+            apps/metaengine-browser/test/package-lock-material.test.mjs
+          git diff --check
+          test -z "$(git status --porcelain --untracked-files=all)"
+
+      - name: Prove native consent denial mechanics before reservation
+        shell: bash
+        run: |
+          set -euo pipefail
+          proof_log="$RUNNER_TEMP/native-consent-mechanics-preflight.tap"
+          node --test --test-concurrency=1 --test-reporter=tap \
+            apps/metaengine-browser/test/native-consent-helper-windows-mechanics.test.mjs | tee "$proof_log"
+          node apps/metaengine-browser/scripts/verify-native-consent-mechanics-proof.mjs "$proof_log" "$GITHUB_WORKSPACE"
+          test -z "$(git status --porcelain --untracked-files=all)"
 
       - name: Refuse duplicate source/version physical build
         working-directory: apps/metaengine-browser
@@ -198,7 +226,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $packageVersion = [string](node -p "require('./node_modules/electron/package.json').version")
-          if ($packageVersion -ne '44.0.0') { throw "electron_package_version_drift:$packageVersion" }
+          if ($packageVersion -ne '44.9.3') { throw "electron_package_version_drift:$packageVersion" }
           $electron = Join-Path (Get-Location) 'node_modules\electron\dist\electron.exe'
           if (-not (Test-Path $electron -PathType Leaf)) {
             node .\node_modules\electron\install.js
@@ -208,12 +236,16 @@ jobs:
           $binaryInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($electron)
           $productVersion = ([string]$binaryInfo.ProductVersion).Trim()
           if ([string]::IsNullOrWhiteSpace($productVersion)) { throw 'electron_runtime_product_version_missing' }
+          if ($productVersion -notmatch '^44\.9\.3(?:\.0)?$') {
+            throw "electron_runtime_version_drift:$productVersion"
+          }
           try {
             $parsedProductVersion = [version]$productVersion
           } catch {
             throw "electron_runtime_product_version_invalid:$productVersion"
           }
-          if ($parsedProductVersion.Major -ne 44 -or $parsedProductVersion.Minor -ne 0 -or $parsedProductVersion.Build -ne 0) {
+          if ($parsedProductVersion.Major -ne 44 -or $parsedProductVersion.Minor -ne 9 -or $parsedProductVersion.Build -ne 3 `
+              -or $parsedProductVersion.Revision -notin @(-1, 0)) {
             throw "electron_runtime_version_drift:$productVersion"
           }
           $binarySha256 = ((Get-FileHash -Algorithm SHA256 -LiteralPath $electron).Hash).ToLowerInvariant()
@@ -760,11 +792,13 @@ jobs:
           git diff --exit-code HEAD -- .
 
       - name: Publish immutable candidate for parallel downstream qualification
+        id: immutable_candidate
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: metaengine-browser-windows-candidate-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             ${{ runner.temp }}/METAENGINE-Browser-Test-Setup-*-x64.exe
+            ${{ runner.temp }}/metaengine-installed-package-code.v1.json
             ${{ runner.temp }}/METAENGINE-Browser-Test-Setup-*-x64.exe.blockmap
             ${{ runner.temp }}/installer-provenance.json
             ${{ runner.temp }}/build-identity.json
@@ -870,7 +904,68 @@ jobs:
           $proof | Add-Member -NotePropertyName guardian_native_manifest_sha256 -NotePropertyValue ([string]$guardian.manifest_sha256) -Force
           $proof | Add-Member -NotePropertyName guardian_native_staging_verified -NotePropertyValue $true -Force
           $proof | ConvertTo-Json -Depth 6 | Set-Content $proofPath -Encoding utf8
+          # Retain the actual successful bounded install result for the separate
+          # sidecar. This does not amend the already published candidate artifact.
+          @{
+            schema='metaengine.browser.forward-fresh-install-readback.v1'
+            source_head=[string]$proof.source_head
+            package_version=[string]$proof.package_version
+            repository=$env:GITHUB_REPOSITORY
+            workflow='.github/workflows/browser-windows-package-smoke.yml'
+            run_id=[string]$env:GITHUB_RUN_ID
+            run_number=[int64]$env:GITHUB_RUN_NUMBER
+            run_attempt=[int]$env:GITHUB_RUN_ATTEMPT
+            event=$env:GITHUB_EVENT_NAME
+            install=$installProof
+          } | ConvertTo-Json -Depth 6 | Set-Content "$env:RUNNER_TEMP\forward-fresh-install-readback.json" -Encoding utf8
           Write-Host ($proof | ConvertTo-Json -Compress)
+
+      - name: Capture same-producer forward candidate image after successful fresh install
+        id: forward_sidecar_capture
+        timeout-minutes: 12
+        working-directory: apps/metaengine-browser
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORWARD_SOURCE_HEAD: ${{ needs.package_identity_preflight.outputs.source_head }}
+          FORWARD_PACKAGE_VERSION: ${{ needs.package_identity_preflight.outputs.package_version }}
+          FORWARD_CANDIDATE_ARTIFACT_ID: ${{ steps.immutable_candidate.outputs.artifact-id }}
+          FORWARD_CANDIDATE_ARTIFACT_DIGEST: ${{ steps.immutable_candidate.outputs.artifact-digest }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node scripts/qa-forward-candidate-evidence.mjs capture
+          if ($LASTEXITCODE -ne 0) { throw 'forward_candidate_evidence_capture_failed' }
+
+      - name: Publish immutable forward candidate sidecar
+        id: forward_sidecar_artifact
+        if: success() && steps.forward_sidecar_capture.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: metaengine-browser-windows-forward-sidecar-${{ needs.package_identity_preflight.outputs.source_head }}
+          path: ${{ runner.temp }}/forward-candidate-sidecar/
+          # Only the vetted packaged tree and public manifest are staged here.
+          # Inventory records restore empty dirs omitted by upload-artifact.
+          include-hidden-files: true
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 30
+          compression-level: 0
+
+      - name: Record forward sidecar pins pending terminal producer success
+        shell: pwsh
+        env:
+          FORWARD_SIDECAR_ARTIFACT_ID: ${{ steps.forward_sidecar_artifact.outputs.artifact-id }}
+          FORWARD_SIDECAR_ARTIFACT_DIGEST: ${{ steps.forward_sidecar_artifact.outputs.artifact-digest }}
+          FORWARD_SIDECAR_MANIFEST_SHA256: ${{ steps.forward_sidecar_capture.outputs.manifest_sha256 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          @(
+            'Forward migration sidecar: CAPTURED_PENDING_PRODUCER_COMPLETION',
+            "Artifact ID: $env:FORWARD_SIDECAR_ARTIFACT_ID",
+            "Artifact ZIP SHA-256: $env:FORWARD_SIDECAR_ARTIFACT_DIGEST",
+            "Manifest SHA-256: $env:FORWARD_SIDECAR_MANIFEST_SHA256",
+            'Consumers must independently require this exact producer run/attempt to finish SUCCESS.'
+          ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
 
       - name: Qualify normal installed first-run and exact installed UI host in isolated profiles
         timeout-minutes: 8
@@ -1185,6 +1280,7 @@ jobs:
           name: metaengine-browser-windows-package-evidence-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             ${{ runner.temp }}/windows-package-proof.json
+            ${{ runner.temp }}/metaengine-installed-package-code.v1.json
             ${{ runner.temp }}/packaged-build-identity-proof.json
             ${{ runner.temp }}/packaged-client-state-runtime-proof.json
             ${{ github.workspace }}/apps/metaengine-browser/client-state-runtime-dist/offline-runtime-bundle.json

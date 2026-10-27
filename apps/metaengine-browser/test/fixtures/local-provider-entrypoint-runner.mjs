@@ -69,12 +69,20 @@ app.setAppUserModelId = () => {};
 app.hasSingleInstanceLock = () => ownsLock;
 app.releaseSingleInstanceLock = () => { trace('release-lock'); ownsLock = false; };
 app.isReady = () => ready;
+app.enableSandbox = () => { if (ready) throw new Error('fixture_sandbox_after_ready'); };
+let schemesRegistered = false;
+const protocol = { registerSchemesAsPrivileged() {
+  if (ready || schemesRegistered) throw new Error('fixture_scheme_registration_not_pre_ready_once');
+  schemesRegistered = true;
+} };
 app.isPackaged = Boolean(options.firstRunAutoConnect || options.packaged);
 app.whenReady = () => ready ? Promise.resolve() : new Promise(resolve => app.once('ready', resolve));
 app.exit = code => { trace('exit', code); process.exit(code); };
 app.quit = () => {
   trace('quit-requested');
   let prevented = false;
+  app.emit('before-quit', { get defaultPrevented() { return prevented; }, preventDefault: () => { prevented = true; trace('before-quit-prevented'); } });
+  if (prevented) return;
   app.emit('will-quit', { preventDefault: () => { prevented = true; trace('quit-prevented'); } });
   if (!prevented && !options.holdQuit) app.exit(0);
 };
@@ -98,6 +106,7 @@ app.requestSingleInstanceLock = data => {
   return ownsLock;
 };
 globalThis.__singletonTestElectron = {
+  protocol,
   app,
   BrowserWindow: class { constructor() { throw new Error('fixture_browser_window_forbidden'); } },
   ipcMain: { handle() { throw new Error('fixture_privileged_ipc_forbidden'); } },
@@ -114,7 +123,9 @@ const electronModule = dataModule([
   'export const BrowserWindow = globalThis.__singletonTestElectron.BrowserWindow;',
   'export const ipcMain = globalThis.__singletonTestElectron.ipcMain;',
   'export const dialog = globalThis.__singletonTestElectron.dialog;',
+  'export const protocol = globalThis.__singletonTestElectron.protocol;',
 ].join('\n'));
+globalThis.__readFixtureHostState = () => JSON.parse(fs.readFileSync(options.managedHost.evidenceFile, 'utf8')).state;
 const runtimeModule = dataModule([
   'import { app } from "electron";',
   'import { NATIVE_SUPERVISOR_BASE, NATIVE_SUPERVISOR_STATE_PROVIDER, setNativeSupervisorBase } from ' + JSON.stringify(endpoint) + ';',
@@ -126,6 +137,20 @@ const runtimeModule = dataModule([
   'globalThis.__traceEntrypoint("runtime-barrier", !!globalThis.__METAENGINE_BROWSER_BOOTSTRAP_BARRIER__);',
   'globalThis.__METAENGINE_BROWSER_BOOTSTRAP_BARRIER__?.then(() => globalThis.__traceEntrypoint("barrier-released"));',
   'app.on("activate", () => globalThis.__traceEntrypoint("runtime-activate"));',
+  ...(options.nativeDrainMode ? [
+    'import { drainManagedRuntimeBindings } from ' + JSON.stringify(new URL('managed-runtime-drain.mjs', src).href) + ';',
+    'let drainComplete=false, drainStarted=false;',
+    'app.on("before-quit", event => {',
+    ' if(drainComplete) return; event.preventDefault(); if(drainStarted) return; drainStarted=true;',
+    ' const hostState=globalThis.__readFixtureHostState(); globalThis.__traceEntrypoint("native-drain-start",hostState);',
+    ' void drainManagedRuntimeBindings({coding:{close:async()=>{',
+    '  await new Promise(resolve=>setTimeout(resolve,50));',
+    options.nativeDrainMode === 'pending' ? '  await new Promise(()=>{});' : '',
+    '  return {schema:"metaengine.native-coding.runtime.v1",shutdown_state:' + JSON.stringify(options.nativeDrainMode === 'failed' ? 'DRAIN_UNCONFIRMED' : 'DRAINED') + ',worker_cleanup_confirmed:' + (options.nativeDrainMode === 'failed' ? 'false' : 'true') + '};',
+    ' }}}).then(()=>{drainComplete=true;globalThis.__traceEntrypoint("native-drain-confirmed",globalThis.__readFixtureHostState());app.quit();})',
+    ' .catch(()=>globalThis.__traceEntrypoint("native-drain-blocked"));',
+    '});',
+  ] : []),
 ].join('\n'));
 const hostModule = dataModule([
   'import { NATIVE_SUPERVISOR_STATE_PROVIDER, NATIVE_SUPERVISOR_BASE } from ' + JSON.stringify(endpoint) + ';',
@@ -166,6 +191,23 @@ if(options.firstRunAutoConnect){
     'globalThis.__traceEntrypoint("me2-import"); export function startMe2Integration() { globalThis.__traceEntrypoint("me2-start"); }',
   ));
 }
+if (options.freshConsentPending || options.freshConsentDenied) {
+  // Only the native operator boundary is inert. Real main-entry must finish
+  // ESM evaluation, wait for readiness and retain provider/runtime admission.
+  mocks.set(new URL('installed-fresh-provider-setup.mjs', src).href, dataModule([
+    'export async function setupInstalledFreshProvider({app}) {',
+    ' globalThis.__traceEntrypoint("fresh-setup-entered", app.isReady());',
+    ' await app.whenReady();',
+    ...(options.freshConsentDenied ? [
+      ' globalThis.__traceEntrypoint("fresh-native-consent-declined", app.isReady());',
+      ' throw new Error("installed_fresh_provider_consent_declined");',
+    ] : []),
+    ' globalThis.__traceEntrypoint("fresh-native-consent-pending", app.isReady());',
+    ' await new Promise(() => {});',
+    ' throw new Error("fixture_consent_must_never_be_granted");',
+    '}',
+  ].join('\n')));
+}
 if (options.managedHost) {
   globalThis.__singletonTestRuntimePaths = options.managedHost;
   mocks.set(offlineVerifier, dataModule([
@@ -199,7 +241,7 @@ try {
     app.emit('ready');
     app.emit('ready'); // A one-shot primary continuation must survive duplicate delivery.
   }
-  if(options.firstRunAutoConnect){
+  if(options.firstRunAutoConnect && !options.freshConsentPending){
     await globalThis.__METAENGINE_PRIMARY_PROVIDER_PREPARATION__?.catch(()=>{});
     trace('deferred-provider-settled');
   }
@@ -218,7 +260,7 @@ if (options.installerAfterBoot || options.installerDuringStartup) {
     trace('installer-signal-after-boot');
     app.emit('second-instance', null, ['browser.exe', '--metaengine-installer-shutdown']);
   }, 50);
-  originalSetTimeout(() => process.exit(99), 5000).unref();
+  originalSetTimeout(() => process.exit(99), options.fixtureDeadlineMs || 5000);
 } else {
   setTimeout(() => options.quitAfterBoot ? app.quit()
     : process.exit(awaitingProbeExit ? 99 : process.exitCode || 0), awaitingProbeExit ? 5000 : 200);

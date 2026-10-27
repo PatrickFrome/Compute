@@ -1,3 +1,4 @@
+import { reservedBrowserParentTelemetry } from './browser-parent-suspension-telemetry.mjs';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import {
@@ -167,7 +168,7 @@ function transportAdmittedFleet(fleet) {
   const readinessOk = cloned?.readiness_contract === 'TRANSPORT_PROOF_REQUIRED';
   cloned.agents = Array.isArray(cloned?.agents) ? cloned.agents.map((agent) => {
     const admitted = schemaOk && readinessOk && Boolean(exactTransportProof(agent));
-    return admitted ? agent : { ...agent, lifecycle_state: 'ADMISSION_FENCED', transport_admission: 'EXACT_ACTIVE_PROOF_REQUIRED' };
+    return admitted || ['SUSPENDED','RETIRED'].includes(agent.lifecycle_state) || (schemaOk && readinessOk && reservedBrowserParentTelemetry(agent)) ? agent : { ...agent, lifecycle_state: 'ADMISSION_FENCED', transport_admission: 'EXACT_ACTIVE_PROOF_REQUIRED' };
   }) : [];
   cloned.transport_admission = schemaOk && readinessOk ? 'EXACT_ACTIVE_PROOF_REQUIRED' : 'FLEET_CONTRACT_INVALID';
   cloned.authority_effect = false;
@@ -422,6 +423,10 @@ export class DevOsNativeTaskCycle {
 
   bindMemoryRetriever(fn) {
     if (typeof this.#inner?.bindMemoryRetriever === 'function') this.#inner.bindMemoryRetriever(fn);
+  }
+
+  bindVerifiedSkillDispatch(consumer) {
+    this.#inner.bindVerifiedSkillDispatch(consumer);
   }
 
   bindProjectRuntime(runtime) {

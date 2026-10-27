@@ -143,6 +143,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - name: Frozen driver for real running-agent SQL regression
+        run: npm ci --prefix infra/client-state-runtime --ignore-scripts --no-audit --no-fund
       - name: Repair checkout ownership inside isolated CI container only
         shell: sh
         run: |
@@ -161,13 +163,18 @@ jobs:
         run: |
           set -eu
           NODE_BIN="$(command -v node)"
-          runuser -u postgres -- env GITHUB_WORKSPACE="$GITHUB_WORKSPACE" EXPECTED_HEAD="$EXPECTED_HEAD" W48_PG17_BIN=/usr/lib/postgresql/17/bin NODE_BIN="$NODE_BIN" sh -ec '
+          runuser -u postgres -- env GITHUB_WORKSPACE="$GITHUB_WORKSPACE" EXPECTED_HEAD="$EXPECTED_HEAD" W48_PG17_BIN=/usr/lib/postgresql/17/bin NODE_BIN="$NODE_BIN" METAENGINE_PG_TEST_BIN=/usr/lib/postgresql/17/bin METAENGINE_PG_TEST_DRIVER="$GITHUB_WORKSPACE/infra/client-state-runtime/node_modules/postgres/src/index.js" sh -ec '
             cd "$GITHUB_WORKSPACE"
             test "$(id -un)" = postgres
             test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
             test -z "$(git status --porcelain)"
             "$NODE_BIN" --test infra/client-state-runtime/client-serial-loop-staging-w48.test.mjs infra/client-state-runtime/client-serial-loop-staging-w56.test.mjs
             "$NODE_BIN" --test infra/client-state-runtime/client-serial-loop-staging-w48.pg17.test.mjs infra/client-state-runtime/client-serial-loop-staging-w56.pg17.test.mjs
+            test -x "$METAENGINE_PG_TEST_BIN/initdb"
+            test -f "$METAENGINE_PG_TEST_DRIVER"
+            "$NODE_BIN" --test infra/client-state-runtime/native-coding-agent-project-tools.integration.test.mjs
+            "$NODE_BIN" --test infra/client-state-runtime/fresh-schema-pg17.integration.test.mjs
+            "$NODE_BIN" --test infra/client-state-runtime/fresh-schema-application-plan.test.mjs infra/client-state-runtime/fresh-client-provider.integration.test.mjs infra/client-state-runtime/browser-parent-suspension.sql.test.mjs infra/client-state-runtime/browser-parent-suspension.concurrency.test.mjs infra/client-state-runtime/guardian-owner-consume.integration.test.mjs infra/client-state-runtime/fresh-device-owner.integration.test.mjs
           '
 
   w45-physical-pg17:

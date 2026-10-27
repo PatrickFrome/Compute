@@ -9,7 +9,9 @@ import {executeDisposableOneShotPg17Dump}
   from './pg17-one-shot-disposable-dump-executor.mjs';
 
 async function fixture(t){
-  const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-safe-dump-exec-'));
+  // The protected journal rejects aliases. Canonicalize the directory we just
+  // created, rather than weakening that check for Windows TEMP short names.
+  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-safe-dump-exec-')));
   t.after(()=>fs.rm(root,{force:true,recursive:true}));
   const source=path.join(root,'data');
   await fs.mkdir(source);
@@ -35,14 +37,27 @@ test('installed Keeper 55432 is forbidden without an effect intent or connection
   assert.equal((await readBackupEffectFence({journalDirectory:root,
     intentId:intent.intent_id})).state,'NO_INTENT');
 });
-test('production PGDATA path is forbidden even when a matching fake intent exists',async t=>{
+test('non-Windows execution refuses before resolving paths or publishing an intent',{
+  skip:process.platform==='win32',
+},async t=>{
+  const {root,intent,params}=await fixture(t);
+  const absent=path.join(root,'never-created-pgdata');
+  await assert.rejects(executeDisposableOneShotPg17Dump({...params,sourceDataDirectory:absent}),
+    /pg17_disposable_authority_invalid/);
+  await assert.rejects(fs.stat(absent),{code:'ENOENT'});
+  assert.equal((await readBackupEffectFence({journalDirectory:root,
+    intentId:intent.intent_id})).state,'NO_INTENT');
+});
+test('production PGDATA path is forbidden even when a matching fake intent exists',{
+  skip:process.platform!=='win32',
+},async t=>{
   const {root,intent,params}=await fixture(t);
   await assert.rejects(executeDisposableOneShotPg17Dump({...params,
     sourceDataDirectory:process.cwd()}),/pg17_disposable_scope_invalid/);
   assert.equal((await readBackupEffectFence({journalDirectory:root,
     intentId:intent.intent_id})).state,'NO_INTENT');
 });
-test('invalid digest never crosses backup barrier',async t=>{
+test('invalid digest never crosses backup barrier',{skip:process.platform!=='win32'},async t=>{
   const {root,intent,params}=await fixture(t);
   if(!process.env.LOCAL_STATE_TEST_PG_BIN_DIR){
     t.skip('physical PostgreSQL binary path unavailable');return;
@@ -52,7 +67,7 @@ test('invalid digest never crosses backup barrier',async t=>{
   assert.equal((await readBackupEffectFence({journalDirectory:root,
     intentId:intent.intent_id})).state,'NO_INTENT');
 });
-test('connection must not be silently retargeted',async t=>{
+test('connection must not be silently retargeted',{skip:process.platform!=='win32'},async t=>{
   const {root,intent,params}=await fixture(t);
   if(!process.env.LOCAL_STATE_TEST_PG_BIN_DIR){
     t.skip('physical PostgreSQL binary path unavailable');return;

@@ -1,0 +1,98 @@
+name: Pinned Predecessor Materialization Qualification
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/scripts/qualify-predecessor-materialization.mjs'
+      - 'apps/metaengine-browser/test/qualify-predecessor-materialization.test.mjs'
+      - '.github/workflows/browser-windows-predecessor-qualification.yml'
+  push:
+    branches:
+      - 'work/preinstall-closure-20261027'
+      - 'work/preinstall-shared-inputs-20261027'
+    paths:
+      - 'apps/metaengine-browser/scripts/qualify-predecessor-materialization.mjs'
+      - 'apps/metaengine-browser/test/qualify-predecessor-materialization.test.mjs'
+      - '.github/workflows/browser-windows-predecessor-qualification.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: predecessor-qualification-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  independent-predecessor-materialization:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: windows-2025
+    timeout-minutes: 45
+    env:
+      EXPECTED_SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Preserve literal committed source bytes
+        run: git config --global core.autocrlf false
+
+      - name: Checkout exact reviewed qualifier source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.EXPECTED_SOURCE_HEAD }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify qualifier source identity
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -cne $env:EXPECTED_SOURCE_HEAD) {
+            throw 'predecessor_qualifier_source_mismatch'
+          }
+
+      - name: Setup frozen Node toolchain
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Install frozen verifier dependencies without lifecycle scripts
+        working-directory: apps/metaengine-browser
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Verify predecessor provenance and refusal contracts
+        run: node --test apps/metaengine-browser/test/qualify-predecessor-materialization.test.mjs
+
+      - name: Independently qualify original immutable predecessor bytes
+        if: github.event_name != 'pull_request'
+        shell: pwsh
+        env:
+          ME2_GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $work = Join-Path $env:RUNNER_TEMP 'predecessor-qualification-private'
+          $out = Join-Path $env:RUNNER_TEMP 'predecessor-materialization-public'
+          node apps/metaengine-browser/scripts/qualify-predecessor-materialization.mjs --work $work --out $out --expected-qualifier-head $env:EXPECTED_SOURCE_HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'predecessor_materialization_failed' }
+          if (!(Test-Path -LiteralPath (Join-Path $out 'predecessor-materialization.json') -PathType Leaf)) { throw 'predecessor_materialization_manifest_missing' }
+
+      - name: Verify tracked source remained unchanged
+        shell: pwsh
+        run: |
+          git diff --exit-code
+          if ($LASTEXITCODE -ne 0) { throw 'predecessor_qualifier_source_drift' }
+          git diff --cached --exit-code
+          if ($LASTEXITCODE -ne 0) { throw 'predecessor_qualifier_index_drift' }
+
+      - name: Publish independently qualified predecessor materialization
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
+        with:
+          name: metaengine-browser-predecessor-materialization-601532ca50db02aa9089783dde157a93f484adf2-${{ env.EXPECTED_SOURCE_HEAD }}
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 30
+          compression-level: 0
+          path: |
+            ${{ runner.temp }}/predecessor-materialization-public/predecessor-materialization.json
+            ${{ runner.temp }}/predecessor-materialization-public/win-unpacked/

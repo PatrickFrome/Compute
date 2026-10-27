@@ -23,10 +23,6 @@ const OBJ = x => x !== null && typeof x === 'object' && !Array.isArray(x);
 const ID = x => typeof x === 'string' && x.length > 0 && x.length <= 128;
 const unique = xs => new Set(xs).size === xs.length;
 const all = (x, props) => OBJ(x) && props.every(k => x[k] === true);
-const within = (value, nowMs) => {
-  const ms = typeof value === 'string' ? Date.parse(value) : NaN;
-  return Number.isFinite(ms) && ms <= nowMs + 5_000 && nowMs - ms <= 30_000;
-};
 
 /**
  * Determine which release exit gates are still unsupported by independently

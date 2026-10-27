@@ -75,17 +75,29 @@ test('migration plan pins deployed sources, unbounded defaults and the opt-in ow
   const upgrade=plan.migrations[mandatorySources.length+nativeSources.length];
   assert.equal(upgrade.source,'native-agent-count-unbounded-v2.sql');
   assert.deepEqual(upgrade.signatures,['destruktion_meta.native_agent_count_unbounded_v2()']);
-  const extras = plan.migrations.slice(mandatorySources.length+nativeSources.length+1);
+  const running = plan.migrations[mandatorySources.length+nativeSources.length+1];
+  assert.equal(running.source,'native-coding-running-agent-scope-v1.sql');
+  assert.deepEqual(running.signatures,['destruktion_meta.native_coding_running_critic_admissible_v1(uuid,uuid)',
+    'destruktion_meta.native_coding_agent_context_v1(uuid)']);
+  const extras = plan.migrations.slice(mandatorySources.length+nativeSources.length+2);
   // The W5 DAG guard is an optional source-only integration lane and must
   // never be admitted as an arbitrary migration or silently become installed.
-  assert(extras.length <= 1, 'unrecognized extra migration requires an explicit contract');
-  if (extras.length === 1) {
+  assert.equal(extras.length, 2, 'every extra migration requires an explicit contract');
+  {
     const [guard] = extras;
     assert.equal(guard.source, 'fleet-coordination-claim-guard-v1.sql');
     assert.deepEqual(guard.signatures, ['destruktion_meta.fleet_coordination_claim_gate_v1()']);
     assert.equal(guard.triggers.length, 1);
     assert.equal(guard.triggers[0].name, 'zz_fleet_coordination_claim_gate_v1');
   }
+  const suspension=extras[1];
+  assert.equal(suspension.source,'20261026020000_browser_parent_suspension_v1.sql');
+  assert.equal(suspension.signatures.length,9);
+  assert.equal(suspension.signatures.filter(value=>value.startsWith('public.')).length,5);
+  assert.deepEqual(suspension.relations,['destruktion_meta.browser_parent_suspension_h205f22','destruktion_meta.browser_child_retirement_h205f22']);
+  assert.deepEqual(suspension.triggers.map(row=>row.name),['browser_parent_reserved_claim_trg','browser_child_retirement_immutable_trg']);
+  assert(!suspension.signatures.some(value=>value.includes('devos_fleet_lease_v1(')||value.includes('project_task_projection_h205f22(')),
+    'pre-existing replacement signatures must not make first suspension installation look partial');
   for (const row of plan.migrations) {
     assert.match(row.source_sha256, /^[a-f0-9]{64}$/);
     assert(row.signatures.length >= 1);
@@ -133,10 +145,10 @@ test('migration catalog skip requires every required object and separately attes
   } };
   const receipt = await applyLocalRuntimeMigrations({ sql: { begin: run => run(tx) } });
   assert(receipt.migrations.every(row => row.status === 'ALREADY_PRESENT_NOT_MODIFIED'));
-  assert(receipt.migrations.every(row => row.existing_bodies_attested === (row.browser_dispatch_version === 3 || row.cognitive_acceptor_direct_api === true || row.source==='native-agent-count-unbounded-v2.sql')));
+  assert(receipt.migrations.every(row => row.existing_bodies_attested === (row.browser_dispatch_version === 3 || row.cognitive_acceptor_direct_api === true || row.source==='native-agent-count-unbounded-v2.sql' || row.running_agent_scope_separate_from_admission===true)));
   assert.equal(receipt.existing_bodies_attested, false);
   assert(statements.some(query => query.includes('pg_advisory_xact_lock')));
-  assert(!statements.some(query => !query.startsWith('-- Reviewed local upgrade.') && /^create /im.test(query)));
+  assert(!statements.some(query => !query.startsWith('-- Reviewed local upgrade.') && !query.startsWith('-- Additive local upgrade: active CRITIC authorization') && /^create /im.test(query)));
 });
 
 async function dispatchFixture(version = 3) {

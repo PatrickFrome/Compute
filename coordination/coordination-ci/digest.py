@@ -104,7 +104,6 @@ def main():
             acked = set(cursor.get("acked", []))
         except Exception:
             acked = set()
-        peer = "chatgpt" if agent == "glm" else "glm"
         lines.append(f"## {agent} outbox ({len(entries)} messages)")
         for name in sorted(entries):
             try:
@@ -114,7 +113,6 @@ def main():
                 continue
             mid = env.get("id", name)
             new = (args.since is None or env.get("ts", "") > args.since)
-            is_acked = mid in acked or agent == "glm"  # glm self-published
             flag = ""
             if agent != "glm" and mid not in acked:
                 unacked += 1

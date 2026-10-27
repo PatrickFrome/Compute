@@ -70,12 +70,17 @@ export async function sourceClosure(entries, repositoryRoot) {
         if (!/\.(js|mjs|cjs|ts|json)$/.test(imported)) throw manifestError('startup_manifest_source_extension_unsupported');
         await visit(imported);
       } else if (specifier.startsWith('npm:')) npm.add(specifier);
+      // This one reviewed adapter is loaded only by packaged Electron main,
+      // after native consent. Electron is a native built-in there, not an npm
+      // dependency of the ordinary Node runtime. No other bare import expands.
+      else if (specifier === 'electron' && slash(relative(repositoryRoot, path))
+        === 'infra/client-state-runtime/fresh-provider-native-device-identity.mjs') { /* source bytes remain pinned */ }
       else if (!specifier.startsWith('node:') && specifier !== 'postgres') throw Object.assign(manifestError('startup_manifest_import_unsupported'),{source_path:path,specifier});
     }
     // Reviewed migration catalogs use literal resource URLs. SQL is hashed as
     // data, never parsed as JavaScript or discovered through arbitrary folders.
-    for (const match of text.matchAll(/\bnew\s+URL\(\s*['"]([^'"\r\n]+\.sql)['"]\s*,\s*import\.meta\.url\s*\)/g)) {
-      if (!/^\.\.?\/[A-Za-z0-9_./-]+\.sql$/.test(match[1])) throw manifestError('startup_manifest_resource_url_invalid');
+    for (const match of text.matchAll(/\bnew\s+URL\(\s*['"]([^'"\r\n]+(?:\.sql|fresh-schema-(?:candidate-plan|statement-selection)\.json))['"]\s*,\s*import\.meta\.url\s*\)/g)) {
+      if (!/^\.\.?\/[A-Za-z0-9_./-]+\.(?:sql|json)$/.test(match[1])) throw manifestError('startup_manifest_resource_url_invalid');
       const resource = resolve(dirname(path), match[1]);
       if (!within(repositoryRoot, resource)) throw manifestError('startup_manifest_source_outside_repository');
       await regularFile(resource);

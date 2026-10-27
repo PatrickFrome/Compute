@@ -40,9 +40,19 @@ export function candidateArtifactName(sourceHead) {
 // before invoking the ordinary reservation/identity build pipeline.
 export const MAX_PACKAGE_IDENTITY_CANDIDATES = 4;
 
-export function deriveDistinctCandidatePackageVersion({ packageVersion, sourceHead, slot = 0 } = {}) {
+function minimumVersionFloor(value) {
+  if (value === undefined) return null;
+  const version = required(value, 'package_build_reservation_minimum_package_version_invalid');
+  if (!DEV_VERSION.test(version)) throw new Error('package_build_reservation_minimum_package_version_invalid');
+  return { version, serial: BigInt(version.slice('0.7.0-dev.'.length, -2)) };
+}
+
+// An explicitly supplied minimum is an EXCLUSIVE consumed-version floor.
+// It is caller-provided evidence, not automatic discovery of all reservations.
+export function deriveDistinctCandidatePackageVersion({ packageVersion, sourceHead, slot = 0, minimumPackageVersion } = {}) {
   const version = required(packageVersion, 'package_build_reservation_version_missing');
   if (!DEV_VERSION.test(version)) throw new Error('package_build_reservation_version_invalid');
+  const minimum = minimumVersionFloor(minimumPackageVersion);
   const head = required(sourceHead, 'package_build_reservation_source_head_missing').toLowerCase();
   if (!SHA40.test(head)) throw new Error('package_build_reservation_source_head_invalid');
   if (!Number.isSafeInteger(slot) || slot < 0 || slot >= MAX_PACKAGE_IDENTITY_CANDIDATES) {
@@ -58,7 +68,8 @@ export function deriveDistinctCandidatePackageVersion({ packageVersion, sourceHe
   // immutable artifact reservations, never assumed away from the hash alone.
   const width = 100_000_000_000n;
   const current = BigInt(version.slice('0.7.0-dev.'.length, -2));
-  const nextBucket = (current / width + 1n) * width;
+  const floor = minimum && minimum.serial > current ? minimum.serial : current;
+  const nextBucket = (floor / width + 1n) * width;
   const base = nextBucket > 800_000_000_000n ? nextBucket : 800_000_000_000n;
   const serial = base + (BigInt(`0x${digest.slice(0, 13)}`) % width);
   return `0.7.0-dev.${serial}.1`;
@@ -231,11 +242,18 @@ async function listArtifactsByName({ repository, name, token, apiBase }) {
 // artifact identity. The proposed version must be committed in BOTH package
 // manifests (and independently rechecked by the ordinary build preflight).
 export async function planDistinctPackageBuildIdentity({
-  repository, sourceHead, packageVersion, runId, runAttempt, token,
+  repository, sourceHead, packageVersion, runId, runAttempt, token, minimumPackageVersion,
   apiBase = 'https://api.github.com',
 } = {}) {
   // Validate source/run/rerun before any remote observation.
   evaluatePackageBuildReservation({ repository, sourceHead, packageVersion, runId, runAttempt });
+  const minimum = minimumVersionFloor(minimumPackageVersion);
+  const minimumProof = minimum ? {
+    minimum_package_version: minimum.version,
+    minimum_package_version_exclusive: true,
+  } : {};
+  const manifestAboveMinimum = !minimum
+    || BigInt(packageVersion.trim().slice('0.7.0-dev.'.length, -2)) > minimum.serial;
   const sourceName = candidateArtifactName(sourceHead);
   const existingSource = await listArtifactsByName({ repository, name: sourceName, token, apiBase });
   const existingVersion = await listArtifactsByName({ repository, name: reservationArtifactName(packageVersion), token, apiBase });
@@ -244,10 +262,11 @@ export async function planDistinctPackageBuildIdentity({
       repository, sourceHead, packageVersion, runId, runAttempt,
       versionArtifacts: existingVersion, sourceArtifacts: existingSource,
     });
-    return Object.freeze({
+    if (manifestAboveMinimum) return Object.freeze({
       schema: 'metaengine.browser.package-identity-candidate-plan.v1',
       source_head: sourceHead.toLowerCase(),
       manifest_package_version: packageVersion,
+      ...minimumProof,
       candidate_package_version: packageVersion,
       candidate_slot: null,
       manifest_update_required: false,
@@ -261,7 +280,7 @@ export async function planDistinctPackageBuildIdentity({
 
   const collisions = [];
   for (let slot = 0; slot < MAX_PACKAGE_IDENTITY_CANDIDATES; slot += 1) {
-    const candidate = deriveDistinctCandidatePackageVersion({ packageVersion, sourceHead, slot });
+    const candidate = deriveDistinctCandidatePackageVersion({ packageVersion, sourceHead, slot, minimumPackageVersion });
     if (candidate === packageVersion || collisions.includes(candidate)) {
       // A candidate collision within the deterministic bounded sequence is
       // ambiguous, not permission to silently alias the same package version.
@@ -286,6 +305,7 @@ export async function planDistinctPackageBuildIdentity({
       schema: 'metaengine.browser.package-identity-candidate-plan.v1',
       source_head: sourceHead.toLowerCase(),
       manifest_package_version: packageVersion,
+      ...minimumProof,
       candidate_package_version: candidate,
       candidate_slot: slot,
       rejected_reserved_candidate_versions: Object.freeze([...collisions]),
@@ -329,11 +349,16 @@ export async function observeAndEvaluatePackageBuildReservation({
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  // The optional planning floor is not a new ordinary-producer authorization.
+  if (args['minimum-package-version'] !== undefined && args['plan-distinct'] !== true) {
+    throw new Error('package_identity_minimum_version_requires_planner');
+  }
   const operation = args['plan-distinct'] === true ? planDistinctPackageBuildIdentity : observeAndEvaluatePackageBuildReservation;
   const proof = await operation({
     repository: args.repository || process.env.GITHUB_REPOSITORY,
     sourceHead: args['source-head'] || process.env.ME2_SOURCE_HEAD || process.env.GITHUB_SHA,
     packageVersion: args['package-version'],
+    minimumPackageVersion: args['minimum-package-version'],
     runId: args['run-id'] || process.env.GITHUB_RUN_ID,
     runAttempt: args['run-attempt'] || process.env.GITHUB_RUN_ATTEMPT,
     token: args.token || process.env.ME2_GITHUB_TOKEN || process.env.GITHUB_TOKEN || '',

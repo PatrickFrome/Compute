@@ -32,7 +32,6 @@ function exactSha(value,label){const out=String(value||'').trim().toLowerCase();
 function exactDigest(value,label){const out=String(value||'').trim().toLowerCase();if(!SHA256_RE.test(out))throw new Error(`rsi_graduation_${label}_digest_invalid`);return out;}
 function boundedId(value,label){const out=String(value||'').trim();if(!SAFE_ID_RE.test(out))throw new Error(`rsi_graduation_${label}_invalid`);return out;}
 function positiveInt(value,label,max=Number.MAX_SAFE_INTEGER){const out=Number(value);if(!Number.isSafeInteger(out)||out<1||out>max)throw new Error(`rsi_graduation_${label}_invalid`);return out;}
-function assertFalse(value,label){if(value!==false)throw new Error(`rsi_graduation_${label}_must_be_false`);}
 function zero(extra={}){
   return Object.freeze({
     ...extra,

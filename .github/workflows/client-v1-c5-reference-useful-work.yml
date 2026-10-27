@@ -11,6 +11,7 @@ on:
       - 'apps/metaengine-browser/test/fixtures/client-c5-reference-project/**'
       - 'research/METAENGINE_CLIENT_V1_C5_REFERENCE_USEFUL_WORK_CHECKPOINT_2026-10-06.md'
       - '.github/workflows/client-v1-c5-reference-useful-work.yml'
+      - '.github/client-c5-reference-source-identity.test.mjs'
   pull_request:
     paths:
       - 'apps/metaengine-browser/src/client-useful-work-proof.mjs'
@@ -19,11 +20,16 @@ on:
       - 'apps/metaengine-browser/test/fixtures/client-c5-reference-project/**'
       - 'research/METAENGINE_CLIENT_V1_C5_REFERENCE_USEFUL_WORK_CHECKPOINT_2026-10-06.md'
       - '.github/workflows/client-v1-c5-reference-useful-work.yml'
+      - '.github/client-c5-reference-source-identity.test.mjs'
   workflow_dispatch:
 
 permissions:
   contents: read
   actions: read
+
+env:
+  # GITHUB_SHA is the synthetic merge commit on pull_request, not the checked-out head.
+  CANDIDATE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
 
 jobs:
   reference-producer:
@@ -36,22 +42,23 @@ jobs:
       - name: Checkout exact candidate head
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ env.CANDIDATE_HEAD }}
           fetch-depth: 1
           persist-credentials: false
 
       - name: Prove exact candidate head
         shell: bash
-        env:
-          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_HEAD"
 
       - name: Setup frozen Node 24
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24.21.0'
+
+      - name: Guard candidate identity across producer and verifier
+        run: node --test .github/client-c5-reference-source-identity.test.mjs
 
       - name: Parse reference producer and verifier
         working-directory: apps/metaengine-browser
@@ -74,20 +81,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node scripts/client-c5-reference-producer.mjs             --repository "$GITHUB_WORKSPACE"             --head "$GITHUB_SHA"             --out "$RUNNER_TEMP/client-c5-reference-producer"
+          node scripts/client-c5-reference-producer.mjs \
+            --repository "$GITHUB_WORKSPACE" \
+            --head "$CANDIDATE_HEAD" \
+            --out "$RUNNER_TEMP/client-c5-reference-producer"
 
       - name: Prove host checkout remained unchanged
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_HEAD"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
 
       - name: Upload immutable producer evidence bundle
         id: upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: client-c5-reference-producer-${{ github.sha }}
+          name: client-c5-reference-producer-${{ env.CANDIDATE_HEAD }}
           path: ${{ runner.temp }}/client-c5-reference-producer/
           if-no-files-found: error
           retention-days: 30
@@ -101,17 +111,15 @@ jobs:
       - name: Checkout exact verifier head
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ env.CANDIDATE_HEAD }}
           fetch-depth: 1
           persist-credentials: false
 
       - name: Prove verifier exact head
         shell: bash
-        env:
-          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_HEAD"
           test -n "${{ needs.reference-producer.outputs.artifact_id }}"
           test -n "${{ needs.reference-producer.outputs.artifact_digest }}"
 
@@ -132,7 +140,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node scripts/client-c5-reference-verifier.mjs             --bundle "$RUNNER_TEMP/client-c5-reference-producer"             --head "$GITHUB_SHA"             --out "$RUNNER_TEMP/client-c5-reference-verification"
+          node scripts/client-c5-reference-verifier.mjs \
+            --bundle "$RUNNER_TEMP/client-c5-reference-producer" \
+            --head "$CANDIDATE_HEAD" \
+            --out "$RUNNER_TEMP/client-c5-reference-verification"
 
       - name: Re-run fail-closed Client C5 contract
         working-directory: apps/metaengine-browser
@@ -142,13 +153,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_HEAD"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
 
       - name: Upload independent verification evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: client-c5-reference-verification-${{ github.sha }}
+          name: client-c5-reference-verification-${{ env.CANDIDATE_HEAD }}
           path: ${{ runner.temp }}/client-c5-reference-verification/
           if-no-files-found: error
           retention-days: 30

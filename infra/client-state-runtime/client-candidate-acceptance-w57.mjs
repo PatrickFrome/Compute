@@ -33,7 +33,6 @@ const goodSha = v => typeof v === 'string' && SHA.test(v);
 const goodDigest = v => typeof v === 'string' && DIGEST.test(v);
 const id = v => typeof v === 'string' && v.length > 0 && v.length <= 128;
 const positive = v => Number.isSafeInteger(v) && v > 0;
-const eq = (a,b) => typeof a === 'string' && a === b;
 const all = (r, fields) => record(r) && fields.every(k => r[k] === true);
 const unique = (xs) => xs.length === new Set(xs).size;
 

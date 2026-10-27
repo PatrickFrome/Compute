@@ -5,6 +5,9 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { captureStartupSource, sourceClosure, startupFilesDigest } from './startup-source-manifest.mjs';
 import { LOCAL_RUNTIME_MIGRATIONS } from './local-runtime-migrations.mjs';
+import { FRESH_SCHEMA_BASELINE_RESOURCES, FRESH_SCHEMA_SELECTION_RESOURCE,
+  FRESH_SCHEMA_PRIVATE_ACL_RESOURCE, FRESH_SCHEMA_PREREQUISITES_RESOURCE } from './fresh-schema-application-plan.mjs';
+import { FRESH_SCHEMA_CANDIDATE_RESOURCE } from './fresh-schema-plan.mjs';
 
 export const BUNDLE_SCHEMA = 'compute.runtime-source-bundle.v1';
 export const BUNDLE_MANIFEST_FILE = 'runtime-source-bundle.json';
@@ -17,8 +20,9 @@ export const BUNDLE_ENTRY_POINTS = Object.freeze([
 export const RUNTIME_HOST_ENTRY = 'infra/client-state-runtime/runtime-host.mjs';
 export const FIRST_RUN_INITDB_ENTRY = 'infra/client-state-runtime/fresh-pg17-initdb.mjs';
 export const ATTACHED_ONBOARDING_ENTRY = 'infra/client-state-runtime/attached-postgres-onboarding.mjs';
+export const FRESH_PROVIDER_ENTRY = 'infra/client-state-runtime/fresh-client-provider-cli.mjs';
 export const REMOTE_SUPPORT_ENTRY = 'apps/metaengine-browser/src/remote-support-mcp.mjs';
-const selectedEntries = includeRuntimeHost => includeRuntimeHost ? [...BUNDLE_ENTRY_POINTS, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY, REMOTE_SUPPORT_ENTRY, ATTACHED_ONBOARDING_ENTRY] : [...BUNDLE_ENTRY_POINTS];
+const selectedEntries = includeRuntimeHost => includeRuntimeHost ? [...BUNDLE_ENTRY_POINTS, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY, REMOTE_SUPPORT_ENTRY, ATTACHED_ONBOARDING_ENTRY, FRESH_PROVIDER_ENTRY] : [...BUNDLE_ENTRY_POINTS];
 
 const runtimeRoot = 'infra/client-state-runtime/';
 const packageRoot = runtimeRoot + 'node_modules/postgres/';
@@ -60,6 +64,20 @@ const migrationResources = new Set(LOCAL_RUNTIME_MIGRATIONS.flatMap(migration =>
     return path;
   }));
 
+// Only the explicit, source-reviewed fresh-install catalogue is packaged.
+// No arbitrary JSON, SQL directory scan, private config or test loader enters it.
+const freshResources = new Set([...FRESH_SCHEMA_BASELINE_RESOURCES,
+  FRESH_SCHEMA_SELECTION_RESOURCE, FRESH_SCHEMA_PRIVATE_ACL_RESOURCE,
+  FRESH_SCHEMA_PREREQUISITES_RESOURCE, FRESH_SCHEMA_CANDIDATE_RESOURCE].map(url => {
+  if (!(url instanceof URL) || url.protocol !== 'file:' || url.search || url.hash) fail('bundle_fresh_source_invalid');
+  const absolute = fileURLToPath(url);
+  if (!within(migrationRepositoryRoot, absolute)) fail('bundle_fresh_source_invalid');
+  const resource = safeRelativePath(slash(relative(migrationRepositoryRoot, absolute)));
+  if (!/^(?:infra\/client-state-runtime|supabase\/migrations)\/[A-Za-z0-9_-]+\.sql$/.test(resource)
+    && !/^infra\/client-state-runtime\/fresh-schema-(?:candidate-plan|statement-selection)\.json$/.test(resource)) fail('bundle_fresh_source_invalid');
+  return resource;
+}));
+
 // These explicitly listed files form the only permitted Windows computer-control import
 // closure. Never broaden this to all browser/src modules: the bundle includes
 // security-sensitive runtime material, and every source is SHA-256 reviewed.
@@ -73,6 +91,14 @@ const REMOTE_SUPPORT_SOURCE_CLOSURE = new Set([
   'apps/metaengine-browser/src/runtime-recovery-policy.mjs',
 ]);
 const NATIVE_CODING_HOST_SOURCE_CLOSURE=new Set([
+  'apps/metaengine-browser/src/agent-context-token.mjs',
+  'apps/metaengine-browser/src/guardian-client-kernel-birth-w67.mjs',
+  'apps/metaengine-browser/src/host-agent-ipc.mjs',
+  'apps/metaengine-browser/src/host-agent-operation-deadlines.mjs',
+  'apps/metaengine-browser/src/host-agent-protocol.mjs',
+  'apps/metaengine-browser/src/host-owner-genesis-custody-w74.mjs',
+  'apps/metaengine-browser/src/supervisor-device-identity.mjs',
+  'apps/metaengine-browser/src/fresh-provider-device-profile.mjs',
   'apps/metaengine-browser/src/native-coding-task-context.mjs',
   'apps/metaengine-browser/src/native-coding-fs-identity.mjs',
   'apps/metaengine-browser/src/native-coding-operator-paths.mjs',
@@ -94,7 +120,7 @@ const NATIVE_CODING_HOST_SOURCE_CLOSURE=new Set([
   'apps/metaengine-browser/src/codex-cli-result-schema.mjs',
 ]);
 function sourcePathAllowed(value) {
-  return (value === runtimeRoot + 'local-vault-compat.sql' || migrationResources.has(value) || REMOTE_SUPPORT_SOURCE_CLOSURE.has(value) || NATIVE_CODING_HOST_SOURCE_CLOSURE.has(value)
+  return (value === runtimeRoot + 'local-vault-compat.sql' || migrationResources.has(value) || freshResources.has(value) || REMOTE_SUPPORT_SOURCE_CLOSURE.has(value) || NATIVE_CODING_HOST_SOURCE_CLOSURE.has(value)
     || /^(?:infra\/client-state-runtime\/[^/]+\.mjs|apps\/metaengine-browser\/src\/meta-(?:objective|orchestrator)-[^/]+\.mjs|apps\/metaengine-browser\/supabase\/a2-browser-native-supervisor-v1\/[^/]+\.(?:mjs|ts))$/.test(value))
     && !/(?:\.test\.|-fixture\.)/.test(value);
 }
@@ -161,7 +187,7 @@ export function reviewedBundlePlan(startupManifest, expectedSourceDigest, { incl
     const selected = classifyRecord(record);
     if (selected) records.push(selected);
   }
-  for (const name of [...selectedEntries(includeRuntimeHost), runtimeRoot + 'local-vault-compat.sql', ...migrationResources, ...locks.map(name => runtimeRoot + name), packageRoot + 'package.json']) {
+  for (const name of [...selectedEntries(includeRuntimeHost), runtimeRoot + 'local-vault-compat.sql', ...migrationResources, ...(includeRuntimeHost ? freshResources : []), ...locks.map(name => runtimeRoot + name), packageRoot + 'package.json']) {
     if (!records.some(record => record.path === name)) fail('bundle_required_resource_missing');
   }
   const paths = records.map(record => record.path);

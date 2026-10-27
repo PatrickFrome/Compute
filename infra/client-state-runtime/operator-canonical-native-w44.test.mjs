@@ -18,6 +18,7 @@ const key = 'k'.repeat(64);
 const srcSha = 'a'.repeat(40);
 const exeDigest = 'b'.repeat(64);
 const proof = 'c'.repeat(64);
+const packageCodeDigest = 'e'.repeat(64);
 const birth = new Date(Date.now() - 60_000).toISOString();
 const at = () => new Date().toISOString();
 function makeNativeOwner(epoch = 7) {
@@ -29,8 +30,14 @@ function makeNativeOwner(epoch = 7) {
     authority_effect: false };
 }
 function makeInstalled(p = proof) {
+  // Controlled synthetic verifier output models the v2 on-disk contract.
+  // These fields do not authenticate a real package or native loaded code;
+  // production W52 rejects this fixture_classification before W44 is reached.
   return { source: 'INSTALLED_EXE_NATIVE_VERIFIER',
     fixture_classification: 'SYNTHETIC', exact_bytes_verified: true,
+    native_signature_verified: true, release_root_signature_verified: true,
+    slsa_evidence_digest_bound: true, package_code_verified: true,
+    package_code_sha256: packageCodeDigest, loaded_runtime_code_attested: false,
     owner_id: ownerId, owner_epoch: 7, owner_generation: 21,
     process_incarnation_id: 'native-w44-incarnation',
     source_sha: srcSha, installed_exe_sha256: exeDigest,
@@ -168,6 +175,43 @@ test('W44 absent verifier or untrusted shape cannot open network or invent Owner
   }).readContext();
   assert.equal(context.state, 'UNKNOWN');
   assert.equal(requests, 0);
+});
+test('W44 rejects unbound, malformed and legacy v1 EXE-only proofs before credentials, PG or network', async () => {
+  const cases = [
+    ['missing package verification', row => { delete row.package_code_verified; }],
+    ['unverified package', row => { row.package_code_verified = false; }],
+    ['truthy flag is not verification', row => { row.package_code_verified = 'true'; }],
+    ['missing package digest', row => { delete row.package_code_sha256; }],
+    ['malformed package digest', row => { row.package_code_sha256 = 'e'.repeat(63); }],
+    ['v1 EXE-only receipt', row => {
+      row.manifest_schema = 'metaengine.browser.installed-release-manifest.v1';
+      delete row.package_code_verified; delete row.package_code_sha256;
+    }],
+  ];
+  for (const [name, mutate] of cases) {
+    const installed = makeInstalled(); mutate(installed);
+    assert.equal(installed.fixture_classification, 'SYNTHETIC');
+    assert.equal(installed.loaded_runtime_code_attested, false);
+    let requests = 0, credentialReads = 0, postgresReads = 0;
+    const verifier = makeVerifier('http://127.0.0.1:15432', {});
+    verifier.verifyInstalledSource = async () => installed;
+    verifier.readGatewayCredential = async () => { credentialReads++; throw Error('credential read forbidden'); };
+    verifier.readPostgresBirth = async () => { postgresReads++; throw Error('PG read forbidden'); };
+    const binding = createOperatorCanonicalNativeBindingReadback({ nativeVerifier: verifier });
+    assert.equal(await binding(), null, name);
+    const context = await createOperatorNativeContextReader({ getTrustedBinding: binding,
+      fetchImpl: async () => { requests++; throw Error('network forbidden'); },
+    }).readContext();
+    assert.equal(context.state, 'UNKNOWN', name);
+    assert.equal(context.context, null, name);
+    assert.equal(context.run_id, null, name);
+    assert.equal(context.proof_identity, null, name);
+    assert.equal(context.authority_effect, false, name);
+    assert.equal(context.automatic_retry_allowed, false, name);
+    assert.equal(requests, 0, name);
+    assert.equal(credentialReads, 0, name);
+    assert.equal(postgresReads, 0, name);
+  }
 });
 test('W44 independent source proof mismatch stays UNKNOWN in source/cursor, not a fabricated digest', async () => {
   const h = await harness();

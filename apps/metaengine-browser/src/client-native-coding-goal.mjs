@@ -62,7 +62,23 @@ export function normalizeNativeCodingGoalAdmission(value,{request_id,objective}=
   return Object.freeze(structuredClone(value));
 }
 
+export function normalizeNativeCodingSeedRejection(value,input){
+  if(!exact(value,['schema','state','request_id','objective','profile_id','profile_sha256','body_sha256',
+    'admission_absent','semantic_fence_absent','automatic_retry_allowed','authority_effect'])
+    ||value.schema!=='metaengine.native-coding.seed-rejection.v1'||value.state!=='REJECTED_BEFORE_DISPATCH'
+    ||value.request_id!==input.request_id||value.objective!==input.objective
+    ||!UUID.test(value.request_id||'')||!UUID.test(value.profile_id||'')||!SHA.test(value.profile_sha256||'')
+    ||value.body_sha256!==digest(JSON.stringify({objective:input.objective,request_id:input.request_id}))
+    ||value.admission_absent!==true||value.semantic_fence_absent!==true
+    ||value.automatic_retry_allowed!==false||value.authority_effect!==false)fail('rejection_invalid');
+  return Object.freeze(structuredClone(value));
+}
 export function normalizeNativeCodingSeedResult(raw,input){
+  if(raw?.state==='REJECTED_BEFORE_DISPATCH'){
+    if(!exact(raw,['state','admission','rejection','production_qualified','automatic_retry_allowed','authority_effect'])
+      ||raw.admission!==null||['production_qualified','automatic_retry_allowed','authority_effect'].some(k=>raw[k]!==false))fail('seed_rejection_invalid');
+    return normalizeNativeCodingSeedRejection(raw.rejection,input);
+  }
   if(!exact(raw,['state','admission','production_qualified','automatic_retry_allowed','authority_effect'])
     ||!['ADMITTED','READBACK_ONLY','READBACK_REQUIRED'].includes(raw.state)
     ||['production_qualified','automatic_retry_allowed','authority_effect'].some(k=>raw[k]!==false))fail('seed_result_invalid');
@@ -111,6 +127,7 @@ export function createClientNativeCodingGoalRouter({journal,request,projectSnaps
   async function observe(entry,raw){
     const input={request_id:entry.request_id,objective:entry.goal};
     const receipt=normalizeNativeCodingSeedResult(raw,input);
+    if(receipt?.schema==='metaengine.native-coding.seed-rejection.v1')return journal.recordNativeRejection(receipt);
     if(!receipt){await journal.markReconcileRequired(entry.request_id,'native_seed_readback_required');return journal.get(entry.request_id);}
     await journal.recordNativeAdmission(receipt);
     // A receipt proves admission, not that this Browser still has an open
@@ -142,17 +159,24 @@ export function createClientNativeCodingGoalRouter({journal,request,projectSnaps
         const entry=await journal.begin({request_id,goal,kind:'NATIVE_CODING'});
         try{
           const observed=await observe(entry,await request('SEED_GOAL',{request_id,objective:entry.goal}));
+          if(observed.native_rejection)fail('rejected_before_dispatch:'+request_id);
           if(!observed.receipt)fail('seed_readback_required');
           return observed.receipt;
         }catch(error){
+          if(journal.get(request_id)?.native_rejection)throw error;
           await journal.markReconcileRequired(request_id,error).catch(()=>{});
           try{await observe(entry,await request('READ_SEED',{request_id,objective:entry.goal}));}catch{}
+          if(journal.get(request_id)?.native_rejection)fail('rejected_before_dispatch:'+request_id);
           fail('submit_requires_reconciliation:'+request_id);
         }
       }finally{state.inFlight=false;}
     },
     async refresh(entry){
       if(entry?.kind!=='NATIVE_CODING')fail('kind_invalid');
+      const durable=journal.get(entry.request_id);
+      // A terminal, validated pre-dispatch rejection has no running project to
+      // observe. It remains readable after Host/profile replacement or offline.
+      if(durable?.kind==='NATIVE_CODING'&&durable.state==='FAILED'&&durable.native_rejection)return durable;
       try{return await observe(entry,await request('READ_SEED',{request_id:entry.request_id,objective:entry.goal}));}
       catch(error){await journal.recordProjectError(entry.request_id,'Native goal observation unavailable').catch(()=>{});throw error;}
     },

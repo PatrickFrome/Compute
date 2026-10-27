@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 import { assertPostgresIdentity, configFromEnvironment, launchClientStateRuntime, normalizeLauncherConfig, normalizeRuntimeHealthFailure, classifyEdgeCapabilityReadiness, runtimeEnvironment } from './launcher.mjs';
 import { captureStartupSource, safeRuntimePolicy, sourceClosure, startupFilesDigest } from './startup-source-manifest.mjs';
-import { ATTACHED_ONBOARDING_ENTRY, BUNDLE_ENTRY_POINTS, FIRST_RUN_INITDB_ENTRY, REMOTE_SUPPORT_ENTRY, RUNTIME_HOST_ENTRY } from './package-runtime-resources.mjs';
+import { ATTACHED_ONBOARDING_ENTRY, BUNDLE_ENTRY_POINTS, FIRST_RUN_INITDB_ENTRY, FRESH_PROVIDER_ENTRY, REMOTE_SUPPORT_ENTRY, RUNTIME_HOST_ENTRY } from './package-runtime-resources.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = path.join(here, 'launcher-fixture.mjs');
@@ -307,14 +307,14 @@ test('a startup source pin mismatch refuses every child before launch', async t 
   assert(alive(process.pid));
 });
 
-test('packaged host launch pins the complete current onboarding and computer-control source closure before children', async t => {
+test('packaged host launch pins the complete fresh-provider, onboarding and computer-control source closure before children', async t => {
   const { input, hooks, events } = await setup(t);
   const sourceRoot = await realpath(path.resolve(here, '../..'));
   const stage = await realpath(await mkdtemp(path.join(os.tmpdir(), 'compute-launcher-source-pin-')));
   t.after(() => rm(stage, { recursive: true, force: true }));
   // Use the packaging entry contract and actual source bytes, rather than a
   // miniature host stub that cannot expose a missing first-run dependency.
-  const entries = [...BUNDLE_ENTRY_POINTS, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY, REMOTE_SUPPORT_ENTRY, ATTACHED_ONBOARDING_ENTRY];
+  const entries = [...BUNDLE_ENTRY_POINTS, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY, REMOTE_SUPPORT_ENTRY, ATTACHED_ONBOARDING_ENTRY, FRESH_PROVIDER_ENTRY];
   const packagedClosure = await sourceClosure(entries.map(name => path.join(sourceRoot, name)), sourceRoot);
   for (const source of packagedClosure.files) {
     const destination = path.join(stage, path.relative(sourceRoot, source));
@@ -354,6 +354,14 @@ test('packaged host launch pins the complete current onboarding and computer-con
     const id = 'repository/' + path.relative(stage, source).split(path.sep).join('/');
     assert.ok(expected.files.some(file => file.id === id), id);
   }
+  const freshProviderClosure = await sourceClosure([path.join(stage, FRESH_PROVIDER_ENTRY)], stage);
+  for (const source of freshProviderClosure.files) {
+    const id = 'repository/' + path.relative(stage, source).split(path.sep).join('/');
+    assert.ok(expected.files.some(file => file.id === id), id);
+  }
+  const inspectPostgres = hooks.inspectPostgres;
+  let postgresInspections = 0;
+  hooks.inspectPostgres = async config => { postgresInspections += 1; return inspectPostgres(config); };
   input.expectedStartupFilesSha256 = startupFilesDigest(expected.files);
   let runtime;
   try {
@@ -362,17 +370,25 @@ test('packaged host launch pins the complete current onboarding and computer-con
     assert.equal(runtime.startupManifest.source_manifest_sha256, expected.manifest_sha256);
     assert.equal(runtime.startupManifest.source.policy.dependency_policy, 'FIXTURE_COMMANDS');
     assert.equal(runtime.children.length, 2);
+    assert.ok(postgresInspections > 0);
     assert.ok(runtime.children.every(child => alive(child.pid)));
     await runtime.stop();
     assert.ok(runtime.children.every(child => !alive(child.pid)));
-    // Tampering with an unused first-run entry still invalidates the reviewed
-    // pin before any runtime child is created; no initdb action is invoked.
-    const firstRunFile = path.join(stage, FIRST_RUN_INITDB_ENTRY);
-    await writeFile(firstRunFile, (await readFile(firstRunFile, 'utf8')) + '\n// changed after review\n');
-    events.length = 0;
-    await assert.rejects(stagedLauncher.launchClientStateRuntime(input, hooks), /startup_files_pin_mismatch/);
-    assert.equal(events.some(event => event.event === 'spawned'), false);
-    assert.ok(alive(process.pid));
+    // First-run code and its reviewed SQL/JSON closure remain measured even
+    // during attached startup. Drift must fail before inspection or children.
+    for (const entry of [FIRST_RUN_INITDB_ENTRY, FRESH_PROVIDER_ENTRY, 'infra/client-state-runtime/fresh-schema-candidate-plan.json']) {
+      const file = path.join(stage, entry);
+      const bytes = await readFile(file);
+      try {
+        await writeFile(file, Buffer.concat([bytes, Buffer.from('\n ')]));
+        events.length = 0;
+        postgresInspections = 0;
+        await assert.rejects(stagedLauncher.launchClientStateRuntime(input, hooks), /startup_files_pin_mismatch/);
+        assert.equal(postgresInspections, 0);
+        assert.equal(events.some(event => event.event === 'spawned'), false);
+        assert.ok(alive(process.pid));
+      } finally { await writeFile(file, bytes); }
+    }
   } finally {
     await runtime?.stop();
   }
@@ -541,4 +557,25 @@ test('a successful complete health probe clears a transient failure before reque
   assert.equal(events.filter(event => event.event === 'health_recovered').length, 1);
   await runtime.stop();
   assert.deepEqual(await runtime.finished, { reason: 'requested', children_stopped: true });
+});
+
+test('inspection credentials cannot attest a different database on the same PostgreSQL cluster', async () => {
+  const good={mode:'local',postgresMode:'attached',databaseUrl:'postgresql://api:fixture@127.0.0.1:15434/app',
+    pgBinDir:here,pgDataDir:here,denoPath:process.execPath};
+  assert.throws(()=>normalizeLauncherConfig({...good,inspectDatabaseUrl:'postgresql://owner:fixture@127.0.0.1:15434/other'}),/inspection_database_identity_mismatch/);
+  const matching=normalizeLauncherConfig({...good,inspectDatabaseUrl:'postgres://owner:other-fixture@127.0.0.1:15434/app'});
+  assert.equal(matching.inspectDatabase.username,'owner');
+  assert.equal(matching.database.username,'api');
+  assert.equal(decodeURIComponent(matching.inspectDatabase.pathname.slice(1)),'app');
+  const {default:postgres}=await import('postgres');
+  const driver=postgres(matching.databaseUrl,{max:1});
+  assert.equal(driver.options.database,decodeURIComponent(matching.inspectDatabase.pathname.slice(1)));
+  await driver.end();
+  for(const suffix of ['', '/', '/%00', '/bad%0Aname', '/%zz', '/%61pp', '/a%70p', '/name%20with%20spaces']) {
+    assert.throws(()=>normalizeLauncherConfig({...good,databaseUrl:'postgresql://api:fixture@127.0.0.1:15434'+suffix}),/local_database_url_invalid/);
+    assert.throws(()=>normalizeLauncherConfig({...good,inspectDatabaseUrl:'postgresql://owner:fixture@127.0.0.1:15434'+suffix}),/inspection_database_url_invalid/);
+  }
+  assert.throws(()=>normalizeLauncherConfig({...good,
+    databaseUrl:'postgresql://api:fixture@127.0.0.1:15434/%61pp',
+    inspectDatabaseUrl:'postgresql://owner:fixture@127.0.0.1:15434/%61pp'}),/local_database_url_invalid/);
 });

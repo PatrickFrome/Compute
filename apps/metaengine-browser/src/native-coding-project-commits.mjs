@@ -31,10 +31,27 @@ function classify(value,wanted){
       ||c.canonical_receipt!==json(r)||c.commit_receipt_sha256!==sha(r))return 'READBACK_REQUIRED';
     return value.state;
   }
-  // A protected physical NOT_ATTEMPTED readback is the only permission for
-  // the first dispatch. Any existing intent or uncertain result stays read-only,
-  // including after a Browser restart that lost its in-memory entry.
   const git=value.git_readback;
+  if(value.state==='GIT_COMMITTED_SQL_NOT_ATTEMPTED'){
+    const proof=value.reconciliation;
+    if(value.checkpoint_id!==wanted.checkpoint_id||value.successor_admitted!==false
+      ||git?.schema!=='metaengine.native-coding.git-commit-receipt.v1'||git.state!=='COMMITTED'||!sameQuery(git,wanted)
+      ||git.checkpoint_id!==wanted.checkpoint_id||!safe(git)||git.successor_admitted!==false
+      ||![git.previous_head,git.head,git.tree].every(head=>HEAD.test(head||''))||git.head===git.previous_head
+      ||!/^refs\/heads\/[A-Za-z0-9][A-Za-z0-9._/-]{0,160}$/.test(git.branch_ref||'')
+      ||!['root_identity_sha256','reviewed_git_artifact_sha256','intent_sha256'].every(field=>HASH.test(git[field]||''))
+      ||!['working_tree_preserved','index_clean','ref_update_cas_verified','commit_object_readback_verified'].every(field=>git[field]===true)
+      ||proof?.schema!=='metaengine.native-coding.checkpoint-reconciliation.v1'
+      ||proof.state!=='FIRST_SQL_FINALIZATION_ELIGIBLE'||proof.operation!=='RECONCILE_FINISH_CHECKPOINT'
+      ||FIELDS.some(field=>proof[field]!==wanted[field])||!safe(proof)
+      ||!['git_receipt_sha256','operator_sha256','sql_journal_identity_sha256'].every(field=>HASH.test(proof[field]||''))
+      ||proof.git_receipt_sha256!==sha(git)||proof.sql_intent_state!=='ABSENT'||proof.sql_commit_state!=='ABSENT'
+      ||!['physical_git_readback_verified','current_authority_verified','observation_only'].every(field=>proof[field]===true)
+      ||!['git_effect_allowed','sql_retry_allowed','successor_admitted'].every(field=>proof[field]===false))return 'READBACK_REQUIRED';
+    return 'GIT_COMMITTED_SQL_NOT_ATTEMPTED';
+  }
+  // NOT_ATTEMPTED permits only the ordinary first Git dispatch. A committed Git
+  // result without the separate first-SQL observation above remains read-only.
   if(value.state==='PENDING_COMMIT'&&value.checkpoint_id===wanted.checkpoint_id&&value.successor_admitted===false
     &&git?.schema==='metaengine.native-coding.git-commit-receipt.v1'&&sameQuery(git,wanted)
     &&git.checkpoint_id===wanted.checkpoint_id&&git.state==='NOT_ATTEMPTED'&&safe(git)&&git.successor_admitted===false)return 'NOT_ATTEMPTED';
@@ -57,12 +74,14 @@ export function createNativeCodingProjectCommitObserver({ownPostgres,maxEntries=
     automatic_retry_allowed:false,authority_effect:false});
   async function observeOne(wanted){
     if(closed)return;const id=wanted.checkpoint_sha256;let entry=entries.get(id);
-    if(entry&&FIELDS.some(field=>entry.selector[field]!==wanted[field])){entry.state='READBACK_REQUIRED';entry.write_attempted=true;return;}
+    if(entry&&FIELDS.some(field=>entry.selector[field]!==wanted[field])){
+      entry.state='READBACK_REQUIRED';entry.write_attempted=true;entry.reconciliation_attempted=true;return;
+    }
     if(entry&&['SUCCESSOR_ADMITTED','COMMITTED_NO_SUCCESSOR'].includes(entry.state))return;
     if(!entry){
       if(entries.size>=maxEntries)for(const [old,row] of entries)if(COMMITTED.has(row.state)){entries.delete(old);break;}
       if(entries.size>=maxEntries){capacityFenced=true;return;}
-      capacityFenced=false;entry={selector:wanted,state:'PENDING',write_attempted:false};entries.set(id,entry);
+      capacityFenced=false;entry={selector:wanted,state:'PENDING',write_attempted:false,reconciliation_attempted:false};entries.set(id,entry);
     }
     const query={project_id:wanted.project_id,checkpoint_sha256:wanted.checkpoint_sha256};
     let observed;
@@ -70,11 +89,22 @@ export function createNativeCodingProjectCommitObserver({ownPostgres,maxEntries=
     catch{if(!closed)entry.state='READBACK_REQUIRED';return;}
     if(closed)return;
     if(COMMITTED.has(observed)){entry.state=observed;return;}
-    if(observed!=='NOT_ATTEMPTED'||entry.write_attempted){entry.state='READBACK_REQUIRED';return;}
-    // A failed read before the first write has no effect. A subsequent exact
-    // NOT_ATTEMPTED physical read may establish that first dispatch is safe.
-    entry.write_attempted=true;
-    try{const value=await ownPostgres.finishCheckpoint(query);if(!closed){
+    const reconcile=observed==='GIT_COMMITTED_SQL_NOT_ATTEMPTED';
+    if(reconcile){
+      if(entry.reconciliation_attempted||typeof ownPostgres.reconcileFinishCheckpoint!=='function'){
+        entry.state='READBACK_REQUIRED';return;
+      }
+      // This observation authorizes a distinct first SQL finalization after Git,
+      // including a lost ordinary FINISH ACK. Host revalidates every pin and
+      // absent intent at dispatch; this observer never resubmits reconciliation.
+      entry.reconciliation_attempted=true;
+    }else{
+      if(observed!=='NOT_ATTEMPTED'||entry.write_attempted||entry.reconciliation_attempted){entry.state='READBACK_REQUIRED';return;}
+      // A failed read before the first write has no effect. A subsequent exact
+      // NOT_ATTEMPTED physical read may establish that first dispatch is safe.
+      entry.write_attempted=true;
+    }
+    try{const value=await (reconcile?ownPostgres.reconcileFinishCheckpoint(query):ownPostgres.finishCheckpoint(query));if(!closed){
       const result=classify(value,wanted);entry.state=COMMITTED.has(result)?result:'READBACK_REQUIRED';
     }}catch{if(!closed)entry.state='READBACK_REQUIRED';}
   }
@@ -88,7 +118,7 @@ export function createNativeCodingProjectCommitObserver({ownPostgres,maxEntries=
         running=Promise.resolve().then(()=>observeOne(row)).finally(()=>{running=null;});}
       return snapshot();
     },snapshot,
-    close(){closed=true;for(const row of entries.values())if(row.write_attempted&&!COMMITTED.has(row.state))row.state='READBACK_REQUIRED';return snapshot();},
+    close(){closed=true;for(const row of entries.values())if((row.write_attempted||row.reconciliation_attempted)&&!COMMITTED.has(row.state))row.state='READBACK_REQUIRED';return snapshot();},
     drain(){return running||Promise.resolve();},
   });
 }

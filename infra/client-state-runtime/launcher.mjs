@@ -80,6 +80,16 @@ function port(value, label) {
   return parsed;
 }
 
+function databaseName(url, code) {
+  let name;
+  try { name = decodeURIComponent(url.pathname.slice(1)); } catch { throw runtimeError(code); }
+  // psql's PGDATABASE is decoded below, whereas pinned postgres.js takes
+  // the raw URL pathname. Refuse ambiguous encodings rather than attest a
+  // different database for those two consumers or silently rename it.
+  if (!name || name !== url.pathname.slice(1) || /[\x00-\x1f\x7f]/.test(name)) throw runtimeError(code);
+  return name;
+}
+
 export function normalizeLauncherConfig(input) {
   if (input.mode !== 'local') throw runtimeError('explicit_local_mode_required');
   if (!['owned', 'attached'].includes(input.postgresMode)) throw runtimeError('explicit_postgres_mode_required');
@@ -94,11 +104,17 @@ export function normalizeLauncherConfig(input) {
   if (database.search || database.hash || !database.username || database.pathname === '/') {
     throw runtimeError('local_database_url_invalid');
   }
+  const selectedDatabase = databaseName(database, 'local_database_url_invalid');
   const databasePort = port(database.port, 'database_port');
   let inspectDatabase;
   try { inspectDatabase = new URL(input.inspectDatabaseUrl || database.href); } catch { throw runtimeError('inspection_database_url_invalid'); }
   if (!['postgres:', 'postgresql:'].includes(inspectDatabase.protocol) || inspectDatabase.hostname !== '127.0.0.1' || Number(inspectDatabase.port) !== databasePort || !inspectDatabase.username || inspectDatabase.pathname === '/' || inspectDatabase.search || inspectDatabase.hash) {
     throw runtimeError('inspection_database_url_invalid');
+  }
+  // A privileged inspection of another database on the same cluster cannot
+  // attest the catalog used by the restricted API login. Credentials may differ.
+  if (databaseName(inspectDatabase, 'inspection_database_url_invalid') !== selectedDatabase) {
+    throw runtimeError('inspection_database_identity_mismatch');
   }
   const apiPort = port(input.apiPort ?? 15432, 'api_port');
   const edgePort = port(input.edgePort ?? 15433, 'edge_port');
@@ -500,7 +516,7 @@ export async function launchClientStateRuntime(input, hooks = {}) {
     const captureOptions = {
       repositoryRoot: projectRoot, entries: [fileURLToPath(import.meta.url), fixtureEntry(hooks.apiCommand, config.apiEntry), fixtureEntry(hooks.edgeCommand, config.edgeEntry),
         path.join(here, 'local-runtime-migrations.mjs'),
-        ...(config.includeRuntimeHost ? [path.join(here, 'runtime-host.mjs'), path.join(here, 'fresh-pg17-initdb.mjs'), path.join(here, 'attached-postgres-onboarding.mjs'),
+        ...(config.includeRuntimeHost ? [path.join(here, 'runtime-host.mjs'), path.join(here, 'fresh-pg17-initdb.mjs'), path.join(here, 'attached-postgres-onboarding.mjs'), path.join(here, 'fresh-client-provider-cli.mjs'),
           path.join(projectRoot, 'apps/metaengine-browser/src/remote-support-mcp.mjs')] : [])],
       nodePath: config.nodePath, denoPath: config.denoPath, denoLockPath: config.denoLockPath,
       pgBinDir: hooks.inspectPostgres ? undefined : config.pgBinDir, env, fixture, policy: safeRuntimePolicy(config, { fixture }),

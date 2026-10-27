@@ -244,9 +244,28 @@ module.exports = async function verifyPackagedEmergencyTrustRoot(buildResult) {
   const asarOnlyIndex = fuses.FuseV1Options.OnlyLoadAppFromAsar;
   if (wire[integrityIndex] !== 49) throw new Error('packaged_asar_integrity_fuse_not_enabled');
   if (wire[asarOnlyIndex] !== 49) throw new Error('packaged_asar_only_fuse_not_enabled');
+  // Ordinary packaging must produce the exact code handoff, not an optional
+  // diagnostic facade. Signature and installed placement remain fail-closed.
+  const { writePackagedCodeInventoryW77 } = await import('./release-proof-producer-w77.mjs');
+  const packageCode = await writePackagedCodeInventoryW77({ appOutDir, outDir,
+    sourceSha: expectedHead, version: packageVersion, exeName: path.basename(executable) });
   const runnerTemp = String(process.env.RUNNER_TEMP || '').trim();
-  if (runnerTemp) fs.writeFileSync(path.join(runnerTemp, 'packaged-client-state-runtime-proof.json'),
-    `${JSON.stringify(offlineRuntime, null, 2)}\n`, 'utf8');
+  if (runnerTemp) {
+    // Keep the existing candidate artifact's runner.temp root. Uploading a
+    // workspace path alongside these siblings changes upload-artifact's LCA
+    // and breaks every downstream top-level installer/receipt lookup.
+    const inventoryBytes = fs.readFileSync(packageCode.path);
+    if (crypto.createHash('sha256').update(inventoryBytes).digest('hex') !== packageCode.package_code_sha256) {
+      throw new Error('packaged_code_inventory_stage_source_changed');
+    }
+    const inventoryTarget = path.join(runnerTemp, path.basename(packageCode.path));
+    fs.writeFileSync(inventoryTarget, inventoryBytes, { flag: 'wx', mode: 0o600 });
+    if (crypto.createHash('sha256').update(fs.readFileSync(inventoryTarget)).digest('hex') !== packageCode.package_code_sha256) {
+      throw new Error('packaged_code_inventory_stage_readback_mismatch');
+    }
+    fs.writeFileSync(path.join(runnerTemp, 'packaged-client-state-runtime-proof.json'),
+      `${JSON.stringify(offlineRuntime, null, 2)}\n`, 'utf8');
+  }
 
   console.log(JSON.stringify({
     schema: 'metaengine.browser.packaged-emergency-trust-root-proof.v1',
@@ -256,6 +275,10 @@ module.exports = async function verifyPackagedEmergencyTrustRoot(buildResult) {
     unpacked_app_fallback_present: false,
     embedded_asar_integrity_validation: true,
     only_load_app_from_asar: true,
+    package_code_sha256: packageCode.package_code_sha256,
+    package_code_file_count: packageCode.file_count,
+    package_code_manifest_path: packageCode.path,
+    package_code_release_signature_available: false,
     private_signing_key_packaged: false,
     guardian_bootstrap_protected_binding_present: true,
     guardian_bootstrap_name: bootstrap.name,

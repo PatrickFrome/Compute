@@ -5,7 +5,6 @@ export const SINGLE_INSTANCE_GUARD_VERSION = '2.2.0';
 export const SINGLE_INSTANCE_LOCK_SCHEMA = 'metaengine.browser.single-instance-lock.v2';
 export const SECONDARY_INSTANCE_RENOTIFY_DELAY_MS = 4_000;
 export const INSTALLER_SHUTDOWN_ARG = '--metaengine-installer-shutdown';
-export const INSTALLER_PRIMARY_EXIT_FALLBACK_MS = 5_000;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const primaryShutdownBarriers = new WeakMap();
@@ -35,7 +34,7 @@ export function isInstallerShutdownArgv(argv) {
   return Array.isArray(argv) && argv.some((arg) => String(arg) === INSTALLER_SHUTDOWN_ARG);
 }
 
-async function stopPrimaryForInstaller(app, { schedule = setTimeout } = {}) {
+async function stopPrimaryForInstaller(app) {
   if (installerShutdownAttempts.has(app)) return;
   installerShutdownAttempts.add(app);
   globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__ = true;
@@ -62,20 +61,18 @@ async function stopPrimaryForInstaller(app, { schedule = setTimeout } = {}) {
     installerShutdownAttempts.delete(app);
     return;
   }
-  // main.mjs already treats Electron's before-quit event as the canonical
-  // planned-shutdown fence: it disables close-to-background and runtime retry.
-  // Calling quit only after confirmed owned cleanup and HostResilience.stop()
-  // prevents an upgrade from leaving a detached database/API stack behind.
-  const fallback = schedule(() => app.exit(0), INSTALLER_PRIMARY_EXIT_FALLBACK_MS);
-  if (fallback && typeof fallback.unref === 'function') fallback.unref();
+  // before-quit drains native workers/journals while their Host is still alive;
+  // will-quit then proves owned Host cleanup. Either barrier can prevent quit.
+  // Never bypass them with app.exit(), even after a timeout: the installer must
+  // retain the old image when physical cleanup is unconfirmed.
   app.quit();
 }
 
-function installPrimaryInstallerShutdownHandler(app, schedule) {
+function installPrimaryInstallerShutdownHandler(app) {
   if (!app || typeof app.on !== 'function') return false;
   app.on('second-instance', (_event, argv) => {
     if (!isInstallerShutdownArgv(argv)) return;
-    void stopPrimaryForInstaller(app, { schedule });
+    void stopPrimaryForInstaller(app);
   });
   return true;
 }
@@ -184,7 +181,7 @@ export function acquirePrimaryInstance(app, {
 
   const installerShutdownControl = isInstallerShutdownArgv(process.argv);
   const primary = requestLock(app, additionalData);
-  if (primary === true && !installerShutdownControl) installPrimaryInstallerShutdownHandler(app, schedule);
+  if (primary === true && !installerShutdownControl) installPrimaryInstallerShutdownHandler(app);
   const secondaryRenotifyScheduled = primary !== true
     ? scheduleSecondaryRenotify(app, additionalData, {
       delay_ms: secondary_retry_delay_ms,

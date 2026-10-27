@@ -53,7 +53,7 @@ test('W78 canonical generated root does not permit a caller path alias', async (
 
 test('W78 version, tarball origin, integrity and actual installed version cannot drift', async () => {
   await fixture(async ({ root, bin, app, lock, save }) => {
-    app.devDependencies.electron = '^44.0.0'; await save();
+    app.devDependencies.electron = '^' + PIN.version; await save();
     await assert.rejects(checkR97ElectronInputs(root, {}), /w78_manifest_version_drift/);
     app.devDependencies.electron = PIN.version;
     lock.packages['node_modules/electron'].resolved = 'https://example.invalid/electron.tgz'; await save();

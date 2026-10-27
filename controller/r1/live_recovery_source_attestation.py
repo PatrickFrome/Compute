@@ -23,10 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from controller.r1.recovery_encryption_envelope import (
-    ENVELOPE_CLASSIFICATION,
-    ENVELOPE_SCHEMA,
     EnvelopeError,
-    _canonical_bytes as envelope_canonical_bytes,
     _verify_self_hash as envelope_verify_self_hash,
     validate_envelope_receipt,
 )

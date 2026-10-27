@@ -2,18 +2,88 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {execFileSync,spawnSync} from 'node:child_process';
 import fs from 'node:fs';
+import {createHash} from 'node:crypto';
+import os from 'node:os';
+import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 const root=fileURLToPath(new URL('../../',import.meta.url));
 const git=(...args)=>execFileSync('git',['-C',root,...args],{encoding:'utf8'}).trim();
 const read=p=>fs.readFileSync(new URL(p,new URL('../../',import.meta.url)),'utf8');
 const manifest=JSON.parse(read('coordination/operator-control/client-critical-closure.manifest.json'));
 
+function assertCommittedAuditPrefix(repository,parent,current,file) {
+ // Compare entire canonical Git blobs, including trailing whitespace/newlines.
+ // Checkout EOL conversion is handled by Git, never by normalizing proof bytes.
+ const bytes=revision=>execFileSync('git',['-C',repository,'show',revision+':'+file]);
+ const previous=bytes(parent),next=bytes(current);
+ assert.ok(next.length>=previous.length&&next.subarray(0,previous.length).equals(previous),
+  'all dated predecessor audit records remain byte-exact in committed history');
+}
+
+test('real autocrlf checkout preserves canonical append-only history and rejects committed prior-record mutations',()=>{
+ const fixture=fs.mkdtempSync(path.join(os.tmpdir(),'metaengine-audit-history-'));
+ const run=(...args)=>execFileSync('git',['-C',fixture,...args],{stdio:['ignore','pipe','pipe']});
+ const text=(...args)=>run(...args).toString('utf8').trim();
+ const auditPath='audit.md';
+ const evidencePath='evidence/audits/metaengine-20261026-package-source-successor/live-artifact-observation.json';
+ const previous='# Dated record\n\nRetained record.  \n\n';
+ const suffix='## Prepared successor\n\nNew record.\n';
+ const commit=message=>{run('add','--all');run('-c','user.name=Source contract fixture',
+  '-c','user.email=source-contract-fixture@invalid','commit','--quiet','--no-gpg-sign','-m',message);return text('rev-parse','HEAD');};
+ try {
+  run('init','--quiet');
+  run('config','core.autocrlf','true');
+  fs.mkdirSync(path.join(fixture,'empty-hooks'));
+  run('config','core.hooksPath',path.join(fixture,'empty-hooks'));
+  fs.writeFileSync(path.join(fixture,'.gitattributes'),read('.gitattributes'));
+  fs.writeFileSync(path.join(fixture,auditPath),previous);
+  fs.mkdirSync(path.dirname(path.join(fixture,evidencePath)),{recursive:true});
+  const observation=fs.readFileSync(path.join(root,evidencePath));
+  fs.writeFileSync(path.join(fixture,evidencePath),observation);
+  const parent=commit('retain exact dated record');
+  fs.writeFileSync(path.join(fixture,auditPath),previous+suffix);
+  const successor=commit('append successor record');
+  fs.unlinkSync(path.join(fixture,auditPath));
+  fs.unlinkSync(path.join(fixture,evidencePath));
+  run('checkout','HEAD','--',auditPath,evidencePath);
+  const checkedOut=fs.readFileSync(path.join(fixture,auditPath));
+  const canonical=run('show','HEAD:'+auditPath);
+  assert.ok(checkedOut.includes(Buffer.from('\r\n')),'positive control: Git actually materialized CRLF');
+  assert.ok(!canonical.includes(Buffer.from('\r\n')),'Git blob retains canonical LF');
+  assert.notDeepEqual(checkedOut,canonical,'the test must exercise real checkout conversion');
+  assertCommittedAuditPrefix(fixture,parent,'HEAD',auditPath);
+  assert.equal(text('hash-object',auditPath),text('rev-parse','HEAD:'+auditPath),'Git-filtered worktree seal stays exact');
+  const observedCheckout=fs.readFileSync(path.join(fixture,evidencePath));
+  assert.ok(!observedCheckout.includes(Buffer.from('\r\n')),'only byte-hashed observation is explicitly LF-pinned');
+  assert.deepEqual(observedCheckout,observation,'raw evidence hash must survive checkout without proof-byte normalization');
+
+  fs.writeFileSync(path.join(fixture,auditPath),previous+suffix.replace('New record.','Uncommitted mutation.'));
+  assertCommittedAuditPrefix(fixture,parent,'HEAD',auditPath);
+  assert.throws(()=>assert.equal(text('hash-object',auditPath),text('rev-parse','HEAD:'+auditPath)),
+   {code:'ERR_ASSERTION'},'the separate worktree seal still rejects uncommitted mutation');
+  run('checkout',successor,'--',auditPath);
+
+  for(const mutated of [
+   previous.replace('Retained record.','Changed record.')+suffix,
+   previous.replace('record.  \n','record.\n')+suffix,
+   previous.slice(0,-1)+suffix,
+  ]) {
+   fs.writeFileSync(path.join(fixture,auditPath),mutated);
+   commit('negative prior-record mutation');
+   assert.throws(()=>assertCommittedAuditPrefix(fixture,parent,'HEAD',auditPath),
+    {code:'ERR_ASSERTION'},'committed record content, trailing whitespace and final newline must remain exact');
+  }
+ } finally {
+  fs.rmSync(fixture,{recursive:true,force:true});
+ }
+});
+
 function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion) {
  const fixed={
   classification:'SOURCE_ONLY_NO_CURRENT_PACKAGE',
-  branch:'work/fix-native-rpc-onboarding-contract-20261025',
+  branch:'work/preinstall-closure-20261027',
   source_parent:'ea405d926568508eac53ebb408e941c94faeadcf',
-  package_version:'0.7.0-dev.1107139874594.1',
+  package_version:'0.7.0-dev.1784381341133.1',
   historical_package_version:'0.7.0-dev.202610152359.1',
   package_build_authorized:false,
   package_version_reuse_authorized:false,
@@ -337,15 +407,70 @@ function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion)
     "production_ready": false,
     "promotion_authorized": false,
     "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "f952ea2cc9ac355459f8afc95d1e30f0e72ff720",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.1107139874593.1",
+    "distinct_version": "0.7.0-dev.1107139874594.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "88eb062b09bd456d430bd0da37cb21baaddcee6d",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.1107139874594.1",
+    "distinct_version": "0.7.0-dev.1359740117434.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "4b1b0854f918e42494e073f36d96307422617643",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.1359740117434.1",
+    "distinct_version": "0.7.0-dev.1485366478478.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "c784151343015a1d93f84ac8a8eae8a4b453a0bb",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.1485366478478.1",
+    "distinct_version": "0.7.0-dev.1508254192075.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "e22178b058065a96d76a76f2c7d29db0a0c87196",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.1508254192075.1",
+    "distinct_version": "0.7.0-dev.1643171572592.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
   }
 ]);
  const successor=manifest.current_package_transition;
  assert.deepEqual(successor,{
   "schema": "metaengine.client.package-version-successor.v1",
-  "source_parent": "f952ea2cc9ac355459f8afc95d1e30f0e72ff720",
+  "source_parent": "61e27840c13dda1d3757da603ffb03f20804dd14",
   "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
-  "prior_version": "0.7.0-dev.1107139874593.1",
-  "distinct_version": "0.7.0-dev.1107139874594.1",
+  "prior_version": "0.7.0-dev.1643171572592.1",
+  "distinct_version": "0.7.0-dev.1784381341133.1",
   "preceding_version_burned": true,
   "production_ready": false,
   "promotion_authorized": false,
@@ -381,12 +506,32 @@ function assertFreshVersion(version, burned) {
  for(const previous of burned) assert.ok(current>parse(previous),'candidate must exceed every consumed reservation');
 }
 
-test('current package reservation is monotonic across known consumed candidates',()=>{
+test('prepared source package identity is monotonic across known consumed candidates, not a reservation',()=>{
  const current=manifest.current_source_candidate.package_version;
  assertFreshVersion(current,manifest.burned_versions);
- for(const value of ['0.7.0-dev.1.1','0.7.0-dev.864629885843.1','0.7.0-dev.1107139874567.1',current]) {
+ for(const value of ['0.7.0-dev.1.1','0.7.0-dev.864629885843.1','0.7.0-dev.1107139874567.1',
+  '0.7.0-dev.1107139874594.1','0.7.0-dev.1269944506140.1',current]) {
   assert.throws(()=>assertFreshVersion(value,[...manifest.burned_versions,current]),{code:'ERR_ASSERTION'});
  }
+});
+
+test('prepared successor burns consumed predecessor and sibling without fabricated sibling ancestry',()=>{
+ const predecessor='0.7.0-dev.1359740117434.1';
+ const sibling='0.7.0-dev.1269944506140.1';
+ const candidate=manifest.current_source_candidate.package_version;
+ assert.ok(manifest.burned_versions.includes(predecessor));
+ assert.ok(manifest.burned_versions.includes(sibling));
+ assert.equal(new Set(manifest.burned_versions).size,manifest.burned_versions.length);
+ assert.equal(manifest.burned_versions.includes(candidate),false,'prepared identity is not a consumed reservation');
+ assertFreshVersion(candidate,[predecessor,sibling]);
+ for(const version of [predecessor,sibling,'0.7.0-dev.1225141128021.1']) {
+  assert.throws(()=>assertFreshVersion(version,[predecessor,sibling]),{code:'ERR_ASSERTION'},'reuse or sibling downgrade must fail');
+ }
+ const transitions=[...manifest.previous_package_transitions,manifest.current_package_transition];
+ assert.ok(transitions.every(item=>item.prior_version!==sibling&&item.distinct_version!==sibling),
+  'the consumed sibling is not a fictitious source-line transition');
+ assert.equal(transitions.find(item=>item.distinct_version==='0.7.0-dev.1485366478478.1').source_parent,'4b1b0854f918e42494e073f36d96307422617643');
+ assert.equal(transitions.find(item=>item.distinct_version==='0.7.0-dev.1485366478478.1').prior_version,predecessor);
 });
 
 test('critical closure retains all reviewed source parents and the immutable W73 base',()=>{
@@ -585,4 +730,192 @@ test('QA successor preserves exact immutable W43-W73 manifest bytes',()=>{
   assert.equal(git('rev-parse','HEAD:'+file),blob,'immutable historical commit bytes: '+wave);
   assert.equal(git('hash-object',file),blob,'immutable historical worktree bytes: '+wave);
  }
+});
+
+
+test('new QA source seal retains time-bound planning evidence and pending exact-source qualification',()=>{
+ const parent='88eb062b09bd456d430bd0da37cb21baaddcee6d';
+ const auditPath='coordination/operator-control/AUDIT_CLOSURE_EXECUTION_REGISTER_20261018.md';
+ const audit=read(auditPath);
+ assertCommittedAuditPrefix(root,parent,'HEAD',auditPath);
+ const parse=source=>{
+  const section=source.replace(/\r\n/g,'\n').split('## QA source seal — 0.7.0-dev.1359740117434.1\n')[1]?.split('\n## ')[0];
+  assert.ok(section,'new prepared QA source record required');
+  const blocks=[...section.matchAll(/```json\n([\s\S]*?)\n```/g)].map(match=>JSON.parse(match[1]));
+  assert.equal(blocks.length,1,'one current QA source record');
+  return blocks[0];
+ };
+ const seal=parse(audit);
+ assert.deepEqual(parse(audit.replace(/\r?\n/g,'\r\n')),seal,'new QA boundary also survives Windows CRLF');
+ assert.deepEqual(seal,{
+  "schema": "metaengine.client.qa-source-seal.v1",
+  "functional_source_parent": "88eb062b09bd456d430bd0da37cb21baaddcee6d",
+  "package_version": "0.7.0-dev.1359740117434.1",
+  "classification": "QA_SOURCE_PREPARED_NOT_INSTALLED_QUALIFIED",
+  "global_version_absence": "TIME_BOUND_API_OBSERVATION_ONLY",
+  "reservation_state": "PENDING_IMMUTABLE_PRODUCER_PREFLIGHT",
+  "metadata_observation_completed_at": "2026-10-26T12:14:11.276Z",
+  "metadata_observation_source_head": "88eb062b09bd456d430bd0da37cb21baaddcee6d",
+  "minimum_package_version": "0.7.0-dev.1269944506140.1",
+  "minimum_package_version_exclusive": true,
+  "metadata_observation_path": "evidence/audits/metaengine-20261026-package-source-successor/live-artifact-observation.json",
+  "metadata_observation_sha256": "7e5c8c1a1c462fa483690ab7e334e7717dcd9270d52036efc0e8afb74df7a12a",
+  "observation_does_not_reserve_version": true,
+  "immutable_producer_preflight_required": true,
+  "artifact_qualification": "NOT_ESTABLISHED",
+  "known_blockers": [
+    "EXACT_SUCCESSOR_SOURCE_CI_PENDING",
+    "EXACT_WINDOWS_PACKAGE_AND_NATIVE_QUALIFICATION_PENDING",
+    "LEGACY_INSTALLED_UPGRADE_QUALIFICATION_HOLD",
+    "LIVE_NATIVE_AGENT_AND_CONTINUOUS_AUTONOMY_UNQUALIFIED",
+    "PRODUCTION_RELEASE_SIGNING_AND_SIDECAR_PLACEMENT_UNQUALIFIED"
+  ],
+  "installed_qualification": "NOT_QUALIFIED",
+  "live_qualification": "NOT_QUALIFIED",
+  "continuous_autonomy_qualification": "NOT_QUALIFIED",
+  "production_ready": false,
+  "promotion_authorized": false,
+  "automatic_effect_retry_allowed": false,
+  "authority_effect": false
+});
+ assert.equal(seal.functional_source_parent,manifest.previous_package_transitions.find(item=>item.distinct_version===seal.package_version).source_parent);
+ assert.ok(manifest.previous_package_transitions.some(item=>item.distinct_version===seal.package_version));
+ const observedBytes=fs.readFileSync(new URL(seal.metadata_observation_path,new URL('../../',import.meta.url)));
+ assert.equal(createHash('sha256').update(observedBytes).digest('hex'),seal.metadata_observation_sha256);
+ assert.match(manifest.current_tree_blobs[seal.metadata_observation_path],/^[a-f0-9]{40}$/,'actual metadata evidence is source sealed');
+});
+
+function assertReadOnlyPackageObservation(evidence) {
+ const source='88eb062b09bd456d430bd0da37cb21baaddcee6d';
+ assert.equal(evidence.schema,'metaengine.package-planner-read-only-observation.v1');
+ assert.equal(evidence.source_head,source);
+ assert.equal(evidence.source_tree,'cc9db3282897bab4670f84e169e06f085a9cb45b');
+ assert.equal(evidence.planner_git_blob,git('rev-parse',source+':apps/metaengine-browser/scripts/package-build-reservation.mjs'));
+ assert.equal(evidence.observed_producer_run_id,40319327170);
+ assert.equal(evidence.observed_producer_run_attempt,1);
+ for(const key of ['selected_version','reservation_created','package_built','authority_effect'])assert.equal(evidence[key],false,key);
+ assert.equal(evidence.started_at,'2026-10-26T12:14:07.017Z');
+ assert.equal(evidence.completed_at,'2026-10-26T12:14:11.276Z');
+ assert.deepEqual(evidence.plan,{
+  schema:'metaengine.browser.package-identity-candidate-plan.v1',source_head:source,
+  manifest_package_version:'0.7.0-dev.1107139874594.1',
+  minimum_package_version:'0.7.0-dev.1269944506140.1',minimum_package_version_exclusive:true,
+  candidate_package_version:'0.7.0-dev.1359740117434.1',candidate_slot:0,
+  rejected_reserved_candidate_versions:[],manifest_update_required:true,
+  physical_package_build_allowed:false,promotion_authorized:false,authority_effect:false,
+ });
+ const expected=[
+  ['metaengine-browser-windows-candidate-'+source,0,null,null,null],
+  ['metaengine-browser-package-version-0.7.0-dev.1107139874594.1',1,12604992808,40208669264,'602d4b07f755f7cd61a6da3af06985d4384b859a'],
+  ['metaengine-browser-package-version-0.7.0-dev.1359740117434.1',0,null,null,null],
+  ['metaengine-browser-package-version-0.7.0-dev.1269944506140.1',1,12608018072,40217087847,'cf547d7e5f973517fa9bd1e206892e3a108ad1ea'],
+ ];
+ assert.equal(evidence.queries.length,expected.length);
+ for(let index=0;index<expected.length;index++) {
+  const [name,count,id,run,head]=expected[index],query=evidence.queries[index];
+  assert.equal(query.url,'https://api.github.com/repos/PatrickFrome/Compute/actions/artifacts?name='+name+'&per_page=100');
+  assert.equal(query.method,'GET');assert.equal(query.status,200);assert.equal(query.headers.link,null);
+  assert.ok(query.headers['x-github-request-id']);
+  assert.ok(query.started_at>=evidence.started_at&&query.completed_at<=evidence.completed_at&&query.completed_at>=query.started_at);
+  const body=JSON.parse(query.response_body);
+  assert.equal(body.total_count,count);assert.equal(body.artifacts.length,count,'partial or failed response is not absence');
+  if(count) {
+   assert.equal(body.artifacts[0].name,name);assert.equal(body.artifacts[0].id,id);
+   assert.equal(body.artifacts[0].workflow_run.id,run);assert.equal(body.artifacts[0].workflow_run.head_sha,head);
+   assert.equal(body.artifacts[0].workflow_run.repository_id,1341371143);
+  }
+ }
+}
+
+test('retained real metadata is advisory only; error, incomplete list and authority laundering fail closed',()=>{
+ const evidence=JSON.parse(read('evidence/audits/metaengine-20261026-package-source-successor/live-artifact-observation.json'));
+ assertReadOnlyPackageObservation(evidence);
+ for(const mutate of [
+  e=>{e.queries[0].status=404;},
+  e=>{e.queries[0].response_body=JSON.stringify({total_count:1,artifacts:[]});},
+  e=>{e.queries[2].url=e.queries[0].url;},
+  e=>{e.source_head='a'.repeat(40);},
+  e=>{e.plan.physical_package_build_allowed=true;},
+  e=>{e.plan.promotion_authorized=true;},
+  e=>{e.reservation_created=true;},
+  e=>{e.package_built=true;},
+  e=>{e.selected_version=true;},
+ ]) {
+  const changed=structuredClone(evidence);mutate(changed);
+  assert.throws(()=>assertReadOnlyPackageObservation(changed),{code:'ERR_ASSERTION'});
+ }
+});
+
+test('sole-owner successor retains its functional parent and live version observation',()=>{
+ const prior='4b1b0854f918e42494e073f36d96307422617643',version='0.7.0-dev.1485366478478.1';
+ const evidence=JSON.parse(read('evidence/audits/metaengine-20261026-sole-owner-repair/live-artifact-observation.json'));
+ assert.equal(evidence.source_head,prior);assert.equal(evidence.plan.candidate_package_version,version);
+ assert.equal(evidence.plan.minimum_package_version,'0.7.0-dev.1359740117434.1');
+ assert.equal(evidence.reservation_created,false);assert.equal(evidence.package_built,false);assert.equal(evidence.authority_effect,false);
+ assert.equal(evidence.plan.physical_package_build_allowed,false);assert.equal(evidence.plan.promotion_authorized,false);
+ for(const q of evidence.queries){assert.equal(q.status,200);const body=JSON.parse(q.response_body);assert.equal(body.total_count,body.artifacts.length);}
+ assert.equal(JSON.parse(evidence.queries.at(-1).response_body).total_count,0);
+ assert.equal(manifest.previous_package_transitions.find(item=>item.distinct_version===version).source_parent,prior);
+ assertCommittedAuditPrefix(root,prior,'HEAD','coordination/operator-control/AUDIT_CLOSURE_EXECUTION_REGISTER_20261018.md');
+});
+
+
+test('seed recovery successor preserves installed predecessor and uses a fresh observed package identity',()=>{
+ const prior='c784151343015a1d93f84ac8a8eae8a4b453a0bb',version='0.7.0-dev.1508254192075.1';
+ const evidence=JSON.parse(read('evidence/audits/metaengine-20261026-seed-recovery/live-artifact-observation.json'));
+ assert.equal(evidence.source_head,prior);assert.equal(evidence.plan.candidate_package_version,version);
+ assert.equal(evidence.plan.minimum_package_version,'0.7.0-dev.1485366478478.1');
+ assert.equal(evidence.reservation_created,false);assert.equal(evidence.package_built,false);assert.equal(evidence.authority_effect,false);
+ assert.equal(evidence.plan.physical_package_build_allowed,false);assert.equal(evidence.plan.promotion_authorized,false);
+ for(const q of evidence.queries){assert.equal(q.status,200);const body=JSON.parse(q.response_body);assert.equal(body.total_count,body.artifacts.length);}
+ assert.equal(JSON.parse(evidence.queries.at(-1).response_body).total_count,0);
+ assert.equal(manifest.previous_package_transitions.find(item=>item.distinct_version===version).source_parent,prior);
+ assertCommittedAuditPrefix(root,prior,'HEAD','coordination/operator-control/AUDIT_CLOSURE_EXECUTION_REGISTER_20261018.md');
+});
+
+
+test('Edge health recovery successor binds fresh source and metadata without installed qualification',()=>{
+ const prior='e22178b058065a96d76a76f2c7d29db0a0c87196',version='0.7.0-dev.1643171572592.1';
+ const evidence=JSON.parse(read('evidence/audits/metaengine-20261026-edge-health-recovery/live-artifact-observation.json'));
+ assert.equal(evidence.source_head,prior);assert.equal(evidence.plan.candidate_package_version,version);
+ assert.equal(evidence.plan.minimum_package_version,'0.7.0-dev.1508254192075.1');
+ assert.equal(evidence.reservation_created,false);assert.equal(evidence.package_built,false);assert.equal(evidence.authority_effect,false);
+ assert.equal(evidence.plan.physical_package_build_allowed,false);assert.equal(evidence.plan.promotion_authorized,false);
+ for(const q of evidence.queries){assert.equal(q.status,200);const body=JSON.parse(q.response_body);assert.equal(body.total_count,body.artifacts.length);}
+ assert.equal(JSON.parse(evidence.queries.at(-1).response_body).total_count,0);
+ assert.equal(manifest.previous_package_transitions.find(item=>item.distinct_version===version).source_parent,prior);
+ assertCommittedAuditPrefix(root,prior,'HEAD','coordination/operator-control/AUDIT_CLOSURE_EXECUTION_REGISTER_20261018.md');
+});
+
+
+test('Concurrent health observer recovery successor binds fresh source and metadata without installed qualification',()=>{
+ const prior='61e27840c13dda1d3757da603ffb03f20804dd14',version='0.7.0-dev.1784381341133.1';
+ const evidence=JSON.parse(read('evidence/audits/metaengine-20261026-health-observer-recovery/live-artifact-observation.json'));
+ assert.equal(evidence.source_head,prior);assert.equal(evidence.plan.candidate_package_version,version);
+ assert.equal(evidence.plan.minimum_package_version,'0.7.0-dev.1643171572592.1');
+ assert.equal(evidence.reservation_created,false);assert.equal(evidence.package_built,false);assert.equal(evidence.authority_effect,false);
+ assert.equal(evidence.plan.physical_package_build_allowed,false);assert.equal(evidence.plan.promotion_authorized,false);
+ for(const q of evidence.queries){assert.equal(q.status,200);const body=JSON.parse(q.response_body);assert.equal(body.total_count,body.artifacts.length);}
+ assert.equal(JSON.parse(evidence.queries.at(-1).response_body).total_count,0);
+ assert.equal(manifest.current_package_transition.source_parent,prior);assert.equal(manifest.current_source_candidate.package_version,version);
+ assertCommittedAuditPrefix(root,prior,'HEAD','coordination/operator-control/AUDIT_CLOSURE_EXECUTION_REGISTER_20261018.md');
+});
+
+test('pre-install repairs and five-stream task contracts are covered by the current source seal',()=>{
+ const required=[
+  ".github/prepare-runtime-contract-pg17.mjs",
+  "apps/metaengine-browser/test/self-update-failure-readback.mjs",
+  "apps/metaengine-browser/test/self-update-failure-readback.pure.test.mjs",
+  "apps/metaengine-browser/test/self-update-failure-readback.test.mjs",
+  "apps/metaengine-browser/test/self-update-fast-physical-ci.ps1",
+  "docs/audits/preinstall-closure-20261027.md",
+  "docs/audits/preinstall-devfleet-wave-20261027.json",
+  "evidence/audits/metaengine-20261027-preinstall/observed-prior-qualification.json",
+  "coordination/operator-control/preinstall-five-streams-20261027.md",
+  "coordination/operator-control/preinstall-tasks/metaengine-stream-1-soak.md",
+  "coordination/operator-control/preinstall-tasks/metaengine-stream-2-migration.md",
+  "coordination/operator-control/preinstall-tasks/metaengine-stream-3-continuity.md",
+  "coordination/operator-control/preinstall-tasks/metaengine-stream-4-ui.md"
+];
+ for(const file of required)assert.match(manifest.current_tree_blobs[file]??'',/^[0-9a-f]{40}$/,file+' must remain source-sealed');
 });

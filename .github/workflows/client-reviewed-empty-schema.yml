@@ -1,0 +1,125 @@
+name: Reviewed Empty Schema PG17 Qualification
+
+on:
+  pull_request:
+    paths:
+      - 'infra/client-state-runtime/export-reviewed-empty-schema.mjs'
+      - 'infra/client-state-runtime/canonical-empty-schema-contract.mjs'
+      - 'infra/client-state-runtime/reviewed-empty-schema.test.mjs'
+      - 'infra/client-state-runtime/owned-postgres-process.mjs'
+      - 'infra/client-state-runtime/owned-postgres-process.test.mjs'
+      - 'infra/client-state-runtime/test/fresh-schema-disposable.mjs'
+      - 'infra/client-state-runtime/fresh-schema-*'
+      - 'infra/client-state-runtime/local-runtime-migrations.mjs'
+      - 'infra/client-state-runtime/*.sql'
+      - 'infra/client-state-runtime/local-vault-compat.sql'
+      - 'infra/client-state-runtime/db-api-core.mjs'
+      - 'supabase/migrations/**'
+      - '.github/prepare-runtime-contract-pg17.mjs'
+      - '.github/workflows/client-reviewed-empty-schema.yml'
+  push:
+    branches:
+      - 'work/preinstall-closure-20261027'
+      - 'work/preinstall-shared-inputs-20261027'
+      - 'work/integrated-installer-repair-20261027'
+    paths:
+      - 'infra/client-state-runtime/*empty-schema*'
+      - 'infra/client-state-runtime/owned-postgres-process.mjs'
+      - 'infra/client-state-runtime/owned-postgres-process.test.mjs'
+      - 'infra/client-state-runtime/test/fresh-schema-disposable.mjs'
+      - 'infra/client-state-runtime/fresh-schema-*'
+      - 'infra/client-state-runtime/local-runtime-migrations.mjs'
+      - 'infra/client-state-runtime/*.sql'
+      - 'infra/client-state-runtime/db-api-core.mjs'
+      - 'supabase/migrations/**'
+      - '.github/prepare-runtime-contract-pg17.mjs'
+      - '.github/workflows/client-reviewed-empty-schema.yml'
+  workflow_dispatch:
+    inputs:
+      schema_source_head:
+        description: Exact canonical SQL source commit; all selected bytes must match
+        required: true
+        default: '601532ca50db02aa9089783dde157a93f484adf2'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reviewed-empty-schema-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  native-schema-roundtrip:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: windows-2025
+    timeout-minutes: 20
+    env:
+      EXPECTED_SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+      SCHEMA_SOURCE_HEAD: ${{ inputs.schema_source_head || '601532ca50db02aa9089783dde157a93f484adf2' }}
+    steps:
+      - name: Preserve literal committed source bytes
+        run: git config --global core.autocrlf false
+
+      - name: Checkout exact reviewed exporter source and canonical history
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.EXPECTED_SOURCE_HEAD }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact exporter source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -cne $env:EXPECTED_SOURCE_HEAD) {
+            throw 'reviewed_schema_source_mismatch'
+          }
+
+      - name: Setup frozen Node toolchain
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Install frozen runtime driver without lifecycle scripts
+        working-directory: infra/client-state-runtime
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Verify exporter refusal and archive contracts
+        run: node --test infra/client-state-runtime/reviewed-empty-schema.test.mjs
+
+      - name: Prepare hash-pinned PostgreSQL 17 binaries
+        if: github.event_name != 'pull_request'
+        run: node .github/prepare-runtime-contract-pg17.mjs prepare
+
+      - name: Export canonical empty schema and independently restore it
+        if: github.event_name != 'pull_request'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $driver = Join-Path $env:GITHUB_WORKSPACE 'infra/client-state-runtime/node_modules/postgres/src/index.js'
+          $output = Join-Path $env:RUNNER_TEMP 'reviewed-empty-schema-public'
+          node infra/client-state-runtime/export-reviewed-empty-schema.mjs --application-mode ATOMIC_SLICE --bin $env:LOCAL_STATE_TEST_PG_BIN_DIR --driver $driver --output-dir $output --schema-source-head $env:SCHEMA_SOURCE_HEAD --exporter-source-head $env:EXPECTED_SOURCE_HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'reviewed_schema_native_roundtrip_failed' }
+          if (!(Test-Path -LiteralPath (Join-Path $output 'canonical-empty-schema.dump') -PathType Leaf)) { throw 'reviewed_schema_archive_missing' }
+          if (!(Test-Path -LiteralPath (Join-Path $output 'canonical-empty-schema-manifest.json') -PathType Leaf)) { throw 'reviewed_schema_manifest_missing' }
+
+      - name: Verify tracked source remained unchanged
+        shell: pwsh
+        run: |
+          git diff --exit-code
+          if ($LASTEXITCODE -ne 0) { throw 'reviewed_schema_source_drift' }
+          git diff --cached --exit-code
+          if ($LASTEXITCODE -ne 0) { throw 'reviewed_schema_index_drift' }
+
+      - name: Publish only qualified empty schema and sanitized manifest
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
+        with:
+          name: metaengine-reviewed-empty-schema-${{ env.SCHEMA_SOURCE_HEAD }}-${{ env.EXPECTED_SOURCE_HEAD }}
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+          path: |
+            ${{ runner.temp }}/reviewed-empty-schema-public/canonical-empty-schema.dump
+            ${{ runner.temp }}/reviewed-empty-schema-public/canonical-empty-schema-manifest.json

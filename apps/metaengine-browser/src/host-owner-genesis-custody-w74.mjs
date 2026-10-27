@@ -93,6 +93,9 @@ export function createHostOwnerGenesisCustodyW74({
         // installed EXE and SLSA digests. No unsigned "valid signer" shortcut.
         source.release_root_signature_verified !== true ||
         source.slsa_evidence_digest_bound !== true ||
+        // Necessary on-disk predicate only; native Guardian must separately
+        // anchor verifier/root and loaded-code custody before bridge enablement.
+        source.package_code_verified !== true || !HEX.test(source.package_code_sha256 || '') ||
         source.authority_effect !== false ||
         !fresh(source.observed_at,now()) ||
         !HEX.test(source.installed_exe_sha256 || '') ||

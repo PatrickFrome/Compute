@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -67,7 +68,9 @@ function fixture() {
       build_id: 'abcdef123456',
       git_sha: HEAD,
       size_bytes: 40000000,
-      content_sha256: I('4'),
+      content_hash_scheme: 'path-file-sha256-v1',
+      content_files: [{ path: 'server.js', size_bytes: 40000000, sha256: I('4') }],
+      content_sha256: createHash('sha256').update(JSON.stringify([{ path: 'server.js', size_bytes: 40000000, sha256: I('4') }])).digest('hex'),
     }),
     daemon: write(root, 'daemon.json', {
       schema: 'metaengine.browser.me2-daemon-package.v1',

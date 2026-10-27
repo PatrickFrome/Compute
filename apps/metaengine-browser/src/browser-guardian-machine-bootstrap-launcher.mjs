@@ -330,6 +330,9 @@ export function createBrowserGuardianMachineBootstrapLauncher({
       return ownerObservationState(result, preparedValue.binding);
     } catch (error) {
       const message = String(error?.message || error);
+      if(error?.code==='GUARDIAN_LOCAL_OWNER_BRIDGE_REQUIRED')return state('HOLD','GUARDIAN_LOCAL_OWNER_BRIDGE_REQUIRED',{
+        source_head:preparedValue.binding.source_head,package_version:preparedValue.binding.package_version,guardian_service_ready:true,
+      });
       const ambiguous = error?.code === 'GUARDIAN_OWNER_ENROLLMENT_AMBIGUOUS'
         || /guardian_owner_enrollment_(?:result_unknown|readback_unknown|ambiguous)/.test(message);
       return state(ambiguous ? 'AMBIGUOUS' : 'HOLD',
@@ -435,7 +438,8 @@ export function browserGuardianMachineBootstrapLauncherContract() {
     read_only_service_polling_allowed: true,
     pipe_activation_requires_preconnect_os_enoent: true,
     pipe_timeout_or_disconnect_proves_absence: false,
-    single_owner_enrollment_attempt_after_service_readback: true,
+    single_owner_enrollment_attempt_after_service_readback: false,
+    authenticated_local_owner_bridge_required: true,
     automatic_effect_retry_allowed: false,
     ambiguous_owner_enrollment_retry_allowed: false,
     bounded_uac_acknowledgement_required: true,

@@ -4,7 +4,8 @@
  *
  * Собирает самодостаточный каталог me2-ui-dist/ из production-сборки Next
  * (output:"standalone"): server.js + .next(+static) + public + обрезанные node_modules.
- * Формат = контракт me2-ui-host браузера (R50): каталог с package.json, спавн `bun run start`,
+ * Формат = контракт me2-ui-host браузера (R50): standalone server.js для embedded Node;
+ * package.json/start сохранён для явного runtime override, не как доказательство его совместимости.
  * health-probe GET / → text/html; при отсутствии каталога — честный фолбэк GET /ui.
  *
  * Паттерн (research/2026/r52-analogues.md): «один SHA → один релиз» (VS Code), каталог как
@@ -13,8 +14,8 @@
  * Запуск: node scripts/pack-me2-ui.mjs  (после `bun run build`).
  * Выход: me2-ui-dist/ + me2-ui-manifest.json; exit≠0 при нарушении контракта сборки.
  */
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { createHash } from 'node:crypto';
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { inventoryUiContent } from './ui-content-inventory.mjs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -47,27 +48,9 @@ const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
 pkg.name = pkg.name || 'me2-ui';
 pkg.scripts = { ...(pkg.scripts || {}), start: 'NODE_ENV=production bun server.js' };
 delete pkg.scripts.dev; delete pkg.scripts.build; delete pkg.scripts.lint;
-delete pkg.scripts['db:push']; delete pkg.scripts['db:generate']; delete pkg.scripts['db:migrate']; delete pkg.scripts['db:reset'];
 writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
 
 // 4) манифест (версия/SHA/размер) — версионируется вместе с релизом (Chromium-паттерн)
-function dirSize(p) {
-  let total = 0;
-  const stack = [p];
-  while (stack.length) {
-    const dir = stack.pop();
-    let names;
-    try { names = readdirSync(dir); } catch { continue; }
-    for (const name of names) {
-      const full = join(dir, name);
-      let st;
-      try { st = statSync(full); } catch { continue; }
-      if (st.isDirectory()) stack.push(full);
-      else total += st.size;
-    }
-  }
-  return total;
-}
 
 let gitSha = process.env.ME2_BUILD_SHA || 'unknown';
 if (!gitSha || gitSha === 'unknown') {
@@ -84,11 +67,8 @@ const manifest = {
   start_script: 'NODE_ENV=production bun server.js',
   health_path: '/',
   fallback: 'GET /ui (daemon, R50)',
-  size_bytes: dirSize(DIST),
+  ...inventoryUiContent(DIST),
 };
-manifest.content_sha256 = createHash('sha256')
-  .update(JSON.stringify({ ...manifest, size_bytes: 0 }) + buildId)
-  .digest('hex');
 writeFileSync(join(DIST, 'me2-ui-manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
 
 // 5) верификация контракта (пост-проверка)

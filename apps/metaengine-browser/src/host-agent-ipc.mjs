@@ -15,6 +15,7 @@ import {
 } from './host-agent-protocol.mjs';
 
 const MAX_BUFFER_BYTES = HOST_AGENT_MAX_FRAME_BYTES * 2;
+const MAX_EXPIRED_REQUESTS = 256;
 
 function hashEndpointMaterial(value) {
   return crypto.createHash('sha256').update(String(value || ''), 'utf8').digest('hex').slice(0, 24);
@@ -173,6 +174,7 @@ export class HostAgentClient {
   #socket = null;
   #bufferState = { buffer: Buffer.alloc(0) };
   #pending = new Map();
+  #expired = new Map();
   #nonceWindow = new HostAgentNonceWindow();
   #connectPromise = null;
 
@@ -228,6 +230,14 @@ export class HostAgentClient {
         const frame = verifyHostAgentFrame(raw, this.#sessionKey, { consumeNonce: (nonce) => this.#nonceWindow.consume(nonce) });
         if (frame.kind !== 'RESPONSE') throw new Error('host_agent_client_response_kind_required');
         const pending = this.#pending.get(frame.request_id);
+        // A timeout is not evidence of a broken authenticated channel. Consume
+        // one exact late response without affecting unrelated in-flight work.
+        // Verification and nonce consumption above still apply; mismatched,
+        // unsolicited and duplicate replies remain fatal protocol errors.
+        if (!pending && this.#expired.get(frame.request_id) === frame.op) {
+          this.#expired.delete(frame.request_id);
+          continue;
+        }
         if (!pending || pending.op !== frame.op) throw new Error('host_agent_client_response_unmatched');
         this.#pending.delete(frame.request_id);
         clearTimeout(pending.timer);
@@ -256,6 +266,8 @@ export class HostAgentClient {
     const promise = new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pending.delete(requestId);
+        this.#expired.set(requestId, frame.op);
+        if (this.#expired.size > MAX_EXPIRED_REQUESTS) this.#expired.delete(this.#expired.keys().next().value);
         reject(new Error(`host_agent_request_timeout:${op}`));
       }, timeout);
       timer.unref?.();
@@ -269,6 +281,7 @@ export class HostAgentClient {
     this.#socket?.destroy();
     this.#socket = null;
     this.#failPending(new Error('host_agent_client_closed'));
+    this.#expired.clear();
   }
 
   snapshot() {

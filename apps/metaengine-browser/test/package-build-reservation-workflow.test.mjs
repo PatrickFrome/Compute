@@ -27,6 +27,8 @@ test('Package Smoke reserves one source/version before dependency install or phy
   assert.match(workflow, /slsa-provenance-verify:[\s\S]*?timeout-minutes:\s*10/);
 
   const guard = workflow.indexOf('- name: Refuse duplicate source/version physical build');
+  const sourceContracts = workflow.indexOf('- name: Verify exact Windows source contracts before reservation');
+  const nativeMechanics = workflow.indexOf('- name: Prove native consent denial mechanics before reservation');
   const marker = workflow.indexOf('- name: Publish immutable package-version reservation');
   const seal = workflow.indexOf('- name: Seal package-version reservation before physical build');
   const lockMaterial = workflow.indexOf('- name: Prove frozen package-lock material before dependency install');
@@ -34,7 +36,9 @@ test('Package Smoke reserves one source/version before dependency install or phy
   const electronBuilder = workflow.indexOf("node_modules\\.bin\\electron-builder.cmd");
   const candidate = workflow.indexOf('- name: Publish immutable candidate for parallel downstream qualification');
 
-  assert.ok(guard >= 0);
+  assert.ok(sourceContracts >= 0);
+  assert.ok(nativeMechanics > sourceContracts);
+  assert.ok(guard > nativeMechanics);
   assert.ok(marker > guard);
   assert.ok(seal > marker);
   assert.ok(lockMaterial > seal);
@@ -52,6 +56,41 @@ test('Package Smoke reserves one source/version before dependency install or phy
   assert.match(workflow, /npm --version\) -ne '11\.19\.0'/);
   assert.match(workflow, /npm ci --no-audit --no-fund/);
   assert.doesNotMatch(workflow, /npm install --no-audit --no-fund --no-package-lock/);
+});
+
+test('native consent mechanics cannot silently skip or claim installed authority before reservation', () => {
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const step = workflow.split('- name: Prove native consent denial mechanics before reservation')[1].split('\n      - name:')[0];
+  assert.match(step, /set -euo pipefail/);
+  assert.match(step, /--test-reporter=tap/);
+  assert.match(step, /native-consent-helper-windows-mechanics\.test\.mjs/);
+  assert.match(step, /verify-native-consent-mechanics-proof\.mjs "\$proof_log" "\$GITHUB_WORKSPACE"/);
+  assert.match(step, /git status --porcelain --untracked-files=all/);
+  assert.doesNotMatch(step, /continue-on-error|if:|npm (?:ci|install)|electron-builder|GITHUB_ACTIONS=/);
+});
+
+test('Windows producer runs full dependency-free source and identity contracts before immutable reservation', () => {
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const windows = workflow.split('  windows-nsis-package-smoke:')[1].split('  slsa-provenance-verify:')[0];
+  const checkout = windows.split('- name: Checkout exact candidate head')[1].split('\n      - name:')[0];
+  assert.match(checkout, /fetch-depth: 0/);
+  assert.match(checkout, /persist-credentials: false/);
+  const preflight = windows.split('- name: Verify exact Windows source contracts before reservation')[1].split('\n      - name:')[0];
+  assert.match(preflight, /shell: bash/);
+  assert.match(preflight, /set -euo pipefail/);
+  assert.match(preflight, /EXPECTED_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/);
+  assert.match(preflight, /test "\$\(git rev-parse HEAD\)" = "\$EXPECTED_SHA"/);
+  assert.match(preflight, /node --test --test-concurrency=1/);
+  for (const file of [
+    'infra/client-state-runtime/client-critical-closure.test.mjs',
+    'apps/metaengine-browser/test/package-identity-candidates.test.mjs',
+    'apps/metaengine-browser/test/package-build-reservation.test.mjs',
+    'apps/metaengine-browser/test/package-build-reservation-workflow.test.mjs',
+    'apps/metaengine-browser/test/package-lock-material.test.mjs',
+  ]) assert.ok(preflight.includes(file), file);
+  assert.equal((preflight.match(/git status --porcelain --untracked-files=all/g) || []).length, 2);
+  assert.match(preflight, /git diff --check/);
+  assert.doesNotMatch(preflight, /continue-on-error|test-name-pattern|npm (?:ci|install)|electron-builder|if:/);
 });
 
 test('Package Smoke has only one physical build and one candidate upload after reservation wiring', () => {

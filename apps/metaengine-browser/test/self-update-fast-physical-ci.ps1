@@ -8,6 +8,14 @@ $maxDiagnosticBytes = 1MB
 $maxFailureText = 8192
 New-Item -ItemType Directory -Force -Path $evidence | Out-Null
 
+# Never reuse another attempt's profile binding or failure projection.
+if ($temp -and (Test-Path -LiteralPath $temp -PathType Container)) {
+  foreach ($name in @('self-update-failure-context.json', 'self-update-failure-readback.json')) {
+    Remove-Item -LiteralPath (Join-Path $temp $name) -Force -ErrorAction SilentlyContinue
+  }
+}
+
+
 function Limit-Text([object]$value, [int]$limit = $maxFailureText) {
   if ($null -eq $value) { return $null }
   $text = [string]$value
@@ -58,6 +66,61 @@ function Copy-BoundedDiagnostic([string]$source, [string]$destination, [string]$
   }
 }
 
+function Write-FailureReadback {
+  $fallback = [ordered]@{
+    schema = 'metaengine.browser.self-update-failure-readback.v1'
+    classification = 'CAPTURE_UNAVAILABLE'
+    capture_only = $true
+    verification_succeeded = $false
+    installation_outcome_proven = $false
+    automatic_retry_allowed = $false
+    authority_effect = $false
+  }
+  $row = $fallback
+  $process = $null
+  try {
+    $contextPath = Join-Path $temp 'self-update-failure-context.json'
+    if (-not (Test-Path -LiteralPath $contextPath -PathType Leaf)) { throw 'context_unavailable' }
+    $start = New-Object System.Diagnostics.ProcessStartInfo
+    $start.FileName = (Get-Command node -ErrorAction Stop).Source
+    $readerPath = Join-Path $root 'test/self-update-failure-readback.mjs'
+    $start.Arguments = '"' + $readerPath + '" --context "' + $contextPath + '"'
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $start
+    if (-not $process.Start()) { throw 'capture_unavailable' }
+    $stdout = $process.StandardOutput.ReadToEndAsync()
+    $stderr = $process.StandardError.ReadToEndAsync()
+    if (-not $process.WaitForExit(15000)) {
+      # This handle belongs only to our diagnostic reader, never the installer.
+      try { $process.Kill() } catch {}
+      [void]$process.WaitForExit(5000)
+      throw 'capture_timeout'
+    }
+    $raw = $stdout.GetAwaiter().GetResult()
+    [void]$stderr.GetAwaiter().GetResult()
+    if ($process.ExitCode -ne 0 -or [Text.Encoding]::UTF8.GetByteCount($raw) -gt 16384) { throw 'capture_invalid' }
+    $candidate = $raw | ConvertFrom-Json -ErrorAction Stop
+    if ($candidate.schema -ne 'metaengine.browser.self-update-failure-readback.v1' -or
+      $candidate.capture_only -ne $true -or $candidate.verification_succeeded -ne $false -or
+      $candidate.installation_outcome_proven -ne $false -or $candidate.automatic_retry_allowed -ne $false -or
+      $candidate.authority_effect -ne $false) { throw 'capture_invalid' }
+    $row = $candidate
+  } catch { $row = $fallback }
+  finally { if ($null -ne $process) { try { $process.Dispose() } catch {} } }
+  try {
+    $json = $row | ConvertTo-Json -Depth 8 -Compress
+    [System.IO.File]::WriteAllText(
+      (Join-Path $temp 'self-update-failure-readback.json'),
+      ($json + "`n"), [System.Text.UTF8Encoding]::new($false))
+    Write-Host $json
+  } catch { # Preserve the original physical failure even if diagnostics cannot be saved.
+  }
+}
+
 $head = (git rev-parse HEAD).Trim()
 $head | Set-Content (Join-Path $evidence 'diagnostic-git-head.txt')
 'RUNNING' | Set-Content (Join-Path $evidence 'physical-script-status.txt')
@@ -82,7 +145,8 @@ $diagnosticFiles = @(
   'self-update-feed.err',
   'self-update-pre-install-receipt.json',
   'self-update-successor-receipt.json',
-  'self-update-e2e-proof.txt'
+  'self-update-e2e-proof.txt',
+  'self-update-failure-readback.json'
 )
 
 try {
@@ -94,17 +158,19 @@ try {
   & $physicalScript
   'PASS' | Set-Content (Join-Path $evidence 'physical-script-status.txt')
 } catch {
+  $physicalFailure = $_
+  Write-FailureReadback
   'FAIL' | Set-Content (Join-Path $evidence 'physical-script-status.txt')
   $failure = [ordered]@{
     schema = 'metaengine.browser.self-update-physical-ci-failure.v1'
     git_sha = $head
     run_id = Limit-Text $env:GITHUB_RUN_ID 128
     run_attempt = Limit-Text $env:GITHUB_RUN_ATTEMPT 32
-    exception_type = if ($_.Exception) { Limit-Text $_.Exception.GetType().FullName } else { $null }
-    exception_message = if ($_.Exception) { Limit-Text $_.Exception.Message } else { Limit-Text $_ }
-    fully_qualified_error_id = Limit-Text $_.FullyQualifiedErrorId
-    category = Limit-Text $_.CategoryInfo.Category 256
-    script_stack_trace = Limit-Text $_.ScriptStackTrace
+    exception_type = if ($physicalFailure.Exception) { Limit-Text $physicalFailure.Exception.GetType().FullName } else { $null }
+    exception_message = if ($physicalFailure.Exception) { Limit-Text $physicalFailure.Exception.Message } else { Limit-Text $physicalFailure }
+    fully_qualified_error_id = Limit-Text $physicalFailure.FullyQualifiedErrorId
+    category = Limit-Text $physicalFailure.CategoryInfo.Category 256
+    script_stack_trace = Limit-Text $physicalFailure.ScriptStackTrace
     diagnostic_file_count_limit = $diagnosticFiles.Count
     diagnostic_bytes_per_file_limit = [int64]$maxDiagnosticBytes
     authority_effect = $false

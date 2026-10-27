@@ -97,6 +97,31 @@ export async function createNativeCodingHostSeedService({sql,stateDirectory,read
   const rows=await sql.unsafe('select destruktion_meta.native_coding_seed_read_v1($1::uuid,$2::uuid) as value',[pins.profile_id,input.request_id]);
   if(rows.length!==1)fail('readback_unavailable');return readback(rows[0].value,input);
  }
+ async function readSeedResult(input){
+  const admission=await read(input);
+  if(admission)return {state:'READBACK_ONLY',admission,...flags};
+  const intent=await saved(path.join(directory,input.request_id+'.json'));
+  if(!intent)return {state:'READBACK_ONLY',admission:null,...flags};
+  if(intent.schema!=='metaengine.native-coding.seed-intent.v1'||intent.profile_id!==pins.profile_id
+   ||intent.profile_sha256!==pins.profile_sha256||!same(intent.body,input)||intent.body_sha256!==digest(json(input)))fail('intent_changed');
+  const semanticFile=path.join(directory,'body-'+digest(json({profile_id:pins.profile_id,objective:input.objective}))+'.json');
+  if(await saved(semanticFile))return {state:'READBACK_ONLY',admission:null,...flags};
+  // The intent is fsynced after its semantic fence. That fence is removed
+  // only after a committed admission, or before SQL dispatch on observation
+  // failure. Read PG again AFTER observing absence: a racing committed seed
+  // must be returned as admitted, never mislabelled as a rejected request.
+  const after=await read(input);
+  if(after)return {state:'READBACK_ONLY',admission:after,...flags};
+  if(await saved(semanticFile))return {state:'READBACK_ONLY',admission:null,...flags};
+  await unchanged();
+  const rejection={schema:'metaengine.native-coding.seed-rejection.v1',state:'REJECTED_BEFORE_DISPATCH',
+   ...input,profile_id:pins.profile_id,profile_sha256:pins.profile_sha256,body_sha256:intent.body_sha256,
+   admission_absent:true,semantic_fence_absent:true,automatic_retry_allowed:false,authority_effect:false};
+  const rejectionFile=path.join(directory,'rejected-'+input.request_id+'.json');
+  try{await durable(rejectionFile,rejection);}catch(error){if(error.code!=='EEXIST')throw error;}
+  if(!same(await saved(rejectionFile),rejection))fail('rejection_changed');
+  return {state:'REJECTED_BEFORE_DISPATCH',admission:null,rejection,...flags};
+ }
  async function observation(p){
   let common=null;const agents=[],started=Date.now();
   // Protected roster has no count ceiling; only verified identities are admitted.
@@ -125,7 +150,7 @@ export async function createNativeCodingHostSeedService({sql,stateDirectory,read
   const prior=await saved(file);
   if(prior){
    if(prior.schema!=='metaengine.native-coding.seed-intent.v1'||prior.profile_id!==pins.profile_id||!same(prior.body,input))fail('request_collision');
-   return {state:'READBACK_ONLY',admission:await read(input),...flags};
+   return readSeedResult(input);
   }
   const p=await profile(true);
   const semantic=digest(json({profile_id:pins.profile_id,objective:input.objective}));
@@ -164,7 +189,7 @@ export async function createNativeCodingHostSeedService({sql,stateDirectory,read
    return {state:admission?'READBACK_ONLY':'READBACK_REQUIRED',admission,...flags};
   }
  }
- return Object.freeze({SEED_GOAL:seed,READ_SEED:async raw=>{const input=request(raw);return{state:'READBACK_ONLY',admission:await read(input),...flags};},
+ return Object.freeze({SEED_GOAL:seed,READ_SEED:async raw=>readSeedResult(request(raw)),
   async LIST_SEEDS(raw={}){
    if(!exact(raw,['after_seq','limit'])||!Number.isSafeInteger(raw.after_seq)||raw.after_seq<0||!Number.isSafeInteger(raw.limit)||raw.limit<1||raw.limit>16)fail('page_invalid');
    await profile(false);const rows=await sql.unsafe('select destruktion_meta.native_coding_seed_list_v1($1::uuid,$2::bigint,$3::integer) as value',[pins.profile_id,raw.after_seq,raw.limit]);

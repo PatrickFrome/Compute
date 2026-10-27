@@ -36,6 +36,7 @@ function fixture() {
     source_sha:sourceSha,exact_bytes_verified:true,native_signature_verified:true,
     installed_exe_sha256:'d'.repeat(64),proof_identity:'e'.repeat(64),
     release_root_signature_verified:true,slsa_evidence_digest_bound:true,
+    package_code_verified:true,package_code_sha256:'f'.repeat(64),
     observed_at:now(),authority_effect:false,fixture_classification:'STAGING'});
   const transaction=async(fn, opts)=>{
     queries.push(opts);
@@ -64,6 +65,7 @@ function fixture() {
     get queries(){return queries;},
     driftEpoch(){epoch++}, driftProcess(){birth='pid:9102:created_100ns:134050012345678902'},
     revokeSource(){signed=()=>null}, markSourceInvalid(){signed=()=>({source_sha:sourceSha})},
+    dropPackageCode(){const prior=signed;signed=()=>({...prior(),package_code_verified:undefined,package_code_sha256:undefined})},
     dropRows(){rows=0}, corrupt(){corrupt=true}, replaceOwner(record){owner=record},
     replaceKernel(f){native=f}, setGuardian(f){guardianOverride=f},
     setIdentity(f){opts.identity=f},
@@ -86,6 +88,9 @@ test('W74 uses fixed own-PG project/epoch+advisory CAS and sealed STAGING genesi
   assert.equal(await bound.read(),null);
 });
 test('W74 refuses missing signer, wrong source shape, missing SQL scope and corrupt protected custody',async()=>{
+  const legacy=fixture();legacy.dropPackageCode();
+  assert.equal(await createHostOwnerGenesisCustodyW74(legacy.opts).create(),null);
+  assert.equal(legacy.writes,0,'EXE-only proof cannot establish package-code authority');
   const missing=fixture();missing.revokeSource();
   assert.equal(await createHostOwnerGenesisCustodyW74(missing.opts).create(),null);
   const shape=fixture();shape.markSourceInvalid();

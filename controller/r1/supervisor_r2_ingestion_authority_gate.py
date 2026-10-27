@@ -14,7 +14,6 @@ transition, or persisted-seal authority.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import subprocess
 import sys
@@ -33,7 +32,6 @@ from controller.r1.supervisor_r2_ingestion_gate import (
     _load_package,
     _read_json,
     _read_jsonl_bytes,
-    _sha_bytes,
     _sha_json,
     _validate_root_context,
     _parse_time,

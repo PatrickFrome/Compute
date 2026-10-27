@@ -111,9 +111,11 @@ function fakeDatabase() {
 
 test('six occupied application requests cannot starve the authenticated DB health read',async()=>{
   const database=fakeDatabase(),rawBegin=database.sql.begin;
-  let release,entered=0;const gate=new Promise(resolve=>{release=resolve;});
+  let release,entered=0,holdHealth=false,healthEntered=false,releaseHealth,heldCapabilityQueries=0;
+  const gate=new Promise(resolve=>{release=resolve;}),healthGate=new Promise(resolve=>{releaseHealth=resolve;});
   database.sql.begin=fn=>rawBegin(tx=>fn({...tx,unsafe:async(text,values)=>{
     if(text.startsWith('SELECT "public"."devos_environment_state_v1"')) {entered++;await gate;}
+    if(holdHealth&&text.startsWith('SELECT "public"."devos_runtime_capabilities_v1"')) {healthEntered=true;heldCapabilityQueries++;await healthGate;}
     return tx.unsafe(text,values);
   }}));
   const secret='f'.repeat(64),runtime=await startDbApi({apiKey:secret,port:0,sql:database.sql});
@@ -130,7 +132,49 @@ test('six occupied application requests cannot starve the authenticated DB healt
     assert.equal(value.schema,'metaengine.client-state.health.v1');
     assert.equal(value.error,undefined);
     assert.deepEqual(value.runtime_capabilities,{schema:'test-capabilities'});
-  } finally {release();await Promise.allSettled(pending);await runtime.close();}
+    // Edge and API health must both complete when their reads overlap.
+    const edgeHealth=await fetch(runtime.address+'/rest/v1/rpc/devos_runtime_capabilities_v1',{method:'POST',headers,body:'{}'});
+    assert.equal(edgeHealth.status,200);
+    assert.deepEqual(await edgeHealth.json(),{schema:'test-capabilities'});
+    assert.equal((await fetch(runtime.address+'/rest/v1/rpc/devos_runtime_capabilities_v1',{method:'POST',headers:{'content-type':'application/json'},body:'{}'})).status,401);
+    assert.equal((await fetch(runtime.address+'/rest/v1/rpc/devos_runtime_capabilities_v1',{method:'POST',headers,body:'{"unexpected":true}'})).status,400);
+    assert.equal((await rpc()).status,503,'the health route must not expand application admission');
+    holdHealth=true;
+    const held=fetch(runtime.address+'/rest/v1/rpc/devos_runtime_capabilities_v1',{method:'POST',headers,body:'{}'});pending.push(held);
+    const healthDeadline=Date.now()+5000;while(!healthEntered&&Date.now()<healthDeadline)await new Promise(resolve=>setTimeout(resolve,5));
+    assert.equal(healthEntered,true);
+    const overlap=fetch(runtime.address+'/health',{headers:{apikey:secret}});pending.push(overlap);
+    const early=await Promise.race([overlap.then(r=>r.status),new Promise(resolve=>setTimeout(()=>resolve('waiting'),60))]);
+    assert.equal(early,'waiting','a concurrent authenticated API probe must await the live DB observation, not fail 503');
+    releaseHealth();assert.equal((await held).status,200);assert.equal((await overlap).status,200);
+    assert.equal(heldCapabilityQueries,1,'overlapping equivalent probes share only the in-flight read-only transaction');
+    await fetch(runtime.address+'/health',{headers:{apikey:secret}});
+    assert.equal(heldCapabilityQueries,2,'a later probe must query PostgreSQL again; completed health is never cached');
+    assert.ok(database.calls.some(call=>call.text==='SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY'));
+  } finally {releaseHealth();release();await Promise.allSettled(pending);await runtime.close();}
+});
+
+test('concurrent authenticated health observers remain bounded and release admission after the database fails',async()=>{
+  const database=fakeDatabase(),rawBegin=database.sql.begin;let entered=0,release;
+  const gate=new Promise(resolve=>{release=resolve;});let failRead=true;
+  database.sql.begin=fn=>rawBegin(tx=>fn({...tx,unsafe:async(text,values)=>{
+    if(text.startsWith('SELECT "public"."devos_runtime_capabilities_v1"')){entered++;if(failRead){await gate;throw Object.assign(Error('unavailable'),{code:'08006'});}}
+    return tx.unsafe(text,values);
+  }}));
+  const secret='h'.repeat(64),headers={apikey:secret,'content-type':'application/json'};
+  const runtime=await startDbApi({apiKey:secret,port:0,sql:database.sql}),pending=[];
+  try{
+    for(let i=0;i<17;i++)pending.push(fetch(runtime.address+(i%2?'/health':'/rest/v1/rpc/devos_runtime_capabilities_v1'),i%2?{headers}:{method:'POST',headers,body:'{}'}));
+    const first=await Promise.race([...pending,new Promise((_,reject)=>setTimeout(()=>reject(Error('bounded_health_observers_not_enforced')),5000))]);
+    assert.equal(first.status,503);
+    assert.equal((await fetch(runtime.address+'/health')).status,401);
+    release();const results=await Promise.all(pending);assert.equal(results.filter(r=>r.status===200).length,0);
+    const bodies=await Promise.all(results.map(r=>r.json()));
+    assert.equal(bodies.filter(r=>r.code==='local_state_health_busy').length,1);
+    assert.equal(bodies.filter(r=>r.code==='08006').length,16);
+    assert.equal(entered,1,'all admitted observers shared one failing DB transaction');
+    failRead=false;const recovered=await fetch(runtime.address+'/health',{headers});assert.equal(recovered.status,200);assert.equal(entered,2);
+  }finally{release();await Promise.allSettled(pending);await runtime.close();}
 });
 
 test('direct API keeps the login identity while preserving signed protocol claims', async () => {

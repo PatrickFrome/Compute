@@ -207,10 +207,13 @@ export function createNativeCodingResultStore({journalRoot,indexRoot,verifyStora
 }
 
 export async function readNativeCodingSandboxEvidence({pin,cliPath,worktreePath,role,hostProcessId=process.pid,
-  readProcess=readNativeCodingWindowsProcess,readBoot=readWindowsSandboxHostBoot,verifyStorage=verifyOwnerOnlyWindowsStorage}={}) {
+  readProcess=readNativeCodingWindowsProcess,readBoot=readWindowsSandboxHostBoot,verifyStorage=verifyOwnerOnlyWindowsStorage,
+  readExecutableSha256=file=>hashFile(file,512*1024*1024)}={}) {
   if(!pin||!HASH.test(pin.sha256||'')||!['IMPLEMENTER','CRITIC'].includes(role))fail('sandbox_receipt_not_pinned');
+  if(typeof readExecutableSha256!=='function')fail('sandbox_image_reader_invalid');
   const [{value,sha256},boot,host,cliSha]=await Promise.all([readNativeCodingProtectedJson(pin.path,{verifyStorage}),
-    readBoot(),readProcess(hostProcessId),hashFile(cliPath,512*1024*1024)]);
+    readBoot(),readProcess(hostProcessId),readExecutableSha256(cliPath)]);
+  if(!HASH.test(cliSha||''))fail('sandbox_image_digest_invalid');
   const mode=role==='CRITIC'?'read-only':'workspace-write';
   if(sha256!==pin.sha256||value.schema!=='metaengine.codex-cli.sandbox-probe.v1'||value.mode!==mode
     ||!same(value.workspace_path||'',worktreePath)||value.cli_sha256!==cliSha

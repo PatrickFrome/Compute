@@ -39,19 +39,39 @@ FunctionEnd
 ; or cancelling the assisted installer's welcome page must not stop the client.
 ; customInstall is too late: that hook runs after installApplicationFiles.
 !macro customCheckAppRunning
+  ; The old uninstaller is executable code too. Only fresh installation is
+  ; qualified here; do not let a successful file-use check launch an old helper.
+  !ifndef BUILD_UNINSTALLER
+    !define METAENGINE_FRESH_INSTALL_ARGS '-RequireFreshInstall -InstallRegistryKey "${INSTALL_REGISTRY_KEY}" -UninstallRegistryKey "${UNINSTALL_REGISTRY_KEY}"'
+    !ifdef UNINSTALL_REGISTRY_KEY_2
+      !define METAENGINE_FRESH_INSTALL_EXTRA_ARGS '-UninstallRegistryKey2 "${UNINSTALL_REGISTRY_KEY_2}"'
+    !else
+      !define METAENGINE_FRESH_INSTALL_EXTRA_ARGS ''
+    !endif
+  !else
+    !define METAENGINE_FRESH_INSTALL_ARGS ''
+    !define METAENGINE_FRESH_INSTALL_EXTRA_ARGS ''
+  !endif
   InitPluginsDir
   File /oname=$PLUGINSDIR\metaengine-installer-shutdown.ps1 "${BUILD_RESOURCES_DIR}\installer-shutdown.ps1"
 
   ; Even a missing Browser executable can leave exact packaged runtime processes.
-  ; The helper confirms absence or completes bounded managed cleanup in both cases.
-  DetailPrint "Checking the existing METAENGINE Browser runtime..."
-  ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\metaengine-installer-shutdown.ps1" -InstalledExe "$INSTDIR\${APP_EXECUTABLE_FILENAME}"' $0
+  ; The helper is a read-only file-use gate. It never signals an unqualified old
+  ; shutdown handler or treats disappearance as a worker-tree cleanup receipt.
+  DetailPrint "Checking that the existing METAENGINE Browser files are not in use..."
+  ClearErrors
+  ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\metaengine-installer-shutdown.ps1" -InstalledExe "$INSTDIR\${APP_EXECUTABLE_FILENAME}" ${METAENGINE_FRESH_INSTALL_ARGS} ${METAENGINE_FRESH_INSTALL_EXTRA_ARGS}' $0
+  IfErrors metaengine_installer_shutdown_failed
   StrCmp $0 "0" metaengine_installer_shutdown_done
 
+metaengine_installer_shutdown_failed:
+
   IfSilent metaengine_installer_shutdown_abort 0
-  MessageBox MB_ICONSTOP|MB_OK "METAENGINE Browser could not be stopped safely. Installation was stopped before replacing application files. Close METAENGINE Browser and try again."
+  MessageBox MB_ICONSTOP|MB_OK "An existing installation, registration, live runtime, or unverified state prevents this operation. Installation was stopped before replacing application files. Existing installations require a separately reviewed migration, including their old uninstaller. Do not delete the Owner profile or database, or retry an ambiguous operation."
 metaengine_installer_shutdown_abort:
   Abort
 
 metaengine_installer_shutdown_done:
+  !undef METAENGINE_FRESH_INSTALL_ARGS
+  !undef METAENGINE_FRESH_INSTALL_EXTRA_ARGS
 !macroend

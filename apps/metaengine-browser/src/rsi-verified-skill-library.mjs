@@ -142,20 +142,6 @@ function exactKeys(value, required, optional, label) {
   }
 }
 
-function zeroAuthority(extra = {}) {
-  return Object.freeze({
-    ...extra,
-    execution_authority: false,
-    production_mutation_authority: false,
-    promotion_authority: false,
-    self_update_authority: false,
-    scheduler_authority: false,
-    signing_authority: false,
-    direct_tool_execution_authority: false,
-    automatic_retry_allowed: false,
-    authority_effect: false,
-  });
-}
 
 function assertZeroAuthority(value, label) {
   for (const field of [

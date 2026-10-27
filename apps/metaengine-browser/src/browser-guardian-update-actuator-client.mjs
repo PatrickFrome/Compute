@@ -1,7 +1,5 @@
 import net from 'node:net';
 
-import { requestBrowserGuardianEnrollmentTicket } from './browser-guardian-enrollment-ticket-client.mjs';
-
 export const BROWSER_GUARDIAN_UPDATE_ACTUATOR_PIPE = '\\\\.\\pipe\\METAENGINEBrowserGuardianUpdateV1';
 export const BROWSER_GUARDIAN_UPDATE_ACTUATOR_RESULT_SCHEMA = 'metaengine.browser-guardian.update-actuator-result.v1';
 const MAX_WIRE_BYTES = 16 * 1024;
@@ -152,59 +150,36 @@ export function requestGuardianUpdatePipe(wireRequest, {
 export class BrowserGuardianUpdateActuatorClient {
   #identity;
   #transport;
-  #ticketProvider;
 
-  constructor({
-    identity,
-    transport = requestGuardianUpdatePipe,
-    enrollmentTicketProvider = null,
-    fetchImpl = globalThis.fetch,
-  } = {}) {
+  constructor(options = {}) {
+    if(!options||typeof options!=='object'||Array.isArray(options)
+      ||Object.keys(options).some(key=>!['identity','transport'].includes(key)))
+      throw new Error('guardian_update_actuator_options_invalid');
+    const {identity,transport=requestGuardianUpdatePipe}=options;
     if (!identity || typeof identity.guardianOwnerChallenge !== 'function'
         || typeof identity.guardianUpdateActuatorProof !== 'function') {
       throw new Error('guardian_update_actuator_identity_required');
     }
     if (typeof transport !== 'function') throw new Error('guardian_update_actuator_transport_required');
-    if (enrollmentTicketProvider != null && typeof enrollmentTicketProvider !== 'function') {
-      throw new Error('guardian_enrollment_ticket_provider_invalid');
-    }
     this.#identity = identity;
     this.#transport = transport;
-    this.#ticketProvider = enrollmentTicketProvider || (() => requestBrowserGuardianEnrollmentTicket({
-      identity: this.#identity,
-      fetchImpl,
-    }));
   }
 
-  async #ownerProbeRaw({ command_id, request_nonce, ticket = null } = {}) {
+  async #ownerProbeRaw({ command_id, request_nonce } = {}) {
     const commandId = exactUuid(command_id, 'guardian_command_id');
     const requestNonce = exactNonce(request_nonce);
-    const ticketValue = ticket == null ? null : exactLine(ticket.ticket, 'guardian_enrollment_ticket', /^[A-Za-z0-9_-]{43}$/);
-    const ticketSha256 = ticket == null ? null : exactSha(ticket.ticket_sha256, 64, 'guardian_enrollment_ticket_sha256');
-    const proof = await this.#identity.guardianOwnerChallenge({
-      command_id: commandId,
-      request_nonce: requestNonce,
-      ...(ticketSha256 ? { enrollment_ticket_sha256: ticketSha256 } : {}),
-    });
-    if (ticketSha256 && String(proof.enrollment_ticket_sha256 || '').toLowerCase() !== ticketSha256) {
-      throw new Error('guardian_enrollment_ticket_proof_binding_mismatch');
-    }
+    const proof = await this.#identity.guardianOwnerChallenge({command_id:commandId,request_nonce:requestNonce});
     const jwk = exactJwk(proof.public_jwk);
     const request = wire([
       'wire_schema=metaengine.browser-guardian.owner-challenge-request.v1',
       `command_id=${commandId}`,
       `request_nonce=${requestNonce}`,
-      ...(ticketValue ? [`enrollment_ticket=${ticketValue}`, `enrollment_ticket_sha256=${ticketSha256}`] : []),
       `public_jwk_x=${jwk.x}`,
       `public_jwk_y=${jwk.y}`,
       `signature=${exactSignature(proof.signature)}`,
     ]);
-    const result = normalizeResult(await this.#transport(request, {
-      // Enrollment includes bounded native HTTPS redemption and durable CAS.
-      // Do not give this effect the shorter read-only observation deadline.
-      timeoutMs: ticket == null ? 2_000 : 30_000,
-    }));
-    return { result, proof };
+    const result = normalizeResult(await this.#transport(request,{timeoutMs:2_000}));
+    return {result,proof};
   }
 
   #assertOwnerBound(result, proof) {
@@ -245,43 +220,12 @@ export class BrowserGuardianUpdateActuatorClient {
       throw new Error(`guardian_owner_probe_unproven:${first.result.state}:${first.result.reason}`);
     }
 
-    const ticket = await this.#ticketProvider();
-    if (!ticket || ticket.single_use !== true || ticket.persisted_locally !== false) {
-      throw new Error('guardian_enrollment_ticket_provider_result_invalid');
-    }
-
-    let second;
-    try {
-      second = await this.#ownerProbeRaw({ command_id, request_nonce, ticket });
-    } catch (error) {
-      const ambiguous = new Error(`guardian_owner_enrollment_result_unknown:${String(error?.message || error).slice(0,180)}`);
-      ambiguous.code = 'GUARDIAN_OWNER_ENROLLMENT_AMBIGUOUS';
-      throw ambiguous;
-    }
-    if (second.result.state === 'OWNER_BOUND') {
-      // Enrollment really changed the store, so its receipt must not pretend
-      // effect absence. Prove the saved owner using an independent read-only
-      // challenge before allowing any installer dispatch.
-      try {
-        if (second.result.owner_binding_proven !== true || second.result.device_binding_proven !== true
-            || String(second.result.device_key_fingerprint_sha256 || '').toLowerCase()
-              !== String(second.proof.key_fingerprint_sha256 || '').toLowerCase()) {
-          throw new Error('guardian_owner_enrollment_binding_invalid');
-        }
-        const readback = await this.#ownerProbeRaw({ command_id, request_nonce });
-        return this.#assertOwnerBound(readback.result, readback.proof);
-      } catch (error) {
-        const ambiguous = new Error(`guardian_owner_enrollment_readback_unknown:${String(error?.message || error).slice(0,180)}`);
-        ambiguous.code = 'GUARDIAN_OWNER_ENROLLMENT_AMBIGUOUS';
-        throw ambiguous;
-      }
-    }
-    if (second.result.state === 'NO_EFFECT_PROVEN' && second.result.effect_absent_proven === true) {
-      throw new Error(`guardian_owner_enrollment_no_effect:${second.result.reason}`);
-    }
-    const ambiguous = new Error(`guardian_owner_enrollment_ambiguous:${second.result.state}:${second.result.reason}`);
-    ambiguous.code = 'GUARDIAN_OWNER_ENROLLMENT_AMBIGUOUS';
-    throw ambiguous;
+    // Own-local ADMIN/ticket issuance is not authenticated native broker
+    // admission. Until that independent bridge exists, do not issue a ticket
+    // or send a second probe that would invoke the legacy hosted consumer.
+    throw Object.assign(new Error('guardian_local_owner_bridge_required'),{
+      code:'GUARDIAN_LOCAL_OWNER_BRIDGE_REQUIRED',
+    });
   }
 
   async #update(operation, input = {}) {
@@ -332,7 +276,9 @@ export function browserGuardianUpdateActuatorClientContract() {
     read_only_owner_probe_precedes_enrollment: true,
     read_only_owner_observation_exposed: true,
     read_only_owner_pipe_timeout_ms: 2_000,
-    owner_enrollment_pipe_timeout_ms: 30_000,
+    owner_enrollment_available: false,
+    authenticated_local_owner_bridge_required: true,
+    hosted_redemption_allowed: false,
     exact_ticket_required_reason: 'OWNER_ENROLLMENT_TICKET_REQUIRED',
     single_use_admin_ticket_required_for_first_binding: true,
     ticket_bound_device_signature_required: true,

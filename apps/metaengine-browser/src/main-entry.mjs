@@ -1,4 +1,5 @@
-import { app, BaseWindow, dialog } from 'electron';
+import { app, BaseWindow, dialog, protocol } from 'electron';
+import { ensureElectronPreReady } from './electron-pre-ready-bootstrap.mjs';
 import { secondaryDiagnosticRefusal, SECONDARY_DIAGNOSTIC_REFUSAL_EXIT_CODE } from './secondary-diagnostic-refusal.mjs';
 import { projectPackagedOwnerAdmissionDiagnostic } from './packaged-owner-admission-diagnostic.mjs';
 import {
@@ -16,6 +17,8 @@ import {
   waitForPrimaryActivationAck,
   waitForStablePrimaryWindow,
 } from './browser-startup-observability.mjs';
+
+ensureElectronPreReady({ app, protocol });
 
 const bypassSingleInstance = process.argv.includes('--metaengine-smoke')
   || process.argv.includes('--metaengine-devplane-smoke');
@@ -111,12 +114,12 @@ if (guard.installer_shutdown_control) {
   let resilienceStartup = null;
   registerPrimaryInstallerShutdownBarrier(app, async () => {
     await primaryPreparation;
-    const controller = await runtimeController;
     // An already-started ready continuation must settle before the guard stops
     // HostResilience. A later ready event is fenced by the installer marker.
     if (resilienceStartup) await resilienceStartup;
-    const cleanup = await controller.stopOwnedLocalRuntimeHost();
-    if (cleanup.cleanup_confirmed !== true) throw new Error('local_runtime_host_cleanup_unconfirmed');
+    // Do not stop the Host here: native worker/checkpoint drains still need its
+    // capability. The canonical before-quit barrier drains those first, then
+    // installLocalRuntimeHostShutdown's will-quit barrier confirms Host cleanup.
   });
   try {
   if (updatedLaunch && app.isPackaged === true) {
@@ -167,15 +170,21 @@ if (guard.installer_shutdown_control) {
     if (app.isPackaged && browserRuntimeNeeded && interactiveNormalLaunch
       && !bypassSingleInstance && bootstrapState === 'NO_OWNER_CONFIG') {
       // Existing Keeper installations are attached from a protected,
-      // path-only descriptor. There is no interactive database wizard: a
-      // missing descriptor remains a hard admission failure below.
+      // path-only descriptor. If none exists, native explicit consent may
+      // provision a new private database; existing state is never adopted.
       ownerAdmissionPhase = 'ATTACHED_DESCRIPTOR_READBACK';
       const { autoConnectInstalledAttachedProvider } = await import('./local-restored-pg17-setup.mjs');
-      const setup = await autoConnectInstalledAttachedProvider({
+      let setup = await autoConnectInstalledAttachedProvider({
         env: process.env, platform: process.platform, resourcesPath: process.resourcesPath,
         appDataDirectory: process.env.APPDATA,
       });
       observedAttachedDescriptorState = setup.state;
+      if (setup.state === 'NO_DESCRIPTOR' && globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__ !== true) {
+        ownerAdmissionPhase = 'FRESH_LOCAL_PROVIDER_SETUP';
+        globalThis.__METAENGINE_PRIMARY_PROVIDER_SETUP_PENDING__ = true;
+        const { setupInstalledFreshProvider } = await import('./installed-fresh-provider-setup.mjs');
+        setup = await setupInstalledFreshProvider({ app, dialog });
+      }
       if (setup.state === 'CONFIGURED' && globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__ !== true) {
         ownerAdmissionPhase = 'ATTACHED_OWNER_REVALIDATION';
         const readyProvider = await providerBoot.revalidatePersistentLocalProviderAfterAttach();
@@ -194,6 +203,7 @@ if (guard.installer_shutdown_control) {
     if (globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__ !== true) {
     const reason = String(error?.message || error).slice(0, 240);
     const staleOwnerBinding = reason === 'packaged_local_runtime_owner_digest_mismatch';
+    const freshConsentDeclined = reason === 'installed_fresh_provider_consent_declined';
     console.error(JSON.stringify({
       schema: 'metaengine.browser.provider-startup.v1',
       state: 'LOCAL_PROVIDER_STARTUP_BLOCKED',
@@ -208,7 +218,9 @@ if (guard.installer_shutdown_control) {
       authority_effect: false,
     }));
     try {
-      dialog.showErrorBox(
+      // A real native No is an intentional cancellation, not a second modal
+      // error. Admission remains denied and the same owned cleanup is required.
+      if (!freshConsentDeclined) dialog.showErrorBox(
         'METAENGINE Browser — local runtime unavailable',
         staleOwnerBinding ? ('The installed Browser package identifies a runtime generation different from the preserved Owner profile.\nDo not delete the Owner profile or PostgreSQL database. Use a reviewed Owner/runtime upgrade procedure.\n\nDiagnostic: ' + reason) : `The selected local state runtime could not be verified.\nStart or repair that runtime and open the Browser again.\n\nDiagnostic: ${reason}`,
       );
@@ -819,7 +831,19 @@ if (guard.installer_shutdown_control) {
   }
   } finally { preparationFinished(); }
   };
+  if (app.isPackaged && interactiveNormalLaunch && !bypassSingleInstance) {
+    globalThis.__METAENGINE_PRIMARY_PROVIDER_SETUP_PENDING__ = true;
+  }
   const providerPreparation = prepareAdmittedPrimary();
   globalThis.__METAENGINE_PRIMARY_PROVIDER_PREPARATION__ = providerPreparation;
-  await providerPreparation;
+  // Fresh setup may require Electron's native consent dialog. Do not hold
+  // top-level ESM evaluation across app.ready; final-runtime-entry keeps all
+  // runtime activation behind this exact preparation promise.
+  await Promise.resolve();
+  if (globalThis.__METAENGINE_PRIMARY_PROVIDER_SETUP_PENDING__ !== true) await providerPreparation;
+  else void providerPreparation.catch(() => {
+    console.error(JSON.stringify({ schema: 'metaengine.browser.provider-startup.v1',
+      state: 'PRIMARY_PROVIDER_PREPARATION_UNCONFIRMED', automatic_retry_allowed: false,
+      browser_runtime_started: false, authority_effect: false }));
+  });
 }

@@ -88,7 +88,7 @@ test('a killed real qualifier process leaves its last completed diagnostic phase
 });
 
 test('terminal startup failures propagate immediately while incomplete readbacks can converge', async () => {
-  for (const reason of ['installed_launch_normal_runtime_import_failed', 'installed_launch_normal_primary_window_journal_failed']) {
+  for (const reason of ['installed_launch_normal_runtime_import_failed', 'installed_launch_normal_primary_window_journal_failed', 'installed_launch_process_ended_before_readback']) {
     let reads = 0;
     await assert.rejects(waitUntil(() => { reads++; throw new Error(reason); }, null, 1000), { message: reason });
     assert.equal(reads, 1);

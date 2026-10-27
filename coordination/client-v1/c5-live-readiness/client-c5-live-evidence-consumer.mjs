@@ -22,9 +22,6 @@ export const CLIENT_C5_LIVE_ARTIFACT_VERIFICATION_SCHEMA = 'metaengine.client-v1
 export const CLIENT_C5_LIVE_REVIEW_SCHEMA = 'metaengine.client-v1.c5-live-artifact-review.v1';
 export const CLIENT_C5_LIVE_INDEPENDENT_RECEIPT_SCHEMA = 'metaengine.client-v1.c5-live-independent-verification.v1';
 
-const SHA40_RE = /^[0-9a-f]{40}$/;
-const SHA256_RE = /^[0-9a-f]{64}$/;
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SAFE_KEY_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,191}$/;
 const UTC_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/;
 const ED25519_SIGNATURE_BASE64URL_RE = /^[A-Za-z0-9_-]{86}$/;
@@ -32,8 +29,6 @@ const LIVE_DEVELOPMENT_CONTEXT = 'LIVE_DEVELOPMENT_TRUST';
 const CONTROLLED_TRUST_ROOT_KIND = 'CONTROLLED_TEST_VECTOR';
 
 const object = (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : null;
-const digest = (value) => typeof value === 'string' && SHA256_RE.test(value);
-const positiveInteger = (value) => Number.isSafeInteger(value) && value > 0;
 
 function exactKeys(value, keys) {
   const row = object(value);

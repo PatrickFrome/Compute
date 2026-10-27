@@ -80,3 +80,29 @@ test('startup bytes drift cannot become readiness and dependency aliases are rej
     await assert.rejects(sourceClosure([join(directory, 'alias/x.mjs')], directory), /alias_path_forbidden/);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
+
+test('only the two reviewed fresh-schema JSON resources are discovered as data', async () => {
+  const directory=await realpath(await mkdtemp(join(tmpdir(),'compute-fresh-json-closure-')));
+  try {
+    const names=['fresh-schema-candidate-plan.json','fresh-schema-statement-selection.json'];
+    for(const name of names)await writeFile(join(directory,name),'{"note":"import outside.mjs"}');
+    await writeFile(join(directory,'entry.mjs'),names.map(name=>`new URL('./${name}', import.meta.url);`).join('\n')+"\nnew URL('./private-config.json', import.meta.url);\n");
+    const closure=await sourceClosure([join(directory,'entry.mjs')],directory);
+    assert.deepEqual(closure.files,[join(directory,'entry.mjs'),...names.map(name=>join(directory,name))].sort());
+    await writeFile(join(directory,'entry.mjs'),"new URL('../fresh-schema-candidate-plan.json', import.meta.url);\n");
+    await assert.rejects(sourceClosure([join(directory,'entry.mjs')],directory),/source_outside_repository/);
+  }finally{await rm(directory,{recursive:true,force:true});}
+});
+
+test('conditional Electron native import is limited to the exact reviewed first-owner adapter',async()=>{
+  const directory=await realpath(await mkdtemp(join(tmpdir(),'compute-native-import-')));
+  try{
+    const native=join(directory,'infra/client-state-runtime/fresh-provider-native-device-identity.mjs');
+    await mkdir(join(directory,'infra/client-state-runtime'),{recursive:true});
+    await writeFile(native,"import {app,safeStorage} from 'electron'; export const native=true;\n");
+    assert.deepEqual((await sourceClosure([native],directory)).files,[native]);
+    const other=join(directory,'infra/client-state-runtime/unreviewed.mjs');
+    await writeFile(other,"import {app} from 'electron';\n");
+    await assert.rejects(sourceClosure([other],directory),/import_unsupported/);
+  }finally{await rm(directory,{recursive:true,force:true});}
+});

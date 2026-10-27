@@ -1,0 +1,75 @@
+{
+  "schema": "metaengine.preinstall.devfleet-wave.v1",
+  "created_request_id": "meta-preinstall-20261027-six-gpt6pro-01",
+  "source_base": "58fadfb354375ba8af4bd9249a459b5b2a8d9f46",
+  "required_model": "GPT-6 Pro",
+  "state": "CREATED_NOT_DISPATCHED",
+  "created_tab_count": 6,
+  "original_tabs_preserved": 10,
+  "assignment_attempt_count": 0,
+  "model_label_observed_all_six": "6 Pro",
+  "native_model_probe_all_six": "model_probe_requires_healthy_chat",
+  "visible_menu_observation": {
+    "at": "2026-10-26T21:52:46.3806870Z",
+    "tab_id": "tab_52381d16-a961-49e4-892b-519ca7dc7075",
+    "selected_radio": "6",
+    "displayed_model_label": "6 Pro",
+    "messages": [
+      "Достигнут лимит использования",
+      "Заблокировано, открывает варианты доступа"
+    ],
+    "method": "Windows UI Automation; no message sent"
+  },
+  "automatic_retry_allowed": false,
+  "resume_requires_fresh_per_tab_model_and_input_proof": true,
+  "tasks": [
+    {
+      "slot": 1,
+      "tab_id": "tab_afd950e1-8efb-42c3-85ec-589fa75e6b97",
+      "request_id": "meta-preinstall-20261027-review-1-01",
+      "role": "source-and-package-qualification",
+      "state": "PREPARED_NOT_SENT",
+      "text": "Работа по METAENGINE, repository PatrickFrome/Compute. Независимая проверка перед установкой. Основная интеграционная ветка work/preinstall-closure-20261027 основана на 58fadfb354375ba8af4bd9249a459b5b2a8d9f46 (PR #1350–1353); перед выводами проверь фактический HEAD. Код на ПК: C:\\Users\\User\\Desktop\\metaen\\metaengine-preinstall-closure-20261027. Root и три агента редактируют source: PG17 CI coverage, self-update failed-path diagnostics, qa-forward-install preserved-path checks. Не редактируй их файлы. Эта задача — независимый read-only аудит: без установки, SQL, изменения Browser/Owner/PG/Guardian/registry, отправки сообщений, merge, перезапуска неоднозначных эффектов, фиктивных receipts и новых package builds. Не открывай секреты/credential files. Исторические аудиты сохраняются. Различай source/fixture, точный CI commit, точный installer artifact и фактическую установку. Верни найденные дефекты с file:line и воспроизведением/точным свидетельством, критерий закрытия, необходимый минимальный patch либо честное NO_FINDING/BLOCKED. Не называй отсутствие доказательства PASS.\n\nТвоя область:\nПроверь актуальные CI/PR и связь source→reservation→single producer→consumers. У .1784381341133.1 producer40382079975 успешен на601532ca, reservation12678978941. На58fadfb3 producer40399627262 отказал PACKAGE_IDENTITY_VERSION_ALREADY_RESERVED, dependent FinalRuntime/DirtyProfile не выполняли installed checks. Уточни последние W73/W66/W59/Runtime Contracts, source seal и lineage. Выдели только реальные обязательные gates перед новым installer; frozen W43–W73 манифесты не менять, .178 не переиспользовать. Проверь как получить точную новую identity после функционального commit, без выдуманного run_id."
+    },
+    {
+      "slot": 2,
+      "tab_id": "tab_9a4ec735-4cb8-4582-9ccd-8ea5e67c67b6",
+      "request_id": "meta-preinstall-20261027-review-2-01",
+      "role": "autonomous-soak-forensics",
+      "state": "PREPARED_NOT_SENT",
+      "text": "Работа по METAENGINE, repository PatrickFrome/Compute. Независимая проверка перед установкой. Основная интеграционная ветка work/preinstall-closure-20261027 основана на 58fadfb354375ba8af4bd9249a459b5b2a8d9f46 (PR #1350–1353); перед выводами проверь фактический HEAD. Код на ПК: C:\\Users\\User\\Desktop\\metaen\\metaengine-preinstall-closure-20261027. Root и три агента редактируют source: PG17 CI coverage, self-update failed-path diagnostics, qa-forward-install preserved-path checks. Не редактируй их файлы. Эта задача — независимый read-only аудит: без установки, SQL, изменения Browser/Owner/PG/Guardian/registry, отправки сообщений, merge, перезапуска неоднозначных эффектов, фиктивных receipts и новых package builds. Не открывай секреты/credential files. Исторические аудиты сохраняются. Различай source/fixture, точный CI commit, точный installer artifact и фактическую установку. Верни найденные дефекты с file:line и воспроизведением/точным свидетельством, критерий закрытия, необходимый минимальный patch либо честное NO_FINDING/BLOCKED. Не называй отсутствие доказательства PASS.\n\nТвоя область:\nРазбери точный failure автономного installed soak40382080084, job121783699368, source601532ca/version.178. Известно только installed_owner_consumer_session_soak_physical_failed, внутреннюю причину нельзя выдумывать. Читай raw logs, bounded diagnostics, код qualify-installed-owner-consumer и session soak. Сопоставь #1352 и наши новые actual-execFile timeout tests: killed:true не отличает native timeout от explicit kill. Определи воспроизводимый внутренний дефект либо точные недостающие наблюдения. Тайм-ауты/ограничения и критерии PASS не ослаблять."
+    },
+    {
+      "slot": 3,
+      "tab_id": "tab_c06a4db3-49c7-435a-baf2-c7bffafe81f9",
+      "request_id": "meta-preinstall-20261027-review-3-01",
+      "role": "self-update-transition-review",
+      "state": "PREPARED_NOT_SENT",
+      "text": "Работа по METAENGINE, repository PatrickFrome/Compute. Независимая проверка перед установкой. Основная интеграционная ветка work/preinstall-closure-20261027 основана на 58fadfb354375ba8af4bd9249a459b5b2a8d9f46 (PR #1350–1353); перед выводами проверь фактический HEAD. Код на ПК: C:\\Users\\User\\Desktop\\metaen\\metaengine-preinstall-closure-20261027. Root и три агента редактируют source: PG17 CI coverage, self-update failed-path diagnostics, qa-forward-install preserved-path checks. Не редактируй их файлы. Эта задача — независимый read-only аудит: без установки, SQL, изменения Browser/Owner/PG/Guardian/registry, отправки сообщений, merge, перезапуска неоднозначных эффектов, фиктивных receipts и новых package builds. Не открывай секреты/credential files. Исторические аудиты сохраняются. Различай source/fixture, точный CI commit, точный installer artifact и фактическую установку. Верни найденные дефекты с file:line и воспроизведением/точным свидетельством, критерий закрытия, необходимый минимальный patch либо честное NO_FINDING/BLOCKED. Не называй отсутствие доказательства PASS.\n\nТвоя область:\nНезависимо проверь fresh-only installer и self-update conflict. Run40382080162/job121783893363 на.178 завершён self_update_durable_successor_receipt_missing. RequireFreshInstall при существующем image/registration держитHOLD/exit23; этот фактический exit в данном запуске пока не доказан. Проверь новый diagnostics patch без изменения gates и предложи минимальный квалифицируемый путь дальнейшей работы. Не подменяй automatic N→N+1 proof ручной forward migration и не исправляй дефект ожиданием/повторным NSIS. Дай отдельные criteria для automated update и controlled migration."
+    },
+    {
+      "slot": 4,
+      "tab_id": "tab_e18648c2-1f8d-4a2a-8a48-28e8cb8f1c47",
+      "request_id": "meta-preinstall-20261027-review-4-01",
+      "role": "postgres-preservation-and-recovery",
+      "state": "PREPARED_NOT_SENT",
+      "text": "Работа по METAENGINE, repository PatrickFrome/Compute. Независимая проверка перед установкой. Основная интеграционная ветка work/preinstall-closure-20261027 основана на 58fadfb354375ba8af4bd9249a459b5b2a8d9f46 (PR #1350–1353); перед выводами проверь фактический HEAD. Код на ПК: C:\\Users\\User\\Desktop\\metaen\\metaengine-preinstall-closure-20261027. Root и три агента редактируют source: PG17 CI coverage, self-update failed-path diagnostics, qa-forward-install preserved-path checks. Не редактируй их файлы. Эта задача — независимый read-only аудит: без установки, SQL, изменения Browser/Owner/PG/Guardian/registry, отправки сообщений, merge, перезапуска неоднозначных эффектов, фиктивных receipts и новых package builds. Не открывай секреты/credential files. Исторические аудиты сохраняются. Различай source/fixture, точный CI commit, точный installer artifact и фактическую установку. Верни найденные дефекты с file:line и воспроизведением/точным свидетельством, критерий закрытия, необходимый минимальный patch либо честное NO_FINDING/BLOCKED. Не называй отсутствие доказательства PASS.\n\nТвоя область:\nПроверь композицию qa-forward-install.mjs/policy: keeper executable/PGDATA/old Owner/state/config/status должны физически находиться вне replaced image/new state/retired image с проверками alias/reparse/hardlink/containment в обе стороны. Root-агент вносит эти правки; проведи независимый review их результата и дальнейших gaps. Особое внимание orphan native/staged Deno ownership, full registry layout, exact image readback, backup/restore, unknown-effect/no-retry после каждого эффекта. prepare тоже имеет эффекты; на реальном ПК не запускать. Опиши один полный disposable Windows migration test, который проверяет композицию без реального Owner."
+    },
+    {
+      "slot": 5,
+      "tab_id": "tab_a8a05cbb-8a1a-4c2f-8bba-4f54d6321ef7",
+      "request_id": "meta-preinstall-20261027-review-5-01",
+      "role": "native-goal-critic-continuity",
+      "state": "PREPARED_NOT_SENT",
+      "text": "Работа по METAENGINE, repository PatrickFrome/Compute. Независимая проверка перед установкой. Основная интеграционная ветка work/preinstall-closure-20261027 основана на 58fadfb354375ba8af4bd9249a459b5b2a8d9f46 (PR #1350–1353); перед выводами проверь фактический HEAD. Код на ПК: C:\\Users\\User\\Desktop\\metaen\\metaengine-preinstall-closure-20261027. Root и три агента редактируют source: PG17 CI coverage, self-update failed-path diagnostics, qa-forward-install preserved-path checks. Не редактируй их файлы. Эта задача — независимый read-only аудит: без установки, SQL, изменения Browser/Owner/PG/Guardian/registry, отправки сообщений, merge, перезапуска неоднозначных эффектов, фиктивных receipts и новых package builds. Не открывай секреты/credential files. Исторические аудиты сохраняются. Различай source/fixture, точный CI commit, точный installer artifact и фактическую установку. Верни найденные дефекты с file:line и воспроизведением/точным свидетельством, критерий закрытия, необходимый минимальный patch либо честное NO_FINDING/BLOCKED. Не называй отсутствие доказательства PASS.\n\nТвоя область:\nПроверь native goal→admission→workers→independent Critic→commit/checkpoint→successor→restart. Сосредоточься на native-coding-host-seed-service, client-native-coding-goal, client-goal-journal, concurrent health observer lane. Проверки должны сохранять terminal REJECTED_BEFORE_DISPATCH, no replay, unknown SQL fences, lost COMMIT ACK/repeated readback и отсутствие fake execution. Direct rejection error в нашей ветке исправлен, root локально получил76PASS/0FAIL/0SKIP в6focusedfiles. Найди недостающие реальные installed continuity proofs и concrete source defects; fixture/pass не выдавать за установленный автономный цикл."
+    },
+    {
+      "slot": 6,
+      "tab_id": "tab_52381d16-a961-49e4-892b-519ca7dc7075",
+      "request_id": "meta-preinstall-20261027-review-6-01",
+      "role": "ui-runtime-and-dependency-review",
+      "state": "PREPARED_NOT_SENT",
+      "text": "Работа по METAENGINE, repository PatrickFrome/Compute. Независимая проверка перед установкой. Основная интеграционная ветка work/preinstall-closure-20261027 основана на 58fadfb354375ba8af4bd9249a459b5b2a8d9f46 (PR #1350–1353); перед выводами проверь фактический HEAD. Код на ПК: C:\\Users\\User\\Desktop\\metaen\\metaengine-preinstall-closure-20261027. Root и три агента редактируют source: PG17 CI coverage, self-update failed-path diagnostics, qa-forward-install preserved-path checks. Не редактируй их файлы. Эта задача — независимый read-only аудит: без установки, SQL, изменения Browser/Owner/PG/Guardian/registry, отправки сообщений, merge, перезапуска неоднозначных эффектов, фиктивных receipts и новых package builds. Не открывай секреты/credential files. Исторические аудиты сохраняются. Различай source/fixture, точный CI commit, точный installer artifact и фактическую установку. Верни найденные дефекты с file:line и воспроизведением/точным свидетельством, критерий закрытия, необходимый минимальный patch либо честное NO_FINDING/BLOCKED. Не называй отсутствие доказательства PASS.\n\nТвоя область:\nСверь все текущие UI/security dependency audit documents с реальным кодом: FULL_CODE_AUDIT, UI_DEPENDENCY_REFRESH, UI_PRISMA_ORPHAN_REMOVAL, OFFLINE_BUILD_PRIVACY, UI_RUNTIME_IMMUTABILITY, FRESH_PROVIDER_INTEGRATION, verified-skill-dispatch-safe-slice. Определи устаревшие findings и реальные оставшиеся блокеры. Normal packaged host использует embedded Node; explicit Bun1.3.3 path имеет известную Next CommonJS wrapper failure, scripts.start до сих пор Bun. НаПК ME2_UI_BIN отсутствует в Process/User/Machine. Проверь exact package immutability/runtime inventory, diskcache/privacy configuration и необходимость minimal fix для реально используемого installed path. Не выполняй bulk npm/bun audit transmission и не добавляй hosted-Supabase gates к owned-PG runtime."
+    }
+  ]
+}

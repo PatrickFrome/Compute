@@ -108,10 +108,21 @@ export class SupervisorDeviceIdentity {
   }
 
   async #loadExisting() {
-    let raw;
-    try { raw = JSON.parse(await fs.readFile(this.#statePath, 'utf8')); }
+    let raw,before;
+    try{before=await fs.lstat(this.#statePath);}
+    catch(error){if(error?.code==='ENOENT')return null;throw error;}
+    if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1)throw new Error('supervisor_device_storage_invalid');
+    try {
+      raw = JSON.parse(await fs.readFile(this.#statePath, 'utf8'));
+      const after=await fs.lstat(this.#statePath);
+      if(before.ino!==after.ino||before.dev!==after.dev||before.size!==after.size||before.mtimeMs!==after.mtimeMs) {
+        throw new Error('supervisor_device_storage_changed');
+      }
+    }
     catch (error) {
-      if (error?.code === 'ENOENT' || error instanceof SyntaxError) return null;
+      // Corrupt existing state is not permission to replace the owner's key.
+      // Nor is disappearance AFTER an existing identity was observed.
+      if (error?.code === 'ENOENT') throw new Error('supervisor_device_storage_changed');
       throw error;
     }
     const state = atomicStateShape(raw);
@@ -123,7 +134,11 @@ export class SupervisorDeviceIdentity {
     }
     const encrypted = Buffer.from(state.encrypted_private_key_b64, 'base64');
     const privatePem = this.#secureStorage.decryptString(encrypted);
-    this.#privateKey = crypto.createPrivateKey(privatePem);
+    const privateKey = crypto.createPrivateKey(privatePem);
+    if (fingerprintFor(canonicalPublicJwk(crypto.createPublicKey(privateKey).export({format:'jwk'}))) !== state.key_fingerprint_sha256) {
+      throw new Error('supervisor_device_private_public_key_mismatch');
+    }
+    this.#privateKey = privateKey;
     this.#state = state;
     return this.snapshot();
   }
@@ -153,7 +168,7 @@ export class SupervisorDeviceIdentity {
     const publicJwk = canonicalPublicJwk(publicKey.export({ format: 'jwk' }));
     const privatePem = privateKey.export({ type: 'pkcs8', format: 'pem' });
     const encrypted = this.#secureStorage.encryptString(String(privatePem));
-    const snapshot = await this.#persist({
+    const shaped = atomicStateShape({
       client_id: crypto.randomUUID(),
       public_jwk: publicJwk,
       key_fingerprint_sha256: fingerprintFor(publicJwk),
@@ -162,8 +177,15 @@ export class SupervisorDeviceIdentity {
       device_id: null,
       created_at: new Date().toISOString(),
     });
+    // Never replace an identity which appeared after the initial absence read.
+    // A partial write remains a review boundary rather than a second key.
+    await fs.mkdir(path.dirname(this.#statePath), {recursive:true});
+    const handle = await fs.open(this.#statePath, 'wx', 0o600);
+    try { await handle.writeFile(`${JSON.stringify(shaped, null, 2)}\n`); await handle.sync(); }
+    finally { await handle.close(); }
+    this.#state = shaped;
     this.#privateKey = privateKey;
-    return snapshot;
+    return this.snapshot();
   }
 
   snapshot() {
@@ -481,7 +503,7 @@ export class SupervisorDeviceIdentity {
     const { buildAgentContextTokenMaterial, issueAgentContextToken, AGENT_CONTEXT_TOKEN_DEFAULT_TTL_SECONDS } = await import('./agent-context-token.mjs');
     // Canonical-material validation runs first so binding errors surface as
     // agent_context_token_* vocabulary before any key operation.
-    const material = buildAgentContextTokenMaterial({
+    buildAgentContextTokenMaterial({
       client_id: String(client_id || state.client_id || ''),
       agent_id, role, generation_epoch, mission_digest,
       issued_at,

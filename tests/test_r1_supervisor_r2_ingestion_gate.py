@@ -1,4 +1,3 @@
-import copy
 import hashlib
 import io
 import json
@@ -203,6 +202,13 @@ class SupervisorR2IngestionGateTests(unittest.TestCase):
         self.assertFalse(result["persisted_seal_allowed"])
         core = dict(result); claimed = core.pop("gate_receipt_sha256")
         self.assertEqual(claimed, hashlib.sha256(canon(core)).hexdigest())
+
+    def test_tampered_receipt_self_hash_is_rejected(self):
+        receipt = json.loads(self.receipt.read_text())
+        receipt["package_bytes"] += 1
+        tampered = self._write_json("tampered-receipt.json", receipt)
+        with self.assertRaisesRegex(SupervisorGateError, "step08_receipt_receipt_sha256_mismatch"):
+            self._run(receipt=tampered)
 
     def test_root_context_policy_is_exact_and_stale_root_is_rejected(self):
         root_sha = hashlib.sha256(self.fresh_root.read_bytes()).hexdigest()

@@ -1,0 +1,117 @@
+{
+  "schema": "metaengine.package-planner-read-only-observation.v1",
+  "source_head": "88eb062b09bd456d430bd0da37cb21baaddcee6d",
+  "source_tree": "cc9db3282897bab4670f84e169e06f085a9cb45b",
+  "planner_git_blob": "1aee544ed7b99898cbde34494bd80a4620b63d34",
+  "planner_sha256": "f491f708dcb0a4f139b8dbc7bf118ae477d61384671f2fb3f5a79aff75c76586",
+  "observer": "local readonly evaluation over live unauthenticated GitHub GET responses; observed source producer run identity, not execution within that CI run",
+  "observed_producer_run_id": 40319327170,
+  "observed_producer_run_attempt": 1,
+  "started_at": "2026-10-26T12:14:07.017Z",
+  "queries": [
+    {
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/actions/artifacts?name=metaengine-browser-windows-candidate-88eb062b09bd456d430bd0da37cb21baaddcee6d&per_page=100",
+      "method": "GET",
+      "started_at": "2026-10-26T12:14:07.020Z",
+      "completed_at": "2026-10-26T12:14:10.865Z",
+      "status": 200,
+      "headers": {
+        "date": "Mon, 26 Oct 2026 12:14:10 GMT",
+        "etag": "W/\"dc5251f2e7eabac7f5179872f71b44fe04fd6716772ebe33a45500838e2cedf8\"",
+        "link": null,
+        "x-github-request-id": "BF35:50FCF:542B363:11269949:6ADF4412",
+        "x-ratelimit-remaining": "49"
+      },
+      "response_body": "{\"total_count\":0,\"artifacts\":[]}"
+    },
+    {
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/actions/artifacts?name=metaengine-browser-package-version-0.7.0-dev.1107139874594.1&per_page=100",
+      "method": "GET",
+      "started_at": "2026-10-26T12:14:10.869Z",
+      "completed_at": "2026-10-26T12:14:10.991Z",
+      "status": 200,
+      "headers": {
+        "date": "Mon, 26 Oct 2026 12:14:10 GMT",
+        "etag": "W/\"79036a81df6787a16e402f7cc1c63795e6313fc1df39107fbc8316884ecb45e5\"",
+        "link": null,
+        "x-github-request-id": "BF35:50FCF:542B47E:11269CAA:6ADF4412",
+        "x-ratelimit-remaining": "47"
+      },
+      "response_body": "{\"total_count\":1,\"artifacts\":[{\"id\":12604992808,\"node_id\":\"MDg6QXJ0aWZhY3QxMjYwNDk5MjgwOA==\",\"name\":\"metaengine-browser-package-version-0.7.0-dev.1107139874594.1\",\"size_in_bytes\":865,\"url\":\"https://api.github.com/repos/PatrickFrome/Compute/actions/artifacts/12604992808\",\"archive_download_url\":\"https://api.github.com/repos/PatrickFrome/Compute/actions/artifacts/12604992808/zip\",\"expired\":false,\"digest\":\"sha256:5f77b4b98402f029c212393394338b3e42274252531c82a4852cd189b3ebc802\",\"created_at\":\"2026-10-25T15:51:02Z\",\"updated_at\":\"2026-10-25T15:51:02Z\",\"expires_at\":\"2027-01-23T15:48:19Z\",\"workflow_run\":{\"id\":40208669264,\"repository_id\":1341371143,\"head_repository_id\":1341371143,\"head_branch\":\"work/fix-native-rpc-onboarding-contract-20261025\",\"head_sha\":\"602d4b07f755f7cd61a6da3af06985d4384b859a\"}}]}"
+    },
+    {
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/actions/artifacts?name=metaengine-browser-package-version-0.7.0-dev.1359740117434.1&per_page=100",
+      "method": "GET",
+      "started_at": "2026-10-26T12:14:10.992Z",
+      "completed_at": "2026-10-26T12:14:11.149Z",
+      "status": 200,
+      "headers": {
+        "date": "Mon, 26 Oct 2026 12:14:11 GMT",
+        "etag": "W/\"dc5251f2e7eabac7f5179872f71b44fe04fd6716772ebe33a45500838e2cedf8\"",
+        "link": null,
+        "x-github-request-id": "BF35:50FCF:542B560:11269FFA:6ADF4412",
+        "x-ratelimit-remaining": "46"
+      },
+      "response_body": "{\"total_count\":0,\"artifacts\":[]}"
+    },
+    {
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/actions/artifacts?name=metaengine-browser-package-version-0.7.0-dev.1269944506140.1&per_page=100",
+      "method": "GET",
+      "started_at": "2026-10-26T12:14:11.150Z",
+      "completed_at": "2026-10-26T12:14:11.275Z",
+      "status": 200,
+      "headers": {
+        "date": "Mon, 26 Oct 2026 12:14:11 GMT",
+        "etag": "W/\"72177559ceeb6b81bf5b0a61c37349f476eae4d8315636f7e3f045f1f8847a5d\"",
+        "link": null,
+        "x-github-request-id": "BF35:50FCF:542B6A5:1126A3DE:6ADF4413",
+        "x-ratelimit-remaining": "45"
+      },
+      "response_body": "{\"total_count\":1,\"artifacts\":[{\"id\":12608018072,\"node_id\":\"MDg6QXJ0aWZhY3QxMjYwODAxODA3Mg==\",\"name\":\"metaengine-browser-package-version-0.7.0-dev.1269944506140.1\",\"size_in_bytes\":865,\"url\":\"https://api.github.com/repos/PatrickFrome/Compute/actions/artifacts/12608018072\",\"archive_download_url\":\"https://api.github.com/repos/PatrickFrome/Compute/actions/artifacts/12608018072/zip\",\"expired\":false,\"digest\":\"sha256:198cc9db7c7cd667ecaa7dd083d51d326a5246a6f4205bf0fc639ac918177098\",\"created_at\":\"2026-10-25T17:38:36Z\",\"updated_at\":\"2026-10-25T17:38:36Z\",\"expires_at\":\"2027-01-23T17:34:02Z\",\"workflow_run\":{\"id\":40217087847,\"repository_id\":1341371143,\"head_repository_id\":1341371143,\"head_branch\":\"work/windows-native-onboarding-diagnostics-20261025\",\"head_sha\":\"cf547d7e5f973517fa9bd1e206892e3a108ad1ea\"}}]}"
+    }
+  ],
+  "selected_version": false,
+  "reservation_created": false,
+  "package_built": false,
+  "authority_effect": false,
+  "plan": {
+    "schema": "metaengine.browser.package-identity-candidate-plan.v1",
+    "source_head": "88eb062b09bd456d430bd0da37cb21baaddcee6d",
+    "manifest_package_version": "0.7.0-dev.1107139874594.1",
+    "minimum_package_version": "0.7.0-dev.1269944506140.1",
+    "minimum_package_version_exclusive": true,
+    "candidate_package_version": "0.7.0-dev.1359740117434.1",
+    "candidate_slot": 0,
+    "rejected_reserved_candidate_versions": [],
+    "manifest_update_required": true,
+    "physical_package_build_allowed": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  },
+  "sibling_reservations": {
+    "total_count": 1,
+    "artifacts": [
+      {
+        "id": 12608018072,
+        "node_id": "MDg6QXJ0aWZhY3QxMjYwODAxODA3Mg==",
+        "name": "metaengine-browser-package-version-0.7.0-dev.1269944506140.1",
+        "size_in_bytes": 865,
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/actions/artifacts/12608018072",
+        "archive_download_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/artifacts/12608018072/zip",
+        "expired": false,
+        "digest": "sha256:198cc9db7c7cd667ecaa7dd083d51d326a5246a6f4205bf0fc639ac918177098",
+        "created_at": "2026-10-25T17:38:36Z",
+        "updated_at": "2026-10-25T17:38:36Z",
+        "expires_at": "2027-01-23T17:34:02Z",
+        "workflow_run": {
+          "id": 40217087847,
+          "repository_id": 1341371143,
+          "head_repository_id": 1341371143,
+          "head_branch": "work/windows-native-onboarding-diagnostics-20261025",
+          "head_sha": "cf547d7e5f973517fa9bd1e206892e3a108ad1ea"
+        }
+      }
+    ]
+  },
+  "completed_at": "2026-10-26T12:14:11.276Z"
+}

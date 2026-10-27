@@ -10,7 +10,6 @@ subject becomes eligible for cryptographic attestation.
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from controller.rsi.promotion_attestation import (

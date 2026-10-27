@@ -73,7 +73,9 @@ jobs:
 
       - name: Security static gate
         run: |
-          grep -q 'app.enableSandbox()' apps/metaengine-browser/src/main.mjs
+          # Exercise the synchronous pre-ready rail and every production entry.
+          # Sandbox initialization lives in the shared helper, not inline in main.
+          node --test apps/metaengine-browser/test/electron-pre-ready-bootstrap.test.mjs
           grep -q 'app.enableSandbox()' apps/metaengine-browser/smoke/dp/main.cjs
           grep -q '"main": "main.cjs"' apps/metaengine-browser/smoke/dp/package.json
           grep -q 'nodeIntegration: false' apps/metaengine-browser/src/browser-policy.mjs

@@ -165,3 +165,15 @@ test('protected operator generation/content changes cannot silently select anoth
   await assert.rejects(service.FINISH_CHECKPOINT(f.query),/operator_changed/);
   assert.equal(await f.git(['rev-parse','HEAD']),f.proof.head);assert.equal(f.finishCalls,0);
 });
+
+test('SQL-only reconciliation cannot initialize a fresh journal, accept caller evidence or fall back to Git',async t=>{
+  const f=await fixture(t),service=await f.make();
+  for(const extra of [{path:f.root},{receipt:{state:'COMMITTED'}},{operation:'FINISH_CHECKPOINT'}]){
+    await assert.rejects(service.RECONCILE_FINISH_CHECKPOINT({...f.query,...extra}),/selectors_invalid/);
+  }
+  const answer=await service.RECONCILE_FINISH_CHECKPOINT(f.query);
+  assert.equal(answer.state,'GIT_READBACK_REQUIRED');assert.equal(answer.reason,'SQL_JOURNAL_PROVENANCE_UNKNOWN');
+  await assert.rejects(fs.lstat(f.operator.journal_root),error=>error.code==='ENOENT');
+  assert.equal(await f.git(['rev-parse','HEAD']),f.proof.head);assert.equal(f.finishCalls,0);
+  service.close();await assert.rejects(service.RECONCILE_FINISH_CHECKPOINT(f.query),/closed/);
+});

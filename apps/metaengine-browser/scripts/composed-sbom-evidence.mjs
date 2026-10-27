@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import crypto from 'node:crypto';
+import { validateUiContentManifest } from '../../me2-ui/scripts/ui-content-inventory.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -74,6 +75,7 @@ function normalizeNpmDocument(document) {
 function normalizeUi(manifest, sourceHead) {
   if (manifest.schema !== 'me2.ui-bundle-manifest.v1') fail('composed_sbom_ui_schema_invalid');
   if (required(manifest.git_sha, 'composed_sbom_ui_source_missing').toLowerCase() !== sourceHead) fail('composed_sbom_ui_source_mismatch');
+  validateUiContentManifest(manifest);
   const version = required(manifest.ui_version, 'composed_sbom_ui_version_missing');
   const digest = sha(manifest.content_sha256, 'composed_sbom_ui_sha_invalid');
   const buildId = required(manifest.build_id, 'composed_sbom_ui_build_id_missing');
@@ -88,6 +90,7 @@ function normalizeUi(manifest, sourceHead) {
       properties: [
         property('metaengine:source_head', sourceHead),
         property('metaengine:build_id', buildId),
+        property('metaengine:content_hash_scheme', manifest.content_hash_scheme),
         property('metaengine:size_bytes', Number(manifest.size_bytes || 0)),
       ],
     },

@@ -36,7 +36,6 @@ async function smoke(exe, manifest) {
   const offset = process.pid % 1000;
   const restPort = 41000 + offset;
   const wsPort = 43000 + offset;
-  let stdout = '';
   let stderr = '';
   const systemRoot = process.env.SystemRoot || process.env.WINDIR || 'C:\\Windows';
   const runtimePath = process.platform === 'win32'
@@ -61,7 +60,8 @@ async function smoke(exe, manifest) {
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   });
-  child.stdout?.on('data', (chunk) => { stdout += String(chunk).slice(0, 4096); });
+  // Drain owned-child output without retaining unused data or blocking its pipe.
+  child.stdout?.resume();
   child.stderr?.on('data', (chunk) => { stderr += String(chunk).slice(0, 4096); });
 
   try {

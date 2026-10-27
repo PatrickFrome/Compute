@@ -63,13 +63,13 @@ async function fixture(t, mode = 'ready') {
 
 async function launch(f, { entry, primary = true, flags = [], extraEnv = {}, emitReady = true,
   managedHost, quitAfterBoot = false, installerAfterBoot = false, installerDuringStartup = false,
-  holdQuit = false, firstRunAutoConnect } = {}) {
+  holdQuit = false, firstRunAutoConnect, freshConsentPending, freshConsentDenied, nativeDrainMode, fixtureDeadlineMs } = {}) {
   const env = { ...process.env };
   for (const name of Object.keys(env)) {
     if (/^(?:METAENGINE_|SUPABASE_|DATABASE_URL$|PG(?:HOST|PORT|USER|PASSWORD|DATABASE|DATA|SERVICE)|GITHUB_TOKEN$|GH_TOKEN$|COMPUTE_RUNTIME_HOST_CONFIG$|NODE_OPTIONS$)/.test(name)) delete env[name];
   }
   const options = { entry, primary, flags, userData: f.userData, emitReady, managedHost, quitAfterBoot,
-    installerAfterBoot, installerDuringStartup, holdQuit, firstRunAutoConnect };
+    installerAfterBoot, installerDuringStartup, holdQuit, firstRunAutoConnect, freshConsentPending, freshConsentDenied, nativeDrainMode, fixtureDeadlineMs };
   let output;
   try {
     output = await execute(process.execPath, [runner], {
@@ -176,6 +176,41 @@ for (const entry of entries) {
     assert.match(result.stderr, /LOCAL_PROVIDER_STARTUP_BLOCKED/);
   });
 
+  test(entry + ': absent descriptor reaches pending native consent without admitting runtime or implying immediate rejection', async t => {
+    const f = await fixture(t);
+    await fs.rm(f.ownerFile);
+    const result = await launch(f, { entry, firstRunAutoConnect: { outcome: 'NO_DESCRIPTOR' },
+      freshConsentPending: true, extraEnv: { ME2_INTEGRATION: '1' } });
+    assert.equal(result.code, 0, result.stderr);
+    assert.ok(eventIndex(result, 'entry-complete') < eventIndex(result, 'ready-emitted'));
+    assert.ok(eventIndex(result, 'fresh-native-consent-pending') > eventIndex(result, 'ready-emitted'));
+    assert.equal(event(result, 'fresh-native-consent-pending')[1], true);
+    for (const kind of ['runtime-import', 'me2-import', 'fetch', 'host-created']) assert.equal(event(result, kind), undefined);
+    assert.equal(f.requests.length, 0);
+    assert.doesNotMatch(result.stderr, /LOCAL_PROVIDER_STARTUP_BLOCKED|RUNTIME_IMPORT_OK/);
+    for (const file of [f.ownerFile, path.join(f.userData, 'metaengine-browser-startup-journal-v1.json'),
+      path.join(f.directory, 'localappdata', 'METAENGINE', 'client-first-run-v1')]) {
+      await assert.rejects(fs.stat(file), { code: 'ENOENT' });
+    }
+    // This is a hermetic reproduction of the obsolete negative expectation,
+    // not a native-dialog, installed launch or successful Owner qualification.
+  });
+
+  test(entry + ': exact declined consent exits denied after cleanup without a second error dialog', async t => {
+    const f = await fixture(t);
+    await fs.rm(f.ownerFile);
+    const result = await launch(f, { entry, firstRunAutoConnect: { outcome: 'NO_DESCRIPTOR' },
+      freshConsentDenied: true, extraEnv: { ME2_INTEGRATION: '1' } });
+    assert.equal(result.code, 1, result.stderr);
+    assert.ok(eventIndex(result, 'fresh-native-consent-declined') > eventIndex(result, 'ready-emitted'));
+    for (const kind of ['runtime-import', 'me2-import', 'fetch', 'host-created', 'dialog']) assert.equal(event(result, kind), undefined);
+    assert.match(result.stderr, /"reason":"installed_fresh_provider_consent_declined"/);
+    assert.match(result.stderr, /"phase":"FRESH_LOCAL_PROVIDER_SETUP"/);
+    assert.equal(f.requests.length, 0);
+    await assert.rejects(fs.stat(f.ownerFile), { code: 'ENOENT' });
+    await assert.rejects(fs.stat(path.join(f.userData, 'metaengine-browser-startup-journal-v1.json')), { code: 'ENOENT' });
+  });
+
   test(entry + ': missing attached descriptor cannot import the runtime or ME2',async t=>{
     const f=await fixture(t);
     await fs.rm(f.ownerFile);
@@ -187,16 +222,17 @@ for (const entry of entries) {
     assert.equal(result.code,1);
   });
 
-  test(entry + ': installer shutdown waits for managed IPC stop before a forced fallback, including a startup race', async t => {
+  test(entry + ': installer shutdown cooperatively drains managed IPC without a forced fallback, including a startup race', async t => {
     for (const duringStartup of [false, true]) {
       const f = await fixture(t);
       const host = await addManagedHost(f, { readyDelayMs: duringStartup ? 100 : 0, stopDelayMs: 250 });
-      const result = await launch(f, { entry, managedHost: host.managedHost, holdQuit: true,
+      const result = await launch(f, { entry, managedHost: host.managedHost,
         installerAfterBoot: !duringStartup, installerDuringStartup: duringStartup });
       assert.equal(result.code, 0, result.stderr);
-      assert.deepEqual(event(result, 'forced-fallback-armed'), ['forced-fallback-armed', 'STOPPED_BY_OWNER_IPC']);
-      assert.ok(eventIndex(result, 'forced-fallback-armed') < eventIndex(result, 'quit-requested'));
-      assert.ok(eventIndex(result, 'quit-requested') < eventIndex(result, 'forced-fallback-fired'));
+      assert.equal(event(result, 'forced-fallback-armed'), undefined);
+      assert.equal(event(result, 'forced-fallback-fired'), undefined);
+      assert.ok(eventIndex(result, 'quit-requested') >= 0);
+      assert.ok(eventIndex(result, 'quit-prevented') < eventIndex(result, 'exit'));
       assert.equal(JSON.parse(await fs.readFile(host.evidenceFile, 'utf8')).state, 'STOPPED_BY_OWNER_IPC');
       if (duringStartup) {
         assert.ok(eventIndex(result, 'lock') < eventIndex(result, 'installer-signal-during-startup'));
@@ -204,7 +240,31 @@ for (const entry of entries) {
         assert.equal(event(result, 'host-created'), undefined);
         assert.equal(event(result, 'host-start'), undefined);
       } else {
-        assert.ok(eventIndex(result, 'resilience-stopped') < eventIndex(result, 'forced-fallback-armed'));
+        assert.ok(eventIndex(result, 'resilience-stopped') < eventIndex(result, 'quit-requested'));
+      }
+    }
+  });
+
+  test(entry + ': installer drains native workers before retiring Host and preserves pending or failed custody', async t => {
+    for (const nativeDrainMode of ['ready', 'pending', 'failed']) {
+      const f = await fixture(t);
+      const host = await addManagedHost(f);
+      const result = await launch(f, { entry, managedHost: host.managedHost,
+        installerAfterBoot: true, nativeDrainMode, fixtureDeadlineMs: 700 });
+      assert.deepEqual(event(result, 'native-drain-start'), ['native-drain-start', 'STARTED']);
+      assert.equal(event(result, 'forced-fallback-armed'), undefined);
+      assert.equal(event(result, 'forced-fallback-fired'), undefined);
+      if (nativeDrainMode === 'ready') {
+        assert.equal(result.code, 0, result.stderr);
+        assert.deepEqual(event(result, 'native-drain-confirmed'), ['native-drain-confirmed', 'STARTED']);
+        assert.ok(eventIndex(result, 'native-drain-confirmed') < eventIndex(result, 'quit-prevented'));
+        assert.equal(JSON.parse(await fs.readFile(host.evidenceFile, 'utf8')).state, 'STOPPED_BY_OWNER_IPC');
+      } else {
+        assert.equal(result.code, 99, result.stderr);
+        assert.equal(event(result, 'exit'), undefined);
+        assert.equal(event(result, 'quit-prevented'), undefined, 'will-quit cannot retire Host before native cleanup');
+        assert.equal(event(result, 'native-drain-confirmed'), undefined);
+        if (nativeDrainMode === 'failed') assert.ok(eventIndex(result, 'native-drain-blocked') >= 0);
       }
     }
   });
@@ -230,17 +290,18 @@ for (const entry of entries) {
       const f = await fixture(t);
       const host = await addManagedHost(f, { terminalMode });
       const result = await launch(f, { entry, managedHost: host.managedHost,
-        holdQuit: true, installerAfterBoot: true });
+        holdQuit: true, installerAfterBoot: true, fixtureDeadlineMs: 700 });
       // Only the fixture watchdog may end this blocked inert primary. The
       // production installer barrier must not arm its successful-exit fallback.
       assert.equal(result.code, 99, result.stderr);
       assert.ok(eventIndex(result, 'runtime-import') >= 0);
       assert.equal(result.boot_state, 'BLOCKED');
       assert.equal(JSON.parse(await fs.readFile(host.evidenceFile, 'utf8')).state, 'STOPPED_BY_OWNER_IPC');
-      assert.match(result.stderr, /PRIMARY_SHUTDOWN_BLOCKED/);
+      assert.match(result.stderr, /LOCAL_RUNTIME_QUIT_BLOCKED/);
       assert.equal(event(result, 'forced-fallback-armed'), undefined);
       assert.equal(event(result, 'forced-fallback-fired'), undefined);
-      assert.equal(event(result, 'quit-requested'), undefined);
+      assert.ok(eventIndex(result, 'quit-requested') >= 0);
+      assert.equal(event(result, 'exit'), undefined);
       assert.doesNotMatch(result.stderr + result.stdout, /PRIVATE_DATABASE_FIXTURE_SECRET|private-host-config/);
     }
   });

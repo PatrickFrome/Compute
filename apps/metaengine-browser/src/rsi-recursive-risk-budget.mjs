@@ -69,11 +69,6 @@ function positiveInt(value, label, max = Number.MAX_SAFE_INTEGER) {
   return out;
 }
 
-function nonNegativeInt(value, label, max = Number.MAX_SAFE_INTEGER) {
-  const out = Number(value);
-  if (!Number.isSafeInteger(out) || out < 0 || out > max) throw new Error(`rsi_risk_${label}_invalid`);
-  return out;
-}
 
 function assertZeroAuthority(value, label) {
   for (const field of ['execution_authority', 'production_mutation_authority', 'promotion_authority', 'self_update_authority', 'authority_effect']) {
@@ -82,17 +77,6 @@ function assertZeroAuthority(value, label) {
   if (value?.automatic_retry_allowed !== false) throw new Error(`rsi_risk_${label}_automatic_retry_invalid`);
 }
 
-function zeroAuthority(extra = {}) {
-  return Object.freeze({
-    ...extra,
-    execution_authority: false,
-    production_mutation_authority: false,
-    promotion_authority: false,
-    self_update_authority: false,
-    automatic_retry_allowed: false,
-    authority_effect: false,
-  });
-}
 
 function evidenceRefs(value) {
   if (!Array.isArray(value) || value.length < 1 || value.length > MAX_EVIDENCE_REFS) throw new Error('rsi_risk_evidence_refs_invalid');

@@ -233,17 +233,34 @@ test('isolated launch drops all inherited credentials, owner endpoint, module lo
     'NODE_OPTIONS', 'ME2_UI_DIR', 'ME2_UI_BIN']) assert.equal(Object.hasOwn(env, key), false, key);
 });
 
-test('missing automatic descriptor must deny runtime admission without a database wizard or cloud fallback', () => {
+test('absent descriptor requires real native No, exact denied receipt and no runtime/cloud admission', () => {
+  const pid=712;
+  const nativeDenial={schema:'metaengine.browser.native-consent-denial-interaction.v1',browser_pid:pid,
+    browser_birth:'134000000000000000',consent_pid:713,consent_birth:'134000000000000001',native_control_id:7,
+    native_no_activated:true,exact_process_tree_bound:true,generated_fixture_bound:true,authority_effect:false};
   const row = { schema: 'metaengine.browser.provider-startup.v1', state: 'LOCAL_PROVIDER_STARTUP_BLOCKED',
-    reason: 'local_state_packaged_owner_not_ready', browser_runtime_started: false, automatic_cloud_fallback: false, authority_effect: false };
-  assert.equal(assertMissingDescriptorAdmissionContract(row), true);
-  for (const [key, value] of [['schema', 'untrusted'], ['state', 'READY'], ['reason', 'arbitrary'],
+    reason: 'installed_fresh_provider_consent_declined', phase:'FRESH_LOCAL_PROVIDER_SETUP',
+    bootstrap_state:'NO_OWNER_CONFIG',attachment_state:'NO_DESCRIPTOR',
+    browser_runtime_started: false, automatic_cloud_fallback: false, authority_effect: false };
+  const rows=['NATIVE_CONSENT_REQUESTED','NATIVE_CONSENT_DECLINED'].map(state=>({
+    schema:'metaengine.browser.fresh-provider-native-consent.v1',state,parent_pid:pid,
+    diagnostic_only:true,browser_runtime_started:false,authority_effect:false}));
+  const output=rows.map(value=>JSON.stringify(value)).join('\n');
+  const context={pid,nativeDenial};
+  assert.equal(assertMissingDescriptorAdmissionContract(row,output,context), true);
+  for (const [key, value] of [['schema', 'untrusted'], ['state', 'READY'], ['reason', 'local_state_packaged_owner_not_ready'],
+    ['reason','installed_fresh_provider_setup_requires_review'],['phase','UNKNOWN'],['attachment_state','CONFIGURED'],
     ['browser_runtime_started', true], ['automatic_cloud_fallback', true], ['authority_effect', true]]) {
-    assert.throws(() => assertMissingDescriptorAdmissionContract({ ...row, [key]: value }), /missing_descriptor_admission_contract_invalid/);
+    assert.throws(() => assertMissingDescriptorAdmissionContract({ ...row, [key]: value },output,context), /missing_descriptor_admission_contract_invalid/);
   }
-  for (const output of ['RUNTIME_IMPORT_OK', 'ME2_INTEGRATION_START', 'DAEMON_HEALTHY', 'ME2_PRIMARY_SHELL_VISIBLE']) {
-    assert.throws(() => assertMissingDescriptorAdmissionContract(row, output), /missing_descriptor_admission_contract_invalid/);
+  for (const extra of ['RUNTIME_IMPORT_OK', 'ME2_INTEGRATION_START', 'DAEMON_HEALTHY', 'ME2_PRIMARY_SHELL_VISIBLE']) {
+    assert.throws(() => assertMissingDescriptorAdmissionContract(row, output+'\n'+extra,context), /missing_descriptor_admission_contract_invalid/);
   }
+  for(const changed of ['',JSON.stringify(rows[0]),output.replaceAll('NATIVE_CONSENT_DECLINED','NATIVE_CONSENT_NOT_CONFIRMED'),
+    output.replaceAll('"parent_pid":712','"parent_pid":714'),output+'\n'+JSON.stringify(rows[1])]) {
+    assert.throws(()=>assertMissingDescriptorAdmissionContract(row,changed,context),/missing_descriptor_admission_contract_invalid/);
+  }
+  assert.throws(()=>assertMissingDescriptorAdmissionContract(row,output,{pid}),/native_no_interaction_unbound/);
 });
 
 async function automaticFixture(t) {

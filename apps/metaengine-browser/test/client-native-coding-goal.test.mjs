@@ -31,6 +31,38 @@ function fixture(){
   return {input,receipt,result,snapshot,journal,storage,getDurable:()=>structuredClone(durable),getWrites:()=>writes};
 }
 
+function rejectionResult(input,profile_id=randomUUID()){
+ return {state:'REJECTED_BEFORE_DISPATCH',admission:null,rejection:{schema:'metaengine.native-coding.seed-rejection.v1',state:'REJECTED_BEFORE_DISPATCH',
+  ...input,profile_id,profile_sha256:'a'.repeat(64),body_sha256:hash(JSON.stringify({objective:input.objective,request_id:input.request_id})),
+  admission_absent:true,semantic_fence_absent:true,automatic_retry_allowed:false,authority_effect:false},
+  production_qualified:false,automatic_retry_allowed:false,authority_effect:false};
+}
+test('confirmed pre-dispatch rejection survives restart and never replays the old request',async()=>{
+ const f=fixture(),calls=[],request=async(op,input)=>{calls.push(op);return rejectionResult(input,f.receipt.profile_id);};
+ const router=createClientNativeCodingGoalRouter({journal:f.journal,request,projectSnapshot:async()=>{throw Error('NO_PROJECT');},onAdmitted:async()=>{throw Error('NO_EXECUTION');}});
+ await assert.rejects(router.submit({request_id:f.input.request_id,goal:f.input.objective}), /rejected_before_dispatch:/);
+ assert.equal(f.journal.latest().state,'FAILED');assert.equal(f.journal.latest().receipt,null);assert.deepEqual(calls,['SEED_GOAL']);
+ const restored=new ClientGoalJournal(f.storage);await restored.load();assert.equal(restored.latest().native_rejection.admission_absent,true);
+ await restored.markReconcileRequired(f.input.request_id,'late transport failure');assert.equal(restored.latest().state,'FAILED');
+ await assert.rejects(restored.recordNativeAdmission(f.receipt),/rejection_conflict/);
+ const next=createClientNativeCodingGoalRouter({journal:restored,request,projectSnapshot:async()=>f.snapshot});
+ await assert.rejects(next.submit({request_id:f.input.request_id,goal:f.input.objective}),/already_recorded/);assert.equal(calls.length,1);
+ // A new explicit user request is possible; refresh never causes it.
+ await next.refresh(restored.latest());assert.deepEqual(calls,['SEED_GOAL']);
+ const offline=createClientNativeCodingGoalRouter({journal:restored,request:async()=>{throw Error('HOST_REPLACED');},projectSnapshot:async()=>{throw Error('NO_PROJECT');}});
+ assert.equal((await offline.refresh(restored.latest())).state,'FAILED');
+ assert.equal(restored.latest().project_error,null);
+ await assert.rejects(next.submit({request_id:randomUUID(),goal:'A new explicit request after the fix'}));
+ assert.deepEqual(calls,['SEED_GOAL','SEED_GOAL']);assert.equal(restored.snapshot().entries.length,2);
+});
+test('rejection requires matching objective, durable request and affirmative absence observations',()=>{
+ const f=fixture(),valid=rejectionResult(f.input);assert.equal(normalizeNativeCodingSeedResult(valid,f.input).state,'REJECTED_BEFORE_DISPATCH');
+ for(const mutate of [r=>r.rejection.objective+='different',r=>r.rejection.request_id=randomUUID(),r=>r.rejection.admission_absent=false,
+  r=>r.rejection.semantic_fence_absent=false,r=>r.rejection.body_sha256='f'.repeat(64),r=>r.admission=f.result.admission,
+  r=>r.automatic_retry_allowed=true,r=>r.rejection.authority_effect=true]){
+   const r=structuredClone(valid);mutate(r);assert.throws(()=>normalizeNativeCodingSeedResult(r,f.input),/client_native_goal_/);
+ }
+});
 test('native admission uses its own schema, exact canonical body and complete receipt digest',()=>{
   const f=fixture();const out=normalizeNativeCodingSeedResult(f.result,f.input);
   assert.equal(out.schema,'metaengine.native-coding.goal-admission.v1');assert.equal(out.physical_execution_proven,false);

@@ -7,11 +7,12 @@
  * без потери состояния флота (VS Code-паттерн «логика вне UI-процесса»).
  *
  * Разрешение каталога UI (кандидаты): ME2_UI_DIR env → resources/me2-ui (упакованный) →
- * cwd/me2-ui → cwd/../me2-ui. Спавн: ME2_UI_BIN (bun) `run start` (production-сборка Next);
- * при ME2_UI_DEV=1 — локальный Next CLI с явным loopback (только для разработки). Если ME2_UI_BIN не задан и bun
- * недоступен на машине (R77: установщик обязан работать без внешних зависимостей) —
- * честный фолбэк: Electron-бинарник в роли node (ELECTRON_RUN_AS_NODE=1) запускает
- * standalone server.js напрямую — Next standalone не требует bun. Отсутствие каталога
+ * cwd/me2-ui → cwd/../me2-ui. Production standalone без ME2_UI_BIN всегда запускается
+ * Electron-бинарником в роли node (ELECTRON_RUN_AS_NODE=1), напрямую через server.js:
+ * это основной путь, а не фолбэк после попытки bun. Явный ME2_UI_BIN сохраняется и
+ * выполняет `run start`; совместимость такого runtime проверяется отдельно от Bun
+ * как инструмента сборки. При ME2_UI_DEV=1 — локальный Next CLI с явным loopback
+ * (только для разработки). Next standalone не требует bun. Отсутствие каталога
  * и живого UI — честный DEGRADED: Mission Control остаётся на самодостаточном
  * GET /ui daemon'а (фолбэк R49).
  *

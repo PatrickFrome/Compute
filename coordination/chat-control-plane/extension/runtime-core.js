@@ -27,7 +27,6 @@
   let lastPollAt = 0;
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-  const normalize = (v) => String(v ?? "").replace(/\r\n?/g, "\n").trim();
   function normUrl(value) {
     try { const u = new URL(String(value || "")); u.hash=""; u.search=""; u.pathname=u.pathname.replace(/\/+$/," ").trim()||"/"; return `${u.origin}${u.pathname}`; }
     catch (_) { return ""; }

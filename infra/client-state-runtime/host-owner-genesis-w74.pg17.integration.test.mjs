@@ -78,8 +78,13 @@ test('W74 own-PG17 bound genesis, epoch drift, ambiguous project and restart (ST
       guardian_client_kernel_birth_verified:true,
       guardian_client_kernel_birth_rechecked:true,
     });
-    let adminEpoch=7,record=null;
+    let adminEpoch=7,record=null,transactions=0;
+    // Generated source-proof inputs exercise custody only, never installed
+    // package attestation. W68 v2 requires package-code binding even in STAGING.
+    const validPackageCode={package_code_verified:true,package_code_sha256:'f'.repeat(64)};
+    let packageCode=validPackageCode;
     const transaction=(fn,opts)=>sql.begin(async tx=>{
+      transactions++;
       if(opts.readOnly)await tx.unsafe('SET TRANSACTION READ ONLY');
       else await tx.unsafe('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE');
       return fn(tx);
@@ -97,12 +102,23 @@ test('W74 own-PG17 bound genesis, epoch drift, ambiguous project and restart (ST
         native_signature_verified:true,proof_identity:'d'.repeat(64),
         installed_exe_sha256:'e'.repeat(64),release_root_signature_verified:true,
         slsa_evidence_digest_bound:true,observed_at:at(),authority_effect:false,
-        fixture_classification:'STAGING'}),
+        ...packageCode,fixture_classification:'STAGING'}),
       readSealed:async()=>record,
       writeSealed:async(next,previous)=>{
         assert.equal(record,previous);record=next;
       },staging:true,
     });
+    for(const invalidPackageCode of [{},
+      {...validPackageCode,package_code_verified:false},
+      {...validPackageCode,package_code_sha256:undefined},
+      {...validPackageCode,package_code_sha256:'not-a-digest'},
+    ]){
+      packageCode=invalidPackageCode;
+      assert.equal(await custody.create(),null,'missing/unverified package-code proof denied');
+      assert.equal(record,null,'invalid source cannot create sealed Owner custody');
+      assert.equal(transactions,0,'invalid source cannot reach own-PG authority');
+    }
+    packageCode=validPackageCode;
     assert.equal((await custody.create())?.project_id,project,
       'project comes from pinned real ownPG catalog, not caller');
     assert.equal(record.fixture_classification,'STAGING');

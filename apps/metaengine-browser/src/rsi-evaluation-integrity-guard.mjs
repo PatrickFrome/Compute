@@ -21,7 +21,6 @@ function exactCandidateId(v,l){const o=String(v||'').toLowerCase();if(!CANDIDATE
 function probability(v,l){const o=Number(v);if(!Number.isFinite(o)||o<0||o>1)throw new Error(`rsi_integrity_${l}_invalid`);return o}
 function canonicalProbabilityDelta(high,low){return Math.max(0,Math.round((high-low)*1e12)/1e12)}
 function refs(v){if(!Array.isArray(v)||v.length<1||v.length>MAX_REFS)throw new Error('rsi_integrity_evidence_refs_invalid');const s=new Set();return v.map(x=>{const r=boundedId(x,'evidence_ref');if(s.has(r))throw new Error('rsi_integrity_evidence_ref_duplicate');s.add(r);return r}).sort()}
-function zero(extra={}){return Object.freeze({...extra,execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,automatic_retry_allowed:false,authority_effect:false})}
 function assertZero(v,l){for(const f of ['execution_authority','production_mutation_authority','promotion_authority','self_update_authority','authority_effect'])if(v?.[f]!==false)throw new Error(`rsi_integrity_${l}_${f}_invalid`);if(v?.automatic_retry_allowed!==false)throw new Error(`rsi_integrity_${l}_automatic_retry_invalid`)}
 
 export function createRsiEvaluationIntegrityPolicy({

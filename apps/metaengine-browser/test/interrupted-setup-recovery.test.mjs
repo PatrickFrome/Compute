@@ -7,6 +7,7 @@ import vm from 'node:vm';
 import { InterruptedSetupRecovery, interruptedSetupDigest, planInterruptedSetupRecovery } from '../src/interrupted-setup-recovery.mjs';
 import { SupervisorKeepalive as SupervisorBootstrapKeepalive } from '../src/supervisor-keepalive.mjs';
 import { FleetProvisioner } from '../src/fleet-provisioner-core.mjs';
+import { createBrowserParentSuspensionMutationGate } from '../src/browser-parent-suspension-mutation-gate.mjs';
 
 const recoveryId = 'recovery_9389026c-f74a-48a3-a3f0-b336e7d1c619';
 function fixture() {
@@ -360,6 +361,7 @@ test('main command guard accounts already admitted direct mutations and denies n
     ${source.slice(begin, end)}
     return { run: runInterruptedSetupPhysicalMutation, count: () => interruptedSetupPhysicalMutationsInFlight };
   })()`, { nativeSupervisor: { interruptedSetupRecoveryFenced: () => hold },
+    browserParentMutationGate: createBrowserParentSuspensionMutationGate(),
     classifyNativeSupervisorCommand: ({ action }) => ({ read_only: action === 'CAPTURE' || action === 'READ_TRANSCRIPT' }) });
   let finish;
   const longOperation = lane.run('FLEET_RECONCILE', () => new Promise(resolve => { finish = resolve; }));
@@ -433,6 +435,7 @@ test('deferred physical tab entrypoints obey the same recovery hold without losi
     return { createTab, loadTab, closeTab, count: () => interruptedSetupPhysicalMutationsInFlight };
   })()`, {
     AGENT_PLATFORM_HOME_URL: 'https://chatgpt.com/', nativeSupervisor: { interruptedSetupRecoveryFenced: () => hold },
+    browserParentMutationGate: createBrowserParentSuspensionMutationGate(),
     classifyNativeSupervisorCommand: () => ({ read_only: false }),
     createTabWithRecoveryAdmission: implementation('createTab'), loadTabWithRecoveryAdmission: implementation('loadTab'), closeTabWithRecoveryAdmission: implementation('closeTab'),
   });

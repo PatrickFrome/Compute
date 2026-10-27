@@ -11,6 +11,7 @@ import { ApiError, authenticated, compileTableRequest, compileRpcRequest, RPC_AL
 const MAX_BODY_BYTES = 1024 * 1024;
 const APPLICATION_REQUEST_CAPACITY = 6;
 const HEALTH_REQUEST_CAPACITY = 1;
+const HEALTH_OBSERVER_CAPACITY = 16;
 const CLAIMS = JSON.stringify({ role: 'service_role', aud: 'authenticated', iss: 'local-state-runtime' });
 
 async function readBody(request) {
@@ -88,6 +89,7 @@ export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port
   let tableAccess;
   let activeRequests = 0;
   let activeHealthRequests = 0;
+  let capabilityReadInFlight = null;
   const transaction = (run, { readOnly = false } = {}) => sql.begin(async (tx) => {
     if (readOnly) await tx.unsafe('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
     if (roleMode === 'service_role') await tx.unsafe("SET LOCAL ROLE service_role");
@@ -98,6 +100,19 @@ export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port
     await tx.unsafe("SELECT set_config('request.jwt.claims', $1, true), set_config('request.jwt.claim.role', 'service_role', true)", [CLAIMS]);
     return run(tx);
   });
+  const readHealthCapabilities = plan => {
+    // Both health surfaces ask this exact parameterless read. Coalesce only
+    // overlapping authenticated observers; never retain a completed result.
+    // This preserves a physical SQL slot while API/Edge/Browser probes overlap.
+    if (plan.values.length !== 0) throw new ApiError(400, 'health_capability_arguments_forbidden');
+    if (!capabilityReadInFlight) {
+      const pending = transaction(tx => tx.unsafe(plan.text, driverValues(sql, plan.values)), { readOnly: true });
+      capabilityReadInFlight = pending;
+      const clear = () => { if (capabilityReadInFlight === pending) capabilityReadInFlight = null; };
+      pending.then(clear, clear);
+    }
+    return capabilityReadInFlight;
+  };
   // Private service capability: never routable over HTTP, page or Gateway.
   // Absent W60 authenticated Host producer: null, not a fabricated birth.
   const readOwnPostgresBirth = bindOwnPostgresBirthProviderW61({
@@ -155,10 +170,13 @@ export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port
       if (request.headers.host !== expectedHost || request.headers.origin !== undefined) throw new ApiError(403, 'local_service_request_required');
       if (!authenticated(request.headers, apiKey)) throw new ApiError(401, 'local_service_key_required');
       const url = new URL(request.url, `http://${expectedHost}`);
-      // Health must still inspect the DB when all six application requests
-      // are busy. It has one separate bounded read slot, with the same auth.
-      if(url.pathname==='/health'&&request.method==='GET'&&!url.search) {
-        if(activeHealthRequests>=HEALTH_REQUEST_CAPACITY) throw new ApiError(503,'local_state_health_busy');
+      // Bound HTTP observers separately from the one shared in-flight SQL read.
+      // A simultaneous API probe must not be rejected merely because Edge is
+      // observing the same capabilities. Authentication still precedes admission.
+      const healthRead=!url.search&&((url.pathname==='/health'&&request.method==='GET')
+        ||(url.pathname==='/rest/v1/rpc/devos_runtime_capabilities_v1'&&request.method==='POST'));
+      if(healthRead) {
+        if(activeHealthRequests>=HEALTH_OBSERVER_CAPACITY) throw new ApiError(503,'local_state_health_busy');
         activeHealthRequests++;healthAdmitted=true;
       } else {
         if (activeRequests >= APPLICATION_REQUEST_CAPACITY) throw new ApiError(503, 'local_state_api_busy');
@@ -264,7 +282,7 @@ export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port
         const missing = RPC_ALLOWLIST.filter((name) => !signatures.some((signature) => signature.name === name));
         const unavailableTables = Object.keys(TABLE_ALLOWLIST).filter((name) => !tableAccess.some((table) => table.name === name && table.readable && table.writable));
         const capabilityPlan = compileRpcRequest('devos_runtime_capabilities_v1', {}, signatures);
-        const capabilityRows = await transaction((tx) => tx.unsafe(capabilityPlan.text, driverValues(sql, capabilityPlan.values)));
+        const capabilityRows = await readHealthCapabilities(capabilityPlan);
         return send(response, missing.length || unavailableTables.length ? 503 : 200, {
           ok: missing.length === 0 && unavailableTables.length === 0, schema: 'metaengine.client-state.health.v1', mode: 'LOCAL_POSTGRES',
           instance_id: instanceId, version: 1, rpc_catalog: { available: RPC_ALLOWLIST.length - missing.length, allowed: RPC_ALLOWLIST.length, missing },
@@ -283,7 +301,8 @@ export async function startDbApi({ databaseUrl, apiKey, host = '127.0.0.1', port
         plan = compileTableRequest({ table: tableMatch[1], method: request.method, params: url.searchParams,
           body: request.method === 'POST' ? await readBody(request) : undefined, prefer: request.headers.prefer });
       } else throw new ApiError(404, 'route_not_found');
-      const rows = await transaction((tx) => tx.unsafe(plan.text, driverValues(sql, plan.values)));
+      const rows = healthAdmitted ? await readHealthCapabilities(plan)
+        : await transaction((tx) => tx.unsafe(plan.text, driverValues(sql, plan.values)));
       send(response, plan.status, plan.scalar ? rows[0]?.value ?? null : plan.returning === false ? null : Array.from(rows));
     } catch (error) {
       const mapped = databaseError(error);

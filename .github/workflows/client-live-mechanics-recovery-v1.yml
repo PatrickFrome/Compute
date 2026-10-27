@@ -57,16 +57,16 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'qualification_electron_materialization_failed' }
           $runtime = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
           if ($runtime.schema -ne 'metaengine.browser.qualified-electron-runtime.v1' `
-              -or $runtime.package_version -ne '44.0.0' `
+              -or $runtime.package_version -ne '44.9.3' `
               -or $runtime.binary_sha256 -notmatch '^[a-f0-9]{64}$' `
               -or $runtime.authority_effect -ne $false) { throw 'qualification_electron_receipt_invalid' }
           $productVersion = ([System.Diagnostics.FileVersionInfo]::GetVersionInfo($runtime.executable).ProductVersion).Trim()
-          # Electron 44 RC string version is 44.0.0; its fixed numeric revision is 0.
-          if ($productVersion -notmatch '^44\.0\.0(?:\.0)?$') {
+          # Accept only the locked release string or its zero-revision PE representation.
+          if ($productVersion -notmatch '^44\.9\.3(?:\.0)?$') {
             throw 'qualification_electron_product_version_drift'
           }
           $version = [version]$productVersion
-          if ($version.Major -ne 44 -or $version.Minor -ne 0 -or $version.Build -ne 0 `
+          if ($version.Major -ne 44 -or $version.Minor -ne 9 -or $version.Build -ne 3 `
               -or $version.Revision -notin @(-1, 0)) {
             throw 'qualification_electron_product_version_drift'
           }

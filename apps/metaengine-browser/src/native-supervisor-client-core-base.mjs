@@ -209,13 +209,6 @@ export async function sendBootstrapHeartbeat({ identity, fetchImpl, getState, ve
   });
 }
 
-function delay(ms) {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    timer.unref?.();
-  });
-}
-
 export class NativeSupervisorClient extends BaseNativeSupervisorClient {
   #devosTaskCycle;
   #lastDevosError = null;
@@ -474,6 +467,10 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
   bindDevosMemoryRetriever(fn) {
     if (fn != null && typeof fn !== 'function') throw new Error('native_supervisor_memory_retriever_invalid');
     if (typeof this.#devosTaskCycle?.bindMemoryRetriever === 'function') this.#devosTaskCycle.bindMemoryRetriever(fn);
+  }
+
+  bindDevosVerifiedSkillDispatch(consumer) {
+    this.#devosTaskCycle?.bindVerifiedSkillDispatch(consumer);
   }
 
   bindDevosProjectRuntime(runtime) {

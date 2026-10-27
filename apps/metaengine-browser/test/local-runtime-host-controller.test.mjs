@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -15,9 +16,15 @@ const delay = milliseconds => new Promise(resolve => setTimeout(resolve, millise
 // Full-suite Windows runs compete for process startup and exit-event delivery.
 // These are inert fixture budgets, separate from the production host deadlines.
 const FIXTURE_START_TIMEOUT_MS = 30000;
-async function waitForFixtureExitObservation(env) {
-  const deadline = Date.now() + 10000;
-  while (env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE !== 'BLOCKED' && Date.now() < deadline) await delay(20);
+async function waitForFixtureExitObservation(fixture) {
+  assert.equal(fixture.children.length, 1);
+  let timer;
+  try {
+    await Promise.race([fixture.children[0].ended, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('fixture_child_exit_timeout')), 10000);
+    })]);
+  } finally { clearTimeout(timer); }
+  assert.equal(fixture.children[0].exited, true);
 }
 const childSource = [
   'import fs from "node:fs";',
@@ -28,8 +35,9 @@ const childSource = [
   '  tokens_absent: !process.env.SUPABASE_SERVICE_ROLE_KEY && !process.env.GITHUB_TOKEN && !process.env.OPENAI_API_KEY,',
   '  browser_identity_absent: !process.env.METAENGINE_STATE_PROVIDER && !process.env.METAENGINE_LOCAL_STATE_INSTANCE_ID,',
   '}));',
-  'const terminal = (reason, code = 0) => process.send({schema:"compute.runtime-host-terminal.v1",launch_nonce:process.env.COMPUTE_RUNTIME_HOST_LAUNCH_NONCE,host_pid:process.pid,instance_id:' + JSON.stringify(instance) + ',state:"STOPPED",children_stopped:true,ownership_released:true,reason,authority_effect:false}, () => config.mode === "ignore-stop" ? setTimeout(() => process.exit(code),150) : process.exit(code));',
-  'process.on("message", value => { if (value?.schema === "compute.runtime-host-control.v1" && value.command === "stop") terminal("requested"); });',
+  'let terminalExitCode = 0, terminalSent = false;',
+  'const terminal = (reason, code = 0) => { if(terminalSent) return; terminalSent = true; terminalExitCode = code; process.send({schema:"compute.runtime-host-terminal.v1",launch_nonce:process.env.COMPUTE_RUNTIME_HOST_LAUNCH_NONCE,host_pid:process.pid,instance_id:' + JSON.stringify(instance) + ',state:"STOPPED",children_stopped:true,ownership_released:true,reason,authority_effect:false}, () => config.hold_exit ? undefined : config.mode === "ignore-stop" ? setTimeout(() => process.exit(code),150) : process.exit(code)); };',
+  'process.on("message", value => { if (value?.schema === "compute.runtime-host-control.v1" && value.command === "stop") { terminal("requested"); if(config.hold_exit) process.send({schema:"fixture.stop-observed"}); } else if(value?.schema === "fixture.control" && value.command === "terminal-stop") terminal("runtime_health_failed",2); else if(value?.schema === "fixture.control" && value.command === "release-exit") process.exit(terminalExitCode); });',
   'process.once("disconnect", () => { if(config.mode !== "ignore-stop") process.exit(0); });',
   'if (config.mode === "failure") {',
   '  process.stderr.write("PRIVATE_FIXTURE_DATABASE_SECRET");',
@@ -42,7 +50,7 @@ const childSource = [
   '}',
 ].join('\n');
 
-async function fixture(t, { mode = 'ready', descriptorPatch = {} } = {}) {
+async function fixture(t, { mode = 'ready', descriptorPatch = {}, holdExit = false } = {}) {
   const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-managed-host-')));
   t.after(async () => {
     const stopped = await stopOwnedLocalRuntimeHost({ timeoutMs: 2000 });
@@ -58,7 +66,7 @@ async function fixture(t, { mode = 'ready', descriptorPatch = {} } = {}) {
   const evidenceFile = path.join(directory, 'inert-host-evidence.json');
   const endpoint = 'http://127.0.0.1:25433/a2-browser-native-supervisor-v1';
   await fs.writeFile(configFile, JSON.stringify({
-    mode, descriptor_patch: descriptorPatch, endpoint, identity_file: identityFile,
+    mode, hold_exit: holdExit, descriptor_patch: descriptorPatch, endpoint, identity_file: identityFile,
     config_file: configFile, evidence_file: evidenceFile, password: 'PRIVATE_FIXTURE_DATABASE_SECRET',
   }));
   const config = {
@@ -77,7 +85,16 @@ async function fixture(t, { mode = 'ready', descriptorPatch = {} } = {}) {
     assert.deepEqual(options, { bundleDirectory, expectedBundleDigest: 'a'.repeat(64) });
     return { paths: { nodeExecutable: process.execPath, sourceRoot: bundleDirectory, hostEntry: hostFile } };
   };
-  return { config, env, evidenceFile, verifyBundleImpl, verifications: () => verifications };
+  const children = [];
+  const spawnImpl = (...args) => {
+    const child = spawn(...args);
+    const record = { child, exited: false, messages: [] };
+    record.ended = new Promise(resolve => child.once('exit', (code, signal) => { record.exited = true; resolve({ code, signal }); }));
+    child.on('message', value => record.messages.push(value));
+    children.push(record);
+    return child;
+  };
+  return { config, env, evidenceFile, verifyBundleImpl, spawnImpl, children, verifications: () => verifications };
 }
 
 test('explicit managed host descriptor accepts only public pinned canonical resource/config locations', () => {
@@ -221,10 +238,47 @@ test('bounded owner cleanup reports unconfirmed before parent disconnect finishe
   assert.equal((await stopOwnedLocalRuntimeHost({ timeoutMs: 2000 })).cleanup_confirmed, true);
 });
 
+test('an unsolicited fixture terminal followed by stop retains one reason until physical exit', async t => {
+  const f = await fixture(t, { holdExit: true });
+  await startConfiguredLocalRuntimeHost({ ...f, startupTimeoutMs: FIXTURE_START_TIMEOUT_MS, stopTimeoutMs: 2000 });
+  const record = f.children[0];
+  const waitForMessage = async schema => {
+    const deadline = Date.now() + 10000;
+    while (!record.messages.some(value => value.schema === schema) && Date.now() < deadline) await delay(5);
+    assert.ok(record.messages.some(value => value.schema === schema));
+  };
+  let stopping, observingExit;
+  try {
+    record.child.send({ schema: 'fixture.control', command: 'terminal-stop' });
+    await waitForMessage('compute.runtime-host-terminal.v1');
+    assert.equal(f.env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE, 'BLOCKED');
+    assert.equal(record.exited, false);
+    let exitObserved = false;
+    observingExit = waitForFixtureExitObservation(f).then(() => { exitObserved = true; });
+    observingExit.catch(() => {});
+    await delay(20);
+    assert.equal(exitObserved, false);
+    stopping = stopOwnedLocalRuntimeHost({ timeoutMs: 2000 });
+    await waitForMessage('fixture.stop-observed');
+    assert.equal(record.exited, false);
+    record.child.send({ schema: 'fixture.control', command: 'release-exit' });
+    assert.equal((await stopping).cleanup_confirmed, true);
+    assert.deepEqual(await record.ended, { code: 2, signal: null });
+    await observingExit;
+    assert.equal(exitObserved, true);
+    assert.deepEqual(record.messages.filter(value => value.schema === 'compute.runtime-host-terminal.v1').map(value => value.reason), ['runtime_health_failed']);
+  } finally {
+    if (record.child.connected) record.child.send({ schema: 'fixture.control', command: 'release-exit' });
+    await waitForFixtureExitObservation(f);
+    await observingExit;
+    await stopping;
+  }
+});
+
 test('unexpected clean Host termination blocks readiness without automatically replacing the writer', async t => {
   const f = await fixture(t, { mode: 'crash' });
   await startConfiguredLocalRuntimeHost({ ...f, startupTimeoutMs: FIXTURE_START_TIMEOUT_MS, stopTimeoutMs: 2000 });
-  await waitForFixtureExitObservation(f.env);
+  await waitForFixtureExitObservation(f);
   assert.equal(f.env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE, 'BLOCKED');
   assert.ok(['OWNED_RUNTIME_HOST_STOPPED', 'OWNED_RUNTIME_HOST_EXITED'].includes(f.env.METAENGINE_LOCAL_PROVIDER_BOOT_REASON));
   assert.equal(localStateProviderConnectionReady(true, f.env), false);

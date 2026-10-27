@@ -5,8 +5,7 @@ import {validateNativeCodingDeviceRequest} from './native-coding-device-request.
 
 export const NATIVE_CODING_HOST_IPC_REQUEST = 'metaengine.native-coding.host-ipc.request.v1';
 export const NATIVE_CODING_HOST_IPC_RESPONSE = 'metaengine.native-coding.host-ipc.response.v1';
-const ACTIONS = ['READ_SCOPE','READ_LEASE','REGISTER_PROVIDER','READ_EXECUTION','RESERVE_EXECUTION','ADVANCE_EXECUTION','RECONCILE_PROJECT','READ_PROJECT_CHECKPOINT','AGENT_OPERATION','FINISH_CHECKPOINT','READ_FINISH_CHECKPOINT','SEED_GOAL','READ_SEED','LIST_SEEDS','SERVICE_HEARTBEAT','READ_SERVICE_HEARTBEAT','READ_PRIOR_EXECUTION'];
-const WRITES = new Set(['REGISTER_PROVIDER','RESERVE_EXECUTION','ADVANCE_EXECUTION','RECONCILE_PROJECT','FINISH_CHECKPOINT','SEED_GOAL','SERVICE_HEARTBEAT']);
+const WRITES = new Set(['REGISTER_PROVIDER','RESERVE_EXECUTION','ADVANCE_EXECUTION','RECONCILE_PROJECT','FINISH_CHECKPOINT','RECONCILE_FINISH_CHECKPOINT','SEED_GOAL','SERVICE_HEARTBEAT']);
 const writes=(action,value)=>WRITES.has(action)||action==='AGENT_OPERATION'&&nativeCodingAgentHostOperationWrites(value);
 const REASONS = new Set(['INVALID_FRAME','INVALID_PAYLOAD','MESSAGE_TOO_LARGE','UNSUPPORTED_ACTION','INSTANCE_MISMATCH',
   'HOST_PID_MISMATCH','INFLIGHT_LIMIT','REQUEST_ID_REUSED','OPERATION_FAILED','WRITE_OUTCOME_UNKNOWN','RESPONSE_INVALID',
@@ -65,7 +64,7 @@ function payload(action,value) {
   }
   else if(['SEED_GOAL','READ_SEED','LIST_SEEDS','SERVICE_HEARTBEAT','READ_SERVICE_HEARTBEAT'].includes(action)){try{validateNativeCodingDeviceRequest(value,action);}catch{invalid('INVALID_PAYLOAD');}}
   else if(action==='AGENT_OPERATION'){try{validateNativeCodingAgentHostRequest(value);}catch{invalid('INVALID_PAYLOAD');}}
-  else if(action==='FINISH_CHECKPOINT'||action==='READ_FINISH_CHECKPOINT'){
+  else if(action==='FINISH_CHECKPOINT'||action==='READ_FINISH_CHECKPOINT'||action==='RECONCILE_FINISH_CHECKPOINT'){
     keys(value,['project_id','checkpoint_sha256']);if(!UUID.test(value.project_id||'')||!HASH.test(value.checkpoint_sha256||''))invalid('INVALID_PAYLOAD');
   }
   else if(action==='RECONCILE_PROJECT'||action==='READ_PROJECT_CHECKPOINT'){
@@ -190,6 +189,7 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
     agentOperation:request=>invoke('AGENT_OPERATION',request),
     finishCheckpoint:value=>invoke('FINISH_CHECKPOINT',value),
     readFinishCheckpoint:value=>invoke('READ_FINISH_CHECKPOINT',value),
+    reconcileFinishCheckpoint:value=>invoke('RECONCILE_FINISH_CHECKPOINT',value),
     seedGoal:value=>invoke('SEED_GOAL',value),readSeed:value=>invoke('READ_SEED',value),listSeeds:value=>invoke('LIST_SEEDS',value),
     serviceHeartbeat:value=>invoke('SERVICE_HEARTBEAT',value),readServiceHeartbeat:value=>invoke('READ_SERVICE_HEARTBEAT',value),
     // Native callback only: never a renderer event or replacement permission.

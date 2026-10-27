@@ -132,7 +132,12 @@ function boundedAgents(value){
   for(const row of rows){
     const agent_id=String(row?.agent_id||'').toLowerCase(); const role=String(row?.role||'').toUpperCase(); const lifecycle_state=String(row?.lifecycle_state||'').toUpperCase(); const tab_id=String(row?.tab_id||''); const target_id=String(row?.target_id||'').toLowerCase(); const generation_epoch=Number(row?.generation_epoch);
     if(!AGENT_RE.test(agent_id)||!ROLE_RE.test(role)||!['BOUND_UNVERIFIED','ACTIVE'].includes(lifecycle_state)||!tab_id||!TARGET_RE.test(target_id)||!Number.isSafeInteger(generation_epoch)||generation_epoch<1)continue;
-    out.push({agent_id,role,lifecycle_state,tab_id,target_id,generation_epoch});
+    const reservation=row.browser_parent_restoration;
+    if(reservation!=null && (reservation.schema!=='metaengine.browser.parent-restoration-reservation.v1'
+      || !UUID_RE.test(reservation.suspension_id||'') || !UUID_RE.test(reservation.task_id||'')
+      || !HASH_RE.test(reservation.checkpoint_sha256||'') || reservation.authority_effect!==false
+      || reservation.automatic_retry_allowed!==false)) throw new Error('devos_parent_restoration_reservation_invalid');
+    out.push({agent_id,role,lifecycle_state,tab_id,target_id,generation_epoch,...(reservation?{browser_parent_restoration:reservation}:{})});
   }
   return out;
 }
@@ -170,7 +175,7 @@ function fairIdleLeaseCandidates(snapshot,agents,backlog){
   const stats=roleSchedulingStats(snapshot);
   const groups=new Map();
   for(const agent of agents){
-    if(busy.has(agent.agent_id)||(backlog.by_role[agent.role]||0)<1)continue;
+    if(agent.browser_parent_restoration || busy.has(agent.agent_id)||(backlog.by_role[agent.role]||0)<1)continue;
     if(!groups.has(agent.role))groups.set(agent.role,[]);
     groups.get(agent.role).push(agent);
   }

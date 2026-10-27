@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
+import { performance } from 'node:perf_hooks';
 import test from 'node:test';
 import postgres from 'postgres';
 
@@ -145,16 +146,32 @@ test('client-pg17-qualification-w45: real isolated source/ACL/CAS/restart (SYNTH
       } finally { await w.end({ timeout: 2 }); }
     });
     await t.test('actual W26 lease CAS, lost commit ACK, event order and no automatic retry', async () => {
+      // The eight real connections may take longer than the minimum 5s lease
+      // to settle on CI. Prove one active lease window, then expire that exact
+      // generated row explicitly for the separate successor/ambiguity check.
+      const leaseTtlMs = 60_000;
       const maker = (incarnation, opts = {}) => createOwnPostgresSupervisorContinuityLease({
         sql: opts.sql || admin, ownerId: owner, runId: run,
-        processIncarnationId: incarnation, ttlMs: 5000,
+        processIncarnationId: incarnation, ttlMs: leaseTtlMs,
         verifyNativeReceipt: opts.verifyNativeReceipt ?? null,
       });
       const contenders = Array.from({ length: 8 }, (_, n) => maker('concurrent_' + n));
+      const raceStarted = performance.now();
       const attempts = await Promise.allSettled(contenders.map(x => x.acquireBoot()));
       const winners = attempts.flatMap((x, n) => x.status === 'fulfilled' && x.value ? [n] : []);
+      const [owned] = await admin.unsafe(`SELECT process_incarnation_id,lease_generation,
+        expires_at > clock_timestamp() AS lease_active
+        FROM public.metaengine_supervisor_continuity_lease_v1 WHERE owner_id=$1 AND run_id=$2`, [owner, run]);
+      t.diagnostic(JSON.stringify({schema:'metaengine.w45.lease-cas-window.v1',
+        contenders:contenders.length,successful_acquisitions:winners.length,
+        ttl_ms:leaseTtlMs,elapsed_ms:Math.round(performance.now()-raceStarted),
+        observed_generation:owned ? Number(owned.lease_generation) : null,
+        lease_active:owned?.lease_active===true,authority_effect:false}));
       assert.equal(winners.length, 1, 'single owner CAS; lock timeout may only fail closed');
       const first = contenders[winners[0]];
+      assert.equal(owned?.process_incarnation_id, first.snapshot().process_incarnation_id);
+      assert.equal(Number(owned.lease_generation), 1, 'the race must not span a lease expiry/transfer');
+      assert.equal(owned.lease_active, true, 'all contenders must settle inside the same active lease window');
       let drop = false;
       const ackLoss = { begin: async callback => {
         const result = await admin.begin(callback);
@@ -170,7 +187,16 @@ test('client-pg17-qualification-w45: real isolated source/ACL/CAS/restart (SYNTH
       const [committed] = await admin.unsafe('SELECT pending_wake_status,event_seq FROM public.metaengine_supervisor_continuity_lease_v1 WHERE owner_id=$1 AND run_id=$2', [owner, run]);
       assert.equal(committed.pending_wake_status, 'PREPARED');
       assert.equal(Number(committed.event_seq), 1);
-      await sleep(5300);
+      const expired = await admin.unsafe(`UPDATE public.metaengine_supervisor_continuity_lease_v1
+        SET expires_at=clock_timestamp()-interval '1 millisecond'
+        WHERE owner_id=$1 AND run_id=$2 AND process_incarnation_id=$3
+          AND lease_generation=1 AND pending_wake_status='PREPARED' AND event_seq=1
+        RETURNING expires_at <= clock_timestamp() AS expired,pending_wake_status,event_seq`,
+      [owner, run, first.snapshot().process_incarnation_id]);
+      assert.equal(expired.length, 1, 'expire only the exact generated lease with the lost-ACK wake');
+      assert.equal(expired[0].expired, true);
+      assert.equal(expired[0].pending_wake_status, 'PREPARED');
+      assert.equal(Number(expired[0].event_seq), 1, 'fixture expiry does not reconcile or erase the wake');
       const next = maker('new_incarnation');
       const boot = await next.acquireBoot();
       assert.equal(boot.lease_generation, 2);

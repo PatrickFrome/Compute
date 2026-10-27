@@ -1,7 +1,7 @@
 import { clientGoalExecutionProofMatchesProgress } from './client-control-contract.mjs';
 import { clientUsefulWorkProofMatchesExecutionProof } from './client-useful-work-proof.mjs';
 import { normalizeClientProjectRegistration } from './client-project-continuity.mjs';
-import {normalizeNativeCodingGoalAdmission,nativeCodingGoalProject} from './client-native-coding-goal.mjs';
+import {normalizeNativeCodingGoalAdmission,nativeCodingGoalProject,normalizeNativeCodingSeedRejection} from './client-native-coding-goal.mjs';
 import {isDeepStrictEqual} from 'node:util';
 
 const SCHEMA = 'metaengine.client.goal-journal.v1';
@@ -55,6 +55,9 @@ function normalizeEntry(value) {
     : null;
   const receipt=kind==='NATIVE_CODING'&&value.receipt!=null
     ?normalizeNativeCodingGoalAdmission(value.receipt,{request_id:id,objective:goal}):value.receipt;
+  const nativeRejection=value.native_rejection==null?null:normalizeNativeCodingSeedRejection(value.native_rejection,{request_id:id,objective:goal});
+  if(nativeRejection&&(kind!=='NATIVE_CODING'||state!=='FAILED'||receipt||progress||value.admitted_task_id||value.project))
+    throw new Error('client_goal_journal_native_rejection_conflict');
   let project;
   if(kind==='NATIVE_CODING'){
     project=receipt?nativeCodingGoalProject(receipt):null;
@@ -77,6 +80,7 @@ function normalizeEntry(value) {
     kind,
     goal,
     state,
+    native_rejection:nativeRejection,
     receipt: receipt && typeof receipt === 'object' && !Array.isArray(receipt)
       ? Object.freeze(clone(receipt))
       : null,
@@ -285,10 +289,23 @@ export class ClientGoalJournal {
     const id=requestId(receipt?.request_id);
     return this.#replace(id,existing=>{
       if(!existing||existing.kind!=='NATIVE_CODING')throw new Error('client_goal_journal_native_request_missing');
+      if(existing.native_rejection)throw new Error('client_goal_journal_native_rejection_conflict');
       const verified=normalizeNativeCodingGoalAdmission(receipt,{request_id:id,objective:existing.goal});
       if(existing.receipt&&!isDeepStrictEqual(existing.receipt,verified))throw new Error('client_goal_journal_native_admission_drift');
       return {...existing,receipt:verified,project:nativeCodingGoalProject(verified),admitted_task_id:verified.root_task_id,
         state:existing.progress?.task_state||'ADMITTED',last_error:null,project_error:null,updated_at:nowIso()};
+    });
+  }
+
+  async recordNativeRejection(rejection){
+    const id=requestId(rejection?.request_id);
+    return this.#replace(id,existing=>{
+      if(!existing||existing.kind!=='NATIVE_CODING'||existing.receipt||existing.progress||existing.project||existing.admitted_task_id)
+        throw new Error('client_goal_journal_native_rejection_conflict');
+      const verified=normalizeNativeCodingSeedRejection(rejection,{request_id:id,objective:existing.goal});
+      if(existing.native_rejection&&!isDeepStrictEqual(existing.native_rejection,verified))throw new Error('client_goal_journal_native_rejection_conflict');
+      return {...existing,native_rejection:verified,state:'FAILED',last_error:'native_goal_rejected_before_dispatch',
+        project_error:null,updated_at:nowIso()};
     });
   }
 
@@ -373,6 +390,7 @@ export class ClientGoalJournal {
     const id = requestId(rawRequestId);
     return this.#replace(id, existing => {
       if (!existing) throw new Error('client_goal_journal_request_missing');
+      if(existing.native_rejection)return existing;
       return {
         ...existing,
         state: 'RECONCILE_REQUIRED',

@@ -1,0 +1,38 @@
+{
+  "base": "19694ae244849dfa7ca3f8c79786867aa616af78",
+  "product_version_unchanged": "0.7.0-dev.1107139874594.1",
+  "package_entries_added": 0,
+  "package_entries_removed": 0,
+  "only_changed_package_fields": [
+    "version",
+    "resolved",
+    "integrity"
+  ],
+  "updated": [
+    {
+      "path": "node_modules/electron",
+      "before": "44.0.0",
+      "after": "44.9.3"
+    },
+    {
+      "path": "node_modules/fast-uri",
+      "before": "3.1.8",
+      "after": "3.1.9"
+    },
+    {
+      "path": "node_modules/http-cache-semantics",
+      "before": "4.2.0",
+      "after": "4.3.0"
+    },
+    {
+      "path": "node_modules/node-gyp/node_modules/undici",
+      "before": "6.29.0",
+      "after": "6.29.1"
+    },
+    {
+      "path": "node_modules/undici",
+      "before": "7.30.0",
+      "after": "7.30.1"
+    }
+  ]
+}

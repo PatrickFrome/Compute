@@ -467,12 +467,37 @@ export function assertUpgradeReceipt(receipt,options) {
 // One descriptor transaction. A failed final readback restores the predecessor
 // only while the exact descriptor written by this attempt is still present.
 // Never overwrite another operator's concurrent publication during rollback.
+async function publishDescriptorLink(staged,owner,bytes) {
+  // link is an atomic absent-only publication. Only this exact temporary pair
+  // may have two links; ordinary Owner reads keep their single-link policy.
+  await fs.link(staged,owner);
+  const a=await fs.lstat(staged),b=await fs.lstat(owner);
+  if(!a.isFile()||a.isSymbolicLink()||!b.isFile()||b.isSymbolicLink()
+    ||a.nlink!==2||b.nlink!==2||a.dev!==b.dev||a.ino!==b.ino
+    ||!(await fs.readFile(staged)).equals(bytes)||!(await fs.readFile(owner)).equals(bytes))fail('publication_effect_unknown');
+  await fs.unlink(staged);
+  if(!(await stableUpgradeRead(owner)).equals(bytes))fail('publication_effect_unknown');
+}
+async function replaceOwnerDescriptor(owner,staged,expected,next) {
+  const custody=await fs.mkdtemp(owner+'.publication-'),captured=path.join(custody,'preimage');
+  if(!(await stableUpgradeRead(owner)).equals(expected))fail('owner_cas_mismatch');
+  // Capture the actual descriptor rather than rename over a mutable pathname.
+  // Any lost acknowledgement retains its original bytes in this private root.
+  await fs.rename(owner,captured);
+  const actual=await stableUpgradeRead(captured);
+  if(!actual.equals(expected)) {
+    try { await publishDescriptorLink(captured,owner,actual); }
+    catch(error) { if(error.code!=='EEXIST')throw error; }
+    fail('owner_cas_mismatch');
+  }
+  await publishDescriptorLink(staged,owner,next);
+}
 export async function publishOwnerFile({ownerFile,stagedFile,oldBytes,nextBytes,rollbackFile},
   {verifyPublished=async()=>{}}={}) {
   if(!(await stableUpgradeRead(ownerFile)).equals(oldBytes))fail('owner_cas_mismatch');
   if(!(await stableUpgradeRead(stagedFile)).equals(nextBytes))fail('owner_stage_mismatch');
   if(path.parse(stagedFile).root.toLowerCase()!==path.parse(ownerFile).root.toLowerCase())fail('cross_volume_forbidden');
-  await fs.rename(stagedFile,ownerFile);
+  await replaceOwnerDescriptor(ownerFile,stagedFile,oldBytes,nextBytes);
   try {
     if(!(await stableUpgradeRead(ownerFile)).equals(nextBytes))fail('owner_readback_mismatch');
     await verifyPublished();
@@ -480,7 +505,7 @@ export async function publishOwnerFile({ownerFile,stagedFile,oldBytes,nextBytes,
   } catch(error) {
     if(!(await stableUpgradeRead(ownerFile)).equals(nextBytes))fail('publication_effect_unknown');
     await exclusive(rollbackFile,oldBytes);
-    await fs.rename(rollbackFile,ownerFile);
+    await replaceOwnerDescriptor(ownerFile,rollbackFile,nextBytes,oldBytes);
     if(!(await stableUpgradeRead(ownerFile)).equals(oldBytes))fail('rollback_unconfirmed');
     error.rollbackConfirmed=true;
     throw error;

@@ -6,6 +6,7 @@ const workflow = readFileSync(new URL('../../../.github/workflows/client-v1-supa
 const producerGuard = "github.event_name != 'pull_request' || github.head_ref != 'work/client-owned-state-runtime-v1'";
 const guard = "github.event_name != 'pull_request' || (github.head_ref != 'work/client-owned-state-runtime-v1' && github.head_ref != 'work/client-runtime-restart-singleton-v1' && github.head_ref != 'work/client-restored-pg17-runtime-repair-v1' && github.head_ref != 'work/client-mcp-offline-installer-qualification-v1' && github.head_ref != 'work/client-mcp-db-connect-operator-v1' && github.head_ref != 'work/client-installed-pg17-setup-wizard-v1' && github.head_ref != 'work/client-github-chat-control-v1' && github.head_ref != 'work/client-github-chat-egress-redaction-v1' && github.head_ref != 'work/client-pg17-auto-prepare-durable-v1' && github.head_ref != 'work/client-github-chat-result-egress-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r2-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r3-v1' && github.head_ref != 'work/client-pg17-private-windows-acl-r4-v1' && github.head_ref != 'work/client-autonomous-continuity-v1')";
 const selfUpdateGuard = `${guard.slice(0, -1)} && github.head_ref != 'work/metaengine-critical-closure-20261015')`;
+const soakGuard = guard.replace("(", "(github.head_ref != 'work/preinstall-soak-20261027' && ");
 const guardedJobs = [
   ['client-v1-supabase-edge-live-probe.yml', 'public-health'],
   ['browser-windows-installed-chat-qualification.yml', 'windows-installed-chat-qualification'],
@@ -20,13 +21,31 @@ for (const [file, job] of guardedJobs) {
   test(`local-only PR holds hosted/default-cloud physical job ${file}:${job}`, () => {
     const source = readFileSync(new URL(`../../../.github/workflows/${file}`, import.meta.url), 'utf8');
     const expectedGuard = file === 'browser-windows-package-smoke.yml' ? producerGuard
-      : file === 'metaengine-browser-self-update-e2e.yml' ? selfUpdateGuard : guard;
+      : file === 'metaengine-browser-self-update-e2e.yml' ? selfUpdateGuard
+      : file === 'browser-windows-autonomous-soak-v1.yml' ? soakGuard : guard;
     const escaped = expectedGuard.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     assert.match(source, new RegExp(`^  ${job}:\\r?\\n(?:    #[^\\n]*\\r?\\n)*    if: ${escaped}\\r?\\n`, 'm'));
     assert.match(source, /^on:\r?\n/m);
     assert.match(source, /^  pull_request:\r?\n/m);
   });
 }
+
+test('source-only soak PR stays held alongside all historical local-only branches', () => {
+  const source = readFileSync(new URL('../../../.github/workflows/browser-windows-autonomous-soak-v1.yml', import.meta.url), 'utf8');
+  const job = source.split('  package-session-soak:')[1]?.split(/\r?\n  [a-zA-Z0-9_-]+:\s*$/m)[0];
+  assert.ok(job, 'physical soak job remains present');
+  const condition = job.match(/^    if: ([^\r\n]+)$/m)?.[1];
+  assert.equal(condition, soakGuard, 'the additional branch refusal preserves the complete historical guard');
+  const permits = new Function('github', `return ${condition};`);
+  const heldBranches = [...guard.matchAll(/github\.head_ref != '([^']+)'/g)].map(match => match[1]);
+  assert.equal(heldBranches.length, 15, 'retain every historical local-only branch');
+  for (const branch of ['work/preinstall-soak-20261027', ...heldBranches]) {
+    assert.equal(permits({ event_name: 'pull_request', head_ref: branch }), false, branch);
+  }
+  assert.equal(permits({ event_name: 'pull_request', head_ref: 'work/another-candidate' }), true);
+  assert.equal(permits({ event_name: 'push', head_ref: '' }), true);
+  assert.equal(permits({ event_name: 'workflow_dispatch', head_ref: '' }), true);
+});
 
 test('critical source closure holds the historical hosted upgrade while its contract job stays enabled', () => {
   const source = readFileSync(new URL('../../../.github/workflows/metaengine-browser-self-update-e2e.yml', import.meta.url), 'utf8');

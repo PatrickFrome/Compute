@@ -14,6 +14,31 @@ export function isW64PostmasterBirthWithinStartupEnvelope(pidBirthSeconds, sqlBi
     sqlBirthMs < (pidBirthSeconds + 2) * 1000;
 }
 
+export function formatW64PostmasterBirthDiagnostic({ pidBirthSeconds, sqlBirthSecond,
+  sqlBirthEpoch, serverVersionNum }) {
+  // Numeric metadata from this generated fixture only. Never serialize raw SQL,
+  // PGDATA, environment, command output or exception text into the assertion.
+  const finite = value => Number.isFinite(value) ? value : null;
+  const epoch = typeof sqlBirthEpoch === 'string' &&
+    /^[0-9]{1,12}(?:\.[0-9]{1,6})?$/.test(sqlBirthEpoch) ? sqlBirthEpoch : null;
+  const birthMs = epoch === null ? NaN : Number(epoch) * 1000;
+  const version = typeof serverVersionNum === 'string' &&
+    /^[0-9]{1,6}$/.test(serverVersionNum) ? Number(serverVersionNum) : null;
+  return JSON.stringify({
+    schema: 'metaengine.w64.pg17-birth-diagnostic.v1',
+    pid_birth_seconds: finite(pidBirthSeconds),
+    sql_floor_seconds: finite(sqlBirthSecond),
+    sql_epoch_seconds: epoch,
+    sql_birth_ms: finite(birthMs),
+    delta_ms: finite(birthMs - pidBirthSeconds * 1000),
+    sql_floor_matches: Number.isSafeInteger(sqlBirthSecond) &&
+      sqlBirthSecond === Math.floor(birthMs / 1000),
+    within_startup_envelope: isW64PostmasterBirthWithinStartupEnvelope(pidBirthSeconds, birthMs),
+    server_version_num: version,
+    platform: process.platform, arch: process.arch, node: process.versions.node,
+  });
+}
+
 export function createW64DisposablePgLifecycle({ run, root, data, port, pgUser }) {
   assert.equal(path.dirname(data), root, 'fixture PGDATA must be directly inside its unique root');
   assert.ok(Number.isSafeInteger(port) && port > 1024 && port < 65536);
@@ -37,20 +62,23 @@ export function createW64DisposablePgLifecycle({ run, root, data, port, pgUser }
     // pg_isready alone could see an unrelated server on a stolen ephemeral
     // port; independent SQL data_directory and start-time bind the socket.
     run('pg_isready', ['-q', '-h', '127.0.0.1', '-p', String(port), '-U', pgUser, '-d', 'postgres']);
-    const sql = "SELECT current_setting('data_directory') || '|' || floor(extract(epoch from pg_postmaster_start_time()))::bigint || '|' || extract(epoch from pg_postmaster_start_time()) || '|' || inet_server_port()";
+    const sql = "SELECT current_setting('data_directory') || '|' || floor(extract(epoch from pg_postmaster_start_time()))::bigint || '|' || extract(epoch from pg_postmaster_start_time()) || '|' || inet_server_port() || '|' || current_setting('server_version_num')";
     const fields = run('psql', ['-X', '-v', 'ON_ERROR_STOP=1', '-A', '-t', '-c', sql]).split('|');
-    assert.equal(fields.length, 4, 'unbound PG identity result');
+    assert.equal(fields.length, 5, 'unbound PG identity result');
     assert.equal(await realpath(fields[0]), await realpath(data), 'SQL connected to foreign PGDATA');
-    // postmaster.pid records time(NULL) near process creation, while SQL reports
-    // the later startup timestamp; crossing a wall-clock second is legitimate.
-    // Still bind to the identical PID before/after and reject >1s drift.
+    // PG17 writes the truncated MyStartTimestamp to postmaster.pid, while SQL
+    // exposes the later PgStartTime sampled after shared-memory/socket setup.
+    // This bounded envelope is our fixture policy, not a PG startup guarantee.
+    // Still bind the identical PID before/after; do not widen on a slow runner.
     const pgBirthSecond = Number(fields[1]);
     assert.equal(Number(fields[3]), port, 'connected to wrong PostgreSQL port');
     const birthMs = Number(fields[2]) * 1000;
     assert.ok(Number.isSafeInteger(pgBirthSecond) &&
       pgBirthSecond === Math.floor(birthMs / 1000) &&
       isW64PostmasterBirthWithinStartupEnvelope(birth.birthSec, birthMs),
-      'postmaster birth changed beyond bounded startup envelope');
+      'postmaster birth changed beyond bounded startup envelope: ' +
+        formatW64PostmasterBirthDiagnostic({ pidBirthSeconds: birth.birthSec,
+          sqlBirthSecond: pgBirthSecond, sqlBirthEpoch: fields[2], serverVersionNum: fields[4] }));
     assert.ok(Number.isFinite(birthMs) && birthMs > 0);
     assert.deepEqual(await ownedPid(), birth, 'PID/birth changed after independent readback');
     return Object.freeze({ ...birth, birthMs, port, log });

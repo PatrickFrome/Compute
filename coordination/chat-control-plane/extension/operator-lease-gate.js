@@ -1,11 +1,6 @@
 (() => {
   'use strict';
 
-  async function sha256Bytes(bytes) {
-    const digest = await crypto.subtle.digest('SHA-256', bytes);
-    return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
-  }
-
   async function signLease(lease, supervisorKey) {
     const data = `${lease.lease_id}|${lease.resource_id}|${lease.actor_id}|${lease.not_after}|${lease.kind}|${lease.target_id || ''}|${lease.profile_id || ''}|${lease.context_id || ''}`;
     const encoder = new TextEncoder();

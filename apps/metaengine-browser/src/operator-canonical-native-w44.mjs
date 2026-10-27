@@ -69,6 +69,7 @@ export function createOperatorCanonicalNativeBindingReadback({
       // no source SHA is derived from arbitrary fields or git working-tree state.
       if (installed?.source !== 'INSTALLED_EXE_NATIVE_VERIFIER' ||
         installed?.exact_bytes_verified !== true || installed?.authority_effect !== false ||
+        installed?.package_code_verified !== true || !DIGEST.test(installed.package_code_sha256 || '') ||
         !SHA.test(installed.source_sha || '') ||
         !DIGEST.test(installed.installed_exe_sha256 || '') ||
         !DIGEST.test(installed.proof_identity || '') ||

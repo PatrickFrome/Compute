@@ -10,6 +10,19 @@ const sleep = delay => new Promise(resolve => setTimeout(resolve, delay));
 const same = (left, right) => left.toLowerCase() === right.toLowerCase();
 const failure = code => Object.assign(new Error(code), { code });
 const maximumDiagnosticBytes = 32768;
+const controlSignals = new Set(['SIGABRT','SIGBUS','SIGFPE','SIGHUP','SIGILL','SIGINT','SIGKILL','SIGSEGV','SIGTERM']);
+const controlSystemCodes = new Set(['EACCES','EAGAIN','EBUSY','EEXIST','EINVAL','EIO','EISDIR','EMFILE',
+  'ENFILE','ENOENT','ENOEXEC','ENOMEM','ENOTDIR','EPERM','ETXTBSY','UNKNOWN']);
+function controlFailure(code, outcome) {
+  // Add only closed scalar observations. Existing public failure codes and
+  // process/ownership flow remain unchanged; never attach spawn errors/argv.
+  return Object.assign(failure(code), { control_outcome: Object.freeze(outcome) });
+}
+function controlSpawnOutcome(error) {
+  let code;
+  try { code = Object.getOwnPropertyDescriptor(error, 'code')?.value; } catch { /* Unknown category only. */ }
+  return { kind: 'SPAWN_ERROR', system_code: controlSystemCodes.has(code) ? code : 'OTHER' };
+}
 
 // pg_ctl exits while its restricted postmaster keeps inherited OS handles.
 // execFile's callback waits for pipe closure, which can take its entire timeout
@@ -21,12 +34,12 @@ export async function runOwnedPostgresControlProcess(executable, args, {
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 130000) {
     throw failure('owned_postgres_control_configuration_invalid');
   }
-  if (signal?.aborted) throw failure('owned_postgres_control_cancelled');
+  if (signal?.aborted) throw controlFailure('owned_postgres_control_cancelled', { kind: 'CANCELLED' });
   return new Promise((resolve, reject) => {
     let child;
     try {
       child = spawn(executable, args, { env, shell: false, windowsHide: true, stdio: 'ignore' });
-    } catch { reject(failure('owned_postgres_control_failed')); return; }
+    } catch (error) { reject(controlFailure('owned_postgres_control_failed', controlSpawnOutcome(error))); return; }
     let settled = false;
     let timer;
     const finish = error => {
@@ -40,12 +53,14 @@ export async function runOwnedPostgresControlProcess(executable, args, {
       // This handle belongs only to the just-spawned pg_ctl. The postmaster
       // remains subject to the separate strict claim/stop ownership contract.
       try { child.kill('SIGKILL'); } catch { /* The deadline remains bounded. */ }
-      finish(failure(category));
+      finish(controlFailure(category, { kind: category === 'owned_postgres_control_timeout' ? 'TIMEOUT' : 'CANCELLED' }));
     };
     const abort = () => terminateControl('owned_postgres_control_cancelled');
-    child.once('error', () => finish(failure('owned_postgres_control_failed')));
+    child.once('error', error => finish(controlFailure('owned_postgres_control_failed', controlSpawnOutcome(error))));
     child.once('exit', (code, exitSignal) => finish(code === 0 && exitSignal === null
-      ? null : failure('owned_postgres_control_failed')));
+      ? null : controlFailure('owned_postgres_control_failed', { kind: 'EXIT',
+        exit_code: Number.isInteger(code) && code >= -2147483648 && code <= 4294967295 ? code : null,
+        signal: exitSignal === null ? null : controlSignals.has(exitSignal) ? exitSignal : 'OTHER' })));
     timer = setTimeout(() => terminateControl('owned_postgres_control_timeout'), timeoutMs);
     if (signal?.aborted) abort();
     else signal?.addEventListener('abort', abort, { once: true });

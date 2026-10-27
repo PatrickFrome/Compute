@@ -1,3 +1,4 @@
+import { browserParentTelemetryFleet } from './browser-parent-suspension-telemetry.mjs';
 import crypto from 'node:crypto';
 import { AGENT_PLATFORM_ID, isAgentPlatformUrl } from './browser-agent-platform.mjs';
 import { browserControlCapabilities } from './browser-control-capabilities.mjs';
@@ -203,7 +204,7 @@ export function nativeSupervisorTransportState(state = {}) {
     active_tab: activeTab,
     development_plane: boundedTransportObject(state.development_plane, 32 * 1024),
     compute: boundedTransportObject(state.compute, 32 * 1024),
-    fleet: boundedTransportObject(state.fleet, 64 * 1024),
+    fleet: boundedTransportObject(browserParentTelemetryFleet(state.fleet), 64 * 1024),
     perception: perceptionTransportProjection(state.perception),
     supervisor_lifecycle: boundedTransportObject(state.supervisor_lifecycle, 32 * 1024),
     supervisor_mesh: boundedTransportObject(state.supervisor_mesh, 32 * 1024),
@@ -1344,7 +1345,7 @@ export class NativeSupervisorClient {
   }
 
   async projectContinuityRequest({ operation, body } = {}) {
-    if (!['register', 'snapshot', 'history', 'spawn', 'activity', 'policy', 'reconcile'].includes(operation)) throw new Error('project_continuity_transport_operation_invalid');
+    if (!['register', 'snapshot', 'history', 'spawn', 'activity', 'policy', 'reconcile', 'release-browser-child', 'suspend-browser', 'suspension-read', 'suspension-list', 'resume-browser'].includes(operation)) throw new Error('project_continuity_transport_operation_invalid');
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('project_continuity_transport_body_invalid');
     const response = await this.#signedRequest(`/v1/devos/project/${operation}`, { method: 'POST', payload: structuredClone(body) });
     const value = await response.json().catch(() => null);
@@ -1676,7 +1677,6 @@ export class NativeSupervisorClient {
   async #nextCommands() {
     if (this.#batchTransport !== 'UNAVAILABLE') {
       this.#markLeaseAttempt();
-      const waitStartedAt = Date.now();
       let leaseResult = null;
       try {
         leaseResult = await this.#leaseWaitBatchOrLegacy();

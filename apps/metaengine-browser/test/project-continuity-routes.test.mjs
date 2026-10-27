@@ -34,3 +34,19 @@ test('project route does not intercept unrelated paths', async () => {
   const routes = createProjectContinuityRoutes({ workspaceId: workspace, rpc: async () => { throw new Error('must_not_call'); } });
   assert.equal(await routes({ req: { method: 'POST' }, path: '/v1/devos/project/admission', body: {}, identity }), null);
 });
+
+test('private parent suspension routes inject ADMIN identity and reject caller authority or wrong task receipt', async()=>{
+  const flags={authority_effect:false,automatic_retry_allowed:false};let calls=[];
+  const receipt={schema:'metaengine.devos.browser-parent-suspension.v1',found:true,suspension_id:id,task_id:id,project_id:id,status:'SUSPENDED',
+    checkpoint_sha256:'a'.repeat(64),checkpoint:{schema:'metaengine.browser.parent-checkpoint.v1'},...flags};
+  const route=createProjectContinuityRoutes({workspaceId:workspace,rpc:async(name,args)=>{calls.push({name,args});return receipt;}});
+  const input={project_id:id,task_id:id,claim_id:1,lease_generation:1,suspension_id:id,checkpoint:receipt.checkpoint};
+  const send=(path,body,auth=identity)=>route({req:{method:'POST'},path:'/v1/devos/project/'+path,body,identity:auth});
+  assert.equal((await send('suspend-browser',input)).status,200);
+  assert.equal(calls[0].name,'h205f22_project_suspend_browser_v1');assert.equal(calls[0].args.p_device_id,identity.device_id);
+  assert.equal((await send('suspend-browser',{...input,device_id:identity.device_id})).status,400);
+  assert.equal((await send('suspension-read',{task_id:id},{...identity,admin_ready:false})).status,403);
+  assert.equal((await send('suspension-list',{after_seq:0,limit:129})).status,400);
+  assert.equal((await send('resume-browser',{suspension_id:id,restoration:{schema:'bad'}})).status,400);
+  receipt.task_id='33333333-3333-4333-8333-333333333333';assert.equal((await send('suspension-read',{task_id:id})).status,409);
+});

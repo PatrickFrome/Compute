@@ -311,3 +311,14 @@ test('edge issue-tool route is mounted with allowlist validation and river task 
   assert.equal(agentToolbeltTrustRootSnapshot().computer_effects_require_existing_db_lease, true);
   assert.equal(agentToolbeltTrustRootSnapshot().authority_effect, false);
 });
+
+test('UNKNOWN or AMBIGUOUS terminal envelope never turns an issued command into completed custody',async()=>{
+  for(const status of ['UNKNOWN','AMBIGUOUS','']){
+    const toolbelt=new AgentToolbelt({signedRequest:async endpoint=>({ok:true,status:200,json:async()=>endpoint.includes('issue-tool')
+      ? {accepted:true,command_id:'11111111-1111-4111-8111-111111111111'}
+      : {found:true,terminal:true,status,receipt:{result:'not proof'}}})});
+    await toolbelt.serveToolRequests({lease:LEASE,requests:[{request_id:'ambiguous:terminal',action:'CAPTURE',payload:{}}]});
+    assert.deepEqual(await toolbelt.harvestResults({lease:LEASE}),[]);assert.equal(toolbelt.pendingCount(LEASE),1);
+    assert.deepEqual(toolbelt.resultsForLease(LEASE),[]);
+  }
+});

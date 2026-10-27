@@ -1,11 +1,13 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
+import fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { durableWriteJson } = require('./durable-json-file.cjs');
 
 export const SELF_UPDATE_TRANSACTION_FILE = 'metaengine-self-update-transaction-v1.json';
+export const SELF_UPDATE_TRANSACTION_LOCK_FILE = `${SELF_UPDATE_TRANSACTION_FILE}.lock`;
 export const SELF_UPDATE_TRANSACTION_SCHEMA = 'metaengine.self-update.transaction.v1';
 export const SELF_UPDATE_INSTALL_EFFECT_BARRIER = 'WRITE_AHEAD_V1';
 export const SELF_UPDATE_INSTALL_EFFECT_SCOPE = 'BROWSER_RESTART';
@@ -77,15 +79,74 @@ function serializeInstallEffectBarrier(operation) {
   return run;
 }
 
-export async function readSelfUpdateTransaction(app) {
+async function syncDirectory(directory) {
+  if (process.platform === 'win32') return;
+  const handle = await fs.open(directory, 'r');
+  try { await handle.sync(); } finally { await handle.close(); }
+}
+
+async function withTransactionLock(app, operation) {
+  const target = transactionPath(app);
+  const lock = path.join(path.dirname(target), SELF_UPDATE_TRANSACTION_LOCK_FILE);
+  const owner = `${JSON.stringify({ schema: 'metaengine.self-update.transaction-lock.v1',
+    nonce: crypto.randomUUID(), authority_effect: false })}\n`;
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  let handle;
+  try { handle = await fs.open(lock, 'wx', 0o600); }
+  catch (error) {
+    if (error?.code === 'EEXIST') throw new Error('self_update_transaction_lock_busy');
+    throw error;
+  }
+  // No PID/staleness guess may reclaim this marker. A crash or uncertain write
+  // retains it for explicit readback instead of granting a second admission.
+  try { await handle.writeFile(owner, 'utf8'); await handle.sync(); }
+  finally { await handle.close(); }
+  await syncDirectory(path.dirname(target));
+  const control = {
+    mutationStarted: false,
+    async assertOwned() {
+      if (await fs.readFile(lock, 'utf8') !== owner) throw new Error('self_update_transaction_lock_identity_unknown');
+    },
+  };
+  const release = async () => {
+    await control.assertOwned();
+    await fs.unlink(lock);
+    await syncDirectory(path.dirname(target));
+  };
+  try {
+    const result = await operation(control);
+    await release();
+    return result;
+  } catch (error) {
+    if (!control.mutationStarted) {
+      try { await release(); } catch { /* Keep any uncertain marker; no retry. */ }
+    }
+    throw error;
+  }
+}
+
+async function readSnapshot(app, { locked = false } = {}) {
   const target = transactionPath(app);
   let raw;
-  try { raw = await import('node:fs/promises').then(({ readFile }) => readFile(target, 'utf8')); }
-  catch (error) { if (error?.code === 'ENOENT') return null; throw error; }
+  try { raw = await fs.readFile(target, 'utf8'); }
+  catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+    if (!locked) {
+      try {
+        await fs.lstat(path.join(path.dirname(target), SELF_UPDATE_TRANSACTION_LOCK_FILE));
+        throw new Error('self_update_transaction_write_outcome_unknown');
+      } catch (lockError) { if (lockError?.code !== 'ENOENT') throw lockError; }
+    }
+    return { raw: null, row: null };
+  }
   let row;
   try { row = JSON.parse(raw); }
   catch { throw new Error('self_update_transaction_json_invalid'); }
-  return structuredClone(validate(row));
+  return { raw, row: structuredClone(validate(row)) };
+}
+
+export async function readSelfUpdateTransaction(app) {
+  return (await readSnapshot(app)).row;
 }
 
 export async function beginSelfUpdateTransaction(app, receipt, { clock = () => Date.now() } = {}) {
@@ -98,6 +159,12 @@ export async function beginSelfUpdateTransaction(app, receipt, { clock = () => D
   // Never erase an unreadable journal and never replace an unresolved/held attempt.
   // A new transaction is admissible only after explicit prior convergence.
   const prior = await readSelfUpdateTransaction(app);
+  if (prior && !BEGIN_ALLOWED_PRIOR_STATES.has(prior.state)) {
+    throw new Error(`self_update_transaction_unresolved_prior:${prior.state}`);
+  }
+  return withTransactionLock(app, async (control) => {
+  const snapshot = await readSnapshot(app, { locked: true });
+  const prior = snapshot.row;
   if (prior && !BEGIN_ALLOWED_PRIOR_STATES.has(prior.state)) {
     throw new Error(`self_update_transaction_unresolved_prior:${prior.state}`);
   }
@@ -120,19 +187,33 @@ export async function beginSelfUpdateTransaction(app, receipt, { clock = () => D
     evidence: {},
     authority_effect: false,
   };
-  await durableWriteJson(transactionPath(app), row);
+  await control.assertOwned();
+  control.mutationStarted = true;
+  await durableWriteJson(transactionPath(app), row, { expectedPreimage: snapshot.raw });
   return structuredClone(row);
+  });
 }
 
 export async function transitionSelfUpdateTransaction(app, nextState, {
   evidence = {},
   clock = () => Date.now(),
   requireTargetVersion = null,
+  requireTransactionId = null,
+  requireState = null,
 } = {}) {
-  const current = await readSelfUpdateTransaction(app);
+  // This optimistic snapshot grants no authority. Revalidate it under the
+  // cross-instance lock, then publish against its exact byte preimage.
+  const snapshot = await readSnapshot(app);
+  const current = snapshot.row;
   if (!current) throw new Error('self_update_transaction_missing');
   const next = String(nextState || '').toUpperCase();
   if (!STATES.has(next)) throw new Error('self_update_transaction_state_invalid');
+  if (requireTransactionId != null && current.transaction_id !== requireTransactionId) {
+    throw new Error('self_update_transaction_identity_binding_mismatch');
+  }
+  if (requireState != null && current.state !== requireState) {
+    throw new Error(`self_update_install_effect_barrier_state_invalid:${current.state}`);
+  }
   if (requireTargetVersion != null && String(requireTargetVersion) !== current.target_version) {
     throw new Error('self_update_transaction_target_binding_mismatch');
   }
@@ -140,6 +221,9 @@ export async function transitionSelfUpdateTransaction(app, nextState, {
     const allowed = TRANSITIONS.get(current.state) || new Set();
     if (!allowed.has(next)) throw new Error(`self_update_transaction_transition_invalid:${current.state}:${next}`);
   }
+  return withTransactionLock(app, async (control) => {
+  const locked = await readSnapshot(app, { locked: true });
+  if (locked.raw !== snapshot.raw) throw new Error('self_update_transaction_preimage_mismatch');
   const now = Number(clock());
   const row = {
     ...current,
@@ -152,8 +236,11 @@ export async function transitionSelfUpdateTransaction(app, nextState, {
     evidence: { ...safeEvidence(current.evidence), ...safeEvidence(evidence) },
     authority_effect: false,
   };
-  await durableWriteJson(transactionPath(app), row);
+  await control.assertOwned();
+  control.mutationStarted = true;
+  await durableWriteJson(transactionPath(app), row, { expectedPreimage: snapshot.raw });
   return structuredClone(row);
+  });
 }
 
 export async function markSelfUpdateInstallEffectAttempted(app, {
@@ -173,6 +260,8 @@ export async function markSelfUpdateInstallEffectAttempted(app, {
     }
     return transitionSelfUpdateTransaction(app, 'INSTALLING', {
       requireTargetVersion: expectedTarget,
+      requireTransactionId: current.transaction_id,
+      requireState: 'PREPARED',
       clock,
       evidence: {
         effect_barrier_contract: SELF_UPDATE_INSTALL_EFFECT_BARRIER,
@@ -225,6 +314,8 @@ export async function reopenQuarantinedSelfUpdateTransactionForRequalification(a
   }
   return transitionSelfUpdateTransaction(app, 'SUCCESSOR_BOOTED', {
     requireTargetVersion: current.target_version,
+    requireTransactionId: current.transaction_id,
+    requireState: 'QUARANTINED',
     clock,
     evidence: {
       quarantine_reopened: true,

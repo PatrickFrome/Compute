@@ -471,7 +471,6 @@ export function selectRsiArchitecturesForFullEvaluation({
   });
   const front = paretoFront(normalized.map((row) => row.triage));
   const frontDigests = new Set(front.map((row) => row.genome_digest));
-  const byDigest = new Map(normalized.map((row) => [row.genome.genome_digest, row]));
 
   const exploitCount = Math.max(0, slots - exploreSlots);
   const exploit = normalized

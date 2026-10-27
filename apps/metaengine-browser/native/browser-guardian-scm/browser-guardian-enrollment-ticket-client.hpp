@@ -21,9 +21,9 @@ struct GuardianEnrollmentTicketRedemption {
     std::string consumer_owner_sid_sha256;
 };
 
-// Redeems one already-issued short-lived ticket at a fixed METAENGINE Edge route.
-// The caller cannot supply host/path/headers. Windows WinHTTP performs ordinary TLS
-// validation and redirects are disabled. This adapter owns no owner-store or SCM effect.
+// Deny-only while independently authenticated installed local broker admission
+// is unavailable. No cloud/localhost network, caller receipt, owner-store or SCM
+// effect is accepted. Existing durable owner readback is a separate operation.
 GuardianEnrollmentTicketRedemption redeemBrowserGuardianEnrollmentTicket(
     const std::string& ticket,
     const std::string& key_fingerprint_sha256,

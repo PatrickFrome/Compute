@@ -65,6 +65,34 @@ for (const [name, plan, command] of [
   });
 }
 
+test('two valid conflicting terminal records retain cleanup uncertainty after physical exit', async t => {
+  const f = await createLocalRuntimeRecoveryFixture(t);
+  f.queueGeneration({ holdExit: true });
+  const first = await f.controller.startConfiguredLocalRuntimeHost(f.startOptions);
+  const { child, ended } = f.children[0];
+  const terminal = new Promise(resolve => {
+    const onMessage = value => {
+      if (value?.schema !== 'compute.runtime-host-terminal.v1') return;
+      child.off('message', onMessage); resolve(value);
+    };
+    child.on('message', onMessage);
+  });
+  await f.command(1, 'terminal-stop');
+  const original = await terminal;
+  assert.equal(original.reason, 'runtime_health_failed');
+  child.emit('message', { ...original, reason: 'requested' });
+  assert.equal(f.env.METAENGINE_LOCAL_PROVIDER_BOOT_REASON, 'OWNED_RUNTIME_HOST_TERMINAL_INVALID');
+  await f.command(1, 'release-exit');
+  await ended;
+  const stopped = await f.controller.stopOwnedLocalRuntimeHost({ timeoutMs: 2_000 });
+  assert.equal(stopped.state, 'CLEANUP_UNCONFIRMED');
+  assert.equal(stopped.cleanup_confirmed, false);
+  assert.equal(f.controller.ownedLocalRuntimeHostReady(first), false);
+  await assert.rejects(f.controller.startConfiguredLocalRuntimeHost(f.startOptions), /local_runtime_host_/);
+  assert.equal(f.children.length, 1);
+  assert.equal(f.verifications(), 1);
+});
+
 test('shutdown during queued verification cancels startup before the child can spawn', async t => {
   const f = await createLocalRuntimeRecoveryFixture(t);
   const gate = f.holdVerification();

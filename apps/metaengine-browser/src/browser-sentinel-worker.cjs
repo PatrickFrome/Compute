@@ -1,7 +1,6 @@
 'use strict';
 
 const fs = require('node:fs/promises');
-const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
 const { durableWriteJson } = require('./durable-json-file.cjs');

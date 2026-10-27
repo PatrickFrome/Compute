@@ -7,11 +7,6 @@ export const NATIVE_SUPERVISOR_STATE_PATH = '/functions/v1/a2-browser-native-sup
 export const NATIVE_SUPERVISOR_HEARTBEAT_PATH = '/functions/v1/a2-browser-native-supervisor-v1/v1/heartbeat';
 export const NATIVE_SUPERVISOR_DEVICE_PROFILE = 'A2_DEVICE_HTTP_SIGNATURE_V1';
 
-const SIGNED_HEARTBEAT_ELIGIBLE_PATHS = new Set([
-  NATIVE_SUPERVISOR_STATE_PATH,
-  NATIVE_SUPERVISOR_HEARTBEAT_PATH,
-]);
-
 function requestUrl(input) {
   if (typeof input === 'string') return input;
   if (input instanceof URL) return input.toString();

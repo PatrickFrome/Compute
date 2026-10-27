@@ -61,6 +61,99 @@ const stop = { role: 'button', name: 'Stop generating' };
 const conversationUrl = 'https://chatgpt.com/c/12345678-abcd-4abc-8abc-123456789abc';
 const supervisorTab = 'tab_supervisor';
 
+for (const scenario of ['OLDER_PENDING', 'FOREIGN_PROJECT', 'UNRELATED_PENDING']) {
+  test(`real running cycle fences recovered conversation admission before tools and Send: ${scenario}`, async t => {
+    const fs = await import('node:fs/promises');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const { AutonomousProjectTaskRuntime } = await import('../src/autonomous-project-task-runtime.mjs');
+    const { createAutonomousProjectJournal } = await import('../src/autonomous-project-journal.mjs');
+    const { createAutonomousProjectProviderFixture } = await import('./fixtures/autonomous-project-provider.mjs');
+    const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-turn-admission-')));
+    const journalPath = path.join(directory, 'effects.sqlite');
+    const projectId = '11111111-1111-4111-8111-111111111111';
+    const foreignProject = '44444444-4444-4444-8444-444444444444';
+    const foreignTask = '00000000-0000-4000-8000-000000000001';
+    const projectLease = { ...lease, claim_id: 10, parent_task_id: null, root_task_id: lease.task_id,
+      depth: 0, state: 'RUNNING', conversation_url_sha256: fleetTransportProof.conversation_url_sha256,
+      task_spec: { ...lease.task_spec, project_continuity: { project_id: projectId } } };
+    const provider = createAutonomousProjectProviderFixture({ filePath: path.join(directory, 'provider.sqlite'),
+      projectId, rootTask: projectLease });
+    let journal = createAutonomousProjectJournal({ filePath: journalPath }), runtime;
+    t.after(async () => { if (runtime) await runtime.close(); else await journal.close(); provider.close();
+      await fs.rm(directory, { recursive: true, force: true }); });
+    const intent = { schema: 'metaengine.devos.project-conversation-turn.v1', project_id: projectId,
+      task_id: lease.task_id, agent_id: lease.agent_id, lease_generation: lease.lease_generation,
+      prompt_sha256: 'a'.repeat(64), transcript_floor: 0, delivery_history_complete: true,
+      delivered_tool_results: [], unresolved_tool_effects: [], authority_effect: false,
+      scheduler_authority: false, second_scheduler_loop: false, automatic_retry_allowed: false };
+    // More than a maximum global pending page precedes this task's UNKNOWN.
+    // The admission decision must query the full exact lease, not sample a page.
+    for (let i = 0; i < 129; i++) await journal.begin(`turn:${foreignTask}:1:pending-${i}`,
+      { ...intent, task_id: foreignTask });
+    await journal.begin(`turn:${lease.task_id}:10:other-generation`, { ...intent, lease_generation: 10 });
+    const unknownKey = `turn:${lease.task_id}:1:unknown`;
+    if (scenario === 'OLDER_PENDING') await journal.begin(unknownKey, intent);
+    const confirmedKey = `turn:${lease.task_id}:1:confirmed`;
+    await journal.begin(confirmedKey, { ...intent, project_id: scenario === 'FOREIGN_PROJECT' ? foreignProject : projectId });
+    await journal.confirm(confirmedKey, { effect_state: 'PROVEN_COMPOSER_CLEARED', transcript_floor: 0 });
+    const before = await journal.find(confirmedKey), unknownBefore = await journal.find(unknownKey);
+    assert.equal((await journal.pending({ limit: 128 })).some(row => row.effect_key === unknownKey), false);
+    // Recovery uses a reopened durable journal and the production runtime/cycle.
+    await journal.close(); journal = createAutonomousProjectJournal({ filePath: journalPath });
+    const effects = { issue_tool: 0, project_spawn: 0, send: 0 }, commands = [], completions = [];
+    runtime = new AutonomousProjectTaskRuntime({ journal, materializeProject: async () => {
+      assert.fail('running recovery must not rematerialize a worktree');
+    }, request: input => {
+      if (input.path.endsWith('/spawn')) effects.project_spawn++;
+      return provider.request(input);
+    } });
+    const transcript = [
+      '```tool\nTOOL_REQUEST_V1\nrequest_id=fixture:observe:one\naction=CAPTURE\npayload_json={}\n```',
+      '```tool\nTOOL_REQUEST_V1\nrequest_id=fixture:child:one\naction=PROJECT_SPAWN\npayload_json={"children":[{"objective":"Useful fixture child","role":"CODER"}]}\n```',
+    ].join('\n');
+    const cycle = new DevOsNativeTaskCycle({ getState: async () => state(), executeCommand: async command => {
+      commands.push(command.action);
+      if (command.action === 'FLEET_RECONCILE') return fleet;
+      if (command.action === 'CAPTURE') return frame({ url: conversationUrl });
+      if (command.action === 'READ_TRANSCRIPT') return { text: transcript, total_chars: transcript.length,
+        has_more: false, census_truncated: false };
+      if (command.action === 'SEMANTIC_TYPE') { typedDraft = command.payload.text; return { typed: true }; }
+      if (command.action === 'TYPED_CLICK') { effects.send++; typedDraft = ''; return { effect_state: 'PROVEN_COMPOSER_CLEARED' }; }
+      assert.fail(`unexpected recovery command: ${command.action}`);
+    }, signedRequest: async (endpoint, options) => {
+      if (endpoint === '/v1/devos/cycle') return response(200, { schema: 'metaengine.devos.browser-cycle.v1',
+        backlog: { ready: 0, running: 1 }, running: [projectLease] });
+      if (endpoint === '/v1/commands/issue-tool') { effects.issue_tool++; return response(200, { accepted: true, command_id: 'fixture-command' }); }
+      if (endpoint === '/v1/commands/fixture-command/receipt') return response(200, { found: true,
+        terminal: true, status: 'COMPLETED', receipt: { result: 'Fixture capture completed' } });
+      if (endpoint === '/v1/devos/complete') { completions.push(options.payload); return response(200, { state: options.payload.state }); }
+      assert.fail(`unexpected recovery route: ${endpoint}`);
+    } });
+    cycle.bindProjectRuntime(runtime);
+    let outcome, cycleError;
+    try { outcome = await cycle.runOnce(); } catch (error) { cycleError = error; }
+    if (scenario === 'UNRELATED_PENDING') {
+      assert.ifError(cycleError);
+      assert.deepEqual(effects, { issue_tool: 1, project_spawn: 1, send: 1 }, 'positive control reaches all three effect barriers');
+      assert.equal(outcome.result_ready.state, 'PROJECT_CONTINUING');
+      assert.equal(completions.length, 0);
+    } else {
+      assert.deepEqual(effects, { issue_tool: 0, project_spawn: 0, send: 0 }, 'untrusted recovery must stop before every effect barrier');
+      assert.ifError(cycleError);
+      assert.equal(outcome.result_ready.state, 'AMBIGUOUS');
+      assert.equal(completions.length, 1);
+      assert.equal(completions[0].error, 'PROJECT_CONTINUATION_EFFECT_UNKNOWN');
+      assert.equal(commands.includes('READ_TRANSCRIPT'), false, 'no recovered transcript window is exposed');
+      assert.equal(commands.includes('SEMANTIC_TYPE'), false);
+      assert.equal(provider.read().tasks.length, 1, 'no child was admitted');
+      assert.equal(provider.read().physical_provider_creations, 0);
+    }
+    assert.deepEqual(await journal.find(confirmedKey), before, 'recovery never rewrites a receipt');
+    assert.deepEqual(await journal.find(unknownKey), unknownBefore, 'UNKNOWN custody remains immutable');
+  });
+}
+
 test('project verification sweep advances on the existing heartbeat even when RESULT_READY leaves no running tasks', async () => {
   let swept = 0; const order = [];
   const cycle = new DevOsNativeTaskCycle({ getState: async () => state(),
@@ -83,6 +176,7 @@ test('project task tool results continue the same proven conversation before com
   const projectRuntime = {
     prepareLease: async () => ({ project_id: '11111111-1111-4111-8111-111111111111' }),
     contextForLease: () => 'PROJECT CONTINUITY V1',
+    latestTurnForLease: async () => ({ state: 'CONFIRMED', transcript_floor: 0 }),
     serveToolRequests: async ({ requests }) => requests.map(row => ({ request_id: row.request_id, status: 'COMPLETED', summary: 'child task queued by DB' })),
     waitForChildren: async () => ({ waiting: true, failed: false, children: [{ task_id: '33333333-3333-4333-8333-333333333333', state: 'RUNNING' }] }),
     continueConversation: async (_lease, results, submit) => { assert.equal(results[0].summary, 'child task queued by DB'); await submit('HOST CONFIRMED TOOL RESULTS; continue current task'); return { state: 'DELIVERED' }; },
@@ -152,6 +246,7 @@ for (const delivery of ['ACK', 'LOST_ACK_BLOCKED', 'LOST_ACK_UNRESOLVED']) {
       },
     });
     cycle.bindProjectRuntime({ prepareLease: async () => null, contextForLease: () => 'PROJECT CONTINUITY V1',
+      latestTurnForLease: async () => ({ state: 'CONFIRMED', transcript_floor: 0 }),
       serveToolRequests: async () => [],
       waitForChildren: async () => ({ waiting: true, failed: true, queued_proposals: 2, children: [
         { task_id: '33333333-3333-4333-8333-333333333333', role: 'CRITIC', state: 'BLOCKED' },
@@ -592,4 +687,120 @@ test('ambiguous completion write performs status readback instead of blind retry
   assert.equal(completionPosts, 1);
   assert.equal(out.readback, 'STATUS_PROVEN_AFTER_AMBIGUOUS_WRITE');
   assert.equal(out.automatic_retry_allowed, false);
+});
+
+// Characterization of the unresolved capacity boundary, NOT a yield/resume
+// implementation. The real route must not steal a current parent's W30 claim.
+test('one browser worker waiting for a READY child retains its claim across cycles and journal restart', async t => {
+  const fs = await import('node:fs/promises');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const { createDevosSupervisorRoutes } = await import('../supabase/a2-browser-native-supervisor-devos-routes.mjs');
+  const { AutonomousProjectTaskRuntime } = await import('../src/autonomous-project-task-runtime.mjs');
+  const { createAutonomousProjectJournal } = await import('../src/autonomous-project-journal.mjs');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-parent-capacity-'));
+  const projectId = '11111111-1111-4111-8111-111111111111';
+  const childId = '33333333-3333-4333-8333-333333333333';
+  const workspaceId = '2de9f84b-7c0a-4091-911c-894ff1d6eaf4';
+  const parent = { ...lease, state: 'RUNNING', claim_id: 10, parent_task_id: null, root_task_id: lease.task_id };
+  const child = { task_id: childId, parent_task_id: lease.task_id, role: 'IMPLEMENTER', state: 'READY' };
+  const children = [child];
+  const activeClaim = { claim_id: 10, task_id: lease.task_id, agent_id: lease.agent_id, state: 'ACTIVE' };
+  const oneWorkerFleet = { ...fleet, policy: { ...fleet.policy, warm_agents: 0 } };
+  const calls = [], commands = [], plans = [], completions = [];
+  let sends = 0, runtime;
+  t.after(async () => { await runtime?.close(); await fs.rm(root, { recursive: true, force: true }); });
+  const route = createDevosSupervisorRoutes({ workspaceId, rpc: async (name, args) => {
+    calls.push(name);
+    if (name === 'meta_orchestrator_controller_lease_v1') return null;
+    if (name === 'devos_fleet_reconcile_v1') return { authority_effect: false };
+    if (name === 'devos_fleet_snapshot_v1') return {
+      active_tasks: [{ ...parent, lease_agent_id: lease.agent_id, lease_tab_id: lease.tab_id,
+        lease_target_id: lease.target_id, lease_agent_generation_epoch: lease.agent_generation_epoch }, ...children],
+      active_claims: [activeClaim], recent_events: [{ event_type: 'TASK_TRANSPORT_PROVEN',
+        task_id: lease.task_id, lease_generation: 1, payload: fleetTransportProof }],
+    };
+    if (name === 'devos_fleet_lease_v1') return { ...lease, task_id: childId, leased: true,
+      agent_id: args.p_agent, tab_id: args.p_tab, target_id: args.p_target, agent_generation_epoch: args.p_epoch };
+    assert.fail(`unexpected capacity reproduction RPC: ${name}`);
+  } });
+  const openRuntime = () => new AutonomousProjectTaskRuntime({
+    journal: createAutonomousProjectJournal({ filePath: path.join(root, 'project.sqlite') }),
+    materializeProject: async () => { assert.fail('waiting parent must not rematerialize its worktree'); },
+    request: async ({ path: endpoint, body }) => {
+      if (endpoint.endsWith('/reconcile')) return { schema: 'metaengine.devos.project-reconcile.v1',
+        project_id: body.project_id, projects: [], bounded_projects: 4, authority_effect: false };
+      if (endpoint.endsWith('/snapshot')) return { schema: 'metaengine.devos.project-snapshot.v1', found: true,
+        project_id: projectId, root_task_id: lease.task_id, state: 'WAITING_CHILDREN', policy: {},
+        selected_task: parent, tasks: [parent, ...children], immediate_children: children, proposals: [], authority_effect: false };
+      assert.fail(`unexpected project write while waiting: ${endpoint}`);
+    },
+  });
+  const openCycle = () => {
+    const cycle = new DevOsNativeTaskCycle({ getState: async () => state(supervisorTab, oneWorkerFleet),
+      executeCommand: async command => {
+        commands.push(command.action);
+        // A real physical resource denial leaves the observed fleet unchanged;
+        // this fixture models that boundary, not a logical agent-count ceiling.
+        if (command.action === 'FLEET_RECONCILE') return oneWorkerFleet;
+        if (command.action === 'CAPTURE') return frame({ url: conversationUrl });
+        if (command.action === 'READ_TRANSCRIPT') return { text: '', total_chars: 0, has_more: false, census_truncated: false };
+        if (command.action === 'SEMANTIC_TYPE') { typedDraft = command.payload.text; return { typed: true }; }
+        if (command.action === 'TYPED_CLICK') { sends++; typedDraft = ''; return { effect_state: 'PROVEN_COMPOSER_CLEARED' }; }
+        assert.fail(`unexpected capacity reproduction effect: ${command.action}`);
+      },
+      signedRequest: async (endpoint, options) => {
+        if (endpoint === '/v1/devos/complete') {
+          assert(children.every(row => row.state === 'COMPLETED'), 'never complete a parent to free its slot while children wait');
+          assert.equal(options.payload.state, 'BLOCKED', 'empty model response is not verified completion');
+          completions.push(options.payload);
+          return response(200, { state: 'BLOCKED' });
+        }
+        assert.equal(endpoint, '/v1/devos/cycle', 'no release may be invented to free the parent');
+        const routedResponse = await route({ req: { method: 'POST' }, path: endpoint, body: options.payload, clientId: 'fixture-client' });
+        const plan = await routedResponse.json(); plans.push(plan);
+        return new Response(JSON.stringify(plan), { status: routedResponse.status });
+      },
+    });
+    cycle.bindProjectRuntime(runtime); return cycle;
+  };
+  runtime = openRuntime(); let cycle = openCycle();
+  await cycle.runOnce();
+  assert.equal(cycle.snapshot().result_ready.state, 'PROJECT_CONTINUING');
+  await cycle.runOnce();
+  assert.equal(cycle.snapshot().result_ready.state, 'WAIT_CHILDREN');
+  await runtime.close(); runtime = openRuntime(); cycle = openCycle();
+  await cycle.runOnce();
+  assert.equal(cycle.snapshot().result_ready.state, 'WAIT_CHILDREN');
+  assert.equal(sends, 1, 'restart recovers the confirmed continuation, never replays Send');
+  assert(plans.every(plan => plan.backlog.ready === 1 && plan.backlog.running === 1 && plan.leases.length === 0));
+  assert.equal(calls.filter(name => name === 'devos_fleet_lease_v1').length, 0);
+  assert.equal(activeClaim.state, 'ACTIVE'); assert.equal(child.state, 'READY');
+  assert.equal(oneWorkerFleet.agents.length, 1);
+  assert.equal(completions.length, 0);
+  assert(!commands.includes('CLOSE_TAB'));
+  // New pending siblings must not manufacture a new parent model turn after
+  // its acknowledgement was durably confirmed, including after restart.
+  children.push({ ...child, task_id: '55555555-5555-4555-8555-555555555555' });
+  await cycle.runOnce();
+  assert.equal(cycle.snapshot().result_ready.state, 'WAIT_CHILDREN');
+  assert.equal(sends, 1, 'unfinished child-status changes do not reawaken the parent');
+  assert.equal(activeClaim.state, 'ACTIVE', 'status suppression is not a claim-release shortcut');
+  children.pop();
+  child.state = 'COMPLETED';
+  await cycle.runOnce();
+  assert.equal(cycle.snapshot().result_ready.state, 'PROJECT_CONTINUING');
+  assert.equal(sends, 2, 'terminal children still resume the original parent conversation');
+  await cycle.runOnce();
+  assert.equal(sends, 2, 'the same terminal child frontier wakes the parent exactly once');
+  assert.equal(completions.length, 1, 'missing post-resume result claim remains BLOCKED, never invented success');
+  child.state = 'READY';
+  // Positive control: the same route can lease the child when a second real
+  // worker is available. The stall above is not a disabled/mock lease route.
+  const idle = { ...oneWorkerFleet.agents[0], agent_id: 'agent_idle-capacity-worker',
+    tab_id: 'tab_44444444-4444-4444-8444-444444444444', target_id: 'webcontents:11' };
+  const released = await (await route({ req: { method: 'POST' }, path: '/v1/devos/cycle',
+    body: { fleet: { agents: [...oneWorkerFleet.agents, idle] } }, clientId: 'fixture-client' })).json();
+  assert.equal(released.leases.length, 1); assert.equal(released.leases[0].task_id, childId);
+  assert.equal(released.leases[0].agent_id, idle.agent_id);
 });

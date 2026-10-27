@@ -9,7 +9,7 @@ import test from 'node:test';
 import { sourceClosure } from './startup-source-manifest.mjs';
 import { LOCAL_RUNTIME_MIGRATIONS } from './local-runtime-migrations.mjs';
 import {
-  BUNDLE_ENTRY_POINTS, BUNDLE_MANIFEST_FILE, BUNDLE_SCHEMA, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY, REMOTE_SUPPORT_ENTRY, ATTACHED_ONBOARDING_ENTRY,
+  BUNDLE_ENTRY_POINTS, BUNDLE_MANIFEST_FILE, BUNDLE_SCHEMA, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY, REMOTE_SUPPORT_ENTRY, ATTACHED_ONBOARDING_ENTRY, FRESH_PROVIDER_ENTRY,
   reviewedBundlePlan, stageRuntimeSourceBundle, verifyRuntimeSourceBundle,
 } from './package-runtime-resources.mjs';
 
@@ -40,7 +40,7 @@ function refreshDigest(manifest) {
 }
 
 async function receipt(root, { includeRuntimeHost = false } = {}) {
-  const entries = includeRuntimeHost ? [...BUNDLE_ENTRY_POINTS, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY, REMOTE_SUPPORT_ENTRY, ATTACHED_ONBOARDING_ENTRY] : BUNDLE_ENTRY_POINTS;
+  const entries = includeRuntimeHost ? [...BUNDLE_ENTRY_POINTS, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY, REMOTE_SUPPORT_ENTRY, ATTACHED_ONBOARDING_ENTRY, FRESH_PROVIDER_ENTRY] : BUNDLE_ENTRY_POINTS;
   const closure = await sourceClosure(entries.map(name => join(root, name)), root);
   const records = [];
   const add = async (path, id, kind) => {
@@ -184,6 +184,14 @@ test('build-resource inventory stages and verifies the full real runtime-host cl
     assert.equal(bundle.policy.installed_client_qualified, false);
     assert.ok(bundle.files.some(file => file.path === runtimeRoot + 'cognitive-acceptor-direct-api-v1.sql'));
     assert.ok(bundle.files.some(file => file.path === ATTACHED_ONBOARDING_ENTRY));
+    for (const resource of [FRESH_PROVIDER_ENTRY, runtimeRoot+'fresh-client-provider.mjs',
+      runtimeRoot+'fresh-provider-native-consent.mjs', runtimeRoot+'fresh-schema-application-plan.mjs',
+      runtimeRoot+'fresh-schema-candidate-plan.json', runtimeRoot+'fresh-schema-statement-selection.json',
+      runtimeRoot+'fresh-schema-prerequisites-v1.sql', runtimeRoot+'fresh-schema-private-acl-v1.sql']) {
+      assert.ok(bundle.files.some(file=>file.path===resource),'fresh install resource missing: '+resource);
+    }
+    assert(!bundle.files.some(file=>file.path.includes('/test/')||file.path.includes('.test.')),
+      'disposable factories and private-body test loader must never ship');
     const nativeContext = 'apps/metaengine-browser/src/windows-native-read-environment.mjs';
     const contextBytes = await readFile(join(repositoryRoot, nativeContext));
     assert.equal(bundle.files.find(file => file.path === nativeContext)?.sha256, hash(contextBytes));
@@ -196,6 +204,13 @@ test('build-resource inventory stages and verifies the full real runtime-host cl
 
 test('reviewed runtime host source is included only by explicit host selection', async () => {
   await fixture(async ({ repository, stage, options }) => {
+    // Fresh setup now requires real reviewed SQL/JSON resources. Copy its exact
+    // source closure, rather than inventing a stub that omits those resources.
+    const fresh=await sourceClosure([join(repositoryRoot,FRESH_PROVIDER_ENTRY)],repositoryRoot);
+    for(const source of fresh.files){
+      const destination=join(repository,relative(repositoryRoot,source));
+      await mkdir(dirname(destination),{recursive:true});await copyFile(source,destination);
+    }
     await writeFile(join(repository, RUNTIME_HOST_ENTRY), "import './launcher.mjs'; export const host = true;\n");
     await writeFile(join(repository, FIRST_RUN_INITDB_ENTRY), "export const firstRun = true;\n");
     await writeFile(join(repository, ATTACHED_ONBOARDING_ENTRY), "export const attachedOnboarding = true;\n");
@@ -206,7 +221,7 @@ test('reviewed runtime host source is included only by explicit host selection',
     const hostOptions = { ...options, startupManifest: manifest, expectedSourceDigest: manifest.source_manifest_sha256 };
     await assert.rejects(stageRuntimeSourceBundle(hostOptions), /reviewed_source_closure_mismatch|bundle_unexpected_source_record/);
     const bundle = await stageRuntimeSourceBundle({ ...hostOptions, includeRuntimeHost: true });
-    assert.deepEqual(bundle.entry_points, [...BUNDLE_ENTRY_POINTS, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY, REMOTE_SUPPORT_ENTRY, ATTACHED_ONBOARDING_ENTRY]);
+    assert.deepEqual(bundle.entry_points, [...BUNDLE_ENTRY_POINTS, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY, REMOTE_SUPPORT_ENTRY, ATTACHED_ONBOARDING_ENTRY, FRESH_PROVIDER_ENTRY]);
     assert.ok(bundle.files.some(file => file.path === RUNTIME_HOST_ENTRY));
     assert.ok(bundle.files.some(file => file.path === FIRST_RUN_INITDB_ENTRY));
     assert.ok(bundle.files.some(file => file.path === REMOTE_SUPPORT_ENTRY));
@@ -370,7 +385,7 @@ test('verification rejects drift, injected files, edited manifests and absent pi
 });
 
 test('selected runtime bundle includes the full real first-run source closure', async () => {
-  const closure = await sourceClosure([...BUNDLE_ENTRY_POINTS, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY, REMOTE_SUPPORT_ENTRY, ATTACHED_ONBOARDING_ENTRY].map(name => join(repositoryRoot, name)), repositoryRoot);
+  const closure = await sourceClosure([...BUNDLE_ENTRY_POINTS, RUNTIME_HOST_ENTRY, FIRST_RUN_INITDB_ENTRY, REMOTE_SUPPORT_ENTRY, ATTACHED_ONBOARDING_ENTRY, FRESH_PROVIDER_ENTRY].map(name => join(repositoryRoot, name)), repositoryRoot);
   const names = new Set(closure.files.map(file => slash(relative(repositoryRoot, file))));
   for (const file of [FIRST_RUN_INITDB_ENTRY, 'infra/client-state-runtime/first-run-preflight.mjs', 'infra/client-state-runtime/local-vault-key.mjs', 'infra/client-state-runtime/local-vault-compat.sql', 'infra/client-state-runtime/offline-runtime-bundle.mjs', REMOTE_SUPPORT_ENTRY, 'apps/metaengine-browser/src/windows-local-computer-executor.mjs', 'apps/metaengine-browser/src/computer-authority-plane.mjs', 'apps/metaengine-browser/src/local-state-provider-policy.mjs', 'apps/metaengine-browser/src/local-runtime-host-controller.mjs', 'infra/client-state-runtime/restored-client-provider-cli.mjs', 'infra/client-state-runtime/restored-client-provider.mjs']) assert.ok(names.has(file), 'missing first-run dependency: ' + file);
   assert.ok(closure.npm.includes('npm:postgres@3.4.7'));

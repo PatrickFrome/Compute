@@ -7,6 +7,8 @@ import path from 'node:path';
 import vm from 'node:vm';
 import {drainManagedRuntimeBindings} from '../src/managed-runtime-drain.mjs';
 import {SupervisorLoopbackRpcServer} from '../src/supervisor-loopback-rpc-server.mjs';
+import {createBrowserParentSuspensionTransport} from '../src/browser-parent-suspension-transport.mjs';
+import {createBrowserParentSuspensionMutationGate} from '../src/browser-parent-suspension-mutation-gate.mjs';
 
 const turn=()=>new Promise(resolve=>setImmediate(resolve));
 function deferred(){let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};}
@@ -23,6 +25,7 @@ async function mainFixture({pause=null,cleanupFailure=null}={}){
   assert.ok(declarations.length>0&&composition.length>0);
   const gate=deferred(),entered=deferred(),events=[],counts={managed:0,project:0,rpc:0,relay:0,mount:0,start:0,command:0,chatCommand:0,goal:0,
     recovery:0,recoverySnapshot:0,recoveryApplyFleet:0,recoveryApplySupervisor:0},recoveryConstructions=[];
+  const skillDispatch=Object.freeze({});
   let rpcOptions=null,relayOptions=null;
   const wait=async kind=>{if(pause===kind){entered.resolve();await gate.promise;}};
   let running=false;
@@ -38,13 +41,15 @@ async function mainFixture({pause=null,cleanupFailure=null}={}){
   const supervisor={snapshot:()=>({running}),stop(){events.push('supervisor.stop');running=false;},
     async start(){counts.start++;await wait('start');running=true;return this.snapshot();},
     bindDevosProjectRuntime(value){if(value)events.push('project.bind');},bindNativeCodingRuntime(){},
+    bindDevosVerifiedSkillDispatch(value){assert.equal(value,skillDispatch);},
     managedTaskProjectRequest:async()=>({}),setInterruptedSetupRecoveryFence(){events.push('supervisor.setRecoveryFence');},
     chatCommandSubmit:async()=>{counts.chatCommand++;return {};},clientGoalSubmit:async()=>{counts.goal++;return {};},
     archiveInterruptedBootstrapForNewEpoch:()=>{counts.recoveryApplySupervisor++;return {};}};
   const scope={Promise,Set,Map,Error,console,globalThis:{},shutdownRequested:false,fixtureSupervisor:supervisor,
     supervisorLoopbackRpc:null,githubChatRelay:null,githubChatRelayError:null,githubChatSetup:null,shellBrainPortConsumerId:'fixture',
     detachShellBrainPort:()=>{},fallbackConsole:null,downloads:null,userSessionConfigured:false,views:new Map(),shellView:null,
-    rsiRuntime:null,rsiOutcomeRiver:null,rsiOperatorSteering:null,developmentPlane:null,
+    rsiRuntime:null,rsiOutcomeRiver:null,rsiOperatorSteering:null,rsiVerifiedSkillDispatch:skillDispatch,developmentPlane:null,
+    createBrowserParentSuspensionTransport,browserParentMutationGate:createBrowserParentSuspensionMutationGate(),
     app:{getPath:()=> 'C:/fixture/private',getVersion:()=> 'fixture'},safeStorage:{},shell:{openPath:async()=>''},
     fleet:{snapshot:()=>{counts.recoverySnapshot++;return {};},archiveInterruptedBootstrapAgents:()=>{counts.recoveryApplyFleet++;return {};}},
     registry:{snapshot:()=>({tabs:[]})},
@@ -70,12 +75,24 @@ async function mainFixture({pause=null,cleanupFailure=null}={}){
   return {context,scope,gate,entered,events,counts,managed,project,rpc,relay,supervisor,state,recoveryConstructions,
     get rpcOptions(){return rpcOptions;},get relayOptions(){return relayOptions;},get recoveryOptions(){return recoveryConstructions.at(-1)?.options;},
     init:()=>tracked(context.initNativeSupervisor()),close:()=>tracked(context.closeManagedTaskProjectHost()),
+    // Startup failures before the selected pause must fail the test, rather
+    // than leaving it waiting forever on a constructor that was never reached.
+    waitForPause:initialization=>Promise.race([entered.promise,initialization.result.then(({error})=>{
+      throw error||Error(`fixture initialization completed before ${pause} pause`);
+    })]),
     custody:()=>vm.runInContext('typeof nativeInitializationCleanupCandidates===\'undefined\'?[]:[...nativeInitializationCleanupCandidates]',context),
     set:(name,value)=>{scope.fixtureValue=value;vm.runInContext(name+'=fixtureValue;',context);delete scope.fixtureValue;}};
 }
 
+test('fixture surfaces an initialization failure before its selected pause',async()=>{
+  const f=await mainFixture({pause:'managed'});
+  f.supervisor.bindDevosVerifiedSkillDispatch=()=>{throw Error('fixture early startup failure');};
+  await assert.rejects(f.waitForPause(f.init()),/fixture early startup failure/);
+  assert.equal(f.counts.managed,0);assert.equal(f.state().pending,0);
+});
+
 test('actual close waits for a deferred managed constructor and prevents its late publication',async()=>{
-  const f=await mainFixture({pause:'managed'}),initialization=f.init();await f.entered.promise;
+  const f=await mainFixture({pause:'managed'}),initialization=f.init();await f.waitForPause(initialization);
   const closing=f.close();await turn();assert.equal(closing.settled,false,'close must include already registered startup');
   f.gate.resolve();await initialization.result;const result=await closing.result;
   assert.equal(result.error,undefined);assert.equal(result.value.cleanup_confirmed,true);
@@ -127,7 +144,7 @@ test('failed published RPC cleanup retains the exact owner and fences subsequent
 
 test('a deferred autonomous constructor is closed before the existing managed host is released',async()=>{
   const f=await mainFixture({pause:'project'});f.set('managedTaskProjectHost',f.managed);
-  const initialization=f.init();await f.entered.promise;const closing=f.close();await turn();assert.equal(closing.settled,false);
+  const initialization=f.init();await f.waitForPause(initialization);const closing=f.close();await turn();assert.equal(closing.settled,false);
   f.gate.resolve();await initialization.result;const result=await closing.result;assert.equal(result.error,undefined);
   assert.equal(f.state().project,null);assert.equal(f.state().host,null);assert.equal(f.project.closed,true);
   assert.ok(f.events.indexOf('project.close')<f.events.indexOf('managed.close'));
@@ -135,7 +152,7 @@ test('a deferred autonomous constructor is closed before the existing managed ho
 });
 
 test('a deferred RPC listen cannot survive actual teardown as an unpublished server',async()=>{
-  const f=await mainFixture({pause:'rpc'}),initialization=f.init();await f.entered.promise;
+  const f=await mainFixture({pause:'rpc'}),initialization=f.init();await f.waitForPause(initialization);
   const closing=f.close();await turn();assert.equal(closing.settled,false);
   f.gate.resolve();await initialization.result;assert.equal((await closing.result).error,undefined);
   assert.equal(f.rpc.state,'STOPPED');assert.equal(f.state().rpc,null);assert.equal(f.counts.relay,0);
@@ -143,7 +160,7 @@ test('a deferred RPC listen cannot survive actual teardown as an unpublished ser
 });
 
 test('the actual relay startup helper stops a relay returned after its initialization lifetime closed',async()=>{
-  const f=await mainFixture({pause:'relay'}),initialization=f.init();await f.entered.promise;
+  const f=await mainFixture({pause:'relay'}),initialization=f.init();await f.waitForPause(initialization);
   const closing=f.close();await turn();assert.equal(closing.settled,false);
   f.gate.resolve();await initialization.result;assert.equal((await closing.result).error,undefined);
   assert.equal(f.relay.state,'REVOKED');assert.equal(f.state().relay,null);assert.ok(f.events.includes('relay.stop'));
@@ -158,7 +175,7 @@ test('an initialization waiting on the old barrier never waits on the close whic
 });
 
 test('a new initialization waits on the new close barrier without joining its captured old snapshot',async()=>{
-  const f=await mainFixture({pause:'managed'}),old=f.init();await f.entered.promise;
+  const f=await mainFixture({pause:'managed'}),old=f.init();await f.waitForPause(old);
   const closing=f.close(),fresh=f.init();await turn();assert.equal(closing.settled,false);assert.equal(fresh.settled,false);
   f.gate.resolve();await old.result;assert.equal((await closing.result).error,undefined);await fresh.result;
   assert.equal(f.counts.managed,2,'fresh startup must run after the old candidate was closed');
@@ -167,7 +184,7 @@ test('a new initialization waits on the new close barrier without joining its ca
 });
 
 test('a stale candidate whose cleanup fails remains in custody and prevents a false successful empty drain',async()=>{
-  const f=await mainFixture({pause:'managed',cleanupFailure:'managed'}),initialization=f.init();await f.entered.promise;
+  const f=await mainFixture({pause:'managed',cleanupFailure:'managed'}),initialization=f.init();await f.waitForPause(initialization);
   const closing=f.close();f.gate.resolve();await initialization.result;const result=await closing.result;
   assert.match(result.error?.message||'',/cleanup|drain|initialization/);
   assert.ok(f.events.includes('managed.close'));assert.equal(f.state().drain,true);
@@ -177,7 +194,7 @@ test('a stale candidate whose cleanup fails remains in custody and prevents a fa
 });
 
 for(const pause of ['recovery','start','storage'])test(`actual teardown waits for pending ${pause} initialization and denies later activation`,async()=>{
-  const f=await mainFixture({pause}),initialization=f.init();await f.entered.promise;
+  const f=await mainFixture({pause}),initialization=f.init();await f.waitForPause(initialization);
   const closing=f.close();await turn();assert.equal(closing.settled,false);
   f.gate.resolve();await initialization.result;assert.equal((await closing.result).error,undefined);
   assert.equal(f.state().host,null);assert.equal(f.state().project,null);assert.equal(f.state().rpc,null);assert.equal(f.state().relay,null);
@@ -186,13 +203,13 @@ for(const pause of ['recovery','start','storage'])test(`actual teardown waits fo
 });
 
 test('an RPC candidate still starting cannot execute a command after its captured lifetime closes',async()=>{
-  const f=await mainFixture({pause:'rpc'}),initialization=f.init();await f.entered.promise;const closing=f.close();
+  const f=await mainFixture({pause:'rpc'}),initialization=f.init();await f.waitForPause(initialization);const closing=f.close();
   await assert.rejects(async()=>f.rpcOptions.executeCommand({action:'fixture'}),/closing|changed|lost|initialization|lifetime/);
   assert.equal(f.counts.command,0);f.gate.resolve();await initialization.result;await closing.result;
 });
 
 test('relay control callbacks cannot submit commands or goals while their unpublished relay finishes stale startup',async()=>{
-  const f=await mainFixture({pause:'relay'}),initialization=f.init();await f.entered.promise;const closing=f.close();
+  const f=await mainFixture({pause:'relay'}),initialization=f.init();await f.waitForPause(initialization);const closing=f.close();
   await assert.rejects(async()=>f.relayOptions.control.commandSubmit({}),/closing|changed|lost|initialization|lifetime/);
   await assert.rejects(async()=>f.relayOptions.control.goalSubmit({}),/closing|changed|lost|initialization|lifetime/);
   assert.equal(f.counts.chatCommand,0);assert.equal(f.counts.goal,0);
@@ -200,21 +217,21 @@ test('relay control callbacks cannot submit commands or goals while their unpubl
 });
 
 test('a late Supervisor start is stopped on the captured old instance rather than a successor',async()=>{
-  const f=await mainFixture({pause:'start'}),initialization=f.init();await f.entered.promise;const closing=f.close();
+  const f=await mainFixture({pause:'start'}),initialization=f.init();await f.waitForPause(initialization);const closing=f.close();
   let successorStops=0;const successor={...f.supervisor,snapshot:()=>({running:true}),stop:()=>{successorStops++;}};
   f.set('nativeSupervisor',successor);f.gate.resolve();await initialization.result;await closing.result;
   assert.equal(f.supervisor.snapshot().running,false);assert.equal(successorStops,0);
 });
 
 test('a stale recovery failure never applies its fence to a successor Supervisor',async()=>{
-  const f=await mainFixture({pause:'recovery'}),initialization=f.init();await f.entered.promise;const closing=f.close();
+  const f=await mainFixture({pause:'recovery'}),initialization=f.init();await f.waitForPause(initialization);const closing=f.close();
   let successorFences=0;const successor={...f.supervisor,setInterruptedSetupRecoveryFence:()=>{successorFences++;}};
   f.set('nativeSupervisor',successor);f.gate.reject(Error('fixture stale recovery failure'));
   await initialization.result;await closing.result;assert.equal(successorFences,0);
 });
 
 test('the actual recovery helper cannot clear its fence or publish recovery after teardown during init',async()=>{
-  const f=await mainFixture({pause:'recovery'}),initialization=f.init();await f.entered.promise;const closing=f.close();
+  const f=await mainFixture({pause:'recovery'}),initialization=f.init();await f.waitForPause(initialization);const closing=f.close();
   const fenceCalls=f.events.filter(value=>value==='supervisor.setRecoveryFence').length;
   f.gate.resolve();await initialization.result;await closing.result;
   assert.equal(f.events.filter(value=>value==='supervisor.setRecoveryFence').length,fenceCalls);
@@ -222,7 +239,7 @@ test('the actual recovery helper cannot clear its fence or publish recovery afte
 });
 
 test('a failed local RPC start never stops or clears a successor published RPC',async()=>{
-  const f=await mainFixture({pause:'rpc'}),initialization=f.init();await f.entered.promise;const closing=f.close();
+  const f=await mainFixture({pause:'rpc'}),initialization=f.init();await f.waitForPause(initialization);const closing=f.close();
   let successorStops=0;const successor={snapshot:()=>({state:'LISTENING',last_error:null}),stop:async()=>{successorStops++;}};
   f.set('supervisorLoopbackRpc',successor);f.gate.reject(Error('fixture stale listen failure'));
   await initialization.result;await closing.result;
@@ -230,7 +247,7 @@ test('a failed local RPC start never stops or clears a successor published RPC',
 });
 
 test('concurrent startup in one lifetime shares construction and the actual successful initialization path',async()=>{
-  const f=await mainFixture({pause:'managed'}),first=f.init(),second=f.init();await f.entered.promise;await turn();
+  const f=await mainFixture({pause:'managed'}),first=f.init(),second=f.init();await f.waitForPause(first);await turn();
   assert.equal(f.counts.managed,1);f.gate.resolve();
   assert.equal((await first.result).error,undefined);assert.equal((await second.result).error,undefined);
   assert.equal(f.counts.project,1);assert.equal(f.counts.start,1);assert.equal(f.counts.rpc,1);assert.equal(f.counts.relay,1);
@@ -246,7 +263,7 @@ test('an old rejected close barrier cannot be converted into successful initiali
 });
 
 test('same-barrier Supervisor substitution cannot redirect a provisional relay goal callback to its successor',async()=>{
-  const f=await mainFixture({pause:'relay'}),initialization=f.init();await f.entered.promise;
+  const f=await mainFixture({pause:'relay'}),initialization=f.init();await f.waitForPause(initialization);
   const barrier=f.state().closing;let successorGoals=0;
   f.set('nativeSupervisor',{...f.supervisor,clientGoalSubmit:async()=>{successorGoals++;return {};}});
   await assert.rejects(async()=>f.relayOptions.control.goalSubmit({}),/supervisor_changed|initialization|lifetime/);
@@ -256,7 +273,7 @@ test('same-barrier Supervisor substitution cannot redirect a provisional relay g
 });
 
 test('actual recovery callbacks reject teardown while init is pending before reading or applying fleet and Supervisor state',async()=>{
-  const f=await mainFixture({pause:'recovery'}),initialization=f.init();await f.entered.promise;const closing=f.close();
+  const f=await mainFixture({pause:'recovery'}),initialization=f.init();await f.waitForPause(initialization);const closing=f.close();
   for(const callback of [f.recoveryOptions.getSnapshot,f.recoveryOptions.applyFleet,f.recoveryOptions.applySupervisor])
     await assert.rejects(async()=>callback({}),/initialization|lifetime|changed|closing/);
   assert.equal(f.counts.recoverySnapshot,0);assert.equal(f.counts.recoveryApplyFleet,0);assert.equal(f.counts.recoveryApplySupervisor,0);

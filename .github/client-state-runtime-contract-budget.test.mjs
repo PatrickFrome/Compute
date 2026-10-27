@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import {WINDOWS_NATIVE_GUARDS, assertWindowsNativeGuardProof} from './prepare-runtime-contract-pg17.mjs';
 
 const workflow = readFileSync(new URL('workflows/client-state-runtime-contract.yml', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const self = '.github/client-state-runtime-contract-budget.test.mjs';
@@ -11,6 +12,8 @@ const compatibility = ['client-local-contracts-w38', 'explicit-local-supervisor-
   'r83-edge-v14-canary-source-binding', 'me2-ui-local-profile-outbound-guard', 'client-owned-state-hosted-workflow-guard',
   'package-build-reservation-workflow'].map(name => 'test/' + name + '.test.mjs');
 const listener = ['test/me2-ui-loopback-host.test.mjs', 'test/verify-windows-tcp-listener.test.mjs'];
+const disposableGuards = ['native-coding-git-commit-operator.test.mjs',
+  'pg17-backup-effect-barrier.test.mjs', 'pg17-one-shot-disposable-dump-executor.test.mjs'];
 
 function contracts(source) {
   const start = source.indexOf('\n  contracts:\n');
@@ -38,6 +41,30 @@ function assertFullCoverage(source) {
     ['Verify normal UI host pins its child listener to loopback', listener],
   ]) assert.match(step(job, name), new RegExp('^        run: node --test ' + files.join(' ').replaceAll('.', '\\.') + '$', 'm'));
 }
+function assertDisposablePreflight(source, script) {
+  const job = contracts(source);
+  const name = 'Verify disposable operator and backup guards before the full suite';
+  const command = 'node ../../apps/metaengine-browser/scripts/run-isolated-tests.mjs --test-reporter=tap --test-concurrency=1 ' + disposableGuards.join(' ');
+  const preflight = step(job, name);
+  assert.ok(preflight.includes('          ' + command + ' | tee "$proof"\n'));
+  assert.ok(preflight.includes('          set -euo pipefail\n'));
+  assert.ok(preflight.includes('          node ../../.github/prepare-runtime-contract-pg17.mjs verify "$proof"\n'));
+  const setup = 'Prepare pinned PostgreSQL 17 binaries for disposable guards';
+  assert.match(step(job, setup), /^        run: node \.github\/prepare-runtime-contract-pg17\.mjs prepare$/m);
+  assert.ok(job.indexOf('- name: ' + setup) < job.indexOf('- name: ' + name));
+  assert.ok(job.indexOf('- name: ' + name) < job.indexOf('run: npm test'));
+  for (const file of disposableGuards) assert.equal(script.split(' ').filter(value => value === file).length, 1,
+    file + ' must remain in the full suite as well as the early preflight');
+}
+
+test('cheap disposable guards run early without removing their full-suite coverage', () => {
+  const script = JSON.parse(readFileSync(new URL('../infra/client-state-runtime/package.json', import.meta.url), 'utf8')).scripts.test;
+  assertDisposablePreflight(workflow, script);
+  for (const file of disposableGuards) {
+    assert.throws(() => assertDisposablePreflight(workflow.replace(' ' + file, ''), script), {code:'ERR_ASSERTION'});
+    assert.throws(() => assertDisposablePreflight(workflow, script.replace(' ' + file, '')), {code:'ERR_ASSERTION'});
+  }
+});
 
 test('StateContracts budgets only Windows physical qualification at 30 minutes and retains Linux at 10', () => assertBudgets(workflow));
 test('StateContracts retains the two-platform fail-fast and workflow concurrency strategy', () => {
@@ -75,4 +102,36 @@ test('StateContracts guard rejects a narrowed budget, removed compatibility targ
   assert.notEqual(removed, workflow); assert.throws(() => assertFullCoverage(removed), { code: 'ERR_ASSERTION' });
   const suppressed = workflow.replace('run: npm test', 'continue-on-error: true\n        run: npm test');
   assert.notEqual(suppressed, workflow); assert.throws(() => assertFullCoverage(suppressed), { code: 'ERR_ASSERTION' });
+});
+
+test('Windows guard proof rejects absent, failed, duplicated or skipped native outcomes', () => {
+  const pass = WINDOWS_NATIVE_GUARDS.map((name,index) => 'ok '+(index+1)+' - '+name).join('\n');
+  assert.equal(assertWindowsNativeGuardProof(pass).windows_native_guards_qualified,true);
+  for(const [index,name] of WINDOWS_NATIVE_GUARDS.entries()) {
+    const row='ok '+(index+1)+' - '+name;
+    for(const replacement of ['', 'not '+row, row+' # SKIP no native binary',
+      row+' # TODO qualification pending', row+'\n'+row]) {
+      assert.throws(()=>assertWindowsNativeGuardProof(pass.replace(row,replacement)),
+        {code:'ERR_ASSERTION'});
+    }
+  }
+});
+
+test('PG17 binary producer shares package pins and remains registered for push and PR', () => {
+  const setup = readFileSync(new URL('prepare-runtime-contract-pg17.mjs',import.meta.url),'utf8');
+  assert.match(setup,/from '\.\.\/apps\/metaengine-browser\/scripts\/stage-client-state-runtime\.mjs'/);
+  assert.match(setup,/const origin=RUNTIME_ORIGINS\.postgresql/);
+  assert.match(setup,/obtainRuntimeArchive\(archives,origin\)/);
+  assert.match(setup,/unpackRuntimeArchive\(archive,destination,\{postgresOnly:true\}\)/);
+  assert.match(setup,/LOCAL_STATE_TEST_PG_BIN_DIR=/);
+  assert.doesNotMatch(setup,/\binitdb\b|\bpg_ctl\b/);
+  for(const event of ['pull_request','push']) {
+    const start=workflow.indexOf('  '+event+':\n');
+    const tail=workflow.slice(start),end=tail.search(/\n {2}\S/);
+    const paths=tail.slice(0,end<0?tail.length:end);
+    for(const file of ['.github/prepare-runtime-contract-pg17.mjs',
+      'apps/metaengine-browser/scripts/stage-client-state-runtime.mjs']) {
+      assert.ok(paths.includes("      - '"+file+"'"),event+' must include '+file);
+    }
+  }
 });

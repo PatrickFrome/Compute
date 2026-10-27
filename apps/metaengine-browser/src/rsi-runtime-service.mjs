@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { normalizeRsiSkillDispatchObservation } from './rsi-verified-skill-dispatch.mjs';
 
 import {
   RsiShadowArchive,
@@ -656,6 +657,29 @@ export class RsiRuntimeService {
       authority_effect: false,
     });
     return plan;
+  }
+
+  skillDispatchObservationReadback(dispatchDigest) {
+    this.#assertRunning();
+    if (!/^sha256:[0-9a-f]{64}$/.test(dispatchDigest || '')) return null;
+    // Existing verified ledger, bounded window, no new storage/trust root.
+    // A cache eviction/restart cannot turn missing history into an outcome.
+    const rows = this.#ledger.events({ limit: 256 });
+    for (let index = rows.length - 1; index >= 0; index -= 1) {
+      const row = rows[index];
+      if (row.source_sha === this.#sourceSha && row.type.startsWith('SKILL_DISPATCH_')
+        && row.payload?.dispatch_digest === dispatchDigest) {
+        return normalizeRsiSkillDispatchObservation(row.payload);
+      }
+    }
+    return null;
+  }
+
+  async recordSkillDispatchObservation(observation) {
+    this.#assertRunning();
+    const checked = normalizeRsiSkillDispatchObservation(observation);
+    await this.#ledger.append(`SKILL_DISPATCH_${checked.stage}`, checked);
+    return checked;
   }
 
   async requestSkillCuration({

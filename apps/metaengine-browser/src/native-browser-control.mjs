@@ -24,7 +24,7 @@ import {
 } from './native-semantic-ref.mjs';
 import { resolveExactWebContentsView } from './browser-webcontents-tab-index.mjs';
 import { withTemporaryDetachedCaptureSurface } from './browser-detached-capture-surface.mjs';
-import { isAgentPlatformConversationUrl, isAgentPlatformUrl, isAgentPlatformAuthRedirectUrl } from './browser-agent-platform.mjs';
+import { isAgentPlatformUrl, isAgentPlatformAuthRedirectUrl } from './browser-agent-platform.mjs';
 
 const SAFE_ROLES = new Set(['textbox','searchbox','combobox','button','checkbox','radio','switch','tab','menuitem','link']);
 const TEXT_INPUT_ROLES = new Set(['textbox','searchbox','combobox']);

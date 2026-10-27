@@ -1,7 +1,10 @@
 import { registerHooks } from 'node:module';
-import { app, BaseWindow } from 'electron';
+import { app, BaseWindow, protocol } from 'electron';
+import { ensureElectronPreReady } from './electron-pre-ready-bootstrap.mjs';
 import { requestPrimaryWindowResurrection } from './primary-window-resurrection.mjs';
 import { isInstallerShutdownArgv } from './single-instance-guard.mjs';
+
+ensureElectronPreReady({ app, protocol });
 
 const mainUrl = new URL('./main.mjs', import.meta.url).href;
 const developmentPlaneUrl = new URL('./development-plane.mjs', import.meta.url).href;

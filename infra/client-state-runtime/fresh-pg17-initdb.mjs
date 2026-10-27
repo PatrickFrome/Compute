@@ -9,6 +9,10 @@ import { initializeLocalVaultKey } from './local-vault-key.mjs';
 const runFile = promisify(execFile);
 const digest = /^[0-9a-f]{64}$/;
 const fail = code => { throw Object.assign(new Error(code), { code }); };
+const databaseOwnerName = value => {
+  if (!['postgres', 'state_owner'].includes(value)) fail('client_initdb_database_owner_invalid');
+  return value;
+};
 const inside = (root, target) => {
   const rel = path.relative(root, target);
   return rel === '' || (!path.isAbsolute(rel) && rel !== '..' && !rel.startsWith('..' + path.sep));
@@ -40,13 +44,14 @@ async function canonicalCredentialFile(filename, { bundleDirectory, stateDirecto
 }
 
 export async function runClientInitdb({
-  executable, dataDirectory, passwordFile, stateDirectory, timeoutMs = 120000,
+  executable, dataDirectory, passwordFile, stateDirectory, timeoutMs = 120000, databaseOwner = 'postgres',
 }) {
+  const username = databaseOwnerName(databaseOwner);
   const env = {};
   for (const name of ['SystemRoot', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'PATH', 'HOME', 'USERPROFILE', 'LANG']) {
     if (typeof process.env[name] === 'string') env[name] = process.env[name];
   }
-  const args = ['-D', dataDirectory, '--username=postgres', '--auth=scram-sha-256',
+  const args = ['-D', dataDirectory, `--username=${username}`, '--auth=scram-sha-256',
     '--encoding=UTF8', '--no-locale', '--data-checksums', '--no-instructions', `--pwfile=${passwordFile}`];
   try {
     await runFile(executable, args, { cwd: stateDirectory, env, windowsHide: true,
@@ -57,10 +62,12 @@ export async function runClientInitdb({
 export async function initializeFreshClientPg17({
   bundleDirectory, expectedBundleSha256, stateDirectory, pgDataDirectory,
   runtimeConfigFile, ownerFile, passwordFile, ownerAction,
+  databaseOwner = 'postgres',
 }, { verifyBundle = verifyOfflineRuntimeBundle, initdb = runClientInitdb,
   initializeVaultKey = initializeLocalVaultKey } = {}) {
   const stageVault = ownerAction === 'INITIALIZE_FRESH_LOCAL_POSTGRES_17_WITH_VAULT';
   if (!stageVault && ownerAction !== 'INITIALIZE_FRESH_LOCAL_POSTGRES_17') fail('client_initdb_owner_approval_required');
+  databaseOwnerName(databaseOwner);
   if (!digest.test(expectedBundleSha256 || '')) fail('client_initdb_reviewed_bundle_digest_required');
   const selected = { bundleDirectory, stateDirectory, pgDataDirectory, runtimeConfigFile, ownerFile };
   const preflight = await inspectClientFirstRun(selected);
@@ -107,7 +114,7 @@ export async function initializeFreshClientPg17({
   } finally { await handle.close(); }
   try {
     await fs.mkdir(pgDataDirectory, { mode: 0o700 }); // exclusive: EEXIST blocks replacement
-    await initdb({ executable, dataDirectory: pgDataDirectory, passwordFile: password, stateDirectory });
+    await initdb({ executable, dataDirectory: pgDataDirectory, passwordFile: password, stateDirectory, databaseOwner });
     const [version, config, base] = await Promise.all([
       fs.readFile(path.join(pgDataDirectory, 'PG_VERSION'), 'utf8'),
       fs.lstat(path.join(pgDataDirectory, 'postgresql.conf')),

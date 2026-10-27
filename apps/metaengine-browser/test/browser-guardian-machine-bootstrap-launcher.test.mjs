@@ -257,6 +257,8 @@ test('launcher contract exposes no renderer path/args and no startup elevation o
   assert.equal(contract.renderer_supplied_arguments_allowed, false);
   assert.equal(contract.packaged_asar_binding_required, true);
   assert.equal(contract.exact_sha256_and_size_required, true);
+  assert.equal(contract.single_owner_enrollment_attempt_after_service_readback, false);
+  assert.equal(contract.authenticated_local_owner_bridge_required, true);
   assert.equal(contract.automatic_effect_retry_allowed, false);
   assert.equal(contract.ambiguous_owner_enrollment_retry_allowed, false);
   assert.equal(contract.bounded_uac_acknowledgement_required, true);
@@ -296,3 +298,15 @@ for (const error of [
     assert.equal(enrollments, 0);
   });
 }
+
+test('missing authenticated local owner bridge is explicit HOLD, not generic failure or READY',async t=>{
+  const fx=await fixture(t);let opens=0,enrolls=0;
+  const launcher=createBrowserGuardianMachineBootstrapLauncher({
+    platform:'win32',isPackaged:true,resourcesPath:fx.root,version:VERSION,identity:identity(),
+    openPath:async()=>{opens++;throw Error('must_not_elevate_existing_service');},trustRootLoader:()=>({build_sha:HEAD}),bindingLoader:()=>fx.binding,
+    actuatorFactory:()=>({observeOwner:async()=>({state:'NO_EFFECT_PROVEN',reason:'OWNER_ENROLLMENT_TICKET_REQUIRED',effect_absent_proven:true}),
+      ensureOwnerBound:async()=>{enrolls++;throw Object.assign(Error('guardian_local_owner_bridge_required'),{code:'GUARDIAN_LOCAL_OWNER_BRIDGE_REQUIRED'});}}),
+  });
+  const value=await launcher.activate();assert.equal(value.state,'HOLD');assert.equal(value.reason,'GUARDIAN_LOCAL_OWNER_BRIDGE_REQUIRED');
+  assert.equal(value.ready,false);assert.equal(opens,0);assert.equal(enrolls,1);
+});

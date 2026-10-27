@@ -85,18 +85,6 @@ function refs(value) {
   }).sort());
 }
 
-function zeroAuthority(extra={}) {
-  return Object.freeze({
-    ...extra,
-    execution_authority:false,
-    production_mutation_authority:false,
-    promotion_authority:false,
-    self_update_authority:false,
-    scheduler_authority:false,
-    automatic_retry_allowed:false,
-    authority_effect:false,
-  });
-}
 
 function assertZeroAuthority(value,label){
   for(const field of ['execution_authority','production_mutation_authority','promotion_authority','self_update_authority','scheduler_authority','authority_effect']){

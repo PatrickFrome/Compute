@@ -2,13 +2,14 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createHash } from 'node:crypto';
-import { readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
+import { verifyUiContent } from '../../me2-ui/scripts/ui-content-inventory.mjs';
 import { verifyWindowsTcpListener } from './verify-windows-tcp-listener.mjs';
 
 // Verify the installed copy, not merely a source manifest or extraResources entry.
@@ -27,22 +28,8 @@ export function verifyMe2UiBundle(directory, expectedSha) {
   assert.equal(manifest.build_id, readFileSync(path.join(root, '.next/BUILD_ID'), 'utf8').trim(), 'me2_ui_build_id_mismatch');
   assert.ok(Number.isSafeInteger(manifest.size_bytes) && manifest.size_bytes > 0, 'me2_ui_manifest_size_invalid');
 
-  // pack-me2-ui computes size_bytes before writing me2-ui-manifest.json, so the
-  // installed tree excluding that manifest must retain exactly the same total bytes.
-  let installedSizeBytes = 0;
-  const stack = [root];
-  const manifestPath = path.join(root, 'me2-ui-manifest.json');
-  while (stack.length) {
-    const current = stack.pop();
-    for (const name of readdirSync(current)) {
-      const absolute = path.join(current, name);
-      if (absolute === manifestPath) continue;
-      const stat = statSync(absolute);
-      if (stat.isDirectory()) stack.push(absolute);
-      else installedSizeBytes += stat.size;
-    }
-  }
-  assert.equal(installedSizeBytes, manifest.size_bytes, `me2_ui_installed_size_mismatch:${installedSizeBytes}:${manifest.size_bytes}`);
+  const content = verifyUiContent(root, manifest);
+  const installedSizeBytes = content.size_bytes;
 
   const require = createRequire(path.join(root, 'server.js'));
   const dependencies = {};
@@ -59,13 +46,20 @@ export function verifyMe2UiBundle(directory, expectedSha) {
     manifest_sha256: createHash('sha256').update(manifestBytes).digest('hex'),
     manifest_size_bytes: manifest.size_bytes,
     installed_size_bytes: installedSizeBytes,
+    content_sha256: content.content_sha256,
+    content_hash_scheme: content.content_hash_scheme,
+    content_file_count: content.content_files.length,
     dependencies,
     runtime_smoke: 'NOT_RUN',
   };
 }
 
-export async function smokeMe2UiBundle(directory, runtime = process.execPath, timeoutMs = 30000) {
+export async function smokeMe2UiBundle(directory, runtime = process.execPath, timeoutMs = 30000, expectedSha) {
   const root = realpathSync(directory);
+  const before = verifyMe2UiBundle(root, expectedSha);
+  const manifestBytes = readFileSync(path.join(root, 'me2-ui-manifest.json'));
+  assert.equal(createHash('sha256').update(manifestBytes).digest('hex'), before.manifest_sha256, 'me2_ui_manifest_changed_before_smoke');
+  const pinnedManifest = JSON.parse(manifestBytes);
   const listener = net.createServer();
   listener.listen(0, '127.0.0.1');
   await once(listener, 'listening');
@@ -73,7 +67,8 @@ export async function smokeMe2UiBundle(directory, runtime = process.execPath, ti
   await new Promise((resolve, reject) => listener.close(error => error ? reject(error) : resolve()));
   const child = spawn(runtime, ['server.js'], {
     cwd: root, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, NODE_ENV: 'production', ELECTRON_RUN_AS_NODE: '1', HOSTNAME: '127.0.0.1', PORT: String(port), NODE_PATH: '', NODE_OPTIONS: '' },
+    env: { ...process.env, NODE_ENV: 'production', ELECTRON_RUN_AS_NODE: '1', HOSTNAME: '127.0.0.1', PORT: String(port), NODE_PATH: '', NODE_OPTIONS: '',
+      ME2_HOSTED_BY_BROWSER: '1', ME2_WATCHDOG: 'off', NEXT_TELEMETRY_DISABLED: '1' },
   });
   let output = '';
   let spawnError;
@@ -102,13 +97,23 @@ export async function smokeMe2UiBundle(directory, runtime = process.execPath, ti
         ? await verifyWindowsTcpListener({ port, pid: child.pid }) : null;
       assert.ok(child.exitCode === null && child.signalCode === null, 'me2_ui_server_died_during_listener_probe');
       return { runtime_smoke: 'PASS', html_sha256: createHash('sha256').update(html).digest('hex'), static_path: staticPath, static_sha256: createHash('sha256').update(assetBytes).digest('hex'),
+        post_exit_content_verified: true, post_exit_manifest_sha256: before.manifest_sha256,
         os_listener_verified: osListener !== null, os_listener: osListener,
         os_listener_verification: osListener ? 'PASS' : 'UNSUPPORTED_PLATFORM' };
     }
     throw new Error(`me2_ui_smoke_timeout:${output}`);
   } finally {
     if (child.exitCode === null && child.signalCode === null) child.kill();
-    await exited;
+    const killTimer = setTimeout(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); }, 5000);
+    killTimer.unref();
+    try { await exited; } finally { clearTimeout(killTimer); }
+    // A healthy HTTP response is not proof that package bytes stayed immutable.
+    // Pin the ORIGINAL manifest, including its exact bytes: a child must not
+    // rewrite the inventory to bless its own additions, deletions or mutations.
+    assert.equal(realpathSync(directory), root, 'me2_ui_root_changed_during_smoke');
+    assert.deepEqual(readFileSync(path.join(root, 'me2-ui-manifest.json')), manifestBytes, 'me2_ui_manifest_changed_during_smoke');
+    verifyUiContent(root, pinnedManifest);
+    assert.equal(verifyMe2UiBundle(root, expectedSha).content_sha256, before.content_sha256, 'me2_ui_content_changed_during_smoke');
   }
 }
 
@@ -116,7 +121,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   try {
     const { values } = parseArgs({ options: { root: { type: 'string' }, 'expected-sha': { type: 'string' }, runtime: { type: 'string' }, evidence: { type: 'string' }, smoke: { type: 'boolean' } } });
     const proof = verifyMe2UiBundle(values.root, values['expected-sha']);
-    if (values.smoke) Object.assign(proof, await smokeMe2UiBundle(values.root, values.runtime));
+    if (values.smoke) Object.assign(proof, await smokeMe2UiBundle(values.root, values.runtime, 30000, values['expected-sha']));
     const json = JSON.stringify(proof, null, 2) + '\n';
     if (values.evidence) writeFileSync(values.evidence, json);
     process.stdout.write(json);

@@ -10,18 +10,19 @@ function displayContent(value: unknown) {
 }
 
 export function ManagedProjectHistory({ taskId = null }: { taskId?: string | null }) {
+  // Each task owns its filter draft; switching tasks remounts this state rather
+  // than rendering one task with another task's draft and resetting in an effect.
+  return <ManagedProjectHistoryScope key={taskId ?? "project-history-root"} taskId={taskId} />;
+}
+
+function ManagedProjectHistoryScope({ taskId }: { taskId: string | null }) {
   const resource = useMemo(() => getClientProjectHistoryView(taskId), [taskId]);
   const view = useSyncExternalStore(resource.subscribe, resource.getSnapshot, resource.getSnapshot);
   const [actor, setActor] = useState("");
-  const [eventType, setEventType] = useState("");
-  const [task, setTask] = useState("");
-  const [attempt, setAttempt] = useState("");
+  const [eventType, setEventType] = useState(() => view.filters.event_type ?? "");
+  const [task, setTask] = useState(() => view.filters.task_id ?? "");
+  const [attempt, setAttempt] = useState(() => view.filters.attempt === null ? "" : String(view.filters.attempt));
   const [filterError, setFilterError] = useState<string | null>(null);
-  useEffect(() => {
-    const filters = resource.getSnapshot().filters;
-    setTask(filters.task_id ?? ""); setAttempt(filters.attempt === null ? "" : String(filters.attempt));
-    setEventType(filters.event_type ?? ""); setActor(""); setFilterError(null);
-  }, [resource]);
   useEffect(() => {
     let active = true;
     const observe = () => { if (active && document.visibilityState === "visible") void resource.refresh(); };

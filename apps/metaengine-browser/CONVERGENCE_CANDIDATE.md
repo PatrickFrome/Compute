@@ -1,4 +1,10 @@
-Reserved package identity is `0.7.0-dev.1107139874594.1`.
+Prepared source package identity is `0.7.0-dev.1359740117434.1`.
+
+Physical package-version reservation is pending. This is a source-only successor of `88eb062b09bd456d430bd0da37cb21baaddcee6d`, not a built, signed, installed-qualified or production-ready package. The supported read-only planner observed no reservation for this proposed version at 2026-10-26T12:14:11.149Z, with exclusive consumed-version floor `0.7.0-dev.1269944506140.1`. That observation is time-bound and does not reserve the version; the ordinary producer must independently recheck the final versioned source and publish its immutable reservation before a physical build.
+
+The consumed predecessor `0.7.0-dev.1107139874594.1` and separately consumed sibling `0.7.0-dev.1269944506140.1` remain burned. The sibling is not fabricated into this source line's ancestry or transition chain. Exact successor CI, physical Windows/native/own-PG package qualification and release signing remain pending. The inherited fresh-install-only diagnostic gate does not authorize replacement of the existing `.4594` installation: that migration remains HOLD. No historical success establishes readiness of this changed source.
+
+Historical predecessor package identity: `0.7.0-dev.1107139874594.1`. Dated records below describe their original source and qualification state.
 
 2026-10-25: this distinct QA candidate removes fixed agent roster and two-worker ceilings, pages private scope and rotates bounded signed admission windows. It includes the PostgreSQL upgrade and restores NSIS blockmap emission required by provenance. Functional parent `f952ea2cc9ac355459f8afc95d1e30f0e72ff720`. Exact-head packaging and installed qualification are pending. Fresh-PC automatic provisioning remains under development and is not claimed by this candidate.
 

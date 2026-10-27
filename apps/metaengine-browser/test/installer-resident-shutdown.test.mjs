@@ -3,7 +3,6 @@ import fs from 'node:fs/promises';
 import test from 'node:test';
 import {
   acquirePrimaryInstance,
-  INSTALLER_PRIMARY_EXIT_FALLBACK_MS,
   INSTALLER_SHUTDOWN_ARG,
   isInstallerShutdownArgv,
   registerPrimaryInstallerShutdownBarrier,
@@ -39,7 +38,7 @@ test('installer shutdown argv is exact and ordinary launches do not match', () =
   assert.equal(isInstallerShutdownArgv(null), false);
 });
 
-test('primary installer shutdown stops resilience, arms one bounded fallback, then quits gracefully first', async () => {
+test('primary installer shutdown requests cooperative quit without any forced-exit fallback', async () => {
   delete globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__;
   const app = fakePrimaryApp();
   const scheduled = [];
@@ -82,24 +81,19 @@ test('primary installer shutdown stops resilience, arms one bounded fallback, th
       'watchdog-cancel',
       'host-stop-start',
       'host-stop-end',
-      `fallback-arm:${INSTALLER_PRIMARY_EXIT_FALLBACK_MS}`,
-      'fallback-unref',
       'quit',
     ]);
-    assert.equal(scheduled.length, 1);
-    assert.equal(scheduled[0].delay, INSTALLER_PRIMARY_EXIT_FALLBACK_MS);
-    assert.equal(unrefCount, 1);
+    assert.equal(scheduled.length, 0, 'a prevented quit must never be bypassed');
+    assert.equal(unrefCount, 0);
     assert.equal(app.events.some((event) => event.startsWith('exit:')), false);
 
     const eventCountBeforeRepeat = app.events.length;
     handler(null, ['browser.exe', INSTALLER_SHUTDOWN_ARG]);
     await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(scheduled.length, 1, 'repeated installer shutdown must not arm a second fallback');
+    assert.equal(scheduled.length, 0, 'repeated installer shutdown must not force exit');
     assert.equal(app.events.length, eventCountBeforeRepeat);
 
-    scheduled[0].fn();
-    assert.equal(app.events.filter((event) => event === 'exit:0').length, 1);
-    assert.equal(app.events.at(-1), 'exit:0');
+    assert.equal(app.events.some((event) => event.startsWith('exit:')), false);
   } finally {
     delete globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__;
     delete globalThis.__METAENGINE_HOST_RESILIENCE_RUNTIME__;
@@ -130,7 +124,7 @@ test('ordinary second-instance does not request installer shutdown or arm forced
   }
 });
 
-test('primary waits for its registered cleanup barrier before resilience stop, quit or forced fallback', async () => {
+test('primary waits for its registered preparation barrier before resilience stop and cooperative quit', async () => {
   delete globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__;
   const app = fakePrimaryApp();
   let release;
@@ -150,7 +144,7 @@ test('primary waits for its registered cleanup barrier before resilience stop, q
     assert.equal(schedules, 0);
     release();
     await new Promise(resolve => setImmediate(resolve));
-    assert.deepEqual(app.events, ['owned-cleanup-start', 'owned-cleanup-confirmed', 'resilience-stop', 'fallback', 'quit']);
+    assert.deepEqual(app.events, ['owned-cleanup-start', 'owned-cleanup-confirmed', 'resilience-stop', 'quit']);
   } finally {
     delete globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__;
     delete globalThis.__METAENGINE_HOST_RESILIENCE_RUNTIME__;
@@ -240,7 +234,7 @@ test('installer control losing the lock keeps one bounded re-notify then exits b
   assert.deepEqual(events, ['exit:0']);
 });
 
-test('NSIS migration fallback is bounded and exact-path only', async () => {
+test('NSIS installed-file gate is read-only and rejects unqualified shutdown protocols', async () => {
   const ps1 = await fs.readFile(new URL('../build/installer-shutdown.ps1', import.meta.url), 'utf8');
   const nsh = await fs.readFile(new URL('../build/installer.nsh', import.meta.url), 'utf8');
   const physical = await fs.readFile(new URL('./installer-resident-upgrade-physical.ps1', import.meta.url), 'utf8');
@@ -248,9 +242,10 @@ test('NSIS migration fallback is bounded and exact-path only', async () => {
   assert.match(ps1, /Win32_Process/);
   assert.match(ps1, /ExecutablePath/);
   assert.match(ps1, /OrdinalIgnoreCase\.Equals/);
-  assert.match(ps1, /Stop-Process -Id/);
-  assert.match(ps1, /AddSeconds\(\$GraceSeconds\)/);
-  assert.match(ps1, /AddSeconds\(\$ForceSeconds\)/);
+  assert.doesNotMatch(ps1, /Start-Process|Stop-Process|--metaengine-installer-shutdown|Start-Sleep/);
+  assert.match(ps1, /installer_shutdown_controlled_quit_required/);
+  assert.match(ps1, /installer_shutdown_process_identity_unknown/);
+  assert.match(ps1, /if \(\$existing.Count -ne 0\) \{[\s\S]*?exit 23/);
   assert.doesNotMatch(ps1, /^\s*(?:&\s*)?taskkill(?:\.exe)?\b/im);
   assert.doesNotMatch(ps1, /Stop-Process\s+-Name/i);
 
@@ -263,4 +258,41 @@ test('NSIS migration fallback is bounded and exact-path only', async () => {
 
   assert.match(physical, /planned_shutdown_signal_exit_/);
   assert.match(physical, /installer-resident-upgrade-proof\.json/);
+});
+
+
+test('installer shutdown has no authority over daemon locks, credentials or bridge files', async () => {
+  const ps1 = await fs.readFile(new URL('../build/installer-shutdown.ps1', import.meta.url), 'utf8');
+  // A stale PID does not bind any artifact to this installation, and a failed
+  // inventory is UNKNOWN. The installer must not even select credential paths.
+  assert.doesNotMatch(ps1, /Remove-DeadComputeDaemonState|Remove-Item|control-token|compute-bridge\.json|a2-daemon\.lock|\$env:USERPROFILE/);
+});
+
+test('installer preparation preserves Host capability until the canonical Electron quit barriers drain', async () => {
+  const entry = await fs.readFile(new URL('../src/main-entry.mjs', import.meta.url), 'utf8');
+  const main = await fs.readFile(new URL('../src/main.mjs', import.meta.url), 'utf8');
+  const host = await fs.readFile(new URL('../src/local-runtime-host-controller.mjs', import.meta.url), 'utf8');
+  const barrier = /registerPrimaryInstallerShutdownBarrier\(app, async \(\) => \{([\s\S]*?)\n  \}\);/.exec(entry)?.[1];
+  assert.ok(barrier);
+  assert.match(barrier, /await primaryPreparation/);
+  assert.doesNotMatch(barrier, /stopOwnedLocalRuntimeHost/);
+  assert.match(entry, /installLocalRuntimeHostShutdown\(app\)/);
+  assert.match(main, /app\.on\('before-quit',[\s\S]*?event\.preventDefault\(\)[\s\S]*?closeManagedTaskProjectHost\(\)/);
+  assert.match(host, /app\.on\('will-quit',[\s\S]*?event\.preventDefault\(\)[\s\S]*?stopOwnedLocalRuntimeHost\(\)/);
+});
+
+
+test('failed Sentinel shutdown cannot authorize a primary quit or a success exit', async () => {
+  const app=fakePrimaryApp();let schedules=0;app.exit=code=>app.events.push('exit:'+code);
+  const previous=console.error;const diagnostics=[];console.error=row=>diagnostics.push(JSON.parse(row));
+  globalThis.__METAENGINE_HOST_RESILIENCE_RUNTIME__={stop:async()=>{throw Error('fixture_sentinel_cleanup_unknown');}};
+  try {
+    acquirePrimaryInstance(app,{launch_id:FIXED_LAUNCH_ID,schedule:()=>{schedules++;}});
+    app.listeners.get('second-instance')(null,['browser.exe',INSTALLER_SHUTDOWN_ARG]);
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.deepEqual(app.events,[]);assert.equal(schedules,0);
+    assert.equal(diagnostics[0].state,'PRIMARY_SHUTDOWN_BLOCKED');
+    assert.equal(diagnostics[0].primary_kept_alive,true);
+    assert.equal(globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__,true);
+  } finally {console.error=previous;delete globalThis.__METAENGINE_HOST_RESILIENCE_RUNTIME__;delete globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__;}
 });

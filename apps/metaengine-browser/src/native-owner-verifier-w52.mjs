@@ -13,8 +13,6 @@ const positive = x => Number.isSafeInteger(x) && x > 0;
 const time = x => typeof x === 'string' && Number.isFinite(Date.parse(x));
 const fresh = (x, now) => time(x) && Date.parse(x) >= now - 30000 && Date.parse(x) <= now + 5000;
 const sameBirth = (a,b) => a.pid === b.pid && Date.parse(a.created_at) === Date.parse(b.created_at);
-const sameOwner = (a,b) => ['owner_id','device_id','project_id','pid','created_at',
-  'process_incarnation_id','generation','epoch'].every(k => a[k] === b[k]);
 const fixture = x => x?.fixture_classification != null ||
   x?.synthetic === true || x?.staging === true || x?.untrusted === true;
 const clone = x => Object.freeze({ ...x });
@@ -79,12 +77,14 @@ export function createNativeOwnerVerifierW52(readers, { now = Date.now } = {}) {
       if (![a,b].every(x => isObj(x) && !fixture(x) &&
         x.source === 'INSTALLED_EXE_NATIVE_VERIFIER' &&
         x.exact_bytes_verified === true && x.native_signature_verified === true &&
+        x.release_root_signature_verified === true && x.slsa_evidence_digest_bound === true &&
+        x.package_code_verified === true && HASH.test(x.package_code_sha256 || '') &&
         x.authority_effect === false && x.owner_id === owner.owner_id &&
         x.owner_epoch === owner.epoch && x.owner_generation === owner.generation &&
         x.process_incarnation_id === owner.process_incarnation_id &&
         SHA.test(x.source_sha || '') && HASH.test(x.installed_exe_sha256 || '') &&
         HASH.test(x.proof_identity || '') && fresh(x.observed_at, now())) ||
-        !['source_sha','installed_exe_sha256','proof_identity'].every(k=>a[k]===b[k]))
+        !['source_sha','installed_exe_sha256','proof_identity','package_code_sha256'].every(k=>a[k]===b[k]))
         return null;
       return clone(b);
     },

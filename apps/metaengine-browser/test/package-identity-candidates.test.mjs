@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 import {
@@ -194,4 +196,126 @@ test('source artifact metadata from current run cannot be reinterpreted as anoth
       workflow_run: { id: opts.runId, head_sha: opts.sourceHead } }],
   });
   assert.equal(plan.physical_package_build_allowed, true);
+});
+
+test('explicit exclusive floor advances every bounded candidate beyond manifest and consumed sibling', () => {
+  const serialOf = version => BigInt(version.split('.')[3]);
+  for (const [packageVersion, minimumPackageVersion] of [
+    ['0.7.0-dev.1107139874594.1', '0.7.0-dev.1269944506140.1'],
+    [VERSION, VERSION],
+    [VERSION, '0.7.0-dev.9007199254740993.1'],
+  ]) {
+    for (let slot = 0; slot < MAX_PACKAGE_IDENTITY_CANDIDATES; slot++) {
+      const input = { packageVersion, sourceHead: HEADS[0], minimumPackageVersion, slot };
+      const candidate = deriveDistinctCandidatePackageVersion(input);
+      assert.ok(serialOf(candidate) > serialOf(packageVersion));
+      assert.ok(serialOf(candidate) > serialOf(minimumPackageVersion));
+      assert.equal(candidate, deriveDistinctCandidatePackageVersion(input));
+    }
+  }
+  assert.equal(deriveDistinctCandidatePackageVersion({ ...opts, minimumPackageVersion: '0.7.0-dev.1.1' }),
+    deriveDistinctCandidatePackageVersion(opts), 'lower floor must not alter default derivation');
+});
+
+test('invalid explicit floors fail before artifact observation and cannot be silently omitted', async () => {
+  await withMock(() => [], async ({ queries }) => {
+    for (const minimumPackageVersion of [null, '', ' ', true, 1, '0.7.0', '0.8.0-dev.123.1',
+      '0.7.0-dev.-1.1', '0.7.0-dev.1e12.1', '0.7.0-dev.123.2']) {
+      assert.throws(() => deriveDistinctCandidatePackageVersion({ ...opts, minimumPackageVersion }),
+        /minimum_package_version_invalid/);
+      await assert.rejects(() => planDistinctPackageBuildIdentity({ ...opts, minimumPackageVersion }),
+        /minimum_package_version_invalid/);
+    }
+    assert.equal(queries.length, 0);
+  });
+});
+
+test('clean but equal or older manifest must advance beyond explicit consumed floor', async () => {
+  for (const minimumPackageVersion of [VERSION, '0.7.0-dev.1269944506140.1']) {
+    await withMock(() => [], async ({ queries }) => {
+      const plan = await planDistinctPackageBuildIdentity({ ...opts, minimumPackageVersion });
+      assert.equal(plan.manifest_update_required, true);
+      assert.equal(plan.candidate_slot, 0);
+      assert.equal(plan.minimum_package_version, minimumPackageVersion);
+      assert.equal(plan.minimum_package_version_exclusive, true);
+      assert.ok(BigInt(plan.candidate_package_version.split('.')[3]) > BigInt(minimumPackageVersion.split('.')[3]));
+      for (const key of ['physical_package_build_allowed', 'promotion_authorized', 'authority_effect']) {
+        assert.equal(plan[key], false);
+      }
+      assert.equal(queries.length, 3);
+    });
+  }
+});
+
+test('clean manifest newer than explicit floor is retained without claiming build authority', async () => {
+  await withMock(() => [], async ({ queries }) => {
+    const plan = await planDistinctPackageBuildIdentity({ ...opts, minimumPackageVersion: '0.7.0-dev.1.1' });
+    assert.equal(plan.candidate_package_version, VERSION);
+    assert.equal(plan.candidate_slot, null);
+    assert.equal(plan.manifest_update_required, false);
+    assert.equal(plan.minimum_package_version, '0.7.0-dev.1.1');
+    assert.equal(plan.minimum_package_version_exclusive, true);
+    for (const key of ['physical_package_build_allowed', 'promotion_authorized', 'authority_effect']) {
+      assert.equal(plan[key], false);
+    }
+    assert.equal(queries.length, 2);
+  });
+});
+
+test('occupied first proposal cannot select a lower-than-sibling fallback with explicit floor', async () => {
+  // Historical source is a deterministic fixture only, not a selected version.
+  const input = { ...opts, packageVersion: '0.7.0-dev.1107139874594.1',
+    sourceHead: '643c8c8b4306ffa4b708591b83c0992591e928b7' };
+  const minimumPackageVersion = '0.7.0-dev.1269944506140.1';
+  assert.ok(BigInt(deriveDistinctCandidatePackageVersion({ ...input, slot: 1 }).split('.')[3])
+    < BigInt(minimumPackageVersion.split('.')[3]), 'generic planner has no sibling high-water mark');
+  const first = deriveDistinctCandidatePackageVersion({ ...input, minimumPackageVersion, slot: 0 });
+  await withMock(name => [reservationArtifactName(input.packageVersion), reservationArtifactName(first)].includes(name)
+    ? [prior(name)] : [], async () => {
+    const plan = await planDistinctPackageBuildIdentity({ ...input, minimumPackageVersion });
+    assert.equal(plan.candidate_slot, 1);
+    assert.equal(plan.candidate_package_version,
+      deriveDistinctCandidatePackageVersion({ ...input, minimumPackageVersion, slot: 1 }));
+    assert.ok(BigInt(plan.candidate_package_version.split('.')[3]) > BigInt(minimumPackageVersion.split('.')[3]));
+    assert.deepEqual(plan.rejected_reserved_candidate_versions, [first]);
+    for (const key of ['physical_package_build_allowed', 'promotion_authorized', 'authority_effect']) {
+      assert.equal(plan[key], false);
+    }
+  });
+});
+
+test('explicit floor preserves four-candidate bound, source refusal, rerun and unavailable API fences', async () => {
+  const input = { ...opts, minimumPackageVersion: '0.7.0-dev.1269944506140.1' };
+  await withMock(name => [prior(name)], async ({ queries }) => {
+    await assert.rejects(() => planDistinctPackageBuildIdentity(input),
+      error => error?.code === 'PACKAGE_IDENTITY_CANDIDATES_EXHAUSTED');
+    assert.equal(queries.length, 2 + MAX_PACKAGE_IDENTITY_CANDIDATES);
+  });
+  await withMock(name => name === candidateArtifactName(input.sourceHead) ? [prior(name)] : [], async () => {
+    await assert.rejects(() => planDistinctPackageBuildIdentity(input),
+      error => error?.code === 'PACKAGE_IDENTITY_SOURCE_ALREADY_BUILT');
+  });
+  await withMock(() => [], async ({ queries }) => {
+    await assert.rejects(() => planDistinctPackageBuildIdentity({ ...input, runAttempt: 2 }),
+      error => error?.code === 'PACKAGE_IDENTITY_RERUN_REQUIRES_NEW_SOURCE_AND_VERSION');
+    assert.equal(queries.length, 0);
+  });
+  for (const response of [{ status: 503 }, { total_count: 101, artifacts: [] }]) {
+    await withMock(() => response, async () => {
+      await assert.rejects(() => planDistinctPackageBuildIdentity(input),
+        error => ['PACKAGE_BUILD_RESERVATION_API_UNAVAILABLE', 'PACKAGE_BUILD_RESERVATION_API_SHAPE_INVALID'].includes(error?.code));
+    });
+  }
+});
+
+test('CLI rejects planner-only floor on ordinary preflight and rejects missing floor value before network', () => {
+  const script = fileURLToPath(new URL('../scripts/package-build-reservation.mjs', import.meta.url));
+  const ordinary = spawnSync(process.execPath, [script, '--minimum-package-version', VERSION], { encoding: 'utf8' });
+  assert.equal(ordinary.status, 1);
+  assert.match(ordinary.stderr, /package_identity_minimum_version_requires_planner/);
+  const missing = spawnSync(process.execPath, [script, '--plan-distinct', '--repository', opts.repository,
+    '--source-head', opts.sourceHead, '--package-version', opts.packageVersion,
+    '--run-id', String(opts.runId), '--run-attempt', '1', '--minimum-package-version'], { encoding: 'utf8' });
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /minimum_package_version_invalid/);
 });
