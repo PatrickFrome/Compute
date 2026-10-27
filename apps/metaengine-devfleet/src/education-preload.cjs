@@ -8,7 +8,11 @@ contextBridge.exposeInMainWorld('devfleet',Object.freeze({
   education:Object.freeze({
     snapshot:()=>ipcRenderer.invoke('education:snapshot'),
     showMaterial:()=>ipcRenderer.invoke('education:show-material'),
+    setViewport:b=>ipcRenderer.invoke('education:viewport',b),
     chatHealth:()=>ipcRenderer.invoke('education:chat-health'),
+    liveAssets:id=>ipcRenderer.invoke('education:live-assets',id),
+    liveAssetRead:p=>ipcRenderer.invoke('education:live-asset-read',p),
+    liveImportImage:id=>ipcRenderer.invoke('education:live-import-image',id),
     liveStatus:()=>ipcRenderer.invoke('education:live-status'),
     liveTopic:id=>ipcRenderer.invoke('education:live-topic',id),
     liveSend:p=>ipcRenderer.invoke('education:live-send',p),

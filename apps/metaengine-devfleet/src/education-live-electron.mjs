@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { dialog, safeStorage } from 'electron';
+import { dialog, safeStorage, nativeImage } from 'electron';
+import {LessonAssetStore,inspectRaster,MAX_IMPORT_BYTES} from './education-assets.mjs';
 import { LiveLessonStore, LiveLessonCoordinator } from './education-live-core.mjs';
 import { OpenAILessonTransport, parseSelectedKey, validModel } from './education-live-openai.mjs';
 
@@ -27,10 +28,30 @@ export async function installLiveEducation({ipcMain,authorize,education,dataDir,
     }
   }catch{/* Credentials unavailable -> visibly NOT CONNECTED; never log key material. */}
   const transport=new OpenAILessonTransport({credentials:()=>credentials,fetchImpl});
-  const coordinator=new LiveLessonCoordinator({store,education,transport});
+  const assets=new LessonAssetStore({dataDir,writeAtomic});await assets.init();
+  const coordinator=new LiveLessonCoordinator({store,education,transport,assets:async id=>assets.list(id)});
   const register=(name,fn)=>ipcMain.handle(name,async(event,...args)=>{
     authorize(event);
     try{return await fn(...args);}catch(e){throw Error(/^live_[a-z0-9_]{1,80}$/.test(e?.message)?e.message:'live_operation_failed');}
+  });
+  register('education:live-assets',id=>assets.list(id));
+  register('education:live-asset-read',({material_id,asset_id}={})=>assets.read(material_id,asset_id));
+  let importing=false;
+  register('education:live-import-image',async id=>{
+    assets.list(id);if(importing)throw Error('live_image_import_busy');importing=true;
+    try{
+      const selected=await dialog.showOpenDialog(window(),{title:'Изображение для текущего урока (PNG / JPEG)',properties:['openFile'],filters:[{name:'Изображения',extensions:['png','jpg','jpeg']}]});
+      if(selected.canceled||selected.filePaths.length!==1)return {cancelled:true};
+      const handle=await fs.open(selected.filePaths[0],'r');let bytes;
+      try{const st=await handle.stat();if(!st.isFile()||st.size>MAX_IMPORT_BYTES)throw Error('live_image_invalid');bytes=await handle.readFile();}finally{await handle.close();}
+      inspectRaster(bytes);let image=nativeImage.createFromBuffer(bytes);
+      if(image.isEmpty())throw Error('live_image_invalid');const size=image.getSize();
+      const scale=Math.min(1,2048/Math.max(size.width,size.height));
+      if(scale<1)image=image.resize({width:Math.max(1,Math.round(size.width*scale)),height:Math.max(1,Math.round(size.height*scale)),quality:'best'});
+      const png=image.toPNG();
+      const asset=await assets.addNormalized(id,png,path.basename(selected.filePaths[0]).slice(0,160));
+      return {material_id:id,asset,pixels_sent_to_model:false};
+    }finally{importing=false;}
   });
   register('education:live-status',()=>transport.status());
   register('education:live-topic',id=>store.topic(id));
@@ -67,5 +88,5 @@ export async function installLiveEducation({ipcMain,authorize,education,dataDir,
     await writeAtomic(configFile,JSON.stringify({accept_billing:false}));
     await fs.rm(keyFile,{force:true});return transport.status();
   });
-  return {store,coordinator,transport};
+  return {store,coordinator,transport,assets};
 }

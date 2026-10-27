@@ -166,6 +166,7 @@ async function clickNode(view,backendNodeId) {
 export class ChatSurface {
   #window;
   #educationMode=false;
+  #educationBounds=null;
   #views = new Map();
   #nativeLoadState = new Map();
   #navigationGenerations = new Map();
@@ -184,9 +185,18 @@ export class ChatSurface {
     const view = this.#views.get(this.#selected);
     if (!view) return;
     const [width,height] = this.#window.getContentSize();
-    const left=this.#educationMode?320:340;
+    if(this.#educationMode&&this.#educationBounds){
+      const b=this.#educationBounds;view.setBounds({x:b.x,y:b.y,width:Math.max(1,Math.min(b.width,width-b.x)),height:Math.max(1,Math.min(b.height,height-b.y))});return;
+    }
+    const left=this.#educationMode?252:340;
     const right=this.#educationMode?300:0;
     view.setBounds({x:left,y:0,width:Math.max(1,width-left-right),height:Math.max(1,height)});
+  }
+  setEducationBounds(b){
+    if(!this.#educationMode)throw Error('education_mode_required');
+    const [width,height]=this.#window.getContentSize();
+    if(!b||!['x','y','width','height'].every(k=>Number.isInteger(b[k]))||b.x<0||b.y<0||b.width<1||b.height<1||b.x+b.width>width+1||b.y+b.height>height+1)throw Error('education_viewport_invalid');
+    this.#educationBounds={x:b.x,y:b.y,width:b.width,height:b.height};this.#layout();return {updated:true};
   }
   select(tabId) {
     const view = this.#views.get(tabId);

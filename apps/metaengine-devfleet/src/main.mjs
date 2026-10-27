@@ -365,6 +365,7 @@ async function start() {
       nodeIntegration:false,contextIsolation:true,sandbox:true,webSecurity:true
     }
   });
+  if(educationMode)mainWindow.setMenuBarVisibility(false);
   mainWindow.webContents.setWindowOpenHandler(()=>({action:'deny'}));
   if(educationMode)await mainWindow.loadFile(path.join(__dirname,'education.html'));
   else await mainWindow.loadFile(activeUiFile);
@@ -390,6 +391,7 @@ async function start() {
       ...educationStore.snapshot(),materials:liveEducation.store.materials()
     };});
     ipcMain.handle('education:show-material',async e=>{educationSender(e);return surface.showLibrary();});
+    ipcMain.handle('education:viewport',async(e,b)=>{educationSender(e);return surface.setEducationBounds(b);});
     ipcMain.handle('education:chat-health',async e=>{educationSender(e);return surface.health();});
     const handoff=(id,options={})=>{
       const snapshot=educationStore.snapshot();

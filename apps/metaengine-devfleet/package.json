@@ -12,6 +12,7 @@
     "start:education": "electron . --devfleet-education",
     "smoke:education": "electron scripts/education-electron-smoke.cjs",
     "smoke:education-live": "electron scripts/education-live-electron-smoke.cjs",
+    "smoke:education-workspace": "electron scripts/education-workspace-smoke.cjs",
     "admin:mcp": "node scripts/devfleet-admin-mcp.mjs",
     "package:win": "electron-builder --config electron-builder.json --win nsis --x64"
   },
