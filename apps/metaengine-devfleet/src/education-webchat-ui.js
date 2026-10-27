@@ -47,7 +47,8 @@
     $('live-configure').disabled=true;$('live-disconnect').hidden=true;
     return {select,status:async()=>paint()};
   }
-  window.mountEducationLive=function(opts){let instance=null,lastId=null;
-    opts.api.liveStatus().then(s=>{instance=s.api_disabled?mountWeb(opts):mountApi(opts);instance.select(lastId,true);}).catch(()=>{});
-    return {select:(id,force)=>{lastId=id;return instance?.select(id,force);},status:()=>instance?.status()};};
+  window.mountEducationLive=function(opts){let instance=null,lastId=null,connecting=null;
+    function ensure(){if(instance)return Promise.resolve(instance);if(connecting)return connecting;
+      connecting=opts.api.liveStatus().then(s=>{instance=s.api_disabled?mountWeb(opts):mountApi(opts);return instance;}).catch(()=>null).finally(()=>{connecting=null;});return connecting;}
+    return {select:async(id,force)=>{lastId=id;const active=await ensure();if(lastId===id)return active?.select(id,force);},status:async()=>{const active=await ensure();return active?.status();}};};
 })();

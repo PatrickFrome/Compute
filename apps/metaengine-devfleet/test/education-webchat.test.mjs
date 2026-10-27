@@ -39,3 +39,18 @@ test('Ordinary web-chat code cannot create a new API request or assert delivery'
  assert.ok(!src.includes('api.openai.com')&&!src.includes('fetch(')&&!src.includes('http.createServer'));
  assert.ok(src.includes('sent:false'));assert.ok(!src.includes('model_verified:true'));
 });
+
+test('Subscription UI retries an initially unavailable status handler on the next local refresh',async()=>{
+ const vm=await import('node:vm');const source=await fs.readFile(new URL('../src/education-webchat-ui.js',import.meta.url),'utf8');
+ const selected=[],window={mountEducationLive:()=>({select:id=>selected.push(id),status:()=>{}})};
+ vm.runInNewContext(source,{window});let count=0;
+ const ui=window.mountEducationLive({api:{liveStatus:async()=>{if(++count===1)throw Error('not_registered_yet');return {api_disabled:false};}}});
+ await ui.select('material-03-01');assert.equal(selected.length,0);
+ await ui.select('material-03-01');assert.deepEqual(selected,['material-03-01']);assert.equal(count,2);
+});
+test('Education IPC is registered before loading its actual HTML page',async()=>{
+ const s=await fs.readFile(new URL('../src/main.mjs',import.meta.url),'utf8');
+ const page=s.indexOf("if(educationMode)await mainWindow.loadFile(path.join(__dirname,'education.html'))");
+ assert.ok(page>s.indexOf("ipcMain.handle('education:snapshot'"));
+ assert.ok(page>s.indexOf('await installWebChats('));
+});

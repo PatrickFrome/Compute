@@ -368,8 +368,7 @@ async function start() {
   });
   if(educationMode)mainWindow.setMenuBarVisibility(false);
   mainWindow.webContents.setWindowOpenHandler(()=>({action:'deny'}));
-  if(educationMode)await mainWindow.loadFile(path.join(__dirname,'education.html'));
-  else await mainWindow.loadFile(activeUiFile);
+  if(!educationMode)await mainWindow.loadFile(activeUiFile);
   liveContracts=new LiveOperatorContracts({store:livePolicyDisk});
   await liveContracts.init();
   sourceWorkspace=new DevFleetSourceWorkspace({
@@ -445,6 +444,7 @@ async function start() {
   ipcMain.handle('devfleet:close',async(e,p)=>{uiSender(e);return operator.closeTab(p);});
   ipcMain.handle('devfleet:assign',async(e,p)=>{uiSender(e);return operator.assign(p);});
   ipcMain.handle('devfleet:select',async(e,tabId)=>{uiSender(e);return surface.select(tabId);});
+  if(educationMode)await mainWindow.loadFile(path.join(__dirname,'education.html'));
   if(!educationMode)registerDevConsole();
   // Publish the authenticated localhost control plane while physical ChatGPT
   // pages restore; chat.list truthfully reports RESTORING. All other operator
