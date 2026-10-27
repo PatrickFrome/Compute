@@ -192,7 +192,7 @@
     }
   ],
   "current_tree_blobs": {
-    ".gitattributes": "3b032a5a2ead703e31a0acc7a66e815e1c8b430a",
+    ".gitattributes": "d83cafacf1252b0d518706af2585fd0cad44b125",
     ".github/CLIENT_CI_TRAIN_W82.md": "696349d7424522a87e3cb2ce350532c87c269092",
     ".github/browser-ci-resource-observation.mjs": "2f08876c2e5dc850b60709aac7df1577c7561226",
     ".github/client-c5-reference-source-identity.test.mjs": "41c1e2edd6801c8e310b826549c2403090856bed",
@@ -324,8 +324,8 @@
     "apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-owner-enrollment-observer.hpp": "179d32335a12c3988890fb6c4b860e26a5b36694",
     "apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-update-actuator.cpp": "ad1306cce2b87e22350d4081e2b443ef1387d11a",
     "apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-update-actuator.hpp": "3078503bc1adbdd47d7bb4dc4b452d8da524ce0f",
-    "apps/metaengine-browser/package-lock.json": "c32e65d887223fcd0e0b9fdcecf38515eb313cdf",
-    "apps/metaengine-browser/package.json": "42061911915b307be561b959e283c8ed102e237f",
+    "apps/metaengine-browser/package-lock.json": "904bfd7da34c43e1fe3c214fb1e50b23b4db54ba",
+    "apps/metaengine-browser/package.json": "db03e8a4e0fbafbbba705763b2f36d5e4936c75a",
     "apps/metaengine-browser/scripts/bootstrap-install-and-launch.ps1": "402f480af3ba2ca32a2c3440b6e1c73e5c2c3aca",
     "apps/metaengine-browser/scripts/build-guardian-native-staging.ps1": "062cbcf6f6f85bbfd9b2d8e20720105aac14fbe3",
     "apps/metaengine-browser/scripts/check-source.mjs": "23020ed996d4f8be7ea9bde9f7654f882c814d90",
@@ -751,7 +751,7 @@
     "coordination/client-v1/c5-live-readiness/client-c5-live-evidence-consumer.mjs": "71f51c09dd413a88394d6b502453f6eec16b50aa",
     "coordination/client-v1/c5-live-readiness/client-c5-live-readiness-capsule.mjs": "646ca598b38d84a1e9f0cbe1be93f07099b808a2",
     "coordination/coordination-ci/digest.py": "15c3fad82e91bf7d204a7e76b0a40785446a59e6",
-    "coordination/operator-control/AUDIT_CLOSURE_EXECUTION_REGISTER_20261018.md": "ad0e3c1aca3c3a06a191d358b3ebe7a4a08de65a",
+    "coordination/operator-control/AUDIT_CLOSURE_EXECUTION_REGISTER_20261018.md": "913bc790ec572a6baf5bceb14d4be56b45cd3015",
     "coordination/operator-control/DEVFLEET_WAVE13_AUTONOMY_10.json": "d0ad641974c9e257fc2a2bc043c250144974884e",
     "coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md": "97be91866417490c4d640eb4eb0268f93add7689",
     "docs/CANONICAL_ROADMAP.md": "7692bd1802847150787a8acb51fa7a6ab54eea3e",
@@ -809,7 +809,7 @@
     "infra/client-state-runtime/client-candidate-acceptance-w57.test.mjs": "83bf395ef2b435e4f7652f9ba5c7413e63532da4",
     "infra/client-state-runtime/client-candidate-acceptance-w65.mjs": "1f82eeea046be59f6f32c944cbb585bd35ee9638",
     "infra/client-state-runtime/client-candidate-acceptance-w65.test.mjs": "d2d275c7ec2c0e51a819254fa1c8e664a4e43fa2",
-    "infra/client-state-runtime/client-critical-closure.test.mjs": "f0c618671bc05a55bf5038315be8440459ac102e",
+    "infra/client-state-runtime/client-critical-closure.test.mjs": "e2f1ef6ca10a0d22952b8b4f6674d93db86ed9b3",
     "infra/client-state-runtime/client-current-acl-critic-w72.mjs": "e5f460f29b0a5aafa6b630bf6584275d60909be2",
     "infra/client-state-runtime/client-current-acl-critic-w72.test.mjs": "e170b2c0803dd38e9f006c87d60c442ee765c139",
     "infra/client-state-runtime/client-current-acl-critic-w81-cli.mjs": "861798564e6ba170a07ea04c1f5508a6e3aac38f",
@@ -1028,8 +1028,9 @@
     "infra/client-state-runtime/export-reviewed-empty-schema.mjs": "a2057ba55f096006b945e4405528e9c9bae79e28",
     ".github/workflows/client-reviewed-empty-schema.yml": "fc6118a2662d72cf1d6cdb366be92d4a9d9c41dd",
     ".github/workflows/browser-package-identity-observation.yml": "2deb61cb08870505f0ad15bd31790072f28cce08",
-    "apps/metaengine-browser/scripts/observe-package-identity.mjs": "4ece3ed5791d32e13feef09976af5e7db11219f0",
-    "apps/metaengine-browser/test/package-identity-observation.test.mjs": "1fc6c19cf0fcaf55c10265cbbd021ee349cdaab3"
+    "apps/metaengine-browser/scripts/observe-package-identity.mjs": "be73809e702332f8ade4429adff429ce44a65d3b",
+    "apps/metaengine-browser/test/package-identity-observation.test.mjs": "3e9a1a6c6706a0f99212c1692b3141834f1958b8",
+    "evidence/audits/metaengine-20261027-integrated-installer/live-artifact-observation.json": "85e7384770facaf382518c74c2bf2e0cae3e828e"
   },
   "parent_checks_not_transitive": true,
   "proof_levels": {
@@ -1111,7 +1112,8 @@
     "0.7.0-dev.1359740117434.1",
     "0.7.0-dev.1485366478478.1",
     "0.7.0-dev.1508254192075.1",
-    "0.7.0-dev.1643171572592.1"
+    "0.7.0-dev.1643171572592.1",
+    "0.7.0-dev.1784381341133.1"
   ],
   "verification_workflow": ".github/workflows/client-source-candidate-w73.yml",
   "physical_pg_complement": ".github/workflows/client-source-candidate-w59.yml",
@@ -1155,9 +1157,9 @@
   },
   "current_source_candidate": {
     "classification": "SOURCE_ONLY_NO_CURRENT_PACKAGE",
-    "branch": "work/preinstall-closure-20261027",
+    "branch": "work/autonomy-continuation-20261026",
     "source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
-    "package_version": "0.7.0-dev.1784381341133.1",
+    "package_version": "0.7.0-dev.1848773682936.1",
     "historical_package_version": "0.7.0-dev.202610152359.1",
     "package_build_authorized": false,
     "package_version_reuse_authorized": false,
@@ -1533,14 +1535,25 @@
       "production_ready": false,
       "promotion_authorized": false,
       "authority_effect": false
+    },
+    {
+      "schema": "metaengine.client.package-version-successor.v1",
+      "source_parent": "61e27840c13dda1d3757da603ffb03f20804dd14",
+      "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+      "prior_version": "0.7.0-dev.1643171572592.1",
+      "distinct_version": "0.7.0-dev.1784381341133.1",
+      "preceding_version_burned": true,
+      "production_ready": false,
+      "promotion_authorized": false,
+      "authority_effect": false
     }
   ],
   "current_package_transition": {
     "schema": "metaengine.client.package-version-successor.v1",
-    "source_parent": "61e27840c13dda1d3757da603ffb03f20804dd14",
+    "source_parent": "1da1a74b0e451143da64e2e0e63647ac87212ce5",
     "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
-    "prior_version": "0.7.0-dev.1643171572592.1",
-    "distinct_version": "0.7.0-dev.1784381341133.1",
+    "prior_version": "0.7.0-dev.1784381341133.1",
+    "distinct_version": "0.7.0-dev.1848773682936.1",
     "preceding_version_burned": true,
     "production_ready": false,
     "promotion_authorized": false,

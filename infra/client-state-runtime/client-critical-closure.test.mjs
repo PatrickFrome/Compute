@@ -81,9 +81,9 @@ test('real autocrlf checkout preserves canonical append-only history and rejects
 function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion) {
  const fixed={
   classification:'SOURCE_ONLY_NO_CURRENT_PACKAGE',
-  branch:'work/preinstall-closure-20261027',
+  branch:'work/autonomy-continuation-20261026',
   source_parent:'ea405d926568508eac53ebb408e941c94faeadcf',
-  package_version:'0.7.0-dev.1784381341133.1',
+  package_version:'0.7.0-dev.1848773682936.1',
   historical_package_version:'0.7.0-dev.202610152359.1',
   package_build_authorized:false,
   package_version_reuse_authorized:false,
@@ -462,15 +462,26 @@ function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion)
     "production_ready": false,
     "promotion_authorized": false,
     "authority_effect": false
-  }
-]);
- const successor=manifest.current_package_transition;
- assert.deepEqual(successor,{
+  },
+{
   "schema": "metaengine.client.package-version-successor.v1",
   "source_parent": "61e27840c13dda1d3757da603ffb03f20804dd14",
   "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
   "prior_version": "0.7.0-dev.1643171572592.1",
   "distinct_version": "0.7.0-dev.1784381341133.1",
+  "preceding_version_burned": true,
+  "production_ready": false,
+  "promotion_authorized": false,
+  "authority_effect": false
+}
+]);
+ const successor=manifest.current_package_transition;
+ assert.deepEqual(successor,{
+  "schema": "metaengine.client.package-version-successor.v1",
+  "source_parent": "1da1a74b0e451143da64e2e0e63647ac87212ce5",
+  "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+  "prior_version": "0.7.0-dev.1784381341133.1",
+  "distinct_version": "0.7.0-dev.1848773682936.1",
   "preceding_version_burned": true,
   "production_ready": false,
   "promotion_authorized": false,
@@ -897,7 +908,7 @@ test('Concurrent health observer recovery successor binds fresh source and metad
  assert.equal(evidence.plan.physical_package_build_allowed,false);assert.equal(evidence.plan.promotion_authorized,false);
  for(const q of evidence.queries){assert.equal(q.status,200);const body=JSON.parse(q.response_body);assert.equal(body.total_count,body.artifacts.length);}
  assert.equal(JSON.parse(evidence.queries.at(-1).response_body).total_count,0);
- assert.equal(manifest.current_package_transition.source_parent,prior);assert.equal(manifest.current_source_candidate.package_version,version);
+ assert.equal(manifest.previous_package_transitions.find(item=>item.distinct_version===version).source_parent,prior);
  assertCommittedAuditPrefix(root,prior,'HEAD','coordination/operator-control/AUDIT_CLOSURE_EXECUTION_REGISTER_20261018.md');
 });
 
@@ -918,4 +929,65 @@ test('pre-install repairs and five-stream task contracts are covered by the curr
   "coordination/operator-control/preinstall-tasks/metaengine-stream-4-ui.md"
 ];
  for(const file of required)assert.match(manifest.current_tree_blobs[file]??'',/^[0-9a-f]{40}$/,file+' must remain source-sealed');
+});
+
+function assertIntegratedHostedObservation(evidence) {
+ const source='1da1a74b0e451143da64e2e0e63647ac87212ce5';
+ const version='0.7.0-dev.1848773682936.1',floor='0.7.0-dev.1784381341133.1';
+ assert.equal(evidence.schema,'metaengine.package-planner-retained-hosted-observation.v1');
+ assert.equal(evidence.source_head,source);
+ assert.equal(evidence.observing_run_id,40468962958);assert.equal(evidence.observing_run_attempt,1);
+ assert.equal(evidence.source_ref,'refs/heads/work/integrated-installer-repair-20261027');
+ assert.equal(evidence.source_tree,git('rev-parse',source+'^{tree}'));
+ assert.equal(evidence.observer_git_blob,git('rev-parse',source+':apps/metaengine-browser/scripts/observe-package-identity.mjs'));
+ assert.equal(evidence.planner_git_blob,git('rev-parse',source+':apps/metaengine-browser/scripts/package-build-reservation.mjs'));
+ assert.deepEqual(evidence.artifact,{id:12718325310,bytes:1501760,
+  sha256:'e4ebfe1ed30be73b5573b613d5e6873e5a73b3e4de04575c04442d0b80524c6c'});
+ assert.deepEqual(evidence.catalog,{complete:true,pagination_complete:true,total_count:17944,pages:180,
+  consistency:'STABLE_TOTAL_UNIQUE_IDS_AND_FIRST_PAGE_RECHECK',global_absence_claim:false,observation_is_time_bound:true});
+ assert.deepEqual(evidence.independent_catalog_recheck,{pages:180,unique_artifacts:17944,
+  first_page_equal:true,highest_observed_reserved_version:floor});
+ assert.equal(evidence.catalog_payloads_retained_in_ci_artifact,true);
+ assert.equal(evidence.post_plan_complete_name_readbacks,true);
+ for(const key of ['selected_version','reservation_created','package_built','physical_package_build_allowed',
+  'promotion_authorized','authority_effect','automatic_retry_allowed'])assert.equal(evidence[key],false);
+ assert.deepEqual(evidence.plan,{schema:'metaengine.browser.package-identity-candidate-plan.v1',source_head:source,
+  manifest_package_version:floor,minimum_package_version:floor,minimum_package_version_exclusive:true,
+  candidate_package_version:version,candidate_slot:0,rejected_reserved_candidate_versions:[],
+  manifest_update_required:true,physical_package_build_allowed:false,promotion_authorized:false,authority_effect:false});
+ assert.equal(createHash('sha256').update(JSON.stringify(evidence.plan,null,2)+'\n').digest('hex'),evidence.plan_json_sha256);
+ assert.equal(evidence.plan_json_sha256,'6cdc5934e8ef8fdd56d13d9ab1a5ab6ef6c1f8ef8a525a92c65217d2857c5fb0');
+ const expected=[['metaengine-browser-windows-candidate-'+source,0],['metaengine-browser-package-version-'+floor,1],
+  ['metaengine-browser-package-version-'+version,0]];
+ assert.equal(evidence.exact_name_readbacks.length,expected.length);
+ for(let i=0;i<expected.length;i++) {
+  const [name,count]=expected[i],q=evidence.exact_name_readbacks[i];
+  assert.equal(q.url,'https://api.github.com/repos/PatrickFrome/Compute/actions/artifacts?name='+name+'&per_page=100');
+  assert.equal(q.method,'GET');assert.equal(q.status,200);assert.equal(q.headers.link,null);
+  assert.ok(q.started_at>=evidence.started_at&&q.completed_at<=evidence.completed_at&&q.completed_at>=q.started_at);
+  assert.equal(q.response.total_count,count);assert.equal(q.response.artifacts.length,count);
+  if(count) {
+   const artifact=q.response.artifacts[0];assert.equal(artifact.name,name);assert.equal(artifact.id,12678978941);
+   assert.equal(artifact.workflow_run.id,40382079975);
+   assert.equal(artifact.workflow_run.head_sha,'601532ca50db02aa9089783dde157a93f484adf2');
+   assert.equal(artifact.workflow_run.repository_id,1341371143);
+  }
+ }
+}
+
+test('integrated installer successor retains complete hosted observation without promoting package authority',()=>{
+ const file='evidence/audits/metaengine-20261027-integrated-installer/live-artifact-observation.json';
+ const bytes=read(file),evidence=JSON.parse(bytes);assertIntegratedHostedObservation(evidence);
+ assert.equal(createHash('sha256').update(bytes).digest('hex'),'c51ea81cba4148a7cd7a58669078ee38fcec0799f6af2c93d172dbb14a424550');
+ assert.equal(manifest.current_package_transition.source_parent,evidence.source_head);
+ assert.equal(manifest.current_source_candidate.package_version,evidence.plan.candidate_package_version);
+ assert.ok(manifest.burned_versions.includes(evidence.plan.manifest_package_version));
+ assertCommittedAuditPrefix(root,evidence.source_head,'HEAD','coordination/operator-control/AUDIT_CLOSURE_EXECUTION_REGISTER_20261018.md');
+ for(const mutate of [e=>{e.catalog.complete=false;},e=>{e.catalog.total_count--;},
+  e=>{e.independent_catalog_recheck.unique_artifacts--;},e=>{e.source_head='a'.repeat(40);},
+  e=>{e.plan.physical_package_build_allowed=true;},e=>{e.reservation_created=true;},
+  e=>{e.exact_name_readbacks[2].response.total_count=1;},e=>{e.exact_name_readbacks[0].status=500;}]) {
+  const changed=structuredClone(evidence);mutate(changed);
+  assert.throws(()=>assertIntegratedHostedObservation(changed),{code:'ERR_ASSERTION'});
+ }
 });
