@@ -10,6 +10,8 @@ import {
   assertEmptySchemaRoundtrip, emptySchemaSha256, emptySchemaProcessEnvironment,
   runEmptySchemaStage, combineEmptySchemaCleanupFailure, emptySchemaFailureMetadata,
   inspectCanonicalEmptySchema, runEmptySchemaCommand,
+  emptySchemaPostgresStartOptions, classifyEmptySchemaPostmasterStartLog,
+  prepareEmptySchemaPostmasterLogObservation,
 } from './canonical-empty-schema-contract.mjs';
 import { assertPublishableEmptySchemaEvidence, emptySchemaFailureReceipt } from './export-reviewed-empty-schema.mjs';
 
@@ -406,4 +408,174 @@ test('bounded child output is classified as output limit even when the child is 
       assert.doesNotMatch(JSON.stringify(receipt),/PRIVATE_OUTPUT/);
       return true;
     });
+});
+
+test('canonical startup supplies an actual empty socket setting under Windows argument rules',() => {
+  // For these fixed ASCII options, Windows argv splits whitespace and removes
+  // double quotes only; single quotes are ordinary characters. pg_ctl inserts
+  // -o into CMD.EXE verbatim (PostgreSQL17 pg_ctl.c start_postmaster).
+  const setting = options => {
+    const argv=options.match(/"[^"]*"|[^\s]+/g).map(value => value.replace(/^"(.*)"$/,'$1'));
+    assert.deepEqual(argv.slice(0,4),['-h','127.0.0.1','-p','49152']);
+    assert.equal(argv[4],'-c'); assert.equal(argv.length,6);
+    const at=argv[5].indexOf('='); assert(at>=0);
+    return {name:argv[5].slice(0,at),value:argv[5].slice(at+1)};
+  };
+  assert.deepEqual(setting(emptySchemaPostgresStartOptions(49152)),{name:'unix_socket_directories',value:''});
+  assert.deepEqual(setting("-h 127.0.0.1 -p 49152 -c unix_socket_directories=''"),
+    {name:'unix_socket_directories',value:"''"},'old POSIX quoting is a literal nonempty Windows setting');
+  for(const port of [0,443,1023,65536,NaN,Infinity,1.5,'49152','49152 -c PRIVATE'])
+    assert.throws(() => emptySchemaPostgresStartOptions(port),/disposable_port_invalid/);
+});
+
+test('startup log categories are finite and never publish raw lines, paths or SQL',() => {
+  const input=Buffer.from("2026-10-27 UTC [123] FATAL: could not create lock file \"''/.s.PGSQL.49152.lock\": No such file or directory\n"
+    + 'PRIVATE password=unpublished SELECT secret FROM private_table; C:\\PRIVATE\\PGDATA\n');
+  const result=classifyEmptySchemaPostmasterStartLog(input);
+  assert.deepEqual(result,{status:'CLASSIFIED',markers:['UNIX_SOCKET_FAILURE','FATAL_OR_PANIC'],bytes_examined:input.length});
+  assert.doesNotMatch(JSON.stringify(result),/PRIVATE|password|secret|PGDATA|49152|No such/);
+  assert.equal(classifyEmptySchemaPostmasterStartLog(Buffer.from('unknown PRIVATE')).status,'UNCLASSIFIED');
+  assert.deepEqual(classifyEmptySchemaPostmasterStartLog(Buffer.alloc(0)),{status:'EMPTY',markers:[],bytes_examined:0});
+  assert.throws(() => classifyEmptySchemaPostmasterStartLog(Buffer.alloc(32769)),/postmaster_log_invalid/);
+  for(const [line,marker] of [
+    ['FATAL: Permission denied: PRIVATE','ACCESS_DENIED'],
+    ['LOG: could not bind IPv4 address PRIVATE: Address already in use','PORT_BIND_FAILURE'],
+    ['FATAL: invalid value for parameter PRIVATE','CONFIGURATION_FAILURE'],
+    ['FATAL: data directory PRIVATE has invalid permissions','DATA_DIRECTORY_FAILURE'],
+    ['FATAL: could not load library PRIVATE','EXECUTABLE_OR_LIBRARY_FAILURE'],
+    ['FATAL: could not create shared memory PRIVATE','SHARED_MEMORY_FAILURE'],
+    ['FATAL: lock file PRIVATE/postmaster.pid already exists','ALREADY_RUNNING_OR_PID_LOCK'],
+    ['LOG: database system is ready to accept connections','DATABASE_READY'],
+  ]) assert(classifyEmptySchemaPostmasterStartLog(Buffer.from(line)).markers.includes(marker));
+});
+
+const controlFailureFixture = () => Object.assign(new Error('PRIVATE control stderr and path'),{
+  code:'owned_postgres_control_failed',control_outcome:Object.freeze({kind:'EXIT',exit_code:1,signal:null}),
+});
+
+test('only a fresh owned log is observed and its categories accompany the original control failure',async () => {
+  await withDirectory(async root => {
+    const observe=await prepareEmptySchemaPostmasterLogObservation(root);
+    const bytes=Buffer.from('FATAL: Permission denied: C:\\PRIVATE\\PGDATA\n');
+    await fs.writeFile(path.join(root,'postgres.log'),bytes,{flag:'wx'});
+    const error=controlFailureFixture(); await observe(error);
+    const receipt=emptySchemaFailureReceipt(await caughtFailure('SOURCE_START',error));
+    assert.deepEqual(receipt.primary_failure,{stage:'SOURCE_START',error_category:'COMMAND',command_reason:'FAILED',
+      control_kind:'EXIT',exit_code:1,signal:null,postmaster_log_status:'CLASSIFIED',
+      postmaster_log_markers:['ACCESS_DENIED','FATAL_OR_PANIC'],postmaster_log_bytes_examined:bytes.length});
+    assert.doesNotMatch(JSON.stringify(receipt),/PRIVATE|PGDATA|stderr/);
+    receipt.primary_failure.postmaster_log_markers.push('TAMPERED');
+    assert(!emptySchemaFailureMetadata(error).primary_failure.postmaster_log_markers.includes('TAMPERED'));
+    await assert.rejects(prepareEmptySchemaPostmasterLogObservation(root),/postmaster_log_already_exists/);
+  });
+});
+
+test('an absent startup log and spawn failure remain explicit without invented server errors',async () => {
+  await withDirectory(async root => {
+    const observe=await prepareEmptySchemaPostmasterLogObservation(root);
+    const error=Object.assign(new Error('PRIVATE'),{code:'owned_postgres_control_failed',
+      control_outcome:{kind:'SPAWN_ERROR',system_code:'ENOENT',PRIVATE:'do not copy'}});
+    await observe(error);
+    const receipt=emptySchemaFailureReceipt(await caughtFailure('RESTORE_START',error));
+    assert.deepEqual(receipt.primary_failure,{stage:'RESTORE_START',error_category:'COMMAND',command_reason:'FAILED',
+      control_kind:'SPAWN_ERROR',spawn_code:'ENOENT',postmaster_log_status:'ABSENT',postmaster_log_markers:[],
+      postmaster_log_bytes_examined:0,postmaster_log_system_code:'ENOENT'});
+    assert.doesNotMatch(JSON.stringify(receipt),/PRIVATE/);
+  });
+});
+
+for(const kind of ['junction','hardlink','oversize','directory']) test('startup log observation refuses '+kind+' without reading payload',async () => {
+  await withDirectory(async root => {
+    const owned=path.join(root,'owned');await fs.mkdir(owned);
+    const observe=await prepareEmptySchemaPostmasterLogObservation(owned);
+    const log=path.join(owned,'postgres.log'),outside=path.join(root,'outside');
+    if(kind==='junction') { await fs.mkdir(outside);await fs.symlink(outside,log,process.platform==='win32'?'junction':'dir'); }
+    if(kind==='hardlink') { await fs.writeFile(outside,'PRIVATE');await fs.link(outside,log); }
+    if(kind==='oversize') await fs.writeFile(log,Buffer.alloc(32769,65));
+    if(kind==='directory')await fs.mkdir(log);
+    const originalOpen=fs.open;let opened=0;
+    fs.open=async (...args) => {opened++;return originalOpen(...args);};
+    try {
+      const error=controlFailureFixture();await observe(error);
+      const record=emptySchemaFailureMetadata(await caughtFailure('SOURCE_START',error)).primary_failure;
+      assert.equal(record.postmaster_log_status,'REFUSED');
+      assert.deepEqual(record.postmaster_log_markers,[]);assert.equal(record.postmaster_log_bytes_examined,0);
+      assert.equal(opened,0);
+    } finally {fs.open=originalOpen;}
+  });
+});
+
+test('startup log custody rejects a root junction or replacement and in-read file mutation',async () => {
+  await withDirectory(async root => {
+    const owned=path.join(root,'owned'),alias=path.join(root,'alias');await fs.mkdir(owned);
+    await fs.symlink(owned,alias,process.platform==='win32'?'junction':'dir');
+    await assert.rejects(prepareEmptySchemaPostmasterLogObservation(alias),/root_alias/);
+    const observe=await prepareEmptySchemaPostmasterLogObservation(owned);
+    await fs.rename(owned,path.join(root,'moved'));await fs.mkdir(owned);
+    await fs.writeFile(path.join(owned,'postgres.log'),'FATAL: PRIVATE');
+    const replaced=controlFailureFixture();await observe(replaced);
+    assert.equal(emptySchemaFailureMetadata(await caughtFailure('SOURCE_START',replaced)).primary_failure.postmaster_log_status,'REFUSED');
+    const fresh=path.join(root,'fresh');await fs.mkdir(fresh);
+    const next=await prepareEmptySchemaPostmasterLogObservation(fresh),log=path.join(fresh,'postgres.log');
+    await fs.writeFile(log,'FATAL: PRIVATE');
+    const originalOpen=fs.open;let mutated=false;
+    fs.open=async (...args) => {
+      const handle=await originalOpen(...args);const read=handle.read.bind(handle);
+      handle.read=async (...readArgs) => {
+        const result=await read(...readArgs);
+        if(!mutated) {mutated=true;await fs.writeFile(log,'FATAL: CHANGED');const changed=new Date(Date.now()+2000);await fs.utimes(log,changed,changed);}
+        return result;
+      };
+      return handle;
+    };
+    try {
+      const error=controlFailureFixture();await next(error);
+      const record=emptySchemaFailureMetadata(await caughtFailure('SOURCE_START',error)).primary_failure;
+      assert.equal(record.postmaster_log_status,'UNSTABLE');assert.deepEqual(record.postmaster_log_markers,[]);
+    } finally {fs.open=originalOpen;}
+  });
+});
+
+test('control diagnostics ignore forged strings and do not read outcome getters',async () => {
+  let reads=0;
+  const outcome={kind:'EXIT',exit_code:'PRIVATE',signal:'PRIVATE',unrelated:'PRIVATE'};
+  Object.defineProperty(outcome,'exit_code',{get(){reads++;throw new Error('PRIVATE');}});
+  const error=Object.assign(new Error('PRIVATE'),{code:'owned_postgres_control_failed',control_outcome:outcome});
+  const record=emptySchemaFailureMetadata(await caughtFailure('SOURCE_START',error)).primary_failure;
+  assert.deepEqual(record,{stage:'SOURCE_START',error_category:'COMMAND',command_reason:'FAILED',control_kind:'EXIT'});
+  assert.equal(reads,0);assert.doesNotMatch(JSON.stringify(record),/PRIVATE/);
+});
+
+test('spawn diagnostics publish the one validated descriptor snapshot only',async () => {
+  let reads=0,gets=0;
+  const outcome=new Proxy({kind:'SPAWN_ERROR'},{
+    get(){gets++;throw new Error('PRIVATE getter must not execute');},
+    getOwnPropertyDescriptor(target,key) {
+      if(key==='system_code')return {configurable:true,enumerable:true,writable:true,
+        value:++reads===1?'ENOENT':'PRIVATE_SENTINEL'};
+      return Reflect.getOwnPropertyDescriptor(target,key);
+    },
+  });
+  const error=Object.assign(new Error('PRIVATE'),{code:'owned_postgres_control_failed',control_outcome:outcome});
+  const record=emptySchemaFailureMetadata(await caughtFailure('SOURCE_START',error)).primary_failure;
+  assert.deepEqual(record,{stage:'SOURCE_START',error_category:'COMMAND',command_reason:'FAILED',
+    control_kind:'SPAWN_ERROR',spawn_code:'ENOENT'});
+  assert.equal(reads,1);assert.equal(gets,0);assert.doesNotMatch(JSON.stringify(record),/PRIVATE/);
+});
+
+test('throwing error or outcome descriptor traps cannot escape the sanitized CLI receipt',async () => {
+  let descriptorReads=0,gets=0;
+  const outcome=new Proxy({}, {
+    getOwnPropertyDescriptor(){descriptorReads++;throw new Error('PRIVATE descriptor');},
+    get(){gets++;throw new Error('PRIVATE getter');},
+  });
+  const control=Object.assign(new Error('PRIVATE'),{code:'owned_postgres_control_failed',control_outcome:outcome});
+  const controlReceipt=emptySchemaFailureReceipt(await caughtFailure('SOURCE_START',control));
+  assert.deepEqual(controlReceipt.primary_failure,{stage:'SOURCE_START',error_category:'COMMAND',command_reason:'FAILED'});
+  assert.equal(descriptorReads,1);assert.equal(gets,0);
+  const error=new Proxy({}, {getOwnPropertyDescriptor(){throw new Error('PRIVATE error descriptor');}});
+  assert.equal(await caughtFailure('RESTORE_START',error),error,'original error identity is retained');
+  const unknownReceipt=emptySchemaFailureReceipt(error);
+  assert.deepEqual(unknownReceipt.primary_failure,{stage:'RESTORE_START',error_category:'UNKNOWN'});
+  assert.doesNotMatch(JSON.stringify([controlReceipt,unknownReceipt]),/PRIVATE/);
 });

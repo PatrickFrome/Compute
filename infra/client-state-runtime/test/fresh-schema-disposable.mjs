@@ -16,9 +16,11 @@ import { RPC_ALLOWLIST, TABLE_ALLOWLIST, RPC_CATALOG_QUERY } from '../db-api-cor
 import { provisionLocalApiLogin } from '../db-api-grants.mjs';
 import { inspectAttachedApiAdmission } from '../attached-postgres-onboarding.mjs';
 import { loadFreshSchemaApplicationPlan, verifyFreshSchemaCatalogue } from '../fresh-schema-application-plan.mjs';
+import { runOwnedPostgresControlProcess } from '../owned-postgres-process.mjs';
 import { EMPTY_SCHEMA_MAX_ARCHIVE_BYTES, emptySchemaSha256, emptySchemaProcessEnvironment,
   runEmptySchemaCommand, inspectCanonicalEmptySchema, assertEmptySchemaRoundtrip,
-  validateEmptySchemaToc, runEmptySchemaStage, combineEmptySchemaCleanupFailure } from '../canonical-empty-schema-contract.mjs';
+  validateEmptySchemaToc, runEmptySchemaStage, combineEmptySchemaCleanupFailure,
+  emptySchemaPostgresStartOptions, prepareEmptySchemaPostmasterLogObservation } from '../canonical-empty-schema-contract.mjs';
 const root = new URL('../../../', import.meta.url);
 const heartbeat = 'public.h205f22_a2_supervisor_mesh_heartbeat_v1(text,text,text)';
 
@@ -257,6 +259,7 @@ async function runFreshSchemaNative({ bin, driver, base = os.tmpdir(), applicati
   const data = path.join(directory, 'data');
   const password = randomBytes(32).toString('hex');
   const passwordFile = path.join(directory, 'private-owner-password');
+  let observePostmasterStartFailure = null;
   const defaultCommand = (name,args) => new Promise((resolve,reject) => {
     const child=spawn(path.join(bin,name+(process.platform==='win32'?'.exe':'')),args,
       {windowsHide:true,stdio:['ignore','pipe','ignore'],shell:false,env:{...process.env,LC_ALL:'C'}});
@@ -269,8 +272,19 @@ async function runFreshSchemaNative({ bin, driver, base = os.tmpdir(), applicati
     ? async (name,args,extraEnv={}) => stage(name === 'pg_ctl' ? (args.includes('stop') ? 'STOP' : 'START')
       : name === 'pg_restore' ? (args.includes('--list') ? 'TOC_READ' : 'RESTORE')
       : {initdb:'INITDB',pg_controldata:'CONTROL_READ',pg_dump:'DUMP'}[name],async () =>
-      (await runEmptySchemaCommand(path.join(bin,name+(process.platform==='win32'?'.exe':'')),args,
-        {env:emptySchemaProcessEnvironment(extraEnv)})).toString('utf8'))
+      {
+        const executable=path.join(bin,name+(process.platform==='win32'?'.exe':''));
+        const env=emptySchemaProcessEnvironment(extraEnv);
+        if(name==='pg_ctl') {
+          try { await runOwnedPostgresControlProcess(executable,args,{env,timeoutMs:120000}); }
+          catch(error) {
+            if(args.includes('start') && observePostmasterStartFailure)await observePostmasterStartFailure(error);
+            throw error;
+          }
+          return '';
+        }
+        return (await runEmptySchemaCommand(executable,args,{env})).toString('utf8');
+      })
     : defaultCommand;
   let started=false,sql,reserved,archiveEvidence,primaryFailure=null;
   const reservedConnections=[];
@@ -288,8 +302,11 @@ async function runFreshSchemaNative({ bin, driver, base = os.tmpdir(), applicati
     const identifier=/Database system identifier:\s*(\d+)/.exec(control)?.[1];
     if(!identifier)throw Error('fresh_disposable_control_identity_missing');
     const expectedDirectory=await stage('IDENTITY_CHECK',() => fs.realpath(data));
+    if(archiveOperation)observePostmasterStartFailure=await stage('LOG_PREFLIGHT',() => prepareEmptySchemaPostmasterLogObservation(directory));
     started=true;
-    await command('pg_ctl',['-D',data,'-l',path.join(directory,'postgres.log'),'-o',`-h 127.0.0.1 -p ${port} -c unix_socket_directories=''`,'-w','start']);
+    await command('pg_ctl',['-D',data,'-l',path.join(directory,'postgres.log'),
+      ...(archiveOperation?['-p',path.join(bin,'postgres'+(process.platform==='win32'?'.exe':''))]:[]),
+      '-o',archiveOperation?emptySchemaPostgresStartOptions(port):`-h 127.0.0.1 -p ${port} -c unix_socket_directories=''`,'-w','start']);
     await stage('DRIVER_CONNECT',async () => {
     const postgres=(await import(pathToFileURL(driver))).default;
     sql=postgres({host:'127.0.0.1',port,user:'state_owner',password,database:'postgres',max:exerciseBackends,onnotice:()=>{},connect_timeout:5,

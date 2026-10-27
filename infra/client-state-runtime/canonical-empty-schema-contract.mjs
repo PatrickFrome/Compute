@@ -1,6 +1,7 @@
 // Test/export support only. These checks confer no installation or runtime authority.
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import { constants } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
@@ -15,6 +16,7 @@ export const EMPTY_SCHEMA_EXPORTER_PATHS = Object.freeze([
   'infra/client-state-runtime/test/fresh-schema-disposable.mjs',
   'infra/client-state-runtime/canonical-empty-schema-contract.mjs',
   'infra/client-state-runtime/export-reviewed-empty-schema.mjs',
+  'infra/client-state-runtime/owned-postgres-process.mjs',
 ]);
 export const EMPTY_SCHEMA_INPUT_PATHS = Object.freeze([
   'infra/client-state-runtime/fresh-schema-candidate-plan.json',
@@ -49,7 +51,7 @@ const diagnosticStages = new Set([
   'WORKSPACE_CREATE','ARCHIVE_CLAIM','PG_TOOL_PIN','PG_TOOL_VERSION','SOURCE_FACTORY',
   'RESTORE_FACTORY','ROUNDTRIP_COMPARE','ARCHIVE_READBACK','ARCHIVE_CLEANUP','WORKSPACE_CLEANUP',
   ...['SOURCE','RESTORE'].flatMap(prefix => [
-    'DIRECTORY_CREATE','PORT_RESERVE','PASSWORD_FILE','INITDB','CONTROL_READ','START',
+    'DIRECTORY_CREATE','PORT_RESERVE','PASSWORD_FILE','INITDB','CONTROL_READ','LOG_PREFLIGHT','START',
     'DRIVER_CONNECT','IDENTITY_CHECK','EMPTY_CHECK','COMPAT_ROLES','RESTORE','INSPECTION',
     'DUMP','TOC_READ','TOC_VALIDATE','ARCHIVE_CHECK','SCHEMA_LOAD','BASELINE','UPGRADES',
     'ACL','CATALOGUE_VERIFY','ROLLBACK_CHECK','COMMIT','REPEAT_UPGRADES','API_PROBES',
@@ -60,6 +62,7 @@ const diagnosticStages = new Set([
   ].map(name => prefix + '_' + name)),
 ]);
 const diagnosticErrors = new WeakMap();
+const postmasterStartLogs = new WeakMap();
 const filesystemCodes = new Set(['EACCES','EBUSY','EEXIST','EINVAL','EIO','EISDIR','EMFILE',
   'ENFILE','ENOENT','ENOMEM','ENOSPC','ENOTDIR','ENOTEMPTY','EPERM','EROFS','EXDEV']);
 const networkCodes = new Set(['EADDRINUSE','EADDRNOTAVAIL','ECONNREFUSED','ECONNRESET','ENETUNREACH','ETIMEDOUT']);
@@ -68,6 +71,13 @@ const commandReasons = new Map([
   ['empty_schema_command_failed','FAILED'],
 ]);
 const MAX_CLEANUP_FAILURES = 8;
+const CONTROL_FAILURES = new Map([
+  ['owned_postgres_control_failed','FAILED'],['owned_postgres_control_timeout','TIMEOUT'],
+  ['owned_postgres_control_cancelled','CANCELLED'],
+]);
+const CONTROL_SIGNALS = new Set(['SIGABRT','SIGBUS','SIGFPE','SIGHUP','SIGILL','SIGINT','SIGKILL','SIGSEGV','SIGTERM','OTHER']);
+const CONTROL_SPAWN_CODES = new Set(['EACCES','EAGAIN','EBUSY','EEXIST','EINVAL','EIO','EISDIR','EMFILE',
+  'ENFILE','ENOENT','ENOEXEC','ENOMEM','ENOTDIR','EPERM','ETXTBSY','UNKNOWN','OTHER']);
 const errorObject = error => error !== null && typeof error === 'object';
 function ownErrorValue(error, key) {
   if (!errorObject(error)) return undefined;
@@ -75,6 +85,24 @@ function ownErrorValue(error, key) {
 }
 function failureObservation(error, stage) {
   const code = ownErrorValue(error,'code'), registered = errorObject(error) ? contractErrorCodes.get(error) : undefined;
+  if (CONTROL_FAILURES.has(code)) {
+    const result = {stage,error_category:'COMMAND',command_reason:CONTROL_FAILURES.get(code)};
+    const outcome = ownErrorValue(error,'control_outcome'), kind = ownErrorValue(outcome,'kind');
+    if (['EXIT','SPAWN_ERROR','TIMEOUT','CANCELLED'].includes(kind)) result.control_kind=kind;
+    if (kind === 'EXIT') {
+      const exit = ownErrorValue(outcome,'exit_code'), signal = ownErrorValue(outcome,'signal');
+      if (exit === null || Number.isInteger(exit) && exit >= -2147483648 && exit <= 4294967295) result.exit_code=exit;
+      if (signal === null || CONTROL_SIGNALS.has(signal)) result.signal=signal;
+    }
+    if (kind === 'SPAWN_ERROR') {
+      const spawnCode = ownErrorValue(outcome,'system_code');
+      if (CONTROL_SPAWN_CODES.has(spawnCode)) result.spawn_code=spawnCode;
+    }
+    const log = postmasterStartLogs.get(error);
+    if (log) Object.assign(result,{postmaster_log_status:log.status,postmaster_log_markers:[...log.markers],
+      postmaster_log_bytes_examined:log.bytes_examined,...(log.system_code ? {postmaster_log_system_code:log.system_code} : {})});
+    return result;
+  }
   if (registered && commandReasons.has(registered))
     return {stage,error_category:'COMMAND',command_reason:commandReasons.get(registered)};
   if (registered) return {stage,error_category:'CONTRACT',contract_code:registered};
@@ -118,10 +146,103 @@ export function combineEmptySchemaCleanupFailure(primaryError, cleanupError) {
 }
 export function emptySchemaFailureMetadata(error) {
   const details = diagnosticDetails(error);
+  const copy = row => ({...row,...(row.postmaster_log_markers ? {postmaster_log_markers:[...row.postmaster_log_markers]} : {})});
   return {code:details.primary_failure?.contract_code || (errorObject(error) && contractErrorCodes.get(error)) || 'empty_schema_qualification_failed',
-    primary_failure:details.primary_failure ? {...details.primary_failure} : null,
-    cleanup_failures:details.cleanup_failures.map(row => ({...row})),
+    primary_failure:details.primary_failure ? copy(details.primary_failure) : null,
+    cleanup_failures:details.cleanup_failures.map(copy),
     cleanup_failures_truncated:details.cleanup_failures_truncated};
+}
+
+export function emptySchemaPostgresStartOptions(port) {
+  if (!Number.isInteger(port) || port <= 1023 || port > 65535) fail('empty_schema_disposable_port_invalid');
+  // pg_ctl inserts -o into CMD.EXE on Windows. Single quotes are literal there,
+  // so unix_socket_directories='' would select a directory named two quotes.
+  // A trailing equals supplies the actual empty GUC value on both platforms.
+  return `-h 127.0.0.1 -p ${port} -c unix_socket_directories=`;
+}
+
+const MAX_POSTMASTER_LOG_BYTES = 32 * 1024;
+const startupLogRules = [
+  ['UNIX_SOCKET_FAILURE', /could not (?:create|open|bind)[^\r\n]*(?:Unix-domain socket|\.s\.PGSQL\.)/i],
+  ['ACCESS_DENIED', /(?:Permission denied|Access is denied|access denied)/i],
+  ['PORT_BIND_FAILURE', /(?:could not bind[^\r\n]*(?:IPv4|IPv6|socket|address)|Address already in use|Only one usage of each socket address)/i],
+  ['CONFIGURATION_FAILURE', /(?:invalid value for parameter|unrecognized configuration parameter|syntax error in file|configuration file[^\r\n]*contains errors)/i],
+  ['DATA_DIRECTORY_FAILURE', /(?:data directory[^\r\n]*(?:does not exist|invalid permissions|wrong ownership)|could not (?:open|access)[^\r\n]*(?:postgresql\.conf|pg_control|PG_VERSION))/i],
+  ['EXECUTABLE_OR_LIBRARY_FAILURE', /(?:could not (?:access|load)[^\r\n]*(?:library|DLL)|specified module could not be found|not a valid Win32 application)/i],
+  ['SHARED_MEMORY_FAILURE', /(?:could not (?:create|map|attach|resize)[^\r\n]*shared memory|could not create semaphores?)/i],
+  ['ALREADY_RUNNING_OR_PID_LOCK', /(?:lock file[^\r\n]*postmaster\.pid[^\r\n]*already exists|another postmaster[^\r\n]*running)/i],
+  ['DATABASE_READY', /LOG:[^\r\n]*database system is ready to accept connections/i],
+  ['FATAL_OR_PANIC', /(?:FATAL|PANIC):/],
+];
+export function classifyEmptySchemaPostmasterStartLog(bytes) {
+  if (!Buffer.isBuffer(bytes) || bytes.length > MAX_POSTMASTER_LOG_BYTES) fail('empty_schema_postmaster_log_invalid');
+  // Input stays private, including unrecognized text. Output is a finite set of
+  // categories; no excerpts, SQL, filenames, hashes or arbitrary strings escape.
+  const text = bytes.toString('utf8'), markers = startupLogRules.filter(([,pattern]) => pattern.test(text)).map(([name]) => name);
+  return {status:bytes.length === 0 ? 'EMPTY' : markers.length ? 'CLASSIFIED' : 'UNCLASSIFIED',
+    markers,bytes_examined:bytes.length};
+}
+const sameLogIdentity = (a,b) => a.dev===b.dev && a.ino===b.ino && a.birthtimeNs===b.birthtimeNs;
+const sameLogFile = (a,b) => sameLogIdentity(a,b) && a.size===b.size && a.nlink===b.nlink
+  && a.mtimeNs===b.mtimeNs && a.ctimeNs===b.ctimeNs;
+
+// Called only inside a newly allocated canonical factory before pg_ctl start.
+// The log must be absent at that point. The returned observer reads nothing
+// until that explicit start fails, before any SQL/driver connection is opened.
+export async function prepareEmptySchemaPostmasterLogObservation(directory) {
+  if (typeof directory !== 'string' || !path.isAbsolute(directory)) fail('empty_schema_postmaster_log_root_invalid');
+  const root = path.resolve(directory), pins = [];
+  const physical = async file => {
+    const stat=await fs.lstat(file,{bigint:true});
+    // Kernel IDs are opaque: Node may expose a high-bit file ID as a signed
+    // BigInt. Zero is unavailable; either nonzero representation stays pinned.
+    if (!stat.isDirectory() || stat.isSymbolicLink() || stat.ino === 0n) fail('empty_schema_postmaster_log_root_alias');
+    return stat;
+  };
+  for (let cursor=root;;) {
+    pins.push({file:cursor,stat:await physical(cursor)});
+    const parent=path.dirname(cursor); if(parent===cursor)break; cursor=parent;
+  }
+  const canonical=await fs.realpath(root), filename=path.join(root,'postgres.log');
+  if (!sameLogIdentity(pins[0].stat,await physical(canonical))) fail('empty_schema_postmaster_log_root_alias');
+  try { await fs.lstat(filename); fail('empty_schema_postmaster_log_already_exists'); }
+  catch(error) { if(error.code!=='ENOENT')throw error; }
+  const checkPins=async () => {
+    for(const pin of pins) if(!sameLogIdentity(pin.stat,await physical(pin.file))) fail('empty_schema_postmaster_log_root_changed');
+  };
+  const empty=status => ({status,markers:[],bytes_examined:0});
+  const inspect=async () => {
+    await checkPins();
+    const before=await fs.lstat(filename,{bigint:true});
+    if(!before.isFile() || before.isSymbolicLink() || before.nlink!==1n || before.ino===0n
+      || before.size>BigInt(MAX_POSTMASTER_LOG_BYTES)) return empty('REFUSED');
+    if(path.relative(canonical,await fs.realpath(filename))!=='postgres.log') return empty('REFUSED');
+    const handle=await fs.open(filename,constants.O_RDONLY|(constants.O_NOFOLLOW||0));
+    try {
+      if(!sameLogFile(before,await handle.stat({bigint:true})))return empty('UNSTABLE');
+      const bytes=Buffer.alloc(Number(before.size)); let offset=0;
+      while(offset<bytes.length) {
+        const read=await handle.read(bytes,offset,bytes.length-offset,offset);
+        if(!read.bytesRead)return empty('UNSTABLE'); offset+=read.bytesRead;
+      }
+      if((await handle.read(Buffer.alloc(1),0,1,offset)).bytesRead)return empty('UNSTABLE');
+      const [opened,named]=await Promise.all([handle.stat({bigint:true}),fs.lstat(filename,{bigint:true})]);
+      if(!opened.isFile() || !named.isFile() || named.isSymbolicLink() || !sameLogFile(before,opened)
+        || !sameLogFile(before,named))return empty('UNSTABLE');
+      await checkPins();
+      return classifyEmptySchemaPostmasterStartLog(bytes);
+    } finally { await handle.close(); }
+  };
+  return async error => {
+    let observation;
+    try { observation=await inspect(); }
+    catch(caught) {
+      const code=ownErrorValue(caught,'code');
+      observation=empty(contractErrorCodes.has(caught)?'REFUSED':code==='ENOENT'?'ABSENT':'UNREADABLE');
+      if(filesystemCodes.has(code))observation.system_code=code;
+    }
+    if(errorObject(error))postmasterStartLogs.set(error,observation);
+  };
 }
 
 export function parseEmptySchemaArguments(args) {

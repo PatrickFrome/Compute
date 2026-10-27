@@ -81,18 +81,32 @@ test('owned control completion follows exit while a real descendant retains stdo
 test('owned control process bounds timeout, cancellation and nonzero exit without public stderr', { timeout: 15000 }, async () => {
   await assert.rejects(runOwnedPostgresControlProcess(process.execPath,
     ['-e', "process.stderr.write('private detail');process.exit(7)"], { timeoutMs: 5000 }),
-  { code: 'owned_postgres_control_failed', message: 'owned_postgres_control_failed' });
+  error => {
+    assert.equal(error.code,'owned_postgres_control_failed');
+    assert.equal(error.message,'owned_postgres_control_failed');
+    assert.deepEqual(error.control_outcome,{kind:'EXIT',exit_code:7,signal:null});
+    assert.equal(Object.isFrozen(error.control_outcome),true);
+    assert.doesNotMatch(JSON.stringify(error),/private detail|stderr|argv/);
+    return true;
+  });
   const started = Date.now();
   await assert.rejects(runOwnedPostgresControlProcess(process.execPath,
-    ['-e', 'setInterval(()=>{},1000)'], { timeoutMs: 300 }), { code: 'owned_postgres_control_timeout' });
+    ['-e', 'setInterval(()=>{},1000)'], { timeoutMs: 300 }),
+    { code: 'owned_postgres_control_timeout',control_outcome:{kind:'TIMEOUT'} });
   assert(Date.now() - started < 5000);
   const controller = new AbortController();
   const aborted = runOwnedPostgresControlProcess(process.execPath,
     ['-e', 'setInterval(()=>{},1000)'], { timeoutMs: 10000, signal: controller.signal });
   setTimeout(() => controller.abort(), 100);
-  await assert.rejects(aborted, { code: 'owned_postgres_control_cancelled' });
+  await assert.rejects(aborted, { code: 'owned_postgres_control_cancelled',control_outcome:{kind:'CANCELLED'} });
   await assert.rejects(runOwnedPostgresControlProcess('unavailable', [], { timeoutMs: 1000 }),
-    { code: 'owned_postgres_control_failed', message: 'owned_postgres_control_failed' });
+    error => {
+      assert.equal(error.code,'owned_postgres_control_failed');
+      assert.equal(error.message,'owned_postgres_control_failed');
+      assert.deepEqual(error.control_outcome,{kind:'SPAWN_ERROR',system_code:'ENOENT'});
+      assert.doesNotMatch(JSON.stringify(error),/unavailable|path|argv/);
+      return true;
+    });
 });
 
 test('owned startup binds cold PostgreSQL initialization to the exact finite Windows launch window', () => {
