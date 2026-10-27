@@ -1,3 +1,7 @@
+# Current website: E12 light workspace
+
+Only topics, lessons, notebooks and chats remain in the user interface. Learning tests/progress were removed; existing local data is preserved. See LIGHT_UI_E12.md for the redesign and current verification. The E11 notes below describe the initial port and are retained for historical context.
+
 # DevFleet Education Web — E11
 
 Standalone browser-first technical academy, extracted from the authored DevFleet Education curriculum. No Electron installation, API key, backend, or npm dependency is needed at runtime. The site includes 15 subjects and 120 Russian learning topics, original explanations, exercises, glossaries and source links. This is a website port, **not a new independent deep research review of every lesson**.
