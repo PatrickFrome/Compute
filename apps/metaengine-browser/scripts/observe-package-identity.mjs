@@ -19,9 +19,11 @@ export const POLICY = Object.freeze({
   reservationDigest: 'sha256:9a1084542301e68ac333860fa810d59cbf790294774b181e053a85dccea27024',
   candidateId: 12679249312,
   candidateDigest: 'sha256:28126ee94d99c59040b1e2f5f215556d148da3f1933198ced5919323ce0881f4',
-  // Fixed documented GitHub default; failures never trigger a retry or fallback.
-  catalogPageSize: 30,
-  maxCatalogPages: 650, maxProducerRuns: 128, maxRequests: 700, maxObservationMs: 12 * 60_000,
+  // Documented 100-item pages preserve the existing 19,500-artifact bound.
+  // Only transient metadata GET 5xx may retry;
+  // every attempt retains the same global request/time/byte budgets.
+  catalogPageSize: 100,
+  maxCatalogPages: 195, maxProducerRuns: 128, maxRequests: 700, maxObservationMs: 12 * 60_000,
   maxResponseBytes: 2 * 1024 * 1024, maxReadBytes: 96 * 1024 * 1024,
   maxEvidenceBytes: 48 * 1024 * 1024,
 });
@@ -120,9 +122,11 @@ export function createGitHubReader({ token, records, fetchImpl = globalThis.fetc
   const started = performance.now();
   return async (route, kind) => {
     requireThat(route.startsWith(PREFIX) && !route.includes('#') && !route.includes('\\') && !/[\r\n]/.test(route), 'OBSERVATION_API_ROUTE_INVALID');
+    for (let attempt = 0; attempt < 3; attempt++) {
     requireThat(++requests <= POLICY.maxRequests, 'OBSERVATION_REQUEST_BOUND_EXCEEDED');
     requireThat(performance.now() - started < POLICY.maxObservationMs, 'OBSERVATION_TIME_BOUND_EXCEEDED');
-    const record = { method: 'GET', url: API + route, started_at: now(), completed_at: null, status: null };
+    const record = { method: 'GET', url: API + route, metadata_attempt: attempt + 1,
+      started_at: now(), completed_at: null, status: null };
     records.push(record);
     try {
       const response = await fetchImpl(API + route, { method: 'GET', redirect: 'error',
@@ -134,6 +138,13 @@ export function createGitHubReader({ token, records, fetchImpl = globalThis.fetc
         const value = response.headers.get(key);
         return [key, value === null || (text(value, 2048) && !value.includes(token)) ? value : null];
       }));
+      if ([500, 502, 503, 504].includes(response.status) && attempt < 2) {
+        // No parsing of error bodies, credential changes, alternate authority,
+        // reservation, planner call or physical effect on this retry path.
+        await response.body?.cancel();
+        await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+        continue;
+      }
       requireThat(response.status === 200, 'OBSERVATION_API_UNAVAILABLE');
       const parts = []; let bytes = 0;
       for await (const chunk of response.body) {
@@ -154,6 +165,7 @@ export function createGitHubReader({ token, records, fetchImpl = globalThis.fetc
       if (typeof error?.code === 'string' && /^OBSERVATION_[A-Z_]+$/.test(error.code)) throw error;
       hold('OBSERVATION_API_UNAVAILABLE');
     } finally { record.completed_at = now(); }
+    }
   };
 }
 
@@ -191,7 +203,7 @@ function verifyOriginalArtifact(row, kind) {
 }
 
 export async function readCompleteCatalog(get) {
-  const route = page => `${PREFIX}artifacts?per_page=${POLICY.catalogPageSize}&page=${page}`;
+  const route = page => `${PREFIX}artifacts?page=${page}&per_page=${POLICY.catalogPageSize}`;
   const first = await get(route(1), 'list');
   const total = first.total_count;
   const pages = Math.max(1, Math.ceil(total / POLICY.catalogPageSize));
@@ -335,8 +347,14 @@ export function checkoutFacts(root, expectedHead) {
 export function observationCounts(queries = []) {
   const bounded = value => Number.isSafeInteger(value) && value >= 0 && value <= 100_000_000 ? value : null;
   const rows = Array.isArray(queries) ? queries.slice(0, POLICY.maxRequests) : [];
-  const catalog = rows.filter(row => typeof row?.url === 'string'
-    && row.url.startsWith(API + PREFIX + `artifacts?per_page=${POLICY.catalogPageSize}&page=`));
+  const catalog = rows.filter(row => {
+    try {
+      const url = new URL(row?.url);
+      return url.origin === API && url.pathname === PREFIX + 'artifacts'
+        && !url.searchParams.has('name') && /^[1-9][0-9]*$/.test(url.searchParams.get('page'))
+        && url.searchParams.get('per_page') === String(POLICY.catalogPageSize);
+    } catch { return false; }
+  });
   const first = catalog[0], last = catalog.at(-1), request = rows.at(-1);
   return { requests: rows.length, catalog_pages_read: catalog.length,
     first_total: bounded(first?.response?.total_count), last_total: bounded(last?.response?.total_count),
@@ -347,7 +365,9 @@ export function observationCounts(queries = []) {
 export function writeReports(directory, evidence, plan, code, maxBytes = POLICY.maxEvidenceBytes) {
   let status = { schema: 'metaengine.browser.package-identity-observation-status.v1',
     disposition: code ? 'HOLD' : 'PLAN_OBSERVED_NOT_RESERVED', code: code || null,
-    ...FALSE_AUTHORITY, observation_counts: observationCounts(evidence.queries) };
+    ...FALSE_AUTHORITY, metadata_get_retry_limit: 2,
+    metadata_retry_does_not_authorize_effect_replay: true,
+    observation_counts: observationCounts(evidence.queries) };
   evidence.status = status;
   let files = { 'status.json': status, 'observation.json': evidence, ...(code ? {} : { 'plan.json': plan }) };
   let bytes = Object.fromEntries(Object.entries(files).map(([name, value]) => [name, JSON.stringify(value, null, 2) + '\n']));

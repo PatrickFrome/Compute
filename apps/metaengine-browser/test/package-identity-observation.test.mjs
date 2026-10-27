@@ -19,7 +19,7 @@ const RESERVATION = 'metaengine-browser-package-version-';
 const CANDIDATE = 'metaengine-browser-windows-candidate-';
 
 test('public observation diagnostics contain bounded counts only, never response strings', () => {
-  const url='https://api.github.com'+BASE+'artifacts?per_page=30&page=';
+  const url='https://api.github.com'+BASE+'artifacts?per_page=100&page=';
   const counts=observationCounts([
     {url:url+'1',status:200,response:{total_count:18000,artifacts:[],secret:'DO_NOT_PRINT'}},
     {url:url+'2',status:200,response:{total_count:18001,artifacts:[{}]}},
@@ -86,8 +86,8 @@ function fixture() {
     }
     const page = Number(url.searchParams.get('page'));
     assert.ok(page >= 1);
-    assert.equal(url.searchParams.get('per_page'), '30');
-    return { total_count: state.artifacts.length, artifacts: state.artifacts.slice((page - 1) * 30, page * 30) };
+    assert.equal(url.searchParams.get('per_page'), '100');
+    return { total_count: state.artifacts.length, artifacts: state.artifacts.slice((page - 1) * 100, page * 100) };
   };
   state.runPlanner = async floor => { state.plannerCalls.push(floor); return plan(floor); };
   state.observe = () => observeIdentity({ context: CONTEXT, packageVersion: POLICY.knownFloor,
@@ -124,43 +124,44 @@ test('catalog traverses every required page and retains all 201 unique artifacts
   const pages = [];
   const result = await readCompleteCatalog(async route => {
     const url = new URL(route, 'https://api.github.com');
-    assert.equal(url.searchParams.get('per_page'), '30');
+    assert.equal(url.searchParams.get('per_page'), '100');
     const page = Number(url.searchParams.get('page')); pages.push(page);
-    return { total_count: rows.length, artifacts: rows.slice((page - 1) * 30, page * 30) };
+    return { total_count: rows.length, artifacts: rows.slice((page - 1) * 100, page * 100) };
   });
-  assert.deepEqual(pages, [1, 2, 3, 4, 5, 6, 7]); assert.equal(result.artifacts.length, 201);
+  assert.deepEqual(pages, [1, 2, 3]); assert.equal(result.artifacts.length, 201);
 });
 
 test('partial catalog, changed totals, duplicate IDs and the finite page bound fail closed', async () => {
-  const first = Array.from({ length: 30 }, (_, index) => artifact(index + 1, `row-${index}`));
+  const first = Array.from({ length: 100 }, (_, index) => artifact(index + 1, `row-${index}`));
   for (const second of [
-    { total_count: 31, artifacts: [] },
-    { total_count: 32, artifacts: [artifact(31, 'new')] },
-    { total_count: 31, artifacts: [first[29]] },
+    { total_count: 101, artifacts: [] },
+    { total_count: 102, artifacts: [artifact(101, 'new')] },
+    { total_count: 101, artifacts: [first[99]] },
   ]) {
     let calls = 0;
     await assert.rejects(() => readCompleteCatalog(async () => ++calls === 1
-      ? { total_count: 31, artifacts: first } : second), /OBSERVATION_CATALOG_/);
+      ? { total_count: 101, artifacts: first } : second), /OBSERVATION_CATALOG_/);
     assert.equal(calls, 2);
   }
   let calls = 0;
   await assert.rejects(() => readCompleteCatalog(async () => { calls++; return {
-    total_count: POLICY.maxCatalogPages * 30 + 1, artifacts: first }; }), /OBSERVATION_CATALOG_BOUND_EXCEEDED/);
+    total_count: POLICY.maxCatalogPages * 100 + 1, artifacts: first }; }), /OBSERVATION_CATALOG_BOUND_EXCEEDED/);
   assert.equal(calls, 1);
 });
 
-test('30-item catalog pages preserve empty, actual-size and 650-page completeness', async () => {
-  assert.equal(POLICY.catalogPageSize, 30);
-  assert.equal(POLICY.maxCatalogPages, 650);
+test('100-item catalog pages preserve the same 19,500-artifact completeness bound', async () => {
+  assert.equal(POLICY.catalogPageSize, 100);
+  assert.equal(POLICY.maxCatalogPages, 195);
   assert.equal(POLICY.maxRequests, 700);
-  for (const [total, expectedPages] of [[0, 1], [30, 1], [31, 2], [60, 2], [15000, 500], [17990, 600], [19500, 650]]) {
+  assert.equal(POLICY.catalogPageSize * POLICY.maxCatalogPages, 19500);
+  for (const [total, expectedPages] of [[0, 1], [100, 1], [101, 2], [200, 2], [15000, 150], [17990, 180], [19500, 195]]) {
     let calls = 0;
     const result = await readCompleteCatalog(async route => {
       const url = new URL(route, 'https://api.github.com');
-      assert.equal(url.searchParams.get('per_page'), '30');
+      assert.equal(url.searchParams.get('per_page'), '100');
       assert.equal(Number(url.searchParams.get('page')), ++calls);
-      const start = (calls - 1) * 30;
-      return { total_count: total, artifacts: Array.from({ length: Math.min(30, total - start) },
+      const start = (calls - 1) * 100;
+      return { total_count: total, artifacts: Array.from({ length: Math.min(100, total - start) },
         (_, index) => artifact(start + index + 1, `row-${start + index}`)) };
     });
     assert.equal(calls, expectedPages);
@@ -171,7 +172,7 @@ test('30-item catalog pages preserve empty, actual-size and 650-page completenes
   let calls = 0;
   await assert.rejects(() => readCompleteCatalog(async () => {
     calls++;
-    return { total_count: 31, artifacts: Array.from({ length: 31 }, (_, index) => artifact(index + 1, `row-${index}`)) };
+    return { total_count: 101, artifacts: Array.from({ length: 101 }, (_, index) => artifact(index + 1, `row-${index}`)) };
   }), /OBSERVATION_CATALOG_INCOMPLETE/);
   assert.equal(calls, 1);
 });
@@ -183,7 +184,7 @@ test('real-boundary fixture calls planner once with confirmed floor and retains 
   assert.equal(state.evidence.catalog.global_absence_claim, false);
   assert.equal(state.evidence.post_plan_complete_name_readbacks, true);
   assert.equal(state.calls.filter(row => row.route === `${BASE}runs/${RUN}`).length, 2);
-  assert.equal(state.calls.filter(row => row.route === `${BASE}artifacts?per_page=30&page=1`).length, 2);
+  assert.equal(state.calls.filter(row => row.route === `${BASE}artifacts?page=1&per_page=100`).length, 2);
 });
 
 test('original producer must be completed success before any planner execution', async () => {
@@ -267,7 +268,7 @@ test('an incomplete per-name response after the CLI is not interpreted as absenc
 
 test('catalog drift or cancelled observing run at final readback is HOLD', async () => {
   const catalog = fixture(); let catalogReads = 0;
-  catalog.mutation = route => route === `${BASE}artifacts?per_page=30&page=1` && ++catalogReads === 2
+  catalog.mutation = route => route === `${BASE}artifacts?page=1&per_page=100` && ++catalogReads === 2
     ? { total_count: 3, artifacts: [...catalog.artifacts, artifact(42, 'new-upload')] } : undefined;
   await assert.rejects(catalog.observe, /OBSERVATION_CATALOG_CHANGED/);
   assert.equal(catalog.evidence.catalog.complete, false);
@@ -349,30 +350,67 @@ test('HTTP capture allows only GET to GitHub and records sanitized actual respon
 test('API failure and truncated JSON leave bounded failure observations, never synthetic empty lists', async () => {
   for (const response of [new Response('private error token', { status: 503 }), new Response('{', { status: 200 })]) {
     const records = [], get = createGitHubReader({ token: 'test', records, fetchImpl: async () => response });
-    await assert.rejects(() => get(`${BASE}artifacts?per_page=30&page=1`, 'list'), /OBSERVATION_(API_UNAVAILABLE|RESPONSE_JSON_INVALID)/);
-    assert.equal(records.length, 1); assert.equal(records[0].response, undefined);
+    await assert.rejects(() => get(`${BASE}artifacts?page=1&per_page=100`, 'list'), /OBSERVATION_(API_UNAVAILABLE|RESPONSE_JSON_INVALID)/);
+    assert.equal(records.length, response.status === 503 ? 3 : 1); assert.equal(records[0].response, undefined);
     assert.equal(JSON.stringify(records).includes('private error token'), false);
   }
 });
 
-test('HTTP 500 on the first catalog page stays HOLD without retry, fallback or planner execution', async () => {
+test('persistent HTTP 500 stays HOLD after bounded GET attempts without fallback or planner execution', async () => {
   const state = fixture(), records = [];
   let httpCalls = 0;
   const get = createGitHubReader({ token: 'test-only-token', records, fetchImpl: async url => {
     httpCalls++;
-    assert.equal(url, 'https://api.github.com' + BASE + 'artifacts?per_page=30&page=1');
+    assert.equal(url, 'https://api.github.com' + BASE + 'artifacts?page=1&per_page=100');
     return new Response('private error token', { status: 500 });
   } });
   const originalGet = state.get;
-  state.get = (route, kind) => route === `${BASE}artifacts?per_page=30&page=1` ? get(route, kind) : originalGet(route, kind);
+  state.get = (route, kind) => route === `${BASE}artifacts?page=1&per_page=100` ? get(route, kind) : originalGet(route, kind);
   await assert.rejects(state.observe, { code: 'OBSERVATION_API_UNAVAILABLE' });
-  assert.equal(httpCalls, 1);
+  assert.equal(httpCalls, 3);
   assert.equal(state.plannerCalls.length, 0);
   assert.equal(state.evidence.catalog, undefined);
-  assert.equal(records.length, 1);
+  assert.equal(records.length, 3);
   assert.equal(records[0].status, 500);
   assert.equal(records[0].response, undefined);
   assert.equal(JSON.stringify(records).includes('private error token'), false);
+});
+
+test('transient metadata 5xx can recover without changing route or method', async () => {
+  for(const status of [500,502,503,504]) {
+    const records=[],calls=[];
+    const get=createGitHubReader({token:'fixture-only',records,fetchImpl:async (url,options)=>{
+      calls.push({url,method:options.method});
+      return calls.length===1?new Response('untrusted server failure',{status})
+        :new Response(JSON.stringify({total_count:0,artifacts:[]}));
+    }});
+    assert.deepEqual(await get(`${BASE}artifacts?page=1&per_page=100`,'list'),{total_count:0,artifacts:[]});
+    assert.equal(calls.length,2);assert.deepEqual(calls[0],calls[1]);
+    assert.deepEqual(records.map(x=>x.status),[status,200]);
+    assert.deepEqual(records.map(x=>x.metadata_attempt),[1,2]);
+    assert.equal(records[0].response,undefined);
+  }
+});
+
+test('access refusals, throttling, redirects and malformed success never retry',async()=>{
+  for(const status of [301,400,401,403,404,429]) {
+    let calls=0;const records=[];
+    const get=createGitHubReader({token:'fixture-only',records,fetchImpl:async()=>{
+      calls++;return new Response('refused',{status});
+    }});
+    await assert.rejects(get(`${BASE}artifacts?page=1&per_page=100`,'list'),{code:'OBSERVATION_API_UNAVAILABLE'});
+    assert.equal(calls,1);
+  }
+});
+
+test('metadata retries consume the shared 700 request budget rather than resetting it',async()=>{
+  let calls=0;const records=[];
+  const get=createGitHubReader({token:'fixture-only',records,fetchImpl:async()=>{
+    calls++;return calls<700?new Response(JSON.stringify({total_count:0,artifacts:[]})):new Response('busy',{status:503});
+  }});
+  for(let i=0;i<699;i++)await get(`${BASE}artifacts?page=1&per_page=100`,'list');
+  await assert.rejects(get(`${BASE}artifacts?page=1&per_page=100`,'list'),{code:'OBSERVATION_REQUEST_BOUND_EXCEEDED'});
+  assert.equal(calls,700);assert.equal(records.length,700);
 });
 
 test('the fixed 700-request budget refuses before a 701st GET with the larger catalog cap', async () => {
@@ -382,8 +420,8 @@ test('the fixed 700-request budget refuses before a 701st GET with the larger ca
     httpCalls++;
     return new Response(JSON.stringify({ total_count: 0, artifacts: [] }), { status: 200 });
   } });
-  for (let request = 1; request <= 700; request++) await get(`${BASE}artifacts?per_page=30&page=1`, 'list');
-  await assert.rejects(() => get(`${BASE}artifacts?per_page=30&page=1`, 'list'),
+  for (let request = 1; request <= 700; request++) await get(`${BASE}artifacts?page=1&per_page=100`, 'list');
+  await assert.rejects(() => get(`${BASE}artifacts?page=1&per_page=100`, 'list'),
     { code: 'OBSERVATION_REQUEST_BOUND_EXCEEDED' });
   assert.equal(httpCalls, 700);
   assert.equal(records.length, 700);
@@ -395,7 +433,7 @@ test('even an allowed metadata field reflecting the job token produces HOLD with
   const get = createGitHubReader({ token, records, fetchImpl: async () => new Response(JSON.stringify({
     total_count: 1, artifacts: [{ id: 1, name: token }],
   }), { headers: { 'x-github-request-id': token } }) });
-  await assert.rejects(() => get(`${BASE}artifacts?per_page=30&page=1`, 'list'), /OBSERVATION_SECRET_IN_RESPONSE/);
+  await assert.rejects(() => get(`${BASE}artifacts?page=1&per_page=100`, 'list'), /OBSERVATION_SECRET_IN_RESPONSE/);
   assert.equal(records[0].response, undefined); assert.equal(records[0].headers['x-github-request-id'], null);
   assert.equal(JSON.stringify(records).includes(token), false);
 });
@@ -403,7 +441,7 @@ test('even an allowed metadata field reflecting the job token produces HOLD with
 test('response body limit refuses oversized API data before adding a payload to evidence', async () => {
   const records = [], get = createGitHubReader({ token: 'test', records,
     fetchImpl: async () => new Response('x'.repeat(POLICY.maxResponseBytes + 1)) });
-  await assert.rejects(() => get(`${BASE}artifacts?per_page=30&page=1`, 'list'), /OBSERVATION_RESPONSE_BOUND_EXCEEDED/);
+  await assert.rejects(() => get(`${BASE}artifacts?page=1&per_page=100`, 'list'), /OBSERVATION_RESPONSE_BOUND_EXCEEDED/);
   assert.equal(records[0].response, undefined);
 });
 
