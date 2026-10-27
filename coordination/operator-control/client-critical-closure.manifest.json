@@ -1028,8 +1028,8 @@
     "infra/client-state-runtime/export-reviewed-empty-schema.mjs": "a2057ba55f096006b945e4405528e9c9bae79e28",
     ".github/workflows/client-reviewed-empty-schema.yml": "fc6118a2662d72cf1d6cdb366be92d4a9d9c41dd",
     ".github/workflows/browser-package-identity-observation.yml": "2deb61cb08870505f0ad15bd31790072f28cce08",
-    "apps/metaengine-browser/scripts/observe-package-identity.mjs": "4ece3ed5791d32e13feef09976af5e7db11219f0",
-    "apps/metaengine-browser/test/package-identity-observation.test.mjs": "1fc6c19cf0fcaf55c10265cbbd021ee349cdaab3"
+    "apps/metaengine-browser/scripts/observe-package-identity.mjs": "be73809e702332f8ade4429adff429ce44a65d3b",
+    "apps/metaengine-browser/test/package-identity-observation.test.mjs": "3e9a1a6c6706a0f99212c1692b3141834f1958b8"
   },
   "parent_checks_not_transitive": true,
   "proof_levels": {
