@@ -1,4 +1,5 @@
 import {inspectRaster} from './raster.mjs';
+import {createPairing,pairMessage} from './pairing.mjs';
 import {icon,decorate} from './icons.mjs';
 import {openStore,loadState,mutate,replaceState} from './storage.mjs';
 import {topicId,currentLesson,changePage,undoPage,canonicalChat,safeSource,parsePatch,buildContext,migrateDesktop,importSummary,MAX_BYTES} from './core.mjs';
@@ -8,7 +9,8 @@ const $=id=>document.getElementById(id);
 const el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=String(text);if(cls)n.className=cls;return n;};
 let catalog,state,current='material-03-01',ready=false,expanded=new Set([3]),share=false,patchRequested=false;
 let editingNote=null,opener=null,navGeneration=0,pendingDraft=null,draftTimer,toastTimer;
-const noteDrafts=new Map();
+const noteDrafts=new Map();let pairView=null;
+const pairing=createPairing({onState:updatePair,onHelp:()=>pairDialog()});
 const channel='BroadcastChannel' in window?new BroadcastChannel('devfleet-education-journal'):null;
 function toast(text){$('toast').textContent=text;$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,4200);}
 function failure(e){toast(e?.message||'Не удалось сохранить изменение');}
@@ -77,7 +79,30 @@ function renderNotebook(){
   })));meta.append(controls);card.append(meta);list.append(card);
  }
 }
-function renderAll(){if(!ready)return;renderTree();renderLesson();renderNotebook();}
+function renderAll(){if(!ready)return;renderTree();renderLesson();renderNotebook();renderPair();}
+function renderPair(){
+ if(!ready)return;const p=pairView?.topic===current?pairView:null,active=!!p?.enabled;
+ $('pair-chat').textContent=active?'Чат рядом':'Подключить рядом';$('pair-chat').setAttribute('aria-pressed',String(active));$('pair-disconnect').hidden=!active;
+ $('chat-location').textContent=active?(p.url?'Беседа закреплена за этим уроком.':'Отправь первое сообщение в ChatGPT для сохранения беседы.'):'Обычный ChatGPT в твоём аккаунте.';
+ $('open-chatgpt').textContent=active?'Скопировать вопрос':'В ChatGPT';$('open-chatgpt').title=active?'Скопировать материал и вопрос для открытой беседы':'Скопировать и открыть обычный ChatGPT';
+}
+async function updatePair(p){
+ if(!ready||p.topic!==current)return;pairView=p;renderPair();
+ if(p.url){let url;try{url=canonicalChat(p.url);}catch{return;}if(!state.bindings[p.topic])try{await save(s=>{if(!s.bindings[p.topic]&&!Object.entries(s.bindings).some(([id,u])=>id!==p.topic&&u===url))s.bindings[p.topic]=url;return s;});}catch(e){failure(e);}}
+ if(p.event==='different_chat')toast(pairMessage('pair_chat_changed_manually'));
+ if(p.error&&p.error!=='pair_extension_unavailable')toast(pairMessage(p.error));
+}
+function pairDialog(){
+ const box=el('div',undefined,'modal-stack');
+ box.append(el('p','Урок и настоящий ChatGPT рядом в одном окне Chrome. Для переключения бесед нужно небольшое расширение Education; это не расширение OpenAI.'));
+ const a=el('a','Скачать расширение');a.href='/downloads/education-chat-link.zip';a.download='education-chat-link.zip';a.className='primary';box.append(a);
+ box.append(el('p','Распакуй архив. В Chrome 155+ открой chrome://extensions, включи «Режим разработчика», выбери «Загрузить распакованное расширение» и папку с manifest.json. Затем обнови эту страницу.'));
+ box.append(el('p','Нажми «Подключить рядом», авторизуйся самостоятельно и выбери модель в ChatGPT. После первого сообщения адрес беседы сохранится за темой. При переключении урока рядом будет открываться его отдельный чат.'));
+ box.append(el('small','Расширение видит только адреса связанных вкладок. Оно не читает переписку, пароли или cookies, не отправляет сообщения и не выбирает модель. Автоматические правки урока не подключены.'));
+ const d=el('a','Официальная боковая панель ChatGPT');d.href='https://learn.chatgpt.com/docs/chrome-extension';d.target='_blank';d.rel='noopener noreferrer';box.append(d);showModal('Беседы рядом',box);
+}
+async function openPair(){const id=current;if(!pairing.info){try{await pairing.probe(id);}catch{pairDialog();return;}}if(current!==id)return;try{await pairing.open(id,state.bindings[id]);}catch(e){toast(pairMessage(e.message));}}
+
 function captureNoteDraft(){if(!ready)return;noteDrafts.set(current,{title:$('note-title').value,body:$('note-body').value,edit:editingNote});}
 function restoreNoteDraft(){const draft=noteDrafts.get(current);editingNote=draft?.edit||null;$('note-title').value=draft?.title||'';$('note-body').value=draft?.body||'';$('cancel-note').hidden=!draft?.edit;$('save-note').textContent='Сохранить';}
 async function go(id,{replace=false}={}){
@@ -87,6 +112,7 @@ async function go(id,{replace=false}={}){
  expanded=new Set([base().subject]);restoreNoteDraft();const hash='#/'+id;
  if(location.hash!==hash)replace?history.replaceState(null,'',hash):history.pushState(null,'',hash);
  renderAll();$('lesson-reader').scrollTo({top:0,behavior:'instant'});closeNav();closeMenus();
+ void pairing.select(id,state.bindings[id]);
 }
 function queueDraft(){pendingDraft={id:current,text:$('question').value};$('draft-status').textContent='';clearTimeout(draftTimer);draftTimer=setTimeout(()=>flushDraft().catch(failure),300);}
 async function flushDraft(){
@@ -112,7 +138,7 @@ function contextDialog(){const box=el('div',undefined,'modal-stack'),text=el('te
 function bindDialog(){
  const id=current,box=el('div',undefined,'modal-stack'),input=el('input');input.type='url';input.placeholder='https://chatgpt.com/c/…';input.value=state.bindings[id]||'';input.setAttribute('aria-label','Ссылка на чат');
  box.append(el('p','Ссылка на беседу для этого урока.'),input,button('Сохранить',async()=>{
-  const url=canonicalChat(input.value.trim());await save(s=>{if(Object.entries(s.bindings).some(([topic,u])=>topic!==id&&u===url))throw Error('Эта беседа уже связана с другой темой');s.bindings[id]=url;return s;});closeModal();
+  const url=canonicalChat(input.value.trim());if(pairing.info)await pairing.bind(id,url);await save(s=>{if(Object.entries(s.bindings).some(([topic,u])=>topic!==id&&u===url))throw Error('Эта беседа уже связана с другой темой');s.bindings[id]=url;return s;});closeModal();
  },'primary'));
  if(state.bindings[id])box.append(button('Отвязать беседу',async()=>{await save(s=>{delete s.bindings[id];return s;});closeModal();}));showModal('Чат урока',box);
 }
@@ -164,10 +190,13 @@ function wire(){
  });bind('cancel-note',resetNote);$('note-title').oninput=$('note-body').oninput=captureNoteDraft;
  $('question').oninput=queueDraft;$('share-notes').onchange=()=>{share=$('share-notes').checked;};
  bind('preview-context',contextDialog);bind('bind-chat',bindDialog);bind('edit-lesson',editDialog);bind('apply-reply',patchDialog);
+ bind('pair-chat',openPair);bind('pair-help',pairDialog);bind('pair-disconnect',async()=>{try{await pairing.disconnect(current);}catch(e){toast(pairMessage(e.message));}});
  bind('undo-lesson',()=>{const id=current;return save(s=>undoPage(s,base(id)));});
  bind('request-patch',()=>{patchRequested=true;$('question').value='Улучши объяснение и пример урока. Подготовь правку для сохранения на сайте.';queueDraft();$('question').focus();});
  bind('open-chatgpt',async()=>{
-  const text=context(),url=state.bindings[current]||'https://chatgpt.com/';window.open(url,'_blank','noopener,noreferrer');
+  const text=context(),url=state.bindings[current]||'https://chatgpt.com/';
+  if(pairView?.enabled&&pairView.topic===current){await copyText(text);toast('Скопировано. Вставь в ChatGPT рядом — сообщение не отправлено.');await flushDraft();return;}
+  window.open(url,'_blank','noopener,noreferrer');
   try{await copyText(text);toast('Скопировано. Вставь в ChatGPT.');}catch(e){contextDialog();throw e;}await flushDraft();
  });
  let excerpt='';$('lesson-reader').addEventListener('mouseup',()=>{const s=getSelection();excerpt=s?.anchorNode&&$('lesson-reader').contains(s.anchorNode)?s.toString().trim().slice(0,1800):'';});

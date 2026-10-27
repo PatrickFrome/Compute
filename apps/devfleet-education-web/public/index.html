@@ -36,12 +36,12 @@
   </section>
   <div id="splitter" class="splitter" role="separator" tabindex="0" aria-label="Изменить высоту чата" aria-orientation="horizontal" aria-valuemin="20" aria-valuemax="60" aria-valuenow="30"><span></span></div>
   <section class="chat-panel" id="chat-panel" aria-label="Чат урока">
-   <header class="chat-header"><div class="chat-heading"><span data-icon="chat"></span><strong>Чат</strong><span id="chat-topic"></span></div>
+   <header class="chat-header"><div class="chat-heading"><span data-icon="chat"></span><strong>Чат</strong><span id="chat-topic"></span></div><button id="pair-chat" class="quiet pair-button" aria-pressed="false">Подключить рядом</button>
     <details class="action-menu"><summary aria-label="Действия с чатом" title="Действия с чатом"><span data-icon="more"></span></summary><div class="menu-items">
-     <button id="bind-chat">Привязать беседу</button><button id="preview-context">Посмотреть контекст</button><button id="request-patch">Попросить улучшить урок</button><button id="apply-reply">Внести ответ в урок</button>
+     <button id="pair-help">Беседы рядом — подключение</button><button id="pair-disconnect" hidden>Отключить переключение</button><button id="bind-chat">Привязать беседу</button><button id="preview-context">Посмотреть контекст</button><button id="request-patch">Попросить улучшить урок</button><button id="apply-reply">Внести ответ в урок</button>
     </div></details>
    </header>
-   <div class="chat-intro"><span id="chat-destination">ChatGPT</span><span>Беседа откроется в новой вкладке.</span></div>
+   <div class="chat-intro"><span id="chat-destination">ChatGPT</span><span id="chat-location">Обычный ChatGPT в твоём аккаунте.</span></div>
    <div class="composer">
     <label class="sr-only" for="question">Вопрос по уроку</label>
     <textarea id="question" rows="2" maxlength="4000" placeholder="Спросить об уроке…"></textarea>
