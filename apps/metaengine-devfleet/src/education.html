@@ -1,159 +1,105 @@
-<!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>DevFleet Education</title>
-<style>
-:root{color-scheme:dark;font:13px system-ui,"Segoe UI",Arial,sans-serif}
-*{box-sizing:border-box}body{margin:0;background:#0d1420;color:#e5edf6}
-.shell{display:flex;height:100vh;overflow:hidden}.left{width:320px;flex:none;background:#141d2b;border-right:1px solid #304052;padding:16px;display:flex;flex-direction:column;gap:12px}
-.center{flex:1;background:#101923;min-width:1px}.right{width:300px;flex:none;background:#141d2b;border-left:1px solid #304052;padding:16px;overflow-y:auto}
-h1{font-size:17px;margin:0}h2{font-size:14px;margin:14px 0 8px}p,small,.muted{color:#aab8ca}
-small{font-size:11px;line-height:1.5}button{background:#233247;color:#e5edf6;border:1px solid #41546c;border-radius:7px;padding:9px;cursor:pointer;font:inherit}
-button:hover{background:#30415a}button:focus-visible{outline:2px solid #55c3b5}button.primary{background:#087f73;border-color:#10b5a0}
-button:disabled{opacity:.55;cursor:wait}.toolbar{display:flex;gap:6px;flex-wrap:wrap}
-#tree{overflow:auto;flex:1;min-height:140px}.folder,.chat{display:flex;gap:6px;align-items:center;width:100%;text-align:left;border-color:transparent;background:transparent;padding:6px 8px}
-.folder.active{background:#164a4a;border-color:#3a9d91}.folder span,.chat span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.chat{color:#a3c5e2;font-size:12px}.folder:hover,.chat:hover{background:#26364b}
-.card{background:#1b2839;border:1px solid #33465b;border-radius:10px;padding:12px;margin-bottom:12px}
-#status{font-size:11px;color:#7dd3c5;min-height:24px;overflow-wrap:anywhere}
-.progress{background:#334155;height:7px;border-radius:9px;overflow:hidden}.bar{height:100%;background:#4ac5b2;width:0}
-textarea{background:#101a28;color:#e5edf6;border:1px solid #41546c;width:100%;padding:9px;border-radius:6px;min-height:135px;resize:vertical;font:12px/1.45 system-ui}
-.choice{width:100%;margin:4px 0;text-align:left}#feedback{white-space:pre-wrap;font-size:12px;line-height:1.5;color:#a8dbcb}
-.lesson-row{width:100%;text-align:left;margin:3px 0;padding:7px}.lesson-row.active{background:#124b4b;border-color:#39bba6}
-#note-text{min-height:74px;max-height:130px}#note-list{display:flex;flex-direction:column;gap:6px;white-space:pre-wrap;overflow-wrap:anywhere}#note-list small{padding:8px;background:#182638;border-radius:5px}
-.counter{font-size:24px;font-weight:700}#unbound{max-height:130px;overflow-y:auto}
-.material-chat{color:#a5d6d1;font-size:12px}
-.material-chat.open{background:#1d4545}
-.center{overflow-y:auto}
-#library-panel{padding:30px;max-width:900px;margin:auto}
-#material-title{font-size:23px;line-height:1.3}
-.lesson-message{background:#1b293a;border:1px solid #35495f;border-radius:14px;padding:20px;margin-top:18px}
-.lesson-message h2{font-size:14px;color:#7ce0cf}
-.lesson-message p{color:#e3ecf4;font-size:14px;line-height:1.7;white-space:pre-wrap}
-#material-glossary{display:grid;gap:10px}#material-glossary div{border-left:2px solid #40726f;padding-left:12px;color:#d5e5ea;line-height:1.55}
-#material-references{display:grid;gap:7px}#material-references button{text-align:left;overflow-wrap:anywhere}
-#material-spotlight[hidden]{display:none}
-#material-status{color:#91a5ba;font-size:12px}
-.material-actions{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}
-#review-list button{display:block;width:100%;margin-top:5px;text-align:left;font-size:12px}
-#lab-title,#lab-kind{width:100%;background:#101a28;color:#e5edf6;border:1px solid #41546c;padding:8px;border-radius:6px}
-#lab-observation{min-height:80px;max-height:160px}.caption{font-size:11px;color:#9daabe}
-#notebook-list{display:grid;gap:8px;margin:10px 0}#notebook-list .entry{padding:10px;border:1px solid #38516a;border-radius:8px}
-#notebook-list .entry p{white-space:pre-wrap;overflow-wrap:anywhere;color:#dbe7f2}
-#notebook-title,#notebook-source{width:100%;background:#101a28;color:#e5edf6;border:1px solid #41546c;padding:8px;border-radius:6px}
-#notebook-body{min-height:112px;max-height:260px}
-#live-tutor{border:1px solid #3a716b;border-radius:10px;padding:12px;margin:12px 0}
-#live-messages{max-height:300px;overflow:auto;display:grid;gap:10px;margin:10px 0}
-.live-turn{padding:8px;background:#1c2b3c;border-radius:8px}.live-turn.user{border-left:2px solid #60d4c0}
-.live-turn p{color:#e5edf6;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5;margin:6px 0}
-#live-input{min-height:95px}#live-model{width:100%;padding:8px;background:#101a28;color:#e5edf6;border:1px solid #41546c}
-#live-notice{font-size:12px;line-height:1.5;white-space:pre-wrap;color:#a1dcd3}
-#live-revisions{font-size:11px;line-height:1.6;max-height:120px;overflow:auto}
-#live-topic{display:block;margin-top:8px}#live-version,#live-provider{display:block;font-size:11px;line-height:1.5}
-</style></head>
+<!DOCTYPE html>
+
+<html lang="ru"><head><meta charset="utf-8"/><meta content="width=device-width,initial-scale=1" name="viewport"/>
+<title>DevFleet Education — E9</title>
+<link href="education-workspace.css" rel="stylesheet"/></head>
 <body><div class="shell">
-<aside class="left" aria-label="Направления обучения">
-  <header><h1>◈ DevFleet <span style="color:#60d4c0">Education</span></h1>
-  <small>15 дисциплин · 120 подготовленных тем · GPT по запросу</small></header>
-  <div class="toolbar"><button id="add-folder">+ Папка</button><button id="rename-folder">Переименовать</button></div>
-  <div id="entry" class="card" hidden><small id="entry-label">Название</small>
-  <input id="entry-title" maxlength="100" aria-label="Название" style="width:100%;padding:8px;margin:8px 0;background:#0b1522;color:white;border:1px solid #51657b;border-radius:6px">
-  <div class="toolbar"><button id="entry-ok" class="primary">Сохранить</button><button id="entry-cancel">Отмена</button></div></div>
-  <div id="tree" role="tree" aria-label="Дисциплины и учебные чаты"></div>
-  <div class="card"><strong>Чаты GPT</strong><p><small>Создавай чат внутри выбранной папки. Беседы открываются в центральной области без автоматической отправки сообщений.</small></p>
-  <button id="new-chat" class="primary">+ Чат в папке</button>
-  <h2>Не распределены</h2><div id="unbound"></div></div>
-  <div id="status" role="status" aria-live="polite">Загрузка Education…</div>
+<aside aria-label="Направления обучения" class="left">
+<header class="brand"><div class="brand-mark">DE</div><div><strong>DevFleet <span>Education</span></strong><small>Личная техническая академия</small></div></header><label class="course-search"><span>⌕</span><input aria-label="Поиск учебной темы" id="topic-search" placeholder="Найти тему…" type="search"/><kbd>/</kbd></label>
+<div class="sidebar-management toolbar"><button id="add-folder">+ Папка</button><button id="rename-folder">Переименовать</button></div>
+<div class="card" hidden="" id="entry"><small id="entry-label">Название</small>
+<input aria-label="Название" id="entry-title" maxlength="100" style="width:100%;padding:8px;margin:8px 0;background:#0b1522;color:white;border:1px solid #51657b;border-radius:6px"/>
+<div class="toolbar"><button class="primary" id="entry-ok">Сохранить</button><button id="entry-cancel">Отмена</button></div></div>
+<div class="section-kicker">ПРОГРАММА ОБУЧЕНИЯ <span>15</span></div><div aria-label="Дисциплины и учебные чаты" id="tree" role="tree"></div>
+<details class="browser-tools"><summary>Дополнительные GPT-вкладки</summary><div class="card"><strong>Чаты GPT</strong><p><small>Создавай чат внутри выбранной папки. Беседы открываются в центральной области без автоматической отправки сообщений.</small></p>
+<button class="primary" id="new-chat">+ Чат в папке</button>
+<h2>Не распределены</h2><div id="unbound"></div></div></details>
+<div class="sidebar-footer"><span class="status-dot"></span> Локальные уроки и конспекты</div><div aria-live="polite" id="status" role="status">Загрузка Education…</div>
 </aside>
-<main class="center" aria-label="Материал учебного чата или активный GPT-чат">
-  <div id="library-panel">
-    <small id="material-status">Локальный учебный материал · без подключения GPT</small>
-    <h1 id="material-title">Выбери учебный чат в левой панели</h1>
-    <div class="material-actions">
-      <button id="library-live" class="primary">Обсудить и переработать урок с GPT</button>
-      <button id="library-external">Запасной вариант: GPT в браузере</button>
-      <button id="library-discuss">Встроенный GPT (эксперимент)</button>
-      <button id="library-copy">Скопировать подробный урок для GPT</button>
-    </div>
-    <div class="lesson-message"><h2>Объяснение с нуля</h2><p id="material-theory"></p></div>
-    <div class="lesson-message"><h2>Пример из практики</h2><p id="material-example"></p></div>
-    <div class="lesson-message"><h2>Задание для самостоятельного выполнения</h2><p id="material-exercise"></p></div>
-    <div class="lesson-message"><h2>Контрольный вопрос</h2><p id="material-check"></p></div>
-    <div class="lesson-message"><h2>Учебная цель</h2><p id="material-objective"></p></div>
-    <div class="lesson-message"><h2>Словарь технических терминов</h2><div id="material-glossary"></div></div>
-    <div class="lesson-message"><h2>Углублённый контекст дисциплины</h2><p id="material-extension"></p></div>
-    <div class="lesson-message" id="material-spotlight" hidden><h2 id="spotlight-title"></h2><p id="spotlight-text"></p></div>
-    <div class="lesson-message"><h2>Распространённая ошибка</h2><p id="material-mistake"></p></div>
-    <div class="lesson-message"><h2>Проверь понимание</h2><p id="material-reflection"></p></div>
-    <div class="lesson-message"><h2>Надёжные источники для дальнейшего изучения</h2><div id="material-references"></div><small>Источник приведён для самостоятельной сверки, а не как гарантия всех утверждений конспекта.</small></div>
-    <p id="material-guidance" class="caption">Материал хранится локально. Рекомендуется обычный браузер: программа копирует подробный учебный запрос и открывает ChatGPT, но не отправляет сообщение. Если встроенный ChatGPT показывает ошибку JavaScript, выбери обычный браузер.</p>
-  </div>
-</main>
-<section class="right" aria-label="Учебный контекст">
-  <h1>Моё обучение</h1><small id="current">Выбери дисциплину слева</small>
-  <section id="live-tutor" aria-label="GPT текущей темы">
-    <h2>GPT внутри урока</h2><strong id="live-topic">Выбери тему</strong>
-    <small id="live-provider">API не подключён · платных запросов нет</small>
-    <small id="live-version"></small>
-    <div id="live-messages" aria-live="polite"></div>
-    <textarea id="live-input" maxlength="4000" placeholder="Объясни проще и переработай раздел с примером…" aria-label="Сообщение GPT текущей темы"></textarea>
-    <label><input type="checkbox" id="live-edit" checked> Разрешить GPT изменять страницу этой темы</label>
-    <div class="toolbar"><button id="live-send" class="primary" disabled>Отправить</button><button id="live-undo" disabled>Отменить правку</button></div>
-    <div id="live-notice" role="status"></div>
-    <details><summary>История изменений страницы</summary><div id="live-revisions"></div></details>
-    <details><summary>Подключение OpenAI API</summary>
-      <p><small>API оплачивается отдельно. При отправке передаются текущий урок и последние сообщения этой темы. Тетрадь включается только по галочке ниже. Выбор темы не запускает генерацию.</small></p>
-      <input id="live-model" maxlength="120" placeholder="ID доступной модели API" aria-label="Модель OpenAI API">
-      <label><input id="live-billing" type="checkbox"> Понимаю отдельную оплату API</label>
-      <button id="live-configure">Импортировать ключ через окно ОС</button>
-      <button id="live-disconnect">Отключить API</button>
-    </details>
-  </section>
-  <button id="browser-from-sidebar" class="primary">Открыть урок с GPT в обычном браузере</button>
-  <small>Если встроенная вкладка сообщает об ошибке JavaScript, эта кнопка продолжит обучение во внешнем браузере. Сообщение не отправляется автоматически.</small>
-  <button id="check-embedded-gpt">Диагностика встроенного GPT</button>
-  <small id="embedded-gpt-health">Настройки встроенной вкладки ещё не проверены.</small>
-  <div class="card"><small>Подтверждённые ответы</small><div class="counter" id="mastery">0 / 0</div><div class="progress"><div class="bar" id="progress-bar"></div></div>
-  <p><small>Прогресс основан на проверенных ответах, а не на количестве сообщений.</small></p></div>
-  <h2>Повторить сегодня (UTC)</h2>
-  <div class="card"><div id="review-count" class="caption">Загрузка…</div><div id="review-list"></div></div>
-  <h2>Контрольные модули программы</h2>
-  <div id="lessons" class="card" aria-label="Модули дисциплины"></div>
-  <h2>Мини-экзамен</h2><div class="card"><strong id="qtitle">Задание</strong><p id="question">Выбери дисциплину.</p><div id="choices"></div><div id="feedback"></div><button id="next-question">Другой вопрос</button></div>
-  <h2>Результаты дисциплины</h2><div class="card"><div id="context-details" class="caption"></div>
-  <button id="copy-context">Скопировать проверенные результаты</button>
-  <div class="caption">Передаются только результаты локальных заданий и количество самоотчётов, не история чатов.</div></div>
-  <h2>Инструкция для преподавателя GPT</h2>
-  <textarea id="lesson-prompt" readonly aria-label="Шаблон учебного запроса"></textarea>
-  <button id="copy-prompt">Скопировать текст урока</button>
-  <h2>Тетрадь выбранной вкладки</h2>
-  <div class="card"><strong id="notebook-heading">Выбери тему</strong><p id="notebook-count" class="caption">Записей: 0</p>
-    <input id="notebook-title" maxlength="100" placeholder="Заголовок заметки">
-    <textarea id="notebook-body" maxlength="5000" placeholder="Что понял, что нужно повторить, формулы, вопросы к GPT…"></textarea>
-    <select id="notebook-source"><option value="student">Моя запись</option><option value="gpt_manually_copied">Я вручную перенёс ответ GPT (не проверено)</option></select>
-    <div class="toolbar"><button id="notebook-save" class="primary">Сохранить запись</button><button id="notebook-cancel">Отмена</button></div>
-    <div id="notebook-list"></div>
-    <label><input type="checkbox" id="notebook-include-gpt"> Включить заметки в контекст GPT при копировании или открытии</label>
-    <p class="caption">Записи хранятся локально. При включённой галочке актуальные записи этой темы автоматически попадут в следующий прямой запрос GPT. Ответ модели может изменить урок, но не эту тетрадь.</p>
-  </div>
-  <h2>Старые конспекты по модулям</h2>
-  <textarea id="note-text" maxlength="4000" placeholder="Запиши своими словами, что понял, и какие вопросы остались…"></textarea>
-  <button id="save-note">Сохранить конспект</button><div id="note-list"></div>
-  <h2>Журнал практических работ</h2>
-  <div class="card"><input id="lab-title" maxlength="100" placeholder="Название опыта / измерения">
-  <select id="lab-kind" aria-label="Тип работы"><option value="analysis">Разбор задачи</option><option value="simulation">Виртуальная лаборатория</option><option value="physical">Физический опыт</option></select>
-  <textarea id="lab-observation" maxlength="4000" placeholder="Что делал, какие результаты получил, что не понял…"></textarea>
-  <button id="save-lab">Сохранить самоотчёт</button><div class="caption">Самоотчёт не означает проверку или подтверждение практических навыков.</div>
-  <div id="lab-list"></div></div>
-  <small>В учебных чатах отправка сообщений выполняется только вручную.</small>
-  <h2>Что подтверждено</h2>
-  <div class="card"><small>Проверены ответы на локальные задания и даты повторения. Конспекты и лабораторные записи — самоотчёты, не подтверждение практической квалификации. GPT может помогать разбирать ошибки, но не выставляет официальный допуск.</small></div>
-</section></div>
+<section aria-label="Рабочее пространство урока" class="workspace"><header class="workspace-bar"><div class="workspace-path"><span>Учебный кабинет</span><span>/</span><strong id="workspace-current">Электротехника</strong></div><div class="workspace-tools"><button aria-controls="study-drawer" aria-expanded="false" class="quiet" id="toggle-notebook">Тетрадь</button><button aria-controls="study-drawer" aria-expanded="false" class="quiet" id="toggle-progress">Прогресс</button><button aria-controls="study-drawer" aria-expanded="false" class="quiet" id="toggle-settings">Настройки</button></div></header><main aria-label="Верхняя часть: учебный материал" class="center" id="lesson-reader" tabindex="0">
+<div id="library-panel">
+<div class="reader-label">УЧЕБНЫЙ МАТЕРИАЛ <span class="live-label">Связан с GPT</span></div><small id="material-status">Локальный учебный материал · без подключения GPT</small>
+<h1 id="material-title">Выбери учебный чат в левой панели</h1><div class="reader-actions"><button class="quiet" id="lesson-add-image">＋ Изображение</button><button class="quiet" id="ask-about-lesson">Обсудить выделенное ↓</button><span id="image-import-status" role="status"></span></div>
+<details class="legacy-actions"><summary>Открыть материал в ChatGPT ↗</summary><div class="material-actions">
+<button class="primary" id="library-live">Обсудить и переработать урок с GPT</button>
+<button id="library-external">Запасной вариант: GPT в браузере</button>
+<button id="library-discuss">Встроенный GPT (эксперимент)</button>
+<button id="library-copy">Скопировать подробный урок для GPT</button>
+</div></details>
+<div id="lesson-assets" class="asset-strip" aria-label="Изображения текущей темы"></div>
+<div class="lesson-message intro-card"><h2>Объяснение с нуля</h2><p id="material-theory"></p></div>
+<div class="lesson-message example-card"><h2>Пример из практики</h2><p id="material-example"></p></div><section aria-label="Модули, добавленные GPT" id="lesson-blocks"></section>
+<div class="lesson-message exercise-card"><h2>Задание для самостоятельного выполнения</h2><p id="material-exercise"></p></div>
+<div class="lesson-message question-card"><h2>Контрольный вопрос</h2><p id="material-check"></p></div>
+<details class="lesson-detail"><summary>Учебная цель</summary><p id="material-objective"></p></details>
+<details class="lesson-detail"><summary>Словарь технических терминов</summary><div id="material-glossary"></div></details>
+<details class="lesson-detail"><summary>Углублённый контекст дисциплины</summary><p id="material-extension"></p></details>
+<details class="lesson-detail" hidden="" id="material-spotlight"><summary id="spotlight-title"></summary><p id="spotlight-text"></p></details>
+<details class="lesson-detail"><summary>Распространённая ошибка</summary><p id="material-mistake"></p></details>
+<details class="lesson-detail"><summary>Проверь понимание</summary><p id="material-reflection"></p></details>
+<details class="lesson-detail"><summary>Надёжные источники для дальнейшего изучения</summary><div id="material-references"></div><small>Источник приведён для самостоятельной сверки, а не как гарантия всех утверждений конспекта.</small></details>
+<p class="caption" id="material-guidance">Этот урок связан с чатом ниже. GPT получает текущую тему и может перерабатывать её текст и модули после отправки запроса. Изменения сохраняются с возможностью отмены. Веб-чат остаётся отдельным запасным вариантом.</p>
+</div>
+</main><div aria-label="Изменить высоту материала и чата" aria-orientation="horizontal" aria-valuemax="65" aria-valuemin="25" aria-valuenow="40" id="lesson-splitter" role="separator" tabindex="0"><span></span></div><section aria-label="Нижняя часть: GPT-чат текущего урока" class="chat-dock" id="live-tutor"><div class="chat-head"><div class="tutor-avatar">✦</div><div class="chat-heading"><strong>Преподаватель GPT</strong><span id="live-topic">Выбери тему</span></div><div class="chat-head-meta"><small id="live-provider">API не подключён</small><small id="live-version"></small></div><button class="quiet" id="open-chat-settings" title="Настроить GPT">Подключение</button><button class="quiet" disabled="" id="live-undo">↶ Отменить</button></div><div aria-label="Сообщения выбранной темы" aria-live="polite" id="live-messages"></div><div class="chat-composer"><div class="prompt-shortcuts"><button data-prompt="Объясни тему проще и обнови раздел объяснения." type="button">Объясни проще</button><button data-prompt="Добавь в страницу наглядную схему из подписанных узлов и связей." type="button">＋ Схема</button><button data-prompt="Встрой в урок тренировочный мини-тест с вариантами ответа и объяснением." type="button">＋ Мини-тест</button><button data-prompt="Добавь подходящий интерактивный учебный модуль или таблицу к этой теме." type="button">＋ Модуль</button></div><div class="composer-row"><textarea aria-label="Сообщение GPT текущей темы" id="live-input" maxlength="4000" placeholder="Спроси о теме или попроси изменить страницу урока…"></textarea><button class="primary" disabled="" id="live-send">Отправить ↑</button></div><div class="composer-bottom"><label><input checked="" id="live-edit" type="checkbox"/> Изменять страницу урока</label><span>Ctrl + Enter — отправить</span><button class="text-button" id="open-note-drawer">Тетрадь ↗</button></div><div id="live-notice" role="status"></div></div></section></section>
+<section aria-hidden="true" aria-label="Тетрадь, прогресс и настройки" class="right study-drawer" hidden="" id="study-drawer"><header class="drawer-header"><strong>Моё обучение</strong><button aria-label="Закрыть правую панель" class="quiet" id="close-drawer">✕</button></header><div class="drawer-tabs" role="tablist"><button data-drawer="notebook" id="tab-notebook" role="tab">Тетрадь</button><button data-drawer="progress" id="tab-progress" role="tab">Прогресс</button><button data-drawer="settings" id="tab-settings" role="tab">Настройки</button></div><section aria-labelledby="tab-notebook" class="drawer-body" id="drawer-notebook" role="tabpanel"><h2>Тетрадь выбранной вкладки</h2>
+<div class="card"><strong id="notebook-heading">Выбери тему</strong><p class="caption" id="notebook-count">Записей: 0</p>
+<input id="notebook-title" maxlength="100" placeholder="Заголовок заметки"/>
+<textarea id="notebook-body" maxlength="5000" placeholder="Что понял, что нужно повторить, формулы, вопросы к GPT…"></textarea>
+<select id="notebook-source"><option value="student">Моя запись</option><option value="gpt_manually_copied">Я вручную перенёс ответ GPT (не проверено)</option></select>
+<div class="toolbar"><button class="primary" id="notebook-save">Сохранить запись</button><button id="notebook-cancel">Отмена</button></div>
+<div id="notebook-list"></div>
+<label><input id="notebook-include-gpt" type="checkbox"/> Включить заметки в контекст GPT при копировании или открытии</label>
+<p class="caption">Записи хранятся локально. При включённой галочке актуальные записи этой темы автоматически попадут в следующий прямой запрос GPT. Ответ модели может изменить урок, но не эту тетрадь.</p>
+</div>
+<h2>Старые конспекты по модулям</h2>
+<textarea id="note-text" maxlength="4000" placeholder="Запиши своими словами, что понял, и какие вопросы остались…"></textarea>
+<button id="save-note">Сохранить конспект</button><div id="note-list"></div>
+<h2>Журнал практических работ</h2>
+<div class="card"><input id="lab-title" maxlength="100" placeholder="Название опыта / измерения"/>
+<select aria-label="Тип работы" id="lab-kind"><option value="analysis">Разбор задачи</option><option value="simulation">Виртуальная лаборатория</option><option value="physical">Физический опыт</option></select>
+<textarea id="lab-observation" maxlength="4000" placeholder="Что делал, какие результаты получил, что не понял…"></textarea>
+<button id="save-lab">Сохранить самоотчёт</button><div class="caption">Самоотчёт не означает проверку или подтверждение практических навыков.</div>
+<div id="lab-list"></div></div>
+<small>В учебных чатах отправка сообщений выполняется только вручную.</small>
+</section><section aria-labelledby="tab-progress" class="drawer-body" id="drawer-progress" role="tabpanel"><small id="current">Выбери дисциплину слева</small><div class="card"><small>Подтверждённые ответы</small><div class="counter" id="mastery">0 / 0</div><div class="progress"><div class="bar" id="progress-bar"></div></div>
+<p><small>Прогресс основан на проверенных ответах, а не на количестве сообщений.</small></p></div>
+<h2>Повторить сегодня (UTC)</h2>
+<div class="card"><div class="caption" id="review-count">Загрузка…</div><div id="review-list"></div></div>
+<h2>Контрольные модули программы</h2>
+<div aria-label="Модули дисциплины" class="card" id="lessons"></div>
+<h2>Мини-экзамен</h2><div class="card"><strong id="qtitle">Задание</strong><p id="question">Выбери дисциплину.</p><div id="choices"></div><div id="feedback"></div><button id="next-question">Другой вопрос</button></div>
+<h2>Результаты дисциплины</h2><div class="card"><div class="caption" id="context-details"></div>
+<button id="copy-context">Скопировать проверенные результаты</button>
+<div class="caption">Передаются только результаты локальных заданий и количество самоотчётов, не история чатов.</div></div>
+<h2>Что подтверждено</h2>
+<div class="card"><small>Проверены ответы на локальные задания и даты повторения. Конспекты и лабораторные записи — самоотчёты, не подтверждение практической квалификации. GPT может помогать разбирать ошибки, но не выставляет официальный допуск.</small></div>
+<details id="revisions-panel"><summary>История изменений страницы</summary><div id="live-revisions"></div></details></section><section aria-labelledby="tab-settings" class="drawer-body" id="drawer-settings" role="tabpanel"><details id="api-settings" open=""><summary>Подключение OpenAI API</summary>
+<p><small>API оплачивается отдельно. При отправке передаются текущий урок и последние сообщения этой темы. Тетрадь включается только по галочке ниже. Выбор темы не запускает генерацию.</small></p>
+<input aria-label="Модель OpenAI API" id="live-model" maxlength="120" placeholder="ID доступной модели API"/>
+<label><input id="live-billing" type="checkbox"/> Понимаю отдельную оплату API</label>
+<button id="live-configure">Импортировать ключ через окно ОС</button>
+<button id="live-disconnect">Отключить API</button>
+</details>
+
+
+<button class="primary" id="browser-from-sidebar">Открыть урок с GPT в обычном браузере</button>
+<small>Если встроенная вкладка сообщает об ошибке JavaScript, эта кнопка продолжит обучение во внешнем браузере. Сообщение не отправляется автоматически.</small>
+<button id="check-embedded-gpt">Диагностика встроенного GPT</button>
+<small id="embedded-gpt-health">Настройки встроенной вкладки ещё не проверены.</small>
+<h2>Инструкция для преподавателя GPT</h2>
+<textarea aria-label="Шаблон учебного запроса" id="lesson-prompt" readonly=""></textarea>
+<button id="copy-prompt">Скопировать текст урока</button>
+</section></section></div>
+
+<script src="education-modules-ui.js"></script>
+<script src="education-workspace.js"></script>
 <script src="education-live-ui.js"></script>
 <script>
 'use strict';
 const $=id=>document.getElementById(id);
 let state=null,fleet=null,selected='subject-3',selectedLesson=null,focusQuestionId=null,visibleQuestionId=null,busy=false;
 let selectedMaterial='material-03-01',materialMode=true,selectedChatTabId=null,editingNotebookEntry=null,confirmDeleteEntry=null,renderedNotebookKey=null;
+const notebookDrafts=new Map();
 const status=message=>{$('status').textContent=String(message).slice(0,450);};
 function askTitle(message,initial=''){
   return new Promise(resolve=>{
@@ -198,9 +144,10 @@ function activeMaterialId(){
 function renderNotebook(){
   const key=activeNotebookKey(),notes=state.notebook_entries||[];
   if(key!==renderedNotebookKey){
-    renderedNotebookKey=key;editingNotebookEntry=null;confirmDeleteEntry=null;
-    $('notebook-title').value='';$('notebook-body').value='';$('notebook-source').value='student';
-    $('notebook-source').disabled=false;$('notebook-save').textContent='Сохранить запись';
+    if(renderedNotebookKey)notebookDrafts.set(renderedNotebookKey,{title:$('notebook-title').value,body:$('notebook-body').value,source:$('notebook-source').value,entry:editingNotebookEntry});
+    renderedNotebookKey=key;const draft=notebookDrafts.get(key);editingNotebookEntry=draft?.entry??null;confirmDeleteEntry=null;
+    $('notebook-title').value=draft?.title||'';$('notebook-body').value=draft?.body||'';$('notebook-source').value=draft?.source||'student';
+    $('notebook-source').disabled=!!editingNotebookEntry;$('notebook-save').textContent=editingNotebookEntry?'Сохранить изменения':'Сохранить запись';
   }
   const chat=state.chats.find(c=>c.tab_id===key);
   const material=state.materials.find(m=>m.id===key);
@@ -241,6 +188,7 @@ function render(){
   const tabs=new Set((fleet.sessions||[]).filter(s=>s.state==='OPEN').map(s=>s.tab_id));
   function folderRow(folder,depth=0){
     const b=elm('button','', 'folder'+(folder.id===selected?' active':''));
+    b.dataset.folderId=folder.id;
     b.style.paddingLeft=(8+Math.min(depth,6)*12)+'px';b.setAttribute('role','treeitem');
     b.append(elm('span','📁'),elm('span',folder.title));
     b.onclick=()=>{
@@ -253,6 +201,7 @@ function render(){
     };tree.append(b);
     for(const chat of state.chats.filter(c=>c.folder_id===folder.id)){
       const cb=elm('button','', 'chat');cb.style.paddingLeft=(22+Math.min(depth,6)*12)+'px';
+      cb.dataset.folderId=folder.id;
       cb.append(elm('span',tabs.has(chat.tab_id)?'◉':'○'),elm('span',chat.title));
       cb.title=tabs.has(chat.tab_id)?'Открыть GPT-чат':'Чат пока не восстановлен в сессиях';
       cb.onclick=()=>action(async()=>{
@@ -265,6 +214,7 @@ function render(){
       const subject=Number(folder.id.slice('subject-'.length));
       for(const material of state.materials.filter(m=>m.subject===subject)){
         const mb=elm('button','', 'chat material-chat'+(material.id===selectedMaterial&&materialMode?' open':''));
+        mb.dataset.folderId=folder.id;mb.dataset.materialId=material.id;
         mb.style.paddingLeft=(22+Math.min(depth,6)*12)+'px';
         const linked=state.chats.some(c=>c.material_id===material.id);
         mb.append(elm('span',linked?'◉':'◇'),elm('span',material.title));
@@ -279,8 +229,8 @@ function render(){
     state.folders.filter(f=>f.parent_id===folder.id).sort((a,b)=>a.order-b.order).forEach(f=>folderRow(f,depth+1));
   }
   state.folders.filter(f=>f.parent_id===null).sort((a,b)=>a.order-b.order).forEach(f=>folderRow(f));
-  const currentMaterial=state.materials.find(m=>m.id===selectedMaterial);
-  if(currentMaterial&&materialMode){
+  const currentMaterial=state.materials.find(m=>m.id===(activeMaterialId()||selectedMaterial));
+  if(currentMaterial){
     $('material-status').textContent='Тема '+currentMaterial.position+' из 8 · предмет '+currentMaterial.subject+
       (currentMaterial.dynamic?.version?' · редакция GPT v'+currentMaterial.dynamic.version+' — не проверена независимо':' · исходный материал');
     $('material-title').textContent=currentMaterial.title;
@@ -386,6 +336,7 @@ function render(){
     labList.append(elm('small',lab.title+' · '+lab.kind+' · НЕ ПРОВЕРЕНО: '+lab.observation));
   }
   renderNotebook();
+  workspaceUI?.update(currentMaterial,f?.title);
   liveUI?.select(activeMaterialId());
   if(renderFeedback?.id===question?.id)$('feedback').textContent=renderFeedback.text;
 }
@@ -402,6 +353,7 @@ function materialPrompt(material){
 }
 let renderFeedback=null;
 $('notebook-cancel').onclick=()=>{
+  notebookDrafts.delete(activeNotebookKey());
   editingNotebookEntry=null;$('notebook-title').value='';$('notebook-body').value='';
   $('notebook-source').value='student';$('notebook-source').disabled=false;
   $('notebook-save').textContent='Сохранить запись';
@@ -415,7 +367,7 @@ $('notebook-save').onclick=()=>action(async()=>{
     await window.devfleet.education.addNotebookEntry({notebook_key:key,title,body,
       source:$('notebook-source').value});
   }
-  editingNotebookEntry=null;
+  notebookDrafts.delete(key);editingNotebookEntry=null;
   $('notebook-title').value='';$('notebook-body').value='';
   $('notebook-source').value='student';$('notebook-source').disabled=false;
   $('notebook-save').textContent='Сохранить запись';
@@ -530,6 +482,8 @@ $('new-chat').onclick=async()=>{
     await window.devfleet.select(tab_id);selectedChatTabId=tab_id;materialMode=false;
   });
 };
+const workspaceUI=window.mountEducationWorkspace?.({api:window.devfleet.education,
+  getMaterial:()=>state?.materials.find(m=>m.id===(activeMaterialId()||selectedMaterial)),refresh:load,notify:status});
 const liveUI=window.mountEducationLive?.({api:window.devfleet.education,getTopicId:activeMaterialId,
   refresh:load,includeNotebook:()=>!!$('notebook-include-gpt').checked});
 window.devfleet.onExternalAuthRequired?.(payload=>{

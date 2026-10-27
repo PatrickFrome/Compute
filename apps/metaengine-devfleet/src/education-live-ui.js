@@ -3,7 +3,7 @@
 window.mountEducationLive=function({api,getTopicId,refresh,includeNotebook}){
   const $=id=>document.getElementById(id),drafts=new Map(),pending=new Set();
   let selected=null,view=null,provider={ready:false},generation=0;
-  const errors={live_not_connected:'Прямой GPT ещё не подключён. Настрой API; подписка ChatGPT не является API-подключением.',
+  const errors={live_block_invalid:'GPT предложил недопустимый модуль. Страница не изменена.',live_block_capacity:'Слишком много модулей или текста. Попроси упростить правку.',live_image_not_authorized:'Изображение не импортировано в эту тему. Сначала добавь PNG/JPEG через кнопку над уроком.',live_block_not_found:'Модуль уже отсутствует. Обнови контекст и сформулируй новую правку.',live_page_too_large:'Урок достиг лимита объёма. Попроси сократить материал.',live_not_connected:'Прямой GPT ещё не подключён. Настрой API; подписка ChatGPT не является API-подключением.',
     live_stale_revision:'Страница уже изменилась. Загружена новая версия; запрос не повторён.',
     live_request_seen:'Этот запрос уже зарегистрирован. Автоматический повтор запрещён.',
     live_topic_busy:'Для этой темы уже выполняется запрос.',live_persistence_fenced:'Не удалось надёжно сохранить журнал. Отправка заблокирована до проверки диска и перезапуска; автоматического повтора нет.',live_capacity:'Достигнут лимит локальной истории. Новые запросы не отправлены.',
@@ -25,10 +25,11 @@ window.mountEducationLive=function({api,getTopicId,refresh,includeNotebook}){
       'OpenAI API · '+provider.model+(provider.connection_verified?' · ответ получен':' · настроен, ещё не проверен'):
       'API не подключён · платных запросов нет';
     $('live-version').textContent=view?'Редакция '+view.version+' · изменения GPT не проходят независимую проверку':'';
-    const list=$('live-messages');list.replaceChildren();
+    const list=$('live-messages'),follow=list.scrollHeight-list.clientHeight-list.scrollTop<60;list.replaceChildren();
     for(const turn of view?.turns||[]){const row=element('div','');row.className='live-turn '+turn.role;
       row.append(element('strong',turn.role==='user'?'Ты':'GPT'),element('p',turn.text));list.append(row);}
     if(!view?.turns?.length)list.append(element('small','У каждой темы своя беседа. Материал подставляется автоматически; запрос выполняется только после «Отправить».'));
+    if(follow)list.scrollTop=list.scrollHeight;
     $('live-send').disabled=!view||pending.has(selected)||view.pending||view.persistence_fenced||!provider.ready;
     $('live-input').disabled=pending.has(selected)||!!view?.pending||!!view?.persistence_fenced;
     $('live-undo').disabled=!view||!view.can_undo||pending.has(selected)||view.pending||view.persistence_fenced;

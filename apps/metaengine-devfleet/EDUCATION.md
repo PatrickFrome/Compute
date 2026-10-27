@@ -1,3 +1,5 @@
+> Current workspace: E9 uses a lesson reader above a topic-bound GPT chat, a closed-by-default right drawer, and reversible declarative learning modules. See [WORKSPACE_E9.md](WORKSPACE_E9.md) for supported modules, images and verification boundaries.
+
 # DevFleet Education — E1–E8 topic-bound GPT and reversible lesson editing
 
 The new direct API tutor, its user-controlled connection, data bounds and verification are documented in [LIVE_LESSONS_E8.md](LIVE_LESSONS_E8.md). E7 browser handoff remains an optional fallback; the E8 direct tutor sends submitted questions and receives page edits without copy/paste. A model call requires separately configured API credentials and billing consent.
