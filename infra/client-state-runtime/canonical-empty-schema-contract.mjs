@@ -521,7 +521,7 @@ export async function inspectCanonicalEmptySchema({ sql, plan, verifyCatalogue, 
   sections.constraints = await query('CONSTRAINTS',`select n.nspname,c.conname,c.contype,c.condeferrable,c.condeferred,c.convalidated,
     case when c.conrelid=0 then null else c.conrelid::regclass::text end as relation,
     case when c.contypid=0 then null else c.contypid::regtype::text end as domain,
-    pg_catalog.pg_get_constraintdef(c.oid,false) as definition
+    pg_catalog.pg_get_constraintdef(c.oid,true) as definition
     from pg_catalog.pg_constraint c join pg_catalog.pg_namespace n on n.oid=c.connamespace where ${userSchemas}`);
   sections.indexes = await query('INDEXES',`select n.nspname,c.relname,pg_catalog.pg_get_indexdef(c.oid) as definition,
     i.indisvalid,i.indisready,i.indisreplident from pg_catalog.pg_index i join pg_catalog.pg_class c on c.oid=i.indexrelid
@@ -555,7 +555,7 @@ export async function inspectCanonicalEmptySchema({ sql, plan, verifyCatalogue, 
       join pg_catalog.pg_namespace n on n.oid=c.relnamespace where ${userSchemas} and a.attnum>0 and not a.attisdropped and a.attacl is not null
     union all select 'type:'||n.nspname||'.'||t.typname,coalesce(t.typacl,pg_catalog.acldefault('T',t.typowner))
       from pg_catalog.pg_type t join pg_catalog.pg_namespace n on n.oid=t.typnamespace where ${userSchemas}
-    union all select 'default:'||pg_catalog.pg_get_userbyid(d.defaclrole)||':'||coalesce(n.nspname,'GLOBAL')||':'||d.defaclobjtype,d.defaclacl
+    union all select 'default:'||pg_catalog.pg_get_userbyid(d.defaclrole)||':'||coalesce(n.nspname,'GLOBAL')||':'||d.defaclobjtype::text,d.defaclacl
       from pg_catalog.pg_default_acl d left join pg_catalog.pg_namespace n on n.oid=d.defaclnamespace
     union all select 'database:postgres',coalesce(d.datacl,pg_catalog.acldefault('d',d.datdba))
       from pg_catalog.pg_database d where d.datname=current_database()

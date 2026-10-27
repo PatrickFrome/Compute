@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 export const POLICY = Object.freeze({
   repository: 'PatrickFrome/Compute', repositoryId: 1341371143,
   workflow: '.github/workflows/browser-package-identity-observation.yml',
-  refs: Object.freeze(['refs/heads/work/preinstall-shared-inputs-20261027', 'refs/heads/work/preinstall-closure-20261027']),
+  refs: Object.freeze(['refs/heads/work/preinstall-shared-inputs-20261027', 'refs/heads/work/preinstall-closure-20261027', 'refs/heads/work/integrated-installer-repair-20261027']),
   producerWorkflow: '.github/workflows/browser-windows-package-smoke.yml', producerWorkflowId: 347795280,
   planner: 'apps/metaengine-browser/scripts/package-build-reservation.mjs',
   plannerBlob: '1aee544ed7b99898cbde34494bd80a4620b63d34',

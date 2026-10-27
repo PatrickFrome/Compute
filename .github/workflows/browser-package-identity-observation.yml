@@ -5,6 +5,7 @@ on:
     branches:
       - work/preinstall-shared-inputs-20261027
       - work/preinstall-closure-20261027
+      - work/integrated-installer-repair-20261027
 
 permissions:
   contents: read

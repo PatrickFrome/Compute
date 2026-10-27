@@ -21,6 +21,7 @@ on:
     branches:
       - 'work/preinstall-closure-20261027'
       - 'work/preinstall-shared-inputs-20261027'
+      - 'work/integrated-installer-repair-20261027'
     paths:
       - 'infra/client-state-runtime/*empty-schema*'
       - 'infra/client-state-runtime/owned-postgres-process.mjs'

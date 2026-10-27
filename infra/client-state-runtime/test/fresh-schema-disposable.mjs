@@ -373,7 +373,7 @@ async function runFreshSchemaNative({ bin, driver, base = os.tmpdir(), applicati
         await command('pg_dump',[...privateConnectionArgs,'--format=custom','--schema-only','--no-owner','--file='+archiveOperation.archive],privateConnectionEnv);
         await check(reserved);
         const archive = await stage('ARCHIVE_CHECK',() => archiveOperation.assertArchive());
-        const tocText = await command('pg_restore',['--list',archiveOperation.archive]);
+        const tocText = await command('pg_restore',['--list','--create',archiveOperation.archive]);
         const toc = await stage('TOC_VALIDATE',() => validateEmptySchemaToc(tocText,before));
         await stage('ARCHIVE_CHECK',() => archiveOperation.assertArchive());
         const after = await stage('INSPECTION',() => inspectCanonicalEmptySchema({sql:ownedSql,plan,verifyCatalogue:verifyFreshSchemaCatalogue,phase}));

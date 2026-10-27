@@ -390,6 +390,37 @@ test('actual inspection query failure identifies its boundary without exposing c
   });
 });
 
+test('canonical inspection pins ACL object type and uses PostgreSQL constraint deparsing',async () => {
+  const reachedAcl=new Error('inspection boundary reached');
+  let constraintQuery=false,aclQuery=false;
+  const sql={unsafe:async statement => {
+    if(statement.includes('server_version_num'))return [{value:170011}];
+    if(statement.includes('pg_catalog.pg_roles'))return ['state_owner','anon','authenticated','service_role'].map(rolname=>({rolname}));
+    if(statement.includes('pg_catalog.pg_largeobject_metadata'))return [{large_objects:0,event_triggers:0,foreign_servers:0,publications:0,subscriptions:0}];
+    if(statement.includes('pg_catalog.pg_constraint c')) {
+      assert.match(statement,/pg_get_constraintdef\(c\.oid,true\)/);
+      constraintQuery=true;
+    }
+    if(statement.includes('pg_catalog.aclexplode')) {
+      assert.match(statement,/d\.defaclobjtype::text/);
+      aclQuery=true;throw reachedAcl;
+    }
+    return [];
+  }};
+  await assert.rejects(inspectCanonicalEmptySchema({sql,plan:{},verifyCatalogue:async()=>({})}),error=>error===reachedAcl);
+  assert.equal(constraintQuery,true);assert.equal(aclQuery,true);
+  const digest=definition=>emptySchemaCatalogueDigest({constraints:[{definition}]});
+  assert.notEqual(digest('CHECK (x >= 16 AND x <= 160)'),digest('CHECK (x >= 16 OR x <= 160)'));
+  assert.notEqual(digest('CHECK (x >= 16)'),digest('CHECK (x >= 15)'));
+});
+
+test('archive listing includes database metadata without restoring database creation',async () => {
+  const source=await fs.readFile(new URL('./test/fresh-schema-disposable.mjs',import.meta.url),'utf8');
+  assert.match(source,/command\('pg_restore',\['--list','--create',archiveOperation\.archive\]\)/);
+  assert.match(source,/command\('pg_restore',\[\.\.\.privateConnectionArgs,'--single-transaction','--exit-on-error','--no-owner',archiveOperation\.archive\]/);
+  assert.throws(()=>validateEmptySchemaToc(toc.replace('10; 1262 5 DATABASE - postgres state_owner\n',''),catalogue),/factory_database_required/);
+});
+
 test('owned command refusal reports a closed reason without child args or stderr',async () => {
   await assert.rejects(runEmptySchemaStage('SOURCE_INITDB',() => runEmptySchemaCommand(
     path.join(directory,'missing-empty-schema-command-PRIVATE'),['PRIVATE_PASSWORD'])),error => {

@@ -415,7 +415,7 @@ test('evidence size overflow publishes explicit HOLD metadata and omits the prop
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
-test('source workflow has exactly the two approved push refs, read permissions and separate observation artifacts', () => {
+test('source workflow has exactly the approved push refs, read permissions and separate observation artifacts', () => {
   const workflow = readFileSync(new URL('../../../.github/workflows/browser-package-identity-observation.yml', import.meta.url), 'utf8');
   assert.deepEqual([...workflow.matchAll(/^      - (work\/[^\r\n]+)$/gm)].map(match => match[1]), POLICY.refs.map(ref => ref.slice('refs/heads/'.length)));
   assert.match(workflow, /ref: \$\{\{ github\.sha \}\}/); assert.match(workflow, /persist-credentials: false/);
