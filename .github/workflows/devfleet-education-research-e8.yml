@@ -1,0 +1,47 @@
+name: DevFleet Education E8 Research
+on:
+  push:
+    branches: ['work/devfleet-education-research-e8-20261027']
+    paths:
+      - 'apps/metaengine-devfleet/**'
+      - '.github/workflows/devfleet-education-research-e8.yml'
+permissions:
+  contents: read
+concurrency:
+  group: education-e8-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify-and-snapshot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify exact source and run tests without installation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          cd apps/metaengine-devfleet
+          npm test
+      - name: Archive only tracked Education source
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          git archive --format=zip --output=artifacts/devfleet-education-source.zip HEAD apps/metaengine-devfleet
+          printf '%s\n' "$GITHUB_SHA" > artifacts/SOURCE_SHA.txt
+          sha256sum artifacts/devfleet-education-source.zip > artifacts/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: education-source-${{ github.sha }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 7
