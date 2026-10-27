@@ -196,9 +196,24 @@ jobs:
           function inspectTap(raw,required,allowBaseline){
             const lines=raw.split(/\r?\n/),records=[],sanitized=['TAP version 13'];
             const counts={};
+            let diagnosticIndent=null,diagnosticOpen=false,diagnosticFields=new Set();
             for(const line of lines){
               const outcome=/^(\s*)(not ok|ok) (\d+) - (.*?)(?:\s+# (SKIP|TODO)(?:\s.*)?)?$/.exec(line);
-              if(outcome){const [,indent,status,id,name,directive]=outcome;records.push({status,name,directive});sanitized.push(`${indent}${status} ${id} - ${publicName(name)}${directive?' # '+directive:''}`);continue;}
+              if(outcome){const [,indent,status,id,name,directive]=outcome;records.push({status,name,directive});sanitized.push(`${indent}${status} ${id} - ${publicName(name)}${directive?' # '+directive:''}`);diagnosticIndent=indent+'  ';diagnosticOpen=false;diagnosticFields=new Set();continue;}
+              if(diagnosticIndent!==null&&line===diagnosticIndent+'---'){diagnosticOpen=true;continue;}
+              if(diagnosticOpen){
+                if(line===diagnosticIndent+'...'){diagnosticOpen=false;diagnosticIndent=null;continue;}
+                // Emit comments with closed scalar values only. Error/location/stack, SQL,
+                // private paths, arbitrary YAML fields and unknown failure types stay private.
+                const field=line.startsWith(diagnosticIndent)?line.slice(diagnosticIndent.length):'';
+                const duration=/^duration_ms: ([0-9]{1,7}(?:\.[0-9]{1,6})?)$/.exec(field);
+                if(duration&&!diagnosticFields.has('duration')&&Number(duration[1])<=18*60*1000){
+                  diagnosticFields.add('duration');sanitized.push(diagnosticIndent+'# duration_ms '+Number(duration[1]));
+                }
+                const failure=/^failureType: '(testTimeoutFailure|cancelledByParent|parentAlreadyFinished|testCodeFailure|subtestsFailed|hookFailed|testAborted|uncaughtException|unhandledRejection)'$/.exec(field);
+                if(failure&&!diagnosticFields.has('failure')){diagnosticFields.add('failure');sanitized.push(diagnosticIndent+'# failure_type '+failure[1]);}
+                continue;
+              }
               const sub=/^(\s*)# Subtest: (.*)$/.exec(line);if(sub){sanitized.push(sub[1]+'# Subtest: '+publicName(sub[2]));continue;}
               if(/^\s*1\.\.[0-9]+$/.test(line)){sanitized.push(line);continue;}
               const summary=/^# (tests|suites|pass|fail|cancelled|skipped|todo) ([0-9]+)$/.exec(line);
@@ -336,7 +351,7 @@ jobs:
             installed_keeper_exclusion_basis:'FRESH_CANONICAL_PROFILE_ABSENT_OWNER_AND_EXPLICIT_NATIVE_FIXTURE_INPUTS',
             user_pc_boundary:'USER_PC_AND_INSTALLED_PROFILE_ARE_NOT_TEST_TARGETS',
             installed_autonomy_proven:false,production_qualified:false,authority_effect:false,
-            sanitizer:'TAP_OUTCOMES_AND_COUNTS_ONLY_KNOWN_NAMES_ELSE_SHA256'};
+            sanitizer:'TAP_OUTCOMES_COUNTS_BOUNDED_TIMING_FAILURE_TYPES_KNOWN_NAMES_ELSE_SHA256'};
           stage='EVIDENCE_PUBLICATION';
           await fs.writeFile(path.join(publicDir,'source-facts.json'),JSON.stringify(evidence,null,2)+'\n',{flag:'wx'});
           console.log(JSON.stringify({state:evidence.state,source_sha:expected,suites:suites.map(({name,state,counts,refusals})=>({name,state,counts,refusals}))}));

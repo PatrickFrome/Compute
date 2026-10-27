@@ -189,7 +189,9 @@ test('ordinary FINISH and explicit RECONCILE racing in two Hosts share one first
   await noAdditionalGitWrites(f);
 });
 
-test('unknown SQL intent, missing/replaced journals and changed physical/authority pins preserve HOLD',{skip:baseline,timeout:180000},async t=>{
+// Each of the 25 controls creates a fresh Git fixture and several child processes.
+// Bound the serial group separately from each control; child I/O retains its 30s cap.
+test('unknown SQL intent, missing/replaced journals and changed physical/authority pins preserve HOLD',{skip:baseline,timeout:600000},async t=>{
   const changes=[
     ['falsy null intent',f=>fs.writeFile(f.sqlIntent,'null')],
     ['falsy false intent',f=>fs.writeFile(f.sqlIntent,'false')],
@@ -228,7 +230,7 @@ test('unknown SQL intent, missing/replaced journals and changed physical/authori
       next_writer_permit_id:'bbbb1111-2222-4333-8444-555555555555',next_critic_permit_id:'cccc1111-2222-4333-8444-555555555555',
       successor_task_id:null,successor_admitted:true,root_fence_released:true,production_qualified:false,automatic_retry_allowed:false,authority_effect:false}));}],
   ];
-  for(const [name,change] of changes)await t.test(name,async t=>{
+  for(const [name,change] of changes)await t.test(name,{timeout:90000},async t=>{
     const f=await createCheckpointReconciliationFixture(t),receipt=await crashAfterGit(f);await change(f,receipt);
     const read=await child(f,{operation:'READ_FINISH_CHECKPOINT'});
     assert.ok(read.type==='ERROR'||read.value.state!=='GIT_COMMITTED_SQL_NOT_ATTEMPTED');
