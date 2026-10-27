@@ -8,6 +8,8 @@ import {
   parseEmptySchemaArguments, assertEmptySchemaOptions, assertNewEmptySchemaOutputDirectory,
   validateEmptySchemaSourceBinding, validateEmptySchemaToc, emptySchemaCatalogueDigest,
   assertEmptySchemaRoundtrip, emptySchemaSha256, emptySchemaProcessEnvironment,
+  runEmptySchemaStage, combineEmptySchemaCleanupFailure, emptySchemaFailureMetadata,
+  inspectCanonicalEmptySchema, runEmptySchemaCommand,
 } from './canonical-empty-schema-contract.mjs';
 import { assertPublishableEmptySchemaEvidence, emptySchemaFailureReceipt } from './export-reviewed-empty-schema.mjs';
 
@@ -252,10 +254,156 @@ test('CLI failure receipts cannot reveal arguments, credentials, SQL or local pa
   let refusal;
   try { parseEmptySchemaArguments([...validArgs(),'--database-url','postgres://owner:DO_NOT_PRINT@localhost/db']); }
   catch(error) { refusal=error; }
-  assert.deepEqual(emptySchemaFailureReceipt(refusal),{event:'reviewed_empty_schema_export_failed',code:'empty_schema_arguments_invalid'});
+  assert.deepEqual(emptySchemaFailureReceipt(refusal),{event:'reviewed_empty_schema_export_failed',code:'empty_schema_arguments_invalid',
+    primary_failure:{stage:'UNCLASSIFIED',error_category:'CONTRACT',contract_code:'empty_schema_arguments_invalid'},
+    cleanup_failures:[],cleanup_failures_truncated:false});
   for(const message of ['postgres://owner:DO_NOT_PRINT@localhost/db','select secret from installed_data',
     'C:\\Users\\Private\\PGDATA','empty_schema_failed\nDO_NOT_PRINT']) {
     const receipt=emptySchemaFailureReceipt(new Error(message));
-    assert.deepEqual(receipt,{event:'reviewed_empty_schema_export_failed',code:'empty_schema_qualification_failed'});
+    assert.deepEqual(receipt,{event:'reviewed_empty_schema_export_failed',code:'empty_schema_qualification_failed',
+      primary_failure:{stage:'UNCLASSIFIED',error_category:'UNKNOWN'},cleanup_failures:[],cleanup_failures_truncated:false});
   }
+});
+
+async function caughtFailure(stage,error) {
+  try { await runEmptySchemaStage(stage,() => { throw error; }); }
+  catch (caught) { return caught; }
+  assert.fail('fixture failure must propagate');
+}
+const postgresFailure = code => Object.assign(new Error('PRIVATE SQL and connection arguments'),{
+  name:'PostgresError',code,query:'PRIVATE SQL',parameters:['PRIVATE PASSWORD'],
+  detail:'PRIVATE DETAIL',file:'C:\\Private\\PGDATA',stderr:'PRIVATE STDERR',
+});
+
+test('diagnostic stages preserve success values and expected original refusals',async () => {
+  const value=Object.freeze({unchanged:true});
+  assert.equal(await runEmptySchemaStage('SOURCE_BASELINE',() => value),value);
+  const refusal=new Error('intentional_atomic_rollback');
+  await assert.rejects(runEmptySchemaStage('SOURCE_BASELINE',() => { throw refusal; }),error => error===refusal);
+  await assert.rejects(runEmptySchemaStage('SOURCE_BASELINE',() => { throw refusal; }),/intentional_atomic_rollback/);
+  let invoked=false;
+  await assert.rejects(runEmptySchemaStage('PRIVATE PATH',() => { invoked=true; }),/diagnostic_stage_invalid/);
+  assert.equal(invoked,false);
+});
+
+test('SQLSTATE diagnostics never read message, stack, query, args, paths or stderr',async () => {
+  const error=postgresFailure('42601');
+  let reads=0;
+  for(const key of ['message','stack','query','parameters','detail','file','stderr'])
+    Object.defineProperty(error,key,{get(){reads++;throw new Error('PRIVATE getter must not run');}});
+  const caught=await caughtFailure('SOURCE_INSPECT_ACL',error);
+  const receipt=emptySchemaFailureReceipt(caught);
+  assert.deepEqual(receipt,{event:'reviewed_empty_schema_export_failed',code:'empty_schema_qualification_failed',
+    primary_failure:{stage:'SOURCE_INSPECT_ACL',error_category:'POSTGRES',sqlstate:'42601'},
+    cleanup_failures:[],cleanup_failures_truncated:false});
+  assert.equal(reads,0);
+  assert.doesNotMatch(JSON.stringify(receipt),/PRIVATE|password|PGDATA|query|stderr/i);
+  for(const invalid of ['42601 PRIVATE','4260','426011','lower']) {
+    const invalidReceipt=emptySchemaFailureReceipt(await caughtFailure('SOURCE_BASELINE',postgresFailure(invalid)));
+    assert.deepEqual(invalidReceipt.primary_failure,{stage:'SOURCE_BASELINE',error_category:'UNKNOWN'});
+  }
+  const forged=Object.assign(new Error('empty_schema_PRIVATE'),{code:'empty_schema_private_password',
+    primary_failure:{stage:'PRIVATE',error_category:'PRIVATE'}});
+  assert.equal(emptySchemaFailureReceipt(forged).code,'empty_schema_qualification_failed');
+});
+
+test('unexpected SQL rejection retains its inner boundary through assert.rejects',async () => {
+  const original=postgresFailure('42P01');
+  await assert.rejects(runEmptySchemaStage('SOURCE_ROLLBACK_CHECK',() =>
+    assert.rejects(runEmptySchemaStage('SOURCE_BASELINE',() => { throw original; }),/intentional_atomic_rollback/)),error => {
+      assert.deepEqual(emptySchemaFailureMetadata(error).primary_failure,
+        {stage:'SOURCE_BASELINE',error_category:'POSTGRES',sqlstate:'42P01'});
+      return true;
+    });
+});
+
+test('an accepted negative SQL control cannot become a later unrelated assertion cause',async () => {
+  const expected=postgresFailure('42501');
+  await assert.rejects(runEmptySchemaStage('SOURCE_API_PROBES',() => { throw expected; }),error => error.code==='42501');
+  await assert.rejects(runEmptySchemaStage('EVIDENCE_COMPARE',() => {
+    assert.equal('actual-catalogue','expected-catalogue','PRIVATE later assertion');
+  }),error => {
+    const receipt=emptySchemaFailureReceipt(error);
+    assert.deepEqual(receipt.primary_failure,{stage:'EVIDENCE_COMPARE',error_category:'ASSERTION'});
+    assert.deepEqual(receipt.cleanup_failures,[]);
+    assert.doesNotMatch(JSON.stringify(receipt),/42501|SOURCE_API_PROBES|PRIVATE/);
+    return true;
+  });
+});
+
+test('primary native failure and independent cleanup failures retain separate bounded records',async () => {
+  const primary=await caughtFailure('RESTORE_INSPECT_COLUMNS',postgresFailure('42703'));
+  const stop=await caughtFailure('RESTORE_STOP',Object.assign(new Error('PRIVATE stop path'),{code:'EPERM'}));
+  const workspace=await caughtFailure('WORKSPACE_CLEANUP',Object.assign(new Error('PRIVATE directory'),{code:'ENOTEMPTY'}));
+  const combined=combineEmptySchemaCleanupFailure(combineEmptySchemaCleanupFailure(primary,stop),workspace);
+  const receipt=emptySchemaFailureReceipt(combined);
+  assert.deepEqual(receipt.primary_failure,{stage:'RESTORE_INSPECT_COLUMNS',error_category:'POSTGRES',sqlstate:'42703'});
+  assert.deepEqual(receipt.cleanup_failures,[
+    {stage:'RESTORE_STOP',error_category:'FILESYSTEM',system_code:'EPERM'},
+    {stage:'WORKSPACE_CLEANUP',error_category:'FILESYSTEM',system_code:'ENOTEMPTY'},
+  ]);
+  assert.equal(receipt.cleanup_failures_truncated,false);
+  assert.doesNotMatch(JSON.stringify(receipt),/PRIVATE/);
+  receipt.cleanup_failures[0].stage='TAMPERED';
+  assert.equal(emptySchemaFailureMetadata(combined).cleanup_failures[0].stage,'RESTORE_STOP');
+  let overflow=combined;
+  for(let i=0;i<12;i++)overflow=combineEmptySchemaCleanupFailure(overflow,workspace);
+  assert.equal(emptySchemaFailureMetadata(overflow).cleanup_failures.length,8);
+  assert.equal(emptySchemaFailureMetadata(overflow).cleanup_failures_truncated,true);
+});
+
+test('cleanup-only refusal does not invent a primary operation failure',async () => {
+  const cleanup=await caughtFailure('SOURCE_DIRECTORY_CLEANUP',Object.assign(new Error('PRIVATE'),{code:'EBUSY'}));
+  const metadata=emptySchemaFailureMetadata(combineEmptySchemaCleanupFailure(null,cleanup));
+  assert.equal(metadata.primary_failure,null);
+  assert.deepEqual(metadata.cleanup_failures,[{stage:'SOURCE_DIRECTORY_CLEANUP',error_category:'FILESYSTEM',system_code:'EBUSY'}]);
+  assert.equal(metadata.cleanup_failures_truncated,false);
+});
+
+test('assertion, filesystem, network and unrecognized errors have closed categories',async () => {
+  for(const [error,expected] of [
+    [Object.assign(new Error('PRIVATE'),{code:'ERR_ASSERTION'}),{error_category:'ASSERTION'}],
+    [Object.assign(new Error('PRIVATE'),{code:'ENOENT'}),{error_category:'FILESYSTEM',system_code:'ENOENT'}],
+    [Object.assign(new Error('PRIVATE'),{code:'ECONNREFUSED'}),{error_category:'NETWORK',system_code:'ECONNREFUSED'}],
+    [Object.assign(new Error('PRIVATE'),{code:'PRIVATE_CODE'}),{error_category:'UNKNOWN'}],
+  ]) assert.deepEqual(emptySchemaFailureMetadata(await caughtFailure('SOURCE_DRIVER_CONNECT',error)).primary_failure,
+    {stage:'SOURCE_DRIVER_CONNECT',...expected});
+});
+
+test('actual inspection query failure identifies its boundary without exposing catalogue data',async () => {
+  // Pure driver-shaped refusal, not a PostgreSQL/schema qualification fixture.
+  const error=postgresFailure('42P01');
+  const sql={unsafe:async statement => {
+    if(statement.startsWith('set search_path'))return [];
+    if(statement.includes('server_version_num'))return [{value:170011}];
+    if(statement.includes('pg_catalog.pg_namespace n where'))return [{name:'public',owner:'state_owner'}];
+    if(statement.includes('pg_catalog.pg_roles'))throw error;
+    assert.fail('no query may follow the refused inspection boundary');
+  }};
+  await assert.rejects(inspectCanonicalEmptySchema({sql,plan:{},verifyCatalogue:async () => ({}),phase:'RESTORE'}),caught => {
+    assert.equal(caught,error);
+    assert.deepEqual(emptySchemaFailureMetadata(caught).primary_failure,
+      {stage:'RESTORE_INSPECT_ROLES',error_category:'POSTGRES',sqlstate:'42P01'});
+    return true;
+  });
+});
+
+test('owned command refusal reports a closed reason without child args or stderr',async () => {
+  await assert.rejects(runEmptySchemaStage('SOURCE_INITDB',() => runEmptySchemaCommand(
+    path.join(directory,'missing-empty-schema-command-PRIVATE'),['PRIVATE_PASSWORD'])),error => {
+      const receipt=emptySchemaFailureReceipt(error);
+      assert.deepEqual(receipt.primary_failure,{stage:'SOURCE_INITDB',error_category:'COMMAND',command_reason:'FAILED'});
+      assert.doesNotMatch(JSON.stringify(receipt),/PRIVATE/);
+      return true;
+    });
+});
+
+test('bounded child output is classified as output limit even when the child is killed',async () => {
+  await assert.rejects(runEmptySchemaStage('SOURCE_TOC_READ',() => runEmptySchemaCommand(
+    process.execPath,['-e',"process.stdout.write('PRIVATE_OUTPUT'.repeat(10000))"],{maxBytes:32})),error => {
+      const receipt=emptySchemaFailureReceipt(error);
+      assert.deepEqual(receipt.primary_failure,{stage:'SOURCE_TOC_READ',error_category:'COMMAND',command_reason:'OUTPUT_LIMIT'});
+      assert.doesNotMatch(JSON.stringify(receipt),/PRIVATE_OUTPUT/);
+      return true;
+    });
 });

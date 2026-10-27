@@ -27,11 +27,102 @@ export const EMPTY_SCHEMA_INPUT_PATHS = Object.freeze([
   'infra/client-state-runtime/local-vault-compat.sql',
   'infra/client-state-runtime/db-api-core.mjs',
 ]);
-const fail = code => { throw new Error(code); };
+const contractErrorCodes = new WeakMap();
+function contractError(code) {
+  const error = new Error(code);
+  contractErrorCodes.set(error, code);
+  return error;
+}
+const fail = code => { throw contractError(code); };
 export const emptySchemaSha256 = value => createHash('sha256').update(value).digest('hex');
 const sha40 = value => typeof value === 'string' && /^[a-f0-9]{40}$/.test(value);
 const quote = value => '"' + value.replaceAll('"', '""') + '"';
 const forbiddenObject = /(?:^|[^a-z0-9_])(?:atomic_fresh_api|fresh_candidate_api|fresh_candidate_probe|fresh_default_acl_probe|canonical_empty_schema_probe|synthetic_rpc|fixture_rpc)(?:$|[^a-z0-9_])/i;
+
+// Internal diagnostic custody. Never copy an error message, stack, query, argv,
+// path, stderr, credentials or arbitrary properties into a public receipt.
+const diagnosticStages = new Set([
+  'UNCLASSIFIED','CLI_ARGUMENTS','INPUT_PREFLIGHT','SOURCE_BINDING','PLAN_LOAD',
+  'NATIVE_ROUNDTRIP','EVIDENCE_COMPARE','SOURCE_RECHECK','PUBLICATION_PREFLIGHT',
+  'PUBLICATION_CLAIM','PUBLICATION_IDENTITY','PUBLICATION_ARCHIVE_WRITE',
+  'PUBLICATION_ARCHIVE_READBACK','PUBLICATION_MANIFEST_WRITE','PUBLICATION_CLEANUP',
+  'WORKSPACE_CREATE','ARCHIVE_CLAIM','PG_TOOL_PIN','PG_TOOL_VERSION','SOURCE_FACTORY',
+  'RESTORE_FACTORY','ROUNDTRIP_COMPARE','ARCHIVE_READBACK','ARCHIVE_CLEANUP','WORKSPACE_CLEANUP',
+  ...['SOURCE','RESTORE'].flatMap(prefix => [
+    'DIRECTORY_CREATE','PORT_RESERVE','PASSWORD_FILE','INITDB','CONTROL_READ','START',
+    'DRIVER_CONNECT','IDENTITY_CHECK','EMPTY_CHECK','COMPAT_ROLES','RESTORE','INSPECTION',
+    'DUMP','TOC_READ','TOC_VALIDATE','ARCHIVE_CHECK','SCHEMA_LOAD','BASELINE','UPGRADES',
+    'ACL','CATALOGUE_VERIFY','ROLLBACK_CHECK','COMMIT','REPEAT_UPGRADES','API_PROBES',
+    'RELEASE_CONNECTIONS','END_CONNECTIONS','STOP','DIRECTORY_CLEANUP',
+    ...['SETTINGS','VERSION','CATALOGUE','NAMESPACES','ROLES','MEMBERSHIPS','EXTENSIONS',
+      'FUNCTIONS','RELATIONS','COLUMNS','TYPES','CONSTRAINTS','INDEXES','TRIGGERS',
+      'POLICIES','SEQUENCES','UNSUPPORTED','ACL','TABLE_ROWS','SEQUENCE_STATE'].map(name => 'INSPECT_' + name),
+  ].map(name => prefix + '_' + name)),
+]);
+const diagnosticErrors = new WeakMap();
+const filesystemCodes = new Set(['EACCES','EBUSY','EEXIST','EINVAL','EIO','EISDIR','EMFILE',
+  'ENFILE','ENOENT','ENOMEM','ENOSPC','ENOTDIR','ENOTEMPTY','EPERM','EROFS','EXDEV']);
+const networkCodes = new Set(['EADDRINUSE','EADDRNOTAVAIL','ECONNREFUSED','ECONNRESET','ENETUNREACH','ETIMEDOUT']);
+const commandReasons = new Map([
+  ['empty_schema_command_timeout','TIMEOUT'],['empty_schema_command_output_limit','OUTPUT_LIMIT'],
+  ['empty_schema_command_failed','FAILED'],
+]);
+const MAX_CLEANUP_FAILURES = 8;
+const errorObject = error => error !== null && typeof error === 'object';
+function ownErrorValue(error, key) {
+  if (!errorObject(error)) return undefined;
+  try { return Object.getOwnPropertyDescriptor(error, key)?.value; } catch { return undefined; }
+}
+function failureObservation(error, stage) {
+  const code = ownErrorValue(error,'code'), registered = errorObject(error) ? contractErrorCodes.get(error) : undefined;
+  if (registered && commandReasons.has(registered))
+    return {stage,error_category:'COMMAND',command_reason:commandReasons.get(registered)};
+  if (registered) return {stage,error_category:'CONTRACT',contract_code:registered};
+  if (code === 'ERR_ASSERTION') return {stage,error_category:'ASSERTION'};
+  if (filesystemCodes.has(code)) return {stage,error_category:'FILESYSTEM',system_code:code};
+  if (networkCodes.has(code)) return {stage,error_category:'NETWORK',system_code:code};
+  if (ownErrorValue(error,'name') === 'PostgresError' && typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code))
+    return {stage,error_category:'POSTGRES',sqlstate:code};
+  return {stage,error_category:'UNKNOWN'};
+}
+function diagnosticDetails(error, stage = 'UNCLASSIFIED') {
+  const existing = errorObject(error) && diagnosticErrors.get(error);
+  if (existing) return existing.primary_failure?.stage === 'UNCLASSIFIED' && stage !== 'UNCLASSIFIED'
+    ? {...existing,primary_failure:{...existing.primary_failure,stage}} : existing;
+  // assert.rejects keeps the unexpected rejection in .actual. Preserve its
+  // already captured SQL boundary without inspecting arbitrary error causes.
+  const actual = ownErrorValue(error,'code') === 'ERR_ASSERTION' ? ownErrorValue(error,'actual') : null;
+  const inner = errorObject(actual) && diagnosticErrors.get(actual);
+  if (inner) return inner;
+  return {primary_failure:failureObservation(error,stage),cleanup_failures:[],cleanup_failures_truncated:false};
+}
+export async function runEmptySchemaStage(stage, action) {
+  if (!diagnosticStages.has(stage) || typeof action !== 'function') fail('empty_schema_diagnostic_stage_invalid');
+  try { return await action(); }
+  catch (caught) {
+    const error = errorObject(caught) ? caught : new Error('empty_schema_qualification_failed');
+    diagnosticErrors.set(error,diagnosticDetails(error,stage));
+    throw error; // Preserve the original exception and expected-refusal behavior.
+  }
+}
+export function combineEmptySchemaCleanupFailure(primaryError, cleanupError) {
+  const prior = primaryError == null
+    ? {primary_failure:null,cleanup_failures:[],cleanup_failures_truncated:false}
+    : diagnosticDetails(primaryError);
+  const next = diagnosticDetails(cleanupError);
+  const cleanup = [...prior.cleanup_failures,...(next.primary_failure ? [next.primary_failure] : []),...next.cleanup_failures];
+  const error = new Error('empty_schema_qualification_failed',{cause:primaryError ?? cleanupError});
+  diagnosticErrors.set(error,{primary_failure:prior.primary_failure,cleanup_failures:cleanup.slice(0,MAX_CLEANUP_FAILURES),
+    cleanup_failures_truncated:prior.cleanup_failures_truncated || next.cleanup_failures_truncated || cleanup.length > MAX_CLEANUP_FAILURES});
+  return error;
+}
+export function emptySchemaFailureMetadata(error) {
+  const details = diagnosticDetails(error);
+  return {code:details.primary_failure?.contract_code || (errorObject(error) && contractErrorCodes.get(error)) || 'empty_schema_qualification_failed',
+    primary_failure:details.primary_failure ? {...details.primary_failure} : null,
+    cleanup_failures:details.cleanup_failures.map(row => ({...row})),
+    cleanup_failures_truncated:details.cleanup_failures_truncated};
+}
 
 export function parseEmptySchemaArguments(args) {
   const names = new Map([
@@ -82,8 +173,8 @@ export function runEmptySchemaCommand(file, args, { env, input, cwd, maxBytes = 
     }, (error, stdout) => {
       if (error) {
         // Never forward argv, environment, server stderr or potentially secret SQL.
-        reject(new Error(error.killed || error.signal ? 'empty_schema_command_timeout'
-          : error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' ? 'empty_schema_command_output_limit'
+        reject(contractError(error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' ? 'empty_schema_command_output_limit'
+          : error.killed || error.signal ? 'empty_schema_command_timeout'
           : 'empty_schema_command_failed'));
       } else resolve(stdout);
     });
@@ -262,28 +353,30 @@ const extensionOwned = "(exists(select 1 from pg_catalog.pg_depend d where d.cla
 
 // Full semantic catalogue and explicit/effective ACLs; no OIDs, paths, passwords,
 // row values or server logs leave this function. Source bodies are hashed in memory.
-export async function inspectCanonicalEmptySchema({ sql, plan, verifyCatalogue }) {
-  await sql.unsafe("set search_path=pg_catalog; set statement_timeout='120s'; set lock_timeout='5s'");
-  const [version] = await sql.unsafe("select current_setting('server_version_num')::int as value");
+export async function inspectCanonicalEmptySchema({ sql, plan, verifyCatalogue, phase = 'SOURCE' }) {
+  if (!['SOURCE','RESTORE'].includes(phase)) fail('empty_schema_diagnostic_stage_invalid');
+  const query = (step,statement,args) => runEmptySchemaStage(phase + '_INSPECT_' + step,() => sql.unsafe(statement,args));
+  await query('SETTINGS',"set search_path=pg_catalog; set statement_timeout='120s'; set lock_timeout='5s'");
+  const [version] = await query('VERSION',"select current_setting('server_version_num')::int as value");
   if (Math.floor(Number(version.value) / 10000) !== 17) fail('empty_schema_native_pg17_required');
-  const catalogueCheck = await verifyCatalogue({sql,plan});
-  const namespaces = await sql.unsafe("select n.nspname as name,pg_catalog.pg_get_userbyid(n.nspowner) as owner from pg_catalog.pg_namespace n where " + userSchemas);
+  const catalogueCheck = await runEmptySchemaStage(phase + '_INSPECT_CATALOGUE',() => verifyCatalogue({sql,plan}));
+  const namespaces = await query('NAMESPACES',"select n.nspname as name,pg_catalog.pg_get_userbyid(n.nspowner) as owner from pg_catalog.pg_namespace n where " + userSchemas);
   if (namespaces.some(row => !['public','destruktion_meta','extensions','vault'].includes(row.name)))
     fail('empty_schema_unreviewed_namespace');
   const sections = { namespaces };
-  sections.roles = await sql.unsafe("select rolname,rolsuper,rolinherit,rolcreaterole,rolcreatedb,rolcanlogin,rolreplication,rolbypassrls,rolconnlimit,rolvaliduntil::text from pg_catalog.pg_roles where rolname !~ '^pg_'");
+  sections.roles = await query('ROLES',"select rolname,rolsuper,rolinherit,rolcreaterole,rolcreatedb,rolcanlogin,rolreplication,rolbypassrls,rolconnlimit,rolvaliduntil::text from pg_catalog.pg_roles where rolname !~ '^pg_'");
   if (sections.roles.length !== 4 || sections.roles.some(row => !['state_owner','anon','authenticated','service_role'].includes(row.rolname)
     || row.rolname !== 'state_owner' && (row.rolcanlogin || row.rolsuper || row.rolcreaterole || row.rolcreatedb || row.rolreplication || row.rolbypassrls)))
     fail('empty_schema_temporary_or_foreign_role');
-  sections.memberships = await sql.unsafe("select pg_get_userbyid(roleid) as role,pg_get_userbyid(member) as member,admin_option,inherit_option,set_option from pg_catalog.pg_auth_members");
-  sections.extensions = await sql.unsafe("select e.extname,e.extversion,n.nspname,e.extrelocatable from pg_catalog.pg_extension e join pg_catalog.pg_namespace n on n.oid=e.extnamespace");
+  sections.memberships = await query('MEMBERSHIPS',"select pg_get_userbyid(roleid) as role,pg_get_userbyid(member) as member,admin_option,inherit_option,set_option from pg_catalog.pg_auth_members");
+  sections.extensions = await query('EXTENSIONS',"select e.extname,e.extversion,n.nspname,e.extrelocatable from pg_catalog.pg_extension e join pg_catalog.pg_namespace n on n.oid=e.extnamespace");
   if (sections.extensions.some(row => !['plpgsql','pgcrypto'].includes(row.extname))) fail('empty_schema_unreviewed_extension');
-  sections.functions = await sql.unsafe(`select n.nspname||'.'||p.proname||'('||pg_catalog.oidvectortypes(p.proargtypes)||')' as identity,
+  sections.functions = await query('FUNCTIONS',`select n.nspname||'.'||p.proname||'('||pg_catalog.oidvectortypes(p.proargtypes)||')' as identity,
     pg_catalog.pg_get_userbyid(p.proowner) as owner,pg_catalog.pg_get_functiondef(p.oid) as definition,
     ${extensionOwned} as extension_owned from pg_catalog.pg_proc p join pg_catalog.pg_namespace n on n.oid=p.pronamespace
     where ${userSchemas} and p.prokind in ('f','p','w')`);
   if (sections.functions.some(row => forbiddenObject.test(row.identity))) fail('empty_schema_synthetic_function');
-  sections.relations = await sql.unsafe(`select n.nspname as schema,c.relname as name,c.relkind,c.relpersistence,c.relrowsecurity,c.relforcerowsecurity,
+  sections.relations = await query('RELATIONS',`select n.nspname as schema,c.relname as name,c.relkind,c.relpersistence,c.relrowsecurity,c.relforcerowsecurity,
     c.relreplident,c.reloptions,pg_catalog.pg_get_userbyid(c.relowner) as owner,
     case when c.relkind in ('v','m') then pg_catalog.pg_get_viewdef(c.oid,false) else null end as view_definition,
     pg_catalog.pg_get_expr(c.relpartbound,c.oid) as partition_bound
@@ -291,7 +384,7 @@ export async function inspectCanonicalEmptySchema({ sql, plan, verifyCatalogue }
     where ${userSchemas} and c.relkind in ('r','p','v','m','S','f')`);
   if (sections.relations.some(row => row.relkind === 'f' || forbiddenObject.test(row.name)))
     fail('empty_schema_unreviewed_relation');
-  sections.columns = await sql.unsafe(`select n.nspname,c.relname,
+  sections.columns = await query('COLUMNS',`select n.nspname,c.relname,
     row_number() over (partition by c.oid order by a.attnum)::int as ordinal,a.attname,
     pg_catalog.format_type(a.atttypid,a.atttypmod) as type,a.attnotnull,a.attidentity,a.attgenerated,
     co.collname,cn.nspname as collation_schema,pg_catalog.pg_get_expr(d.adbin,d.adrelid) as default_expression
@@ -299,34 +392,34 @@ export async function inspectCanonicalEmptySchema({ sql, plan, verifyCatalogue }
     left join pg_catalog.pg_attrdef d on d.adrelid=c.oid and d.adnum=a.attnum
     left join pg_catalog.pg_collation co on co.oid=a.attcollation left join pg_catalog.pg_namespace cn on cn.oid=co.collnamespace
     where ${userSchemas} and a.attnum>0 and not a.attisdropped and c.relkind in ('r','p','v','m','S')`);
-  sections.types = await sql.unsafe(`select n.nspname,t.typname,t.typtype,t.typcategory,t.typnotnull,t.typdefault,
+  sections.types = await query('TYPES',`select n.nspname,t.typname,t.typtype,t.typcategory,t.typnotnull,t.typdefault,
     case when t.typbasetype=0 then null else pg_catalog.format_type(t.typbasetype,t.typtypmod) end as base_type,
     pg_catalog.pg_get_userbyid(t.typowner) as owner,
     (select pg_catalog.json_agg(e.enumlabel order by e.enumsortorder) from pg_catalog.pg_enum e where e.enumtypid=t.oid) as enum_labels
     from pg_catalog.pg_type t join pg_catalog.pg_namespace n on n.oid=t.typnamespace where ${userSchemas}`);
-  sections.constraints = await sql.unsafe(`select n.nspname,c.conname,c.contype,c.condeferrable,c.condeferred,c.convalidated,
+  sections.constraints = await query('CONSTRAINTS',`select n.nspname,c.conname,c.contype,c.condeferrable,c.condeferred,c.convalidated,
     case when c.conrelid=0 then null else c.conrelid::regclass::text end as relation,
     case when c.contypid=0 then null else c.contypid::regtype::text end as domain,
     pg_catalog.pg_get_constraintdef(c.oid,false) as definition
     from pg_catalog.pg_constraint c join pg_catalog.pg_namespace n on n.oid=c.connamespace where ${userSchemas}`);
-  sections.indexes = await sql.unsafe(`select n.nspname,c.relname,pg_catalog.pg_get_indexdef(c.oid) as definition,
+  sections.indexes = await query('INDEXES',`select n.nspname,c.relname,pg_catalog.pg_get_indexdef(c.oid) as definition,
     i.indisvalid,i.indisready,i.indisreplident from pg_catalog.pg_index i join pg_catalog.pg_class c on c.oid=i.indexrelid
     join pg_catalog.pg_namespace n on n.oid=c.relnamespace where ${userSchemas}`);
-  sections.triggers = await sql.unsafe(`select n.nspname,c.relname,t.tgname,t.tgenabled,pg_catalog.pg_get_triggerdef(t.oid,false) as definition
+  sections.triggers = await query('TRIGGERS',`select n.nspname,c.relname,t.tgname,t.tgenabled,pg_catalog.pg_get_triggerdef(t.oid,false) as definition
     from pg_catalog.pg_trigger t join pg_catalog.pg_class c on c.oid=t.tgrelid join pg_catalog.pg_namespace n on n.oid=c.relnamespace
     where ${userSchemas} and not t.tgisinternal`);
-  sections.policies = await sql.unsafe("select schemaname,tablename,policyname,permissive,roles,cmd,qual,with_check from pg_catalog.pg_policies where schemaname !~ '^pg_'");
-  sections.sequences = await sql.unsafe(`select n.nspname,c.relname,pg_catalog.format_type(s.seqtypid,null) as type,
+  sections.policies = await query('POLICIES',"select schemaname,tablename,policyname,permissive,roles,cmd,qual,with_check from pg_catalog.pg_policies where schemaname !~ '^pg_'");
+  sections.sequences = await query('SEQUENCES',`select n.nspname,c.relname,pg_catalog.format_type(s.seqtypid,null) as type,
     s.seqstart::text,s.seqincrement::text,s.seqmax::text,s.seqmin::text,s.seqcache::text,s.seqcycle
     from pg_catalog.pg_sequence s join pg_catalog.pg_class c on c.oid=s.seqrelid join pg_catalog.pg_namespace n on n.oid=c.relnamespace where ${userSchemas}`);
-  const [unsupported] = await sql.unsafe(`select
+  const [unsupported] = await query('UNSUPPORTED',`select
     (select count(*) from pg_catalog.pg_largeobject_metadata)::int as large_objects,
     (select count(*) from pg_catalog.pg_event_trigger)::int as event_triggers,
     (select count(*) from pg_catalog.pg_foreign_server)::int as foreign_servers,
     (select count(*) from pg_catalog.pg_publication)::int as publications,
     (select count(*) from pg_catalog.pg_subscription)::int as subscriptions`);
   if (Object.values(unsupported).some(value => Number(value) !== 0)) fail('empty_schema_unsupported_external_or_data_object');
-  const acls = await sql.unsafe(`with objects as (
+  const acls = await query('ACL',`with objects as (
     select 'schema:'||n.nspname as identity,coalesce(n.nspacl,pg_catalog.acldefault('n',n.nspowner)) as acl
       from pg_catalog.pg_namespace n where ${userSchemas}
     union all select 'function:'||n.nspname||'.'||p.proname||'('||pg_catalog.oidvectortypes(p.proargtypes)||')',
@@ -350,14 +443,14 @@ export async function inspectCanonicalEmptySchema({ sql, plan, verifyCatalogue }
     a.privilege_type,a.is_grantable from objects o cross join lateral pg_catalog.aclexplode(o.acl) a`);
   const tableRows = [];
   for (const table of sections.relations.filter(row => ['r','p','m'].includes(row.relkind))) {
-    const [row] = await sql.unsafe('select count(*)::text as count from ' + quote(table.schema) + '.' + quote(table.name));
+    const [row] = await query('TABLE_ROWS','select count(*)::text as count from ' + quote(table.schema) + '.' + quote(table.name));
     if (row.count !== '0') fail('empty_schema_application_rows_present');
     tableRows.push({schema:table.schema,name:table.name,rows:0});
   }
   if (!tableRows.length) fail('empty_schema_application_tables_missing');
   const sequenceState = [];
   for (const sequence of sections.sequences) {
-    const [row] = await sql.unsafe('select last_value::text,is_called from ' + quote(sequence.nspname) + '.' + quote(sequence.relname));
+    const [row] = await query('SEQUENCE_STATE','select last_value::text,is_called from ' + quote(sequence.nspname) + '.' + quote(sequence.relname));
     if (row.is_called !== false || row.last_value !== sequence.seqstart) fail('empty_schema_sequence_already_used');
     sequenceState.push({schema:sequence.nspname,name:sequence.relname,last_value:row.last_value,is_called:false});
   }

@@ -8,14 +8,13 @@ import {
   EMPTY_SCHEMA_FILES, EMPTY_SCHEMA_INPUT_PATHS, EMPTY_SCHEMA_MAX_ARCHIVE_BYTES,
   assertEmptySchemaOptions, parseEmptySchemaArguments, assertNewEmptySchemaOutputDirectory,
   validateEmptySchemaSourceBinding, emptySchemaSha256,
+  runEmptySchemaStage, combineEmptySchemaCleanupFailure, emptySchemaFailureMetadata,
 } from './canonical-empty-schema-contract.mjs';
 
 const repositoryRoot = fileURLToPath(new URL('../../',import.meta.url));
 
 export function emptySchemaFailureReceipt(error) {
-  const code = typeof error?.message === 'string' && /^(?:empty_schema|fresh_disposable)_[a-z0-9_]+$/.test(error.message)
-    ? error.message : 'empty_schema_qualification_failed';
-  return {event:'reviewed_empty_schema_export_failed',code};
+  return {event:'reviewed_empty_schema_export_failed',...emptySchemaFailureMetadata(error)};
 }
 
 export function assertPublishableEmptySchemaEvidence({archive,evidence}) {
@@ -42,6 +41,7 @@ export function assertPublishableEmptySchemaEvidence({archive,evidence}) {
 }
 
 export async function exportReviewedEmptySchema(options) {
+  const {destination,candidateBytes,candidateJson} = await runEmptySchemaStage('INPUT_PREFLIGHT',async () => {
   assertEmptySchemaOptions(options);
   const destination = await assertNewEmptySchemaOutputDirectory(options.outputDir);
   const candidateStat = await fs.lstat(new URL('./fresh-schema-candidate-plan.json',import.meta.url));
@@ -53,23 +53,30 @@ export async function exportReviewedEmptySchema(options) {
     || !Array.isArray(candidateJson.upgrades) || !candidateJson.baseline.length || !candidateJson.upgrades.length
     || candidateJson.baseline.length > 128 || candidateJson.upgrades.length > 128)
     throw Error('empty_schema_candidate_plan_invalid');
+  return {destination,candidateBytes,candidateJson};
+  });
   const inputPaths = [...EMPTY_SCHEMA_INPUT_PATHS,...candidateJson.baseline.map(row=>row.path),...candidateJson.upgrades.map(row=>row.path)];
   const bindingArgs = {repositoryRoot,inputPaths,schemaSourceHead:options.schemaSourceHead,exporterSourceHead:options.exporterSourceHead};
-  const sourceBinding = await validateEmptySchemaSourceBinding(bindingArgs);
+  const sourceBinding = await runEmptySchemaStage('SOURCE_BINDING',() => validateEmptySchemaSourceBinding(bindingArgs));
   // Import executable loaders only after their exact actual bytes are bound.
+  const {candidate,plan,roundtripCanonicalEmptySchemaNative} = await runEmptySchemaStage('PLAN_LOAD',async () => {
   const {loadFreshSchemaCandidatePlan} = await import('./fresh-schema-plan.mjs');
   const {loadFreshSchemaApplicationPlan} = await import('./fresh-schema-application-plan.mjs');
   const candidate = await loadFreshSchemaCandidatePlan(), plan = await loadFreshSchemaApplicationPlan();
   const {roundtripCanonicalEmptySchemaNative} = await import('./test/fresh-schema-disposable.mjs');
-  const {archive,evidence} = await roundtripCanonicalEmptySchemaNative({
-    bin:options.bin,driver:options.driver,applicationMode:options.applicationMode,
+  return {candidate,plan,roundtripCanonicalEmptySchemaNative};
   });
+  const {archive,evidence} = await runEmptySchemaStage('NATIVE_ROUNDTRIP',() => roundtripCanonicalEmptySchemaNative({
+    bin:options.bin,driver:options.driver,applicationMode:options.applicationMode,
+  }));
+  await runEmptySchemaStage('EVIDENCE_COMPARE',() => {
   assertPublishableEmptySchemaEvidence({archive,evidence});
   assert.equal(evidence.source_manifest_sha256,plan.source_manifest_sha256);
   assert.equal(evidence.upgrade_sources_sha256,candidate.upgrade_sources_sha256);
   assert.equal(candidate.candidate_sha256,emptySchemaSha256(candidateBytes));
-  assert.deepEqual(await validateEmptySchemaSourceBinding(bindingArgs),sourceBinding);
-  await assertNewEmptySchemaOutputDirectory(destination);
+  });
+  await runEmptySchemaStage('SOURCE_RECHECK',async () => assert.deepEqual(await validateEmptySchemaSourceBinding(bindingArgs),sourceBinding));
+  await runEmptySchemaStage('PUBLICATION_PREFLIGHT',() => assertNewEmptySchemaOutputDirectory(destination));
   const manifest = {
     schema:'compute.reviewed-empty-schema-export.v1',application_mode:'ATOMIC_SLICE',
     artifact_kind:'REVIEWED_CANONICAL_EMPTY_SCHEMA_FIXTURE',schema_only:true,custom_archive:true,
@@ -89,32 +96,41 @@ export async function exportReviewedEmptySchema(options) {
   };
   // No output directory exists until both independent factory cleanups returned.
   // mkdir is the exclusive publication claim. A manifest is written last.
-  await fs.mkdir(destination,{mode:0o700});
-  const claimed = await fs.lstat(destination);
-  const assertClaim = async () => {
+  const claimed = await runEmptySchemaStage('PUBLICATION_CLAIM',async () => {
+    await fs.mkdir(destination,{mode:0o700});
+    return fs.lstat(destination);
+  });
+  const assertClaim = async () => runEmptySchemaStage('PUBLICATION_IDENTITY',async () => {
     const actual = await fs.lstat(destination);
     if (!actual.isDirectory() || actual.isSymbolicLink() || actual.dev !== claimed.dev || actual.ino !== claimed.ino)
       throw Error('empty_schema_output_identity_changed');
-  };
+  });
   try {
     await assertClaim();
-    await fs.writeFile(path.join(destination,EMPTY_SCHEMA_FILES.archive),archive,{flag:'wx',mode:0o600});
+    await runEmptySchemaStage('PUBLICATION_ARCHIVE_WRITE',() => fs.writeFile(path.join(destination,EMPTY_SCHEMA_FILES.archive),archive,{flag:'wx',mode:0o600}));
     await assertClaim();
-    const readback = await fs.readFile(path.join(destination,EMPTY_SCHEMA_FILES.archive));
-    if (!readback.equals(archive)) throw Error('empty_schema_output_readback_mismatch');
-    await fs.writeFile(path.join(destination,EMPTY_SCHEMA_FILES.manifest),JSON.stringify(manifest,null,2)+'\n',{flag:'wx',mode:0o600});
+    await runEmptySchemaStage('PUBLICATION_ARCHIVE_READBACK',async () => {
+      const readback = await fs.readFile(path.join(destination,EMPTY_SCHEMA_FILES.archive));
+      if (!readback.equals(archive)) throw Error('empty_schema_output_readback_mismatch');
+    });
+    await runEmptySchemaStage('PUBLICATION_MANIFEST_WRITE',() => fs.writeFile(path.join(destination,EMPTY_SCHEMA_FILES.manifest),JSON.stringify(manifest,null,2)+'\n',{flag:'wx',mode:0o600}));
     await assertClaim();
     return manifest;
   } catch (error) {
-    await assertClaim();
-    await fs.rm(destination,{recursive:true,force:true});
+    try {
+      await runEmptySchemaStage('PUBLICATION_CLEANUP',async () => {
+        await assertClaim();
+        await fs.rm(destination,{recursive:true,force:true});
+      });
+    } catch (cleanup) { throw combineEmptySchemaCleanupFailure(error,cleanup); }
     throw error;
   }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   try {
-    const manifest = await exportReviewedEmptySchema(parseEmptySchemaArguments(process.argv.slice(2)));
+    const options = await runEmptySchemaStage('CLI_ARGUMENTS',() => parseEmptySchemaArguments(process.argv.slice(2)));
+    const manifest = await exportReviewedEmptySchema(options);
     console.log(JSON.stringify({event:'reviewed_empty_schema_exported',status:manifest.qualification.status,
       schema_source_head:manifest.schema_source_head,exporter_source_head:manifest.exporter_source_head,
       archive_sha256:manifest.archive.sha256,archive_bytes:manifest.archive.bytes,production_qualified:false,runtime_ready:false}));

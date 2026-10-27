@@ -18,7 +18,7 @@ import { inspectAttachedApiAdmission } from '../attached-postgres-onboarding.mjs
 import { loadFreshSchemaApplicationPlan, verifyFreshSchemaCatalogue } from '../fresh-schema-application-plan.mjs';
 import { EMPTY_SCHEMA_MAX_ARCHIVE_BYTES, emptySchemaSha256, emptySchemaProcessEnvironment,
   runEmptySchemaCommand, inspectCanonicalEmptySchema, assertEmptySchemaRoundtrip,
-  validateEmptySchemaToc } from '../canonical-empty-schema-contract.mjs';
+  validateEmptySchemaToc, runEmptySchemaStage, combineEmptySchemaCleanupFailure } from '../canonical-empty-schema-contract.mjs';
 const root = new URL('../../../', import.meta.url);
 const heartbeat = 'public.h205f22_a2_supervisor_mesh_heartbeat_v1(text,text,text)';
 
@@ -108,40 +108,45 @@ async function qualifyDisposableFreshSchema({ sql, engine } = {}) {
 }
 
 
-async function qualifyAtomicFreshSchema({sql,engine,beforeApiProvision = null}) {
-  const plan=await loadFreshSchemaApplicationPlan();
+async function qualifyAtomicFreshSchema({sql,engine,beforeApiProvision = null,stage = async (_name,action) => action()}) {
+  const plan=await stage('SCHEMA_LOAD',() => loadFreshSchemaApplicationPlan());
   const [version]=await sql.unsafe("select current_setting('server_version_num')::int as value");
   assert.equal(Math.floor(Number(version.value)/10000),engine==='NATIVE_PG17'?17:18);
   const stages=['BASELINE','UPGRADES','ACL'];
   const apply=async(tx,stop)=>{
     assertEmptyApplicationSchema(await tx.unsafe(FRESH_SCHEMA_OCCUPANCY_QUERY));
     const [start]=await tx.unsafe('select txid_current()::text as id');
-    await tx.unsafe(plan.prerequisite_sql);
-    for(const statement of plan.statements)await tx.unsafe(statement.sql);
+    await stage('BASELINE',async () => {
+      await tx.unsafe(plan.prerequisite_sql);
+      for(const statement of plan.statements)await tx.unsafe(statement.sql);
+    });
     if(stop==='BASELINE')throw Error('intentional_atomic_rollback');
     const nested={unsafe:(...args)=>tx.unsafe(...args),begin:fn=>fn(tx)};
-    await applyLocalRuntimeMigrations({sql:nested,expectedMigrationSourcesSha256:plan.upgrade_sources_sha256});
+    await stage('UPGRADES',() => applyLocalRuntimeMigrations({sql:nested,expectedMigrationSourcesSha256:plan.upgrade_sources_sha256}));
     if(stop==='UPGRADES')throw Error('intentional_atomic_rollback');
-    await tx.unsafe(plan.post_upgrade_acl_sql);
+    await stage('ACL',() => tx.unsafe(plan.post_upgrade_acl_sql));
     if(stop==='ACL')throw Error('intentional_atomic_rollback');
-    const catalog=await verifyFreshSchemaCatalogue({sql:tx,plan});
+    const catalog=await stage('CATALOGUE_VERIFY',() => verifyFreshSchemaCatalogue({sql:tx,plan}));
     const [finish]=await tx.unsafe('select txid_current()::text as id');
     assert.equal(finish.id,start.id,'no included source may commit the owner transaction');
     return catalog;
   };
-  for(const stage of stages) {
-    await assert.rejects(sql.begin(tx=>apply(tx,stage)),/intentional_atomic_rollback/);
-    assertEmptyApplicationSchema(await sql.unsafe(FRESH_SCHEMA_OCCUPANCY_QUERY));
-    const roles=await sql.unsafe("select rolname from pg_roles where rolname in ('anon','authenticated','service_role')");
-    assert.equal(roles.length,0,'failed baseline must not leave cluster roles');
+  for(const boundary of stages) {
+    await stage('ROLLBACK_CHECK',async () => {
+      await assert.rejects(sql.begin(tx=>apply(tx,boundary)),/intentional_atomic_rollback/);
+      assertEmptyApplicationSchema(await sql.unsafe(FRESH_SCHEMA_OCCUPANCY_QUERY));
+      const roles=await sql.unsafe("select rolname from pg_roles where rolname in ('anon','authenticated','service_role')");
+      assert.equal(roles.length,0,'failed baseline must not leave cluster roles');
+    });
   }
-  const catalog=await sql.begin(tx=>apply(tx));
+  const catalog=await stage('COMMIT',() => sql.begin(tx=>apply(tx)));
   await assert.rejects(sql.begin(tx=>apply(tx)),/refuse partial/);
-  const repeat=await applyLocalRuntimeMigrations({sql,expectedMigrationSourcesSha256:plan.upgrade_sources_sha256});
+  const repeat=await stage('REPEAT_UPGRADES',() => applyLocalRuntimeMigrations({sql,expectedMigrationSourcesSha256:plan.upgrade_sources_sha256}));
   assert(repeat.migrations.every(row=>row.status==='ALREADY_PRESENT_NOT_MODIFIED'));
   // Internal export hook: the canonical owner transaction is committed, repeat
   // upgrades are attested, and no temporary direct API role/ACL exists yet.
   if (beforeApiProvision) await beforeApiProvision({sql,plan,catalog});
+  return stage('API_PROBES',async () => {
   const [identity]=await sql.unsafe('select current_database() as database,session_user::text as login');
   await provisionLocalApiLogin({sql,databaseName:identity.database,login:'atomic_fresh_api',password:randomBytes(32).toString('hex'),roleMode:'direct'});
   const admission=await sql.begin(async tx=>{
@@ -196,6 +201,7 @@ async function qualifyAtomicFreshSchema({sql,engine,beforeApiProvision = null}) 
     static_deferred_dependencies:[...new Set(optional)],
     empty_application_tables:tables.length,application_rows_seeded:false,automatic_population_required:true,
     native_owner_enrollment_qualified:false};
+  });
 }
 
 // No raw SQL handle or connection URI is accepted by either public factory.
@@ -245,7 +251,9 @@ async function runFreshSchemaNative({ bin, driver, base = os.tmpdir(), applicati
   if(![1,2].includes(exerciseBackends)||(exerciseBackends!==1&&!exercise))throw Error('fresh_test_backend_count_invalid');
   if (!['HISTORICAL_CANDIDATE','ATOMIC_SLICE'].includes(applicationMode)) throw Error('fresh_test_mode_invalid');
   if (!bin || !driver) throw new Error('fresh_disposable_binaries_required');
-  const directory = await fs.mkdtemp(path.join(await fs.realpath(base), 'fresh-schema-pg17-'));
+  const phase = archiveOperation?.kind === 'RESTORE' ? 'RESTORE' : 'SOURCE';
+  const stage = (name,action) => archiveOperation ? runEmptySchemaStage(phase + '_' + name,action) : action();
+  const directory = await stage('DIRECTORY_CREATE',async () => fs.mkdtemp(path.join(await fs.realpath(base), 'fresh-schema-pg17-')));
   const data = path.join(directory, 'data');
   const password = randomBytes(32).toString('hex');
   const passwordFile = path.join(directory, 'private-owner-password');
@@ -258,26 +266,31 @@ async function runFreshSchemaNative({ bin, driver, base = os.tmpdir(), applicati
     child.once('exit',code=>{clearTimeout(timer);code===0?resolve(output):reject(Error('fresh_pg_command_failed:'+name));});
   });
   const command = archiveOperation
-    ? async (name,args,extraEnv={}) => (await runEmptySchemaCommand(path.join(bin,name+(process.platform==='win32'?'.exe':'')),args,
-      {env:emptySchemaProcessEnvironment(extraEnv)}).catch(error => {
-        throw Error('empty_schema_'+name+'_'+(error.message.endsWith('_timeout')?'timeout':error.message.endsWith('_output_limit')?'output_limit':'failed'));
-      })).toString('utf8')
+    ? async (name,args,extraEnv={}) => stage(name === 'pg_ctl' ? (args.includes('stop') ? 'STOP' : 'START')
+      : name === 'pg_restore' ? (args.includes('--list') ? 'TOC_READ' : 'RESTORE')
+      : {initdb:'INITDB',pg_controldata:'CONTROL_READ',pg_dump:'DUMP'}[name],async () =>
+      (await runEmptySchemaCommand(path.join(bin,name+(process.platform==='win32'?'.exe':'')),args,
+        {env:emptySchemaProcessEnvironment(extraEnv)})).toString('utf8'))
     : defaultCommand;
-  let started=false,sql,reserved,archiveEvidence;
+  let started=false,sql,reserved,archiveEvidence,primaryFailure=null;
   const reservedConnections=[];
   try {
-    const listener=net.createServer();
-    await new Promise((resolve,reject)=>{listener.once('error',reject);listener.listen(0,'127.0.0.1',resolve);});
-    const port=listener.address().port; await new Promise(resolve=>listener.close(resolve));
-    assert(![55432,55433,55434].includes(port));
-    await fs.writeFile(passwordFile,password+'\n',{flag:'wx',mode:0o600});
+    const port=await stage('PORT_RESERVE',async () => {
+      const listener=net.createServer();
+      await new Promise((resolve,reject)=>{listener.once('error',reject);listener.listen(0,'127.0.0.1',resolve);});
+      const selected=listener.address().port; await new Promise(resolve=>listener.close(resolve));
+      assert(![55432,55433,55434].includes(selected));
+      return selected;
+    });
+    await stage('PASSWORD_FILE',() => fs.writeFile(passwordFile,password+'\n',{flag:'wx',mode:0o600}));
     await command('initdb',['-D',data,'--username=state_owner','--auth=scram-sha-256','--pwfile='+passwordFile,'--no-locale','--encoding=UTF8','--no-sync']);
     const control=await command('pg_controldata',['-D',data]);
     const identifier=/Database system identifier:\s*(\d+)/.exec(control)?.[1];
     if(!identifier)throw Error('fresh_disposable_control_identity_missing');
-    const expectedDirectory=await fs.realpath(data);
+    const expectedDirectory=await stage('IDENTITY_CHECK',() => fs.realpath(data));
     started=true;
     await command('pg_ctl',['-D',data,'-l',path.join(directory,'postgres.log'),'-o',`-h 127.0.0.1 -p ${port} -c unix_socket_directories=''`,'-w','start']);
+    await stage('DRIVER_CONNECT',async () => {
     const postgres=(await import(pathToFileURL(driver))).default;
     sql=postgres({host:'127.0.0.1',port,user:'state_owner',password,database:'postgres',max:exerciseBackends,onnotice:()=>{},connect_timeout:5,
       // Shared SQL fixtures pass serialized JSON text, just as PGlite.query
@@ -287,14 +300,15 @@ async function runFreshSchemaNative({ bin, driver, base = os.tmpdir(), applicati
       types:{fixtureJson:{to:114,from:[114,3802],
         serialize:value=>typeof value==='string'?value:JSON.stringify(value),parse:JSON.parse}}});
     reserved=await sql.reserve();reservedConnections.push(reserved);
+    });
     const identityQuery="select current_setting('data_directory') as directory, system_identifier::text, pg_backend_pid() as pid from pg_control_system()";
-    const [first]=await reserved.unsafe(identityQuery);
+    const [first]=await stage('IDENTITY_CHECK',() => reserved.unsafe(identityQuery));
     const expected={directory:expectedDirectory,system_identifier:identifier,pid:first.pid};
-    const check=async(connection,identity=expected)=>{
+    const check=async(connection,identity=expected)=>stage('IDENTITY_CHECK',async () => {
       const [actual]=await connection.unsafe(identityQuery);
       actual.directory=await fs.realpath(actual.directory);
       assertDisposableIdentity(actual,identity);
-    };
+    });
     await check(reserved); // reject port races/misbinding BEFORE any mutation
     if (archiveOperation?.kind === 'RESTORE') {
       assert.notEqual(expected.system_identifier,archiveOperation.sourceIdentity.system_identifier,'restore requires a second new cluster');
@@ -309,49 +323,51 @@ async function runFreshSchemaNative({ bin, driver, base = os.tmpdir(), applicati
     const privateConnectionArgs = ['--host=127.0.0.1','--port='+port,'--username=state_owner','--dbname=postgres','--no-password'];
     const privateConnectionEnv = {PGPASSWORD:password,PGCONNECT_TIMEOUT:'5',PGSSLMODE:'disable',
       PGOPTIONS:'-c statement_timeout=120000 -c lock_timeout=5000',PGAPPNAME:'canonical-empty-schema'};
-    const inspect = async plan => {
+    const inspect = async plan => stage('INSPECTION',async () => {
       await check(reserved);
-      const evidence = await inspectCanonicalEmptySchema({sql:wrap(reserved),plan,verifyCatalogue:verifyFreshSchemaCatalogue});
+      const evidence = await inspectCanonicalEmptySchema({sql:wrap(reserved),plan,verifyCatalogue:verifyFreshSchemaCatalogue,phase});
       await check(reserved);
       return evidence;
-    };
+    });
     let receipt;
     if (archiveOperation?.kind === 'RESTORE') {
-      const plan = await loadFreshSchemaApplicationPlan();
-      const [version] = await reserved.unsafe("select current_setting('server_version_num')::int as value");
-      assert.equal(Math.floor(Number(version.value)/10000),17);
-      assertEmptyApplicationSchema(await reserved.unsafe(FRESH_SCHEMA_OCCUPANCY_QUERY));
+      const plan = await stage('SCHEMA_LOAD',() => loadFreshSchemaApplicationPlan());
+      await stage('EMPTY_CHECK',async () => {
+        const [version] = await reserved.unsafe("select current_setting('server_version_num')::int as value");
+        assert.equal(Math.floor(Number(version.value)/10000),17);
+        assertEmptyApplicationSchema(await reserved.unsafe(FRESH_SCHEMA_OCCUPANCY_QUERY));
+      });
       // pg_dump deliberately excludes cluster roles. Restore only the canonical
       // NOLOGIN compatibility names; no API user, fixture RPC or owner identity.
-      await wrap(reserved).unsafe('create role anon nologin; create role authenticated nologin; create role service_role nologin');
-      await archiveOperation.assertArchive();
+      await stage('COMPAT_ROLES',() => wrap(reserved).unsafe('create role anon nologin; create role authenticated nologin; create role service_role nologin'));
+      await stage('ARCHIVE_CHECK',() => archiveOperation.assertArchive());
       await check(reserved);
       await command('pg_restore',[...privateConnectionArgs,'--single-transaction','--exit-on-error','--no-owner',archiveOperation.archive],privateConnectionEnv);
       await check(reserved);
-      await archiveOperation.assertArchive();
+      await stage('ARCHIVE_CHECK',() => archiveOperation.assertArchive());
       archiveEvidence = await inspect(plan);
-      assertEmptySchemaRoundtrip(archiveOperation.sourceEvidence,archiveEvidence);
+      await runEmptySchemaStage('ROUNDTRIP_COMPARE',() => assertEmptySchemaRoundtrip(archiveOperation.sourceEvidence,archiveEvidence));
       receipt = {classification:'NATIVE_PG17',status:'CANONICAL_EMPTY_SCHEMA_RESTORE_CHECKS_PASSED',production_qualified:false};
     } else {
       const beforeApiProvision = archiveOperation ? async ({sql:ownedSql,plan}) => {
         const before = await inspect(plan);
-        await archiveOperation.assertArchive(false);
+        await stage('ARCHIVE_CHECK',() => archiveOperation.assertArchive(false));
         await check(reserved);
         await command('pg_dump',[...privateConnectionArgs,'--format=custom','--schema-only','--no-owner','--file='+archiveOperation.archive],privateConnectionEnv);
         await check(reserved);
-        const archive = await archiveOperation.assertArchive();
+        const archive = await stage('ARCHIVE_CHECK',() => archiveOperation.assertArchive());
         const tocText = await command('pg_restore',['--list',archiveOperation.archive]);
-        const toc = validateEmptySchemaToc(tocText,before);
-        await archiveOperation.assertArchive();
-        const after = await inspectCanonicalEmptySchema({sql:ownedSql,plan,verifyCatalogue:verifyFreshSchemaCatalogue});
-        assertEmptySchemaRoundtrip(before,after);
+        const toc = await stage('TOC_VALIDATE',() => validateEmptySchemaToc(tocText,before));
+        await stage('ARCHIVE_CHECK',() => archiveOperation.assertArchive());
+        const after = await stage('INSPECTION',() => inspectCanonicalEmptySchema({sql:ownedSql,plan,verifyCatalogue:verifyFreshSchemaCatalogue,phase}));
+        await runEmptySchemaStage('ROUNDTRIP_COMPARE',() => assertEmptySchemaRoundtrip(before,after));
         archiveEvidence = {...before,toc,archive_sha256:archive.sha256,archive_bytes:archive.bytes,
           source_manifest_sha256:plan.source_manifest_sha256,selection_sha256:plan.selection_sha256,
           upgrade_sources_sha256:plan.upgrade_sources_sha256,prerequisite_sha256:plan.prerequisite_sha256,
           post_upgrade_acl_sha256:plan.post_upgrade_acl_sha256};
       } : null;
       receipt=await (applicationMode==='ATOMIC_SLICE'?qualifyAtomicFreshSchema:qualifyDisposableFreshSchema)({
-        sql:wrap(reserved),engine:'NATIVE_PG17',beforeApiProvision});
+        sql:wrap(reserved),engine:'NATIVE_PG17',beforeApiProvision,stage});
     }
     let exerciseResult=null;
     if(exercise) {
@@ -378,7 +394,24 @@ async function runFreshSchemaNative({ bin, driver, base = os.tmpdir(), applicati
     }
     return {...receipt, native_identity_verified:true,...(exercise?{test_exercise:exerciseResult}:{} ),
       ...(archiveOperation?{empty_schema_archive:archiveEvidence,disposable_identity:expected}:{} )};
+  } catch (error) {
+    primaryFailure=error;
+    throw error;
   } finally {
+    if (archiveOperation) {
+      let failure=primaryFailure;
+      const cleanup=async (name,action) => {
+        try { await stage(name,action); return true; }
+        catch (error) { failure=combineEmptySchemaCleanupFailure(failure,error); return false; }
+      };
+      await cleanup('RELEASE_CONNECTIONS',() => Promise.all(reservedConnections.map(connection=>connection.release())));
+      await cleanup('END_CONNECTIONS',async () => { if(sql)await sql.end({timeout:5}); });
+      // A failed stop retains cluster data. Outer nonrecursive workspace cleanup
+      // will refuse, while both failures remain distinct from the original one.
+      const stopped=!started || await cleanup('STOP',() => command('pg_ctl',['-D',data,'-m','immediate','-w','stop']));
+      if(stopped)await cleanup('DIRECTORY_CLEANUP',() => fs.rm(directory,{recursive:true,force:true}));
+      if(failure)throw failure;
+    } else {
     try { await Promise.all(reservedConnections.map(connection=>connection.release())); }
     finally {
       try { if(sql)await sql.end({timeout:5}); }
@@ -388,6 +421,7 @@ async function runFreshSchemaNative({ bin, driver, base = os.tmpdir(), applicati
         if(started)await command('pg_ctl',['-D',data,'-m','immediate','-w','stop']);
         await fs.rm(directory,{recursive:true,force:true});
       }
+    }
     }
   }
 }
@@ -402,12 +436,14 @@ export async function roundtripCanonicalEmptySchemaNative(options = {}) {
   const {bin,driver} = options;
   if (!bin || !driver || !path.isAbsolute(bin) || !path.isAbsolute(driver))
     throw Error('empty_schema_disposable_tools_required');
-  const work = await fs.mkdtemp(path.join(await fs.realpath(os.tmpdir()),'canonical-empty-schema-'));
+  const work = await runEmptySchemaStage('WORKSPACE_CREATE',async () => fs.mkdtemp(path.join(await fs.realpath(os.tmpdir()),'canonical-empty-schema-')));
   const archive = path.join(work,'canonical-empty-schema.dump');
-  let fingerprint = null;
+  let fingerprint = null, primaryFailure = null;
   try {
-    await fs.writeFile(archive,Buffer.alloc(0),{flag:'wx',mode:0o600});
-    const original = await fs.lstat(archive,{bigint:true});
+    const original = await runEmptySchemaStage('ARCHIVE_CLAIM',async () => {
+      await fs.writeFile(archive,Buffer.alloc(0),{flag:'wx',mode:0o600});
+      return fs.lstat(archive,{bigint:true});
+    });
     const assertArchive = async (requireContent = true) => {
       const stat = await fs.lstat(archive,{bigint:true});
       if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1n || stat.dev !== original.dev || stat.ino !== original.ino
@@ -425,28 +461,35 @@ export async function roundtripCanonicalEmptySchemaNative(options = {}) {
     const tools = [];
     let toolVersion = null;
     for (const name of ['initdb','pg_ctl','pg_controldata','postgres','pg_dump','pg_restore']) {
+      await runEmptySchemaStage('PG_TOOL_PIN',async () => {
       const file = path.join(bin,name+(process.platform==='win32'?'.exe':''));
       const stat = await fs.lstat(file);
       if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 128 * 1024 * 1024)
         throw Error('empty_schema_pg17_binary_invalid');
-      const version = (await runEmptySchemaCommand(file,['--version'])).toString('utf8').trim();
+      const version = (await runEmptySchemaStage('PG_TOOL_VERSION',() => runEmptySchemaCommand(file,['--version']))).toString('utf8').trim();
       const match = /\(PostgreSQL\) (17\.\d+)(?:\s|$)/.exec(version);
       if (!match || toolVersion && match[1] !== toolVersion) throw Error('empty_schema_pg17_binary_version_mismatch');
       toolVersion = match[1];
       tools.push({name:path.basename(file),bytes:stat.size,sha256:emptySchemaSha256(await fs.readFile(file)),version:match[1]});
+      });
     }
-    const source = await runFreshSchemaNative({bin,driver,base:work,applicationMode:'ATOMIC_SLICE',
-      archiveOperation:{kind:'EXPORT',archive,assertArchive}});
-    const restored = await runFreshSchemaNative({bin,driver,base:work,applicationMode:'ATOMIC_SLICE',
-      archiveOperation:{kind:'RESTORE',archive,assertArchive,sourceIdentity:source.disposable_identity,sourceEvidence:source.empty_schema_archive}});
+    const source = await runEmptySchemaStage('SOURCE_FACTORY',() => runFreshSchemaNative({bin,driver,base:work,applicationMode:'ATOMIC_SLICE',
+      archiveOperation:{kind:'EXPORT',archive,assertArchive}}));
+    const restored = await runEmptySchemaStage('RESTORE_FACTORY',() => runFreshSchemaNative({bin,driver,base:work,applicationMode:'ATOMIC_SLICE',
+      archiveOperation:{kind:'RESTORE',archive,assertArchive,sourceIdentity:source.disposable_identity,sourceEvidence:source.empty_schema_archive}}));
+    await runEmptySchemaStage('ROUNDTRIP_COMPARE',() => {
     assertEmptySchemaRoundtrip(source.empty_schema_archive,restored.empty_schema_archive);
     const expectedVersion = 170000 + Number(toolVersion.split('.')[1]);
     assert.equal(source.empty_schema_archive.postgres_version_num,expectedVersion);
     assert.equal(restored.empty_schema_archive.postgres_version_num,expectedVersion);
     assert.equal(source.empty_schema_archive.toc.pg_dump_version,toolVersion);
-    await assertArchive();
-    const bytes = await fs.readFile(archive);
-    if (emptySchemaSha256(bytes) !== fingerprint.sha256) throw Error('empty_schema_archive_changed');
+    });
+    const bytes = await runEmptySchemaStage('ARCHIVE_READBACK',async () => {
+      await assertArchive();
+      const value = await fs.readFile(archive);
+      if (emptySchemaSha256(value) !== fingerprint.sha256) throw Error('empty_schema_archive_changed');
+      return value;
+    });
     const {functionIdentities,relationIdentities,...evidence} = source.empty_schema_archive;
     return {archive:bytes,evidence:{...evidence,classification:'NATIVE_PG17',
       status:'CANONICAL_EMPTY_SCHEMA_ROUNDTRIP_PASSED',production_qualified:false,runtime_ready:false,
@@ -458,11 +501,21 @@ export async function roundtripCanonicalEmptySchemaNative(options = {}) {
       binary_pin_scope:'LISTED_PG_EXECUTABLES_ONLY_NOT_A_RUNTIME_BUNDLE',
       restored_catalogue_sha256:restored.empty_schema_archive.catalogue_sha256,
       restored_acl_sha256:restored.empty_schema_archive.acl_sha256}};
+  } catch (error) {
+    primaryFailure=error;
+    throw error;
   } finally {
     // Factories may deliberately retain their directory if stopping PostgreSQL
     // failed. Never recursively remove that retained server data. In that case
     // rmdir fails and no successful result/artifact can escape this function.
-    await fs.rm(archive,{force:true});
-    await fs.rmdir(work);
+    let failure=primaryFailure;
+    for (const [stage,action] of [
+      ['ARCHIVE_CLEANUP',() => fs.rm(archive,{force:true})],
+      ['WORKSPACE_CLEANUP',() => fs.rmdir(work)],
+    ]) {
+      try { await runEmptySchemaStage(stage,action); }
+      catch (error) { failure=combineEmptySchemaCleanupFailure(failure,error); }
+    }
+    if(failure)throw failure;
   }
 }
