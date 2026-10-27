@@ -13,6 +13,8 @@ app.setPath('userData',smokeProfile);
 async function run(){
   await app.whenReady();
   const {EducationStore}=await import('../src/education-core.mjs');
+  const {LiveLessonStore}=await import('../src/education-live-core.mjs');
+  const liveStore=new LiveLessonStore({load:async()=>null,save:async()=>{}});await liveStore.init();
   const {buildEducationHandoff}=await import('../src/education-handoff.mjs');
   const {ALLOWED_RESOURCE_URLS}=await import('../src/education-lesson-depth.mjs');
   const {pathToFileURL}=await import('node:url');
@@ -32,6 +34,9 @@ async function run(){
   }
   const wrap=(channel,handler)=>ipcMain.handle(channel,(event,...args)=>{trusted(event);return handler(...args);});
   wrap('education:snapshot',()=>store.snapshot());
+  wrap('education:live-status',()=>({ready:false,provider:'test-disconnected',connection_verified:false}));
+  wrap('education:live-topic',id=>liveStore.topic(id));
+  wrap('education:live-send',()=>{throw Error('live_not_connected');});
   const handoff=(id,opts={})=>buildEducationHandoff(id,store.snapshot().study_contexts,
     store.snapshot().notebook_entries,opts);
   wrap('education:preview-handoff',(id,opts)=>handoff(id,opts));

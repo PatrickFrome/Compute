@@ -41,6 +41,14 @@ textarea{background:#101a28;color:#e5edf6;border:1px solid #41546c;width:100%;pa
 #notebook-list .entry p{white-space:pre-wrap;overflow-wrap:anywhere;color:#dbe7f2}
 #notebook-title,#notebook-source{width:100%;background:#101a28;color:#e5edf6;border:1px solid #41546c;padding:8px;border-radius:6px}
 #notebook-body{min-height:112px;max-height:260px}
+#live-tutor{border:1px solid #3a716b;border-radius:10px;padding:12px;margin:12px 0}
+#live-messages{max-height:300px;overflow:auto;display:grid;gap:10px;margin:10px 0}
+.live-turn{padding:8px;background:#1c2b3c;border-radius:8px}.live-turn.user{border-left:2px solid #60d4c0}
+.live-turn p{color:#e5edf6;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5;margin:6px 0}
+#live-input{min-height:95px}#live-model{width:100%;padding:8px;background:#101a28;color:#e5edf6;border:1px solid #41546c}
+#live-notice{font-size:12px;line-height:1.5;white-space:pre-wrap;color:#a1dcd3}
+#live-revisions{font-size:11px;line-height:1.6;max-height:120px;overflow:auto}
+#live-topic{display:block;margin-top:8px}#live-version,#live-provider{display:block;font-size:11px;line-height:1.5}
 </style></head>
 <body><div class="shell">
 <aside class="left" aria-label="Направления обучения">
@@ -61,7 +69,8 @@ textarea{background:#101a28;color:#e5edf6;border:1px solid #41546c;width:100%;pa
     <small id="material-status">Локальный учебный материал · без подключения GPT</small>
     <h1 id="material-title">Выбери учебный чат в левой панели</h1>
     <div class="material-actions">
-      <button id="library-external" class="primary">Продолжить с GPT в обычном браузере</button>
+      <button id="library-live" class="primary">Обсудить и переработать урок с GPT</button>
+      <button id="library-external">Запасной вариант: GPT в браузере</button>
       <button id="library-discuss">Встроенный GPT (эксперимент)</button>
       <button id="library-copy">Скопировать подробный урок для GPT</button>
     </div>
@@ -81,6 +90,24 @@ textarea{background:#101a28;color:#e5edf6;border:1px solid #41546c;width:100%;pa
 </main>
 <section class="right" aria-label="Учебный контекст">
   <h1>Моё обучение</h1><small id="current">Выбери дисциплину слева</small>
+  <section id="live-tutor" aria-label="GPT текущей темы">
+    <h2>GPT внутри урока</h2><strong id="live-topic">Выбери тему</strong>
+    <small id="live-provider">API не подключён · платных запросов нет</small>
+    <small id="live-version"></small>
+    <div id="live-messages" aria-live="polite"></div>
+    <textarea id="live-input" maxlength="4000" placeholder="Объясни проще и переработай раздел с примером…" aria-label="Сообщение GPT текущей темы"></textarea>
+    <label><input type="checkbox" id="live-edit" checked> Разрешить GPT изменять страницу этой темы</label>
+    <div class="toolbar"><button id="live-send" class="primary" disabled>Отправить</button><button id="live-undo" disabled>Отменить правку</button></div>
+    <div id="live-notice" role="status"></div>
+    <details><summary>История изменений страницы</summary><div id="live-revisions"></div></details>
+    <details><summary>Подключение OpenAI API</summary>
+      <p><small>API оплачивается отдельно. При отправке передаются текущий урок и последние сообщения этой темы. Тетрадь включается только по галочке ниже. Выбор темы не запускает генерацию.</small></p>
+      <input id="live-model" maxlength="120" placeholder="ID доступной модели API" aria-label="Модель OpenAI API">
+      <label><input id="live-billing" type="checkbox"> Понимаю отдельную оплату API</label>
+      <button id="live-configure">Импортировать ключ через окно ОС</button>
+      <button id="live-disconnect">Отключить API</button>
+    </details>
+  </section>
   <button id="browser-from-sidebar" class="primary">Открыть урок с GPT в обычном браузере</button>
   <small>Если встроенная вкладка сообщает об ошибке JavaScript, эта кнопка продолжит обучение во внешнем браузере. Сообщение не отправляется автоматически.</small>
   <button id="check-embedded-gpt">Диагностика встроенного GPT</button>
@@ -106,7 +133,7 @@ textarea{background:#101a28;color:#e5edf6;border:1px solid #41546c;width:100%;pa
     <div class="toolbar"><button id="notebook-save" class="primary">Сохранить запись</button><button id="notebook-cancel">Отмена</button></div>
     <div id="notebook-list"></div>
     <label><input type="checkbox" id="notebook-include-gpt"> Включить заметки в контекст GPT при копировании или открытии</label>
-    <p class="caption">Записи хранятся локально. Передача в GPT — только по нажатию кнопки; обновлённый контекст нужно отправлять вручную.</p>
+    <p class="caption">Записи хранятся локально. При включённой галочке актуальные записи этой темы автоматически попадут в следующий прямой запрос GPT. Ответ модели может изменить урок, но не эту тетрадь.</p>
   </div>
   <h2>Старые конспекты по модулям</h2>
   <textarea id="note-text" maxlength="4000" placeholder="Запиши своими словами, что понял, и какие вопросы остались…"></textarea>
@@ -121,6 +148,7 @@ textarea{background:#101a28;color:#e5edf6;border:1px solid #41546c;width:100%;pa
   <h2>Что подтверждено</h2>
   <div class="card"><small>Проверены ответы на локальные задания и даты повторения. Конспекты и лабораторные записи — самоотчёты, не подтверждение практической квалификации. GPT может помогать разбирать ошибки, но не выставляет официальный допуск.</small></div>
 </section></div>
+<script src="education-live-ui.js"></script>
 <script>
 'use strict';
 const $=id=>document.getElementById(id);
@@ -151,7 +179,7 @@ async function action(fn){
   if(busy)return;busy=true;
   for(const b of document.querySelectorAll('button'))b.disabled=true;
   try{await fn();await load();}catch(e){status('Ошибка: '+String(e?.message||e));}
-  finally{busy=false;for(const b of document.querySelectorAll('button'))b.disabled=false;}
+  finally{busy=false;for(const b of document.querySelectorAll('button'))b.disabled=false;liveUI?.repaint();}
 }
 function topSubject(folderId){
   let f=state.folders.find(x=>x.id===folderId),guard=0;
@@ -253,7 +281,8 @@ function render(){
   state.folders.filter(f=>f.parent_id===null).sort((a,b)=>a.order-b.order).forEach(f=>folderRow(f));
   const currentMaterial=state.materials.find(m=>m.id===selectedMaterial);
   if(currentMaterial&&materialMode){
-    $('material-status').textContent='Локальный учебный чат · '+(currentMaterial.position)+' из 8 · предмет '+currentMaterial.subject;
+    $('material-status').textContent='Тема '+currentMaterial.position+' из 8 · предмет '+currentMaterial.subject+
+      (currentMaterial.dynamic?.version?' · редакция GPT v'+currentMaterial.dynamic.version+' — не проверена независимо':' · исходный материал');
     $('material-title').textContent=currentMaterial.title;
     $('material-theory').textContent=currentMaterial.theory;
     $('material-example').textContent=currentMaterial.example;
@@ -357,6 +386,7 @@ function render(){
     labList.append(elm('small',lab.title+' · '+lab.kind+' · НЕ ПРОВЕРЕНО: '+lab.observation));
   }
   renderNotebook();
+  liveUI?.select(activeMaterialId());
   if(renderFeedback?.id===question?.id)$('feedback').textContent=renderFeedback.text;
 }
 function handoffOptions(){return {includeNotebook:$('notebook-include-gpt').checked};}
@@ -426,6 +456,10 @@ async function launchInBrowser(){
     if(r.opened&&r.copied)status('ChatGPT открыт в обычном браузере. Учебный запрос скопирован — вставь Ctrl+V и отправь вручную.');}
   catch(e){status('Не удалось открыть браузер: '+e.message+'. Можно скопировать урок отдельной кнопкой.');}
 }
+$('library-live').onclick=()=>{
+  document.getElementById('live-tutor').scrollIntoView({block:'start'});
+  document.getElementById('live-input').focus();
+};
 $('library-external').onclick=launchInBrowser;
 $('browser-from-sidebar').onclick=launchInBrowser;
 $('check-embedded-gpt').onclick=async()=>{
@@ -496,6 +530,8 @@ $('new-chat').onclick=async()=>{
     await window.devfleet.select(tab_id);selectedChatTabId=tab_id;materialMode=false;
   });
 };
+const liveUI=window.mountEducationLive?.({api:window.devfleet.education,getTopicId:activeMaterialId,
+  refresh:load,includeNotebook:()=>!!$('notebook-include-gpt').checked});
 window.devfleet.onExternalAuthRequired?.(payload=>{
   status('Google не разрешает вход во встроенном браузере. ChatGPT открыт в обычном браузере. Продолжай авторизацию там; cookies между браузерами не переносятся.');
   $('embedded-gpt-health').textContent='Встроенный Google OAuth не поддерживается. Используй обычный браузер.';

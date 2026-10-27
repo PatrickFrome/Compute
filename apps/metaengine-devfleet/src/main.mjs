@@ -11,6 +11,7 @@ import { LiveUiSlots } from './live-ui-slots.mjs';
 import { LiveOperatorContracts } from './live-operator-contracts.mjs';
 import { DevFleetSourceWorkspace } from './source-workspace-patch.mjs';
 import { EducationStore } from './education-core.mjs';
+import { installLiveEducation } from './education-live-electron.mjs';
 import { buildEducationHandoff } from './education-handoff.mjs';
 import { ALLOWED_RESOURCE_URLS } from './education-lesson-depth.mjs';
 
@@ -39,7 +40,7 @@ app.commandLine.appendSwitch('disable-features','Translate');
 app.commandLine.appendSwitch('force-renderer-accessibility');
 let mainWindow, surface, operator, httpServer, rpcToken, rpcManifest;
 let liveUiSlots, liveContracts, sourceWorkspace, devConsoleWindow, developerToken, developerManifest;
-let educationStore;
+let educationStore,liveEducation;
 let shuttingDown = false;
 function safeError(error) {
   const msg = String(error?.message || 'operation_refused');
@@ -383,7 +384,11 @@ async function start() {
     };
     educationStore=new EducationStore(educationDisk);
     await educationStore.init();
-    ipcMain.handle('education:snapshot',async e=>{educationSender(e);return educationStore.snapshot();});
+    liveEducation=await installLiveEducation({ipcMain,authorize:educationSender,education:educationStore,
+      dataDir,writeAtomic:atomicPrivateWrite,window:()=>mainWindow});
+    ipcMain.handle('education:snapshot',async e=>{educationSender(e);return {
+      ...educationStore.snapshot(),materials:liveEducation.store.materials()
+    };});
     ipcMain.handle('education:show-material',async e=>{educationSender(e);return surface.showLibrary();});
     ipcMain.handle('education:chat-health',async e=>{educationSender(e);return surface.health();});
     const handoff=(id,options={})=>{
@@ -392,7 +397,7 @@ async function start() {
       return buildEducationHandoff(id,snapshot.study_contexts,snapshot.notebook_entries,{
         includeNotebook:options?.includeNotebook===true,
         linkedNotebookKey:linked?.tab_id??null
-      });
+      },liveEducation.store.material(id));
     };
     ipcMain.handle('education:preview-handoff',async(e,id,options)=>{educationSender(e);return handoff(id,options);});
     ipcMain.handle('education:copy-handoff',async(e,id,options)=>{
