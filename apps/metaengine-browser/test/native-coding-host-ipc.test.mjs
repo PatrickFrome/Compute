@@ -47,8 +47,12 @@ const operations={
  READ_FINISH_CHECKPOINT:async value=>({...value,state:'PENDING_COMMIT'}),
  close:()=>{},
 };
-if(['reconciliation-mounted','slow-reconciliation','exit-reconciliation'].includes(mode))operations.RECONCILE_FINISH_CHECKPOINT=async value=>{
+if(['reconciliation-mounted','slow-reconciliation','held-reconciliation','exit-reconciliation'].includes(mode))operations.RECONCILE_FINISH_CHECKPOINT=async value=>{
  ++calls;if(mode==='exit-reconciliation')process.exit(19);if(mode==='slow-reconciliation')await delay(180);
+ if(mode==='held-reconciliation')await new Promise(resolve=>{
+  const release=message=>{if(message?.schema==='test.native-coding.release-reconciliation'){process.off('message',release);resolve();}};
+  process.on('message',release);process.send({schema:'test.native-coding.reconciliation-started'});
+ });
  return {...value,state:'COMMITTED_NO_SUCCESSOR',automatic_retry_allowed:false};
 };
 if(mode==='seed-mounted'||mode==='slow-seed')for(const action of ['SEED_GOAL','READ_SEED','LIST_SEEDS'])operations[action]=async request=>{
@@ -71,6 +75,7 @@ const server=createNativeCodingHostIpcServer({instanceId:process.env.METAENGINE_
  maxInflight:Number(process.env.METAENGINE_IPC_TEST_SERVER_MAX),timeoutMs:Number(process.env.METAENGINE_IPC_TEST_SERVER_TIMEOUT),
  onProtocolError:reason=>protocolErrors.push(reason)});
 process.on('message',(message,handle)=>{
+ if(message?.schema==='test.native-coding.release-reconciliation')return;
  if(message?.schema==='test.native-coding.stats'){process.send({schema:'test.native-coding.stats',calls,protocolErrors,snapshot:server.snapshot()});return;}
  if(message?.schema==='test.native-coding.handle'){server.handleMessage(message.frame,{});return;}
  server.handleMessage(message,handle);
@@ -173,11 +178,19 @@ test('lost reconciliation ACK stays UNKNOWN after timeout without retransmission
 });
 
 test('closing a reconciliation channel preserves the dispatched write ambiguity',async t=>{
-  const {client,stats}=await setup(t,'slow-reconciliation');
+  const {child,client,stats}=await setup(t,'held-reconciliation');
+  const started=new Promise((resolve,reject)=>{
+    const timer=setTimeout(()=>{child.off('message',listener);reject(Error('test_reconciliation_start_missing'));},1000);
+    const listener=message=>{if(message?.schema==='test.native-coding.reconciliation-started'){
+      clearTimeout(timer);child.off('message',listener);resolve();
+    }};
+    child.on('message',listener);
+  });
   const pending=client.reconcileFinishCheckpoint({project_id:id(),checkpoint_sha256:'a'.repeat(64)});
   const rejected=assert.rejects(pending,e=>e.reason==='CLIENT_CLOSED'&&e.effect_outcome==='UNKNOWN'
     &&e.readback_required===true&&e.automatic_retry_allowed===false);
-  assert.equal((await stats()).calls,1);client.close();await rejected;
+  await started;assert.equal((await stats()).calls,1);client.close();await rejected;
+  child.send({schema:'test.native-coding.release-reconciliation'});
   await sleep(210);assert.equal((await stats()).calls,1);assert.equal(client.snapshot().inflight,0);
 });
 

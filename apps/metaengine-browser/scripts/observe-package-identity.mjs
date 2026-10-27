@@ -332,10 +332,22 @@ export function checkoutFacts(root, expectedHead) {
     manifest_package_version: pkg.version };
 }
 
+export function observationCounts(queries = []) {
+  const bounded = value => Number.isSafeInteger(value) && value >= 0 && value <= 100_000_000 ? value : null;
+  const rows = Array.isArray(queries) ? queries.slice(0, POLICY.maxRequests) : [];
+  const catalog = rows.filter(row => typeof row?.url === 'string'
+    && row.url.startsWith(API + PREFIX + `artifacts?per_page=${POLICY.catalogPageSize}&page=`));
+  const first = catalog[0], last = catalog.at(-1), request = rows.at(-1);
+  return { requests: rows.length, catalog_pages_read: catalog.length,
+    first_total: bounded(first?.response?.total_count), last_total: bounded(last?.response?.total_count),
+    last_page_items: Array.isArray(last?.response?.artifacts) ? bounded(last.response.artifacts.length) : null,
+    last_http_status: bounded(request?.status) };
+}
+
 export function writeReports(directory, evidence, plan, code, maxBytes = POLICY.maxEvidenceBytes) {
   let status = { schema: 'metaengine.browser.package-identity-observation-status.v1',
     disposition: code ? 'HOLD' : 'PLAN_OBSERVED_NOT_RESERVED', code: code || null,
-    ...FALSE_AUTHORITY };
+    ...FALSE_AUTHORITY, observation_counts: observationCounts(evidence.queries) };
   evidence.status = status;
   let files = { 'status.json': status, 'observation.json': evidence, ...(code ? {} : { 'plan.json': plan }) };
   let bytes = Object.fromEntries(Object.entries(files).map(([name, value]) => [name, JSON.stringify(value, null, 2) + '\n']));

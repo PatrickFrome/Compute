@@ -7,7 +7,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   POLICY, contextFromEnv, createGitHubReader, observeIdentity, readCompleteCatalog,
-  runPlannerCli, sanitizeArtifact, sanitizeRun, validatePlan, verifyObserverRun, writeReports,
+  runPlannerCli, sanitizeArtifact, sanitizeRun, validatePlan, verifyObserverRun, writeReports, observationCounts,
 } from '../scripts/observe-package-identity.mjs';
 
 // All contexts and responses below are isolated test fixtures. Production only
@@ -17,6 +17,18 @@ const CONTEXT = { repository: POLICY.repository, sourceHead: SOURCE, ref: POLICY
 const BASE = `/repos/${POLICY.repository}/actions/`;
 const RESERVATION = 'metaengine-browser-package-version-';
 const CANDIDATE = 'metaengine-browser-windows-candidate-';
+
+test('public observation diagnostics contain bounded counts only, never response strings', () => {
+  const url='https://api.github.com'+BASE+'artifacts?per_page=30&page=';
+  const counts=observationCounts([
+    {url:url+'1',status:200,response:{total_count:18000,artifacts:[],secret:'DO_NOT_PRINT'}},
+    {url:url+'2',status:200,response:{total_count:18001,artifacts:[{}]}},
+  ]);
+  assert.deepEqual(counts,{requests:2,catalog_pages_read:2,first_total:18000,last_total:18001,last_page_items:1,last_http_status:200});
+  const invalid=observationCounts([{url:url+'1',status:'DO_NOT_PRINT',response:{total_count:'DO_NOT_PRINT'}}]);
+  assert.equal(invalid.last_http_status,null);assert.equal(invalid.first_total,null);
+  assert.doesNotMatch(JSON.stringify([counts,invalid]),/DO_NOT_PRINT|https|secret/);
+});
 const repo = { id: POLICY.repositoryId, full_name: POLICY.repository };
 const ENV = {
   GITHUB_ACTIONS: 'true', RUNNER_ENVIRONMENT: 'github-hosted', GITHUB_REPOSITORY: POLICY.repository,

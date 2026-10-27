@@ -636,7 +636,7 @@
     "apps/metaengine-browser/test/native-coding-execution-pool.test.mjs": "26bb53384ff56dc53a20f6c3685fda097e9d8682",
     "apps/metaengine-browser/test/native-coding-fixture-temporary.test.mjs": "7061f3f051789cfdc321065440172aa2ab256357",
     "apps/metaengine-browser/test/native-coding-git-proof.test.mjs": "1753d1ff09470438d4c3d257e730a22c2e62bfad",
-    "apps/metaengine-browser/test/native-coding-host-ipc.test.mjs": "4c0096344c3f4e806d7abaf56fe3a61b43d034ba",
+    "apps/metaengine-browser/test/native-coding-host-ipc.test.mjs": "bb29341553e49d04b697815fa8038005f570bb16",
     "apps/metaengine-browser/test/native-coding-host-issuer.test.mjs": "471594b6a67e16fe133434e8e909265697410410",
     "apps/metaengine-browser/test/native-coding-host-observers-asar.test.mjs": "25729e46291bcf2fdd34985060a8f3fdc41acf92",
     "apps/metaengine-browser/test/native-coding-host-observers.test.mjs": "821fdb4d80457cdc7fdb5fc8fecbf9f4c170e8f0",
@@ -1028,8 +1028,8 @@
     "infra/client-state-runtime/export-reviewed-empty-schema.mjs": "a2057ba55f096006b945e4405528e9c9bae79e28",
     ".github/workflows/client-reviewed-empty-schema.yml": "fc6118a2662d72cf1d6cdb366be92d4a9d9c41dd",
     ".github/workflows/browser-package-identity-observation.yml": "2deb61cb08870505f0ad15bd31790072f28cce08",
-    "apps/metaengine-browser/scripts/observe-package-identity.mjs": "2a877af87f03a399d3168197cb66117a76cc4e26",
-    "apps/metaengine-browser/test/package-identity-observation.test.mjs": "804634b64ca14de97c69d488d458d8fb9d9cb828"
+    "apps/metaengine-browser/scripts/observe-package-identity.mjs": "4ece3ed5791d32e13feef09976af5e7db11219f0",
+    "apps/metaengine-browser/test/package-identity-observation.test.mjs": "1fc6c19cf0fcaf55c10265cbbd021ee349cdaab3"
   },
   "parent_checks_not_transitive": true,
   "proof_levels": {
