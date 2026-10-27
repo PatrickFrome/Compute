@@ -1,0 +1,13 @@
+{
+  "name": "devfleet-education-web",
+  "version": "0.1.0-e11",
+  "private": true,
+  "type": "module",
+  "description": "Standalone local-first technical academy; no Electron or API credentials",
+  "scripts": {
+    "start": "node scripts/serve.mjs",
+    "build": "node scripts/build.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {"node": ">=22"}
+}

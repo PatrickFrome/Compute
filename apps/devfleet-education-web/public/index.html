@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ru"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#101516"><meta name="description" content="Личная техническая академия: 120 учебных тем, тетради и работа с ChatGPT. Без установки приложения.">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>DevFleet Education — техническая академия</title>
+<link rel="icon" type="image/svg+xml" href="/assets/logo.svg"><link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/style.css">
+</head><body>
+<a class="skip-link" href="#lesson-title">Перейти к уроку</a>
+<div id="app" class="app">
+<aside class="sidebar" id="sidebar" aria-label="Учебная программа">
+ <a class="brand" href="#/material-03-01"><img src="/assets/logo.svg" width="38" height="38" alt=""><span>DevFleet <b>Education</b><small>ЛИЧНАЯ ТЕХНИЧЕСКАЯ АКАДЕМИЯ</small></span></a>
+ <label class="search"><span data-icon="search"></span><input id="topic-search" type="search" placeholder="Найти тему…" aria-label="Найти тему"><kbd>/</kbd></label>
+ <div class="nav-caption"><span>ПРОГРАММА ОБУЧЕНИЯ</span><span id="subject-count">15</span></div>
+ <nav id="course-tree" aria-label="Направления и темы"></nav>
+ <div class="sidebar-bottom"><div class="study-card"><span data-icon="book"></span><div><b id="read-count">0 / 120</b><small>тем отмечено прочитанными</small></div><div class="progress-track"><span id="read-bar"></span></div></div>
+ <button id="data-menu" class="data-button"><span data-icon="database"></span><span>Мои данные</span><span class="local-dot"></span></button><small class="local-caption">Сохраняются в этом браузере</small></div>
+</aside>
+<main class="workspace" id="workspace">
+ <header class="topbar"><button id="menu-toggle" class="icon-button mobile-menu" aria-label="Открыть программу" aria-expanded="false"><span data-icon="menu"></span></button><div class="breadcrumb"><span>Учебный кабинет</span><span>/</span><b id="subject-name">Электротехника</b></div><div class="topbar-actions"><span class="web-badge">WEB <span>·</span> E11</span><button id="open-notebook" class="quiet"><span data-icon="notebook"></span><span>Тетрадь</span><span id="note-badge" class="count-badge" hidden>0</span></button><button id="open-settings" class="icon-button" aria-label="Настройки"><span data-icon="settings"></span></button></div></header>
+ <section class="lesson-reader" id="lesson-reader" aria-label="Материал урока"><div class="lesson-content">
+   <div class="lesson-meta"><span id="lesson-level">ОСНОВЫ · УРОК 01</span><span class="lesson-type"><i></i> Учебный материал</span></div>
+   <div class="title-row"><h1 id="lesson-title" tabindex="-1">Загрузка урока…</h1><button id="mark-read" class="icon-button" aria-label="Отметить прочитанным" aria-pressed="false"><span data-icon="check"></span></button></div>
+   <p id="lesson-goal" class="lesson-goal"></p>
+   <div class="lesson-toolbar"><button id="ask-selection" class="quiet"><span data-icon="sparkles"></span>Обсудить выделенное</button><button id="edit-lesson" class="quiet"><span data-icon="edit"></span>Редактировать</button><button id="add-image" class="quiet"><span data-icon="image"></span>Изображение</button><button id="undo-lesson" class="quiet" disabled><span data-icon="undo"></span>Откат</button></div>
+   <div id="revision-status" class="revision-status" hidden></div>
+   <div id="lesson-body"></div>
+   <section id="lesson-modules" aria-label="Модули урока"></section>
+   <section id="lesson-images" aria-label="Иллюстрации урока"></section>
+   <div class="lesson-end"><span>Понимание важнее количества пройденных тем.</span><button id="next-lesson" class="quiet">Следующая тема <span data-icon="arrow-right"></span></button></div>
+ </div></section>
+ <div id="splitter" class="splitter" role="separator" tabindex="0" aria-label="Изменить высоту рабочей области" aria-orientation="horizontal" aria-valuemin="24" aria-valuemax="65" aria-valuenow="38"><span></span></div>
+ <section class="chat-panel" id="chat-panel" aria-label="Работа с ChatGPT по этой теме">
+  <header class="chat-header"><div class="tutor-mark" data-icon="sparkles"></div><div class="chat-heading"><strong>Работа с ChatGPT</strong><span id="chat-topic"></span></div><div class="chat-actions"><span class="no-api">БЕЗ API</span><button id="bind-chat" class="quiet"><span data-icon="link"></span><span>Привязать беседу</span></button><button id="apply-reply" class="icon-button" aria-label="Применить структурированную правку"><span data-icon="download"></span></button></div></header>
+  <div class="chat-context" id="chat-context"><div class="context-icon" data-icon="external"></div><div><b>Продолжай урок в своём ChatGPT</b><p>Материал и вопрос готовятся здесь. Обычная беседа откроется в новой вкладке; сайт не читает её ответы.</p></div><button id="preview-context" class="quiet">Что передаётся <span data-icon="arrow-right"></span></button></div>
+  <div class="composer"><div class="suggestions"><button data-prompt="Объясни эту тему проще, через физический смысл и понятную аналогию.">Объясни проще</button><button data-prompt="Разбери дополнительный практический пример по этому уроку пошагово.">Разбери пример</button><button data-prompt="Проверь моё понимание: задавай вопросы по одному, не показывая решение заранее.">Проверь меня</button><button id="request-patch">Подготовь правку урока</button></div>
+  <div class="compose-row"><textarea id="question" rows="2" maxlength="4000" placeholder="Что осталось непонятным? Задай вопрос или попроси улучшить урок…" aria-label="Вопрос по выбранному уроку"></textarea><button id="open-chatgpt" class="primary">Скопировать и открыть <span data-icon="external"></span></button></div>
+  <div class="composer-bottom"><label><input id="share-notes" type="checkbox">Включить тетрадь этой темы</label><span id="draft-status">Черновик хранится локально</span><span class="shortcut">Ctrl + Enter</span></div>
+  </div>
+ </section>
+</main>
+</div>
+<div id="drawer-backdrop" class="backdrop" hidden></div>
+<aside id="drawer" class="drawer" hidden role="dialog" aria-modal="true" aria-label="Тетрадь и настройки"><header class="drawer-header"><h2 id="drawer-title">Тетрадь</h2><button id="close-drawer" class="icon-button" aria-label="Закрыть панель"><span data-icon="close"></span></button></header><div class="drawer-tabs"><button data-tab="notebook" aria-selected="true">Тетрадь</button><button data-tab="progress" aria-selected="false">Прогресс</button><button data-tab="settings" aria-selected="false">Настройки</button></div>
+ <section id="panel-notebook" class="drawer-panel"><div class="eyebrow">ТОЛЬКО ЭТА ТЕМА</div><h3 id="notebook-topic"></h3><p class="muted">Твои формулы, выводы и вопросы. Чужие темы не видят эти записи.</p><form id="note-form"><label>Заголовок<input id="note-title" maxlength="100" placeholder="Например, главное про напряжение"></label><label>Конспект<textarea id="note-body" rows="7" maxlength="5000" placeholder="Объясни своими словами, что понял…" required></textarea></label><div class="form-actions"><button type="submit" class="primary" id="save-note">Сохранить запись</button><button type="button" id="cancel-note" class="quiet" hidden>Отмена</button></div></form><div id="notes-list"></div></section>
+ <section id="panel-progress" class="drawer-panel" hidden><div class="eyebrow">ТВОЁ ОБУЧЕНИЕ</div><h3>Небольшие шаги. Настоящее понимание.</h3><div id="progress-summary"></div><p class="muted">Отметка «прочитано» — не подтверждение навыка. Самостоятельные задачи и работа с наставником остаются необходимыми.</p><div id="recent-lessons"></div></section>
+ <section id="panel-settings" class="drawer-panel" hidden><div class="setting-card"><h3>Данные остаются у тебя</h3><p>Конспекты, черновики, изображения и правки хранятся в IndexedDB этого браузера. Учётной записи сайта и облачной синхронизации пока нет.</p><button id="export-data" class="secondary"><span data-icon="download"></span>Скачать резервную копию</button><button id="import-data" class="secondary"><span data-icon="upload"></span>Импортировать данные</button><p class="small">Поддерживается журнал education-state.json из настольной версии. Ключи API и cookies не импортируются.</p><button id="persist-storage" class="quiet">Запросить устойчивое хранение</button></div><div class="setting-card"><h3>Обычный ChatGPT</h3><p>Для каждого урока можно сохранить ссылку на свою беседу. Модель выбирается в самом ChatGPT; сайт не подтверждает GPT‑6 Pro и не использует API.</p><p>Автоматической синхронизации ответов нет. Структурированную правку можно вставить вручную, проверить и применить с возможностью отката.</p></div><div class="setting-card"><h3>О сайте</h3><p>DevFleet Education · E11 Web<br>15 направлений · 120 тем<br>Материал перенесён из учебной версии приложения, а не заново аттестован.</p><button id="install-app" class="quiet" hidden>Установить как веб-приложение</button><p id="storage-status" class="small"></p></div></section>
+</aside>
+<dialog id="modal"><div class="modal-head"><h2 id="modal-title"></h2><button id="close-modal" class="icon-button" aria-label="Закрыть окно"><span data-icon="close"></span></button></div><div id="modal-body"></div></dialog>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+<input type="file" id="data-file" accept="application/json,.json" hidden><input type="file" id="image-file" accept="image/png,image/jpeg" hidden>
+<noscript><div class="fatal">Для работы с тетрадями и уроками включи JavaScript в браузере.</div></noscript>
+<script type="module" src="/src/app.mjs"></script>
+</body></html>
