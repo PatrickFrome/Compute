@@ -164,7 +164,7 @@ The real-runtime Windows failure is not reclassified by the Linux success.
 | Original P1 suspension test, retained | `b24642959c9539a489838057bc4b85e32f945e79caab2ea68d937bbe089960a5` |
 | Suspension test with leaf-import correction | `1ab434433d30476f7088494f8c328786d782e0e2290848d6a88368315be4625a` |
 | Isolated Linux 73-case TAP | `6b418c0f6d6ad217dafc800badec2da35050cdc5a16ad535f702b63ac572f80b` |
-| Revised Windows source qualification workflow | `1ed568e6e7d72c04db4cd9b207cd278a53ca8690652d45a1dc4efe6fb707f4f7` |
+| Initial Windows profile-isolation workflow integrated at 0c82 | `1ed568e6e7d72c04db4cd9b207cd278a53ca8690652d45a1dc4efe6fb707f4f7` |
 
 ## Required next step
 
@@ -174,3 +174,15 @@ actual final source SHA. Keep canonical empty-schema, Windows ACL, installed
 autonomy, migration and release acceptance separate. This correction does not
 authorize another runtime-touching test on the user's PC, installation,
 database rollback, version reuse, merge or package promotion.
+## Subsequent trigger-only revision
+
+The workflow hash `1ed568e6e7d72c04db4cd9b207cd278a53ca8690652d45a1dc4efe6fb707f4f7`
+above identifies the initial profile-isolation revision integrated at
+`0c82f4a6a60e62505ee880e1b7e4c529999deb53`. A subsequent trigger-only
+revision removes `push.paths` so dependency changes and the final package and
+manifest identity commit each schedule qualification for their own source HEAD.
+The two coordinator branches, PR path filters, isolation guards, and test logic
+are unchanged. That trigger-only workflow has SHA-256
+`2f79d871d72e80a97b9ca7f2ed6b56b487f345287008e2920e7eb2992d97766a`.
+This scheduling change supplies no native PASS and does not close the incident's
+undetermined database effects.
