@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 
 <html lang="ru"><head><meta charset="utf-8"/><meta content="width=device-width,initial-scale=1" name="viewport"/>
-<title>DevFleet Education — E9</title>
+<title>DevFleet Education — ChatGPT</title>
 <link href="education-workspace.css" rel="stylesheet"/></head>
 <body><div class="shell">
 <aside aria-label="Направления обучения" class="left">
@@ -94,6 +94,7 @@
 <script src="education-modules-ui.js"></script>
 <script src="education-workspace.js"></script>
 <script src="education-live-ui.js"></script>
+<script src="education-webchat-ui.js"></script>
 <script>
 'use strict';
 const $=id=>document.getElementById(id);
@@ -118,7 +119,7 @@ async function load(){
   [state,fleet]=await Promise.all([window.devfleet.education.snapshot(),window.devfleet.list()]);
   if(!state.folders.some(f=>f.id===selected))selected=state.folders[0]?.id||null;
   render();
-  if(materialMode)await window.devfleet.education.showMaterial();
+  if(materialMode&&document.body.dataset.webEmbedded!=='true')await window.devfleet.education.showMaterial();
   status('Дисциплин: '+state.folders.length+' · подготовленных учебных чатов: '+state.materials.length+' · активных GPT-вкладок: '+state.chats.length);
 }
 async function action(fn){

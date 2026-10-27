@@ -68,7 +68,7 @@ window.mountEducationWorkspace=function({api,getMaterial,refresh,notify}){
     if(material){window.renderEducationModules($('lesson-blocks'),material,{readImage:p=>api.liveAssetRead(p)});
       if(imageTopic!==material.id){imageTopic=material.id;$('image-import-status').textContent='';loadImages(material.id);}}
   }
-  let resizeTimer;const syncViewport=()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(typeof api.setViewport!=='function')return;const r=$('lesson-reader').getBoundingClientRect();api.setViewport({x:Math.round(r.x),y:Math.round(r.y),width:Math.floor(r.width),height:Math.floor(r.height)}).catch(()=>{});},40);};
+  let resizeTimer;const syncViewport=()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(typeof api.setViewport!=='function')return;const r=$(document.body.dataset.webEmbedded==='true'?'live-messages':'lesson-reader').getBoundingClientRect();api.setViewport({x:Math.round(r.x),y:Math.round(r.y),width:Math.floor(r.width),height:Math.floor(r.height)}).catch(()=>{});},40);};
   new ResizeObserver(syncViewport).observe($('lesson-reader'));
   window.addEventListener('resize',syncViewport);
   // Right panel is intentionally closed on every launch, including after reload.

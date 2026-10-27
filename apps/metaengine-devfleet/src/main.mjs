@@ -12,6 +12,7 @@ import { LiveOperatorContracts } from './live-operator-contracts.mjs';
 import { DevFleetSourceWorkspace } from './source-workspace-patch.mjs';
 import { EducationStore } from './education-core.mjs';
 import { installLiveEducation } from './education-live-electron.mjs';
+import { installWebChats } from './education-webchat-electron.mjs';
 import { buildEducationHandoff } from './education-handoff.mjs';
 import { ALLOWED_RESOURCE_URLS } from './education-lesson-depth.mjs';
 
@@ -367,8 +368,7 @@ async function start() {
   });
   if(educationMode)mainWindow.setMenuBarVisibility(false);
   mainWindow.webContents.setWindowOpenHandler(()=>({action:'deny'}));
-  if(educationMode)await mainWindow.loadFile(path.join(__dirname,'education.html'));
-  else await mainWindow.loadFile(activeUiFile);
+  if(!educationMode)await mainWindow.loadFile(activeUiFile);
   liveContracts=new LiveOperatorContracts({store:livePolicyDisk});
   await liveContracts.init();
   sourceWorkspace=new DevFleetSourceWorkspace({
@@ -386,7 +386,9 @@ async function start() {
     educationStore=new EducationStore(educationDisk);
     await educationStore.init();
     liveEducation=await installLiveEducation({ipcMain,authorize:educationSender,education:educationStore,
-      dataDir,writeAtomic:atomicPrivateWrite,window:()=>mainWindow});
+      dataDir,writeAtomic:atomicPrivateWrite,window:()=>mainWindow,apiDisabled:true});
+    await installWebChats({ipcMain,authorize:educationSender,live:liveEducation.store,education:educationStore,
+      operator,surface,assets:liveEducation.assets,dataDir,writeAtomic:atomicPrivateWrite});
     ipcMain.handle('education:snapshot',async e=>{educationSender(e);return {
       ...educationStore.snapshot(),materials:liveEducation.store.materials()
     };});
@@ -442,6 +444,7 @@ async function start() {
   ipcMain.handle('devfleet:close',async(e,p)=>{uiSender(e);return operator.closeTab(p);});
   ipcMain.handle('devfleet:assign',async(e,p)=>{uiSender(e);return operator.assign(p);});
   ipcMain.handle('devfleet:select',async(e,tabId)=>{uiSender(e);return surface.select(tabId);});
+  if(educationMode)await mainWindow.loadFile(path.join(__dirname,'education.html'));
   if(!educationMode)registerDevConsole();
   // Publish the authenticated localhost control plane while physical ChatGPT
   // pages restore; chat.list truthfully reports RESTORING. All other operator

@@ -14,7 +14,8 @@
     "smoke:education-live": "electron scripts/education-live-electron-smoke.cjs",
     "smoke:education-workspace": "electron scripts/education-workspace-smoke.cjs",
     "admin:mcp": "node scripts/devfleet-admin-mcp.mjs",
-    "package:win": "electron-builder --config electron-builder.json --win nsis --x64"
+    "package:win": "electron-builder --config electron-builder.json --win nsis --x64",
+    "smoke:education-webchat": "electron scripts/education-webchat-smoke.cjs"
   },
   "devDependencies": {
     "electron": "44.0.0",
