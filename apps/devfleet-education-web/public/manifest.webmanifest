@@ -1,1 +1,19 @@
-{"name":"DevFleet Education","short_name":"Education","description":"Личная техническая академия: электроника, сети и оптоволокно","start_url":"/","scope":"/","display":"standalone","background_color":"#101516","theme_color":"#101516","lang":"ru","icons":[{"src":"/assets/logo.svg","sizes":"any","type":"image/svg+xml","purpose":"any"}]}
+{
+  "name": "DevFleet Education",
+  "short_name": "Education",
+  "description": "Темы, уроки, тетради и чаты.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#fafaf8",
+  "theme_color": "#fafaf8",
+  "lang": "ru",
+  "icons": [
+    {
+      "src": "/assets/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

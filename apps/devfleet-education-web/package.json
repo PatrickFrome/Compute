@@ -1,13 +1,16 @@
 {
   "name": "devfleet-education-web",
-  "version": "0.1.0-e11",
+  "version": "0.2.0-light-e12",
   "private": true,
   "type": "module",
   "description": "Standalone local-first technical academy; no Electron or API credentials",
   "scripts": {
     "start": "node scripts/serve.mjs",
     "build": "node scripts/build.mjs",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "smoke:light": "node scripts/light-browser-smoke.mjs"
   },
-  "engines": {"node": ">=22"}
+  "engines": {
+    "node": ">=22"
+  }
 }
