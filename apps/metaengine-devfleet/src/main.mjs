@@ -12,6 +12,7 @@ import { LiveOperatorContracts } from './live-operator-contracts.mjs';
 import { DevFleetSourceWorkspace } from './source-workspace-patch.mjs';
 import { EducationStore } from './education-core.mjs';
 import { installLiveEducation } from './education-live-electron.mjs';
+import { installWebChats } from './education-webchat-electron.mjs';
 import { buildEducationHandoff } from './education-handoff.mjs';
 import { ALLOWED_RESOURCE_URLS } from './education-lesson-depth.mjs';
 
@@ -386,7 +387,9 @@ async function start() {
     educationStore=new EducationStore(educationDisk);
     await educationStore.init();
     liveEducation=await installLiveEducation({ipcMain,authorize:educationSender,education:educationStore,
-      dataDir,writeAtomic:atomicPrivateWrite,window:()=>mainWindow});
+      dataDir,writeAtomic:atomicPrivateWrite,window:()=>mainWindow,apiDisabled:true});
+    await installWebChats({ipcMain,authorize:educationSender,live:liveEducation.store,education:educationStore,
+      operator,surface,assets:liveEducation.assets,dataDir,writeAtomic:atomicPrivateWrite});
     ipcMain.handle('education:snapshot',async e=>{educationSender(e);return {
       ...educationStore.snapshot(),materials:liveEducation.store.materials()
     };});

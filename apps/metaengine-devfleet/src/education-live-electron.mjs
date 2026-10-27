@@ -6,7 +6,7 @@ import { LiveLessonStore, LiveLessonCoordinator } from './education-live-core.mj
 import { OpenAILessonTransport, parseSelectedKey, validModel } from './education-live-openai.mjs';
 
 // Renderer cannot choose key paths, read credentials, or dispatch arbitrary URLs.
-export async function installLiveEducation({ipcMain,authorize,education,dataDir,writeAtomic,window,fetchImpl=fetch}){
+export async function installLiveEducation({ipcMain,authorize,education,dataDir,writeAtomic,window,fetchImpl=fetch,apiDisabled=false}){
   const stateFile=path.join(dataDir,'education-live-state.json');
   const keyFile=path.join(dataDir,'education-openai-key.bin');
   const configFile=path.join(dataDir,'education-openai-config.json');
@@ -22,12 +22,12 @@ export async function installLiveEducation({ipcMain,authorize,education,dataDir,
     &&!(process.platform==='linux'&&safeStorage.getSelectedStorageBackend?.()==='basic_text');
   try{
     const config=await loadJson(configFile,4096);
-    if(config?.accept_billing===true&&validModel(config.model)&&safeAvailable()){
+    if(!apiDisabled&&config?.accept_billing===true&&validModel(config.model)&&safeAvailable()){
       const encrypted=await fs.readFile(keyFile);if(encrypted.length>32768)throw Error('live_key_file_invalid');
       credentials={model:config.model,key:parseSelectedKey(safeStorage.decryptString(encrypted)),accept_billing:true};
     }
   }catch{/* Credentials unavailable -> visibly NOT CONNECTED; never log key material. */}
-  const transport=new OpenAILessonTransport({credentials:()=>credentials,fetchImpl});
+  const transport=new OpenAILessonTransport({credentials:()=>apiDisabled?null:credentials,fetchImpl});
   const assets=new LessonAssetStore({dataDir,writeAtomic});await assets.init();
   const coordinator=new LiveLessonCoordinator({store,education,transport,assets:async id=>assets.list(id)});
   const register=(name,fn)=>ipcMain.handle(name,async(event,...args)=>{
@@ -53,11 +53,12 @@ export async function installLiveEducation({ipcMain,authorize,education,dataDir,
       return {material_id:id,asset,pixels_sent_to_model:false};
     }finally{importing=false;}
   });
-  register('education:live-status',()=>transport.status());
+  register('education:live-status',()=>({...transport.status(),api_disabled:apiDisabled}));
   register('education:live-topic',id=>store.topic(id));
-  register('education:live-send',p=>coordinator.send(p));
+  register('education:live-send',p=>{if(apiDisabled)throw Error('live_api_disabled');return coordinator.send(p);});
   register('education:live-undo',p=>store.undo(p));
   register('education:live-configure',async({model,accept_billing}={})=>{
+    if(apiDisabled)throw Error('live_api_disabled');
     if(configuring)throw Error('live_configuration_busy');
     if(!validModel(model)||accept_billing!==true)throw Error('live_configuration_consent_required');
     if(!safeAvailable())throw Error('live_secure_storage_unavailable');
