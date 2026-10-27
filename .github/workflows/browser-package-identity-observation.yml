@@ -1,0 +1,52 @@
+name: Browser Package Identity Read-only Observation
+
+on:
+  push:
+    branches:
+      - work/preinstall-shared-inputs-20261027
+      - work/preinstall-closure-20261027
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  observe-package-identity:
+    if: github.repository == 'PatrickFrome/Compute' && github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact observing source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup frozen Node for dependency-free observation
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.21.0'
+
+      - name: Verify the observer's dependency-free refusal controls
+        run: node --test --test-concurrency=1 apps/metaengine-browser/test/package-identity-observation.test.mjs
+
+      - name: Observe real reservations and run the unchanged bounded planner
+        env:
+          EXPECTED_HEAD: ${{ github.sha }}
+          ME2_GITHUB_TOKEN: ${{ github.token }}
+        run: node apps/metaengine-browser/scripts/observe-package-identity.mjs
+
+      - name: Publish bounded sanitized observation including HOLD
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: metaengine-browser-package-identity-observation-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/browser-package-identity-observation/observation.json
+            ${{ runner.temp }}/browser-package-identity-observation/status.json
+            ${{ runner.temp }}/browser-package-identity-observation/plan.json
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 6
+          overwrite: false
