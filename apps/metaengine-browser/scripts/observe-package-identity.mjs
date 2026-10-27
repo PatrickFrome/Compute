@@ -21,7 +21,7 @@ export const POLICY = Object.freeze({
   candidateDigest: 'sha256:28126ee94d99c59040b1e2f5f215556d148da3f1933198ced5919323ce0881f4',
   // Fixed documented GitHub default; failures never trigger a retry or fallback.
   catalogPageSize: 30,
-  maxCatalogPages: 500, maxProducerRuns: 128, maxRequests: 700, maxObservationMs: 12 * 60_000,
+  maxCatalogPages: 650, maxProducerRuns: 128, maxRequests: 700, maxObservationMs: 12 * 60_000,
   maxResponseBytes: 2 * 1024 * 1024, maxReadBytes: 96 * 1024 * 1024,
   maxEvidenceBytes: 48 * 1024 * 1024,
 });

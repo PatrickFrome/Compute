@@ -137,11 +137,11 @@ test('partial catalog, changed totals, duplicate IDs and the finite page bound f
   assert.equal(calls, 1);
 });
 
-test('30-item catalog pages preserve empty, exact-boundary and 500-page completeness', async () => {
+test('30-item catalog pages preserve empty, actual-size and 650-page completeness', async () => {
   assert.equal(POLICY.catalogPageSize, 30);
-  assert.equal(POLICY.maxCatalogPages, 500);
+  assert.equal(POLICY.maxCatalogPages, 650);
   assert.equal(POLICY.maxRequests, 700);
-  for (const [total, expectedPages] of [[0, 1], [30, 1], [31, 2], [60, 2], [15000, 500]]) {
+  for (const [total, expectedPages] of [[0, 1], [30, 1], [31, 2], [60, 2], [15000, 500], [17990, 600], [19500, 650]]) {
     let calls = 0;
     const result = await readCompleteCatalog(async route => {
       const url = new URL(route, 'https://api.github.com');
@@ -361,6 +361,21 @@ test('HTTP 500 on the first catalog page stays HOLD without retry, fallback or p
   assert.equal(records[0].status, 500);
   assert.equal(records[0].response, undefined);
   assert.equal(JSON.stringify(records).includes('private error token'), false);
+});
+
+test('the fixed 700-request budget refuses before a 701st GET with the larger catalog cap', async () => {
+  const records = [];
+  let httpCalls = 0;
+  const get = createGitHubReader({ token: 'test-only-token', records, fetchImpl: async () => {
+    httpCalls++;
+    return new Response(JSON.stringify({ total_count: 0, artifacts: [] }), { status: 200 });
+  } });
+  for (let request = 1; request <= 700; request++) await get(`${BASE}artifacts?per_page=30&page=1`, 'list');
+  await assert.rejects(() => get(`${BASE}artifacts?per_page=30&page=1`, 'list'),
+    { code: 'OBSERVATION_REQUEST_BOUND_EXCEEDED' });
+  assert.equal(httpCalls, 700);
+  assert.equal(records.length, 700);
+  assert.ok(records.every(record => record.status === 200));
 });
 
 test('even an allowed metadata field reflecting the job token produces HOLD without retaining that field', async () => {
