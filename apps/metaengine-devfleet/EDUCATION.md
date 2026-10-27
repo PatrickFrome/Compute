@@ -1,4 +1,6 @@
-# DevFleet Education — E1–E7 safe browser authorization and topic notebooks
+# DevFleet Education — E1–E8 topic-bound GPT and reversible lesson editing
+
+The new direct API tutor, its user-controlled connection, data bounds and verification are documented in [LIVE_LESSONS_E8.md](LIVE_LESSONS_E8.md). E7 browser handoff remains an optional fallback; the E8 direct tutor sends submitted questions and receives page edits without copy/paste. A model call requires separately configured API credentials and billing consent.
 
 ## Purpose and current status
 Education mode adds a structured technical-learning workspace on top of DevFleet's native Electron ChatGPT view system. It is **not** a certified training system or an installed Windows release. Source branch is a Draft PR; do not merge or overwrite the live DevFleet/METAENGINE installation before the remaining acceptance gates.

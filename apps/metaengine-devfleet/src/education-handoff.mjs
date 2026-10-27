@@ -3,8 +3,8 @@ export const HANDOFF_SCHEMA='devfleet.education.handoff.v1';
 // The handoff is assembled by trusted main code, only after an explicit student click.
 // Never include chat transcripts or self-reported lab contents. Personal
 // notebook text is included ONLY when the student explicitly opts in.
-export function buildEducationHandoff(materialId,contexts=[],entries=[],{includeNotebook=false,linkedNotebookKey=null}={}){
-  const material=MATERIALS.find(m=>m.id===materialId);
+export function buildEducationHandoff(materialId,contexts=[],entries=[],{includeNotebook=false,linkedNotebookKey=null}={},currentMaterial=null){
+  const material=currentMaterial?.id===materialId?currentMaterial:MATERIALS.find(m=>m.id===materialId);
   if(!material)throw Error('education_material_unknown');
   if(typeof includeNotebook!=='boolean'||(linkedNotebookKey!==null
     &&(typeof linkedNotebookKey!=='string'||!/^tab_[0-9a-f-]{36}$/i.test(linkedNotebookKey))))
