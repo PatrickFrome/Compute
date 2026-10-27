@@ -1,0 +1,208 @@
+{
+  "source_head": "1da1a74b0e451143da64e2e0e63647ac87212ce5",
+  "source_tree": "2430b76fb77d93b57ff9c6406ea764b8cee8ee82",
+  "observer_git_blob": "be73809e702332f8ade4429adff429ce44a65d3b",
+  "planner_git_blob": "1aee544ed7b99898cbde34494bd80a4620b63d34",
+  "planner_sha256": "f491f708dcb0a4f139b8dbc7bf118ae477d61384671f2fb3f5a79aff75c76586",
+  "observing_run_id": 40468962958,
+  "observing_run_attempt": 1,
+  "source_ref": "refs/heads/work/integrated-installer-repair-20261027",
+  "started_at": "2026-10-27T07:44:56.351Z",
+  "completed_at": "2026-10-27T07:46:32.292Z",
+  "original_consumed_identity": {
+    "version": "0.7.0-dev.1784381341133.1",
+    "producer": {
+      "id": 40382079975,
+      "workflow_id": 347795280,
+      "path": ".github/workflows/browser-windows-package-smoke.yml",
+      "head_sha": "601532ca50db02aa9089783dde157a93f484adf2",
+      "head_branch": "work/autonomy-continuation-20261026",
+      "run_attempt": 1,
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "repository": {
+        "id": 1341371143,
+        "full_name": "PatrickFrome/Compute"
+      },
+      "head_repository": {
+        "id": 1341371143,
+        "full_name": "PatrickFrome/Compute"
+      },
+      "created_at": "2026-10-26T18:55:35Z",
+      "updated_at": "2026-10-26T19:24:02Z"
+    },
+    "reservation": {
+      "id": 12678978941,
+      "name": "metaengine-browser-package-version-0.7.0-dev.1784381341133.1",
+      "expired": false,
+      "size_in_bytes": 865,
+      "digest": "sha256:9a1084542301e68ac333860fa810d59cbf790294774b181e053a85dccea27024",
+      "created_at": "2026-10-26T19:03:04Z",
+      "expires_at": "2027-01-24T18:55:35Z",
+      "workflow_run": {
+        "id": 40382079975,
+        "repository_id": 1341371143,
+        "head_repository_id": 1341371143,
+        "head_sha": "601532ca50db02aa9089783dde157a93f484adf2"
+      }
+    },
+    "candidate": {
+      "id": 12679249312,
+      "name": "metaengine-browser-windows-candidate-601532ca50db02aa9089783dde157a93f484adf2",
+      "expired": false,
+      "size_in_bytes": 257692297,
+      "digest": "sha256:28126ee94d99c59040b1e2f5f215556d148da3f1933198ced5919323ce0881f4",
+      "created_at": "2026-10-26T19:15:01Z",
+      "expires_at": "2026-11-25T19:14:58Z",
+      "workflow_run": {
+        "id": 40382079975,
+        "repository_id": 1341371143,
+        "head_repository_id": 1341371143,
+        "head_sha": "601532ca50db02aa9089783dde157a93f484adf2"
+      }
+    }
+  },
+  "catalog": {
+    "complete": true,
+    "pagination_complete": true,
+    "total_count": 17944,
+    "pages": 180,
+    "consistency": "STABLE_TOTAL_UNIQUE_IDS_AND_FIRST_PAGE_RECHECK",
+    "global_absence_claim": false,
+    "observation_is_time_bound": true
+  },
+  "confirmed_consumed_reservations": [
+    {
+      "id": 12678978941,
+      "name": "metaengine-browser-package-version-0.7.0-dev.1784381341133.1",
+      "expired": false,
+      "size_in_bytes": 865,
+      "digest": "sha256:9a1084542301e68ac333860fa810d59cbf790294774b181e053a85dccea27024",
+      "created_at": "2026-10-26T19:03:04Z",
+      "expires_at": "2027-01-24T18:55:35Z",
+      "workflow_run": {
+        "id": 40382079975,
+        "repository_id": 1341371143,
+        "head_repository_id": 1341371143,
+        "head_sha": "601532ca50db02aa9089783dde157a93f484adf2"
+      }
+    }
+  ],
+  "minimum_package_version": "0.7.0-dev.1784381341133.1",
+  "post_plan_complete_name_readbacks": true,
+  "selected_version": false,
+  "reservation_created": false,
+  "package_built": false,
+  "physical_package_build_allowed": false,
+  "promotion_authorized": false,
+  "authority_effect": false,
+  "automatic_retry_allowed": false,
+  "schema": "metaengine.package-planner-retained-hosted-observation.v1",
+  "artifact": {
+    "id": 12718325310,
+    "bytes": 1501760,
+    "sha256": "e4ebfe1ed30be73b5573b613d5e6873e5a73b3e4de04575c04442d0b80524c6c"
+  },
+  "observation_json_sha256": "b51017f134b3d3e35c1262017c1106f1c8df2fbf3374d2f6ff80dfae8cef35dd",
+  "plan_json_sha256": "6cdc5934e8ef8fdd56d13d9ab1a5ab6ef6c1f8ef8a525a92c65217d2857c5fb0",
+  "catalog_payloads_retained_in_ci_artifact": true,
+  "independent_catalog_recheck": {
+    "pages": 180,
+    "unique_artifacts": 17944,
+    "first_page_equal": true,
+    "highest_observed_reserved_version": "0.7.0-dev.1784381341133.1"
+  },
+  "exact_name_readbacks": [
+    {
+      "method": "GET",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/actions/artifacts?name=metaengine-browser-windows-candidate-1da1a74b0e451143da64e2e0e63647ac87212ce5&per_page=100",
+      "metadata_attempt": 1,
+      "started_at": "2026-10-27T07:46:31.451Z",
+      "completed_at": "2026-10-27T07:46:31.563Z",
+      "status": 200,
+      "headers": {
+        "date": "Tue, 27 Oct 2026 07:46:31 GMT",
+        "etag": "W/\"6f9500ef734aa77e1865e0b160f665dbaa5908ab08078320e3cbe6227b26b8e1\"",
+        "x-github-request-id": "2C10:217B7E:D41719:2BAC6C6:6AE056D6",
+        "link": null
+      },
+      "response_sha256": "244563f989470892c537c9a4622920af0d228ee4528f7d00c64a06d6cd95856c",
+      "response_bytes": 32,
+      "response": {
+        "total_count": 0,
+        "artifacts": []
+      }
+    },
+    {
+      "method": "GET",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/actions/artifacts?name=metaengine-browser-package-version-0.7.0-dev.1784381341133.1&per_page=100",
+      "metadata_attempt": 1,
+      "started_at": "2026-10-27T07:46:31.563Z",
+      "completed_at": "2026-10-27T07:46:31.688Z",
+      "status": 200,
+      "headers": {
+        "date": "Tue, 27 Oct 2026 07:46:31 GMT",
+        "etag": "W/\"1a249f1659011da84175b5933c8181bc0f0a54e780549f1e4eac80832b66ac51\"",
+        "x-github-request-id": "2C10:217B7E:D417E5:2BAC944:6AE056D7",
+        "link": null
+      },
+      "response_sha256": "20183a346776774c8040293546f69b5df50b21596216cb0d03a045a6851bfea3",
+      "response_bytes": 788,
+      "response": {
+        "total_count": 1,
+        "artifacts": [
+          {
+            "id": 12678978941,
+            "name": "metaengine-browser-package-version-0.7.0-dev.1784381341133.1",
+            "expired": false,
+            "size_in_bytes": 865,
+            "digest": "sha256:9a1084542301e68ac333860fa810d59cbf790294774b181e053a85dccea27024",
+            "created_at": "2026-10-26T19:03:04Z",
+            "expires_at": "2027-01-24T18:55:35Z",
+            "workflow_run": {
+              "id": 40382079975,
+              "repository_id": 1341371143,
+              "head_repository_id": 1341371143,
+              "head_sha": "601532ca50db02aa9089783dde157a93f484adf2"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "method": "GET",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/actions/artifacts?name=metaengine-browser-package-version-0.7.0-dev.1848773682936.1&per_page=100",
+      "metadata_attempt": 1,
+      "started_at": "2026-10-27T07:46:31.688Z",
+      "completed_at": "2026-10-27T07:46:31.831Z",
+      "status": 200,
+      "headers": {
+        "date": "Tue, 27 Oct 2026 07:46:31 GMT",
+        "etag": "W/\"6f9500ef734aa77e1865e0b160f665dbaa5908ab08078320e3cbe6227b26b8e1\"",
+        "x-github-request-id": "2C10:217B7E:D418BD:2BACC52:6AE056D7",
+        "link": null
+      },
+      "response_sha256": "244563f989470892c537c9a4622920af0d228ee4528f7d00c64a06d6cd95856c",
+      "response_bytes": 32,
+      "response": {
+        "total_count": 0,
+        "artifacts": []
+      }
+    }
+  ],
+  "plan": {
+    "schema": "metaengine.browser.package-identity-candidate-plan.v1",
+    "source_head": "1da1a74b0e451143da64e2e0e63647ac87212ce5",
+    "manifest_package_version": "0.7.0-dev.1784381341133.1",
+    "minimum_package_version": "0.7.0-dev.1784381341133.1",
+    "minimum_package_version_exclusive": true,
+    "candidate_package_version": "0.7.0-dev.1848773682936.1",
+    "candidate_slot": 0,
+    "rejected_reserved_candidate_versions": [],
+    "manifest_update_required": true,
+    "physical_package_build_allowed": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  }
+}

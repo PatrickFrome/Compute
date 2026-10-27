@@ -615,3 +615,8 @@ Terminal rejected goals now remain readable offline from the validated durable j
 ## Concurrent health observer package successor — 0.7.0-dev.1784381341133.1
 
 Functional source: 61e27840c13dda1d3757da603ffb03f20804dd14. This unique package replaces the installed .164 source after the reproduced API/Edge health-admission collision. The preceding section records the regression and live PG evidence. New planner evidence: evidence/audits/metaengine-20261026-health-observer-recovery/live-artifact-observation.json. This metadata alone proves neither a built artifact nor installed autonomy; Windows build, payload readback and live agent execution remain pending. Activation-latency qualification must be reported independently.
+
+
+## 2026-10-27: integrated installer identity prepared, not installed-qualified
+
+Functional source 1da1a74b0e451143da64e2e0e63647ac87212ce5 incorporates the seven preinstall streams and source repairs. Hosted read-only observer 40468962958 completed a strict 17,944-artifact / 180-page observation. Archive 12718325310 was independently byte-hashed and read; full catalogue uniqueness, first-page equality and exact-name readbacks were rechecked. The unchanged bounded planner proposed 0.7.0-dev.1848773682936.1 above consumed 0.7.0-dev.1784381341133.1. The proposal is not a reservation, package build or installed acceptance. All historical source/version records remain retained. Normal producer preflight must independently reserve the final exact source/version before one physical build. Main and user PC were not modified.
