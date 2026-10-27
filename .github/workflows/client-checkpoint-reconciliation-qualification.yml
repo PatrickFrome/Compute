@@ -111,6 +111,7 @@ jobs:
           import path from 'node:path';
           import {createHash} from 'node:crypto';
           import {spawn,execFileSync} from 'node:child_process';
+          let stage='INPUT_BOUNDARIES';
           try {
           const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
           const root=await fs.realpath(process.env.GITHUB_WORKSPACE);
@@ -119,22 +120,28 @@ jobs:
           const below=(base,target)=>{const r=path.relative(base,target);return !!r&&!r.startsWith('..')&&!path.isAbsolute(r);};
           const publicDir=path.join(work,'public'),privateDir=path.join(work,'private'),profilesDir=path.join(work,'profiles');
           const git=args=>execFileSync('git',args,{cwd:root,encoding:'utf8',windowsHide:true,timeout:30000,stdio:['ignore','pipe','pipe']}).trim();
+          stage='RUNNER_AND_SOURCE';
           assert.equal(process.platform,'win32');assert.equal(process.arch,'x64');assert.equal(process.version,'v24.21.0');
           assert.equal(process.env.RUNNER_ENVIRONMENT,'github-hosted');assert.ok(below(temporary,work));assert.ok(!below(root,work));
           const expected=process.env.EXPECTED_SOURCE_HEAD;assert.match(expected,/^[0-9a-f]{40}$/);assert.equal(git(['rev-parse','HEAD']),expected);
+          stage='PG_BINARY_RECEIPT';
           const pg=JSON.parse((await fs.readFile(path.join(privateDir,'pg-binaries.json'),'utf8')).replace(/^\uFEFF/,''));
           assert.equal(pg.schema,'metaengine.runtime-contract-pg17-binaries.v1');assert.equal(pg.database_started,false);assert.equal(pg.installed_state_used,false);
           assert.match(pg.version,/^17\.[0-9]+(?:\.[0-9]+)?$/);assert.match(pg.archive_sha256,/^[0-9a-f]{64}$/);
+          stage='PG_BINARY_PATHS';
           assert.ok(process.env.LOCAL_STATE_TEST_PG_BIN_DIR,'required_native_pg17_bin_missing');
           const bin=await fs.realpath(process.env.LOCAL_STATE_TEST_PG_BIN_DIR);
           assert.equal(bin,await fs.realpath(pg.bin_directory));assert.ok(below(temporary,bin));assert.ok(!below(root,bin));
           for(const name of ['initdb.exe','pg_ctl.exe','postgres.exe','pg_dump.exe','pg_restore.exe','psql.exe'])assert.ok((await fs.stat(path.join(bin,name))).isFile());
+          stage='POSTGRES_DRIVER';
           const driver=await fs.realpath(path.join(root,'infra/client-state-runtime/node_modules/postgres/src/index.js'));
           assert.ok(below(path.join(root,'infra/client-state-runtime/node_modules/postgres'),driver));
           const lock=JSON.parse(await fs.readFile(path.join(root,'infra/client-state-runtime/package-lock.json'),'utf8'));
           const installedDriver=JSON.parse(await fs.readFile(path.join(root,'infra/client-state-runtime/node_modules/postgres/package.json'),'utf8'));
           assert.equal(installedDriver.version,lock.packages['node_modules/postgres'].version);
-          const executable=await fs.realpath('C:/Program Files/Git/mingw64/bin/git.exe');assert.ok((await fs.stat(executable)).isFile());
+          stage='GIT_EXECUTABLE';
+          // Use the installed Git launcher verified by checkout; internal toolchain directories changed in Git 2.56.
+          const executable=await fs.realpath('C:/Program Files/Git/bin/git.exe');assert.ok((await fs.stat(executable)).isFile());
           const component=[
             'apps/metaengine-browser/test/native-coding-project-commits.test.mjs',
             'apps/metaengine-browser/test/native-coding-runtime.test.mjs',
@@ -288,8 +295,11 @@ jobs:
               raw_tap_sha256:hash(outcome.stdout),sanitized_tap_sha256:hash(checked.tap),required_cases:required.length,
               isolation:{...isolated.evidence,default_owner_absent_after:profileUnchanged}});
           }
+          stage='COMPONENT_PROFILE_AND_SUITE';
           await runSuite('component',component,componentRequired,await createSuiteEnvironment('component',false),true);
+          stage='NATIVE_PROFILE_AND_SUITE';
           await runSuite('native-pg17',native,nativeRequired,await createSuiteEnvironment('native-pg17',true),false);
+          stage='SOURCE_READBACK';
           const sourcePaths=[...component,...native,
             'apps/metaengine-browser/src/native-coding-project-commits.mjs',
             'apps/metaengine-browser/src/native-coding-host-ipc-client.mjs',
@@ -327,12 +337,25 @@ jobs:
             user_pc_boundary:'USER_PC_AND_INSTALLED_PROFILE_ARE_NOT_TEST_TARGETS',
             installed_autonomy_proven:false,production_qualified:false,authority_effect:false,
             sanitizer:'TAP_OUTCOMES_AND_COUNTS_ONLY_KNOWN_NAMES_ELSE_SHA256'};
+          stage='EVIDENCE_PUBLICATION';
           await fs.writeFile(path.join(publicDir,'source-facts.json'),JSON.stringify(evidence,null,2)+'\n',{flag:'wx'});
           console.log(JSON.stringify({state:evidence.state,source_sha:expected,suites:suites.map(({name,state,counts,refusals})=>({name,state,counts,refusals}))}));
           if(!ok)process.exitCode=1;
-          } catch {
-            // Do not echo assertion payloads or private paths from preflight.
-            console.error('checkpoint_ci_input_or_runner_refused');process.exitCode=1;
+          } catch(error) {
+            // Closed stages/codes only: no assertion payloads, private paths, stdout or stderr.
+            const allowedCodes=new Set(['ENOENT','EACCES','EPERM','ENOTDIR','EISDIR','EINVAL',
+              'ERR_ASSERTION','ERR_INVALID_ARG_TYPE','ERR_INVALID_ARG_VALUE','ERR_BUFFER_TOO_LARGE']);
+            const ownValue=(value,key)=>{
+              try{
+                if(value===null||!['object','function'].includes(typeof value))return undefined;
+                const descriptor=Object.getOwnPropertyDescriptor(value,key);
+                return descriptor&&Object.prototype.hasOwnProperty.call(descriptor,'value')?descriptor.value:undefined;
+              }catch{return undefined;}
+            };
+            const rawCode=ownValue(error,'code'),rawName=ownValue(error,'name');
+            const code=allowedCodes.has(rawCode)?rawCode:'OTHER';
+            const kind=['Error','AssertionError','SyntaxError','TypeError','RangeError'].includes(rawName)?rawName:'Error';
+            console.error(JSON.stringify({error:'checkpoint_ci_input_or_runner_refused',stage,code,kind}));process.exitCode=1;
           }
           '@ | node --input-type=module
           if ($LASTEXITCODE -ne 0) { throw 'checkpoint_ci_source_qualification_failed' }
