@@ -19,6 +19,8 @@ export const POLICY = Object.freeze({
   reservationDigest: 'sha256:9a1084542301e68ac333860fa810d59cbf790294774b181e053a85dccea27024',
   candidateId: 12679249312,
   candidateDigest: 'sha256:28126ee94d99c59040b1e2f5f215556d148da3f1933198ced5919323ce0881f4',
+  // Fixed documented GitHub default; failures never trigger a retry or fallback.
+  catalogPageSize: 30,
   maxCatalogPages: 500, maxProducerRuns: 128, maxRequests: 700, maxObservationMs: 12 * 60_000,
   maxResponseBytes: 2 * 1024 * 1024, maxReadBytes: 96 * 1024 * 1024,
   maxEvidenceBytes: 48 * 1024 * 1024,
@@ -189,15 +191,15 @@ function verifyOriginalArtifact(row, kind) {
 }
 
 export async function readCompleteCatalog(get) {
-  const route = page => `${PREFIX}artifacts?per_page=100&page=${page}`;
+  const route = page => `${PREFIX}artifacts?per_page=${POLICY.catalogPageSize}&page=${page}`;
   const first = await get(route(1), 'list');
   const total = first.total_count;
-  const pages = Math.max(1, Math.ceil(total / 100));
+  const pages = Math.max(1, Math.ceil(total / POLICY.catalogPageSize));
   requireThat(pages <= POLICY.maxCatalogPages, 'OBSERVATION_CATALOG_BOUND_EXCEEDED');
   const artifacts = [], ids = new Set();
   for (let page = 1; page <= pages; page++) {
     const body = page === 1 ? first : await get(route(page), 'list');
-    requireThat(body.total_count === total && body.artifacts.length === Math.max(0, Math.min(100, total - (page - 1) * 100)), 'OBSERVATION_CATALOG_INCOMPLETE');
+    requireThat(body.total_count === total && body.artifacts.length === Math.max(0, Math.min(POLICY.catalogPageSize, total - (page - 1) * POLICY.catalogPageSize)), 'OBSERVATION_CATALOG_INCOMPLETE');
     for (const artifact of body.artifacts) {
       requireThat(!ids.has(artifact.id), 'OBSERVATION_CATALOG_DUPLICATE');
       ids.add(artifact.id); artifacts.push(artifact);
