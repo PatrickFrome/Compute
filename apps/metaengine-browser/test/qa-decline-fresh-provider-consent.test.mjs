@@ -1,4 +1,5 @@
 import test from 'node:test';
+import vm from 'node:vm';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
@@ -9,8 +10,8 @@ const env={GITHUB_ACTIONS:'true',GITHUB_RUN_ID:'123456',RUNNER_TEMP:os.tmpdir(),
 const receipt=()=>({schema:'metaengine.browser.native-consent-denial-interaction.v1',browser_pid:712,
  browser_birth:'134000000000000000',consent_pid:713,consent_birth:'134000000000000001',native_control_id:7,
  native_no_activated:true,exact_process_tree_bound:true,generated_fixture_bound:true,authority_effect:false});
-const options=()=>({browserPid:712,executable:path.join(root,'installed.exe'),fixtureRoot:path.join(root,'first-run'),
- nonce:'11111111-2222-4333-8444-555555555555',startedMs:Date.now(),deadlineMs:Date.now()+90000});
+const options=()=>{const startedMs=Date.now();return {browserPid:712,executable:path.join(root,'installed.exe'),fixtureRoot:path.join(root,'first-run'),
+ nonce:'11111111-2222-4333-8444-555555555555',startedMs,deadlineMs:startedMs+90000};};
 test('native No helper refuses non-CI and unbound/foreign/stale identities',()=>{
  for(const value of [{},{...env,GITHUB_ACTIONS:'false'},{...env,GITHUB_RUN_ID:''},{...env,RUNNER_TEMP:'relative'}])assert.throws(()=>assertGeneratedFirstRunCi(value),/generated_ci_required/);
  assert.equal(assertGeneratedFirstRunCi(env),undefined);
@@ -52,4 +53,12 @@ test('Windows helper retains exact process handles and can activate only the bou
   /SendMessageTimeoutW\(no,0x00f5/,/ChildText\(no\)\.Replace\("&",""\)!="No"/,
   /ReadTextMessage\(h,0x000d/,/0x534b/])assert.match(source,expression);
  assert.doesNotMatch(source,/SendKeys|SetForegroundWindow|SendMessageTimeoutW\(yes|BM_CLICK.*6/);
+});
+
+
+test('native denial fixture uses one clock sample for its exact ninety-second budget', () => {
+ let tick=1700000000000;
+ const generate=vm.runInNewContext('('+options.toString()+')',{path,root,Date:{now:()=>tick++}});
+ const value=generate();
+ assert.equal(value.deadlineMs-value.startedMs,90000);
 });
