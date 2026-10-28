@@ -2,6 +2,7 @@ await import('./helpers/local-supervisor-transport-fixture.mjs');
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import vm from 'node:vm';
 
 const {
   ClientAdmissionRecoveryJournal,
@@ -282,7 +283,8 @@ test('Client bridge exposes only explicit admission recovery and UI never schedu
   assert.match(preload, /admission_resume_requires_explicit_user_action:\s*true/);
   assert.match(preload, /admission_resume_automatic_retry_allowed:\s*false/);
   assert.match(main, /ipcMain\.handle\('metaengine:client:resume-admission'/);
-  assert.match(main, /await journal\.markSendIntent\(\);[\s\S]*nativeSupervisor\.resumeDevosAdmission/);
+  assert.match(main, /const supervisor = nativeSupervisor, closing = managedTaskProjectHostClosing/);
+  assert.match(main, /await journal\.markSendIntent\(\);\s*assertCurrent\(\);[\s\S]*supervisor\.resumeDevosAdmission/);
   assert.match(main, /if \(journal\.hasPending\(\)\)[\s\S]*journal\.reconcile\(observed\)/);
   assert.match(main, /prior_effect_replayed:\s*false/);
   assert.match(main, /RECOVERY_JOURNAL_INCOMPATIBLE/);
@@ -299,4 +301,76 @@ test('Client bridge exposes only explicit admission recovery and UI never schedu
   assert.match(ui.slice(freshRead, submitEffect), /if \(!freshReadiness\?\.execution_ready\)/);
   const runButton = ui.match(/data-testid="client-goal-submit"[\s\S]{0,900}/)?.[0] || '';
   assert.doesNotMatch(runButton, /readiness\?\.execution_ready === false/);
+});
+
+async function mainAdmissionFixture(stage = null) {
+  const main = await readFile(new URL('../src/main.mjs', import.meta.url), 'utf8');
+  const source = main.slice(main.indexOf('async function resumeClientAdmissionOnce()'),
+    main.indexOf("ipcMain.handle('metaengine:client:resume-admission'"));
+  const guard = main.slice(main.indexOf('function assertNativeSupervisorInitializationOpen('),
+    main.indexOf('function runNativeInitialization('));
+  const { journal } = memoryJournal();
+  await journal.load();
+  const calls = { oldResume: 0, newResume: 0, newRead: 0 };
+  let reads = 0;
+  const receipt = { schema: 'metaengine.devos.environment-resume.v1', resumed: true, requested_floor: 28,
+    operator_initiated: true, automatic_retry_allowed: false, authority_effect: false };
+  const next = {
+    async devosEnvironmentState() { calls.newRead++; return state({ open: true }); },
+    async resumeDevosAdmission() { calls.newResume++; return receipt; },
+  };
+  const current = {
+    async devosEnvironmentState() {
+      reads++;
+      if (stage === 'during-read') scope.nativeSupervisor = next;
+      return state({ open: reads > 1 });
+    },
+    async resumeDevosAdmission() {
+      calls.oldResume++;
+      if (stage === 'after-effect') scope.nativeSupervisor = next;
+      return receipt;
+    },
+  };
+  const scope = { nativeSupervisor: current, managedTaskProjectHostClosing: Promise.resolve(),
+    runtimeRecoveryGenerationLost: false, shutdownRequested: false, managedTaskProjectHostDrainPending: false,
+    nativeInitializationCleanupCandidates: new Set(), globalThis: {},
+    ensureClientAdmissionRecoveryJournal: async () => journal,
+    readClientConnectionStatus: () => ({ admin_ready: true, access_tier: 'ADMIN' }),
+    randomUUID: () => ATTEMPT, clientAdmissionRecoveryJournalLoadError: null };
+  const mark = journal.markSendIntent.bind(journal);
+  journal.markSendIntent = async () => {
+    await mark();
+    if (stage === 'before-effect') scope.nativeSupervisor = next;
+    if (stage === 'closing') scope.managedTaskProjectHostClosing = Promise.resolve();
+    if (stage === 'generation-lost') scope.runtimeRecoveryGenerationLost = true;
+  };
+  const run = vm.runInNewContext(guard + source + '\nresumeClientAdmissionOnce', scope);
+  return { run, calls, journal };
+}
+
+for (const stage of ['during-read', 'before-effect', 'closing', 'generation-lost']) test(`main admission never redirects or sends after ${stage} lifetime drift`, async () => {
+  const f = await mainAdmissionFixture(stage);
+  const outcome = await f.run().catch(error => ({ error }));
+  assert.equal(f.calls.oldResume, 0);
+  assert.equal(f.calls.newResume, 0);
+  assert.notEqual(outcome.confirmed_open, true);
+  if (stage !== 'during-read') assert.equal(f.journal.hasPending(), true, 'durable intent stays available for readback, not replay');
+});
+
+test('main admission cannot confirm a prior effect using a replacement Supervisor readback', async () => {
+  const f = await mainAdmissionFixture('after-effect');
+  const outcome = await f.run().catch(error => ({ error }));
+  assert.equal(f.calls.oldResume, 1);
+  assert.equal(f.calls.newResume, 0);
+  assert.equal(f.calls.newRead, 0);
+  assert.notEqual(outcome.confirmed_open, true);
+  assert.equal(f.journal.hasPending(), true);
+});
+
+test('main admission retains the normal single-effect independent-readback path', async () => {
+  const f = await mainAdmissionFixture();
+  assert.equal((await f.run()).confirmed_open, true);
+  assert.equal(f.calls.oldResume, 1);
+  assert.equal(f.calls.newResume, 0);
+  assert.equal(f.journal.hasPending(), false);
 });

@@ -3152,9 +3152,14 @@ ipcMain.handle('metaengine:client:connection-status', async (event) => {
   return readClientConnectionStatus();
 });
 async function resumeClientAdmissionOnce() {
-  if (!nativeSupervisor
-    || typeof nativeSupervisor.devosEnvironmentState !== 'function'
-    || typeof nativeSupervisor.resumeDevosAdmission !== 'function') {
+  const supervisor = nativeSupervisor, closing = managedTaskProjectHostClosing;
+  const assertCurrent = () => {
+    assertNativeSupervisorInitializationOpen(closing);
+    if (nativeSupervisor !== supervisor) throw Error('client_admission_recovery_runtime_changed');
+  };
+  if (!supervisor
+    || typeof supervisor.devosEnvironmentState !== 'function'
+    || typeof supervisor.resumeDevosAdmission !== 'function') {
     return Object.freeze({
       schema: 'metaengine.client.admission-recovery-result.v1',
       state: 'UNAVAILABLE',
@@ -3165,6 +3170,7 @@ async function resumeClientAdmissionOnce() {
       authority_effect: false,
     });
   }
+  assertCurrent();
   const connection = readClientConnectionStatus();
   if (connection.admin_ready !== true || connection.access_tier !== 'ADMIN') {
     return Object.freeze({
@@ -3179,6 +3185,7 @@ async function resumeClientAdmissionOnce() {
   }
 
   const journal = await ensureClientAdmissionRecoveryJournal();
+  assertCurrent();
   if (!journal) {
     return Object.freeze({
       schema: 'metaengine.client.admission-recovery-result.v1',
@@ -3195,7 +3202,8 @@ async function resumeClientAdmissionOnce() {
   }
   let observed;
   try {
-    observed = await nativeSupervisor.devosEnvironmentState();
+    observed = await supervisor.devosEnvironmentState();
+    assertCurrent();
   } catch (error) {
     return Object.freeze({
       schema: 'metaengine.client.admission-recovery-result.v1',
@@ -3213,6 +3221,7 @@ async function resumeClientAdmissionOnce() {
   // explicit action may create a fresh attempt.
   if (journal.hasPending()) {
     const reconciled = await journal.reconcile(observed);
+    assertCurrent();
     const confirmed = reconciled?.state === 'OPEN_CONFIRMED';
     return Object.freeze({
       schema: 'metaengine.client.admission-recovery-result.v1',
@@ -3264,11 +3273,14 @@ async function resumeClientAdmissionOnce() {
     attempt_id: randomUUID(),
     expected_generation_floor: generationFloor,
   });
+  assertCurrent();
   await journal.markSendIntent();
+  assertCurrent();
 
   let receipt;
   try {
-    receipt = await nativeSupervisor.resumeDevosAdmission(generationFloor);
+    receipt = await supervisor.resumeDevosAdmission(generationFloor);
+    assertCurrent();
   } catch (error) {
     await journal.markAmbiguous(error);
     return Object.freeze({
@@ -3290,8 +3302,9 @@ async function resumeClientAdmissionOnce() {
   if (receipt?.effect_state === 'ABSENT') {
     await journal.markAmbiguous(receipt?.error || 'RESUME_EFFECT_ABSENT');
     let after = null;
-    try { after = await nativeSupervisor.devosEnvironmentState(); } catch {}
+    try { assertCurrent(); after = await supervisor.devosEnvironmentState(); assertCurrent(); } catch { after = null; }
     const reconciled = after ? await journal.reconcile(after) : journal.latest();
+    if (after) assertCurrent();
     return Object.freeze({
       schema: 'metaengine.client.admission-recovery-result.v1',
       state: reconciled?.state || 'RECONCILE_REQUIRED',
@@ -3311,7 +3324,9 @@ async function resumeClientAdmissionOnce() {
   await journal.recordReceipt(receipt);
   let after;
   try {
-    after = await nativeSupervisor.devosEnvironmentState();
+    assertCurrent();
+    after = await supervisor.devosEnvironmentState();
+    assertCurrent();
   } catch (error) {
     await journal.markAmbiguous(error);
     return Object.freeze({
@@ -3332,6 +3347,7 @@ async function resumeClientAdmissionOnce() {
   }
 
   const reconciled = await journal.reconcile(after);
+  assertCurrent();
   const confirmed = reconciled?.state === 'OPEN_CONFIRMED';
   return Object.freeze({
     schema: 'metaengine.client.admission-recovery-result.v1',
