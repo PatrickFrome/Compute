@@ -20,3 +20,13 @@ export function goalSubmissionModeText(mode: GoalSubmissionMode | null): {
   label: string;
   detail: string;
 };
+
+export function shouldPollClientGoal(entry: {
+  request_id?: string;
+  kind?: string;
+  state?: string;
+  last_error?: string | null;
+  native_rejection?: { schema?: string; state?: string } | null;
+  progress?: { terminal?: boolean; task_state?: string | null } | null;
+  execution_proof?: { user_goal_to_result_readback?: boolean } | null;
+} | null, receipt: { request_id?: string } | null): boolean;

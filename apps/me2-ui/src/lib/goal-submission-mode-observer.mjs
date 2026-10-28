@@ -91,6 +91,20 @@ const HOLD_TEXT = Object.freeze({
   GOAL_SUBMISSION_MODE_UNAVAILABLE: ['Admission status unavailable', 'A valid admission status could not be read. Check admission again before running the goal.'],
 });
 
+// A durable rejection before dispatch has no project or task to poll. The
+// backend has already validated this record; this only controls UI observation.
+export function shouldPollClientGoal(entry,receipt) {
+  if(entry?.kind==='NATIVE_CODING' && entry.state==='FAILED'
+    && entry.last_error==='native_goal_rejected_before_dispatch'
+    && entry.native_rejection?.schema==='metaengine.native-coding.seed-rejection.v1'
+    && entry.native_rejection?.state==='REJECTED_BEFORE_DISPATCH')return false;
+  if(entry?.kind==='NATIVE_CODING' && entry.progress?.terminal)return false;
+  if(!(receipt?.request_id || entry?.request_id))return false;
+  if(entry?.progress?.terminal && (entry.progress.task_state!=='COMPLETED'
+    || entry.execution_proof?.user_goal_to_result_readback))return false;
+  return true;
+}
+
 export function goalSubmissionModeText(mode) {
   if (mode?.state === 'HOLD') {
     const [label, detail] = Object.hasOwn(HOLD_TEXT, mode.reason) ? HOLD_TEXT[mode.reason]
