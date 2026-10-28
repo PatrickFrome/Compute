@@ -5,10 +5,11 @@ import {readWindowsKernelProcessW60} from '../src/host-native-owner-producers-w6
 // Local manual-forward readback only. A PID reused by a later, unrelated
 // executable is not the former owned process. Unknown observations stay held.
 export function createForwardPriorPidReadback({config,status,readNative=readWindowsKernelProcessW60,pidState=runtimeHostPidState,now=Date.now}={}) {
-  const root=config?.bundle_directory,observed=Date.parse(status?.checked_at||'');
+  const root=config?.bundle_directory,stateDirectory=config?.state_directory,observed=Date.parse(status?.checked_at||'');
   const children=status?.children;
   const valid=process.platform==='win32' && typeof root==='string' && path.win32.isAbsolute(root)
-    && !root.startsWith('\\\\') && Number.isFinite(observed) && observed<=now()
+    && !root.startsWith('\\\\') && typeof stateDirectory==='string' && path.win32.isAbsolute(stateDirectory)
+    && !stateDirectory.startsWith('\\\\') && Number.isFinite(observed) && observed<=now()
     && status?.state==='READY' && status.runtime_ready===true
     && status.bundle_sha256===config?.expected_bundle_sha256
     && Number.isSafeInteger(status.host_pid) && status.host_pid>0
@@ -24,8 +25,12 @@ export function createForwardPriorPidReadback({config,status,readNative=readWind
     if(native?.state!=='PRESENT'||native.source!=='OS_PROCESS_INVENTORY'||native.pid!==pid||native.authority_effect!==false
       ||!Number.isFinite(Date.parse(native.created_at))||Date.parse(native.created_at)<=observed||Date.parse(native.created_at)>now()+5000
       ||typeof native.exe_path!=='string'||!path.win32.isAbsolute(native.exe_path)||native.exe_path.startsWith('\\\\'))return 'PRESENT';
-    const relative=path.win32.relative(root.toLowerCase(),native.exe_path.toLowerCase());
-    if(!relative||(!relative.startsWith('..'+path.win32.sep)&&relative!=='..'&&!path.win32.isAbsolute(relative)))return 'PRESENT';
+    // Edge is launched from the Host's private staged Deno directory, not
+    // necessarily from the immutable bundle itself.
+    for(const owned of [root,path.win32.join(stateDirectory,'deno-runtime')]){
+      const relative=path.win32.relative(owned.toLowerCase(),native.exe_path.toLowerCase());
+      if(!relative||(!relative.startsWith('..'+path.win32.sep)&&relative!=='..'&&!path.win32.isAbsolute(relative)))return 'PRESENT';
+    }
     return 'ABSENT';
   };
 }
