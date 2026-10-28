@@ -73,7 +73,7 @@ test('image fixture cleanup refuses a redirected root rather than removing anoth
  }
 });
 
-test('actual checkpoint and native OS scope functions route PG identity through the private active reader',async()=>{
+async function scopeFixture(){
   const source=await fs.readFile(new URL('./native-coding-host-os-scope.mjs',import.meta.url),'utf8');
   const start=source.indexOf('  async function postgres('),end=source.indexOf('  function journalPath(');
   assert.ok(start>0&&end>start);
@@ -84,29 +84,103 @@ test('actual checkpoint and native OS scope functions route PG identity through 
     expected_cluster_system_identifier:p.postgres.system_identifier,expected_bundle_sha256:p.artifact.runtime_bundle_sha256};
   const operator={cli_executable:path.resolve('C:/METAENGINE/fixture-cli/codex.exe'),git_executable:path.resolve('C:/METAENGINE/fixture-git/git.exe')};
   const pidText=[pg.pid,config.pg_data_directory,Math.floor(Date.parse(pg.created_at)/1000),55432,'','127.0.0.1','ready',''].join('\n');
-  let transactionReads=0,baseReads=0;
-  const tx={unsafe:async text=>{transactionReads++;assert.match(text,/pg_control_system/);return[{data_directory:config.pg_data_directory,
+  const counts={transactionReads:0,baseReads:0,processReads:0,operatorReads:0,bootReads:0,sandboxReads:0,worktreeReads:0};
+  const tx={unsafe:async text=>{counts.transactionReads++;assert.match(text,/pg_control_system/);return[{data_directory:config.pg_data_directory,
     version:170006,address:'127.0.0.1',port:55432,system_identifier:p.postgres.system_identifier}];}};
-  const sql={unsafe:async()=>{baseReads++;throw Error('EXTRA_BASE_POOL_BORROW');}};
+  const sql={unsafe:async()=>{counts.baseReads++;throw Error('EXTRA_BASE_POOL_BORROW');}};
   const fileHashes=new Map([[expectedExe,p.artifact.installed_exe_sha256],[path.join(resources,'app.asar'),p.artifact.installed_asar_sha256],
     [operator.cli_executable,p.artifact.cli_executable_sha256]]);
-  const scope={sql,config,resources,expectedExe,parentPid:host.pid,path,URL,Date,Number,Promise,
+  const scope={sql,config,resources,expectedExe,parentPid:host.pid,path,URL,Date,Number,Promise,structuredClone,
     process:{env:{SystemRoot:'C:/Windows'}},fs:{readFile:async()=>pidText},
     fail:reason=>{throw Error('native_coding_host_os_'+reason);},
     samePath:(a,b)=>path.resolve(a).toLowerCase()===path.resolve(b).toLowerCase(),
     publicProcess:value=>({pid:value.pid,created_at:value.created_at,process_incarnation_id:value.process_incarnation_id}),
-    readNativeCodingWindowsProcess:async pid=>pid===pg.pid?{...pg,exe_path:path.resolve('C:/METAENGINE/fixture-pg-bin/postgres.exe')}:
-      {...host,exe_path:expectedExe,user_sid:p.user_sid},
-    readDirectoryIdentity:async directory=>directory===config.pg_data_directory?p.postgres.data_directory_identity_sha256:p.worktree.root_identity_sha256,
-    readNativeCodingOperatorPaths:async()=>operator,
+    readNativeCodingWindowsProcess:async pid=>{counts.processReads++;return pid===pg.pid?{...pg,exe_path:path.resolve('C:/METAENGINE/fixture-pg-bin/postgres.exe')}:
+      {...host,exe_path:expectedExe,user_sid:p.user_sid};},
+    readDirectoryIdentity:async directory=>{if(directory===config.pg_data_directory)return p.postgres.data_directory_identity_sha256;
+      counts.worktreeReads++;return p.worktree.root_identity_sha256;},
+    readNativeCodingOperatorPaths:async()=>{counts.operatorReads++;return operator;},
+    readWindowsSandboxHostBoot:async()=>{counts.bootReads++;return {kernel_boot_id:101};},
+    resolveNativeCodingSandboxPin:(_operator,permit)=>({path:permit.role}),
+    readNativeCodingSandboxEvidence:async options=>{counts.sandboxReads++;
+      assert.equal((await options.readBoot()).kernel_boot_id,101);
+      assert.equal((await options.readProcess(host.pid)).pid,host.pid);
+      await assert.rejects(options.readProcess(host.pid+1),/scope_batch_process_mismatch/);
+      return structuredClone(p.sandbox);},
     image:{prepare:async()=>{},read:async file=>fileHashes.get(file)},
     run:async()=>({stdout:p.worktree.base_sha}),
     readNativeCodingGitProof:async()=>({head:p.worktree.base_sha,artifact_sha256:'a'.repeat(64)}),
   };
-  const readers=vm.runInNewContext(source.slice(start,end)+'\n({readNativeScope,readCheckpointScope})',scope);
+  const readers=vm.runInNewContext(source.slice(start,end)+'\n({readNativeScope,readNativeScopeBatch,readCheckpointScope})',scope);
+  return {readers,counts,p,tx,scope};
+}
+
+test('actual checkpoint and native OS scope functions route PG identity through the private active reader',async()=>{
+  const {readers,counts,p,tx}=await scopeFixture();
   const result=await readers.readCheckpointScope(p,tx);
   assert.equal(result.postgres.system_identifier,p.postgres.system_identifier);
-  assert.equal(result.git.head,p.worktree.base_sha);assert.equal(transactionReads,1);assert.equal(baseReads,0);
+  assert.equal(result.git.head,p.worktree.base_sha);assert.equal(counts.transactionReads,1);assert.equal(counts.baseReads,0);
   await assert.rejects(readers.readCheckpointScope(p),/EXTRA_BASE_POOL_BORROW/);
-  assert.equal(baseReads,1,'existing callers still default to the original private SQL connection');
+  assert.equal(counts.baseReads,1,'existing callers still default to the original private SQL connection');
+});
+
+test('observation cohort shares native common reads but verifies every agent and never caches a completed cohort',async()=>{
+  const {readers,counts,p,tx}=await scopeFixture();
+  const permits=[p,{...p,role:'CRITIC'}];
+  const results=await readers.readNativeScopeBatch(permits,true,tx);
+  assert.equal(results.length,2);assert.equal(counts.transactionReads,1);assert.equal(counts.processReads,2);
+  assert.equal(counts.operatorReads,1);assert.equal(counts.bootReads,1);
+  assert.equal(counts.worktreeReads,2);assert.equal(counts.sandboxReads,2);
+  results[0].postgres.postmaster.pid=1;
+  assert.equal(results[1].postgres.postmaster.pid,p.postgres.postmaster.pid,'returned agents do not share mutable identity objects');
+  await readers.readNativeScopeBatch(permits,true,tx);
+  assert.equal(counts.transactionReads,2);assert.equal(counts.processReads,4);
+  assert.equal(counts.bootReads,2);assert.equal(counts.sandboxReads,4);
+});
+
+test('concurrent observation cohorts never borrow another transaction or hide its failure',async()=>{
+  const {readers,counts,p,tx}=await scopeFixture();let otherReads=0;
+  const other={unsafe:async()=>{otherReads++;throw Error('OTHER_TRANSACTION_FAILED');}};
+  const result=await Promise.allSettled([readers.readNativeScopeBatch([p],false,tx),readers.readNativeScopeBatch([p],false,other)]);
+  assert.equal(result[0].status,'fulfilled');assert.equal(result[1].status,'rejected');
+  assert.match(result[1].reason.message,/OTHER_TRANSACTION_FAILED/);assert.equal(otherReads,1);
+  assert.equal(counts.transactionReads,1);assert.equal(counts.baseReads,0);assert.equal(counts.bootReads,0);
+  await assert.rejects(readers.readNativeScopeBatch([p]),/EXTRA_BASE_POOL_BORROW/);
+  assert.equal(counts.baseReads,1);
+});
+
+test('any agent image mismatch rejects its entire cohort; future reads still physically verify',async()=>{
+  const {readers,counts,p,tx}=await scopeFixture();
+  await assert.rejects(readers.readNativeScopeBatch([p,{...p,artifact:{...p.artifact,installed_exe_sha256:'0'.repeat(64)}}],false,tx),/installed_artifact_mismatch/);
+  const result=await readers.readNativeScopeBatch([p],false,tx);
+  assert.equal(result.length,1);assert.equal(counts.transactionReads,2);assert.equal(counts.processReads,4);
+});
+
+test('batch preserves distinct worktree, provider pin and role and rejects one failed sandbox',async()=>{
+  const {readers,p,tx,scope}=await scopeFixture();
+  const other={...p,provider_id:'other-provider',role:'CRITIC',worktree:{...p.worktree,path:path.resolve('C:/METAENGINE/other-worktree')}};
+  const seen=[];
+  scope.resolveNativeCodingSandboxPin=(_operator,permit)=>({path:permit.provider_id,sha256:permit.role});
+  scope.readNativeCodingSandboxEvidence=async options=>{
+    seen.push([options.pin.path,options.pin.sha256,options.worktreePath,options.role]);
+    if(options.role==='CRITIC')throw Error('SECOND_SANDBOX_REVOKED');
+    return structuredClone(p.sandbox);
+  };
+  await assert.rejects(readers.readNativeScopeBatch([p,other],true,tx),/SECOND_SANDBOX_REVOKED/);
+  assert.deepEqual(seen.sort((a,b)=>a[0].localeCompare(b[0])),[
+    [p.provider_id,p.role,p.worktree.path,p.role],
+    [other.provider_id,other.role,other.worktree.path,other.role],
+  ].sort((a,b)=>a[0].localeCompare(b[0])));
+});
+
+test('ordinary sandbox read retains default physical observers without caller-supplied common evidence',async()=>{
+  const {readers,p,tx,scope,counts}=await scopeFixture();let observed=false;
+  scope.readNativeCodingSandboxEvidence=async options=>{
+    assert.equal(Object.hasOwn(options,'readBoot'),false);assert.equal(Object.hasOwn(options,'readProcess'),false);
+    assert.equal(options.worktreePath,p.worktree.path);assert.equal(options.role,p.role);observed=true;
+    return structuredClone(p.sandbox);
+  };
+  const result=await readers.readNativeScope(p,true,tx);
+  assert.equal(observed,true);assert.deepEqual(result.sandbox,p.sandbox);assert.equal(counts.transactionReads,1);
+  assert.equal(counts.bootReads,0);
 });

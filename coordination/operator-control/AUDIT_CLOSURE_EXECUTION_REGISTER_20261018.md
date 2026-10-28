@@ -632,3 +632,7 @@ Functional source: be11be66853c822f0138cbaf899aa203f1312016. This unique package
 ## Postgres health contract package successor — 0.7.0-dev.2179244300106.1
 
 Functional source: 91a680d813a5bb44c6ab4438fec2ba1bcbe23ee0. This unique package aligns Browser and Host health diagnostics and separates connection and query timeouts. New planner evidence: evidence/audits/metaengine-20261028-postgres-health-contract/live-artifact-observation.json. This metadata alone proves neither a built artifact nor installed autonomy; Windows build, payload readback and live agent execution remain pending. Activation-latency qualification must be reported independently.
+
+## Native seed observation cohort and failure diagnostics — 2026-10-29
+
+Reduced duplicate common native observations while preserving each role boundary and the 25-second freshness budget. Before-dispatch failures retain bounded private diagnostics; rejection still requires independent DB/fence readback. The observation start timestamp is no longer refreshed after profile revalidation. Source tests and readonly physical measurements are recorded in evidence/audits/metaengine-20261029-native-seed-admission; installed autonomous work is not yet proven.
