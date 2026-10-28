@@ -173,7 +173,8 @@ test('Win32 real ACL protects fresh private directory and verifies inheriting co
 });
 
 test('Win32 DACL protection can repeat on existing private state without changing owner or group', {
-  skip:process.platform!=='win32',timeout:180000,
+  // Five sequential native calls each have their own 120s cap, plus cleanup.
+  skip:process.platform!=='win32',timeout:630000,
 },async t=>{
   const top=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-acl-reprotect-'));
   t.after(()=>fs.rm(top,{recursive:true,force:true}));

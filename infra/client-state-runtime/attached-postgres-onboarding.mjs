@@ -104,6 +104,27 @@ function validateOptions(options) {
   return { admin, startupTimeoutMs };
 }
 
+function runAttachedWindowsAcl(script, file, failureCode) {
+  const root = 'C:\\Windows';
+  if (String(process.env.SystemRoot || process.env.SYSTEMROOT || '').toLowerCase() !== root.toLowerCase()) fail('windows_root_unverified');
+  const env = { SystemRoot: root, SYSTEMROOT: root, WINDIR: root,
+    PATH: path.win32.join(root, 'System32'),
+    PSModulePath: path.win32.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'Modules'),
+    METAENGINE_ATTACHED_PRIVATE_FILE: file };
+  // Preserve only native profile/cache locations, never database credentials
+  // or caller-controlled module and executable search paths.
+  for (const key of ['TEMP', 'TMP', 'LOCALAPPDATA', 'APPDATA', 'USERPROFILE', 'HOME']) {
+    if (typeof process.env[key] === 'string') env[key] = process.env[key];
+  }
+  const result = spawnSync(path.win32.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+    ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
+    { windowsHide: true, shell: false, timeout: 120000, stdio: 'ignore', env });
+  if (result.error?.code === 'ETIMEDOUT') {
+    throw onboardingFailure('attached_onboarding_' + failureCode, 'preflight', 'native_query_timeout');
+  }
+  if (result.status !== 0 || result.error) fail(failureCode);
+}
+
 // Only current owner and SYSTEM can read newly staged credentials on Windows.
 // ACL is applied while the exclusive temporary file is still empty.
 export async function secureAttachedPrivateFile(file) {
@@ -119,9 +140,7 @@ $attachedSystem = [System.Security.Principal.SecurityIdentifier]::new('S-1-5-18'
 $attachedAcl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($attachedSystem, 'FullControl', 'Allow'))
 [System.IO.File]::SetAccessControl($attachedFile, $attachedAcl)
 `;
-  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
-    { windowsHide: true, shell: false, timeout: 30000, stdio: 'ignore', env: { ...process.env, METAENGINE_ATTACHED_PRIVATE_FILE: file } });
-  if (result.status !== 0) fail('private_file_acl_failed');
+  runAttachedWindowsAcl(script, file, 'private_file_acl_failed');
 }
 
 async function assertPrivateCredentialPermissions(file) {
@@ -139,9 +158,7 @@ foreach ($attachedRule in $attachedAcl.GetAccessRules($true, $true, [System.Secu
 }
 exit 0
 `;
-  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
-    { windowsHide: true, shell: false, timeout: 30000, stdio: 'ignore', env: { ...process.env, METAENGINE_ATTACHED_PRIVATE_FILE: file } });
-  if (result.status !== 0) fail('options_file_permissions_invalid');
+  runAttachedWindowsAcl(script, file, 'options_file_permissions_invalid');
 }
 
 export async function readAttachedOnboardingOptionsFile(file) {

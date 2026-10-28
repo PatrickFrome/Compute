@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import vm from 'node:vm';
 import { RPC_ALLOWLIST, RPC_CATALOG_QUERY, TABLE_ALLOWLIST } from './db-api-core.mjs';
 import { localApiRolePolicyName } from './db-api-grants.mjs';
 import { formatAttachedOnboardingDiagnostic } from './test/attached-onboarding-diagnostic.mjs';
@@ -460,3 +461,42 @@ test('negative, excessive and invalid postmaster timestamp drift cannot mutate a
   }
   assert.equal(postmasterPidStartEpochMatchesLive(epoch,'invalid'),false);
 });
+
+
+for (const operation of ['secureAttachedPrivateFile', 'assertPrivateCredentialPermissions']) {
+  test(`Windows ${operation} pins its native executable and keeps cold-start failure closed`, async () => {
+    const source = await fs.readFile(new URL('./attached-postgres-onboarding.mjs', import.meta.url), 'utf8');
+    const helperStart = source.indexOf('function runAttachedWindowsAcl(');
+    const helper = helperStart < 0 ? '' : source.slice(helperStart, source.indexOf('// Only current owner', helperStart));
+    const fn = operation === 'secureAttachedPrivateFile' ? secureAttachedPrivateFile.toString()
+      : source.slice(source.indexOf('async function assertPrivateCredentialPermissions('), source.indexOf('export async function readAttachedOnboardingOptionsFile(')).trim();
+    const calls = [];
+    let result = { status: 0 };
+    const environment = { SystemRoot: String.raw`C:\Windows`, PATH: String.raw`C:\untrusted`, DATABASE_URL: 'test-secret-canary',
+      PSModulePath: String.raw`C:\untrusted-modules`, LOCALAPPDATA: String.raw`C:\isolated\local`, TEMP: String.raw`C:\isolated\tmp` };
+    const run = vm.runInNewContext(helper + '\n(' + fn + ')', {
+      process: { platform: 'win32', env: environment }, path, Buffer,
+      fail: code => { throw new Error('attached_onboarding_' + code); },
+      onboardingFailure: (code, stage, category) => Object.assign(new Error(code), { code, stage, category }),
+      spawnSync: (...args) => { calls.push(args); return result; },
+    });
+    const target = String.raw`C:\isolated\private.json`;
+    await run(target);
+    const [executable, argv, options] = calls[0];
+    assert.equal(executable, String.raw`C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`);
+    assert.equal(options.timeout, 120000);
+    assert.equal(options.shell, false);
+    assert.equal(options.env.DATABASE_URL, undefined);
+    assert.equal(options.env.PSModulePath, String.raw`C:\Windows\System32\WindowsPowerShell\v1.0\Modules`);
+    assert.equal(options.env.METAENGINE_ATTACHED_PRIVATE_FILE, target);
+    assert.equal(JSON.stringify(argv).includes(target), false);
+    result = { status: null, error: { code: 'ETIMEDOUT', message: 'private-child-canary' } };
+    await assert.rejects(run(target), error => error.category === 'native_query_timeout' && !error.message.includes('canary'));
+    result = { status: 2 };
+    await assert.rejects(run(target), /attached_onboarding_(?:private_file_acl_failed|options_file_permissions_invalid)/);
+    assert.equal(calls.length, 3, 'no automatic retry');
+    environment.SystemRoot = String.raw`\\untrusted\Windows`;
+    await assert.rejects(run(target), /windows_root_unverified/);
+    assert.equal(calls.length, 3, 'unverified executable root cannot spawn');
+  });
+}

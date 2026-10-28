@@ -10,6 +10,9 @@ import test from 'node:test';
 const execute = promisify(execFile);
 const script = fileURLToPath(new URL('../build/installer-shutdown.ps1', import.meta.url));
 const windows = { skip: process.platform !== 'win32' };
+// Measured TCG PowerShell startup alone takes 40-50s. This bounds only
+// the inert fixture process; production installer deadlines are unchanged.
+const fixtureTimeoutMs = 120000;
 const harness = `param([string]$Scenario,[string]$Root,[string]$ActualScript,[string]$Evidence,[string]$RuntimeRelativePath,[string]$ProfileRoot,[switch]$RequireFreshInstall)
 $script:Now = [DateTime]::Parse('2026-10-08T00:00:00Z').ToUniversalTime()
 $script:Sleeps = 0; $script:Signals = 0; $script:Killed = @(); $script:Removed = @(); $script:PidReads = 0; $script:RegistryReads = 0
@@ -97,7 +100,7 @@ async function run(t, scenario, { managed = true, executable = true, runtimeRela
   try {
     result = { code: 0, ...await execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', wrapper,
       '-Scenario', scenario, '-Root', installationRoot, '-ActualScript', script, '-Evidence', evidenceFile,
-      '-RuntimeRelativePath', runtimeRelativePath, '-ProfileRoot', privateRoot, ...(fresh ? ['-RequireFreshInstall'] : [])], { windowsHide: true, timeout: 10000 }) };
+      '-RuntimeRelativePath', runtimeRelativePath, '-ProfileRoot', privateRoot, ...(fresh ? ['-RequireFreshInstall'] : [])], { windowsHide: true, timeout: fixtureTimeoutMs }) };
   } catch (error) { result = error; }
   const bytes = await readFile(evidenceFile, 'utf8').catch(() => {
     throw new Error('installer fixture did not emit evidence: ' + String(result.stderr || result.stdout || result));
