@@ -38,10 +38,13 @@ try {
  [Console]::Error.WriteLine('RUNTIME_RECOVERY_PHASE_RESULT_WRITTEN')
 } finally {$p.Dispose()}`;
   let value;
+  // Cold Windows PowerShell startup can exceed 30s before any script runs.
+  // Keep one finite attempt (matching the private-storage native reader),
+  // with unchanged PID/birth/image validation and sanitized timeout phases.
   try {
     const pending = exec(path.win32.join(root,'System32','WindowsPowerShell','v1.0','powershell.exe'),
       ['-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')],
-      {windowsHide:true,shell:false,timeout:30000,maxBuffer:8192,env:{SystemRoot:root,SYSTEMROOT:root,WINDIR:root,
+      {windowsHide:true,shell:false,timeout:120000,maxBuffer:8192,env:{SystemRoot:root,SYSTEMROOT:root,WINDIR:root,
         PATH:path.win32.join(root,'System32'),PSModulePath:path.win32.join(root,'System32','WindowsPowerShell','v1.0','Modules'),
         METAENGINE_RECOVERY_QUERY_PID:String(pid)}});
     pending.child.stdin?.end();

@@ -6,6 +6,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import vm from 'node:vm';
 import {createRequire} from 'node:module';
 import {createRuntimeRecoveryTransaction} from '../src/runtime-recovery-transaction.mjs';
 import {createSameExecutableRuntimeRecoveryAdapter,readRuntimeRecoveryProcess} from '../src/runtime-recovery-process-adapter.mjs';
@@ -272,4 +273,33 @@ for (const change of ['cancel', 'gate-epoch']) test(`successor confirmation reje
   await assert.rejects(successor.acknowledgeSuccessor(prepared.ticket_id), /gate_closed/);
   assert.equal((await f.fresh().read()).state, 'REQUESTED', 'invalidated readback cannot persist CONFIRMED');
   assert.equal(f.dispatches, 1, 'readback never replays the relaunch');
+});
+
+
+test('fixed native process query allows bounded cold startup without retrying or accepting an unbound result', async () => {
+  const calls = [];
+  let result = { stdout: JSON.stringify({ state: 'ABSENT', pid: 123 }) };
+  let error = null;
+  const reader = vm.runInNewContext('(' + readRuntimeRecoveryProcess.toString() + ')', {
+    process: { platform: 'win32', env: { SystemRoot: 'C:\\Windows' } },
+    path, Buffer, TextDecoder,
+    fail: code => { throw new Error('runtime_recovery_' + code); },
+    exec: (executable, argv, options) => {
+      calls.push({ executable, argv, options });
+      return Object.assign(error ? Promise.reject(error) : Promise.resolve(result), { child: { stdin: { end() {} } } });
+    },
+  });
+  assert.equal((await reader(123)).state, 'ABSENT');
+  assert.equal(calls[0].options.timeout, 120000);
+  assert.equal(calls[0].options.maxBuffer, 8192);
+  assert.equal(calls[0].options.shell, false);
+  assert.equal(calls[0].options.env.METAENGINE_RECOVERY_QUERY_PID, '123');
+  assert.equal(calls[0].argv.includes('-NoProfile'), true);
+  result = { stdout: JSON.stringify({ state: 'ABSENT', pid: 124 }) };
+  await assert.rejects(reader(123), /process_query_unbound/);
+  error = Object.assign(new Error('private child details'), {
+    killed: true, stderr: 'RUNTIME_RECOVERY_PHASE_PROCESS_OPENED\nprivate-path',
+  });
+  await assert.rejects(reader(123), { message: 'runtime_recovery_process_query_timeout_process_opened' });
+  assert.equal(calls.length, 3, 'each read has one bounded attempt, never an automatic retry');
 });
