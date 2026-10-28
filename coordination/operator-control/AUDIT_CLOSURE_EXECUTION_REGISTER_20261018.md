@@ -624,3 +624,7 @@ Functional source 1da1a74b0e451143da64e2e0e63647ac87212ce5 incorporates the seve
 ## Recovery fences package successor — 0.7.0-dev.1955970210787.1
 
 Functional source: 3d6e3b9a5bf4e7ddb5c9dd9cc0fc3d41d73ef320. This unique package includes the 15 recovery-fence changes after the integrated .184 base. New planner evidence: evidence/audits/metaengine-20261028-recovery-fences-package/live-artifact-observation.json. This metadata alone proves neither a built artifact nor installed autonomy; Windows build, payload readback and live agent execution remain pending. Activation-latency qualification must be reported independently.
+
+## Terminal goal and health diagnostics package successor — 0.7.0-dev.2070820686579.1
+
+Functional source: be11be66853c822f0138cbaf899aa203f1312016. This unique package includes terminal rejected goal polling repair and bounded API health failure diagnostics. New planner evidence: evidence/audits/metaengine-20261028-terminal-goal-health/live-artifact-observation.json. This metadata alone proves neither a built artifact nor installed autonomy; Windows build, payload readback and live agent execution remain pending. Activation-latency qualification must be reported independently.
