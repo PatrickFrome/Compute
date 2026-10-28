@@ -5,6 +5,8 @@ import {createReadStream} from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {createRequire} from 'node:module';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
 import {pathToFileURL} from 'node:url';
 
 const require = createRequire(import.meta.url);
@@ -26,6 +28,43 @@ const mode = value => ['NORMAL', 'PROBE_ONLY'].includes(value) ? value : null;
 const safeState = value => STATES.has(value) ? value : null;
 const fail = code => { throw Object.assign(new Error(code), {code}); };
 const stamp = stat => [stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs, stat.birthtimeMs].join(':');
+
+// A single OS census is observational only. A matching process could belong to
+// another attempt, while an absent process says nothing about an earlier one.
+// Inaccessible executable paths fail closed and no private path is retained.
+export function projectInstallerProcessObservation({rows, expectedPath, observedAt} = {}) {
+  const unavailable = () => ({schema:'metaengine.self-update.installer-process-observation.v1',
+    state:'UNAVAILABLE', matching_process_count:null, observed_at:null,
+    transaction_binding_proven:false, installer_result_observed:false, authority_effect:false});
+  if (!Array.isArray(rows) || rows.length > 256 || typeof expectedPath !== 'string'
+    || !path.win32.isAbsolute(expectedPath) || !Number.isFinite(Date.parse(observedAt || ''))) return unavailable();
+  const expected = path.win32.normalize(expectedPath).toLowerCase();
+  const name = path.win32.basename(expected).toLowerCase();
+  let count = 0;
+  for (const row of rows) {
+    if (!row || typeof row.Name !== 'string') return unavailable();
+    if (row.Name.toLowerCase() !== name) continue;
+    if (typeof row.ExecutablePath !== 'string' || !path.win32.isAbsolute(row.ExecutablePath)) return unavailable();
+    if (path.win32.normalize(row.ExecutablePath).toLowerCase() === expected) count++;
+  }
+  return {schema:'metaengine.self-update.installer-process-observation.v1',
+    state:count ? 'PRESENT' : 'ABSENT', matching_process_count:count, observed_at:observedAt,
+    transaction_binding_proven:false, installer_result_observed:false, authority_effect:false};
+}
+
+async function observeInstallerProcess(context) {
+  if (process.platform !== 'win32' || !process.env.LOCALAPPDATA) return projectInstallerProcessObservation();
+  const expectedPath = path.win32.join(process.env.LOCALAPPDATA, '@metaenginebrowser-shell-updater', 'pending',
+    `METAENGINE-Browser-Test-Setup-${context.target_version}-x64.exe`);
+  const ps = path.win32.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  const command = "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); $ErrorActionPreference='Stop'; "
+    + "$rows=@(Get-CimInstance Win32_Process -Filter \"Name LIKE 'METAENGINE-Browser-Test-Setup-%'\" | Select-Object Name,ExecutablePath); ConvertTo-Json -InputObject $rows -Compress";
+  try {
+    const {stdout} = await promisify(execFile)(ps, ['-NoLogo','-NoProfile','-NonInteractive','-Command',command],
+      {windowsHide:true,timeout:8000,maxBuffer:262144});
+    return projectInstallerProcessObservation({rows:JSON.parse(stdout),expectedPath,observedAt:new Date().toISOString()});
+  } catch { return projectInstallerProcessObservation(); }
+}
 
 async function regularFile(file, maximum) {
   if (!path.isAbsolute(file || '')) fail('UNSAFE_PATH');
@@ -197,13 +236,15 @@ function validateContext(value) {
 export async function collectSelfUpdateFailureReadback(context) {
   validateContext(context);
   const read = name => readJson(path.join(context.profile_path, name));
-  const [preInstall, transaction, successor, installedImage] = await Promise.all([
+  const [preInstall, transaction, successor, installedImage, installerProcess] = await Promise.all([
     read('metaengine-self-update-pre-install-receipt-v1.json'),
     read('metaengine-self-update-transaction-v1.json'),
     read('metaengine-self-update-successor-receipt-v1.json'),
     readInstalledImage(context.installed_asar_path),
+    observeInstallerProcess(context),
   ]);
-  return projectSelfUpdateFailureReadback({context, preInstall, transaction, successor, installedImage});
+  return {...projectSelfUpdateFailureReadback({context, preInstall, transaction, successor, installedImage}),
+    installer_process:installerProcess};
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {

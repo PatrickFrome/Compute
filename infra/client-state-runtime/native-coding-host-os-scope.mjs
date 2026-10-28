@@ -10,6 +10,7 @@ import {readNativeCodingGitProof} from '../../apps/metaengine-browser/src/native
 import {readNativeCodingWindowsProcess,readNativeCodingProtectedJson,readNativeCodingSandboxEvidence}
   from '../../apps/metaengine-browser/src/native-coding-host-observers.mjs';
 import {readNativeCodingOperatorPaths,resolveNativeCodingSandboxPin} from '../../apps/metaengine-browser/src/native-coding-operator-paths.mjs';
+import {readWindowsSandboxHostBoot} from '../../apps/metaengine-browser/src/codex-cli-sandbox-probe.mjs';
 export {readNativeCodingOperatorPaths};
 
 const run=promisify(execFile);
@@ -86,9 +87,28 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
   }
   async function readNativeScope(permit,includeSandbox=true,reader=sql) {
     const [pg,host]=await Promise.all([postgres(reader),readNativeCodingWindowsProcess(parentPid)]);
-    const base={postgres:pg,host_process:publicProcess(host),user_sid:host.user_sid};
-    if(permit===null) return base;
+    if(permit===null) return {postgres:pg,host_process:publicProcess(host),user_sid:host.user_sid};
     const operator=await readNativeCodingOperatorPaths(config.state_directory);
+    return readScopeWithCommon(permit,includeSandbox,{pg,host,operator});
+  }
+  // One explicit observation cohort shares only its common physical reads.
+  // Never retain the cohort after this call, accept caller-supplied evidence,
+  // or reuse it for another SQL transaction. Each agent still checks its own
+  // worktree, pinned sandbox receipt/logs and current immutable image identity.
+  async function readNativeScopeBatch(permits,includeSandbox=true,reader=sql) {
+    if(!Array.isArray(permits)||permits.length<1||permits.some(p=>!p||typeof p!=='object'))fail('scope_batch_invalid');
+    const [pg,host,operator,boot]=await Promise.all([postgres(reader),readNativeCodingWindowsProcess(parentPid),
+      readNativeCodingOperatorPaths(config.state_directory),includeSandbox?readWindowsSandboxHostBoot():null]);
+    const common={pg,host,operator,boot},results=new Array(permits.length);let cursor=0,failed=false;
+    await Promise.all(Array.from({length:Math.min(4,permits.length)},async()=>{
+      while(!failed&&cursor<permits.length){const i=cursor++;
+        try{results[i]=await readScopeWithCommon(permits[i],includeSandbox,common);}catch(error){failed=true;throw error;}
+      }
+    }));
+    return results;
+  }
+  async function readScopeWithCommon(permit,includeSandbox,{pg,host,operator,boot}) {
+    const base={postgres:structuredClone(pg),host_process:publicProcess(host),user_sid:host.user_sid};
     if(path.basename(host.exe_path)!=='METAENGINE Browser Test.exe') fail('browser_parent_unverified');
     if(!samePath(host.exe_path,expectedExe))fail('browser_parent_unverified');
     const expectedBundle=path.join(resources,'client-state-runtime');
@@ -111,6 +131,9 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
     if(!includeSandbox){await unchanged();return {...base,artifact,worktree};}
     const sandbox=await readNativeCodingSandboxEvidence({pin:resolveNativeCodingSandboxPin(operator,permit),cliPath:operator.cli_executable,
       worktreePath:permit.worktree.path,role:permit.role,hostProcessId:parentPid,
+      ...(boot?{readBoot:async()=>boot,readProcess:async pid=>{
+        if(pid!==parentPid)fail('scope_batch_process_mismatch');return host;
+      }}:{}),
       // The CLI was byte-qualified before admission. Recheck its exact native
       // file identity instead of reading hundreds of MB again for every role.
       // The guard permanently rejects replacement, mutation and hardlinks.
@@ -153,5 +176,6 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
     return receipt;
   }
   Object.defineProperty(readNativeScope,'prepare',{value:prepareNativeScopes});
+  Object.defineProperty(readNativeScope,'batch',{value:readNativeScopeBatch});
   return Object.freeze({readNativeScope,prepareNativeScopes,readNativeWorker,readProtectedReceipt,readCheckpointScope});
 }

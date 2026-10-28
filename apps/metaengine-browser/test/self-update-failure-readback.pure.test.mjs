@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {projectSelfUpdateFailureReadback} from './self-update-failure-readback.mjs';
+import {projectSelfUpdateFailureReadback, projectInstallerProcessObservation} from './self-update-failure-readback.mjs';
 
 const baseline = '0.7.0-dev.100.1';
 const target = '0.7.0-dev.101.1';
@@ -8,6 +8,20 @@ const oldHash = 'a'.repeat(64);
 const newHash = 'b'.repeat(64);
 const preHash = 'c'.repeat(64);
 const privateText = 'DO_NOT_EXPORT_PRIVATE_PATH_TOKEN_OR_ERROR';
+
+test('installer census reports only exact visible paths and never proves a transaction', () => {
+  const expectedPath = 'C:\\Users\\private\\updater\\METAENGINE-Browser-Test-Setup-0.7.0-dev.101.1-x64.exe';
+  const name = 'METAENGINE-Browser-Test-Setup-0.7.0-dev.101.1-x64.exe';
+  const base = {expectedPath,observedAt:'2026-10-29T00:00:00.000Z'};
+  const present = projectInstallerProcessObservation({...base,rows:[{Name:name,ExecutablePath:expectedPath}]});
+  assert.equal(present.state,'PRESENT');assert.equal(present.matching_process_count,1);
+  assert.equal(present.transaction_binding_proven,false);assert.equal(present.installer_result_observed,false);
+  assert.ok(!JSON.stringify(present).includes('private'));
+  assert.equal(projectInstallerProcessObservation({...base,rows:[]}).state,'ABSENT');
+  assert.equal(projectInstallerProcessObservation({...base,rows:[{Name:name,ExecutablePath:'D:\\other\\'+name}]}).state,'ABSENT');
+  assert.equal(projectInstallerProcessObservation({...base,rows:[{Name:name,ExecutablePath:null}]}).state,'UNAVAILABLE');
+  assert.equal(projectInstallerProcessObservation({...base,rows:[{Name:name,ExecutablePath:expectedPath}],observedAt:'invalid'}).state,'UNAVAILABLE');
+});
 
 function observations() {
   return {

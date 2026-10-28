@@ -12,6 +12,29 @@ const same=(a,b)=>json(a)===json(b);
 const exact=(v,keys)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).sort().join('\0')===[...keys].sort().join('\0');
 const fail=reason=>{throw Error('native_coding_host_seed_'+reason);};
 const flags={production_qualified:false,automatic_retry_allowed:false,authority_effect:false};
+// This allowlist deliberately excludes arbitrary exception text, stderr, paths,
+// SQL and credentials. A diagnostic is not an admission/rejection receipt.
+const observationFailureReasons=new Map([
+ ['native_coding_host_seed_observation_window_exceeded','OBSERVATION_WINDOW_EXCEEDED'],
+ ['native_coding_host_seed_physical_scope_changed','PHYSICAL_SCOPE_CHANGED'],
+ ['native_coding_host_seed_process_identity_invalid','PROCESS_IDENTITY_INVALID'],
+ ['native_coding_host_seed_process_birth_invalid','PROCESS_IDENTITY_INVALID'],
+ ['native_coding_host_seed_profile_unverified','PROFILE_UNVERIFIED'],
+ ['native_coding_seed_profile_unavailable','PROFILE_UNAVAILABLE'],
+ ['native_coding_seed_profile_invalid','PROFILE_UNVERIFIED'],
+ ['native_coding_seed_profile_scope_invalid','PROFILE_UNVERIFIED'],
+ ['native_coding_seed_device_changed','CURRENT_DEVICE_CHANGED'],
+ ['native_coding_host_seed_operator_changed','OPERATOR_CHANGED'],
+ ['native_coding_host_seed_current_device_changed','CURRENT_DEVICE_CHANGED'],
+ ['native_coding_host_seed_closed','HOST_SERVICE_CLOSED'],
+ ['native_coding_host_os_postgres_incarnation_unverified','POSTGRES_IDENTITY_UNVERIFIED'],
+ ['native_coding_host_os_postgres_changed','POSTGRES_IDENTITY_CHANGED'],
+ ['native_coding_host_os_browser_parent_unverified','BROWSER_PARENT_UNVERIFIED'],
+ ['native_coding_host_os_installed_artifact_mismatch','INSTALLED_ARTIFACT_MISMATCH'],
+ ['native_coding_host_os_image_preparation_invalidated','INSTALLED_IMAGE_CHANGED'],
+ ['native_coding_observer_native_process_unavailable','NATIVE_PROCESS_UNAVAILABLE'],
+ ['native_coding_observer_private_storage_unverified','PRIVATE_STORAGE_UNVERIFIED'],
+]);
 function request(value){
  if(!exact(value,['request_id','objective'])||!UUID.test(value.request_id||'')||typeof value.objective!=='string'
   ||value.objective!==value.objective.trim()||!value.objective||[...value.objective].length>480
@@ -125,10 +148,18 @@ export async function createNativeCodingHostSeedService({sql,stateDirectory,read
  async function observation(p){
   let common=null;const agents=[],started=Date.now();
   // Protected roster has no count ceiling; only verified identities are admitted.
-  const observations=new Array(p.agents.length);let cursor=0;
-  await Promise.all(Array.from({length:Math.min(4,p.agents.length)},async()=>{
-   while(cursor<p.agents.length){const i=cursor++,a=p.agents[i];observations[i]=await readNativeScope({...p,...a},true);}
-  }));
+  let observations;
+  if(typeof readNativeScope.batch==='function'){
+   // The native scope implementation shares only fresh common observations
+   // inside this invocation. Each returned role remains independently checked.
+   observations=await readNativeScope.batch(p.agents.map(a=>({...p,...a})),true);
+  }else{
+   observations=new Array(p.agents.length);let cursor=0;
+   await Promise.all(Array.from({length:Math.min(4,p.agents.length)},async()=>{
+    while(cursor<p.agents.length){const i=cursor++,a=p.agents[i];observations[i]=await readNativeScope({...p,...a},true);}
+   }));
+  }
+  if(!Array.isArray(observations)||observations.length!==p.agents.length)fail('physical_scope_changed');
   for(let i=0;i<p.agents.length;i++){
    const a=p.agents[i],actual=observations[i];
    if(!actual||!same(actual.artifact,p.artifact)||!same(actual.postgres,p.postgres)||actual.user_sid!==p.user_sid
@@ -140,8 +171,11 @@ export async function createNativeCodingHostSeedService({sql,stateDirectory,read
   }
   if(Date.now()-started>25000)fail('observation_window_exceeded');
   await profile(true);
+  // Profile/ACL revalidation consumes freshness too. Do not re-date physical
+  // observations after those reads or let a slow revalidation admit stale data.
+  if(Date.now()-started>25000)fail('observation_window_exceeded');
   return {schema:'metaengine.native-coding.seed-observation.v1',profile_id:pins.profile_id,profile_sha256:pins.profile_sha256,
-   observed_at:new Date().toISOString(),...common,agents,installed_execution_proven:false,...flags};
+   observed_at:new Date(started).toISOString(),...common,agents,installed_execution_proven:false,...flags};
  }
  async function saved(file){try{return(await readProtectedJson(file,{maximumBytes:16384})).value;}catch(e){if(e.code==='ENOENT')return null;throw e;}}
  async function seed(raw){
@@ -170,8 +204,23 @@ export async function createNativeCodingHostSeedService({sql,stateDirectory,read
   // Cold native ACL verification precedes the physical freshness window.
   // A failure here proves no SQL write was dispatched; retain the request
   // journal for readonly reconciliation and release only its semantic latch.
-  let observed;
-  try{observed=await observation(p);}catch(error){await fs.unlink(semanticFile);throw error;}
+  let observed;const observationStarted=Date.now();
+  try{observed=await observation(p);}catch(error){
+   // Write diagnostic data before releasing the semantic latch. A crash or
+   // failed unlink can therefore leave a diagnostic beside an UNKNOWN fence:
+   // only READ_SEED's independent DB/fence checks can prove rejection. Missing
+   // diagnostics never turn a known pre-dispatch failure into a permanent fence.
+   try{
+    const diagnosticFile=path.join(directory,'observation-failed-'+input.request_id+'.json');
+    await durable(diagnosticFile,{schema:'metaengine.native-coding.seed-observation-failure.v1',
+     request_id:input.request_id,profile_id:pins.profile_id,profile_sha256:pins.profile_sha256,body_sha256:digest(json(input)),
+     reason:observationFailureReasons.get(error?.message)||'OBSERVATION_FAILED',
+     elapsed_ms:Math.max(0,Math.min(86400000,Math.trunc(Date.now()-observationStarted))),observed_at:new Date().toISOString(),
+     diagnostic_only:true,rejection_proven:false,readback_required:true,...flags});
+    await verifyStorage(diagnosticFile,{operation:'VERIFY_FILE'});
+   }catch{}
+   await fs.unlink(semanticFile);throw error;
+  }
   try{
    await unchanged();
    const value=await sql.begin('isolation level serializable',async tx=>{

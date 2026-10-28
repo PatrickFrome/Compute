@@ -24,3 +24,5 @@ evidence/audits/metaengine-20261028-recovery-fences-package/live-artifact-observ
 evidence/audits/metaengine-20261028-terminal-goal-health/live-artifact-observation.json text eol=lf
 
 evidence/audits/metaengine-20261028-postgres-health-contract/live-artifact-observation.json text eol=lf
+
+evidence/audits/metaengine-20261029-native-seed-admission/live-artifact-observation.json text eol=lf
