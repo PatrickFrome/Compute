@@ -256,3 +256,20 @@ test('portable adapter contract binds private process readback and exact ticket 
   physical={...physical,pid:process.pid+1};await assert.rejects(adapter.capture(),/own_process_unbound/);
   assert.equal(calls.length,2);
 });
+
+for (const change of ['cancel', 'gate-epoch']) test(`successor confirmation rejects ${change} during physical predecessor readback`, async t => {
+  const f = await fixture(t);
+  await f.transaction.arm(); f.fail();
+  const prepared = await f.transaction.prepare(); f.advance(5000);
+  await f.transaction.dispatch(prepared.ticket_id);
+  f.successor();
+  const successor = f.fresh();
+  f.adapter.readProcess = async pid => {
+    if (change === 'cancel') successor.cancel();
+    else f.gate = { ...f.gate, epoch: f.gate.epoch + 1 };
+    return { schema: 'metaengine.browser.runtime-recovery-process.v1', state: 'ABSENT', pid, authority_effect: false };
+  };
+  await assert.rejects(successor.acknowledgeSuccessor(prepared.ticket_id), /gate_closed/);
+  assert.equal((await f.fresh().read()).state, 'REQUESTED', 'invalidated readback cannot persist CONFIRMED');
+  assert.equal(f.dispatches, 1, 'readback never replays the relaunch');
+});

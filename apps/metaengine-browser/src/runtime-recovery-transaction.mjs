@@ -225,7 +225,7 @@ export function createRuntimeRecoveryTransaction({app,readGeneration,readBinding
       if (!active||active.ticket_id!==ticket) fail('ticket_unbound');
       if (active.state==='CONFIRMED') return status(value,'ALREADY_RECORDED');
       if (!['DISPATCH_INTENT','REQUESTED','AMBIGUOUS'].includes(active.state)) fail('effect_barrier_not_crossed');
-      await gate();
+      const acknowledgementGate = await gate();
       const binding=await readBinding(),browser=await adapter.capture();
       if (!same(pins(binding),active.binding)||binding.normal_bootstrap_ready!==true||!binding.host
         || binding.host.instance_id===active.host.instance_id||binding.host.launch_nonce===active.host.launch_nonce
@@ -236,6 +236,9 @@ export function createRuntimeRecoveryTransaction({app,readGeneration,readBinding
       if (previous?.schema!=='metaengine.browser.runtime-recovery-process.v1'||previous.pid!==active.origin_browser.pid||previous.authority_effect!==false
         || !(previous.state==='ABSENT'||previous.state==='PRESENT'&&/^[1-9][0-9]{16,18}$/.test(previous.created_100ns||'')
           && previous.created_100ns!==active.origin_browser.created_100ns)) fail('old_browser_exit_unproven');
+      // Native readback awaits may overlap stop/cancel or a new gate epoch.
+      // Do not turn that invalidated observation into a durable success receipt.
+      await gate(acknowledgementGate.epoch);
       const clock=at();if(clock<active.prepared_at_ms)fail('clock_regressed');
       return status(await save({...value,sha256:undefined,revision:value.revision+1,
         active:{...active,state:'CONFIRMED',new_browser:browser,new_host:binding.host,confirmed_at_ms:clock}}));
