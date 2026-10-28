@@ -83,7 +83,7 @@ function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion)
   classification:'SOURCE_ONLY_NO_CURRENT_PACKAGE',
   branch:'work/autonomy-continuation-20261026',
   source_parent:'ea405d926568508eac53ebb408e941c94faeadcf',
-  package_version:'0.7.0-dev.2179244300106.1',
+  package_version:'0.7.0-dev.2257027431866.1',
   historical_package_version:'0.7.0-dev.202610152359.1',
   package_build_authorized:false,
   package_version_reuse_authorized:false,
@@ -506,15 +506,26 @@ function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion)
     "production_ready": false,
     "promotion_authorized": false,
     "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "91a680d813a5bb44c6ab4438fec2ba1bcbe23ee0",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.2070820686579.1",
+    "distinct_version": "0.7.0-dev.2179244300106.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
   }
 ]);
  const successor=manifest.current_package_transition;
  assert.deepEqual(successor,{
   "schema": "metaengine.client.package-version-successor.v1",
-  "source_parent": "91a680d813a5bb44c6ab4438fec2ba1bcbe23ee0",
+  "source_parent": "21e439a082d214bb7601d5b43d53bc520058517e",
   "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
-  "prior_version": "0.7.0-dev.2070820686579.1",
-  "distinct_version": "0.7.0-dev.2179244300106.1",
+  "prior_version": "0.7.0-dev.2179244300106.1",
+  "distinct_version": "0.7.0-dev.2257027431866.1",
   "preceding_version_burned": true,
   "production_ready": false,
   "promotion_authorized": false,
@@ -1058,6 +1069,20 @@ test('Postgres health contract successor binds fresh source and metadata without
  const evidence=JSON.parse(read('evidence/audits/metaengine-20261028-postgres-health-contract/live-artifact-observation.json'));
  assert.equal(evidence.source_head,prior);assert.equal(evidence.plan.candidate_package_version,version);
  assert.equal(evidence.plan.minimum_package_version,'0.7.0-dev.2070820686579.1');
+ assert.equal(evidence.reservation_created,false);assert.equal(evidence.package_built,false);assert.equal(evidence.authority_effect,false);
+ assert.equal(evidence.plan.physical_package_build_allowed,false);assert.equal(evidence.plan.promotion_authorized,false);
+ for(const q of evidence.queries){assert.equal(q.status,200);const body=JSON.parse(q.response_body);assert.equal(body.total_count,body.artifacts.length);}
+ assert.equal(JSON.parse(evidence.queries.at(-1).response_body).total_count,0);
+ assert.equal(manifest.previous_package_transitions.find(item=>item.distinct_version===version).source_parent,prior);
+ assertCommittedAuditPrefix(root,prior,'HEAD','coordination/operator-control/AUDIT_CLOSURE_EXECUTION_REGISTER_20261018.md');
+});
+
+
+test('Native seed observation successor binds fresh source and metadata without installed qualification',()=>{
+ const prior='21e439a082d214bb7601d5b43d53bc520058517e',version='0.7.0-dev.2257027431866.1';
+ const evidence=JSON.parse(read('evidence/audits/metaengine-20261029-native-seed-admission/live-artifact-observation.json'));
+ assert.equal(evidence.source_head,prior);assert.equal(evidence.plan.candidate_package_version,version);
+ assert.equal(evidence.plan.minimum_package_version,'0.7.0-dev.2179244300106.1');
  assert.equal(evidence.reservation_created,false);assert.equal(evidence.package_built,false);assert.equal(evidence.authority_effect,false);
  assert.equal(evidence.plan.physical_package_build_allowed,false);assert.equal(evidence.plan.promotion_authorized,false);
  for(const q of evidence.queries){assert.equal(q.status,200);const body=JSON.parse(q.response_body);assert.equal(body.total_count,body.artifacts.length);}

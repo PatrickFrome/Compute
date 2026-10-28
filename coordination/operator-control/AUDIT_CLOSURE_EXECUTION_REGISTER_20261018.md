@@ -636,3 +636,7 @@ Functional source: 91a680d813a5bb44c6ab4438fec2ba1bcbe23ee0. This unique package
 ## Native seed observation cohort and failure diagnostics — 2026-10-29
 
 Reduced duplicate common native observations while preserving each role boundary and the 25-second freshness budget. Before-dispatch failures retain bounded private diagnostics; rejection still requires independent DB/fence readback. The observation start timestamp is no longer refreshed after profile revalidation. Source tests and readonly physical measurements are recorded in evidence/audits/metaengine-20261029-native-seed-admission; installed autonomous work is not yet proven.
+
+## Native seed observation package successor — 0.7.0-dev.2257027431866.1
+
+Functional source: 21e439a082d214bb7601d5b43d53bc520058517e. This unique package shares only request-scoped common native observations, preserves per-agent checks and exact freshness, and records bounded pre-dispatch diagnostics. New planner evidence: evidence/audits/metaengine-20261029-native-seed-admission/live-artifact-observation.json. This metadata alone proves neither a built artifact nor installed autonomy; Windows build, payload readback and live agent execution remain pending. Activation-latency qualification must be reported independently.
