@@ -3442,28 +3442,36 @@ async function ensureInterruptedSetupRecovery(closing=managedTaskProjectHostClos
       assertCurrent();return interruptedSetupRecovery;
     }
     if (!nativeSupervisor || !fleet) throw new Error('interrupted_setup_native_runtime_not_ready');
-    const privateRoot = await prepareManagedTaskProjectStorage({ userDataPath: app.getPath('userData') });
-    assertCurrent();
-    const directory = path.join(privateRoot, 'interrupted-setup-recovery-v1');
-    const recovery = new InterruptedSetupRecovery({
-      directory,
-      verifyDirectory: async location => {
-        await assertManagedProjectPhysicalDirectory(location);
-        if (process.platform === 'win32') assertManagedProjectPrivateReceipt(await verifyOwnerOnlyWindowsStorage(location, { operation: 'VERIFY_DIRECTORY' }), 'VERIFY_DIRECTORY');
-      },
-      verifyFile: location => verifyManagedProjectPrivateFile(location),
-      getSnapshot: async () => {assertCurrent();return {
-        keepalive: supervisor.snapshot()?.lifecycle?.keepalive || null,
-        fleet: currentFleet.snapshot(),
-        tabs: registry.snapshot()?.tabs,
-      };},
-      applyFleet: binding => {assertCurrent();return currentFleet.archiveInterruptedBootstrapAgents(binding);},
-      applySupervisor: binding => {assertCurrent();return supervisor.archiveInterruptedBootstrapForNewEpoch(binding);},
-    });
-    const status = await recovery.init();
-    assertCurrent();supervisor.setInterruptedSetupRecoveryFence(status.fenced);
-    interruptedSetupRecovery=recovery;interruptedSetupRecoveryClosing=closing;interruptedSetupRecoverySupervisor=supervisor;interruptedSetupRecoveryFleet=currentFleet;
-    return recovery;
+    try {
+      const privateRoot = await prepareManagedTaskProjectStorage({ userDataPath: app.getPath('userData') });
+      assertCurrent();
+      const directory = path.join(privateRoot, 'interrupted-setup-recovery-v1');
+      const recovery = new InterruptedSetupRecovery({
+        directory,
+        verifyDirectory: async location => {
+          await assertManagedProjectPhysicalDirectory(location);
+          if (process.platform === 'win32') assertManagedProjectPrivateReceipt(await verifyOwnerOnlyWindowsStorage(location, { operation: 'VERIFY_DIRECTORY' }), 'VERIFY_DIRECTORY');
+        },
+        verifyFile: location => verifyManagedProjectPrivateFile(location),
+        getSnapshot: async () => {assertCurrent();return {
+          keepalive: supervisor.snapshot()?.lifecycle?.keepalive || null,
+          fleet: currentFleet.snapshot(),
+          tabs: registry.snapshot()?.tabs,
+        };},
+        applyFleet: binding => {assertCurrent();return currentFleet.archiveInterruptedBootstrapAgents(binding);},
+        applySupervisor: binding => {assertCurrent();return supervisor.archiveInterruptedBootstrapForNewEpoch(binding);},
+      });
+      const status = await recovery.init();
+      assertCurrent();supervisor.setInterruptedSetupRecoveryFence(status.fenced);
+      interruptedSetupRecovery=recovery;interruptedSetupRecoveryClosing=closing;interruptedSetupRecoverySupervisor=supervisor;interruptedSetupRecoveryFleet=currentFleet;
+      return recovery;
+    } catch (error) {
+      // The failed object is not cached, but its unknown durable intent must
+      // still fence the actual native mutation owner. Never affect a successor.
+      assertCurrent();
+      supervisor.setInterruptedSetupRecoveryFence(true);
+      throw error;
+    }
   });
 }
 ipcMain.handle('metaengine:client:interrupted-setup-inspect', async (event) => {

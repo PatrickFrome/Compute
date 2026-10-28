@@ -308,3 +308,32 @@ test('same-barrier Fleet replacement refreshes cached recovery against the same 
   assert.equal((await fresh.getSnapshot()).fleet.instance,'successor-fleet');await fresh.applyFleet({});
   assert.equal(snapshots,1);assert.equal(applications,1);assert.equal(f.counts.recoveryApplyFleet,0);
 });
+
+for (const stage of ['storage', 'journal']) test(`recovery ${stage} failure fences the actual current Supervisor until a verified reload`, async () => {
+  const f = await mainFixture(), fences = [];
+  f.supervisor.setInterruptedSetupRecoveryFence = value => fences.push(value);
+  const storage = f.scope.prepareManagedTaskProjectStorage;
+  const Recovery = f.scope.InterruptedSetupRecovery;
+  if (stage === 'storage') f.scope.prepareManagedTaskProjectStorage = async () => { throw Error('fixture_recovery_unreadable'); };
+  else f.scope.InterruptedSetupRecovery = class { async init() { throw Error('fixture_recovery_unreadable'); } };
+  await assert.rejects(f.context.ensureInterruptedSetupRecovery(), /fixture_recovery_unreadable/);
+  assert.deepEqual(fences, [true], 'discarding a failed recovery object must not leave the native mutation gate open');
+  assert.equal(f.state().recovery, null);
+  f.scope.prepareManagedTaskProjectStorage = storage;
+  f.scope.InterruptedSetupRecovery = Recovery;
+  await f.context.ensureInterruptedSetupRecovery();
+  assert.deepEqual(fences, [true, false], 'only successful current-lifetime readback releases the fence');
+});
+
+test('failed old recovery initialization cannot change a replacement Supervisor fence', async () => {
+  const f = await mainFixture(), fences = [];
+  f.supervisor.setInterruptedSetupRecoveryFence = value => fences.push(['old', value]);
+  const successor = { ...f.supervisor, setInterruptedSetupRecoveryFence: value => fences.push(['new', value]) };
+  f.scope.InterruptedSetupRecovery = class { async init() {
+    f.set('nativeSupervisor', successor);
+    throw Error('fixture_recovery_unreadable');
+  } };
+  await assert.rejects(f.context.ensureInterruptedSetupRecovery(), /fixture_recovery_unreadable|supervisor_changed/);
+  assert.deepEqual(fences, []);
+  assert.equal(f.state().recovery, null);
+});
