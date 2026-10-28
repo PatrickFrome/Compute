@@ -167,3 +167,54 @@ test('second concurrent readback cannot overwrite a committed first terminal dec
   assert.equal(journal.hasPending(),false);
   assert.equal(saves,3);
 });
+
+test('concurrent startup loads cannot overwrite a newly durable pending admission with stale disk state', async () => {
+  const reads = [];
+  const empty = { schema: 'metaengine.client.admission-recovery-journal.v1', latest: null,
+    automatic_retry_allowed: false, authority_effect: false };
+  let saved;
+  const journal = new ClientAdmissionRecoveryJournal({
+    loadState: () => new Promise(resolve => reads.push(resolve)),
+    saveState: async value => { saved = structuredClone(value); },
+  });
+  const first = journal.load();
+  const concurrent = journal.load();
+  await Promise.resolve();
+  reads[0](structuredClone(empty));
+  await first;
+  await journal.begin(request(id1));
+  // A second physical read may already have captured the old empty file.
+  // Completing it after the write must not erase the in-memory admission.
+  for (const resolve of reads.slice(1)) resolve(structuredClone(empty));
+  await concurrent;
+  assert.equal(journal.latest()?.attempt_id, id1);
+  assert.equal(journal.hasPending(), true);
+  await assert.rejects(journal.begin(request(id2)), /pending_reconcile_required/);
+  assert.equal(saved.latest.attempt_id, id1);
+  assert.equal(reads.length, 1, 'startup must share one load operation');
+});
+
+test('failed shared startup read rejects all callers and permits a later verified read', async () => {
+  let reads = 0, release;
+  const barrier = new Promise(resolve => { release = resolve; });
+  const journal = new ClientAdmissionRecoveryJournal({
+    loadState: async () => {
+      reads++;
+      if (reads === 1) { await barrier; throw new Error('synthetic_initial_read_failure'); }
+      return { schema: 'metaengine.client.admission-recovery-journal.v1', latest: null,
+        automatic_retry_allowed: false, authority_effect: false };
+    },
+    saveState: async () => {},
+  });
+  const results = Promise.allSettled([journal.load(), journal.load()]);
+  release();
+  for (const result of await results) {
+    assert.equal(result.status, 'rejected');
+    assert.match(result.reason.message, /synthetic_initial_read_failure/);
+  }
+  assert.equal(reads, 1);
+  await journal.load();
+  assert.equal(reads, 2);
+  await journal.begin(request(id1));
+  assert.equal(journal.latest().attempt_id, id1);
+});

@@ -130,6 +130,7 @@ export class ClientAdmissionRecoveryJournal {
   #saveState;
   #state = emptyState();
   #loaded = false;
+  #loadPromise = null;
   #writeTail = Promise.resolve();
   #persistenceFenced = false;
 
@@ -143,6 +144,15 @@ export class ClientAdmissionRecoveryJournal {
 
   async load() {
     if (this.#loaded) return this.snapshot();
+    // Every startup caller must observe the same read. A slower second read
+    // must never overwrite an admission already persisted by the first caller.
+    if (!this.#loadPromise) {
+      this.#loadPromise = this.#readInitialState().finally(() => { this.#loadPromise = null; });
+    }
+    return this.#loadPromise;
+  }
+
+  async #readInitialState() {
     let raw = null;
     try { raw = await this.#loadState(); } catch (error) {
       if (error?.code !== 'ENOENT') throw error;
