@@ -1,0 +1,11 @@
+# Qualification follow-up, 29 October 2026
+
+The immutable unsigned QA candidate is source `59eb7f33e5e87aabbb02b0c8fbf3eecd5aa9c49c`, version `0.7.0-dev.2257027431866.1`. Windows Package Smoke run `40783415257`, job `123150571155`, completed successfully, including isolated installed Owner/UI and journal restart qualification. Installer SHA-256: `70f2f9b3107e1e26878c598fb43cd447c3a61453559265d97605cef4756a4f47`.
+
+The full source CI at that exact SHA failed seven transaction-scope cases because its test VM did not expose Node's `structuredClone`. Passing the real global to the fixture reproduced then resolved all seven failures. Corrected local runtime suite: 731 PASS, 13 SKIP, 0 FAIL (744 total); exact transaction suite: 10 PASS. The fixture is excluded from the packaged runtime. These are subsequent test corrections, not a relabeling of the original CI result or installed artifact.
+
+The first local forward qualification stopped with `runtime_health_failed` after three `postgres_inspection_connection_timeout` observations; its surface failure was the later Windows listener query. Host/API/Edge reported stopped and PostgreSQL retained its original incarnation. Subsequent read-only identity probes succeeded. This does not establish that cold-start timing is fixed.
+
+An explicit `resume-after-stopped-readback` operator path now permits one new qualification only after exact plan/Owner/configuration checks, no installer attempt, absent Host/API/Edge and ports, and unchanged PostgreSQL continuity. It preserves the prior status/stderr and reserves the attempt durably. It never converts the failed generation to READY, retries an installer, or replays an agent task. The new qualification must independently establish readiness and cleanup. Focused forward policy/schema/predecessor/readback tests: 101 PASS, 0 FAIL.
+
+Both current-boot Codex CLI sandbox canaries passed (IMPLEMENTER workspace-write, CRITIC read-only); no model was called by those canaries. Installation, useful agent work, independent review, durable Git successor, message pickup, and restart continuation are separate acceptance stages. At this follow-up commit, local qualification is still running and installed autonomy is not proven.

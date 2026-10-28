@@ -23,6 +23,8 @@ import {compareQaInstalledImage} from './qa-operator-install-recovery.mjs';
 import {observeWindowsNsisEffects} from './qa-nsis-external-effects.mjs';
 import {forwardDigest as sha,writeForwardEvidence as write,retireForwardImage,assertForwardScope,assertForwardPreservedPaths,writeForwardPreservedGate,assertForwardArtifactsUnchanged,assertForwardInstallNotAttempted,runForwardEffect,publishForwardOwner} from './qa-forward-install-policy.mjs';
 import {QA_UPGRADE_ADMISSION_SCHEMA} from '../src/local-provider-upgrade-admission.mjs';
+import {runtimeRecoveryPostgresProof} from '../../../infra/client-state-runtime/runtime-recovery-postgres-proof.mjs';
+import {assertStoppedQualificationReadback,preserveStoppedQualificationAttempt} from './qa-forward-stopped-readback.mjs';
 
 const exec=promisify(execFile),require=createRequire(import.meta.url);
 const ps='C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
@@ -141,7 +143,9 @@ function preservedPathScope(plan,old,pg){
     statusFile:old.owner.runtime_identity_file,predecessorStateDirectory:old.config.state_directory,
   };
 }
-export async function prepareForwardInstall(plan,{resume=false}={}){
+export async function prepareForwardInstall(plan,{resume=false,resumeStopped=false}={}){
+  if(resume&&resumeStopped)fail('resume_mode_ambiguous');
+  const stoppedResume=resumeStopped;resume=resume||stoppedResume;
   validatePlan(plan);if(!resume)await absent(plan.state_directory);
   const checked=await candidate(plan),old=await oldState(plan);await quiescent(old.config,old.status);
   await assertForwardArtifactsUnchanged(artifactPins(plan,checked.image));
@@ -149,16 +153,38 @@ export async function prepareForwardInstall(plan,{resume=false}={}){
   const preservedPaths=preservedPathScope(plan,old,pg),preserve=()=>assertForwardPreservedPaths(preservedPaths);
   await preserve();
   const oldPkg=await readUpgradeAsarPackage(path.join(installedRoot,'resources','app.asar'));
+  if(stoppedResume&&oldPkg.metaengineClientStateRuntime?.bundle_sha256!==old.config.expected_bundle_sha256)fail('resume_predecessor_image_unbound');
   const predecessor=await captureInstalledTreeFingerprint(installedRoot);
   const nsis=await observeWindowsNsisEffects({expectedVersion:oldPkg.version});
-  const gate=old.file+'.qa-upgrade-gate.json';let gateBytes;
+  const gate=old.file+'.qa-upgrade-gate.json';let gateBytes,stoppedReadback=null,logDirectory=plan.state_directory;
   if(resume){
     await acl(plan.state_directory,true);await absent(path.join(plan.state_directory,'forward-qualification.json'));
     if(JSON.stringify(JSON.parse(await stableUpgradeRead(path.join(plan.state_directory,'input-plan.json'))))!==JSON.stringify(plan))fail('resume_plan_changed');
     gateBytes=await stableUpgradeRead(gate);await acl(gate);const priorGate=JSON.parse(gateBytes);
     if(priorGate.schema!=='metaengine.operator.forward-install-gate.v1'||priorGate.owner_sha256!==plan.owner_sha256||priorGate.source_head!==plan.source_head||runtimeHostPidState(priorGate.pid)!=='ABSENT')fail('resume_gate_unverified');
     const failedBytes=await stableUpgradeRead(path.join(plan.state_directory,'runtime-instance.json')),failed=JSON.parse(failedBytes);
-    if(failed.state!=='FAILED'||failed.reason!=='api_process_failed'||failed.runtime_ready!==false||runtimeHostPidState(failed.host_pid)!=='ABSENT')fail('resume_failed_host_unverified');
+    if(stoppedResume){
+      await assertForwardInstallNotAttempted(plan.state_directory);
+      const {default:postgres}=await import(pathToFileURL(path.join(checked.verified.paths.sourceRoot,'infra/client-state-runtime/node_modules/postgres/src/index.js')).href);
+      const db=postgres(old.config.inspect_database_url,{max:1,prepare:false,fetch_types:false,connect_timeout:30,
+        connection:{statement_timeout:10000,default_transaction_read_only:'on',application_name:'metaengine-qualification-stopped-readback'},onnotice:()=>{}});
+      let identity;
+      try{const rows=await db.unsafe("select json_build_object('data_directory',current_setting('data_directory'),'version',current_setting('server_version_num')::int,'port',inet_server_port(),'started_at',pg_postmaster_start_time(),'system_identifier',(select system_identifier::text from pg_catalog.pg_control_system())) as identity");
+        if(rows.length!==1)fail('resume_postgres_readback_invalid');identity={...rows[0].identity,pid:pg.pid};}
+      finally{await db.end({timeout:5});}
+      const continuity=await runtimeRecoveryPostgresProof({identity,pgDataDirectory:old.config.pg_data_directory,
+        expectedClusterSystemIdentifier:old.config.expected_cluster_system_identifier});
+      const verify=async()=>{
+        await assertForwardInstallNotAttempted(plan.state_directory);await preserve();await quiescent(old.config,old.status);await keeperSame(old.config,pg);
+        if(runtimeHostPidState(priorGate.pid)!=='ABSENT')fail('resume_gate_unverified');
+        if(!failedBytes.equals(await stableUpgradeRead(path.join(plan.state_directory,'runtime-instance.json')))
+          ||!gateBytes.equals(await stableUpgradeRead(gate))||sha(await stableUpgradeRead(old.file))!==plan.owner_sha256)fail('resume_evidence_changed');
+        await absent(path.join(plan.state_directory,'runtime-host-lock.json'));
+        await assertStoppedQualificationReadback({status:failed,bundleSha256:checked.binding.bundle_sha256,postgresContinuity:continuity,
+          pidState:runtimeHostPidState,portState:runtimeHostTcpPortState,ports:[old.config.api_port,old.config.edge_port]});
+      };
+      await verify();stoppedReadback={statusBytes:failedBytes,stderrBytes:await stableUpgradeRead(path.join(plan.state_directory,'qualification-host.stderr'),262144),verify};
+    }else if(failed.state!=='FAILED'||failed.reason!=='api_process_failed'||failed.runtime_ready!==false||runtimeHostPidState(failed.host_pid)!=='ABSENT')fail('resume_failed_host_unverified');
     await absent(path.join(plan.state_directory,'runtime-host-lock.json'));
     const rows=JSON.parse(await runPs(['-Command',"$ErrorActionPreference='Stop'; @(Get-CimInstance Win32_Process -Filter \"Name='node.exe' OR Name='deno.exe'\" | Select-Object ProcessId,ExecutablePath) | ConvertTo-Json -Compress"]));
     for(const row of Array.isArray(rows)?rows:[rows]){
@@ -166,8 +192,10 @@ export async function prepareForwardInstall(plan,{resume=false}={}){
       for(const root of [plan.candidate_root,plan.state_directory]){const rel=path.relative(root,row.ExecutablePath);if(!rel||(!rel.startsWith('..')&&!path.isAbsolute(rel)))fail('resume_owned_process_present');}
     }
     await preserve();
-    await write(path.join(plan.state_directory,'failed-qualification-readback.json'),{state:'FAILED_STARTUP_QUIESCENT',prior_status_sha256:sha(failedBytes),host_pid:failed.host_pid,owned_executable_processes_absent:true,ports_absent:true,automatic_retry_allowed:false,authority_effect:false});
-    await fs.rename(path.join(plan.state_directory,'qualification-host.stderr'),path.join(plan.state_directory,'first-qualification-host.stderr'));
+    if(!stoppedResume){
+      await write(path.join(plan.state_directory,'failed-qualification-readback.json'),{state:'FAILED_STARTUP_QUIESCENT',prior_status_sha256:sha(failedBytes),host_pid:failed.host_pid,owned_executable_processes_absent:true,ports_absent:true,automatic_retry_allowed:false,authority_effect:false});
+      await fs.rename(path.join(plan.state_directory,'qualification-host.stderr'),path.join(plan.state_directory,'first-qualification-host.stderr'));
+    }
   }else{
     await preserve();
     await fs.mkdir(plan.state_directory,{mode:0o700});await protectOwnerOnlyWindowsDirectory(plan.state_directory);await acl(plan.state_directory,true);
@@ -190,13 +218,17 @@ export async function prepareForwardInstall(plan,{resume=false}={}){
   const proposed=validateLocalStateProviderConfig({...old.owner,runtime_identity_file:path.join(plan.state_directory,'runtime-instance.json'),runtime_host:{bundle_directory:configs.final.bundle_directory,expected_bundle_sha256:checked.binding.bundle_sha256,config_file:configFile}});
   await preserve();
   await assertForwardArtifactsUnchanged(artifactPins(plan,checked.image));
-  const runtime=await qualifyForwardRuntime({verified:checked.verified,configFile:qualificationFile,owner:proposed,stateDirectory:plan.state_directory});
+  if(stoppedReadback)logDirectory=await preserveStoppedQualificationAttempt({stateDirectory:plan.state_directory,...stoppedReadback,
+    protect:async directory=>{await protectOwnerOnlyWindowsDirectory(directory);await acl(directory,true);}});
+  const runtime=await qualifyForwardRuntime({verified:checked.verified,configFile:qualificationFile,owner:proposed,stateDirectory:plan.state_directory,logDirectory});
   await preserve();
   await assertForwardArtifactsUnchanged(artifactPins(plan,checked.image));
   await quiescent(old.config,old.status);await keeperSame(old.config,pg);
   if(sha(await stableUpgradeRead(old.file))!==plan.owner_sha256||!old.configBytes.equals(await stableUpgradeRead(old.owner.runtime_host.config_file))||!old.statusBytes.equals(await stableUpgradeRead(old.owner.runtime_identity_file)))fail('predecessor_changed');
   const registration=JSON.parse(await runPs(['-File',script('qa-forward-registration.ps1'),'-Mode','Observe','-StateDirectory',plan.state_directory,'-ExpectedVersion',oldPkg.version]));
-  const proof={schema:'metaengine.operator.forward-install-proof.v1',state:'QUALIFIED_AND_STOPPED',plan,old_version:oldPkg.version,owner_file:old.file,old_config_sha256:sha(old.configBytes),old_status_sha256:sha(old.statusBytes),old_nsis:nsis,registration,predecessor,keeper:pg,reconciliation,runtime,candidate:checked.image,proposed,bundle_sha256:checked.binding.bundle_sha256,config_sha256:sha(await stableUpgradeRead(configFile)),qualification_config_sha256:sha(await stableUpgradeRead(qualificationFile)),runtime_status_sha256:sha(await stableUpgradeRead(proposed.runtime_identity_file)),gate_file:gate,gate_sha256:sha(gateBytes),production_authorized:false,automatic_retry_allowed:false,authority_effect:false};
+  const proof={schema:'metaengine.operator.forward-install-proof.v1',state:'QUALIFIED_AND_STOPPED',plan,old_version:oldPkg.version,owner_file:old.file,old_config_sha256:sha(old.configBytes),old_status_sha256:sha(old.statusBytes),old_nsis:nsis,registration,predecessor,keeper:pg,reconciliation,runtime,candidate:checked.image,proposed,bundle_sha256:checked.binding.bundle_sha256,config_sha256:sha(await stableUpgradeRead(configFile)),qualification_config_sha256:sha(await stableUpgradeRead(qualificationFile)),runtime_status_sha256:sha(await stableUpgradeRead(proposed.runtime_identity_file)),gate_file:gate,gate_sha256:sha(gateBytes),production_authorized:false,automatic_retry_allowed:false,authority_effect:false,
+    ...(stoppedResume?{previous_failed_qualification:{state:'PRESERVED_NOT_QUALIFIED',evidence_directory:logDirectory,
+      prior_status_sha256:sha(stoppedReadback.statusBytes),prior_stderr_sha256:sha(stoppedReadback.stderrBytes),new_qualification_attempted:true}}:{})};
   const proofFile=path.join(plan.state_directory,'forward-qualification.json'),proofSha=await write(proofFile,proof);await acl(proofFile);
   return {state:proof.state,proof_file:proofFile,proof_sha256:proofSha,provider_published:false,installed:false};
 }
@@ -308,7 +340,7 @@ async function finalizeForwardPayload({proof,plan,old,expectedProofSha256,verify
 if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
   try{
     const [mode,file,pin]=process.argv.slice(2);let result;
-    if(['prepare','resume-after-schema-readback'].includes(mode)&&file&&!pin)result=await prepareForwardInstall(JSON.parse(await stableUpgradeRead(file)),{resume:mode==='resume-after-schema-readback'});
+    if(['prepare','resume-after-schema-readback','resume-after-stopped-readback'].includes(mode)&&file&&!pin)result=await prepareForwardInstall(JSON.parse(await stableUpgradeRead(file)),{resume:mode==='resume-after-schema-readback',resumeStopped:mode==='resume-after-stopped-readback'});
     else if(mode==='install'&&file&&/^[a-f0-9]{64}$/.test(pin||''))result=await installForwardQualified({proofFile:file,expectedProofSha256:pin});
     else if(mode==='finalize-after-installer-readback'&&file&&/^[a-f0-9]{64}$/.test(pin||''))result=await finalizeForwardAfterInstallerReadback({proofFile:file,expectedProofSha256:pin});
     else fail('arguments_invalid');

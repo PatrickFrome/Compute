@@ -66,7 +66,9 @@ export async function createPhysicalScopeReaders({sql,permit,host,worktree=permi
   const pidText=[pg.postmaster.pid,config.pg_data_directory,Math.floor(Date.parse(pg.postmaster.created_at)/1000),55432,'','127.0.0.1','ready',''].join('\n');
   const fileHashes=new Map([[expectedExe,artifact.installed_exe_sha256],[path.join(resources,'app.asar'),artifact.installed_asar_sha256],
     [operator.cli_executable,artifact.cli_executable_sha256]]);
-  const scope={sql,config,resources,expectedExe,parentPid:currentHost().pid,path,URL,Date,Number,Promise,
+  // vm contexts do not inherit Node's structuredClone host global. Supply the
+  // real primitive used by the production reader, without replacing its logic.
+  const scope={sql,config,resources,expectedExe,parentPid:currentHost().pid,path,URL,Date,Number,Promise,structuredClone,
     process:{env:{SystemRoot:'C:/Windows'}},fs:{readFile:async()=>pidText},
     fail:reason=>{throw Error('native_coding_host_os_'+reason);},
     samePath:(a,b)=>path.resolve(a).toLowerCase()===path.resolve(b).toLowerCase(),

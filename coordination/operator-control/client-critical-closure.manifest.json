@@ -955,7 +955,7 @@
     "infra/client-state-runtime/test/native-coding-checkpoint-fixture.mjs": "886728a2584c8e1fa727f4e46c29d8f757dd13aa",
     "infra/client-state-runtime/test/native-coding-host-commit-git-fixture.mjs": "80d0ef7e78b59d61abd19838e89e128e17096a2f",
     "infra/client-state-runtime/test/native-coding-pg-pool-target.mjs": "b5670eccb01823ae473fd3e3a83db43b882332cf",
-    "infra/client-state-runtime/test/native-coding-single-connection-fixture.mjs": "3669c63dc390085ac3e14d68644e29dee604f89e",
+    "infra/client-state-runtime/test/native-coding-single-connection-fixture.mjs": "ac0155cbec9d5bfef7b7bd7699fe374d119d53ad",
     "infra/client-state-runtime/test/runtime-host-readiness.mjs": "66fa59cda81d6a1b94a5f68e0ed06ce81240caad",
     "infra/client-state-runtime/upgrade-backup-gate.mjs": "90f9f3b0090beb64008b6d63efae1363c010ca34",
     "infra/client-state-runtime/upgrade-backup-gate.test.mjs": "fe6011a9871b9cfa2d349e0b107a1b4d608f7f8b",
@@ -999,7 +999,7 @@
     "apps/metaengine-browser/test/self-update-transaction-cas.generated.test.mjs": "b475ed9922fa869ff1cbd7ad83ae14a07476b8d0",
     "evidence/audits/metaengine-20261026-sole-owner-repair/live-artifact-observation.json": "6770b18c12e5fbf01608c27bbf6bf27b7ee350d0",
     "apps/metaengine-browser/scripts/qa-forward-install-policy.mjs": "f87b8cd2e27f4e7299a7c641eb292e003852bae6",
-    "apps/metaengine-browser/scripts/qa-forward-install.mjs": "df602d5c33b6770d0e95bc290e737852061c552f",
+    "apps/metaengine-browser/scripts/qa-forward-install.mjs": "4b8a1a55603f3d64f42c54a5d19679d38d4f8cbc",
     "apps/metaengine-browser/scripts/qa-forward-registration.ps1": "2c181bb1798401c0ee1eed2d986d6f9ad70a8fb9",
     "apps/metaengine-browser/test/qa-forward-install-policy.test.mjs": "dce91d9743fb992427b0d9f4f2a6323b4ed356c0",
     "apps/metaengine-browser/test/qa-forward-registration.windows.test.mjs": "0d7baa8626bb8235133acd91306b71bc7db970a0",
@@ -1131,7 +1131,10 @@
     "evidence/audits/metaengine-20261029-native-seed-admission/README.md": "9903a92663e91975e4c087f1b80f19c5740b2f45",
     "evidence/audits/metaengine-20261029-native-seed-admission/architecture-research.md": "4435ce583f4abafeee3d174da93de2f2153ad2a8",
     "infra/client-state-runtime/native-coding-host-seed-service.test.mjs": "b8d7951f0d98ccaa6538fd8a0c2da816dc1c93fd",
-    "evidence/audits/metaengine-20261029-native-seed-admission/live-artifact-observation.json": "76f612d585f43ca227904ec3a9d87dd0bf1317ae"
+    "evidence/audits/metaengine-20261029-native-seed-admission/live-artifact-observation.json": "76f612d585f43ca227904ec3a9d87dd0bf1317ae",
+    "apps/metaengine-browser/scripts/qa-forward-stopped-readback.mjs": "10041487821accf9aba8e7fe6fac69cbc6711df6",
+    "apps/metaengine-browser/test/qa-forward-stopped-readback.test.mjs": "052acc36dd586f4bc385289f7479dec20e243b25",
+    "evidence/audits/metaengine-20261029-native-seed-admission/qualification-followup.md": "eb44b2862a4d535fac444f27810a74f193dbea78"
   },
   "parent_checks_not_transitive": true,
   "proof_levels": {
