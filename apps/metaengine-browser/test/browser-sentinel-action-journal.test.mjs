@@ -153,3 +153,29 @@ test('journal rejects exact binding drift across token pid and executable', asyn
     await assert.rejects(() => restarted.init(drift), /binding_drift/);
   }
 });
+
+for (const payload of ['null', 'false', '0', '""']) {
+  test(`existing scalar action journal is not absent evidence: ${payload}`, async t => {
+    const { dir, statePath } = await journalFixture();
+    t.after(() => fs.rm(dir, { recursive: true, force: true }));
+    await fs.writeFile(actionJournalPath(statePath), payload);
+    const restarted = new BrowserSentinelActionJournal({ statePath });
+    await assert.rejects(restarted.init(binding()), /sentinel_action_journal_schema_invalid/);
+    await assert.rejects(restarted.beginRelaunch(binding()), /binding_drift/);
+    assert.equal(await fs.readFile(actionJournalPath(statePath), 'utf8'), payload);
+  });
+}
+
+test('unknown persisted action state cannot reopen termination or relaunch authority', async t => {
+  const { dir, statePath, journal } = await journalFixture();
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const row = await journal.beginRelaunch(binding());
+  row.state = 'FUTURE_UNKNOWN_EFFECT';
+  const bytes = JSON.stringify(row);
+  await fs.writeFile(actionJournalPath(statePath), bytes);
+  const restarted = new BrowserSentinelActionJournal({ statePath });
+  await assert.rejects(restarted.init(binding()), /sentinel_action_journal_state_invalid/);
+  await assert.rejects(restarted.beginTermination(binding()), /binding_drift/);
+  await assert.rejects(restarted.beginRelaunch(binding()), /binding_drift/);
+  assert.equal(await fs.readFile(actionJournalPath(statePath), 'utf8'), bytes);
+});

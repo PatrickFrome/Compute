@@ -8,6 +8,7 @@ const SENTINEL_ACTION_JOURNAL_SCHEMA = 'metaengine.browser-sentinel.action-journ
 const SENTINEL_ACTION_JOURNAL_VERSION = '1.2.0';
 const TERMINATION_STATES = new Set(['PARENT_TERMINATION_INTENT','PARENT_TERMINATION_CONFIRMED','PARENT_TERMINATION_AMBIGUOUS']);
 const RELAUNCH_STATES = new Set(['RELAUNCH_INTENT','RELAUNCH_DISPATCHED','RELAUNCH_FAILED','RELAUNCH_AMBIGUOUS']);
+const JOURNAL_STATES = new Set([...TERMINATION_STATES, ...RELAUNCH_STATES, 'SUCCESSOR_BOUND', 'SENTINEL_ERROR']);
 
 function actionJournalPath(statePath) {
   return `${String(statePath)}.action-journal-v1.json`;
@@ -47,11 +48,12 @@ function retryableRelaunchFailure(row) {
 
 async function readJson(file) {
   try { return JSON.parse(await fs.readFile(file, 'utf8')); }
-  catch (error) { if (error?.code === 'ENOENT') return null; if (error instanceof SyntaxError) throw new Error('sentinel_action_journal_json_invalid'); throw error; }
+  catch (error) { if (error?.code === 'ENOENT') return undefined; if (error instanceof SyntaxError) throw new Error('sentinel_action_journal_json_invalid'); throw error; }
 }
 
 function validateRow(row, binding = null) {
   if (!row || row.schema !== SENTINEL_ACTION_JOURNAL_SCHEMA || !['1.0.0', '1.1.0', SENTINEL_ACTION_JOURNAL_VERSION].includes(String(row.version || ''))) throw new Error('sentinel_action_journal_schema_invalid');
+  if (!JOURNAL_STATES.has(row.state)) throw new Error('sentinel_action_journal_state_invalid');
   if (!Number.isSafeInteger(Number(row.sequence)) || Number(row.sequence) < 1) throw new Error('sentinel_action_journal_sequence_invalid');
   if (row.authority_effect !== false) throw new Error('sentinel_action_journal_authority_invalid');
   if (row.automatic_retry_allowed === true && !retryableRelaunchFailure(row)) throw new Error('sentinel_action_journal_retry_authority_invalid');
@@ -77,7 +79,9 @@ class BrowserSentinelActionJournal {
   async init(bindingSource) {
     const binding = bindingFrom(bindingSource);
     const existing = await readJson(this.#path);
-    if (!existing) {
+    // Only a genuinely absent file is fresh history. JSON null/false are
+    // unknown persisted evidence and must never reopen effect authority.
+    if (existing === undefined) {
       this.#binding = binding;
       return this.snapshot();
     }
