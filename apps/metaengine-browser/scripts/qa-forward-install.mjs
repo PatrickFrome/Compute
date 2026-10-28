@@ -16,6 +16,7 @@ import {localStateProviderOwnerFile,validateLocalStateProviderConfig,validateLoc
 import {localRuntimeHostEnvironment} from '../src/local-runtime-host-controller.mjs';
 import {protectOwnerOnlyWindowsDirectory,verifyOwnerOnlyWindowsStorage} from '../src/private-windows-storage-acl.mjs';
 import {readWindowsKernelProcessW60} from '../src/host-native-owner-producers-w60.mjs';
+import {createForwardPriorPidReadback} from './qa-forward-pid-readback.mjs';
 import {verifyWindowsTcpListener} from './verify-windows-tcp-listener.mjs';
 import {readUpgradeAsarPackage,readUpgradeAsarVerifier,stableUpgradeRead,makeUpgradeConfigs,completeUpgradeFiles,commitUpgradeAdmission,assertKeeperIncarnation} from './qa-owner-runtime-upgrade.mjs';
 import {captureInstalledTreeFingerprint} from './qa-installed-tree-fingerprint.mjs';
@@ -57,7 +58,8 @@ async function keeper(config){
 async function keeperSame(config,expected){const now=await keeper(config);assertKeeperIncarnation({...now,state:'PRESENT',source:'OS_PROCESS_INVENTORY',authority_effect:false},expected);if(now.pidfile_sha256!==expected.pidfile_sha256||now.vault_sha256!==expected.vault_sha256)fail('keeper_bytes_changed');}
 async function quiescent(config,status){
   await noBrowser();
-  for(const pid of [status.host_pid,...status.children.map(c=>c.pid)])if(runtimeHostPidState(pid)!=='ABSENT')fail('old_process_presence_unresolved');
+  const pidState=createForwardPriorPidReadback({config,status});
+  for(const pid of [status.host_pid,...status.children.map(c=>c.pid)])if(await pidState(pid)!=='ABSENT')fail('old_process_presence_unresolved');
   for(const port of [config.api_port,config.edge_port])if(await runtimeHostTcpPortState(port)!=='ABSENT')fail('endpoint_presence_unresolved');
 }
 export async function qualifyForwardRuntime({verified,configFile,owner,stateDirectory,logDirectory=stateDirectory}){
@@ -179,7 +181,7 @@ export async function prepareForwardInstall(plan,{resume=false}={}){
   // proves every recorded process and endpoint absent before retiring its lock.
   let reconciliation;
   await preserve();
-  if(old.status.state==='READY')reconciliation=await reconcileAbandonedAttachedRuntimeLock({config:old.config});
+  if(old.status.state==='READY')reconciliation=await reconcileAbandonedAttachedRuntimeLock({config:old.config,pidState:createForwardPriorPidReadback({config:old.config,status:old.status})});
   else if(old.status.state==='STOPPED'&&old.status.children_stopped===true&&old.status.runtime_ready===false){await absent(path.join(old.config.state_directory,'runtime-host-lock.json'));reconciliation={state:'ALREADY_STOPPED'};}
   else fail('predecessor_custody_unverified');
   const configs=makeUpgradeConfigs(old.config,{stateDirectory:plan.state_directory,candidateBundle:path.join(plan.candidate_root,'resources','client-state-runtime'),installedBundle:path.join(installedRoot,'resources','client-state-runtime'),bundleDigest:checked.binding.bundle_sha256});
