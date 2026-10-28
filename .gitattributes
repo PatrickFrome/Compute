@@ -18,3 +18,5 @@ evidence/audits/metaengine-20261026-edge-health-recovery/live-artifact-observati
 evidence/audits/metaengine-20261026-health-observer-recovery/live-artifact-observation.json text eol=lf
 
 /evidence/audits/metaengine-20261027-integrated-installer/live-artifact-observation.json text eol=lf
+
+evidence/audits/metaengine-20261028-recovery-fences-package/live-artifact-observation.json text eol=lf
