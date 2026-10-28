@@ -566,3 +566,28 @@ test('native recovery mutation requires active ownership and no newly retained f
   assert.equal(effects, 1);
   assert.equal(client.interruptedSetupRecoveryFenced(), true);
 });
+
+for (const suffix of ['fleet-applied', 'committed']) test(`orphan ${suffix} checkpoint cannot be treated as an empty recovery journal`, async t => {
+  const { directory, getState } = await harness(t);
+  await fs.writeFile(path.join(directory, `${recoveryId}.${suffix}.json`), JSON.stringify({ recovery_id: recoveryId }));
+  const restarted = new InterruptedSetupRecovery({ directory, getSnapshot: getState,
+    applyFleet: () => assert.fail('no orphan replay'), applySupervisor: () => assert.fail('no orphan replay') });
+  await assert.rejects(restarted.init(), /orphan_checkpoint/);
+  assert.equal(restarted.status().fenced, true);
+  assert.equal((await restarted.inspect()).eligible, false);
+});
+
+test('recovery restart validates the committed receipt domain before clearing its fence', async t => {
+  const { controller, directory, getState } = await harness(t);
+  await controller.execute(request(getState()));
+  const create = () => new InterruptedSetupRecovery({ directory, getSnapshot: getState,
+    applyFleet: () => assert.fail('no replay'), applySupervisor: () => assert.fail('no replay') });
+  assert.equal((await create().init()).fenced, false, 'a genuine completed checkpoint remains readable');
+  const file = path.join(directory, `${recoveryId}.committed.json`);
+  const receipt = JSON.parse(await fs.readFile(file, 'utf8'));
+  receipt.schema = 'different.receipt.domain.v1';
+  await fs.writeFile(file, JSON.stringify(receipt));
+  const restarted = create();
+  await assert.rejects(restarted.init(), /commit_invalid/);
+  assert.equal(restarted.status().fenced, true);
+});

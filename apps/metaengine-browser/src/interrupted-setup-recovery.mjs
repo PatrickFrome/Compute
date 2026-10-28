@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 export const INTERRUPTED_SETUP_REQUEST_SCHEMA = 'metaengine.client.interrupted-setup-request.v1';
 export const INTERRUPTED_SETUP_STATUS_SCHEMA = 'metaengine.client.interrupted-setup-status.v1';
 const ARCHIVE_SCHEMA = 'metaengine.client.interrupted-setup-archive.v1';
+const RECEIPT_SCHEMA = 'metaengine.client.interrupted-setup-receipt.v1';
 const ID_RE = /^recovery_[a-f0-9-]{36}$/i;
 const SHA_RE = /^[a-f0-9]{64}$/;
 const clone = value => structuredClone(value);
@@ -142,6 +143,13 @@ export class InterruptedSetupRecovery {
     if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) { this.#fenced = true; throw new Error('interrupted_setup_directory_alias_forbidden'); }
     if (this.#verifyDirectory) await this.#verifyDirectory(this.#directory);
     const entries = await this.#fs.readdir(this.#directory);
+    const names = new Set(entries);
+    for (const name of entries) {
+      const checkpoint = /^(recovery_[a-f0-9-]{36})\.(?:fleet-applied|committed)\.json$/i.exec(name);
+      if (checkpoint && !names.has(`${checkpoint[1]}.archive.json`)) {
+        throw new Error('interrupted_setup_orphan_checkpoint');
+      }
+    }
     for (const name of entries.filter(name => /^recovery_[a-f0-9-]{36}\.archive\.json$/i.test(name))) {
       const stat = await this.#fs.lstat(path.join(this.#directory, name));
       if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) { this.#fenced = true; throw new Error('interrupted_setup_archive_alias_forbidden'); }
@@ -156,7 +164,7 @@ export class InterruptedSetupRecovery {
         if (!receiptStat.isFile() || receiptStat.isSymbolicLink() || receiptStat.nlink !== 1) { this.#fenced = true; throw new Error('interrupted_setup_commit_alias_forbidden'); }
         if (this.#verifyFile) await this.#verifyFile(path.join(this.#directory, `${id}.committed.json`));
         const receipt = await this.#fs.readFile(path.join(this.#directory, `${id}.committed.json`), 'utf8').then(JSON.parse);
-        if (receipt.recovery_id !== id || receipt.state !== 'FRESH_SETUP_PREPARED'
+        if (receipt.schema !== RECEIPT_SCHEMA || receipt.recovery_id !== id || receipt.state !== 'FRESH_SETUP_PREPARED'
           || receipt.archive_sha256 !== interruptedSetupDigest(archive)) throw new Error('interrupted_setup_commit_invalid');
       }
     }
@@ -238,7 +246,7 @@ export class InterruptedSetupRecovery {
       || afterAgents.some(row => oldAgents.has(row.agent_id) && row.lifecycle_state !== 'RETIRED')) {
       throw new Error('interrupted_setup_apply_readback_unconfirmed');
     }
-    const receipt = { schema: 'metaengine.client.interrupted-setup-receipt.v1', recovery_id: id,
+    const receipt = { schema: RECEIPT_SCHEMA, recovery_id: id,
       state: 'FRESH_SETUP_PREPARED', archive_sha256: binding.archive_sha256, previous_effect_outcome: 'UNKNOWN',
       previous_effect_replayed: false, supervisor_epoch: plan.next_supervisor_epoch, retired_agent_count: oldAgents.size,
       automatic_retry_allowed: false, tasks_modified: false, sql_admission_modified: false, authority_effect: false, at };
