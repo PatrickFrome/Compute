@@ -2,7 +2,7 @@ const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 const HASH = /^[a-f0-9]{64}$/;
 const TRANSPORT = new Set(['health_timeout', 'health_connection_refused', 'health_network_failed']);
 const FAILURE_CODES = new Set([
-  ...TRANSPORT, 'health_http_failed', 'health_response_invalid', 'health_not_ready',
+  ...TRANSPORT, 'health_http_failed', 'health_http_api_capacity', 'health_http_api_database', 'health_http_api_catalog', 'health_response_invalid', 'health_not_ready',
   'health_capability_unattested', 'health_capability_rpc_unavailable', 'health_capability_runtime_not_deployed',
   'health_capability_attestation_timeout', 'health_capability_source_mismatch', 'health_capability_db_read_failed', 'health_instance_mismatch',
   'postgres_identity_mismatch', 'postgres_cluster_identity_mismatch', 'postgres_data_directory_mismatch',
@@ -11,7 +11,7 @@ const FAILURE_CODES = new Set([
   'postgres_inspection_spawn_failed', 'postgres_inspection_query_failed', 'postgres_inspection_output_limit',
   'postgres_inspection_stderr_limit', 'postgres_inspection_auth_failed', 'postgres_inspection_permission_denied',
   'postgres_inspection_row_security_denied', 'postgres_inspection_connection_refused', 'postgres_inspection_server_unavailable',
-  'postgres_inspection_query_timeout', 'postgres_inspection_database_missing',
+  'postgres_inspection_query_timeout', 'postgres_inspection_connection_timeout', 'postgres_inspection_network_timeout', 'postgres_inspection_database_missing',
 ]);
 const fields = value => value && typeof value === 'object' && !Array.isArray(value);
 const exact = (value, keys) => fields(value) && Object.keys(value).sort().join(',') === [...keys].sort().join(',');
@@ -23,7 +23,8 @@ export function finiteRuntimeRecoveryHealthFailure(value) {
     || value.code.startsWith('postgres_') !== (value.component === 'postgres')
     || value.code.startsWith('health_capability_') && value.component !== 'edge'
     || !Number.isSafeInteger(value.consecutive_failures) || value.consecutive_failures < 1 || value.consecutive_failures > 3
-    || (value.code === 'health_http_failed') !== (value.http_status !== null)
+    || (value.code === 'health_http_failed' || value.code.startsWith('health_http_api_')) !== (value.http_status !== null)
+    || value.code.startsWith('health_http_api_') && (value.component !== 'api' || value.http_status !== 503)
     || value.http_status !== null && (!Number.isSafeInteger(value.http_status) || value.http_status < 100 || value.http_status > 599)
     || value.authority_effect !== false) return null;
   return Object.freeze({...value});

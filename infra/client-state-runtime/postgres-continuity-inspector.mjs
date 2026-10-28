@@ -21,9 +21,12 @@ export async function createPostgresContinuityInspector(config,{connect}={}) {
           return {...rows[0].identity};
         } catch(cause) {
           const state=/^[0-9A-Z]{5}$/.test(cause?.code||'')?cause.code:null;
-          const text=state?`SQLSTATE ${state}`:['ECONNREFUSED','ECONNRESET'].includes(cause?.code)?'connection refused'
-            :['CONNECT_TIMEOUT','ETIMEDOUT'].includes(cause?.code)?'connection timed out':'';
-          const code=classifyPostgresUtilityFailure(text).code;
+          const text=state?`SQLSTATE ${state}`:['ECONNREFUSED','ECONNRESET'].includes(cause?.code)?'connection refused':'';
+          // CONNECT_TIMEOUT is emitted before a connection exists. A socket
+          // ETIMEDOUT may occur later and cannot identify a SQL statement timeout.
+          const code=cause?.code==='CONNECT_TIMEOUT'?'postgres_inspection_connection_timeout'
+            :cause?.code==='ETIMEDOUT'?'postgres_inspection_network_timeout'
+            :classifyPostgresUtilityFailure(text).code;
           throw Object.assign(new Error(code),{code});
         } finally {pending=null;}
       })();

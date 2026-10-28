@@ -1,0 +1,77 @@
+{
+  "schema": "metaengine.package-planner-read-only-observation.v1",
+  "source_head": "91a680d813a5bb44c6ab4438fec2ba1bcbe23ee0",
+  "source_tree": "fe39572a65805e339f2aedbd3b627f8cea1bceb1",
+  "planner_git_blob": "1aee544ed7b99898cbde34494bd80a4620b63d34",
+  "planner_sha256": "27c1ebc83393964d6182bb6a06a52651d3100084b3a2270059ca3d25f4d46fef",
+  "observer": "local read-only evaluation over live GitHub GET responses; prior producer run identity, not execution within that CI run",
+  "observed_producer_run_id": 40753545489,
+  "observed_producer_run_attempt": 1,
+  "started_at": "2026-10-28T19:34:31.315Z",
+  "queries": [
+    {
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/actions/artifacts?name=metaengine-browser-windows-candidate-91a680d813a5bb44c6ab4438fec2ba1bcbe23ee0&per_page=100",
+      "method": "GET",
+      "started_at": "2026-10-28T19:34:31.319Z",
+      "completed_at": "2026-10-28T19:34:32.859Z",
+      "status": 200,
+      "headers": {
+        "date": "Wed, 28 Oct 2026 19:34:32 GMT",
+        "etag": "W/\"dc5251f2e7eabac7f5179872f71b44fe04fd6716772ebe33a45500838e2cedf8\"",
+        "link": null,
+        "x-github-request-id": "DD22:27E3DA:385765:5385C4:6AE24E48",
+        "x-ratelimit-remaining": "17"
+      },
+      "response_body": "{\"total_count\":0,\"artifacts\":[]}"
+    },
+    {
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/actions/artifacts?name=metaengine-browser-package-version-0.7.0-dev.2070820686579.1&per_page=100",
+      "method": "GET",
+      "started_at": "2026-10-28T19:34:32.869Z",
+      "completed_at": "2026-10-28T19:34:33.377Z",
+      "status": 200,
+      "headers": {
+        "date": "Wed, 28 Oct 2026 19:34:33 GMT",
+        "etag": "W/\"9be5ae9003e6262a88757ac5b5e7c30e4be8fcdda5a73cfdfa06c08a3d67496d\"",
+        "link": null,
+        "x-github-request-id": "DD22:27E3DA:385CE0:538DF1:6AE24E48",
+        "x-ratelimit-remaining": "16"
+      },
+      "response_body": "{\"total_count\":1,\"artifacts\":[{\"id\":12844368618,\"node_id\":\"MDg6QXJ0aWZhY3QxMjg0NDM2ODYxOA==\",\"name\":\"metaengine-browser-package-version-0.7.0-dev.2070820686579.1\",\"size_in_bytes\":865,\"url\":\"https://api.github.com/repos/PatrickFrome/Compute/actions/artifacts/12844368618\",\"archive_download_url\":\"https://api.github.com/repos/PatrickFrome/Compute/actions/artifacts/12844368618/zip\",\"expired\":false,\"digest\":\"sha256:74852ca584bcf0a12bf89466fcc1fb681adc152ddf5556c5a1c33856ff5b7549\",\"created_at\":\"2026-10-28T19:26:43Z\",\"updated_at\":\"2026-10-28T19:26:43Z\",\"expires_at\":\"2027-01-26T19:21:20Z\",\"workflow_run\":{\"id\":40753545489,\"repository_id\":1341371143,\"head_repository_id\":1341371143,\"head_branch\":\"work/runtime-health-503-diagnostic-20261028\",\"head_sha\":\"054551d404ebad657116e183756a933057487cdd\"}}]}"
+    },
+    {
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/actions/artifacts?name=metaengine-browser-package-version-0.7.0-dev.2179244300106.1&per_page=100",
+      "method": "GET",
+      "started_at": "2026-10-28T19:34:33.381Z",
+      "completed_at": "2026-10-28T19:34:33.934Z",
+      "status": 200,
+      "headers": {
+        "date": "Wed, 28 Oct 2026 19:34:33 GMT",
+        "etag": "W/\"dc5251f2e7eabac7f5179872f71b44fe04fd6716772ebe33a45500838e2cedf8\"",
+        "link": null,
+        "x-github-request-id": "DD22:27E3DA:386180:5394FC:6AE24E49",
+        "x-ratelimit-remaining": "15"
+      },
+      "response_body": "{\"total_count\":0,\"artifacts\":[]}"
+    }
+  ],
+  "selected_version": false,
+  "reservation_created": false,
+  "package_built": false,
+  "authority_effect": false,
+  "plan": {
+    "schema": "metaengine.browser.package-identity-candidate-plan.v1",
+    "source_head": "91a680d813a5bb44c6ab4438fec2ba1bcbe23ee0",
+    "manifest_package_version": "0.7.0-dev.2070820686579.1",
+    "minimum_package_version": "0.7.0-dev.2070820686579.1",
+    "minimum_package_version_exclusive": true,
+    "candidate_package_version": "0.7.0-dev.2179244300106.1",
+    "candidate_slot": 0,
+    "rejected_reserved_candidate_versions": [],
+    "manifest_update_required": true,
+    "physical_package_build_allowed": false,
+    "promotion_authorized": false,
+    "authority_effect": false
+  },
+  "completed_at": "2026-10-28T19:34:33.938Z"
+}
