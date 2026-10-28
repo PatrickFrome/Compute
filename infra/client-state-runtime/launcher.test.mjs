@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { test } from 'node:test';
-import { assertPostgresIdentity, configFromEnvironment, launchClientStateRuntime, normalizeLauncherConfig, normalizeRuntimeHealthFailure, classifyEdgeCapabilityReadiness, runtimeEnvironment } from './launcher.mjs';
+import { assertPostgresIdentity, configFromEnvironment, launchClientStateRuntime, normalizeLauncherConfig, normalizeRuntimeHealthFailure, classifyEdgeCapabilityReadiness, classifyApiHealthHttpFailure, runtimeEnvironment } from './launcher.mjs';
 import { captureStartupSource, safeRuntimePolicy, sourceClosure, startupFilesDigest } from './startup-source-manifest.mjs';
 import { ATTACHED_ONBOARDING_ENTRY, BUNDLE_ENTRY_POINTS, FIRST_RUN_INITDB_ENTRY, FRESH_PROVIDER_ENTRY, REMOTE_SUPPORT_ENTRY, RUNTIME_HOST_ENTRY } from './package-runtime-resources.mjs';
 
@@ -100,6 +100,33 @@ test('health diagnostics accept only finite public categories and bounded metada
     { consecutive_failures: 4 }, { http_status: 600 }, { http_status: null }, { authority_effect: true },
     { code: 'postgres_incarnation_mismatch' }, { response_body: 'synthetic-private-response' },
   ]) assert.throws(() => normalizeRuntimeHealthFailure({ ...diagnostic, ...mutation }), /health_failure_contract_invalid/);
+});
+
+test('API HTTP 503 diagnostics retain only bounded fixed reason categories', async () => {
+ const response=body=>new Response(body,{status:503,headers:{'content-type':'application/json'}});
+ for(const [body,expected] of [
+  [{code:'local_state_health_busy',message:'private'},'health_http_api_capacity'],
+  [{code:'08006',message:'database_request_failed'},'health_http_api_database'],
+  [{code:'CONNECT_TIMEOUT',message:'database_request_failed'},'health_http_api_database'],
+  [{schema:'metaengine.client-state.health.v1',ok:false},'health_http_api_catalog'],
+  [{code:'secret',message:'private'},'health_http_failed'],
+  [{code:'08006',message:'private-secret'},'health_http_failed'],
+ ]) {
+  const code=await classifyApiHealthHttpFailure(response(JSON.stringify(body)));
+  assert.equal(code,expected);
+  assert.equal(normalizeRuntimeHealthFailure({schema:'metaengine.client-state.health-failure.v1',code,component:'api',
+   consecutive_failures:3,http_status:503,authority_effect:false}).code,code);
+ }
+ assert.equal(await classifyApiHealthHttpFailure(response('x'.repeat(3000))),'health_http_failed');
+ assert.equal(await classifyApiHealthHttpFailure(response('{malformed')),'health_http_failed');
+ assert.equal(await classifyApiHealthHttpFailure(new Response('{}',{status:502})),'health_http_failed');
+ const stalled=new Response(new ReadableStream({pull(){return new Promise(()=>{});}}),{status:503});
+ const before=Date.now();assert.equal(await classifyApiHealthHttpFailure(stalled,20),'health_http_failed');
+ assert(Date.now()-before<500,'an unresponsive peer must not hold health classification');
+ for(const code of ['health_http_api_capacity','health_http_api_database','health_http_api_catalog']) {
+  for(const change of [{component:'edge'},{http_status:502},{http_status:null}])assert.throws(()=>normalizeRuntimeHealthFailure({
+   schema:'metaengine.client-state.health-failure.v1',code,component:'api',consecutive_failures:1,http_status:503,authority_effect:false,...change}),/health_failure_contract_invalid/);
+ }
 });
 
 test('Edge readiness publishes only exact capability reason categories, not remote strings', () => {
