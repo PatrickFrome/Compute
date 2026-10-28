@@ -21,8 +21,8 @@ export function createForwardPriorPidReadback({config,status,readNative=readWind
     const state=pidState(pid);
     if(state!=='PRESENT'||!pids.has(pid))return state;
     const native=await readNative(pid);
-    if(native?.state!=='PRESENT'||native.pid!==pid||native.authority_effect!==false
-      ||!Number.isFinite(Date.parse(native.created_at))||Date.parse(native.created_at)<=observed
+    if(native?.state!=='PRESENT'||native.source!=='OS_PROCESS_INVENTORY'||native.pid!==pid||native.authority_effect!==false
+      ||!Number.isFinite(Date.parse(native.created_at))||Date.parse(native.created_at)<=observed||Date.parse(native.created_at)>now()+5000
       ||typeof native.exe_path!=='string'||!path.win32.isAbsolute(native.exe_path)||native.exe_path.startsWith('\\\\'))return 'PRESENT';
     const relative=path.win32.relative(root.toLowerCase(),native.exe_path.toLowerCase());
     if(!relative||(!relative.startsWith('..'+path.win32.sep)&&relative!=='..'&&!path.win32.isAbsolute(relative)))return 'PRESENT';
