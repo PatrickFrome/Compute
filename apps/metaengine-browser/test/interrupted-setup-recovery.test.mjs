@@ -483,15 +483,17 @@ for(const [field,value] of [['process_incarnation_id','replaced'],['admission_ge
 });
 
 
-async function nativeRecoveryHoldFixture() {
+async function nativeRecoveryHoldFixture({ archive = () => ({}) } = {}) {
   const source = await fs.readFile(new URL('../src/native-supervisor-client-base.mjs', import.meta.url), 'utf8');
   const begin = source.indexOf('  canStartMaintenance() {');
-  const end = source.indexOf('  async archiveInterruptedBootstrapForNewEpoch(binding)', begin);
+  const end = source.indexOf('  #kickMaintenance()', begin);
   return new (vm.runInNewContext(`(class {
     #interruptedSetupRecoveryHold = false; #interruptedSetupRecoveryActive = false; #interruptedSetupRecoveryRetainedFence = false;
     #currentCommands = new Map(); #legacyFastlaneBusy = false; #maintenancePromise = null;
+    #lifecycle = { archiveInterruptedBootstrapForNewEpoch: binding => fixtureArchive(binding) };
+    setMaintenance(promise) { this.#maintenancePromise = promise; }
     ${source.slice(begin, end)}
-  })`))();
+  })`, { fixtureArchive: archive }))();
 }
 
 test('a clear journal readback cannot release an active native recovery operation', async () => {
@@ -529,4 +531,38 @@ for (const outcome of ['success', 'rejected-before-archive']) test(`a journal fe
   assert.equal(client.canStartMaintenance(), false);
   client.setInterruptedSetupRecoveryFence(false);
   assert.equal(client.canStartMaintenance(), true);
+});
+
+
+test('a new retained fence during maintenance drain prevents recovery from starting', async () => {
+  const client = await nativeRecoveryHoldFixture();
+  let release, effects = 0;
+  client.setMaintenance(new Promise(resolve => { release = resolve; }));
+  const operation = client.withInterruptedSetupRecovery(() => { effects++; return {}; });
+  client.setInterruptedSetupRecoveryFence(true);
+  release();
+  await assert.rejects(operation, /native_mutation_busy/);
+  assert.equal(effects, 0);
+  assert.equal(client.interruptedSetupRecoveryFenced(), true);
+});
+
+test('retained journal fence alone cannot authorize the native recovery mutation', async () => {
+  let effects = 0;
+  const client = await nativeRecoveryHoldFixture({ archive: () => { effects++; } });
+  client.setInterruptedSetupRecoveryFence(true);
+  await assert.rejects(client.archiveInterruptedBootstrapForNewEpoch({}), /native_hold_required/);
+  assert.equal(effects, 0);
+});
+
+test('native recovery mutation requires active ownership and no newly retained fence', async () => {
+  let effects = 0;
+  const client = await nativeRecoveryHoldFixture({ archive: () => { effects++; return {}; } });
+  await client.withInterruptedSetupRecovery(() => client.archiveInterruptedBootstrapForNewEpoch({}));
+  assert.equal(effects, 1);
+  await assert.rejects(client.withInterruptedSetupRecovery(async () => {
+    client.setInterruptedSetupRecoveryFence(true);
+    return client.archiveInterruptedBootstrapForNewEpoch({});
+  }), /native_hold_required/);
+  assert.equal(effects, 1);
+  assert.equal(client.interruptedSetupRecoveryFenced(), true);
 });

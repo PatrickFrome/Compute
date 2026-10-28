@@ -1575,7 +1575,7 @@ export class NativeSupervisorClient {
       await this.#maintenancePromise;
       // A remote lease may have arrived while the maintenance lane drained.
       // It cannot execute a mutation under the hold; require it fully settled.
-      if (this.#currentCommands.size > 0) throw new Error('interrupted_setup_native_mutation_busy');
+      if (this.#currentCommands.size > 0 || this.#interruptedSetupRecoveryRetainedFence) throw new Error('interrupted_setup_native_mutation_busy');
       operationStarted = true;
       return await operation();
     } catch (error) {
@@ -1594,7 +1594,8 @@ export class NativeSupervisorClient {
   }
 
   async archiveInterruptedBootstrapForNewEpoch(binding) {
-    if (!this.#interruptedSetupRecoveryHold) throw new Error('interrupted_setup_native_hold_required');
+    // A retained journal fence blocks effects; it is not operation ownership.
+    if (!this.#interruptedSetupRecoveryActive || this.#interruptedSetupRecoveryRetainedFence) throw new Error('interrupted_setup_native_hold_required');
     return this.#lifecycle?.archiveInterruptedBootstrapForNewEpoch(binding);
   }
 
