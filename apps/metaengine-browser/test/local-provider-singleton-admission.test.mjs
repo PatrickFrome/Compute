@@ -248,9 +248,12 @@ for (const entry of entries) {
   test(entry + ': installer drains native workers before retiring Host and preserves pending or failed custody', async t => {
     for (const nativeDrainMode of ['ready', 'pending', 'failed']) {
       const f = await fixture(t);
-      const host = await addManagedHost(f);
+      // A real inert child may acknowledge cleanup after the negative-case
+      // observation window, especially under coverage or software emulation.
+      const host = await addManagedHost(f, { stopDelayMs: nativeDrainMode === 'ready' ? 1000 : 0 });
       const result = await launch(f, { entry, managedHost: host.managedHost,
-        installerAfterBoot: true, nativeDrainMode, fixtureDeadlineMs: 700 });
+        installerAfterBoot: true, nativeDrainMode,
+        fixtureDeadlineMs: nativeDrainMode === 'ready' ? 5000 : 700 });
       assert.deepEqual(event(result, 'native-drain-start'), ['native-drain-start', 'STARTED']);
       assert.equal(event(result, 'forced-fallback-armed'), undefined);
       assert.equal(event(result, 'forced-fallback-fired'), undefined);
