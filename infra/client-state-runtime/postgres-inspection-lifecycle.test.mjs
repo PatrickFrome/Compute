@@ -90,7 +90,7 @@ test('oversized private stderr is fail-closed without capturing or exposing byte
 });
 
 test('new inspection categories stay within the redacted host health contract', () => {
-  for(const code of ['postgres_inspection_timeout','postgres_inspection_spawn_failed','postgres_inspection_query_failed','postgres_inspection_output_limit']) {
+  for(const code of ['postgres_inspection_timeout','postgres_inspection_spawn_failed','postgres_inspection_query_failed','postgres_inspection_output_limit','postgres_inspection_connection_timeout','postgres_inspection_network_timeout']) {
     const value={schema:'metaengine.client-state.health-failure.v1',code,component:'postgres',consecutive_failures:3,http_status:null,authority_effect:false};
     assert.deepEqual(normalizeRuntimeHealthFailure(value),value);
     assert.throws(()=>normalizeRuntimeHealthFailure({...value,stderr:'PRIVATE_SECRET'}),/contract_invalid/);

@@ -24,7 +24,7 @@ test('overlapping health reads join one query rather than opening more probes',a
 });
 
 test('SQL, auth and network failures remain finite and never expose private error text',async()=>{
-  for(const [code,expected] of [['42501','permission_denied'],['28P01','auth_failed'],['53300','server_unavailable'],['ECONNREFUSED','connection_refused'],['CONNECT_TIMEOUT','query_timeout'],['PRIVATE_SECRET','query_failed']]) {
+  for(const [code,expected] of [['42501','permission_denied'],['28P01','auth_failed'],['53300','server_unavailable'],['57014','query_timeout'],['ECONNREFUSED','connection_refused'],['CONNECT_TIMEOUT','connection_timeout'],['ETIMEDOUT','network_timeout'],['PRIVATE_SECRET','query_failed']]) {
     const inspector=await createPostgresContinuityInspector({inspectDatabaseUrl:'postgres://fixture'},
       {connect:()=>({unsafe:async()=>{throw Object.assign(Error('PRIVATE_SECRET postgresql://credentials'),{code});},end:async()=>{}})});
     await assert.rejects(inspector.inspect(),error=>error.code===`postgres_inspection_${expected}`&&!JSON.stringify(error).includes('PRIVATE_SECRET')&&!error.message.includes('credentials'));

@@ -35,6 +35,7 @@ const HEALTH_FAILURE_CODES = new Set([
   'postgres_inspection_auth_failed', 'postgres_inspection_permission_denied',
   'postgres_inspection_row_security_denied', 'postgres_inspection_connection_refused',
   'postgres_inspection_server_unavailable', 'postgres_inspection_query_timeout',
+  'postgres_inspection_connection_timeout', 'postgres_inspection_network_timeout',
   'postgres_inspection_database_missing',
 ]);
 
