@@ -628,3 +628,7 @@ Functional source: 3d6e3b9a5bf4e7ddb5c9dd9cc0fc3d41d73ef320. This unique package
 ## Terminal goal and health diagnostics package successor — 0.7.0-dev.2070820686579.1
 
 Functional source: be11be66853c822f0138cbaf899aa203f1312016. This unique package includes terminal rejected goal polling repair and bounded API health failure diagnostics. New planner evidence: evidence/audits/metaengine-20261028-terminal-goal-health/live-artifact-observation.json. This metadata alone proves neither a built artifact nor installed autonomy; Windows build, payload readback and live agent execution remain pending. Activation-latency qualification must be reported independently.
+
+## Postgres health contract package successor — 0.7.0-dev.2179244300106.1
+
+Functional source: 91a680d813a5bb44c6ab4438fec2ba1bcbe23ee0. This unique package aligns Browser and Host health diagnostics and separates connection and query timeouts. New planner evidence: evidence/audits/metaengine-20261028-postgres-health-contract/live-artifact-observation.json. This metadata alone proves neither a built artifact nor installed autonomy; Windows build, payload readback and live agent execution remain pending. Activation-latency qualification must be reported independently.
