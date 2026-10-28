@@ -1,6 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createGoalSubmissionModeObserver, goalSubmissionModeText } from './goal-submission-mode-observer.mjs';
+import { createGoalSubmissionModeObserver, goalSubmissionModeText, shouldPollClientGoal } from './goal-submission-mode-observer.mjs';
+
+test('a durable pre-dispatch rejection stops polling without hiding active or ambiguous requests',()=>{
+ const rejected={request_id:'old',kind:'NATIVE_CODING',state:'FAILED',last_error:'native_goal_rejected_before_dispatch',
+  native_rejection:{schema:'metaengine.native-coding.seed-rejection.v1',state:'REJECTED_BEFORE_DISPATCH'},progress:null};
+ assert.equal(shouldPollClientGoal(rejected,null),false);
+ for(const change of [{state:'RECONCILE_REQUIRED'},{last_error:'other'}, {native_rejection:null},
+  {native_rejection:{schema:'other',state:'REJECTED_BEFORE_DISPATCH'}}, {kind:'BROWSER'}])
+  assert.equal(shouldPollClientGoal({...rejected,...change},null),true);
+ assert.equal(shouldPollClientGoal(null,null),false);
+ assert.equal(shouldPollClientGoal({request_id:'new',kind:'NATIVE_CODING',state:'RUNNING',progress:null},null),true);
+ assert.equal(shouldPollClientGoal({request_id:'new',kind:'NATIVE_CODING',progress:{terminal:true}},null),false);
+});
 
 const ready = Object.freeze({
   schema: 'metaengine.client.goal-submission-mode.v1', kind: 'NATIVE_CODING',

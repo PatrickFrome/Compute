@@ -22,7 +22,8 @@ function runtimeError(code) {
 
 const HEALTH_FAILURE_SCHEMA = 'metaengine.client-state.health-failure.v1';
 const HEALTH_FAILURE_CODES = new Set([
-  'health_http_failed', 'health_response_invalid', 'health_not_ready', 'health_capability_unattested',
+  'health_http_failed', 'health_http_api_capacity', 'health_http_api_database', 'health_http_api_catalog',
+  'health_response_invalid', 'health_not_ready', 'health_capability_unattested',
   'health_capability_rpc_unavailable', 'health_capability_runtime_not_deployed',
   'health_capability_attestation_timeout', 'health_capability_source_mismatch', 'health_capability_db_read_failed',
   'health_timeout', 'health_connection_refused', 'health_network_failed', 'health_instance_mismatch',
@@ -47,6 +48,30 @@ const EDGE_UNATTESTED_REASON_CODES = Object.freeze({
   DB_SOURCE_ATTESTATION_FAILED: 'health_capability_source_mismatch',
   DB_SOURCE_READ_FAILED: 'health_capability_db_read_failed',
 });
+
+// A 503 is not enough to distinguish local health saturation from a database
+// failure. Inspect only one small, promptly available chunk and retain a fixed
+// category; never persist response text, database errors or credentials.
+export async function classifyApiHealthHttpFailure(response, timeoutMs=150) {
+  const fallback='health_http_failed';
+  if(response?.status!==503 || !response.body?.getReader) {
+    void response?.body?.cancel().catch(()=>{});
+    return fallback;
+  }
+  const reader=response.body.getReader();let timer;
+  try {
+    const part=await Promise.race([reader.read(),new Promise(resolve=>{timer=setTimeout(()=>resolve(null),timeoutMs);})]);
+    if(!part || part.done || !part.value || part.value.byteLength>2048)return fallback;
+    let body;try{body=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(part.value));}catch{return fallback;}
+    if(body?.code==='local_state_health_busy')return 'health_http_api_capacity';
+    if(typeof body?.code==='string' && (/^[0-9A-Z]{5}$/.test(body.code)
+      || ['CONNECT_TIMEOUT','CONNECTION_CLOSED','CONNECTION_DESTROYED'].includes(body.code))
+      && body.message==='database_request_failed')return 'health_http_api_database';
+    if(body?.schema==='metaengine.client-state.health.v1' && body.ok===false)return 'health_http_api_catalog';
+    return fallback;
+  } catch { return fallback; }
+  finally {clearTimeout(timer);void reader.cancel().catch(()=>{});}
+}
 export function classifyEdgeCapabilityReadiness(body) {
   const health = body?.capability_health;
   if (body?.runtime_ready !== false || !health || typeof health !== 'object' || Array.isArray(health)
@@ -69,7 +94,8 @@ export function normalizeRuntimeHealthFailure(value) {
     || (value.code.startsWith('health_capability_') && value.component !== 'edge')
     || !Number.isSafeInteger(value.consecutive_failures) || value.consecutive_failures < 1 || value.consecutive_failures > 3
     || (value.http_status !== null && (!Number.isSafeInteger(value.http_status) || value.http_status < 100 || value.http_status > 599))
-    || (value.code === 'health_http_failed') !== (value.http_status !== null)
+    || (value.code === 'health_http_failed' || value.code.startsWith('health_http_api_')) !== (value.http_status !== null)
+    || (value.code.startsWith('health_http_api_') && (value.component !== 'api' || value.http_status !== 503))
     || value.authority_effect !== false) throw runtimeError('runtime_health_failure_contract_invalid');
   return Object.freeze(Object.fromEntries(fields.map(name => [name, value[name]])));
 }
@@ -458,7 +484,7 @@ export async function launchClientStateRuntime(input, hooks = {}) {
           const code=HEALTH_FAILURE_CODES.has(error.healthFailureCode) && !error.healthFailureCode.startsWith('postgres_')
             ? error.healthFailureCode:'health_response_invalid';
           diagnostic=normalizeRuntimeHealthFailure({schema:HEALTH_FAILURE_SCHEMA,component:label,code,
-            consecutive_failures:Math.min(3,failures),http_status:code==='health_http_failed'?error.healthHttpStatus:null,
+            consecutive_failures:Math.min(3,failures),http_status:code==='health_http_failed'||code.startsWith('health_http_api_')?error.healthHttpStatus:null,
             authority_effect:false});
         }
         if (String(error.code || '').includes('mismatch')) { await retainStartupFailure(); throw error; }
@@ -481,10 +507,9 @@ export async function launchClientStateRuntime(input, hooks = {}) {
     }
     if (!response.ok) {
       const error = runtimeError(`${which}_health_failed`);
-      error.healthFailureCode = 'health_http_failed'; error.healthHttpStatus = response.status;
-      // A failing peer can send an arbitrarily large body. Cancel it without
-      // buffering, parsing, logging, or delaying the fail-closed classification.
-      void response.body?.cancel().catch(() => {});
+      error.healthFailureCode = which==='api' ? await classifyApiHealthHttpFailure(response) : 'health_http_failed';
+      error.healthHttpStatus = response.status;
+      if(which!=='api')void response.body?.cancel().catch(() => {});
       throw error;
     }
     let body;

@@ -83,7 +83,7 @@ function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion)
   classification:'SOURCE_ONLY_NO_CURRENT_PACKAGE',
   branch:'work/autonomy-continuation-20261026',
   source_parent:'ea405d926568508eac53ebb408e941c94faeadcf',
-  package_version:'0.7.0-dev.1955970210787.1',
+  package_version:'0.7.0-dev.2070820686579.1',
   historical_package_version:'0.7.0-dev.202610152359.1',
   package_build_authorized:false,
   package_version_reuse_authorized:false,
@@ -484,15 +484,26 @@ function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion)
     "production_ready": false,
     "promotion_authorized": false,
     "authority_effect": false
+  },
+  {
+    "schema": "metaengine.client.package-version-successor.v1",
+    "source_parent": "3d6e3b9a5bf4e7ddb5c9dd9cc0fc3d41d73ef320",
+    "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+    "prior_version": "0.7.0-dev.1848773682936.1",
+    "distinct_version": "0.7.0-dev.1955970210787.1",
+    "preceding_version_burned": true,
+    "production_ready": false,
+    "promotion_authorized": false,
+    "authority_effect": false
   }
 ]);
  const successor=manifest.current_package_transition;
  assert.deepEqual(successor,{
   "schema": "metaengine.client.package-version-successor.v1",
-  "source_parent": "3d6e3b9a5bf4e7ddb5c9dd9cc0fc3d41d73ef320",
+  "source_parent": "be11be66853c822f0138cbaf899aa203f1312016",
   "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
-  "prior_version": "0.7.0-dev.1848773682936.1",
-  "distinct_version": "0.7.0-dev.1955970210787.1",
+  "prior_version": "0.7.0-dev.1955970210787.1",
+  "distinct_version": "0.7.0-dev.2070820686579.1",
   "preceding_version_burned": true,
   "production_ready": false,
   "promotion_authorized": false,
@@ -1008,6 +1019,20 @@ test('Recovery fences successor binds fresh source and metadata without installe
  const evidence=JSON.parse(read('evidence/audits/metaengine-20261028-recovery-fences-package/live-artifact-observation.json'));
  assert.equal(evidence.source_head,prior);assert.equal(evidence.plan.candidate_package_version,version);
  assert.equal(evidence.plan.minimum_package_version,'0.7.0-dev.1848773682936.1');
+ assert.equal(evidence.reservation_created,false);assert.equal(evidence.package_built,false);assert.equal(evidence.authority_effect,false);
+ assert.equal(evidence.plan.physical_package_build_allowed,false);assert.equal(evidence.plan.promotion_authorized,false);
+ for(const q of evidence.queries){assert.equal(q.status,200);const body=JSON.parse(q.response_body);assert.equal(body.total_count,body.artifacts.length);}
+ assert.equal(JSON.parse(evidence.queries.at(-1).response_body).total_count,0);
+ assert.equal(manifest.previous_package_transitions.find(item=>item.distinct_version===version).source_parent,prior);
+ assertCommittedAuditPrefix(root,prior,'HEAD','coordination/operator-control/AUDIT_CLOSURE_EXECUTION_REGISTER_20261018.md');
+});
+
+
+test('Terminal goal and health diagnostics successor binds fresh source and metadata without installed qualification',()=>{
+ const prior='be11be66853c822f0138cbaf899aa203f1312016',version='0.7.0-dev.2070820686579.1';
+ const evidence=JSON.parse(read('evidence/audits/metaengine-20261028-terminal-goal-health/live-artifact-observation.json'));
+ assert.equal(evidence.source_head,prior);assert.equal(evidence.plan.candidate_package_version,version);
+ assert.equal(evidence.plan.minimum_package_version,'0.7.0-dev.1955970210787.1');
  assert.equal(evidence.reservation_created,false);assert.equal(evidence.package_built,false);assert.equal(evidence.authority_effect,false);
  assert.equal(evidence.plan.physical_package_build_allowed,false);assert.equal(evidence.plan.promotion_authorized,false);
  for(const q of evidence.queries){assert.equal(q.status,200);const body=JSON.parse(q.response_body);assert.equal(body.total_count,body.artifacts.length);}

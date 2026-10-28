@@ -8,7 +8,7 @@ import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react"
 import { useMe2, type PageKey } from "@/components/me2/store";
 import { useToast } from "@/hooks/use-toast";
 import { refreshClientRuntimeStatus, useClientRuntimeStatus } from "@/hooks/use-client-runtime-status";
-import { createGoalSubmissionModeObserver, goalSubmissionModeText, type GoalSubmissionMode } from "@/lib/goal-submission-mode-observer.mjs";
+import { createGoalSubmissionModeObserver, goalSubmissionModeText, shouldPollClientGoal, type GoalSubmissionMode } from "@/lib/goal-submission-mode-observer.mjs";
 import { TopBar } from "@/components/me2/shell/topbar";
 import { CommandPalette } from "@/components/me2/shell/command-palette";
 import { InterruptedSetupRecovery } from "@/components/me2/interrupted-setup-recovery";
@@ -133,6 +133,7 @@ type ClientGoalJournalEntry = {
   progress: ClientGoalProgress | null;
   execution_proof: ClientGoalExecutionProof | null;
   last_error: string | null;
+  native_rejection?: {schema:string;state:string}|null;
   project_error?:string|null;
   automatic_retry_allowed: false;
   authority_effect: false;
@@ -410,13 +411,12 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
 
   // Observation only: submitGoal is never called by a timer or recovery path.
   useEffect(() => {
-    if(journalEntry?.kind==="NATIVE_CODING"&&journalEntry.progress?.terminal)return;
-    if (!(receipt?.request_id || journalEntry?.request_id) || (journalEntry?.progress?.terminal && (journalEntry.progress.task_state !== "COMPLETED" || journalEntry.execution_proof?.user_goal_to_result_readback))) return;
+    if (!shouldPollClientGoal(journalEntry,receipt)) return;
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") void refreshProgress();
     }, 5_000);
     return () => window.clearInterval(timer);
-  }, [receipt?.request_id, journalEntry?.request_id,journalEntry?.kind, journalEntry?.progress?.terminal, journalEntry?.progress?.task_state, journalEntry?.execution_proof?.user_goal_to_result_readback, refreshProgress]);
+  }, [receipt?.request_id, journalEntry?.request_id,journalEntry?.kind,journalEntry?.state,journalEntry?.last_error,journalEntry?.native_rejection?.schema,journalEntry?.native_rejection?.state, journalEntry?.progress?.terminal, journalEntry?.progress?.task_state, journalEntry?.execution_proof?.user_goal_to_result_readback, refreshProgress]);
 
   const submit = useCallback(async () => {
     const value = goal.trim();
