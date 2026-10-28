@@ -120,6 +120,7 @@ function processAlive(pid) {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export class BrowserSentinelHost {
+  #childProcessErrors = new WeakSet();
   #statePath; #workerScript; #executable; #spawn; #processAlive; #state = null; #child = null; #childExitProof = null;
   #beforeQuit = null; #plannedShutdownBlocked = false; #app = null; #workerRecoveryPromise = null; #transitionLatch = null;
 
@@ -150,7 +151,8 @@ export class BrowserSentinelHost {
       && heartbeat?.lifecycle === 'READY'
       && heartbeat?.authority_effect === false
     );
-    const workerHealthy = heartbeatBound
+    const workerProcessFailed = Boolean(this.#child && this.#childProcessErrors.has(this.#child));
+    const workerHealthy = !workerProcessFailed && heartbeatBound
       && heartbeatAgeMs != null
       && heartbeatAgeMs <= BROWSER_SENTINEL_WORKER_HEARTBEAT_MAX_AGE_MS
       && this.#state.worker_released !== true
@@ -160,7 +162,7 @@ export class BrowserSentinelHost {
       worker_ready: workerHealthy,
       worker_heartbeat_at: heartbeatBound ? heartbeat.heartbeat_at : null,
       worker_heartbeat_age_ms: heartbeatBound ? heartbeatAgeMs : null,
-      worker_health: workerHealthy ? 'HEALTHY' : 'STALE_OR_MISSING',
+      worker_health: workerProcessFailed ? 'PROCESS_ERROR' : workerHealthy ? 'HEALTHY' : 'STALE_OR_MISSING',
       transition_latched: this.#transitionLatch ? this.#transitionLatch.lifecycle : null,
       exact_child_exit_observed: Boolean(
         this.#childExitProof?.child === this.#child
@@ -186,6 +188,7 @@ export class BrowserSentinelHost {
     const deadline = Date.now() + Math.max(500, Number(timeoutMs) || 5_000);
     while (Date.now() <= deadline) {
       const snap = this.snapshot();
+      if (snap?.worker_health === 'PROCESS_ERROR') throw new Error('browser_sentinel_worker_process_error');
       if (snap?.worker_ready === true) return snap;
       await sleep(50);
     }
@@ -201,6 +204,12 @@ export class BrowserSentinelHost {
       windowsHide: true,
       env,
     });
+    // ChildProcess reports asynchronous launch errors outside start()'s promise.
+    // Own the event for every child, including launches with no assigned PID.
+    // Keep only a child-bound failure marker, never raw native error details.
+    if (typeof child?.on === 'function') {
+      child.on('error', () => { this.#childProcessErrors.add(child); });
+    }
     const pid = Number(child?.pid || 0);
     if (typeof child?.once === 'function' && Number.isSafeInteger(pid) && pid > 0) {
       child.once('exit', (code, signal) => {

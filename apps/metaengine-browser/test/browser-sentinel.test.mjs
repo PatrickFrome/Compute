@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -192,4 +193,53 @@ test('a blocked Owner marker never leaks an unattested local endpoint into a det
       else process.env[key]=value;
     }
   }
+});
+
+
+test('missing Sentinel executable degrades through a caught health error instead of crashing the parent', async t => {
+  const { dir, statePath } = await tempState();
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const moduleUrl = new URL('../src/browser-sentinel.mjs', import.meta.url).href;
+  const script = `
+    import { BrowserSentinelHost } from ${JSON.stringify(moduleUrl)};
+    const sentinel = new BrowserSentinelHost(${JSON.stringify({ statePath, executable: path.join(dir, 'missing-executable'), workerScript: path.join(dir, 'worker.cjs') })});
+    await sentinel.start();
+    try { await sentinel.waitUntilHealthy(1000); process.exitCode = 4; }
+    catch (error) {
+      console.log(error.message);
+      console.log(JSON.stringify(sentinel.snapshot()));
+      if (error.message !== 'browser_sentinel_worker_process_error') process.exitCode = 5;
+    }
+  `;
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+    encoding: 'utf8', timeout: 120000, windowsHide: true, shell: false,
+  });
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  assert.match(result.stdout, /browser_sentinel_worker_process_error/);
+  assert.match(result.stdout, /"worker_ready":false/);
+  assert.match(result.stdout, /"worker_health":"PROCESS_ERROR"/);
+  assert.doesNotMatch(result.stderr, /Unhandled 'error' event/);
+});
+
+test('an exact child process error overrides an otherwise fresh authenticated heartbeat', async t => {
+  const { dir, statePath } = await tempState();
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const child = new EventEmitter();
+  child.pid = 43211;
+  child.unref = () => {};
+  const sentinel = new BrowserSentinelHost({ statePath, workerScript: path.join(dir, 'worker.cjs'),
+    spawnImpl: () => child });
+  const binding = await sentinel.start();
+  await fs.writeFile(browserSentinelWorkerHeartbeatPath(statePath), JSON.stringify({
+    schema: 'metaengine.browser-sentinel.worker-heartbeat.v1', token: binding.token,
+    parent_pid: process.pid, worker_pid: child.pid, lifecycle: 'READY',
+    heartbeat_at: new Date().toISOString(), authority_effect: false,
+  }));
+  assert.equal(sentinel.snapshot().worker_ready, true);
+  child.emit('error', new Error('private native launch detail'));
+  assert.equal(sentinel.snapshot().worker_ready, false);
+  assert.equal(sentinel.snapshot().worker_health, 'PROCESS_ERROR');
+  assert.doesNotMatch(JSON.stringify(sentinel.snapshot()), /private native launch detail/);
+  await assert.rejects(sentinel.waitUntilHealthy(), /browser_sentinel_worker_process_error/);
 });
