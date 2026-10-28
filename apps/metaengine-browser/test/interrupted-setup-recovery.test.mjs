@@ -455,3 +455,29 @@ test('deferred physical tab entrypoints obey the same recovery hold without losi
   assert.deepEqual(observed[2].args, ['tab_exact']);
   assert.equal(tabApi.count(), 0);
 });
+
+// Regression checks for unknown initialization and final identity drift.
+const fenceRecoveryId='recovery_9389026c-f74a-48a3-a3f0-b336e7d1c619';
+const fenceSnapshot=()=>({keepalive:{supervisor_epoch:2,cycle_seq:5,process_incarnation_id:'current',predecessor_process_incarnation_id:'old',predecessor_fenced_at:'2026-10-27T00:00:00Z',admission_generation_floor:7,ambiguous_history:[],pending_wake:{wake_id:'wake',process_incarnation_id:'old',ambiguous_at:'2026-10-27T00:00:00Z',automatic_retry_allowed:false,process_boundary_fenced_at:'2026-10-27T00:00:00Z'}},fleet:{agents:[]},tabs:[]});
+const fenceRequest=s=>({schema:'metaengine.client.interrupted-setup-request.v1',action:'ARCHIVE_INTERRUPTED_SETUP_AND_START_NEW',operator_initiated:true,expected_recovery_sha256:planInterruptedSetupRecovery(s).expected_recovery_sha256});
+for(const mode of ['directory verifier','archive schema','commit syntax']) test(`initialization failure remains fenced: ${mode}`,async t=>{
+ const directory=await fs.mkdtemp(path.join(os.tmpdir(),'recovery-fence-'));t.after(()=>fs.rm(directory,{recursive:true,force:true}));
+ const state=fenceSnapshot();let effects=0;
+ if(mode!=='directory verifier') await fs.writeFile(path.join(directory,fenceRecoveryId+'.archive.json'),JSON.stringify({schema:mode==='archive schema'?'invalid':'metaengine.client.interrupted-setup-archive.v1',recovery_id:fenceRecoveryId}));
+ if(mode==='commit syntax') await fs.writeFile(path.join(directory,fenceRecoveryId+'.committed.json'),'{');
+ const c=new InterruptedSetupRecovery({directory,getSnapshot:async()=>state,applyFleet:async()=>effects++,applySupervisor:async()=>effects++,verifyDirectory:mode==='directory verifier'?async()=>{throw Error('private_directory_unverified');}:null});
+ await assert.rejects(c.init());
+ assert.equal(c.status().fenced,true);
+ await assert.rejects(c.execute(fenceRequest(state)),/fenced/);
+ assert.equal(effects,0);
+});
+for(const [field,value] of [['process_incarnation_id','replaced'],['admission_generation_floor',8],['rollover_attempt',{id:'new'}]]) test(`final readback rejects unexpected ${field} drift`,async t=>{
+ const directory=await fs.mkdtemp(path.join(os.tmpdir(),'recovery-final-drift-'));t.after(()=>fs.rm(directory,{recursive:true,force:true}));
+ const state=fenceSnapshot();
+ const c=new InterruptedSetupRecovery({directory,getSnapshot:async()=>structuredClone(state),applyFleet:async()=>{},applySupervisor:async binding=>{
+  state.keepalive.pending_wake=null;state.keepalive.supervisor_epoch=3;state.keepalive.ambiguous_history.push({wake_id:'wake',operator_recovery_id:binding.recovery_id});state.keepalive[field]=value;
+ }});
+ await c.init();await assert.rejects(c.execute(fenceRequest(state)),/readback_unconfirmed/);
+ assert.equal(c.status().fenced,true);
+ assert.equal((await fs.readdir(directory)).some(n=>n.endsWith('.committed.json')),false);
+});

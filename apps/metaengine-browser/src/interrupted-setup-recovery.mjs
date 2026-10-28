@@ -127,6 +127,16 @@ export class InterruptedSetupRecovery {
     this.#verifyDirectory = verifyDirectory; this.#verifyFile = verifyFile;
   }
   async init() {
+    try {
+      return await this.#readInitialState();
+    } catch (error) {
+      // An unreadable or invalid recovery record is unknown durable intent,
+      // never permission to run another recovery on this same instance.
+      this.#fenced = true;
+      throw error;
+    }
+  }
+  async #readInitialState() {
     await this.#fs.mkdir(this.#directory, { recursive: true, mode: 0o700 });
     const directoryStat = await this.#fs.lstat(this.#directory);
     if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) { this.#fenced = true; throw new Error('interrupted_setup_directory_alias_forbidden'); }
@@ -215,6 +225,9 @@ export class InterruptedSetupRecovery {
     const priorTabs = new Set([snapshot.keepalive.pending_wake?.ambiguity_continuation_tab_id,
       ...snapshot.fleet.agents.map(row => row.tab_id)].filter(Boolean));
     if (after.keepalive?.pending_wake || after.keepalive?.active_wake || after.keepalive?.conversation_url
+      || after.keepalive?.rollover_attempt
+      || after.keepalive?.process_incarnation_id !== plan.current_process_incarnation_id
+      || after.keepalive?.admission_generation_floor !== plan.expected_admission_generation_floor
       || after.keepalive?.supervisor_epoch !== plan.next_supervisor_epoch
       || !(after.keepalive?.ambiguous_history || []).some(row => row.wake_id === plan.supervisor_wake_id && row.operator_recovery_id === id)
       || !Array.isArray(afterAgents)
