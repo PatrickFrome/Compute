@@ -32,7 +32,7 @@ function safeError(value) {
 }
 
 function normalizeAttempt(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || value.schema !== ATTEMPT_SCHEMA) {
     throw new Error('client_admission_recovery_attempt_invalid');
   }
   const state = String(value.state || '').toUpperCase();
@@ -154,12 +154,15 @@ export class ClientAdmissionRecoveryJournal {
 
   async #readInitialState() {
     let raw = null;
+    let missing = false;
     try { raw = await this.#loadState(); } catch (error) {
       if (error?.code !== 'ENOENT') throw error;
+      missing = true;
     }
-    if (raw != null) {
+    if (!missing) {
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)
         || raw.schema !== SCHEMA
+        || !Object.hasOwn(raw, 'latest')
         || raw.automatic_retry_allowed !== false
         || raw.authority_effect !== false) {
         throw new Error('client_admission_recovery_snapshot_invalid');

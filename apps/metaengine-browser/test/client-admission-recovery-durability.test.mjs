@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -217,4 +217,27 @@ test('failed shared startup read rejects all callers and permits a later verifie
   assert.equal(reads, 2);
   await journal.begin(request(id1));
   assert.equal(journal.latest().attempt_id, id1);
+});
+
+for (const malformed of [null, { schema: 'metaengine.client.admission-recovery-journal.v1', automatic_retry_allowed: false, authority_effect: false }]) {
+  test(`existing malformed admission journal cannot be treated as a fresh profile: ${JSON.stringify(malformed)}`, async t => {
+    const f = await fixture(t);
+    const bytes = JSON.stringify(malformed);
+    await writeFile(f.target, bytes);
+    await assert.rejects(f.journal.load(), /client_admission_recovery_snapshot_invalid/);
+    await assert.rejects(f.journal.begin(request(id1)), /client_admission_recovery_snapshot_invalid/);
+    assert.equal(await readFile(f.target, 'utf8'), bytes, 'unknown durable history must not be overwritten');
+  });
+}
+
+test('admission journal refuses an unsupported nested attempt schema without rewriting it', async t => {
+  const f = await fixture(t);
+  await f.journal.begin(request(id1));
+  const snapshot = JSON.parse(await readFile(f.target, 'utf8'));
+  snapshot.latest.schema = 'metaengine.client.admission-recovery-attempt.v99';
+  const bytes = JSON.stringify(snapshot);
+  await writeFile(f.target, bytes);
+  const restart = createClientAdmissionRecoveryJournalFileStore(f.dir).journal;
+  await assert.rejects(restart.load(), /client_admission_recovery_attempt_invalid/);
+  assert.equal(await readFile(f.target, 'utf8'), bytes);
 });
