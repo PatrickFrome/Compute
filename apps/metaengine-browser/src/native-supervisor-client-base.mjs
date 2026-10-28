@@ -426,6 +426,8 @@ export class NativeSupervisorClient {
   #armed = true;
   #lifecycle = null;
   #interruptedSetupRecoveryHold = false;
+  #interruptedSetupRecoveryActive = false;
+  #interruptedSetupRecoveryRetainedFence = false;
   #mesh = null;
   #selfUpdate = null;
   #continuityStatus = {
@@ -1552,7 +1554,8 @@ export class NativeSupervisorClient {
 
   setInterruptedSetupRecoveryFence(fenced) {
     if (typeof fenced !== 'boolean') throw new Error('interrupted_setup_recovery_fence_invalid');
-    this.#interruptedSetupRecoveryHold = fenced;
+    this.#interruptedSetupRecoveryRetainedFence = fenced;
+    this.#interruptedSetupRecoveryHold = fenced || this.#interruptedSetupRecoveryActive;
   }
 
   interruptedSetupRecoveryFenced() {
@@ -1565,6 +1568,7 @@ export class NativeSupervisorClient {
     if (this.#interruptedSetupRecoveryHold || this.#currentCommands.size > 0 || this.#legacyFastlaneBusy || this.canStartMaintenance() !== true) {
       throw new Error('interrupted_setup_native_mutation_busy');
     }
+    this.#interruptedSetupRecoveryActive = true;
     this.#interruptedSetupRecoveryHold = true;
     let operationStarted = false;
     try {
@@ -1573,17 +1577,19 @@ export class NativeSupervisorClient {
       // It cannot execute a mutation under the hold; require it fully settled.
       if (this.#currentCommands.size > 0) throw new Error('interrupted_setup_native_mutation_busy');
       operationStarted = true;
-      const result = await operation();
-      this.#interruptedSetupRecoveryHold = false;
-      return result;
+      return await operation();
     } catch (error) {
-      // This catch owns the acquired hold. A rejected concurrent caller never
-      // enters it and therefore cannot release another operation's fence.
-      if (!operationStarted) this.#interruptedSetupRecoveryHold = false;
-      else if (retainFenceOnError) {
-        try { this.#interruptedSetupRecoveryHold = retainFenceOnError() !== false; } catch { this.#interruptedSetupRecoveryHold = true; }
+      // This operation owns only its active hold. It cannot clear a journal
+      // fence published by another current-lifetime read while it was awaiting.
+      let retain = operationStarted;
+      if (operationStarted && retainFenceOnError) {
+        try { retain = retainFenceOnError() !== false; } catch { retain = true; }
       }
+      if (retain) this.#interruptedSetupRecoveryRetainedFence = true;
       throw error;
+    } finally {
+      this.#interruptedSetupRecoveryActive = false;
+      this.#interruptedSetupRecoveryHold = this.#interruptedSetupRecoveryRetainedFence;
     }
   }
 

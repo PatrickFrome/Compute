@@ -300,7 +300,7 @@ test('native recovery hold serializes explicit operations and remains closed aft
   // Run the actual mutation-hold methods in their private-field scope. Other
   // native dependencies (Electron, update services, network) stay absent.
   const NativeHold = vm.runInNewContext(`(class {
-    #interruptedSetupRecoveryHold = false; #currentCommands = new Map(); #legacyFastlaneBusy = false; #maintenancePromise = null;
+    #interruptedSetupRecoveryHold = false; #interruptedSetupRecoveryActive = false; #interruptedSetupRecoveryRetainedFence = false; #currentCommands = new Map(); #legacyFastlaneBusy = false; #maintenancePromise = null;
     ${source.slice(begin, end)}
     snapshot() { return { continuous_service: { interrupted_setup_recovery_fenced: this.#interruptedSetupRecoveryHold } }; }
   })`);
@@ -384,7 +384,7 @@ test('concurrent real start-fresh IPC loser cannot release the first pre-archive
   const nativeBegin = nativeSource.indexOf('  canStartMaintenance() {');
   const nativeEnd = nativeSource.indexOf('  async archiveInterruptedBootstrapForNewEpoch(binding)', nativeBegin);
   const NativeHold = vm.runInNewContext(`(class {
-    #interruptedSetupRecoveryHold = false; #currentCommands = new Map(); #legacyFastlaneBusy = false; #maintenancePromise = null;
+    #interruptedSetupRecoveryHold = false; #interruptedSetupRecoveryActive = false; #interruptedSetupRecoveryRetainedFence = false; #currentCommands = new Map(); #legacyFastlaneBusy = false; #maintenancePromise = null;
     ${nativeSource.slice(nativeBegin, nativeEnd)}
   })`);
   const native = new NativeHold();
@@ -480,4 +480,53 @@ for(const [field,value] of [['process_incarnation_id','replaced'],['admission_ge
  await c.init();await assert.rejects(c.execute(fenceRequest(state)),/readback_unconfirmed/);
  assert.equal(c.status().fenced,true);
  assert.equal((await fs.readdir(directory)).some(n=>n.endsWith('.committed.json')),false);
+});
+
+
+async function nativeRecoveryHoldFixture() {
+  const source = await fs.readFile(new URL('../src/native-supervisor-client-base.mjs', import.meta.url), 'utf8');
+  const begin = source.indexOf('  canStartMaintenance() {');
+  const end = source.indexOf('  async archiveInterruptedBootstrapForNewEpoch(binding)', begin);
+  return new (vm.runInNewContext(`(class {
+    #interruptedSetupRecoveryHold = false; #interruptedSetupRecoveryActive = false; #interruptedSetupRecoveryRetainedFence = false;
+    #currentCommands = new Map(); #legacyFastlaneBusy = false; #maintenancePromise = null;
+    ${source.slice(begin, end)}
+  })`))();
+}
+
+test('a clear journal readback cannot release an active native recovery operation', async () => {
+  const client = await nativeRecoveryHoldFixture();
+  let release, entered;
+  const started = new Promise(resolve => { entered = resolve; });
+  const barrier = new Promise(resolve => { release = resolve; });
+  const operation = client.withInterruptedSetupRecovery(async () => { entered(); await barrier; return {}; });
+  await started;
+  client.setInterruptedSetupRecoveryFence(false);
+  try {
+    assert.equal(client.canStartMaintenance(), false);
+    assert.equal(client.interruptedSetupRecoveryFenced(), true);
+    await assert.rejects(client.withInterruptedSetupRecovery(() => assert.fail('second mutation')), /native_mutation_busy/);
+  } finally { release(); await operation; }
+  assert.equal(client.interruptedSetupRecoveryFenced(), false);
+});
+
+for (const outcome of ['success', 'rejected-before-archive']) test(`a journal fence arriving during ${outcome} survives operation cleanup`, async () => {
+  const client = await nativeRecoveryHoldFixture();
+  let release, entered;
+  const started = new Promise(resolve => { entered = resolve; });
+  const barrier = new Promise(resolve => { release = resolve; });
+  const operation = client.withInterruptedSetupRecovery(async () => {
+    entered(); await barrier;
+    if (outcome !== 'success') throw Error('fixture_pre_archive_validation');
+    return {};
+  }, { retainFenceOnError: () => false });
+  await started;
+  client.setInterruptedSetupRecoveryFence(true);
+  release();
+  if (outcome === 'success') await operation;
+  else await assert.rejects(operation, /fixture_pre_archive_validation/);
+  assert.equal(client.interruptedSetupRecoveryFenced(), true);
+  assert.equal(client.canStartMaintenance(), false);
+  client.setInterruptedSetupRecoveryFence(false);
+  assert.equal(client.canStartMaintenance(), true);
 });
