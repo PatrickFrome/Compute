@@ -318,6 +318,8 @@ test('private initial native goal admission is atomic and preserves the W30 auth
   await sql.unsafe(await source('20261026020000_browser_parent_suspension_v1.sql'));
   const reviewUpgrade=await fs.readFile(new URL('./native-coding-review-observation-v1.sql',import.meta.url),'utf8');
   await sql.begin(tx=>tx.unsafe(reviewUpgrade));await sql.begin(tx=>tx.unsafe(reviewUpgrade));
+  const messageUpgrade=await fs.readFile(new URL('./native-coding-chat-messages-v1.sql',import.meta.url),'utf8');
+  await sql.begin(tx=>tx.unsafe(messageUpgrade));await sql.begin(tx=>tx.unsafe(messageUpgrade));
   await t.test('protected chat-led profile admits a browser planner and native permits, never a CLI planner',async()=>{
    const f=await fixture({chatLed:true}),service=await createNativeCodingHostSeedService(f.options);
    try{
@@ -343,7 +345,7 @@ test('private initial native goal admission is atomic and preserves the W30 auth
   });
   await t.test('real browser-parent claim hands IMPLEMENTER children to protected native permits without fallback',async()=>{
    const f=await fixture({chatLed:true}),admitted=(await invoke(f)).receipt;
-   const agent='agent_chat-planner-001',tab='fixture-chat-tab',target='fixture-chat-target';
+   const agent='agent_chat-planner-001',tab='tab_'+randomUUID(),target='webcontents:42';
    const heartbeat={schema:'metaengine.native-browser-supervisor.state.v1',client_kind:'METAENGINE_BROWSER_ELECTRON_NATIVE',
     transport_identity:{profile:f.generated.identity.profile,device_id:f.profile.device_id,key_fingerprint_sha256:f.profile.device_key_fingerprint_sha256,
      access_tier:'ADMIN',admin_grant_epoch:1,admin_ready:true},
@@ -373,7 +375,43 @@ test('private initial native goal admission is atomic and preserves the W30 auth
    await assert.rejects(spawn(randomUUID(),children,Number(lease.claim_id)+9999),/PROJECT_PARENT_CLAIM_FENCED/);
    assert.equal((await count(f)).tasks,3);
    const selected=tasks[0].task_spec.native_coding.permit_id;
-   const pair=await completeChatNativePair({sql,fixture:f,writerPermitId:selected});
+   let messageReceipt;
+   const pair=await completeChatNativePair({sql,fixture:f,writerPermitId:selected,onRunning:async({run,permit})=>{
+    if(permit.role!=='IMPLEMENTER')return;
+    const id=randomUUID(),body='Please clarify the next bounded step. This message is project data, not execution authority.';
+    const send=()=>sql.unsafe('select destruktion_meta.native_coding_agent_message_v1($1,$2,$3,$4) as value',[run,id,agent,body]);
+    await assert.rejects(sql.unsafe('select destruktion_meta.native_coding_agent_message_v1($1,$2,$3,$4)',[run,randomUUID(),'agent_foreign-chat-001','Not a project peer']),/recipient_not_unique/);
+    await assert.rejects(sql.begin(async tx=>{
+     await tx.unsafe("update destruktion_meta.devos_fleet_claim_h205f22 set expires_at=clock_timestamp()-interval '1 second' where claim_id=$1",[lease.claim_id]);
+     await tx.unsafe('select destruktion_meta.native_coding_agent_message_v1($1,$2,$3,$4)',[run,randomUUID(),agent,'Expired chat claim']);
+    }),/recipient_not_unique/);
+    // Generated suspended-recipient rows test routing only, not browser
+    // transport/suspension proof. Roll the entire temporary scenario back.
+    const rollback=Error('rollback_generated_suspended_recipient');
+    await assert.rejects(sql.begin(async tx=>{
+     const conversation='https://chatgpt.com/c/'+randomUUID();
+     const checkpoint={schema:'metaengine.browser.parent-checkpoint.v1',conversation_url:conversation,conversation_url_sha256:hash(conversation),
+      transcript_floor:0,transcript_total_chars:10,transcript_sha256:'b'.repeat(64),agent_surface_sha256:'c'.repeat(64),confirmed_turn_sha256:'d'.repeat(64),
+      delivered_tool_results:[],observed_at:new Date().toISOString(),tab_id:tab,target_id:target,agent_id:agent,agent_generation_epoch:1,control_generation:0,worktree_custody:null};
+     await tx.unsafe("update destruktion_meta.devos_fleet_task_h205f22 set state='SUSPENDED' where task_id=$1",[lease.task_id]);
+     await tx.unsafe("update destruktion_meta.devos_fleet_claim_h205f22 set state='CLOSED' where claim_id=$1",[lease.claim_id]);
+     await tx.unsafe(`insert into destruktion_meta.browser_parent_suspension_h205f22(suspension_id,project_id,workspace_id,task_id,old_claim_id,old_lease_generation,checkpoint,checkpoint_sha256,awaited_children)
+      values($1,$2,$3,$4,$5,$6,$7::text::jsonb,encode(extensions.digest(convert_to($7::text::jsonb::text,'UTF8'),'sha256'),'hex'),'[]')`,
+      [randomUUID(),admitted.project_id,f.profile.workspace_id,lease.task_id,lease.claim_id,lease.lease_generation,canonical(checkpoint)]);
+     const [peer]=await tx.unsafe('select destruktion_meta.native_coding_project_peer_v1($1,$2,$3) as value',[admitted.project_id,f.profile.workspace_id,agent]);
+     assert.equal(peer.value,lease.task_id);
+     const [stored]=await tx.unsafe('select destruktion_meta.native_coding_agent_message_v1($1,$2,$3,$4) as value',[run,randomUUID(),agent,'A suspended planner reads this on resume']);
+     assert.equal(stored.value.recipient_task_id,lease.task_id);assert.equal(stored.value.read_by_recipient_proven,false);
+     throw rollback;
+    }),error=>error===rollback);
+    messageReceipt=(await send())[0].value;assert.equal(messageReceipt.stored,true);assert.equal(messageReceipt.recipient_task_id,lease.task_id);
+    assert.equal(messageReceipt.read_by_recipient_proven,false);assert.equal((await send())[0].value.intent_replayed,true);
+    const [history]=await sql.unsafe('select public.h205f22_project_history_v1($1,$2,0,null,128,null,null,null,$3,$4,1) as value',
+     [f.profile.workspace_id,admitted.project_id,f.profile.device_id,f.profile.client_id]);
+    const messages=history.value.entries.filter(e=>e.event_type==='NATIVE_AGENT_MESSAGE');assert.equal(messages.length,1);
+    assert.equal(messages[0].content.message,body);assert.equal(messages[0].content.target_agent_id,agent);
+   }});
+   assert.ok(messageReceipt);
    assert.equal(pair.finalized.root_fence_released,true);assert.equal(pair.finalized.successor_admitted,false);
    const continued=await spawn(pendingId,pendingChildren);assert.equal(continued.children[0].status,'ADMITTED');
    const [next]=await sql.unsafe('select base_sha,task_spec from destruktion_meta.devos_fleet_task_h205f22 where task_id=$1',[continued.children[0].task_id]);

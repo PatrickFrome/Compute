@@ -259,6 +259,10 @@
     {
       "path": "infra/client-state-runtime/native-coding-review-observation-v1.sql",
       "sha256": "70a1dac528d94e4c16cf9fdff713fb77b15158d6cac0e0cdbeac8fb5bf0f0043"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-chat-messages-v1.sql",
+      "sha256": "d6f2c5cb0600076f4093c687c714826362d8efec39aabaed3e474900dad7b614"
     }
   ],
   "unresolved_dependencies": [

@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {nativeCodingCanonicalJson as canonical,nativeCodingCanonicalSha256 as sha} from '../native-coding-task-context.mjs';
-export async function completeChatNativePair({sql,fixture,writerPermitId,verdict='ACCEPT'}) {
+export async function completeChatNativePair({sql,fixture,writerPermitId,verdict='ACCEPT',onRunning=null}) {
  const generated=fixture.generated;
  const [row]=await sql.unsafe('select permit from destruktion_meta.native_coding_operator_permit_h205f22 where permit_id=$1',[writerPermitId]);
  const p=row.permit;
@@ -64,6 +64,7 @@ export async function completeChatNativePair({sql,fixture,writerPermitId,verdict
       await advance(scope,'RESERVED','ATTEMPTED',sha(job));
       await sql.unsafe(`select public.devos_fleet_mark_running_v1($1,$2,$3,$4,$5,1,$6)`,[scope.task_id,permit.agent_id,scope.lease_generation,'native-coding:'+permit.provider_id,scope.target_id,
         sql.json({schema:'metaengine.native-coding.mark-running.v1',job_proof_sha256:sha(job),authority_effect:false})]);
+      if(onRunning)await onRunning({run,scope,permit,lease:leased});
       const artifact=subject?.git_artifact_sha256||sha([run,'artifact']);
       const receipt={...generated.receipt,workspace_id:permit.workspace_id,project_id:permit.project_id,task_id:scope.task_id,lease_generation:scope.lease_generation,agent_id:permit.agent_id,run_id:run,
         role:permit.role,permit_id:permit.permit_id,worktree_path:permit.worktree.path,process_incarnation_id:worker.process_incarnation_id,result_sha256:sha([run,'result']),

@@ -192,6 +192,11 @@ export const LOCAL_RUNTIME_MIGRATIONS = Object.freeze([
     signatures:Object.freeze(['destruktion_meta.native_coding_review_rejection_v1(uuid,uuid)']),
     source_url:new URL('./native-coding-review-observation-v1.sql',import.meta.url),
     reviewed_native_review_observation_upgrade:true},
+  {path:'native-coding-chat-messages-v1.sql',
+    signature:'destruktion_meta.native_coding_project_peer_v1(uuid,uuid,text)',
+    signatures:Object.freeze(['destruktion_meta.native_coding_project_peer_v1(uuid,uuid,text)','destruktion_meta.native_coding_agent_message_v1(uuid,uuid,text,text)']),
+    source_url:new URL('./native-coding-chat-messages-v1.sql',import.meta.url),
+    reviewed_chat_message_upgrade:true},
 ]);
 
 const REQUIRED_COLUMNS = {
@@ -384,6 +389,15 @@ export async function applyLocalRuntimeMigrations({ sql, expectedMigrationSource
           signature:migration.signature,signatures:migration.signatures,
           status:before.complete?'ALREADY_PRESENT_NOT_MODIFIED':'APPLIED_LOCAL_ONLY',
           existing_bodies_attested:true,native_review_observation_only:true});
+        continue;
+      }
+      if (migration.reviewed_chat_message_upgrade) {
+        await tx.unsafe(migration.source);
+        if (!(await inspectMigrationObjects(tx,migration)).complete)
+          throw Error('local_runtime_chat_message_readback_failed');
+        receipts.push({source:migration.path,source_sha256:migration.sha256,
+          signature:migration.signature,signatures:migration.signatures,
+          status:before.complete?'ALREADY_PRESENT_NOT_MODIFIED':'APPLIED_LOCAL_ONLY',existing_bodies_attested:true,chat_message_recipient_scope:true});
         continue;
       }
       if (before.complete) {

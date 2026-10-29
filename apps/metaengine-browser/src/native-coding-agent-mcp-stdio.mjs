@@ -34,7 +34,7 @@ const requestProperty={type:'string',format:'uuid'};
 function toolDefinition(name) {
   const descriptions={project_overview:'Read the Host-scoped project and peer task overview.',
     project_history_page:'Read complete committed project history one bounded page at a time; use the returned cursor.',
-    agent_send_message:'Submit one durable message intent to a project peer; preserve request_id after an unknown outcome.',
+    agent_send_message:'Store one durable message for a native or chat peer in this project; preserve request_id after an unknown outcome. Storage does not prove reading and does not wake a suspended chat peer.',
     project_propose_children:'Propose child work to the existing project allocator; this does not create a process or grant a lease.',
     client_control_intent:'Submit a fixed client-control intent for Host authorization and journaling; this is not arbitrary PC or shell access.'};
   const schemas={project_overview:objectSchema({after_seq:{type:'integer',minimum:0},limit:{type:'integer',minimum:1,maximum:32}},[]),
