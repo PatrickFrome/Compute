@@ -130,7 +130,7 @@ function installFixture({ kind }) {
   const proof = { schema: 'metaengine.client.goal-execution-proof.v1', request_id: A, task_id: TASK,
     task_state: 'COMPLETED', found: true, user_goal_to_agent_readback: true, user_goal_to_result_readback: true,
     result_proof: { available: true, claim_valid: true, origin_bound: true, accepted: false }, ...flags };
-  const state = { fixture_only: true, kind, connected: true, failLatest: false, submissions: [], statusRequests: [],
+  const state = { fixture_only: true, kind, connected: true, connectionReads: 0, workReads: 0, connectionGate: null, releaseConnection: null, failLatest: false, submissions: [], statusRequests: [],
     latest: { schema: 'metaengine.client.goal-journal-entry.v1', request_id: A, kind,
       goal: 'Synthetic renderer contract observation', state: kind === 'BROWSER' ? 'COMPLETED' : 'ADMITTED',
       receipt: kind === 'BROWSER' ? browserReceipt : nativeReceipt, progress: kind === 'BROWSER' ? progress : null,
@@ -144,6 +144,8 @@ function installFixture({ kind }) {
   window.metaengineClient = {
     typed_positive_api: true, generic_command_exposed: false,
     connectionStatus: async () => {
+      state.connectionReads++;
+      if (state.connectionGate) await state.connectionGate;
       if (!state.connected) throw new Error('simulated_native_bridge_disconnected');
       return { schema: 'metaengine.client.connection-status.v1', local_runtime_ready: true,
         admin_ready: true, cloud_control_state: 'CONNECTED', authority_effect: false,
@@ -154,6 +156,7 @@ function installFixture({ kind }) {
           useful_work_verified: false, authority_effect: false } };
     },
     workReadiness: async () => {
+      state.workReads++;
       if (!state.connected) throw new Error('simulated_native_bridge_disconnected');
       return { schema: 'metaengine.client.work-readiness.v1', observed_at: new Date().toISOString(),
         state: 'READY', reason: null, label: 'Chats ready', detail: 'Synthetic renderer readiness input; no Owner proof.',
@@ -311,6 +314,33 @@ async function browserMatrix(browser, origin, evidenceDir, report) {
     assert.ok(!rendered.includes('11111111-2222-4333-8444-555555555555'));
     await captureUiAcceptanceScreenshot(native,evidenceDir,'renderer-journal-read-failure.png');
     passed('failed_read_visible_refresh_correlated_no_resend', { new_request_refreshes: state.statusRequests.slice(beforeRefresh), submit_count: state.submissions.length });
+    const stalled = await pageFor('BROWSER');
+    await attributeEquals(stalled, '[data-testid="admin-connection-badge"]', 'data-work-state', 'READY');
+    await stalled.evaluate(() => {
+      const state = window.__me2SourceAcceptance;
+      state.connectionGate = new Promise(resolve => { state.releaseConnection = resolve; });
+      state.connected = false;
+    });
+    await textContains(stalled, '[data-testid="native-runtime-badge"]', 'Native: unknown');
+    await attributeEquals(stalled, '[data-testid="admin-connection-badge"]', 'data-work-state', 'UNAVAILABLE');
+    const readCounts = () => stalled.evaluate(() => {
+      const state = window.__me2SourceAcceptance;
+      return { connection: state.connectionReads, work: state.workReads };
+    });
+    const held = await readCounts();
+    // Observe two polling intervals after the deadline. Neither IPC may restart
+    // while the original connection invoke remains unresolved.
+    await stalled.waitForTimeout(4500);
+    assert.deepEqual(await readCounts(), held, 'acceptance_timed_out_read_overlap');
+    await stalled.evaluate(() => {
+      const state = window.__me2SourceAcceptance;
+      state.connected = true; state.connectionGate = null; state.releaseConnection();
+    });
+    await attributeEquals(stalled, '[data-testid="admin-connection-badge"]', 'data-work-state', 'READY');
+    await textContains(stalled, '[data-testid="native-runtime-badge"]', 'Native: 1 need readback');
+    assert.equal(await stalled.evaluate(() => window.__me2SourceAcceptance.submissions.length), 0);
+    passed('timed_out_ipc_pair_drains_before_fresh_observation', 'One hung connection and rejected work read do not overlap polling; fresh read resumes after settlement without goal submission.');
+    await stalled.context().close();
     assert.deepEqual(external, [], 'acceptance_browser_external_request_attempted');
     assert.deepEqual(pageErrors, [], 'acceptance_browser_page_error');
   } finally {

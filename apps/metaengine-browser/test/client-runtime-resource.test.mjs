@@ -50,7 +50,7 @@ test('IPC failure clears a previously positive status', async () => {
   stop();
 });
 
-test('deadline clears stale green; a late response cannot overwrite a newer success', async () => {
+test('deadline clears stale green; late settlement cannot publish and fresh success waits for the physical read', async () => {
   let calls = 0; let late;
   const h = harness(() => {
     calls++;
@@ -60,8 +60,11 @@ test('deadline clears stale green; a late response cannot overwrite a newer succ
   const hung = h.resource.refresh(); await flush(); h.fire(4_000); await hung;
   assert.equal(h.resource.getSnapshot().readback, null);
   await h.resource.refresh();
-  assert.equal(h.resource.getSnapshot().state, 'LIVE');
+  assert.equal(calls, 2, 'timed out IPC still occupies the physical read slot');
+  assert.equal(h.resource.getSnapshot().state, 'UNAVAILABLE');
   late({ connection: {}, work: {} }); await flush();
+  assert.equal(h.resource.getSnapshot().state, 'UNAVAILABLE', 'late result cannot restore readiness');
+  await h.resource.refresh();
   assert.equal(h.resource.getSnapshot().state, 'LIVE');
   assert.equal(calls, 3); stop();
 });
