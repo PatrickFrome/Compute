@@ -608,3 +608,55 @@ for (const pendingCheck of ['MISSING', 'UNPROVEN']) {
     assert.deepEqual(await f.journal.latestConversationTurn(rootTask()), before);
   });
 }
+
+for (const objective of ['x'.repeat(4001), '😀'.repeat(4001)]) {
+  test('oversized child objective is rejected before durable intent or provider dispatch', async t => {
+    const f = await fixture(t);
+    await assert.rejects(f.runtime.serveToolRequests({ lease: rootTask(), requests: [{
+      ...spawnRequest(), payload: { children: [{ role: 'IMPLEMENTER', objective }] },
+    }] }), /proposal_invalid/);
+    assert.equal((await f.journal.pending()).length, 0);
+    assert.equal(f.provider.read().tasks.length, 1);
+  });
+}
+
+test('child objective length follows PostgreSQL character count and space trimming', async t => {
+  const f = await fixture(t);
+  const objective = '  ' + '😀'.repeat(4000) + '  ';
+  const result = await f.runtime.serveToolRequests({ lease: rootTask(), requests: [{
+    ...spawnRequest(), payload: { children: [{ role: 'IMPLEMENTER', objective }] },
+  }] });
+  assert.equal(result[0].status, 'COMPLETED');
+  assert.equal(f.provider.read().tasks.length, 2);
+});
+
+test('capacity-wait proposals do not claim task admission', async t => {
+  const f = await fixture(t, { capacity: 1 });
+  const [result] = await f.runtime.serveToolRequests({ lease: rootTask(), requests: [spawnRequest()] });
+  const receipt = JSON.parse(result.summary);
+  assert.equal(receipt.children[0].status, 'CAPACITY_WAIT');
+  assert.equal(receipt.task_admission_proven, false);
+  assert.equal((await f.journal.pending()).length, 1);
+});
+
+for (const corruption of ['duplicate_task', 'parent_task', 'wait_with_task', 'admitted_with_wait_reason', 'wrong_depth']) {
+  test(`spawn receipt rejects ${corruption} and leaves durable intent unresolved`, async t => {
+    const f = await fixture(t);
+    const runtime = f.own(new AutonomousProjectTaskRuntime({ journal: f.journal,
+      materializeProject: async () => ({ state: 'NOT_REQUIRED' }), request: async input => {
+        const result = await f.provider.request(input);
+        if (input.path.endsWith('/spawn')) {
+          if (corruption === 'duplicate_task') result.children[1].task_id = result.children[0].task_id;
+          if (corruption === 'parent_task') result.children[0].task_id = rootTask().task_id;
+          if (corruption === 'wait_with_task') result.children[0].status = 'CAPACITY_WAIT';
+          if (corruption === 'admitted_with_wait_reason') result.children[0].wait_reason = 'NO_CAPACITY';
+          if (corruption === 'wrong_depth') result.children[0].depth = 99;
+        }
+        return result;
+      } }));
+    await assert.rejects(runtime.serveToolRequests({ lease: rootTask(), requests: [{ ...spawnRequest(),
+      payload: { children: [{ role: 'IMPLEMENTER', objective: 'First task' }, { role: 'CRITIC', objective: 'Second task' }] },
+    }] }), /spawn_readback_invalid/);
+    assert.equal((await f.journal.pending()).length, 1);
+  });
+}

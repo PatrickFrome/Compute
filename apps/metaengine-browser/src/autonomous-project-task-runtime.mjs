@@ -24,7 +24,10 @@ function childrenProposal(value) {
   if (!value || Object.keys(value).length !== 1 || !Array.isArray(value.children) || value.children.length < 1 || value.children.length > 8) fail('proposal_invalid');
   return value.children.map(child => {
     if (!child || Object.keys(child).sort().join('|') !== 'objective|role' || !ROLES.has(child.role)
-        || typeof child.objective !== 'string' || !child.objective.trim() || child.objective.length > 12000
+        || typeof child.objective !== 'string' || !child.objective.trim()
+        // PostgreSQL validates length(btrim(objective)): Unicode characters,
+        // not UTF-16 code units. Reject before journaling an unsendable intent.
+        || Array.from(child.objective.replace(/^ +| +$/g, '')).length > 4000
         || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(child.objective)) fail('proposal_invalid');
     return { objective: child.objective, role: child.role };
   });
@@ -387,16 +390,20 @@ export class AutonomousProjectTaskRuntime {
         || value.parent_task_id !== lease.task_id || value.request_id !== requestId
         || typeof value.replayed !== 'boolean' || value.proposals_preserved !== true
         || !Array.isArray(value.children) || value.children.length !== children.length) fail('spawn_readback_invalid');
-    const seen = new Set();
+    const seen = new Set(), admittedTasks = new Set();
     for (const child of value.children) {
       if (!Number.isSafeInteger(child.child_index) || child.child_index < 0 || child.child_index >= children.length
           || seen.has(child.child_index) || !['ADMITTED', 'CAPACITY_WAIT', 'BUDGET_WAIT'].includes(child.status)
-          || (child.status === 'ADMITTED' && !UUID.test(child.task_id || ''))) fail('spawn_readback_invalid');
+          || !Number.isSafeInteger(child.depth) || child.depth !== current.task.depth + 1
+          || (child.status === 'ADMITTED'
+            ? (!UUID.test(child.task_id || '') || child.task_id === lease.task_id || admittedTasks.has(child.task_id) || child.wait_reason !== null)
+            : (child.task_id !== null || typeof child.wait_reason !== 'string' || !child.wait_reason))) fail('spawn_readback_invalid');
       seen.add(child.child_index);
+      if (child.status === 'ADMITTED') admittedTasks.add(child.task_id);
     }
     const receipt = { schema: value.schema, project_id: project, parent_task_id: lease.task_id,
       request_id: requestId, children: value.children, proposals_preserved: true,
-      task_admission_proven: true, physical_provider_creation_proven: false, ...flags };
+      task_admission_proven: value.children.every(row => row.status === 'ADMITTED'), physical_provider_creation_proven: false, ...flags };
     if (value.children.every(row => row.status === 'ADMITTED')) await this.#journal.confirm(effectKey, receipt);
     this.#last = { schema: AUTONOMOUS_PROJECT_RUNTIME_SCHEMA, state: 'CHILD_PROPOSALS_RECORDED', project_id: project, ...flags };
     return { status: 'COMPLETED', summary: JSON.stringify(receipt) };
