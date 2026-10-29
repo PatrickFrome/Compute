@@ -27,3 +27,17 @@ ACLs and sandbox receipts remain explicit fixtures. No model was called.
 Evidence: chat-cli-evidence/pg17-native-seed-cancel.log, disposable receipt path
 printed in that log. The generated cluster was stopped and its postmaster PID file
 is absent. This does not prove installed Windows execution or chat-agent pickup.
+
+Additional qualification:
+- Initial seed suite repeated10times: all10 completed successfully (17tests each).
+- Native project tools on actualPG17:10/10 including addressed full messages,
+  immutable replay, foreign recipient rejection, child admission and current
+  CRITIC authorization. No model/chat execution claim follows from this.
+- Combined protected-profile/Git/PG continuation attempt failed: its actual
+  Linux worktree path is rejected by the explicitly Windows-only protected
+  seed profile validator (native_coding_seed_agent_invalid). The later count
+  assertion also failed. Production Windows path validation was not weakened,
+  and the test was not changed to skip or silently pass. This stage still needs
+  a Windows execution environment or a separately reviewed portable fixture.
+Both integration fixtures now explicitly use their existing loopbackTCP route
+without a dependency on a system Unix socket directory.
