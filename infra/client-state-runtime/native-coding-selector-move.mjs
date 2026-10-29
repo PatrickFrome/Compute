@@ -1,8 +1,18 @@
 import path from 'node:path';
 import {execFile} from 'node:child_process';
-import {promisify} from 'node:util';
 import {assertNativeCodingHostRequestOpen} from './native-coding-host-request-lifetime.mjs';
-const execute=promisify(execFile);
+function execute(executable,args,options) {
+ // execFile may invoke its callback on AbortError before child close. The
+ // caller owns a staging file: never release it while File.Move can still run.
+ return new Promise((resolve,reject)=>{
+  let closed=false,outcome=null;
+  const finish=()=>{if(closed&&outcome){if(outcome.error)reject(outcome.error);else resolve(outcome.value);}};
+  const child=execFile(executable,args,options,(error,stdout,stderr)=>{
+   outcome={error,value:{stdout,stderr}};finish();
+  });
+  child.once('close',()=>{closed=true;finish();});
+ });
+}
 const fail=reason=>{throw Error('native_coding_selector_move_'+reason);};
 const absolute=value=>typeof value==='string'&&value.length<2048&&/^[A-Za-z]:\\/.test(value)
  &&!/[\x00-\x1f]/.test(value)&&!value.slice(2).includes(':')&&path.win32.normalize(value)===value;

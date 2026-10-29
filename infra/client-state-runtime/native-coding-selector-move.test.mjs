@@ -4,6 +4,8 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
+import {EventEmitter} from 'node:events';
+import vm from 'node:vm';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {publishNativeSeedSelectorWindows as move} from './native-coding-selector-move.mjs';
@@ -56,4 +58,50 @@ test('Windows native selector move publishes one-link bytes and preserves existi
  const later=staged();await fs.writeFile(later,'different fixture bytes',{flag:'wx'});
  assert.equal(await move(later,target),false);assert.equal(await fs.readFile(target,'utf8'),'{"verified_fixture":true}');
  assert.equal(await fs.readFile(later,'utf8'),'different fixture bytes');assert.equal((await fs.stat(target)).nlink,1);
+});
+
+
+test('production selector runner joins child close after an early abort callback before releasing staged-file custody',async()=>{
+ const source=await fs.readFile(new URL('./native-coding-selector-move.mjs',import.meta.url),'utf8');
+ const start=source.indexOf('function execute('),end=source.indexOf('const fail=',start);
+ assert.ok(start>=0&&end>start);let callback;const child=new EventEmitter();
+ const execute=vm.runInNewContext(source.slice(start,end)+'\nexecute',{
+  execFile:(_exe,_args,_options,done)=>{callback=done;return child;},
+ });
+ let settled=false;const pending=execute('fixed-native-executable',[],{}).then(()=>{settled=true;return 'unexpected';},()=>{settled=true;return 'rejected';});
+ callback(Object.assign(Error('cancelled'),{code:'ABORT_ERR'}),'','');
+ await new Promise(resolve=>setImmediate(resolve));assert.equal(settled,false,'abort callback does not prove process close');
+ child.emit('close',1);assert.equal(await pending,'rejected');assert.equal(settled,true);
+});
+
+test('production selector runner also joins close before reporting successful output',async()=>{
+ const source=await fs.readFile(new URL('./native-coding-selector-move.mjs',import.meta.url),'utf8');
+ const start=source.indexOf('function execute('),end=source.indexOf('const fail=',start);
+ let callback;const child=new EventEmitter();
+ const execute=vm.runInNewContext(source.slice(start,end)+'\nexecute',{
+  execFile:(_exe,_args,_options,done)=>{callback=done;return child;},
+ });
+ let settled=false;const pending=execute('fixed-native-executable',[],{}).then(v=>{settled=true;return v;});
+ callback(null,'METAENGINE_SELECTOR_PUBLISHED','');await new Promise(resolve=>setImmediate(resolve));assert.equal(settled,false);
+ child.emit('close',0);assert.equal((await pending).stdout,'METAENGINE_SELECTOR_PUBLISHED');
+});
+
+test('actual execFile abort callback cannot settle the selector runner before its owned child closes', {timeout:15000}, async()=>{
+ const source=await fs.readFile(new URL('./native-coding-selector-move.mjs',import.meta.url),'utf8');
+ const start=source.indexOf('function execute('),end=source.indexOf('const fail=',start);
+ const controller=new AbortController(),events=[];
+ const execute=vm.runInNewContext(source.slice(start,end)+'\nexecute',{
+  execFile:(exe,args,options,done)=>{
+   const child=execFile(exe,args,options,(...values)=>{events.push('callback');done(...values);});
+   child.once('close',()=>events.push('close'));
+   child.stdout.once('data',()=>controller.abort());
+   return child;
+  },
+ });
+ const program="process.on('SIGTERM',()=>setTimeout(()=>process.exit(0),80));process.stdout.write('READY');setTimeout(()=>process.exit(0),10000)";
+ await assert.rejects(execute(process.execPath,['-e',program],{signal:controller.signal,timeout:12000,windowsHide:true,shell:false}),error=>{
+  events.push('settled');return error.code==='ABORT_ERR';
+ });
+ assert.equal(controller.signal.aborted,true);
+ assert.ok(events.indexOf('close')>=0);assert.ok(events.indexOf('close')<events.indexOf('settled'));
 });
