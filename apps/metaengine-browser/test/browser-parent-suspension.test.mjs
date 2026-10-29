@@ -32,7 +32,7 @@ async function fixture(t) {
  const confirm=async(extra={})=>{await journal.begin(`turn:${lease.task_id}:1:first`,{task_id:lease.task_id,agent_id:lease.agent_id,
   lease_generation:1,transcript_floor:12,delivery_history_complete:true,delivered_tool_results:[{request_id:'tool:one',result_sha256:'e'.repeat(64)}],...extra});
   await journal.confirm(`turn:${lease.task_id}:1:first`,{transcript_floor:12});};
- return {open,confirm,journal:()=>journal,counts:()=>({posted,captured,closed,resumePosts}),mode:m=>{mode=m;},ready:()=>{receipt.state='READY_TO_RESUME';},
+ return {open,confirm,journal:()=>journal,counts:()=>({posted,captured,closed,resumePosts}),mode:m=>{mode=m;},ready:(state='READY_TO_RESUME')=>{receipt.state=state;},
  restart:async()=>{await journal.close();journal=createAutonomousProjectJournal({filePath});return open();}};
 }
 test('durable suspension lost ACK reconciles exact checkpoint without repeating capture/write; restored turn preserves result delivery',async t=>{
@@ -223,3 +223,11 @@ test('global authorization failure does not advance local retirement cursor',asy
  await assert.rejects(runtime.tick(),/HTTP_403/);deny=false;await runtime.tick();await runtime.tick();
  assert.deepEqual(starts,[null,null,f.key(32)]);assert.equal((await underlying.find(f.key(1))).receipt,null);
 });
+
+ test('message-ready suspension resumes through the existing durable callback once',async t=>{
+  const f=await fixture(t);await f.confirm();let runtime=f.open();await runtime.suspend(lease);
+  f.ready('READY_FOR_MESSAGE');runtime=await f.restart();await runtime.tick();
+  assert.equal(f.counts().resumePosts,1);await runtime.tick();assert.equal(f.counts().resumePosts,1);
+  const turn=await f.journal().latestConversationTurn({...lease,lease_generation:2});
+  assert.equal(turn.receipt.effect_state,'RESTORED_EXISTING_CONVERSATION');
+ });

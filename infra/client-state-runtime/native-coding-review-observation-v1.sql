@@ -26,7 +26,7 @@ begin
 
  if p.prosrc is null or p.lanname<>'plpgsql' or p.prosecdef is distinct from true or p.provolatile<>'v'
   or p.proconfig is distinct from ARRAY['search_path=pg_catalog, public, destruktion_meta']::text[]
-  or encode(extensions.digest(convert_to(replace(p.prosrc,E'\r\n',E'\n'),'UTF8'),'sha256'),'hex') not in('1066fabc38868ce5502f37f660d90e9273c55cbbaec58a799e5f9dabc5d55f37','429d2c62ac3d0bc9115563ee3dad54ed1caf0d17b7b7ecf777767332f0c35807')
+  or encode(extensions.digest(convert_to(replace(p.prosrc,E'\r\n',E'\n'),'UTF8'),'sha256'),'hex') not in('1066fabc38868ce5502f37f660d90e9273c55cbbaec58a799e5f9dabc5d55f37','794ff6dc42a594888bf83bdad385692a6629be76c4d4bf0b098105b5393ef208','429d2c62ac3d0bc9115563ee3dad54ed1caf0d17b7b7ecf777767332f0c35807')
  then raise exception 'native_review_browser_parent_suspension_projection_v1_requires_review' using errcode='55000';end if;
 end $review$;
 create or replace function destruktion_meta.native_coding_review_rejection_v1(p_project uuid,p_task uuid)

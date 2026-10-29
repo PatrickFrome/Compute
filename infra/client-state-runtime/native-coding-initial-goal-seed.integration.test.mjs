@@ -333,6 +333,9 @@ test('private initial native goal admission is atomic and preserves the W30 auth
     has_function_privilege('service_role','destruktion_meta.project_message_ack_v1(uuid,uuid,text,bigint,bigint)','EXECUTE') as private_allowed`);
   assert.equal(ackPrivileges.anon_allowed,false);assert.equal(ackPrivileges.private_allowed,false);
 
+  const wakeUpgrade=await fs.readFile(new URL('./project-message-wake-v1.sql',import.meta.url),'utf8');
+  await sql.begin(tx=>tx.unsafe(wakeUpgrade));await sql.begin(tx=>tx.unsafe(wakeUpgrade));
+  await sql.begin(async tx=>{await tx.unsafe(reviewUpgrade);await tx.unsafe(wakeUpgrade);});
   await t.test('protected chat-led profile admits a browser planner and native permits, never a CLI planner',async()=>{
    const f=await fixture({chatLed:true}),service=await createNativeCodingHostSeedService(f.options);
    try{
@@ -444,6 +447,9 @@ test('private initial native goal admission is atomic and preserves the W30 auth
      assert.equal(peer.value,lease.task_id);
      const [stored]=await tx.unsafe('select destruktion_meta.native_coding_agent_message_v1($1,$2,$3,$4) as value',[run,randomUUID(),agent,'A suspended planner reads this on resume']);
      assert.equal(stored.value.recipient_task_id,lease.task_id);assert.equal(stored.value.read_by_recipient_proven,false);
+     const [wake]=await tx.unsafe('select destruktion_meta.browser_parent_suspension_projection_v1(suspension_id) as value from destruktion_meta.browser_parent_suspension_h205f22 where task_id=$1 and status=$2',[lease.task_id,'SUSPENDED']);
+     assert.equal(wake.value.state,'READY_FOR_MESSAGE');
+
      throw rollback;
     }),error=>error===rollback);
     messageReceipt=(await send())[0].value;assert.equal(messageReceipt.stored,true);assert.equal(messageReceipt.recipient_task_id,lease.task_id);

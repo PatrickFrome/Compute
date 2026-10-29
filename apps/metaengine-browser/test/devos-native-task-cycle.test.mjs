@@ -787,12 +787,19 @@ test('one browser worker waiting for a READY child retains its claim across cycl
   assert.equal(sends, 1, 'unfinished child-status changes do not reawaken the parent');
   assert.equal(activeClaim.state, 'ACTIVE', 'status suppression is not a claim-release shortcut');
   children.pop();
+  parent.pending_message_seqs=[7];
+  await cycle.runOnce();assert.equal(cycle.snapshot().result_ready.state,'PROJECT_CONTINUING');assert.equal(sends,2);
+  children.push({...child,task_id:'66666666-6666-4666-8666-666666666666'});
+  await cycle.runOnce();assert.equal(cycle.snapshot().result_ready.state,'WAIT_MESSAGE_ACK');assert.equal(sends,2,'same message is not resent on child status changes');
+  assert.equal(completions.length,0,'an unacknowledged message does not complete or block the parent');
+  children.pop();parent.pending_message_seqs=[];
+  await cycle.runOnce();assert.equal(cycle.snapshot().result_ready.state,'WAIT_CHILDREN');assert.equal(sends,2);
   child.state = 'COMPLETED';
   await cycle.runOnce();
   assert.equal(cycle.snapshot().result_ready.state, 'PROJECT_CONTINUING');
-  assert.equal(sends, 2, 'terminal children still resume the original parent conversation');
+  assert.equal(sends, 3, 'terminal children still resume the original parent conversation');
   await cycle.runOnce();
-  assert.equal(sends, 2, 'the same terminal child frontier wakes the parent exactly once');
+  assert.equal(sends, 3, 'the same terminal child frontier wakes the parent exactly once');
   assert.equal(completions.length, 1, 'missing post-resume result claim remains BLOCKED, never invented success');
   child.state = 'READY';
   // Positive control: the same route can lease the child when a second real

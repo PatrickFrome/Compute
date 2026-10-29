@@ -1395,9 +1395,16 @@ export class DevOsNativeTaskCycle {
         return { state: suspension?.status === 'SUSPENDED' ? 'PARENT_SUSPENDED' : 'WAIT_CHILDREN',
           task_id: lease.task_id, suspension: suspension || null, authority_effect: false };
       }
-      const continuationResults = childState?.children?.length || childState?.queued_proposals
-        ? [...projectResults, { request_id: 'project:children:status', status: 'COMPLETED', summary: JSON.stringify(childState) }]
-        : projectResults;
+      // Message notifications are keyed by committed message sequences, not
+      // changing sibling counts. An unacknowledged message cannot cause a new
+      // Send on every child update, nor let this parent finish prematurely.
+      const pendingMessages=childState?.pending_message_seqs||[];
+      const continuationResults = pendingMessages.length
+        ? [...projectResults,{request_id:'project:messages:pending',status:'COMPLETED',summary:JSON.stringify({pending_message_seqs:pendingMessages,
+          instruction:'Read these committed events with PROJECT_HISTORY, then acknowledge addressed messages with PROJECT_ACK_MESSAGE.',authority_effect:false})}]
+        : childState?.children?.length || childState?.queued_proposals
+          ? [...projectResults, { request_id: 'project:children:status', status: 'COMPLETED', summary: JSON.stringify(childState) }]
+          : projectResults;
       if (continuationResults.length) {
         const continuation = await projectRuntime.continueConversation(lease, continuationResults, async text => {
           const latest = await this.#getState(); assertLiveLeaseBinding(lease, latest?.fleet);
@@ -1428,6 +1435,7 @@ export class DevOsNativeTaskCycle {
         if (continuation?.state === 'AMBIGUOUS') return this.#reportAmbiguous(lease, 'PROJECT_CONTINUATION_EFFECT_UNKNOWN');
       }
       if (childState?.waiting) return { state: 'WAIT_CHILDREN', task_id: lease.task_id, authority_effect: false };
+      if(pendingMessages.length)return {state:'WAIT_MESSAGE_ACK',task_id:lease.task_id,pending_message_seqs:pendingMessages,authority_effect:false};
     }
 
     const metaTask = (lease?.task_spec?.meta_orchestrator && typeof lease.task_spec.meta_orchestrator === 'object' && !Array.isArray(lease.task_spec.meta_orchestrator))

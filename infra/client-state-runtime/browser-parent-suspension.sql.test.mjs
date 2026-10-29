@@ -48,7 +48,7 @@ test('native fixture callback rejects non-code values before allocating any clus
  await assert.rejects(qualifyFreshSchemaNative({exercise:{connection:'not accepted'}}),/fresh_test_exercise_invalid/);
 });
 
-async function exerciseBrowserParentSuspension({q,exec}) {
+async function exerciseBrowserParentSuspension({q,exec,messageWake=false}) {
  const workspace=randomUUID(),device=randomUUID(),project=randomUUID(),sid=randomUUID(),client='suspension-fixture',base='a'.repeat(40),fp='d'.repeat(64),url='https://chatgpt.com/c/'+randomUUID();
  const agent={agent_id:'agent_suspension-00000001',ownership:'FLEET_OWNED',lifecycle_state:'ACTIVE',authority_effect:false,automatic_retry_allowed:false,role:'RESEARCHER',tab_id:'tab_'+randomUUID(),target_id:'webcontents:1',generation_epoch:4};
  const heartbeat=async()=>{agent.transport_proof={schema:'metaengine.browser.fleet-transport-proof.v1',authority_effect:false,tab_id:agent.tab_id,target_id:agent.target_id,generation_epoch:agent.generation_epoch,conversation_url_sha256:sha(url),agent_surface_sha256:'e'.repeat(64),proven_at:new Date().toISOString()};
@@ -100,11 +100,30 @@ async function exerciseBrowserParentSuspension({q,exec}) {
  const restoration={schema:'metaengine.devos.browser-parent-restoration.v1',checkpoint_sha256:suspended.checkpoint_sha256,conversation_url:url,conversation_url_sha256:sha(url),transcript_floor:10,transcript_total_chars:20,transcript_sha256:checkpoint.transcript_sha256,agent_surface_sha256:checkpoint.agent_surface_sha256,observed_at:new Date().toISOString(),agent_id:agent.agent_id,tab_id:agent.tab_id,target_id:agent.target_id,agent_generation_epoch:5,control_generation:0};
  const resume=(v=restoration)=>rpc('h205f22_project_resume_browser_v1',[workspace,sid,v,device,client,1]);
  await assert.rejects(resume(),/DEPENDENCIES_PENDING/);
+ let messageSeq=null;
+ if(messageWake){
+  // Synthetic trusted producer event only; this qualifies SQL wake/admission,
+  // not actual browser or native message delivery.
+  await q(`select destruktion_meta.project_append_h205f22($1,'NATIVE_AGENT_MESSAGE',$2,1,'agent_fixture-sender',null,'agent_send_message',null,
+    $3::jsonb,'UNTRUSTED_ACTIVITY',null,false,$4)`,[project,child,JSON.stringify({recipient_task_id:parent,target_agent_id:agent.agent_id,message:'Forged producer label'}),'fixture-forged-wake:'+sid]);
+  assert.equal((await list()).entries[0].state,'WAITING_CHILDREN','ordinary activity cannot impersonate a trusted message producer');
+  messageSeq=(await q(`select destruktion_meta.project_append_h205f22($1,'NATIVE_AGENT_MESSAGE',$2,1,'agent_fixture-sender',null,'agent_send_message',null,
+    $3::jsonb,'UNTRUSTED_NATIVE_AGENT_MESSAGE',null,false,$4) as seq`,[project,child,JSON.stringify({recipient_task_id:parent,target_agent_id:agent.agent_id,message:'Please clarify the task'}),'fixture-wake:'+sid]))[0].seq;
+  assert.equal((await list()).entries[0].state,'READY_FOR_MESSAGE');
+  await q("update destruktion_meta.devos_fleet_task_h205f22 set state='FAILED' where task_id=$1",[child]);
+  assert.equal((await list()).entries[0].state,'BLOCKED_CHILDREN');await assert.rejects(resume(),/DEPENDENCIES_PENDING/);
+  // Restore this synthetic child only to exercise the separate successful wake.
+  await exec('alter table destruktion_meta.devos_fleet_task_h205f22 disable trigger user');
+  await q("update destruktion_meta.devos_fleet_task_h205f22 set state='RESULT_READY' where task_id=$1",[child]);
+  await exec('alter table destruktion_meta.devos_fleet_task_h205f22 enable trigger user');
+
+ }else{
  await q("update destruktion_meta.devos_fleet_task_h205f22 set state='FAILED' where task_id=$1",[child]);assert.equal((await list()).entries[0].state,'BLOCKED_CHILDREN');await assert.rejects(resume(),/DEPENDENCIES_PENDING/);
  // Test fixture completion bypass is explicit, never used by production resume.
  await exec('alter table destruktion_meta.devos_fleet_task_h205f22 disable trigger user');
  await q("update destruktion_meta.devos_fleet_task_h205f22 set state='COMPLETED' where task_id=$1",[child]);
  await exec('alter table destruktion_meta.devos_fleet_task_h205f22 enable trigger user');
+ }
  await assert.rejects(resume({...restoration,agent_generation_epoch:4}),/RESTORATION_INVALID/);
  await assert.rejects(resume({...restoration,transcript_sha256:'f'.repeat(64)}),/RESTORATION_INVALID/);
  await q('update destruktion_meta.devos_fleet_runtime_control_h205f22 set refill_enabled=false where workspace_id=$1',[workspace]);await assert.rejects(resume(),/OWNER_FENCED/);
@@ -117,6 +136,15 @@ async function exerciseBrowserParentSuspension({q,exec}) {
  const deniedAllocation=await rpc('devos_fleet_lease_v1',[workspace,agent.agent_id,agent.role,agent.tab_id,agent.target_id,5,900]);assert.equal(deniedAllocation.wait_reason,'BROWSER_PHYSICAL_CUSTODY_HELD');
  const resumed=await resume();assert.equal(resumed.lease.lease_generation,2);assert.equal(resumed.lease.agent_id,agent.agent_id);assert.equal(resumed.lease.state,'RUNNING');assert.equal((await resume()).replayed,true);
  assert.equal((await list()).entries[0].status,'RESUMED');
+ if(messageWake){
+  assert.equal((await q('select state from destruktion_meta.devos_fleet_task_h205f22 where task_id=$1',[child]))[0].state,'RESULT_READY');
+  const task=(await rpc('h205f22_project_snapshot_v1',[workspace,null,parent,0,32,device,client,1])).selected_task;
+  assert.deepEqual(task.pending_message_seqs,[Number(messageSeq)]);
+  const ack=await rpc('h205f22_project_message_ack_v1',[workspace,project,parent,resumed.lease.claim_id,2,Number(messageSeq),device,client,1]);
+  assert.equal(ack.recipient_acknowledged,true);assert.equal(ack.processing_verified,false);
+  assert.deepEqual((await rpc('h205f22_project_snapshot_v1',[workspace,null,parent,0,32,device,client,1])).selected_task.pending_message_seqs,[]);
+ }
+
  await assert.rejects(resume({...restoration,transcript_floor:0}),/COLLISION/);
  await q("update destruktion_meta.devos_fleet_task_h205f22 set state='FAILED' where task_id=$1",[parent]);assert.equal((await list()).entries.length,0);await assert.rejects(resume(),/RECEIPT_STALE/);
 
@@ -133,3 +161,13 @@ async function exerciseBrowserParentSuspension({q,exec}) {
  selected=await projected();assert.equal(selected.claim_id,null,'current live claim projection alone does not prove release');assert.equal(selected.active_claim_count,1);assert.equal(selected.active_workspace_binding_count,1);
  const privileges=await q("select has_function_privilege('anon','public.h205f22_project_resume_browser_v1(uuid,uuid,jsonb,uuid,text,bigint)','execute') allowed");assert.equal(privileges[0].allowed,false);
 }
+
+ test('native PG17 resumes a message-addressed parent while child work is still open',{
+  skip:!bin||!driver?'Native PG17 binaries/driver absent':false,timeout:240000,
+ },async()=>{
+  const receipt=await qualifyFreshSchemaNative({bin,driver,base:process.env.METAENGINE_PG_TEST_BASE,exercise:async({sql})=>{
+   await exerciseBrowserParentSuspension({q:(s,a=[])=>sql.unsafe(s,a),exec:s=>sql.unsafe(s),messageWake:true});
+   return {status:'MESSAGE_WAKE_SQL_PASSED',installed_client_qualified:false};
+  }});
+  assert.equal(receipt.test_exercise.status,'MESSAGE_WAKE_SQL_PASSED');
+ });

@@ -216,7 +216,7 @@ export class BrowserParentSuspension {
       await reconcile('PARENT_RECONCILIATION',receipt.task_id,async()=>{
       if(control(this.#readControl())!==generation)fail('owner_generation_changed');
       if(receipt.status==='SUSPENDED')await this.#transport.hibernateStored(receipt);
-      if(receipt.state==='READY_TO_RESUME'||receipt.status==='RESUMED') {
+      if(['READY_TO_RESUME','READY_FOR_MESSAGE'].includes(receipt.state)||receipt.status==='RESUMED') {
         const resumed=await this.#transport.resumeStored({receipt,control_generation:generation},async restoration=>{
           if(control(this.#readControl())!==generation)fail('owner_generation_changed');
           // An already committed resume is never posted a second time.

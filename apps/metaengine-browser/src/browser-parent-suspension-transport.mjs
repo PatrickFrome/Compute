@@ -42,7 +42,7 @@ export function createBrowserParentSuspensionTransport({ gate, getFleet, capture
     assertBrowserParentSuspensionReceipt(receipt);
     if (receipt.status !== 'SUSPENDED') fail('hibernate_state_invalid');
     if (['BLOCKED_CHILDREN', 'OWNER_STOPPED'].includes(receipt.state)) return receipt;
-    if (!['WAITING_CHILDREN', 'READY_TO_RESUME'].includes(receipt.state)) fail('hibernate_state_invalid');
+    if (!['WAITING_CHILDREN', 'READY_TO_RESUME', 'READY_FOR_MESSAGE'].includes(receipt.state)) fail('hibernate_state_invalid');
     const current = agent(receipt.checkpoint.agent_id);
     if (current.lifecycle_state === 'RESUMING') {
       if (current.parent_suspension?.suspension_id !== receipt.suspension_id

@@ -206,6 +206,9 @@ export const LOCAL_RUNTIME_MIGRATIONS = Object.freeze([
     signatures:Object.freeze(['public.h205f22_project_message_ack_v1(uuid,uuid,uuid,bigint,bigint,bigint,uuid,text,bigint)',
       'destruktion_meta.project_message_ack_v1(uuid,uuid,text,bigint,bigint)','destruktion_meta.native_coding_agent_message_ack_v1(uuid,uuid,bigint)']),
     source_url:new URL('./project-message-ack-v1.sql',import.meta.url),reviewed_chat_message_upgrade:true},
+  {path:'project-message-wake-v1.sql',signature:'destruktion_meta.project_pending_message_seqs_v1(uuid,uuid,text)',
+    signatures:Object.freeze(['destruktion_meta.project_pending_message_seqs_v1(uuid,uuid,text)']),
+    source_url:new URL('./project-message-wake-v1.sql',import.meta.url),reviewed_chat_message_upgrade:true},
 ]);
 
 const REQUIRED_COLUMNS = {

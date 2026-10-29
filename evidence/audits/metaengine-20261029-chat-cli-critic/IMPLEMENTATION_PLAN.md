@@ -149,3 +149,37 @@ Focused parser/stdio/Host/runtime/route tests:128pass. Runtime aggregate:
 28samepriorenvironmentfail,82skip. A new prompt-length failure was reproduced
 and fixed by shortening protocol wording to1182chars, preserving1200budget.
 Automatic message wake remains the next separate stage.
+
+### Message-driven parent wake implemented (source)
+
+A private bounded projection now returns up to16 committed message sequences
+addressed to the current task+agent without an authenticated recipient ACK.
+Ordinary activity cannot impersonate a message producer. An indexed recipient
+lookup avoids scanning unrelated project events. Existing suspension readback
+can report READY_FOR_MESSAGE, after owner-stop/generation/rejected-review and
+failed-child gates. The existing authenticated restoration, physical transcript
+checks, W30 claim-admission trigger and durable resume receipt remain mandatory.
+No second scheduler or new model-call authority is introduced.
+
+The existing task cycle includes pending message refs in the continuation and
+keeps the parent active until ACK clears them. Notification identity depends on
+message sequences, not changing sibling counts; unchanged notifications are not
+resent. Already delivered but unacknowledged messages return WAIT_MESSAGE_ACK,
+not false completion and not a repeated suspend/resume loop. On ACK the parent
+can return to waiting for unfinished children. A rejection/failure still blocks
+this message wake path; automatic code repair remains separate and unfinished.
+
+Evidence: actual disposable PG17 message/suspension/concurrency set41pass with
+1optionalWASMskip, including resume while child RESULT_READY, exact new claim,
+ACK removal from pending projection, owner-stop/failure negatives and forged
+producer rejection.123 focused Browser runtime/transport/cycle tests pass.
+Final full browser6946total6836pass28unchangedenvironmentfail82skip; runtime
+754total723pass1UnixIPCfail30skip (native-PG test separately executed above).
+Source244pass. The first migration test caught an accidental CREATE instead of
+CREATE OR REPLACE; corrected and repeated installation succeeds. Prior local
+review migration accepts only this reviewed successor projection body, with
+restoration of the wake layer in the same installer transaction.
+
+These results do not qualify actual installed Windows chat restoration or
+provider/model interaction. Next P0 remains safe rejected-result repair and
+source-owned installed CHAT_LED preparation, followed by live qualification.

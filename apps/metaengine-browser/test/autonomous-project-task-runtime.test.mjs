@@ -722,3 +722,18 @@ test('browser acknowledgement is durable and cannot claim processing or another 
  await assert.rejects(send({...request,payload:{message_seq:8}}));assert.equal(calls,1);
  wrong=true;await assert.rejects(send({...request,request_id:'fixture:message:ack2'}),/message_ack_readback_invalid/);
 });
+
+ test('pending addressed messages keep a waiting parent active until acknowledgement projection clears them',async t=>{
+  const f=await fixture(t);await f.runtime.serveToolRequests({lease:rootTask(),requests:[spawnRequest()]});
+  assert.equal((await f.runtime.waitForChildren(rootTask())).waiting,true);
+  f.provider.update(s=>{s.tasks[0].pending_message_seqs=[7,11];});
+  const state=await f.runtime.waitForChildren(rootTask());assert.equal(state.waiting,false);assert.equal(state.failed,false);
+  assert.deepEqual(state.pending_message_seqs,[7,11]);assert.match(f.runtime.contextForLease(rootTask()),/pending_message_seqs/);
+  f.provider.update(s=>{s.tasks[0].pending_message_seqs=[];});assert.equal((await f.runtime.waitForChildren(rootTask())).waiting,true);
+  f.provider.update(s=>{s.tasks[0].pending_message_seqs=[12];s.tasks[1].state='FAILED';});
+  assert.equal((await f.runtime.waitForChildren(rootTask())).failed,true,'a message cannot override child failure');
+  for(const invalid of [[1,1],[0],['1'],Array.from({length:17},(_,i)=>i+1)]){
+    f.provider.update(s=>{s.tasks[0].pending_message_seqs=invalid;});
+    await assert.rejects(f.runtime.waitForChildren(rootTask()),/pending_messages_invalid/);
+  }
+ });
