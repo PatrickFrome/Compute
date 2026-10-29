@@ -238,7 +238,7 @@
     },
     {
       "path": "infra/client-state-runtime/native-agent-count-unbounded-v2.sql",
-      "sha256": "4806492759d7e189f9c24a2404e072db69d24ac50657e2e2792d8c05efa2e858"
+      "sha256": "273ba1028f94c99bd3ccd5de695964c2d36fdba13a00209e2c84462d5a459e04"
     },
     {
       "path": "infra/client-state-runtime/native-coding-running-agent-scope-v1.sql",

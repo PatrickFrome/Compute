@@ -394,6 +394,10 @@ test('private initial native goal admission is atomic and preserves the W30 auth
      returns jsonb language plpgsql security invoker set search_path=pg_catalog,destruktion_meta as $$begin return null;end $$`);
     await tx.unsafe(chatUpgrade);
    }),/chat_coordination_native_coding_chat_child_permit_v1_requires_review/);
+   for(const alteration of [
+    'alter function destruktion_meta.native_coding_seed_profile_v1(uuid,boolean) set search_path=public',
+    'alter function destruktion_meta.native_coding_seed_profile_v1(uuid,boolean) stable',
+   ])await assert.rejects(sql.begin(async tx=>{await tx.unsafe(alteration);await tx.unsafe(capacityUpgrade);}),/native_agent_capacity_native_coding_seed_profile_v1_requires_review/);
    // Repeated installer order must attest the current chat validator, apply
    // the prior capacity upgrade, then restore chat mode in the SAME transaction.
    await sql.begin(async tx=>{await tx.unsafe(capacityUpgrade);await tx.unsafe(chatUpgrade);});
