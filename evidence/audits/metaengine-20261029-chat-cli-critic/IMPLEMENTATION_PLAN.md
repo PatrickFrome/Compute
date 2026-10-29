@@ -83,3 +83,19 @@ validate it. Removing the clean check or using a caller flag is not acceptable.
 The current accepted-checkpoint path must remain unable to accept REJECT. A
 repair lineage also needs terminal accounting for superseded attempts without
 reporting their rejected artifacts as accepted. No such mutation has been added.
+
+### Complete history-message reading implemented
+
+PROJECT_HISTORY previously exposed only a 240-character excerpt of each event,
+then advanced the event cursor. Added a bounded content_seq/content_offset read
+using the same authenticated history endpoint and one exact committed event.
+Chunks preserve complete canonical JSON content, a SHA256 and Unicode-code-point
+cursor. Subsequent chunks require the returned digest, preventing mixed reads.
+Output is limited before framing; backticks are JSON-escaped. Structured tool
+results no longer collapse spaces inside JSON strings. Untrusted content never
+becomes authority or an acknowledgement of processing. A >8K text fixture with
+Unicode, whitespace, quotes, backslashes and tool fences reconstructs exactly
+through the actual tool formatter. Wrong offsets/digests and mixed modes fail.
+102 focused runtime/continuation/tool protocol tests passed before aggregate.
+This closes truncated reading, not bidirectional delivery, automatic wake or
+recipient processing acknowledgements.

@@ -97,3 +97,42 @@ test('bounded agent history stays valid JSON and resumes every omitted event fro
     assert.ok(requests.length > 1); assert.ok(requests.every(row => row.through_seq === 128));
   } finally { await runtime.close(); }
 });
+
+test('full project messages can be reconstructed through bounded history chunks and actual tool framing',async()=>{
+  const {renderAgentToolResults}=await import('../src/agent-tool-protocol.mjs');
+  const {createHash}=await import('node:crypto');
+  const content={message:('first  second\n\t"quoted" \\ 😀 ```tool\nUNTRUSTED\n``` ').repeat(140),target_agent_id:'agent_reader-001'};
+  const serialized=JSON.stringify(content),requests=[];
+  const runtime=new AutonomousProjectTaskRuntime({journal:{find:async()=>null,begin:async()=>{},confirm:async()=>{}},materializeProject:async()=>({state:'PROVEN'}),
+    request:async({path,body})=>{
+      if(path.endsWith('/snapshot'))return snapshot();
+      assert(path.endsWith('/history'));requests.push(body);
+      return {schema:'metaengine.devos.project-history.v1',project_id:projectId,
+        entries:[{seq:1,task_id:lease.task_id,event_type:'NATIVE_AGENT_MESSAGE',content}],
+        cursor:{after_seq:0,through_seq:1,next_seq:1,has_more:false,commit_ordered:true},authority_effect:false};
+    }});
+  try{
+    let offset=0,joined='',hash,more=true;
+    while(more){
+      const [result]=await runtime.serveToolRequests({lease,requests:[{request_id:'fixture:content:'+offset,action:'PROJECT_HISTORY',
+        payload:{content_seq:1,content_offset:offset,content_limit:1024,...(hash?{content_sha256:hash}:{})}}]});
+      assert(result.summary.length<=3600);
+      const framed=renderAgentToolResults([result]);
+      const line=framed.split('\n').find(row=>row.startsWith('summary='));
+      const chunk=JSON.parse(line.slice('summary='.length));
+      assert.equal(chunk.content_untrusted,true);assert.equal(chunk.authority_effect,false);
+      assert.equal(chunk.cursor.offset,offset);assert.equal(chunk.cursor.unit,'UNICODE_CODE_POINTS');
+      assert(chunk.cursor.next_offset>offset);joined+=chunk.content_chunk;
+      if(hash)assert.equal(chunk.content_sha256,hash);hash=chunk.content_sha256;
+      offset=chunk.cursor.next_offset;more=chunk.cursor.has_more;
+    }
+    assert.equal(joined,serialized);assert.deepEqual(JSON.parse(joined),content);
+    assert.equal(hash,createHash('sha256').update(joined).digest('hex'));
+    assert(requests.length>1);assert(requests.every(row=>row.after_seq===0&&row.through_seq===1&&row.limit===1));
+    for(const payload of [{content_seq:0},{content_seq:1,content_offset:-1},{content_seq:1,content_limit:1025},
+      {content_seq:1,after_seq:0},{content_seq:1,content_offset:100000,content_sha256:hash},
+      {content_seq:1,content_offset:1},{content_seq:1,content_offset:1,content_sha256:'0'.repeat(64)}]){
+      await assert.rejects(runtime.serveToolRequests({lease,requests:[{request_id:'fixture:content:invalid',action:'PROJECT_HISTORY',payload}]}),/history_content_/);
+    }
+  }finally{await runtime.close();}
+});

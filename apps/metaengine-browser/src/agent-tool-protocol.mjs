@@ -153,7 +153,13 @@ export function renderAgentToolResults(results) {
       ? String(row.status).toUpperCase()
       : 'UNAVAILABLE';
     const summaryRaw = row?.summary == null ? '' : (typeof row.summary === 'string' ? row.summary : JSON.stringify(row.summary));
-    const summary = clip(String(summaryRaw).replace(/\s+/g, ' ').trim(), MAX_RESULT_SUMMARY_CHARS);
+    let normalized;
+    try {
+      // Structured readbacks contain user/message text. Collapsing whitespace
+      // inside JSON strings changes that content and can invalidate digests.
+      normalized=JSON.stringify(JSON.parse(summaryRaw)).replace(/`/g,'\\u0060');
+    } catch { normalized=String(summaryRaw).replace(/\s+/g,' ').trim(); }
+    const summary = clip(normalized, MAX_RESULT_SUMMARY_CHARS);
     blocks.push([
       '```tool',
       AGENT_TOOL_RESULT_MARKER,
