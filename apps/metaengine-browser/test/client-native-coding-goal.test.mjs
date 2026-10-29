@@ -490,3 +490,13 @@ test('protected profile mode is reported without changing the authenticated nati
   const bad=await readClientGoalSubmissionMode({...options,readNativeBusy:async()=>({busy:false,coordination_mode:'UNVERIFIED'})});
   assert.equal(bad.state,'HOLD');
 });
+
+test('chat-led native project retains suspended planner progress across journal restart',async()=>{
+ const f=fixture();f.snapshot.selected_task.role='PLANNER';f.snapshot.selected_task.state='SUSPENDED';
+ const router=createClientNativeCodingGoalRouter({journal:f.journal,request:async()=>f.result,projectSnapshot:async()=>f.snapshot});
+ await router.submit({request_id:f.input.request_id,goal:f.input.objective});
+ assert.equal(f.journal.latest().progress?.task_state,'SUSPENDED');assert.equal(f.journal.latest().project_error,null);
+ const restored=new ClientGoalJournal(f.storage);await restored.load();
+ assert.equal(restored.latest().state,'SUSPENDED');assert.equal(restored.latest().progress.terminal,false);
+ f.snapshot.selected_task.state='RUNNING';await router.refresh(f.journal.latest());assert.equal(f.journal.latest().state,'RUNNING');
+});

@@ -15,7 +15,7 @@ const equal=isDeepStrictEqual;
 const ADMISSION_KEYS=['schema','state','request_id','objective','profile_id','profile_sha256','workspace_id','project_id','root_task_id',
   'goal_id','goal_sha256','task_spec_sha256','permit_ids','logical_policy','physical_execution_proven','global_actuation_granted',
   'production_qualified','automatic_retry_allowed','authority_effect'];
-const STATES=new Set(['READY','LEASED','RUNNING','RESULT_READY','BLOCKED','COMPLETED','FAILED','AMBIGUOUS','FENCED']);
+const STATES=new Set(['READY','LEASED','RUNNING','SUSPENDED','RESULT_READY','BLOCKED','COMPLETED','FAILED','AMBIGUOUS','FENCED']);
 const routerStates=new WeakMap();
 
 function nativeProfileStatusReason(error){

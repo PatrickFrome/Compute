@@ -51,6 +51,21 @@ not granted to public, anon, authenticated or service_role callers.
 All enrolled identities, Windows images, native process/canary and ACL witnesses
 in these SQL tests are generated fixtures. The protected v2 profile producer
 on the user's machine has not been integrated or run. Full chat-led Windows
-execution, resumed browser parent after native commit, rotated-permit handoff,
+execution, resumed browser parent after native commit, installed rotated-permit handoff,
 installer and live model qualification remain open. Do not describe this as a
 completed autonomous client or silently enable v2 in an existing installation.
+
+## Additional integrated SQL qualification
+
+The chat-led PG17 scenario now runs the native writer and independent CRITIC
+ledger/claim/result transitions, records a generated checkpoint and Git receipt
+through the actual protected finalizers, rotates permits and admits the chat
+planner's previously waiting child at the new base SHA exactly once. This
+qualifies SQL integration and lineage selection; OS/jobs/Git receipts remain
+generated fixtures, not physical execution evidence. The current browser-parent
+claim gate is loaded in this suite. Full fresh-schema install and repeat install
+also pass serial suspension tests and twelve two-backend concurrency cases
+(18 pass, one supplemental WASM skip).
+
+A suspended chat-led root is now valid durable native-project progress, surviving
+journal reload and returning to RUNNING without claiming a terminal result.
