@@ -231,3 +231,20 @@ pass;4 real PG17 checkpoint tests pass. Final browser6951total6841pass,
 28unchangedenvironmentfail82skip; runtime755total724pass1UnixIPCfail30skip.
 Windows component qualification also requires the Git abort and pre-dispatch
 cancel tests. These changes do not authorize automatic retry or code repair.
+
+### Windows source qualification failure and portable fixture startup
+
+71d0f4e Windows source run40834461374: component268pass/1baseline skip,
+nativePG41pass/1fail/0skip. The failed required case is the new native parent
+message-wake test. Sanitized artifact12879814238 (SHA256
+3253e847ecd30faaf05d5e98ce4f6cbedb3ab36f1d1e4904527cd6cf3c53c4c7)
+identifies that case but deliberately omits raw private error text.
+
+Inspection found the ordinary fresh-schema fixture still used POSIX single
+quotes in pg_ctl -o for an empty unix_socket_directories setting. The existing
+canonical startup helper and its Windows-argument regression already demonstrate
+that those quotes become a literal nonempty Windows value. The archive path
+used the correct helper, but the ordinary path did not. Both now use the same
+Windows-safe helper; the assertion/gate remains required.40 startup/contract
+regressions and the real native parent-wake PG case pass locally. Windows CI
+must confirm whether this fixes the observed failure; no pass is inferred.

@@ -610,3 +610,11 @@ test('throwing error or outcome descriptor traps cannot escape the sanitized CLI
   assert.deepEqual(unknownReceipt.primary_failure,{stage:'RESTORE_START',error_category:'UNKNOWN'});
   assert.doesNotMatch(JSON.stringify([controlReceipt,unknownReceipt]),/PRIVATE/);
 });
+
+test('all native fresh-schema fixture starts share Windows-safe empty socket options',async()=>{
+  const {readFile}=await import('node:fs/promises');
+  const source=await readFile(new URL('./test/fresh-schema-disposable.mjs',import.meta.url),'utf8');
+  assert.match(source,/'-o',emptySchemaPostgresStartOptions\(port\),'-w','start'/);
+  assert.doesNotMatch(source,/unix_socket_directories=''/);
+  assert.doesNotMatch(source,/archiveOperation\?emptySchemaPostgresStartOptions/);
+});

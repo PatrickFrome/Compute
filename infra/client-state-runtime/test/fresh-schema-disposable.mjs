@@ -306,7 +306,7 @@ async function runFreshSchemaNative({ bin, driver, base = os.tmpdir(), applicati
     started=true;
     await command('pg_ctl',['-D',data,'-l',path.join(directory,'postgres.log'),
       ...(archiveOperation?['-p',path.join(bin,'postgres'+(process.platform==='win32'?'.exe':''))]:[]),
-      '-o',archiveOperation?emptySchemaPostgresStartOptions(port):`-h 127.0.0.1 -p ${port} -c unix_socket_directories=''`,'-w','start']);
+      '-o',emptySchemaPostgresStartOptions(port),'-w','start']);
     await stage('DRIVER_CONNECT',async () => {
     const postgres=(await import(pathToFileURL(driver))).default;
     sql=postgres({host:'127.0.0.1',port,user:'state_owner',password,database:'postgres',max:exerciseBackends,onnotice:()=>{},connect_timeout:5,
