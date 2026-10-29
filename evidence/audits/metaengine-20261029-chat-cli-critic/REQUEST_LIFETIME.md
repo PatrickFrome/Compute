@@ -24,3 +24,18 @@ This slice does not yet interrupt every individual native PowerShell read or
 eliminate repeated ACL checks. It does not prove the installed .225 request's
 outcome, actual agent work, or the whole chat/CLI/critic cycle. User PC was not
 modified. Windows VM is cancelled by user.
+
+## Native ACL cancellation follow-up
+
+The existing private storage verifier now accepts a native AbortSignal, refuses
+pre-cancelled reads, passes the signal to execFile, and rejects a late success
+after cancellation. Protected JSON reads forward that signal to both parent
+and file ACL queries. Seed profile/operator verification carries the same
+private context. No ACL rule or validation condition was removed.
+
+Portable regression failed before. After:59tests56pass0fail3Windows-only skips
+for ACL/observer/seed suites, including cancellation of a real inert child
+process. A further transaction-acquisition cancellation test passes and proves
+no seed mutation query is dispatched; uncertainty is retained for readback.
+These tests do not measure actual Windows PowerShell latency or qualify the
+installed client. Physical scope inventory batching/cancellation remains open.

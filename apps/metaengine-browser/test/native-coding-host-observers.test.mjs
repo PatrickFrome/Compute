@@ -265,3 +265,12 @@ test('native Windows process inventory independently reads this test process wit
   assert.match(actual.user_sid,/^S-1-/);assert.match(actual.process_incarnation_id,new RegExp(`^pid:${process.pid}:created_100ns:[0-9]+$`));
   assert(Date.parse(actual.created_at)<=Date.now());
 });
+
+test('protected JSON forwards cancellation to both ACL reads and rejects their late success',async t=>{
+ const root=await temporary(t),file=path.join(root,'cancelled.json');await fs.writeFile(file,'{"schema":"fixture"}');
+ const controller=new AbortController();let reads=0;
+ await assert.rejects(readNativeCodingProtectedJson(file,{signal:controller.signal,verifyStorage:async(_target,options)=>{
+  assert.equal(options.signal,controller.signal);reads++;controller.abort();return yes();
+ }}),/request_cancelled/);
+ assert.equal(reads,2);
+});

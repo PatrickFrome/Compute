@@ -186,3 +186,18 @@ test('cancellation during physical observation prevents later SQL admission and 
  assert.equal(f.seen.dispatches,0);
  assert.equal((await f.service.READ_SEED(f.input)).state,'REJECTED_BEFORE_DISPATCH');
 });
+
+test('expiry after transaction acquisition cannot dispatch the seed mutation',async t=>{
+ const f=await fixture(t),controller=new AbortController();let mutationCalls=0;
+ f.sql.begin=async(_options,callback)=>{
+  controller.abort();
+  return callback({unsafe:async(query,args)=>{
+   if(query==='set local synchronous_commit=on')return [];
+   if(query.includes('native_coding_seed_goal_v1')){mutationCalls++;throw Error('late mutation forbidden');}
+   return f.sql.unsafe(query,args);
+  }});
+ };
+ const result=await f.service.SEED_GOAL(f.input,{signal:controller.signal});
+ assert.equal(mutationCalls,0);assert.equal(result.state,'READBACK_REQUIRED');
+ assert.equal(result.automatic_retry_allowed,false);
+});

@@ -32,11 +32,12 @@ const safeDenial=output=>{
 };
 
 export async function verifyOwnerOnlyWindowsStorage(target,{
-  operation='VERIFY_FILE',platform=process.platform,run=exec,env=process.env,
+  operation='VERIFY_FILE',platform=process.platform,run=exec,env=process.env,signal,
 }={}){
   if(platform!=='win32' || !absolute(target)
     || !['PROTECT_DIRECTORY','VERIFY_FILE','VERIFY_PRIVATE_FILE','VERIFY_DIRECTORY'].includes(operation))
     fail('arguments_invalid');
+  if(signal?.aborted===true)fail('request_cancelled');
   const root=String(env.SystemRoot || env.SYSTEMROOT || '');
   if(!/^[A-Za-z]:\\Windows$/i.test(root))fail('windows_root_unverified');
   const exe=path.win32.join(root,'System32','WindowsPowerShell','v1.0','powershell.exe');
@@ -64,8 +65,9 @@ export async function verifyOwnerOnlyWindowsStorage(target,{
   try{
     ({stdout}=await run(exe,['-NoLogo','-NoProfile','-NonInteractive',
       '-EncodedCommand',Buffer.from(diagnosticAclScript,'utf16le').toString('base64')],{
-      env:vars,shell:false,windowsHide:true,timeout:aclTimeoutMs,maxBuffer:8192}));
+      env:vars,shell:false,windowsHide:true,timeout:aclTimeoutMs,maxBuffer:8192,...(signal?{signal}:{})}));
   }catch(error){
+    if(signal?.aborted===true)fail('request_cancelled');
     // Only predetermined phase/denial IDs can reach errors. Raw stderr and
     // stdout may contain user profile paths, credentials or private PGDATA.
     if(error?.code==='ETIMEDOUT'||(error?.killed&&!error?.code))
@@ -74,6 +76,7 @@ export async function verifyOwnerOnlyWindowsStorage(target,{
     const denial=safeDenial(error?.stdout);
     fail('acl_not_confirmed_'+safePhase(error?.stdout)+(denial?'_'+denial:''));
   }
+  if(signal?.aborted===true)fail('request_cancelled');
   if(String(stdout||'').trim().split(/\r?\n/).at(-1)!==done){
     const denial=safeDenial(stdout);
     fail('acl_not_confirmed_'+safePhase(stdout)+(denial?'_'+denial:''));
@@ -81,6 +84,7 @@ export async function verifyOwnerOnlyWindowsStorage(target,{
   const st=await fs.lstat(target).catch(()=>null);
   if(!st||st.isSymbolicLink()||(['VERIFY_FILE','VERIFY_PRIVATE_FILE'].includes(operation)?!st.isFile():!st.isDirectory()))
     fail('physical_object_changed');
+  if(signal?.aborted===true)fail('request_cancelled');
   return Object.freeze({owner_dacl_verified:true,operation});
 }
 

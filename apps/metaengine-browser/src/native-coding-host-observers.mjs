@@ -47,15 +47,19 @@ async function hashFile(file,maxBytes=1024*1024*1024,allowEmpty=false) {
   if(before.ino!==after.ino||before.size!==after.size||before.mtimeMs!==after.mtimeMs)fail('file_changed');
   return hash.digest('hex');
 }
-export async function readNativeCodingProtectedJson(file,{maximumBytes=256*1024,verifyStorage=verifyOwnerOnlyWindowsStorage}={}) {
+export async function readNativeCodingProtectedJson(file,{maximumBytes=256*1024,verifyStorage=verifyOwnerOnlyWindowsStorage,signal}={}) {
+  if(signal?.aborted===true)fail('request_cancelled');
   const physical=await canonical(file,'file');
+  if(signal?.aborted===true)fail('request_cancelled');
   const acl=await Promise.all([[path.dirname(physical),'VERIFY_DIRECTORY'],[physical,'VERIFY_FILE']]
-    .map(([target,operation])=>verifyStorage(target,{operation})));
+    .map(([target,operation])=>verifyStorage(target,{operation,...(signal?{signal}:{})})));
+  if(signal?.aborted===true)fail('request_cancelled');
   if(acl.some(evidence=>evidence?.owner_dacl_verified!==true))fail('private_storage_unverified');
   const before=await fs.stat(physical);if(before.size<1||before.size>maximumBytes)fail('json_budget_exceeded');
   const bytes=await fs.readFile(physical), after=await fs.stat(physical);
   if(bytes.length!==before.size||before.ino!==after.ino||before.size!==after.size||before.mtimeMs!==after.mtimeMs)fail('private_file_changed');
   let value;try{value=JSON.parse(bytes.toString('utf8').replace(/^\uFEFF/,''));}catch{fail('private_json_invalid');}
+  if(signal?.aborted===true)fail('request_cancelled');
   return {value,sha256:digest(bytes)};
 }
 

@@ -49,8 +49,8 @@ function processIdentity(p){
  if(!m||Number(m[1])!==p.pid||!Number.isFinite(ms)||new Date(ms).toISOString()!==p.created_at
   ||(BigInt(m[2])-116444736000000000n)/10000n!==BigInt(ms))fail('process_birth_invalid');
 }
-export async function readNativeCodingSeedOperator(stateDirectory){
- const result=await readNativeCodingProtectedJson(path.join(stateDirectory,'native-coding-seed-operator-v1.json'));
+export async function readNativeCodingSeedOperator(stateDirectory,options={}){
+ const result=await readNativeCodingProtectedJson(path.join(stateDirectory,'native-coding-seed-operator-v1.json'),options);
  const v=result.value;
  if(!exact(v,['schema','profile_id','profile_sha256'])||v.schema!=='metaengine.native-coding.seed-operator.v1'
   ||!UUID.test(v.profile_id||'')||!HASH.test(v.profile_sha256||''))fail('operator_invalid');
@@ -81,10 +81,13 @@ export async function createNativeCodingHostSeedService({sql,stateDirectory,read
  await readNativeScope.prepare?.();
  const directory=path.join(stateDirectory,'native-coding-seed-intents-v1');
  await fs.mkdir(directory,{recursive:true,mode:0o700});await protectStorage(directory);await verifyStorage(directory,{operation:'VERIFY_DIRECTORY'});
- async function unchanged(){open();const now=await readOperator(stateDirectory);
+ async function unchanged(requestContext){open();assertNativeCodingHostRequestOpen(requestContext);
+  const now=await readOperator(stateDirectory,{signal:requestContext?.signal});
+  assertNativeCodingHostRequestOpen(requestContext);
   if(now.sha256!==operator.sha256||!same(now.value,pins))fail('operator_changed');}
- async function profile(active){
-  await owner();await unchanged();
+ async function profile(active,requestContext){
+  assertNativeCodingHostRequestOpen(requestContext);
+  await owner();await unchanged(requestContext);
   const rows=await sql.unsafe('select destruktion_meta.native_coding_seed_profile_v1($1::uuid,$2::boolean) as value',[pins.profile_id,active]);
   const value=rows[0]?.value,p=value?.profile;
   if(rows.length!==1||value.schema!=='metaengine.native-coding.seed-profile-readback.v1'||value.profile_sha256!==pins.profile_sha256
@@ -93,7 +96,7 @@ export async function createNativeCodingHostSeedService({sql,stateDirectory,read
    ||p.production_qualified!==false||p.automatic_retry_allowed!==false||p.authority_effect!==false
    ||!Array.isArray(p.agents)||p.agents.length<2)fail('profile_unverified');
   await currentDevice(p);
-  await unchanged();return p;
+  await unchanged(requestContext);return p;
  }
  async function currentDevice(p){
   const device=await readCurrentDevice();
@@ -173,7 +176,7 @@ export async function createNativeCodingHostSeedService({sql,stateDirectory,read
    agents.push({provider_id:a.provider_id,worktree:actual.worktree,sandbox:actual.sandbox});
   }
   if(Date.now()-started>25000)fail('observation_window_exceeded');
-  await profile(true);
+  await profile(true,requestContext);
   assertNativeCodingHostRequestOpen(requestContext);
   // Profile/ACL revalidation consumes freshness too. Do not re-date physical
   // observations after those reads or let a slow revalidation admit stale data.
@@ -184,7 +187,7 @@ export async function createNativeCodingHostSeedService({sql,stateDirectory,read
  async function saved(file){try{return(await readProtectedJson(file,{maximumBytes:16384})).value;}catch(e){if(e.code==='ENOENT')return null;throw e;}}
  async function seed(raw,requestContext){
   assertNativeCodingHostRequestOpen(requestContext);
-  const input=request(raw);await profile(false);
+  const input=request(raw);await profile(false,requestContext);
   assertNativeCodingHostRequestOpen(requestContext);
   const file=path.join(directory,input.request_id+'.json');
   const prior=await saved(file);
@@ -192,7 +195,7 @@ export async function createNativeCodingHostSeedService({sql,stateDirectory,read
    if(prior.schema!=='metaengine.native-coding.seed-intent.v1'||prior.profile_id!==pins.profile_id||!same(prior.body,input))fail('request_collision');
    return readSeedResult(input);
   }
-  const p=await profile(true);
+  const p=await profile(true,requestContext);
   assertNativeCodingHostRequestOpen(requestContext);
   const semantic=digest(json({profile_id:pins.profile_id,objective:input.objective}));
   const semanticFile=path.join(directory,'body-'+semantic+'.json');
@@ -229,11 +232,11 @@ export async function createNativeCodingHostSeedService({sql,stateDirectory,read
    await fs.unlink(semanticFile);throw error;
   }
   try{
-   await unchanged();
+   await unchanged(requestContext);
    assertNativeCodingHostRequestOpen(requestContext);
    const value=await sql.begin('isolation level serializable',async tx=>{
     await tx.unsafe('set local synchronous_commit=on');await owner(tx);
-    await currentDevice(p);await unchanged();
+    await currentDevice(p);await unchanged(requestContext);
     assertNativeCodingHostRequestOpen(requestContext);
     const text=json(observed),rows=await tx.unsafe('select destruktion_meta.native_coding_seed_goal_v1($1::uuid,$2::uuid,$3::text,$4::text::jsonb,$4::text,$5::text) as value',
      [pins.profile_id,input.request_id,input.objective,text,digest(text)]);

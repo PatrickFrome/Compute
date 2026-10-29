@@ -193,3 +193,30 @@ test('Win32 DACL protection can repeat on existing private state without changin
   await fs.writeFile(privateFile,'{"test":"private"}',{flag:'wx'});
   assert.equal((await verifyOwnerOnlyWindowsStorage(privateFile)).owner_dacl_verified,true);
 });
+
+test('a cancelled ACL read never starts a native process or accepts a late successful receipt',async t=>{
+ const directory=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-dacl-abort-'));
+ t.after(()=>fs.rm(directory,{recursive:true,force:true}));
+ const before=new AbortController();before.abort();let calls=0;
+ const options={platform:'win32',env:{SystemRoot:'C:\\Windows'},operation:'VERIFY_DIRECTORY'};
+ await assert.rejects(verifyOwnerOnlyWindowsStorage(directory,{...options,signal:before.signal,run:async()=>{calls++;return {stdout:'METAENGINE_OWNER_DACL_VERIFIED\n'};}}),/request_cancelled/);
+ assert.equal(calls,0);
+ const during=new AbortController();
+ await assert.rejects(verifyOwnerOnlyWindowsStorage(directory,{...options,signal:during.signal,run:async(_exe,_args,opts)=>{
+  assert.equal(opts.signal,during.signal);during.abort();return {stdout:'METAENGINE_OWNER_DACL_VERIFIED\n'};
+ }}),/request_cancelled/);
+});
+
+test('ACL cancellation reaches an actual child process without waiting for the native timeout', {timeout:15000}, async t=>{
+ const directory=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-dacl-child-abort-'));
+ t.after(()=>fs.rm(directory,{recursive:true,force:true}));
+ const controller=new AbortController();let closed,child;
+ await assert.rejects(verifyOwnerOnlyWindowsStorage(directory,{platform:'win32',env:{SystemRoot:'C:\\Windows'},
+  operation:'VERIFY_DIRECTORY',signal:controller.signal,run:(_exe,_argv,options)=>{
+   const pending=promisify(execFile)(process.execPath,['-e','setInterval(()=>{},1000)'],options);
+   child=pending.child;closed=new Promise(resolve=>child.once('close',resolve));
+   child.once('spawn',()=>controller.abort());return pending;
+  }}),/private_windows_storage_request_cancelled/);
+ await closed;
+ assert.ok(child.exitCode!==null||child.signalCode!==null);
+});
