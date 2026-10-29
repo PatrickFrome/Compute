@@ -87,7 +87,7 @@ test('private initial native goal admission is atomic and preserves the W30 auth
    (select count(*)::int from destruktion_meta.devos_fleet_task_h205f22 where workspace_id=$2) as tasks,
    (select count(*)::int from destruktion_meta.native_coding_operator_permit_h205f22 where workspace_id=$2) as permits,
    (select count(*)::int from destruktion_meta.client_v1_goal_request_h205f22 where workspace_id=$2) as browser_goals`,[f.profile.profile_id,f.profile.workspace_id]))[0];
-  async function fixture({pairs=2,budget=2,sqlBinding=sql}={}){
+  async function fixture({pairs=2,budget=2,sqlBinding=sql,chatLed=false}={}){
    const generated=admissionFixture(),p=generated.permit,pairing=randomUUID(),agents=[];
    p.postgres.system_identifier=cluster;
    for(let i=0;i<pairs;i++)for(const role of ['IMPLEMENTER','CRITIC'])agents.push({provider_id:randomUUID(),agent_id:'agent_seed-'+randomUUID().slice(0,8),role,agent_generation_epoch:1,
@@ -99,6 +99,7 @@ test('private initial native goal admission is atomic and preserves the W30 auth
     owner_epoch:p.owner_epoch,user_sid:p.user_sid,artifact:p.artifact,postgres:p.postgres,agents,primary_provider_id:agents[0].provider_id,
     physical_slot_budget:budget,expires_at:p.expires_at,storage_evidence_sha256:sha(randomUUID()),branch_name:'work/native-seed',
     policy:{max_depth:null,max_tasks:null,max_children:null},production_qualified:false,automatic_retry_allowed:false,authority_effect:false};
+   if(chatLed){profile.schema='metaengine.native-coding.seed-profile.v2';profile.coordination_mode='CHAT_LED';}
    await sql.unsafe('insert into public.compute_fabric_a2_chat_bridge_remote_pairing_h205f22(token_hash)values($1)',[pairing]);
    await sql.unsafe(`insert into public.compute_fabric_a2_browser_device_h205f22(device_id,client_id,profile,public_jwk,key_fingerprint_sha256,enrollment_pairing_token_hash)
     values($1,$2,$3,$4,$5,$6)`,[profile.device_id,profile.client_id,generated.identity.profile,sql.json(generated.jwk),profile.device_key_fingerprint_sha256,pairing]);
@@ -308,7 +309,85 @@ test('private initial native goal admission is atomic and preserves the W30 auth
     assert.deepEqual(reply.admission.receipt.logical_policy,{max_depth:null,max_tasks:null,max_children:null});
    }finally{service.close();}passed++;
   });
-  assert.equal(passed,16);
+  const chatUpgrade=await fs.readFile(new URL('./native-coding-chat-coordination-v1.sql',import.meta.url),'utf8');
+  await sql.begin(async tx=>tx.unsafe(chatUpgrade));
+  await sql.begin(async tx=>tx.unsafe(chatUpgrade));
+  await t.test('protected chat-led profile admits a browser planner and native permits, never a CLI planner',async()=>{
+   const f=await fixture({chatLed:true}),service=await createNativeCodingHostSeedService(f.options);
+   try{
+    const admitted=(await service.SEED_GOAL(f.input)).admission.receipt;
+    const [task]=await sql.unsafe('select role,claim_class,task_spec from destruktion_meta.devos_fleet_task_h205f22 where task_id=$1',[admitted.root_task_id]);
+    assert.equal(task.role,'PLANNER');assert.equal(task.claim_class,'READ_ONLY');
+    assert.equal(task.task_spec.native_coding,undefined);assert.equal(task.task_spec.coordination_mode,'CHAT_LED');
+    assert.equal(task.task_spec.project_continuity.project_id,admitted.project_id);
+    assert.deepEqual(await count(f),{seeds:1,projects:1,tasks:1,permits:4,browser_goals:0});
+    const [candidate]=await sql.unsafe('select destruktion_meta.native_coding_chat_child_permit_v1($1,$2,$3) as value',[admitted.project_id,admitted.root_task_id,'IMPLEMENTER']);
+    assert.equal(candidate.value.project_id,admitted.project_id);assert.equal(candidate.value.role,'IMPLEMENTER');
+    const [critic]=await sql.unsafe('select destruktion_meta.native_coding_chat_child_permit_v1($1,$2,$3) as value',[admitted.project_id,admitted.root_task_id,'CRITIC']);
+    assert.equal(critic.value,null,'critic needs the completed writer subject, never a free-form proposal');
+    const replay=await service.SEED_GOAL(f.input);assert.equal(replay.admission.receipt.root_task_id,admitted.root_task_id);
+   }finally{service.close();}passed++;
+  });
+  await t.test('legacy profile remains native and cannot acquire chat handoff mode',async()=>{
+   const f=await fixture(),admitted=(await invoke(f)).receipt;
+   const [task]=await sql.unsafe('select role,task_spec from destruktion_meta.devos_fleet_task_h205f22 where task_id=$1',[admitted.root_task_id]);
+   assert.equal(task.role,'IMPLEMENTER');assert.ok(task.task_spec.native_coding);
+   const [candidate]=await sql.unsafe('select destruktion_meta.native_coding_chat_child_permit_v1($1,$2,$3) as value',[admitted.project_id,admitted.root_task_id,'IMPLEMENTER']);
+   assert.equal(candidate.value,null);passed++;
+  });
+  await t.test('real browser-parent claim hands IMPLEMENTER children to protected native permits without fallback',async()=>{
+   const f=await fixture({chatLed:true}),admitted=(await invoke(f)).receipt;
+   const agent='agent_chat-planner-001',tab='fixture-chat-tab',target='fixture-chat-target';
+   const heartbeat={schema:'metaengine.native-browser-supervisor.state.v1',client_kind:'METAENGINE_BROWSER_ELECTRON_NATIVE',
+    transport_identity:{profile:f.generated.identity.profile,device_id:f.profile.device_id,key_fingerprint_sha256:f.profile.device_key_fingerprint_sha256,
+     access_tier:'ADMIN',admin_grant_epoch:1,admin_ready:true},
+    supervisor_lifecycle:{continuous_service:{enabled:true},actuation_enabled:true,keepalive:{state:'WAITING'}},
+    fleet:{schema:'metaengine.browser.fleet-snapshot.v1',readiness_contract:'TRANSPORT_PROOF_REQUIRED',agents:[{
+     agent_id:agent,role:'PLANNER',tab_id:tab,target_id:target,generation_epoch:1,ownership:'FLEET_OWNED',lifecycle_state:'ACTIVE',
+     authority_effect:false,automatic_retry_allowed:false,transport_proof:{schema:'metaengine.browser.fleet-transport-proof.v1',
+      tab_id:tab,target_id:target,generation_epoch:1,conversation_url_sha256:'a'.repeat(64),proven_at:new Date().toISOString(),authority_effect:false},
+    }]}};
+   await sql.unsafe('update public.compute_fabric_a2_browser_supervisor_state_h205f22 set state=$1,last_seen_at=clock_timestamp() where workspace_id=$2',
+    [sql.json(heartbeat),f.profile.workspace_id]);
+   const [leaseRow]=await sql.unsafe('select public.devos_fleet_lease_v1($1,$2,$3,$4,$5,1,900) as value',
+    [f.profile.workspace_id,agent,'PLANNER',tab,target]);
+   const lease=leaseRow.value;assert.equal(lease.leased,true);assert.equal(lease.task_id,admitted.root_task_id);
+   const request=randomUUID(),children=[{role:'IMPLEMENTER',objective:'Implement first bounded patch'},{role:'CODER',objective:'Implement second independent patch'}];
+   const spawn=async(id,batch,claim=lease.claim_id)=>(await sql.unsafe('select public.h205f22_project_spawn_v1($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,1) as value',
+    [f.profile.workspace_id,admitted.project_id,lease.task_id,claim,lease.lease_generation,id,sql.json(batch),f.profile.device_id,f.profile.client_id]))[0].value;
+   const result=await spawn(request,children);assert.equal(result.children.length,2);assert.ok(result.children.every(c=>c.status==='ADMITTED'));
+   const tasks=await sql.unsafe('select task_spec,role from destruktion_meta.devos_fleet_task_h205f22 where task_id=any($1::uuid[])',[result.children.map(c=>c.task_id)]);
+   assert.equal(tasks.length,2);assert.ok(tasks.every(t=>t.role==='IMPLEMENTER'&&t.task_spec.native_coding.project_id===admitted.project_id));
+   assert.equal(new Set(tasks.map(t=>t.task_spec.native_coding.permit_id)).size,2);
+   assert.equal((await spawn(request,children)).replayed,true);
+   const waiting=await spawn(randomUUID(),[{role:'IMPLEMENTER',objective:'Wait for an available protected worker'}]);
+   assert.equal(waiting.children[0].status,'CAPACITY_WAIT');assert.equal(waiting.children[0].task_id,null);
+   await assert.rejects(spawn(randomUUID(),[{role:'CRITIC',objective:'Cannot choose an unbound review subject'}]),/PROJECT_NATIVE_REVIEW_SUBJECT_REQUIRED/);
+   await assert.rejects(spawn(randomUUID(),children,Number(lease.claim_id)+9999),/PROJECT_PARENT_CLAIM_FENCED/);
+   assert.equal((await count(f)).tasks,3);passed++;
+  });
+  await t.test('chat profile revocation cannot downgrade native handoff to a browser implementation',async()=>{
+   const f=await fixture({chatLed:true}),g=await fixture({chatLed:true});
+   const a=(await invoke(f)).receipt,b=(await invoke(g)).receipt;
+   const read=(project,task)=>(sql.unsafe('select destruktion_meta.native_coding_chat_child_permit_v1($1,$2,$3) as value',[project,task,'IMPLEMENTER']));
+   assert.equal((await read(a.project_id,b.root_task_id))[0].value,null);
+   await sql.unsafe('update destruktion_meta.native_coding_seed_profile_h205f22 set revoked_at=clock_timestamp() where profile_id=$1',[f.profile.profile_id]);
+   assert.equal((await read(a.project_id,a.root_task_id))[0].value,null);
+   assert.equal((await count(f)).tasks,1);passed++;
+  });
+  await t.test('chat upgrade rejects unreviewed predecessor bodies without changing the live test schema',async()=>{
+   await assert.rejects(sql.begin(async tx=>{
+    await tx.unsafe(`create or replace function destruktion_meta.native_coding_chat_child_permit_v1(p_project uuid,p_task uuid,p_role text)
+     returns jsonb language plpgsql security invoker set search_path=pg_catalog,destruktion_meta as $$begin return null;end $$`);
+    await tx.unsafe(chatUpgrade);
+   }),/chat_coordination_native_coding_chat_child_permit_v1_requires_review/);
+   // Repeated installer order must attest the current chat validator, apply
+   // the prior capacity upgrade, then restore chat mode in the SAME transaction.
+   await sql.begin(async tx=>{await tx.unsafe(capacityUpgrade);await tx.unsafe(chatUpgrade);});
+   const f=await fixture({chatLed:true}),receipt=(await invoke(f)).receipt;
+   assert.equal((await sql.unsafe('select role from destruktion_meta.devos_fleet_task_h205f22 where task_id=$1',[receipt.root_task_id]))[0].role,'PLANNER');passed++;
+  });
+  assert.equal(passed,21);
   await fs.writeFile(path.join(directory,'receipt.json'),JSON.stringify({schema:'metaengine.native-coding.initial-seed.disposable-qa.v1',state:'PASS',
    postgres_version_num:identity.version,postgres_system_identifier:cluster,port,subtests:passed,migration_sha256:migrationSha,
    source_classification:'REAL_DISPOSABLE_PG_AND_HOST_SERVICE_WITH_GENERATED_ENROLLED_DEVICE_INSTALLED_IMAGE_OS_CANARY_AND_ACL_FIXTURES',

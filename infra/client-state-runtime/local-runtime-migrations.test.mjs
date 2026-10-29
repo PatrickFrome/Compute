@@ -79,7 +79,10 @@ test('migration plan pins deployed sources, unbounded defaults and the opt-in ow
   assert.equal(running.source,'native-coding-running-agent-scope-v1.sql');
   assert.deepEqual(running.signatures,['destruktion_meta.native_coding_running_critic_admissible_v1(uuid,uuid)',
     'destruktion_meta.native_coding_agent_context_v1(uuid)']);
-  const extras = plan.migrations.slice(mandatorySources.length+nativeSources.length+2);
+  const chat=plan.migrations[mandatorySources.length+nativeSources.length+2];
+  assert.equal(chat.source,'native-coding-chat-coordination-v1.sql');
+  assert.deepEqual(chat.signatures,['destruktion_meta.native_coding_chat_child_permit_v1(uuid,uuid,text)']);
+  const extras = plan.migrations.slice(mandatorySources.length+nativeSources.length+3);
   // The W5 DAG guard is an optional source-only integration lane and must
   // never be admitted as an arbitrary migration or silently become installed.
   assert.equal(extras.length, 2, 'every extra migration requires an explicit contract');
@@ -145,10 +148,10 @@ test('migration catalog skip requires every required object and separately attes
   } };
   const receipt = await applyLocalRuntimeMigrations({ sql: { begin: run => run(tx) } });
   assert(receipt.migrations.every(row => row.status === 'ALREADY_PRESENT_NOT_MODIFIED'));
-  assert(receipt.migrations.every(row => row.existing_bodies_attested === (row.browser_dispatch_version === 3 || row.cognitive_acceptor_direct_api === true || row.source==='native-agent-count-unbounded-v2.sql' || row.running_agent_scope_separate_from_admission===true)));
+  assert(receipt.migrations.every(row => row.existing_bodies_attested === (row.browser_dispatch_version === 3 || row.cognitive_acceptor_direct_api === true || row.source==='native-agent-count-unbounded-v2.sql' || row.running_agent_scope_separate_from_admission===true || row.chat_coordination_opt_in===true)));
   assert.equal(receipt.existing_bodies_attested, false);
   assert(statements.some(query => query.includes('pg_advisory_xact_lock')));
-  assert(!statements.some(query => !query.startsWith('-- Reviewed local upgrade.') && !query.startsWith('-- Additive local upgrade: active CRITIC authorization') && /^create /im.test(query)));
+  assert(!statements.some(query => !query.startsWith('-- Reviewed local upgrade.') && !query.startsWith('-- Additive local upgrade: active CRITIC authorization') && !query.startsWith('-- Additive local upgrade: protected chat-led coordination') && /^create /im.test(query)));
 });
 
 async function dispatchFixture(version = 3) {

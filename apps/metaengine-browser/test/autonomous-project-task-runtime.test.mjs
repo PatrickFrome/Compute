@@ -660,3 +660,11 @@ for (const corruption of ['duplicate_task', 'parent_task', 'wait_with_task', 'ad
     assert.equal((await f.journal.pending()).length, 1);
   });
 }
+
+test('chat-led planner cannot persist a review without an exact writer subject',async t=>{
+ const f=await fixture(t);
+ await assert.rejects(f.runtime.serveToolRequests({lease:{...rootTask(),task_spec:{coordination_mode:'CHAT_LED'}},requests:[{
+  ...spawnRequest(),payload:{children:[{role:'CRITIC',objective:'Review arbitrary work'}]},
+ }]}),/native_review_subject_required/);
+ assert.equal((await f.journal.pending()).length,0);assert.equal(f.provider.read().tasks.length,1);
+});

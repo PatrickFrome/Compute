@@ -156,6 +156,11 @@ export const LOCAL_RUNTIME_MIGRATIONS = Object.freeze([
       'destruktion_meta.native_coding_agent_context_v1(uuid)']),
     source_url:new URL('./native-coding-running-agent-scope-v1.sql',import.meta.url),
     reviewed_running_agent_scope_upgrade:true},
+  {path:'native-coding-chat-coordination-v1.sql',
+    signature:'destruktion_meta.native_coding_chat_child_permit_v1(uuid,uuid,text)',
+    signatures:Object.freeze(['destruktion_meta.native_coding_chat_child_permit_v1(uuid,uuid,text)']),
+    source_url:new URL('./native-coding-chat-coordination-v1.sql',import.meta.url),
+    reviewed_chat_coordination_upgrade:true},
   // P3 opt-in fleet DAG: qualified only for self-owned local PostgreSQL;
   // the existing devos lease inserts into the same canonical claim table.
   { path: 'fleet-coordination-claim-guard-v1.sql', signature: 'destruktion_meta.fleet_coordination_claim_gate_v1()',
@@ -354,6 +359,16 @@ export async function applyLocalRuntimeMigrations({ sql, expectedMigrationSource
           signature:migration.signature,signatures:migration.signatures,
           status:before.complete?'ALREADY_PRESENT_NOT_MODIFIED':'APPLIED_LOCAL_ONLY',
           existing_bodies_attested:true,running_agent_scope_separate_from_admission:true});
+        continue;
+      }
+      if (migration.reviewed_chat_coordination_upgrade) {
+        await tx.unsafe(migration.source);
+        if (!(await inspectMigrationObjects(tx,migration)).complete)
+          throw Error('local_runtime_chat_coordination_readback_failed');
+        receipts.push({source:migration.path,source_sha256:migration.sha256,
+          signature:migration.signature,signatures:migration.signatures,
+          status:before.complete?'ALREADY_PRESENT_NOT_MODIFIED':'APPLIED_LOCAL_ONLY',
+          existing_bodies_attested:true,chat_coordination_opt_in:true});
         continue;
       }
       if (before.complete) {

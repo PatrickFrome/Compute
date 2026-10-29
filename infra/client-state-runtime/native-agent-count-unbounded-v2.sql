@@ -46,7 +46,7 @@ declare p record;
 begin
  select prosrc,prosecdef,proconfig,l.lanname into p from pg_proc f join pg_language l on l.oid=f.prolang where f.oid=to_regprocedure('destruktion_meta.native_coding_seed_profile_v1(uuid,boolean)');
  if p.prosrc is null or p.lanname<>'plpgsql' or p.prosecdef is distinct from false
-  or encode(extensions.digest(convert_to(replace(p.prosrc,E'\r\n',E'\n'),'UTF8'),'sha256'),'hex') not in('ff22e1833e64b9b2f48bd02227cb9cff13b98a8575435257b0ae188ea9696cc4','c15e950cb8a1940c9e9af177d7a1dcf0a374a67fc61c7fca5984db43fad5ca77')
+  or encode(extensions.digest(convert_to(replace(p.prosrc,E'\r\n',E'\n'),'UTF8'),'sha256'),'hex') not in('ff22e1833e64b9b2f48bd02227cb9cff13b98a8575435257b0ae188ea9696cc4','c15e950cb8a1940c9e9af177d7a1dcf0a374a67fc61c7fca5984db43fad5ca77','6fd143ff425a752a7e5740c635f144d8249253e1922f915ab62e0ca9fa841dc7')
  then raise exception 'native_agent_capacity_native_coding_seed_profile_v1_requires_review' using errcode='55000';end if;
 end $upgrade$;
 create or replace function destruktion_meta.native_coding_seed_profile_v1(p_profile uuid,p_require_active boolean default true)

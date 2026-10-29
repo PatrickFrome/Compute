@@ -20,11 +20,13 @@ function normalize(value) {
     || (value.state === 'HOST_VERIFICATION_REQUIRED'
       ? value.kind === 'UNAVAILABLE' || value.reason !== null
       : typeof value.reason !== 'string' || !/^[A-Z0-9_]{1,80}$/.test(value.reason))
+    || (value.coordination_mode !== undefined && (!['CHAT_LED','CLI_LED'].includes(value.coordination_mode) || value.kind !== 'NATIVE_CODING'))
     || (value.project_id != null && !UUID.test(value.project_id))) {
     throw new Error('goal_submission_mode_readback_invalid');
   }
   return Object.freeze({
     schema: SCHEMA, kind: value.kind, state: value.state, reason: value.reason,
+    ...(value.coordination_mode !== undefined ? {coordination_mode:value.coordination_mode} : {}),
     ...(value.project_id !== undefined ? { project_id: value.project_id } : {}),
     automatic_retry_allowed: false, authority_effect: false,
   });
@@ -111,5 +113,6 @@ export function goalSubmissionModeText(mode) {
       : ['Admission on hold', 'Admission has not been verified. Check admission again to read its current state.'];
     return { label, detail };
   }
+  if(mode.coordination_mode==='CHAT_LED')return {label:'Chat planner → Codex CLI → CRITIC',detail:'The protected profile starts a chat planner. Implementation proposals use native worker permits in the same project. Admission does not prove execution or review.'};
   return { label: 'Codex CLI · Host admission', detail: 'The Host verifies this task for native execution and independent review. Chat sessions have separate status. Admission does not prove execution.' };
 }

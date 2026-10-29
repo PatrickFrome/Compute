@@ -480,3 +480,13 @@ test('primary product routing has fixed native IPC/signing paths and separate ad
   assert.match(ui,/mode\.kind==="BROWSER"/);assert.match(ui,/metaengine\.native-coding\.goal-admission\.v1/);
   assert.match(ui,/data-testid="client-native-goal-progress"/);assert.match(ui,/Execution proof is separate from admission/);
 });
+
+test('protected profile mode is reported without changing the authenticated native admission route',async()=>{
+  const options={readSummary:()=>({status_file:'/owned/status.json'}),lstat:async()=>({isFile:()=>true,isSymbolicLink:()=>false,nlink:1})};
+  for(const coordination_mode of ['CHAT_LED','CLI_LED']){
+    const value=await readClientGoalSubmissionMode({...options,readNativeBusy:async()=>({busy:false,coordination_mode})});
+    assert.equal(value.kind,'NATIVE_CODING');assert.equal(value.coordination_mode,coordination_mode);assert.equal(value.state,'HOST_VERIFICATION_REQUIRED');
+  }
+  const bad=await readClientGoalSubmissionMode({...options,readNativeBusy:async()=>({busy:false,coordination_mode:'UNVERIFIED'})});
+  assert.equal(bad.state,'HOLD');
+});

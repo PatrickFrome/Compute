@@ -257,8 +257,8 @@ export async function createNativeCodingHostSeedService({sql,stateDirectory,read
  return Object.freeze({SEED_GOAL:seed,READ_SEED:async raw=>readSeedResult(request(raw)),
   async LIST_SEEDS(raw={}){
    if(!exact(raw,['after_seq','limit'])||!Number.isSafeInteger(raw.after_seq)||raw.after_seq<0||!Number.isSafeInteger(raw.limit)||raw.limit<1||raw.limit>16)fail('page_invalid');
-   await profile(false);const rows=await sql.unsafe('select destruktion_meta.native_coding_seed_list_v1($1::uuid,$2::bigint,$3::integer) as value',[pins.profile_id,raw.after_seq,raw.limit]);
+   const p=await profile(false);const rows=await sql.unsafe('select destruktion_meta.native_coding_seed_list_v1($1::uuid,$2::bigint,$3::integer) as value',[pins.profile_id,raw.after_seq,raw.limit]);
    const v=rows[0]?.value;if(rows.length!==1||v?.schema!=='metaengine.native-coding.seed-catalog.v1'||!Array.isArray(v.entries)
-    ||v.entries.length>raw.limit||Buffer.byteLength(json(v))>65536||v.authority_effect!==false||v.automatic_retry_allowed!==false)fail('catalog_invalid');return v;
+    ||v.entries.length>raw.limit||Buffer.byteLength(json(v))>65536||v.authority_effect!==false||v.automatic_retry_allowed!==false)fail('catalog_invalid');return {...v,coordination_mode:p.schema==='metaengine.native-coding.seed-profile.v2'&&p.coordination_mode==='CHAT_LED'?'CHAT_LED':'CLI_LED'};
   },close(){closed=true;}});
 }

@@ -45,6 +45,8 @@ export async function readClientGoalSubmissionMode({readSummary,lstat=fs.lstat,r
     let busy;try{busy=await readNativeBusy();}catch(error){return {...base,kind:'NATIVE_CODING',state:'HOLD',reason:nativeProfileStatusReason(error)};}
     if(busy?.busy===true)return {...base,kind:'NATIVE_CODING',state:'HOLD',reason:'NATIVE_PROFILE_BUSY',
       project_id:UUID.test(busy.project_id||'')?busy.project_id:null};
+    if(busy?.coordination_mode!==undefined&&!['CHAT_LED','CLI_LED'].includes(busy.coordination_mode))return {...base,kind:'NATIVE_CODING',state:'HOLD',reason:'NATIVE_PROFILE_VERIFICATION_FAILED'};
+    if(['CHAT_LED','CLI_LED'].includes(busy?.coordination_mode))return {...base,kind:'NATIVE_CODING',state:'HOST_VERIFICATION_REQUIRED',reason:null,coordination_mode:busy.coordination_mode};
   }
   return {...base,kind:'NATIVE_CODING',state:'HOST_VERIFICATION_REQUIRED',reason:null};
 }

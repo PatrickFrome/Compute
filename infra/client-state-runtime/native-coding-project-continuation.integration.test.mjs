@@ -34,6 +34,8 @@ test('native project continuation SQL qualifies on disposable PG17 without permi
  let started=false,sql,cluster,passed=0;
  try {
   await command('initdb',['-D',data,'--username=state_owner','--auth=trust','--no-locale','--encoding=UTF8','--no-sync']);
+  // Disposable fixture uses only its allocated loopback TCP port.
+  await fs.appendFile(path.join(data,'postgresql.conf'),"\nunix_socket_directories = ''\n");
   started=true;await command('pg_ctl',['-D',data,'-l',log,'-o',`-h 127.0.0.1 -p ${port}`,'-w','start']);
   const postgres=(await import(pathToFileURL(driver))).default;
   sql=postgres({host:'127.0.0.1',port,user:'state_owner',database:'postgres',max:4,onnotice:()=>{},connect_timeout:5,idle_timeout:10,

@@ -238,11 +238,15 @@
     },
     {
       "path": "infra/client-state-runtime/native-agent-count-unbounded-v2.sql",
-      "sha256": "df32710ce8260eaafa76b340c48c3787a3498154cfeb019273445549e64aa9ca"
+      "sha256": "4806492759d7e189f9c24a2404e072db69d24ac50657e2e2792d8c05efa2e858"
     },
     {
       "path": "infra/client-state-runtime/native-coding-running-agent-scope-v1.sql",
       "sha256": "6cb0d557d10430e193f68cbfb82c1944c9253ac8e3d39d2268b3174a5d9e611a"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-chat-coordination-v1.sql",
+      "sha256": "7502ac48b64f31eecec0e19b4073d6d7464009a125a298f092d8785f80a0a246"
     },
     {
       "path": "infra/client-state-runtime/fleet-coordination-claim-guard-v1.sql",

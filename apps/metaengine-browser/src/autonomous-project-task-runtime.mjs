@@ -373,6 +373,7 @@ export class AutonomousProjectTaskRuntime {
   }
   async #spawn(lease, request, expectedProject = null) {
     const children = childrenProposal(request.payload);
+    if(lease?.task_spec?.coordination_mode==='CHAT_LED'&&children.some(child=>child.role==='CRITIC'))fail('native_review_subject_required');
     const current = await this.#taskSnapshot(lease); if (!current) fail('project_missing');
     const project = current.snapshot.project_id;
     if(expectedProject!==null&&project!==expectedProject)fail('parent_project_drift');

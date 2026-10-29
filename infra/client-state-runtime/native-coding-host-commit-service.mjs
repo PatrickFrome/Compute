@@ -258,7 +258,7 @@ export async function createNativeCodingHostCommitService({sql,stateDirectory,re
     parse(row.canonical_body_text,s.body,s.body_sha256);
     const receipt=s.receipt,goal=s.goal;
     if(pr.profile_id!==pin.profile_id||pr.profile_sha256!==pin.profile_sha256||requireActive&&pr.revoked_at!==null
-      ||p.schema!=='metaengine.native-coding.seed-profile.v1'||p.profile_id!==pin.profile_id||p.workspace_id!==k.workspace_id
+      ||!(p.schema==='metaengine.native-coding.seed-profile.v1'||(p.schema==='metaengine.native-coding.seed-profile.v2'&&p.coordination_mode==='CHAT_LED'))||p.profile_id!==pin.profile_id||p.workspace_id!==k.workspace_id
       ||p.trust_namespace!=='LOCAL_OPERATOR_QA'||p.owner_epoch!==k.owner_epoch||!same(p.artifact,k.artifact)
       ||p.postgres?.system_identifier!==k.postgres?.system_identifier
       ||p.postgres?.data_directory_identity_sha256!==k.postgres?.data_directory_identity_sha256

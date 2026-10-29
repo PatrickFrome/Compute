@@ -975,7 +975,7 @@ async function readNativeGoalSubmissionMode(){
       if(scope?.schema!=='metaengine.native-coding.own-pg-scope.v1'||scope.source!=='PRIVATE_RUNTIME_HOST_OWN_PG'
         ||!Array.isArray(scope.bindings))throw new Error('client_native_goal_scope_unavailable');
       const bound=scope.bindings.find(row=>row.device_id===device.device_id&&row.client_id===device.client_id);
-      return {busy:Boolean(bound),project_id:bound?.project_id||null};
+      return {busy:Boolean(bound),project_id:bound?.project_id||null,coordination_mode:catalog.coordination_mode};
     }finally{if(!owned)capability.close();}
   }});
 }

@@ -4,6 +4,7 @@ export type GoalSubmissionMode = {
   state: "HOST_VERIFICATION_REQUIRED" | "HOLD";
   reason: string | null;
   project_id?: string | null;
+  coordination_mode?: "CHAT_LED" | "CLI_LED";
   automatic_retry_allowed: false;
   authority_effect: false;
 };

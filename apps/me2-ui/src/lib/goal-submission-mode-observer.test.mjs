@@ -195,3 +195,13 @@ test('native admission explains the CLI executor without claiming chat pickup or
  assert.match(text.detail,/Chat sessions/);
  assert.match(text.detail,/does not prove execution/);
 });
+
+test('chat-led profile explains the planned handoff without claiming execution',async()=>{
+ const mode={...ready,coordination_mode:'CHAT_LED'};
+ const observer=createGoalSubmissionModeObserver({read:async()=>mode,publish:()=>{}}),stop=observer.start();
+ try{
+  const result=await observer.refresh();assert.equal(result.coordination_mode,'CHAT_LED');
+  const text=goalSubmissionModeText(result);assert.match(text.label,/Chat planner.*Codex CLI.*CRITIC/);
+  assert.match(text.detail,/does not prove execution or review/);
+ }finally{stop();}
+});

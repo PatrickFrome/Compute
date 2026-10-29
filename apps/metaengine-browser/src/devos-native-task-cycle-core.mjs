@@ -152,6 +152,11 @@ export function renderDevosTaskPrompt(lease = {}, { telemetry_digest = null, con
     '',
     objective,
   ];
+  if(taskSpec.coordination_mode==='CHAT_LED')lines.push('',
+    'CHAT-LED DEVELOPMENT: coordinate this project through PROJECT_SPAWN and PROJECT_HISTORY.',
+    'Delegate bounded code changes as IMPLEMENTER children; the Host routes them to protected Codex CLI workers.',
+    'Do not propose a free-form CRITIC child. Independent CRITIC review is admitted automatically for the exact completed writer result.',
+    'Wait for verified child completion and committed checkpoint evidence before planning the next change. A proposal or admission is not completion.');
   if (constraints.length) lines.push('', 'Constraints:', ...constraints.map((row) => `- ${row}`));
   const deliverable = clip(taskSpec.deliverable || '', 4000).trim();
   if (deliverable) lines.push('', `Deliverable: ${deliverable}`);
