@@ -18,6 +18,7 @@ export const SOURCE_CHECK_FILES = Object.freeze([
   "../../infra/client-state-runtime/native-coding-device-request.mjs",
   "../../infra/client-state-runtime/native-coding-host-seed-service.mjs",
   "../../infra/client-state-runtime/native-coding-host-seed-binding.mjs",
+  "../../infra/client-state-runtime/native-coding-host-request-lifetime.mjs",
   "../../infra/client-state-runtime/native-coding-host-service-heartbeat.mjs",
   "../../infra/client-state-runtime/runtime-recovery-postgres-proof.mjs",
   "src/native-coding-project-commits.mjs",

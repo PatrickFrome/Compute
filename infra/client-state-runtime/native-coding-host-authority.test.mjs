@@ -4,7 +4,7 @@ import {createNativeCodingHostAuthority} from './native-coding-host-authority.mj
 import {admissionFixture} from '../../apps/metaengine-browser/test/fixtures/native-coding-admission-fixture.mjs';
 import {nativeCodingCanonicalSha256} from './native-coding-task-context.mjs';
 
-async function fixture({role='state_owner',nativeChange=null}={}) {
+async function fixture({role='state_owner',nativeChange=null,seedOperations=null}={}) {
   const f=admissionFixture(),calls=[];
   const native={artifact:f.permit.artifact,postgres:f.permit.postgres,worktree:f.permit.worktree,
     host_process:f.provider.payload.host_process,user_sid:f.permit.user_sid,sandbox:f.provider.payload.sandbox};
@@ -19,7 +19,7 @@ async function fixture({role='state_owner',nativeChange=null}={}) {
     if(text.startsWith('set local synchronous_commit')){calls.push({text});return[];}
     return sql.unsafe(text,values);
   }})};
-  const authority=await createNativeCodingHostAuthority({sql,readNativeScope:async()=>structuredClone(native),
+  const authority=await createNativeCodingHostAuthority({sql,seedOperations,readNativeScope:async()=>structuredClone(native),
     readNativeWorker:async()=>{throw Error('worker_not_observed');},readProtectedReceipt:async()=>{throw Error('receipt_not_observed');}});
   return {f,calls,sql,authority};
 }
@@ -72,4 +72,15 @@ test('a closed authority cannot open or replay a private registration transactio
   const {authority,f,calls}=await fixture();authority.close();const before=calls.length;
   await assert.rejects(authority.REGISTER_PROVIDER({descriptor:f.provider}),/host_closed/);
   assert.equal(calls.length,before);
+});
+
+
+test('seed authority forwards the private request lifetime and blocks an expired invocation',async()=>{
+ let received,calls=0;
+ const seedOperations={...Object.fromEntries(['SEED_GOAL','READ_SEED','LIST_SEEDS'].map(action=>[action,async(_request,context)=>{calls++;received=context;return {action};}])),close(){}};
+ const {authority}=await fixture({seedOperations});
+ const context=Object.freeze({signal:new AbortController().signal,deadlineAt:Date.now()+30000});
+ await authority.SEED_GOAL({},context);assert.equal(received,context);assert.equal(calls,1);
+ await assert.rejects(authority.SEED_GOAL({},{deadlineAt:Date.now()-1}),/request_deadline_exceeded/);
+ assert.equal(calls,1);authority.close();
 });

@@ -166,3 +166,18 @@ test('real seed service retries a corrected initial profile but never replaces m
  await assert.rejects(f.binding.operations.LIST_SEEDS(await f.request()),/operator_changed/);
  assert.equal(f.seen.created,3);
 });
+
+test('private IPC cancellation context reaches the authenticated seed operation unchanged',async t=>{
+ let received;
+ const f=await fixture(t,{createService:(options,service)=>({...service(options),SEED_GOAL:async(_input,context)=>{received=context;return {state:'READBACK_REQUIRED'};}})});
+ await f.binding.prepare();const controller=new AbortController();
+ const context=Object.freeze({signal:controller.signal,deadlineAt:Date.now()+30000});
+ await f.binding.operations.SEED_GOAL(await f.request('SEED_GOAL'),context);
+ assert.equal(received,context);
+});
+
+test('already cancelled invocation never calls the authenticated seed operation',async t=>{
+ const f=await fixture(t);await f.binding.prepare();const controller=new AbortController();controller.abort();
+ await assert.rejects(f.binding.operations.SEED_GOAL(await f.request('SEED_GOAL'),{signal:controller.signal}),/request_cancelled/);
+ assert.equal(f.seen.calls.length,0);
+});

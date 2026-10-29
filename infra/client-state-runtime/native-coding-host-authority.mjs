@@ -1,3 +1,4 @@
+import {assertNativeCodingHostRequestOpen} from './native-coding-host-request-lifetime.mjs';
 import {createPublicKey} from 'node:crypto';
 import {NativeCodingPgLedger} from '../../apps/metaengine-browser/src/native-coding-pg-ledger.mjs';
 import {verifyNativeCodingProviderDescriptor,verifyNativeCodingJobProof,nativeCodingDeviceKeyFingerprint} from '../../apps/metaengine-browser/src/native-coding-transport-proof.mjs';
@@ -464,8 +465,9 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
         return projectResult(id,'CHECKPOINTED_PENDING_COMMIT',k,verified.checkpoint_sha256);
       });
     },
-    ...(seedOperations?Object.fromEntries(['SEED_GOAL','READ_SEED','LIST_SEEDS'].map(action=>[action,async request=>{
-      open();const result=await seedOperations[action](request);open();return result;
+    ...(seedOperations?Object.fromEntries(['SEED_GOAL','READ_SEED','LIST_SEEDS'].map(action=>[action,async (request,context)=>{
+      open();assertNativeCodingHostRequestOpen(context);
+      const result=await seedOperations[action](request,context);open();return result;
     }])):{}),
     ...(serviceHeartbeatOperations?Object.fromEntries(['SERVICE_HEARTBEAT','READ_SERVICE_HEARTBEAT'].map(action=>[action,async request=>{
       open();const result=await serviceHeartbeatOperations[action](request);open();return result;

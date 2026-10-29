@@ -1,3 +1,4 @@
+import {assertNativeCodingHostRequestOpen} from './native-coding-host-request-lifetime.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
@@ -145,7 +146,8 @@ export async function createNativeCodingHostSeedService({sql,stateDirectory,read
   if(!same(await saved(rejectionFile),rejection))fail('rejection_changed');
   return {state:'REJECTED_BEFORE_DISPATCH',admission:null,rejection,...flags};
  }
- async function observation(p){
+ async function observation(p,requestContext){
+  assertNativeCodingHostRequestOpen(requestContext);
   let common=null;const agents=[],started=Date.now();
   // Protected roster has no count ceiling; only verified identities are admitted.
   let observations;
@@ -156,9 +158,10 @@ export async function createNativeCodingHostSeedService({sql,stateDirectory,read
   }else{
    observations=new Array(p.agents.length);let cursor=0;
    await Promise.all(Array.from({length:Math.min(4,p.agents.length)},async()=>{
-    while(cursor<p.agents.length){const i=cursor++,a=p.agents[i];observations[i]=await readNativeScope({...p,...a},true);}
+    while(cursor<p.agents.length){assertNativeCodingHostRequestOpen(requestContext);const i=cursor++,a=p.agents[i];observations[i]=await readNativeScope({...p,...a},true);}
    }));
   }
+  assertNativeCodingHostRequestOpen(requestContext);
   if(!Array.isArray(observations)||observations.length!==p.agents.length)fail('physical_scope_changed');
   for(let i=0;i<p.agents.length;i++){
    const a=p.agents[i],actual=observations[i];
@@ -171,6 +174,7 @@ export async function createNativeCodingHostSeedService({sql,stateDirectory,read
   }
   if(Date.now()-started>25000)fail('observation_window_exceeded');
   await profile(true);
+  assertNativeCodingHostRequestOpen(requestContext);
   // Profile/ACL revalidation consumes freshness too. Do not re-date physical
   // observations after those reads or let a slow revalidation admit stale data.
   if(Date.now()-started>25000)fail('observation_window_exceeded');
@@ -178,8 +182,10 @@ export async function createNativeCodingHostSeedService({sql,stateDirectory,read
    observed_at:new Date(started).toISOString(),...common,agents,installed_execution_proven:false,...flags};
  }
  async function saved(file){try{return(await readProtectedJson(file,{maximumBytes:16384})).value;}catch(e){if(e.code==='ENOENT')return null;throw e;}}
- async function seed(raw){
+ async function seed(raw,requestContext){
+  assertNativeCodingHostRequestOpen(requestContext);
   const input=request(raw);await profile(false);
+  assertNativeCodingHostRequestOpen(requestContext);
   const file=path.join(directory,input.request_id+'.json');
   const prior=await saved(file);
   if(prior){
@@ -187,6 +193,7 @@ export async function createNativeCodingHostSeedService({sql,stateDirectory,read
    return readSeedResult(input);
   }
   const p=await profile(true);
+  assertNativeCodingHostRequestOpen(requestContext);
   const semantic=digest(json({profile_id:pins.profile_id,objective:input.objective}));
   const semanticFile=path.join(directory,'body-'+semantic+'.json');
   const unresolved=await saved(semanticFile);
@@ -205,7 +212,7 @@ export async function createNativeCodingHostSeedService({sql,stateDirectory,read
   // A failure here proves no SQL write was dispatched; retain the request
   // journal for readonly reconciliation and release only its semantic latch.
   let observed;const observationStarted=Date.now();
-  try{observed=await observation(p);}catch(error){
+  try{observed=await observation(p,requestContext);}catch(error){
    // Write diagnostic data before releasing the semantic latch. A crash or
    // failed unlink can therefore leave a diagnostic beside an UNKNOWN fence:
    // only READ_SEED's independent DB/fence checks can prove rejection. Missing
@@ -223,9 +230,11 @@ export async function createNativeCodingHostSeedService({sql,stateDirectory,read
   }
   try{
    await unchanged();
+   assertNativeCodingHostRequestOpen(requestContext);
    const value=await sql.begin('isolation level serializable',async tx=>{
     await tx.unsafe('set local synchronous_commit=on');await owner(tx);
     await currentDevice(p);await unchanged();
+    assertNativeCodingHostRequestOpen(requestContext);
     const text=json(observed),rows=await tx.unsafe('select destruktion_meta.native_coding_seed_goal_v1($1::uuid,$2::uuid,$3::text,$4::text::jsonb,$4::text,$5::text) as value',
      [pins.profile_id,input.request_id,input.objective,text,digest(text)]);
     if(rows.length!==1)fail('admission_ack_missing');return readback(rows[0].value,input);

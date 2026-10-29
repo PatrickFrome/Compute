@@ -27,7 +27,7 @@ import {createNativeCodingHostIpcServer} from ${JSON.stringify(serverUrl)};
 const mode=process.env.METAENGINE_IPC_TEST_MODE;let calls=0,protocolErrors=[];
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const operations={
- READ_SCOPE:async value=>{const n=++calls;if(mode==='delayed-read')await delay(80);
+ READ_SCOPE:async (value,context)=>{const n=++calls;if(mode==='request-context')return {bindings:[],has_signal:context.signal instanceof AbortSignal,aborted:context.signal.aborted,deadline_at:context.deadlineAt,remaining_ms:context.deadlineAt-Date.now()};if(mode==='delayed-read')await delay(80);
   if(mode==='paged-scope'){
    const all=Array.from({length:160},(_,i)=>({permit_id:'00000000-0000-4000-8000-'+String(i+1).padStart(12,'0'),permit:{padding:'x'.repeat(3000)}}));
    const rows=all.filter(r=>!value.after_permit_id||r.permit_id>value.after_permit_id),page=rows.slice(0,32);
@@ -438,4 +438,13 @@ test('duplicate request UUIDs cannot execute a private write twice',async t=>{
 
 test('a JSON transport object cannot impersonate the private ChildProcess capability',()=>{
   assert.throws(()=>createNativeCodingHostIpcClient({child:{pid:1,connected:true,channel:{},send(){}},instanceId:id(),hostPid:1}),/CHANNEL_CLOSED/);
+});
+
+
+test('real private IPC supplies a bounded server-owned deadline and cancellation signal',async t=>{
+ const {client}=await setup(t,'request-context',{serverTimeoutMs:1000});
+ const result=await client.readScope();
+ assert.equal(result.has_signal,true);assert.equal(result.aborted,false);
+ assert.ok(Number.isSafeInteger(result.deadline_at));
+ assert.ok(result.remaining_ms>0&&result.remaining_ms<=1000);
 });

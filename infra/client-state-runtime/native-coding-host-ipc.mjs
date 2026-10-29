@@ -168,7 +168,7 @@ export function createNativeCodingHostIpcServer({instanceId,operations,send=proc
       return true;
     }
     if(active.size>=maxInflight){emit(response(message,requestDigest,'REJECTED',null,'INFLIGHT_LIMIT'));return true;}
-    const row={request:structuredClone(message),write:writes(message.action,message.payload),digest:requestDigest,abort:new AbortController(),timer:null,response:null};
+    const row={request:structuredClone(message),write:writes(message.action,message.payload),digest:requestDigest,abort:new AbortController(),deadlineAt:Date.now()+timeoutMs,timer:null,response:null};
     active.set(message.request_id,row);
     row.timer=setTimeout(()=>{
       seal(row,row.write?'UNKNOWN':'REJECTED',null,'REQUEST_TIMEOUT');row.abort.abort();
@@ -176,7 +176,7 @@ export function createNativeCodingHostIpcServer({instanceId,operations,send=proc
       // must not create unbounded parallel work or authorize a second write.
     },timeoutMs);
     Promise.resolve().then(()=>operations[message.action](Object.freeze(structuredClone(message.payload)),
-      Object.freeze({signal:row.abort.signal,instanceId,hostPid,requestId:message.request_id,action:message.action})))
+      Object.freeze({signal:row.abort.signal,deadlineAt:row.deadlineAt,instanceId,hostPid,requestId:message.request_id,action:message.action})))
       .then(value=>{if(!row.response){json(value);seal(row,'OK',structuredClone(value),null);}})
       .catch(()=>seal(row,row.write?'UNKNOWN':'REJECTED',null,row.write?'WRITE_OUTCOME_UNKNOWN':'OPERATION_FAILED'))
       .finally(()=>{clearTimeout(row.timer);active.delete(message.request_id);});

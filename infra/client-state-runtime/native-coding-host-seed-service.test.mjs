@@ -171,3 +171,18 @@ test('closing while a physical batch is pending cannot dispatch its late result'
  const restarted=await createNativeCodingHostSeedService(f.options);t.after(()=>restarted.close());
  assert.equal((await restarted.READ_SEED(f.input)).state,'REJECTED_BEFORE_DISPATCH');
 });
+
+test('cancelled seed request cannot enter profile reads or SQL admission',async t=>{
+ const f=await fixture(t),controller=new AbortController();controller.abort();
+ const before=f.seen.profiles;
+ await assert.rejects(f.service.SEED_GOAL(f.input,{signal:controller.signal}),/request_cancelled/);
+ assert.equal(f.seen.profiles,before);assert.equal(f.seen.dispatches,0);
+});
+
+test('cancellation during physical observation prevents later SQL admission and preserves rejection readback',async t=>{
+ const f=await fixture(t),controller=new AbortController();
+ f.setScope(async permit=>{controller.abort();return f.defaultScope(permit);});
+ await assert.rejects(f.service.SEED_GOAL(f.input,{signal:controller.signal}),/request_cancelled/);
+ assert.equal(f.seen.dispatches,0);
+ assert.equal((await f.service.READ_SEED(f.input)).state,'REJECTED_BEFORE_DISPATCH');
+});

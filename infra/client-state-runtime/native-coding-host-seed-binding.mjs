@@ -1,3 +1,4 @@
+import {assertNativeCodingHostRequestOpen} from './native-coding-host-request-lifetime.mjs';
 import {validateNativeCodingDeviceRequest} from '../../apps/metaengine-browser/src/native-coding-device-request.mjs';
 import {createNativeCodingHostSeedService} from './native-coding-host-seed-service.mjs';
 import {createNativeCodingDeviceRequestVerifier,createNativeCodingAuthenticatedRequestContext} from './native-coding-device-request.mjs';
@@ -40,20 +41,20 @@ export function createNativeCodingHostSeedBinding({sql,stateDirectory,readNative
   attempt.then(settled,settled);
   return attempt;
  }
- async function invoke(action,request){
-  open();
+ async function invoke(action,request,requestContext){
+  open();assertNativeCodingHostRequestOpen(requestContext);
   const checked=validateNativeCodingDeviceRequest(request,action);
   // A write never boots an unavailable service or waits for its cold setup.
   // The caller must first obtain an authenticated readonly catalog/readback.
   if(action==='SEED_GOAL'&&!service)fail('not_ready');
   const current=service||await prepare();
-  open();
+  open();assertNativeCodingHostRequestOpen(requestContext);
   // Cold image/ACL preparation precedes the existing cryptographic freshness
   // check. A packet that expired during setup is rejected, never re-signed or
   // retried here. The next readonly request must carry a fresh signature.
   return context.run(action,checked,async input=>{
-   open();
-   const result=await current[action](input);
+   open();assertNativeCodingHostRequestOpen(requestContext);
+   const result=await current[action](input,requestContext);
    open();return result;
   });
  }
@@ -63,7 +64,7 @@ export function createNativeCodingHostSeedBinding({sql,stateDirectory,readNative
   const current=service;service=null;
   try{current?.close();}finally{try{context.close();}finally{verifier.close();}}
  }
- const operations=Object.freeze({...Object.fromEntries(ACTIONS.map(action=>[action,request=>invoke(action,request)])),close});
+ const operations=Object.freeze({...Object.fromEntries(ACTIONS.map(action=>[action,(request,requestContext)=>invoke(action,request,requestContext)])),close});
  // prepare/close are native lifecycle methods, not additional IPC operations.
  return Object.freeze({operations,prepare,close});
 }
