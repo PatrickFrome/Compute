@@ -1347,7 +1347,7 @@ export class NativeSupervisorClient {
   }
 
   async projectContinuityRequest({ operation, body } = {}) {
-    if (!['register', 'snapshot', 'history', 'spawn', 'activity', 'policy', 'reconcile', 'release-browser-child', 'suspend-browser', 'suspension-read', 'suspension-list', 'resume-browser'].includes(operation)) throw new Error('project_continuity_transport_operation_invalid');
+    if (!['register', 'snapshot', 'history', 'spawn', 'message', 'activity', 'policy', 'reconcile', 'release-browser-child', 'suspend-browser', 'suspension-read', 'suspension-list', 'resume-browser'].includes(operation)) throw new Error('project_continuity_transport_operation_invalid');
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('project_continuity_transport_body_invalid');
     const response = await this.#signedRequest(`/v1/devos/project/${operation}`, { method: 'POST', payload: structuredClone(body) });
     const value = await response.json().catch(() => null);

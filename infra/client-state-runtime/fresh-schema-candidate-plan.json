@@ -263,6 +263,10 @@
     {
       "path": "infra/client-state-runtime/native-coding-chat-messages-v1.sql",
       "sha256": "d6f2c5cb0600076f4093c687c714826362d8efec39aabaed3e474900dad7b614"
+    },
+    {
+      "path": "infra/client-state-runtime/browser-project-messages-v1.sql",
+      "sha256": "6d361fe697a75a85add493099a9ada986d23795329a3f9d5c636c34067c91523"
     }
   ],
   "unresolved_dependencies": [
@@ -311,6 +315,7 @@
     "public.h205f22_a2_workspace_binding_snapshot_v1(uuid)",
     "public.h205f22_project_activity_v1(uuid,uuid,uuid,bigint,bigint,uuid,text,bigint,text,text,jsonb,bigint,uuid,text,bigint)",
     "public.h205f22_project_history_v1(uuid,uuid,bigint,bigint,integer,uuid,bigint,text,uuid,text,bigint)",
+    "public.h205f22_project_message_v1(uuid,uuid,uuid,bigint,bigint,uuid,text,text,uuid,text,bigint)",
     "public.h205f22_project_policy_v1(uuid,uuid,bigint,integer,bigint,bigint,uuid,text,bigint)",
     "public.h205f22_project_reconcile_v1(uuid,uuid,uuid,text,bigint)",
     "public.h205f22_project_register_v1(uuid,uuid,uuid,text,bigint)",

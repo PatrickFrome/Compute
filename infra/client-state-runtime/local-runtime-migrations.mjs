@@ -197,6 +197,11 @@ export const LOCAL_RUNTIME_MIGRATIONS = Object.freeze([
     signatures:Object.freeze(['destruktion_meta.native_coding_project_peer_v1(uuid,uuid,text)','destruktion_meta.native_coding_agent_message_v1(uuid,uuid,text,text)']),
     source_url:new URL('./native-coding-chat-messages-v1.sql',import.meta.url),
     reviewed_chat_message_upgrade:true},
+  {path:'browser-project-messages-v1.sql',
+    signature:'public.h205f22_project_message_v1(uuid,uuid,uuid,bigint,bigint,uuid,text,text,uuid,text,bigint)',
+    signatures:Object.freeze(['public.h205f22_project_message_v1(uuid,uuid,uuid,bigint,bigint,uuid,text,text,uuid,text,bigint)']),
+    source_url:new URL('./browser-project-messages-v1.sql',import.meta.url),
+    reviewed_chat_message_upgrade:true},
 ]);
 
 const REQUIRED_COLUMNS = {

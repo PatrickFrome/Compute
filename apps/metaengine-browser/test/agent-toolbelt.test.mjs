@@ -322,3 +322,18 @@ test('UNKNOWN or AMBIGUOUS terminal envelope never turns an issued command into 
     assert.deepEqual(toolbelt.resultsForLease(LEASE),[]);
   }
 });
+
+test('PROJECT_MESSAGE crosses the real parser and project tool route without a generic command effect',async()=>{
+ let calls=0;
+ const toolbelt=new AgentToolbelt({signedRequest:async()=>{throw Error('generic command path must not run');}});
+ toolbelt.bindProjectRuntime({serveToolRequests:async({lease,requests})=>{
+  calls++;assert.equal(lease.task_id,LEASE.task_id);assert.equal(requests[0].action,'PROJECT_MESSAGE');
+  assert.equal(requests[0].payload.text,'Hello  peer');
+  return [{request_id:requests[0].request_id,status:'COMPLETED',summary:JSON.stringify({stored:true,read_by_recipient_proven:false,authority_effect:false})}];
+ }});
+ const requests=parseAgentToolRequests(requestBlock({action:'PROJECT_MESSAGE',payload_json:JSON.stringify({recipient_agent_id:'agent_native-peer-001',text:'Hello  peer'})})).requests;
+ assert.equal(requests.length,1);
+ const served=await toolbelt.serveToolRequests({lease:LEASE,requests});await toolbelt.serveToolRequests({lease:LEASE,requests});
+ assert.equal(calls,1);assert.equal(served.issued[0].action,'PROJECT_MESSAGE');
+ assert.equal(JSON.parse(toolbelt.resultsForLease(LEASE)[0].summary).read_by_recipient_proven,false);
+});

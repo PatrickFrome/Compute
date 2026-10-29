@@ -99,3 +99,29 @@ through the actual tool formatter. Wrong offsets/digests and mixed modes fail.
 102 focused runtime/continuation/tool protocol tests passed before aggregate.
 This closes truncated reading, not bidirectional delivery, automatic wake or
 recipient processing acknowledgements.
+
+### Browser-to-native addressed messages implemented (source)
+
+PROJECT_MESSAGE is now registered in the parser, project toolbelt, prompt,
+current-parent runtime, signed Supervisor transport, strict route, fixed DB API
+allowlist and fresh/local migration plans. The new RPC uses existing device and
+parent claim authentication, existing project peer resolution and event append.
+It stores one event per sender/request UUID under task -> project locking.
+Repeating the same request returns its stored event; changing text/recipient or
+using a foreign/stale parent is refused. The local journal retains unknown ACKs
+and reconciles only the same immutable request identity. Content is untrusted;
+there is no execution grant, automatic wake or claim of recipient processing.
+
+Real disposable PG17 integration covers both directions, replay, body collision,
+foreign recipient, wrong parent claim and Unicode byte budgets. Fresh PG17
+schema creation/reapplication passes; two supplemental PG18 WASM tests remain
+skipped. Parser -> toolbelt delegation and lost-ACK journal tests pass. Full
+aggregate runs are in progress before commit/publication. Live model, recipient
+acknowledgement and wake remain open.
+
+Browser message aggregate evidence: full browser run 6,940 total, 6,830 pass,
+28 fail, 82 skip; failing test names unchanged from the preceding run (Unix IPC
+and graphical Electron limitations). Runtime aggregate 753 total, 723 pass,
+1 Unix IPC failure, 29 skip. After final recipient-type checks and prompt wiring,
+87 focused parser/toolbelt/project/route tests pass. Native PG17 integration22/22;
+fresh schema10/10 executed with2 optional WASM skips. No installer/live claim.

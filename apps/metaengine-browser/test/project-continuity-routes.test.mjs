@@ -50,3 +50,19 @@ test('private parent suspension routes inject ADMIN identity and reject caller a
   assert.equal((await send('resume-browser',{suspension_id:id,restoration:{schema:'bad'}})).status,400);
   receipt.task_id='33333333-3333-4333-8333-333333333333';assert.equal((await send('suspension-read',{task_id:id})).status,409);
 });
+
+test('addressed project messages inject current device identity and never claim recipient reading',async()=>{
+ const calls=[],recipient='agent_native-peer-001',target='33333333-3333-4333-8333-333333333333';
+ let wrong=false;
+ const route=createProjectContinuityRoutes({workspaceId:workspace,rpc:async(name,args)=>{calls.push({name,args});
+  return {schema:'metaengine.devos.project-message.v1',project_id:args.p_project_id,request_id:args.p_request_id,sender_task_id:args.p_task_id,
+   recipient_task_id:target,recipient_agent_id:recipient,seq:3,stored:true,replayed:false,read_by_recipient_proven:wrong,
+   authority_effect:false,automatic_retry_allowed:false};}});
+ const input={project_id:id,task_id:id,claim_id:1,lease_generation:1,request_id:id,recipient_agent_id:recipient,text:'A bounded message'};
+ const send=(body=input,auth=identity)=>route({req:{method:'POST'},path:'/v1/devos/project/message',body,identity:auth});
+ assert.equal((await send()).status,200);assert.equal(calls[0].name,'h205f22_project_message_v1');
+ assert.equal(calls[0].args.p_device_id,identity.device_id);assert.equal(calls[0].args.p_workspace_id,workspace);
+ for(const changed of [{device_id:id},{text:'😀'.repeat(1025)},{recipient_agent_id:'other'},{claim_id:0},{text:'   '}])assert.equal((await send({...input,...changed})).status,400);
+ assert.equal((await send(input,{...identity,admin_ready:false})).status,403);
+ wrong=true;assert.equal((await send()).status,409);
+});

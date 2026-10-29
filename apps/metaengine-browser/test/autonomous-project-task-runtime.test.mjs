@@ -684,3 +684,25 @@ test('a bound rejected native review is a blocker rather than endless child wait
  assert.equal(result.waiting,false);assert.equal(result.failed,true);assert.equal(result.reason,'NATIVE_REVIEW_REJECTED');
  assert.deepEqual(f.provider.read(),before,'observation itself must not retry, complete or release child custody');
 });
+
+test('browser message journals one request across lost ACK and refuses changed payload or false read acknowledgement',async t=>{
+ const f=await fixture(t),original=f.provider.request;let calls=0,saved=null,lose=true,wrong=false;
+ f.provider.request=async input=>{
+  if(!input.path.endsWith('/message'))return original(input);
+  calls++;const b=input.body;
+  const receipt={schema:'metaengine.devos.project-message.v1',project_id:projectId,request_id:b.request_id,sender_task_id:b.task_id,
+   recipient_task_id:'33333333-3333-4333-8333-333333333333',recipient_agent_id:b.recipient_agent_id,seq:1,stored:true,replayed:Boolean(saved),
+   read_by_recipient_proven:wrong,authority_effect:false,automatic_retry_allowed:false};
+  if(saved)assert.deepEqual(b,saved);else saved=structuredClone(b);
+  if(lose){lose=false;throw Error('fixture_lost_message_ack');}return receipt;
+ };
+ const message={request_id:'fixture:message:one',action:'PROJECT_MESSAGE',payload:{recipient_agent_id:'agent_native-peer-001',text:'First  message\nSecond line'}};
+ const send=request=>f.runtime.serveToolRequests({lease:rootTask(),requests:[request]});
+ await assert.rejects(send(message),/fixture_lost_message_ack/);
+ const [recovered]=await send(message);assert.equal(JSON.parse(recovered.summary).stored,true);assert.equal(JSON.parse(recovered.summary).read_by_recipient_proven,false);
+ assert.equal(calls,2);await send(message);assert.equal(calls,2);
+ await assert.rejects(send({...message,payload:{...message.payload,text:'Changed'}}));assert.equal(calls,2);
+ saved=null;wrong=true;await assert.rejects(send({...message,request_id:'fixture:message:two'}),/message_readback_invalid/);
+ for(const payload of [{...message.payload,text:'😀'.repeat(1025)},{...message.payload,authority_effect:true},{...message.payload,recipient_agent_id:'other'}])
+  await assert.rejects(send({...message,payload}),/message_request_invalid/);
+});

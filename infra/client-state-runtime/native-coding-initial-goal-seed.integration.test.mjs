@@ -320,6 +320,10 @@ test('private initial native goal admission is atomic and preserves the W30 auth
   await sql.begin(tx=>tx.unsafe(reviewUpgrade));await sql.begin(tx=>tx.unsafe(reviewUpgrade));
   const messageUpgrade=await fs.readFile(new URL('./native-coding-chat-messages-v1.sql',import.meta.url),'utf8');
   await sql.begin(tx=>tx.unsafe(messageUpgrade));await sql.begin(tx=>tx.unsafe(messageUpgrade));
+  const browserMessageUpgrade=await fs.readFile(new URL('./browser-project-messages-v1.sql',import.meta.url),'utf8');
+  await sql.begin(tx=>tx.unsafe(browserMessageUpgrade));await sql.begin(tx=>tx.unsafe(browserMessageUpgrade));
+  await assert.rejects(sql.begin(async tx=>{await tx.unsafe('alter function public.h205f22_project_message_v1(uuid,uuid,uuid,bigint,bigint,uuid,text,text,uuid,text,bigint) stable');
+    await tx.unsafe(browserMessageUpgrade);}),/PROJECT_MESSAGE_BODY_REQUIRES_REVIEW/);
   await t.test('protected chat-led profile admits a browser planner and native permits, never a CLI planner',async()=>{
    const f=await fixture({chatLed:true}),service=await createNativeCodingHostSeedService(f.options);
    try{
@@ -378,6 +382,21 @@ test('private initial native goal admission is atomic and preserves the W30 auth
    let messageReceipt;
    const pair=await completeChatNativePair({sql,fixture:f,writerPermitId:selected,onRunning:async({run,permit})=>{
     if(permit.role!=='IMPLEMENTER')return;
+    const browserId=randomUUID(),browserText='Review the failing test first.  Preserve this spacing. 😀';
+    const browserSend=(request=browserId,text=browserText,recipient=permit.agent_id,claim=lease.claim_id)=>sql.unsafe(
+      'select public.h205f22_project_message_v1($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1) as value',
+      [f.profile.workspace_id,admitted.project_id,lease.task_id,claim,lease.lease_generation,request,recipient,text,f.profile.device_id,f.profile.client_id]);
+    const [storedBrowser]=await browserSend();
+    assert.equal(storedBrowser.value.stored,true);assert.equal(storedBrowser.value.replayed,false);
+    assert.equal(storedBrowser.value.recipient_task_id,(await sql.unsafe('select task_id from destruktion_meta.native_coding_job_registration_h205f22 where run_id=$1',[run]))[0].task_id);
+    assert.equal(storedBrowser.value.read_by_recipient_proven,false);
+    const [replayedBrowser]=await browserSend();assert.equal(replayedBrowser.value.replayed,true);assert.equal(replayedBrowser.value.seq,storedBrowser.value.seq);
+    await assert.rejects(browserSend(browserId,'Different body'),/PROJECT_MESSAGE_REQUEST_COLLISION/);
+    await assert.rejects(browserSend(randomUUID(),browserText,'agent_foreign-peer-001'),/PROJECT_MESSAGE_RECIPIENT_NOT_UNIQUE/);
+    await assert.rejects(browserSend(randomUUID(),browserText,permit.agent_id,Number(lease.claim_id)+9999),/PROJECT_PARENT_CLAIM_FENCED/);
+    await assert.rejects(browserSend(randomUUID(),'😀'.repeat(1025)),/PROJECT_MESSAGE_REQUEST_INVALID/);
+    const [event]=await sql.unsafe('select content from destruktion_meta.project_event_h205f22 where project_id=$1 and seq=$2',[admitted.project_id,storedBrowser.value.seq]);
+    assert.equal(event.content.message,browserText);
     const id=randomUUID(),body='Please clarify the next bounded step. This message is project data, not execution authority.';
     const send=()=>sql.unsafe('select destruktion_meta.native_coding_agent_message_v1($1,$2,$3,$4) as value',[run,id,agent,body]);
     await assert.rejects(sql.unsafe('select destruktion_meta.native_coding_agent_message_v1($1,$2,$3,$4)',[run,randomUUID(),'agent_foreign-chat-001','Not a project peer']),/recipient_not_unique/);
