@@ -3,6 +3,14 @@ name: Windows Checkpoint Reconciliation Source Qualification
 on:
   pull_request:
     paths:
+      - 'apps/metaengine-browser/src/client-native-coding-goal.mjs'
+      - 'apps/metaengine-browser/test/client-native-coding-goal.test.mjs'
+      - 'apps/metaengine-browser/src/agent-resource-admission.mjs'
+      - 'apps/metaengine-browser/test/native-resource-recovery.test.mjs'
+      - 'apps/metaengine-browser/src/managed-task-project-runtime.mjs'
+      - 'apps/metaengine-browser/src/workspace-git-hardening.mjs'
+      - 'apps/metaengine-browser/test/managed-project-inventory-case.test.mjs'
+      - 'apps/metaengine-browser/test/managed-task-project-runtime.test.mjs'
       - 'apps/metaengine-browser/src/native-coding-*.mjs'
       - 'apps/metaengine-browser/src/autonomous-project-*.mjs'
       - 'apps/metaengine-browser/src/devos-native-task-cycle*.mjs'
@@ -159,6 +167,14 @@ jobs:
           // Use the installed Git launcher verified by checkout; internal toolchain directories changed in Git 2.56.
           const executable=await fs.realpath('C:/Program Files/Git/bin/git.exe');assert.ok((await fs.stat(executable)).isFile());
           const component=[
+            'infra/client-state-runtime/native-coding-host-seed-binding.test.mjs',
+            'infra/client-state-runtime/native-coding-host-seed-service.test.mjs',
+            'infra/client-state-runtime/native-coding-host-os-scope.test.mjs',
+            'infra/client-state-runtime/native-coding-host-transaction-scope.test.mjs',
+            'apps/metaengine-browser/test/client-native-coding-goal.test.mjs',
+            'apps/metaengine-browser/test/native-resource-recovery.test.mjs',
+            'apps/metaengine-browser/test/managed-project-inventory-case.test.mjs',
+            'apps/metaengine-browser/test/managed-task-project-runtime.test.mjs',
             'infra/client-state-runtime/windows-qualification-registration.test.mjs',
             'apps/metaengine-browser/test/agent-toolbelt.test.mjs',
             'apps/metaengine-browser/test/agent-tool-protocol-malformed.test.mjs',
@@ -186,6 +202,15 @@ jobs:
             'infra/client-state-runtime/browser-parent-message-wake.pg17.test.mjs',
           ];
           const componentRequired=[
+            'cancellation after a seed effect suppresses the late response without replay',
+            'deadline expiring during catalog read suppresses stale readiness',
+            'failed native batch joins an already started sibling before rejecting',
+            'failed common physical read does not abandon its active SQL transaction reader',
+            'interrupted native preparation cannot silently route a new goal to Browser',
+            'inaccessible or aliased native setup marker cannot authorize Browser fallback',
+            'default pool holds under memory pressure and recovers parallel capacity without reconstruction',
+            'actual managed inventory preserves verified Windows case equivalence during lock and realpath readback',
+            'managed inventory does not case-fold distinct Linux paths',
             'cancelled Git proof launches no new read and an in-flight Git child is joined before rejection',
             'expired or cancelled private rejection requests perform no database or physical read',
             'a rejected pair has separately verified retained bytes, never an accepted checkpoint or repair permission',
@@ -205,6 +230,10 @@ jobs:
             'existing cycle suspends parent and child with one slot, then exact completion and restored receipts unwind without Send replay',
           ];
           const nativeRequired=[
+            'profile preparation is atomic, immutable and never publishes execution authority',
+            'profile preparation cancellation rolls back before commit and preserves committed identity after lost response',
+            'protected operator publication refuses changed pins, missing ACL and changed physical evidence',
+            'interrupted selector staging never publishes partial bytes and can retry the same registered profile',
             'rejected pair is verified through actual Host SQL without creating a checkpoint',
             'native PG17 resumes a message-addressed parent while child work is still open',
             'private initial native goal admission is atomic and preserves the W30 authority boundaries',

@@ -8,3 +8,11 @@ export function assertNativeCodingHostRequestOpen(context) {
     }
   }
 }
+
+// Join all started reads before releasing transaction lifetime. No retries.
+export async function joinNativeCodingHostReads(reads) {
+ const outcomes=await Promise.allSettled(reads);
+ const failed=outcomes.find(outcome=>outcome.status==='rejected');
+ if(failed)throw failed.reason;
+ return outcomes.map(outcome=>outcome.value);
+}

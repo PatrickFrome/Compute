@@ -36,8 +36,18 @@ export async function readClientGoalSubmissionMode({readSummary,lstat=fs.lstat,r
   const summary=readSummary?.();
   if(!summary?.status_file)return {...base,kind:'UNAVAILABLE',state:'HOLD',reason:'OWNED_RUNTIME_HOST_UNAVAILABLE'};
   let file;try{file=await lstat(path.join(path.dirname(summary.status_file),'native-coding-seed-operator-v1.json'));}
-  catch(error){if(error?.code==='ENOENT')return {...base,kind:'BROWSER',state:'HOST_VERIFICATION_REQUIRED',reason:null};
-    return {...base,kind:'UNAVAILABLE',state:'HOLD',reason:'NATIVE_PROFILE_PRESENCE_UNAVAILABLE'};}
+  catch(error){
+    if(error?.code==='ENOENT'){
+      // An interrupted native setup must not switch the executor implicitly.
+      try{await lstat(path.join(path.dirname(summary.status_file),'native-coding-operator-v1.json'));}
+      catch(operatorError){
+        if(operatorError?.code==='ENOENT')return {...base,kind:'BROWSER',state:'HOST_VERIFICATION_REQUIRED',reason:null};
+        return {...base,kind:'UNAVAILABLE',state:'HOLD',reason:'NATIVE_PROFILE_PRESENCE_UNAVAILABLE'};
+      }
+      return {...base,kind:'NATIVE_CODING',state:'HOLD',reason:'NATIVE_PROFILE_PREPARATION_REQUIRED'};
+    }
+    return {...base,kind:'UNAVAILABLE',state:'HOLD',reason:'NATIVE_PROFILE_PRESENCE_UNAVAILABLE'};
+  }
   // Presence selects a route, never grants admission. Malformed/protected data
   // remains a native HOLD; it cannot silently downgrade into the browser path.
   if(!file.isFile()||file.isSymbolicLink()||file.nlink!==1)return {...base,kind:'NATIVE_CODING',state:'HOLD',reason:'NATIVE_PROFILE_NOT_REGULAR_FILE'};

@@ -16,7 +16,8 @@ export function readAgentResourceAdmission({freeMemory=os.freemem(),totalMemory=
 }
 
 export function defaultNativePhysicalSlotBudget() {
-  // A zero-capacity observation delays starts; the retained pool still needs
-  // a positive capacity to represent its receipts and observe future recovery.
-  return Math.max(1,readAgentResourceAdmission().physical_parallelism);
+  // Memory pressure is observed at dispatch, not frozen into the startup ceiling.
+  const parallelism=os.availableParallelism();
+  if(!Number.isSafeInteger(parallelism)||parallelism<1)throw Error('agent_resource_observation_invalid');
+  return parallelism;
 }

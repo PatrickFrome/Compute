@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { createWorkspaceReservation, recordWorkspaceMaterializationReadback } from './workspace-manager.mjs';
-import { planLockedWorkspaceMaterialization, planWorkspaceInventory, verifyWorkspaceInventory, parseWorktreePorcelainZ } from './workspace-git-hardening.mjs';
+import { planLockedWorkspaceMaterialization, planWorkspaceInventory, verifyWorkspaceInventory, parseWorktreePorcelainZ, samePhysicalWorkspacePath } from './workspace-git-hardening.mjs';
 
 export const MANAGED_TASK_PROJECT_RUNTIME_SCHEMA = 'metaengine.devos.managed-task-project-runtime.v1';
 const IDEMPOTENCY_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{3,127}$/;
@@ -166,9 +166,9 @@ export function createManagedTaskProjectRuntime({ executePlan, journal, validate
       const result = await executePlan(planWorkspaceInventory(reservation));
       const stdout = result?.stdout ?? result ?? '';
       const proof = verifyWorkspaceInventory(reservation, stdout);
-      const record = parseWorktreePorcelainZ(stdout).find(row => path.resolve(String(row.worktree || '')) === path.resolve(reservation.worktree_path));
+      const record = parseWorktreePorcelainZ(stdout).find(row => samePhysicalWorkspacePath(row.worktree, reservation.worktree_path));
       if (record?.locked !== `METAENGINE:${reservation.workspace_id}:task:${reservation.task_id}:lease:${reservation.lease_generation}`) throw new Error('managed_project_lock_identity_mismatch');
-      if (await fs.realpath(reservation.worktree_path) !== reservation.worktree_path) throw new Error('managed_project_realpath_mismatch');
+      if (!samePhysicalWorkspacePath(await fs.realpath(reservation.worktree_path), reservation.worktree_path)) throw new Error('managed_project_realpath_mismatch');
       return proof;
     } catch (error) {
       if (String(error?.message || error) === 'workspace_git_inventory_path_missing') return null;

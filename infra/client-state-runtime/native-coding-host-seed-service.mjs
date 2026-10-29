@@ -64,6 +64,45 @@ async function durable(file,value){
  const h=await fs.open(file,'wx',0o600);try{await h.writeFile(json(value)+'\n');await h.sync();}finally{await h.close();}
 }
 
+export async function observeNativeCodingSeedProfile({profile:p,profileSha256,readNativeScope,revalidate,requestContext}={}){
+  if(typeof readNativeScope!=='function'||typeof revalidate!=='function'||!Array.isArray(p?.agents)||p.agents.length<2||!HASH.test(profileSha256||''))fail('private_dependencies_required');
+  assertNativeCodingHostRequestOpen(requestContext);
+  let common=null;const agents=[],started=Date.now();
+  // Protected roster has no count ceiling; only verified identities are admitted.
+  let observations;
+  if(typeof readNativeScope.batch==='function'){
+   // The native scope implementation shares only fresh common observations
+   // inside this invocation. Each returned role remains independently checked.
+   observations=await readNativeScope.batch(p.agents.map(a=>({...p,...a})),true,undefined,requestContext);
+  }else{
+   observations=new Array(p.agents.length);let cursor=0,failed=false;
+   const workers=await Promise.allSettled(Array.from({length:Math.min(4,p.agents.length)},async()=>{
+    try{while(!failed&&cursor<p.agents.length){assertNativeCodingHostRequestOpen(requestContext);const i=cursor++,a=p.agents[i];observations[i]=await readNativeScope({...p,...a},true,undefined,requestContext);}}
+    catch(error){failed=true;throw error;}
+   }));
+   const rejected=workers.find(worker=>worker.status==='rejected');if(rejected)throw rejected.reason;
+  }
+  assertNativeCodingHostRequestOpen(requestContext);
+  if(!Array.isArray(observations)||observations.length!==p.agents.length)fail('physical_scope_changed');
+  for(let i=0;i<p.agents.length;i++){
+   const a=p.agents[i],actual=observations[i];
+   if(!actual||!same(actual.artifact,p.artifact)||!same(actual.postgres,p.postgres)||actual.user_sid!==p.user_sid
+    ||!same(actual.worktree,a.worktree)||!same(actual.sandbox,a.sandbox))fail('physical_scope_changed');
+   processIdentity(actual.host_process);processIdentity(actual.postgres.postmaster);
+   const now={host_process:actual.host_process,user_sid:actual.user_sid,artifact:actual.artifact,postgres:actual.postgres};
+   if(common&&!same(common,now))fail('physical_scope_changed');common=now;
+   agents.push({provider_id:a.provider_id,worktree:actual.worktree,sandbox:actual.sandbox});
+  }
+  if(Date.now()-started>25000)fail('observation_window_exceeded');
+  await revalidate();
+  assertNativeCodingHostRequestOpen(requestContext);
+  // Profile/ACL revalidation consumes freshness too. Do not re-date physical
+  // observations after those reads or let a slow revalidation admit stale data.
+  if(Date.now()-started>25000)fail('observation_window_exceeded');
+  return {schema:'metaengine.native-coding.seed-observation.v1',profile_id:p.profile_id,profile_sha256:profileSha256,
+   observed_at:new Date(started).toISOString(),...common,agents,installed_execution_proven:false,...flags};
+ }
+
 /** Private Host only. The UI supplies a UUID/objective, never profile, identity,
  * DSN, path, permit, SQL or an evidence object. All readers are private bindings.
  * Missing operator/profile is an inactive capability, never implicit consent. */
@@ -153,41 +192,8 @@ export async function createNativeCodingHostSeedService({sql,stateDirectory,read
   if(!same(await saved(rejectionFile),rejection))fail('rejection_changed');
   return {state:'REJECTED_BEFORE_DISPATCH',admission:null,rejection,...flags};
  }
- async function observation(p,requestContext){
-  assertNativeCodingHostRequestOpen(requestContext);
-  let common=null;const agents=[],started=Date.now();
-  // Protected roster has no count ceiling; only verified identities are admitted.
-  let observations;
-  if(typeof readNativeScope.batch==='function'){
-   // The native scope implementation shares only fresh common observations
-   // inside this invocation. Each returned role remains independently checked.
-   observations=await readNativeScope.batch(p.agents.map(a=>({...p,...a})),true,undefined,requestContext);
-  }else{
-   observations=new Array(p.agents.length);let cursor=0;
-   await Promise.all(Array.from({length:Math.min(4,p.agents.length)},async()=>{
-    while(cursor<p.agents.length){assertNativeCodingHostRequestOpen(requestContext);const i=cursor++,a=p.agents[i];observations[i]=await readNativeScope({...p,...a},true,undefined,requestContext);}
-   }));
-  }
-  assertNativeCodingHostRequestOpen(requestContext);
-  if(!Array.isArray(observations)||observations.length!==p.agents.length)fail('physical_scope_changed');
-  for(let i=0;i<p.agents.length;i++){
-   const a=p.agents[i],actual=observations[i];
-   if(!actual||!same(actual.artifact,p.artifact)||!same(actual.postgres,p.postgres)||actual.user_sid!==p.user_sid
-    ||!same(actual.worktree,a.worktree)||!same(actual.sandbox,a.sandbox))fail('physical_scope_changed');
-   processIdentity(actual.host_process);processIdentity(actual.postgres.postmaster);
-   const now={host_process:actual.host_process,user_sid:actual.user_sid,artifact:actual.artifact,postgres:actual.postgres};
-   if(common&&!same(common,now))fail('physical_scope_changed');common=now;
-   agents.push({provider_id:a.provider_id,worktree:actual.worktree,sandbox:actual.sandbox});
-  }
-  if(Date.now()-started>25000)fail('observation_window_exceeded');
-  await profile(true,requestContext);
-  assertNativeCodingHostRequestOpen(requestContext);
-  // Profile/ACL revalidation consumes freshness too. Do not re-date physical
-  // observations after those reads or let a slow revalidation admit stale data.
-  if(Date.now()-started>25000)fail('observation_window_exceeded');
-  return {schema:'metaengine.native-coding.seed-observation.v1',profile_id:pins.profile_id,profile_sha256:pins.profile_sha256,
-   observed_at:new Date(started).toISOString(),...common,agents,installed_execution_proven:false,...flags};
- }
+ const observation=(p,requestContext)=>observeNativeCodingSeedProfile({profile:p,profileSha256:pins.profile_sha256,
+  readNativeScope,revalidate:()=>profile(true,requestContext),requestContext});
  async function saved(file){try{return(await readProtectedJson(file,{maximumBytes:16384})).value;}catch(e){if(e.code==='ENOENT')return null;throw e;}}
  async function seed(raw,requestContext){
   assertNativeCodingHostRequestOpen(requestContext);

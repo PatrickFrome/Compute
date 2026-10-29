@@ -1,4 +1,6 @@
 import test from 'node:test';
+import {prepareNativeCodingSeedProfile,readPreparedNativeCodingSeedProfile} from './native-coding-seed-profile-preparation.mjs';
+import {publishNativeCodingSeedOperator} from './native-coding-seed-operator-publication.mjs';
 import {completeChatNativePair} from './test/native-coding-chat-pair-pg-fixture.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -110,11 +112,11 @@ test('private initial native goal admission is atomic and preserves the W30 auth
    await sql.unsafe('insert into public.compute_fabric_a2_browser_supervisor_state_h205f22(workspace_id,client_id,state)values($1,$2,$3)',[profile.workspace_id,profile.client_id,sql.json(supervisor)]);
    await sql.unsafe('insert into public.qa_native_environment values($1,true)',[profile.workspace_id]);
    const profileText=canonical(profile),profileSha=hash(profileText);
-   await sql.unsafe(`insert into destruktion_meta.native_coding_seed_profile_h205f22(profile_id,profile,canonical_profile,profile_sha256)values($1,$2::text::jsonb,$2::text,$3)`,
-    [profile.profile_id,profileText,profileSha]);
+   const prepared=await prepareNativeCodingSeedProfile({sql,profile});assert.equal(prepared.profile_sha256,profileSha);assert.equal(prepared.operator_pin_published,false);
+   assert.deepEqual(await prepareNativeCodingSeedProfile({sql,profile}),prepared);
    const stateDirectory=path.join(directory,'host-state-'+profile.profile_id);await fs.mkdir(stateDirectory);
    const operator={schema:'metaengine.native-coding.seed-operator.v1',profile_id:profile.profile_id,profile_sha256:profileSha};
-   const operatorPath=path.join(stateDirectory,'native-coding-seed-operator-v1.json');await fs.writeFile(operatorPath,canonical(operator)+'\n');
+   const operatorPath=path.join(stateDirectory,'native-coding-seed-operator-v1.json');
    const device={device_id:profile.device_id,client_id:profile.client_id,key_fingerprint_sha256:profile.device_key_fingerprint_sha256,admin_grant_epoch:1};
    const input={request_id:randomUUID(),objective:'Implement useful step one, request independent review, then continue step two'};
    const observation=()=>({schema:'metaengine.native-coding.seed-observation.v1',profile_id:profile.profile_id,profile_sha256:profileSha,observed_at:new Date().toISOString(),
@@ -126,6 +128,9 @@ test('private initial native goal admission is atomic and preserves the W30 auth
     readCurrentDevice:async()=>structuredClone(device),readNativeScope:async permit=>({host_process:structuredClone(generated.payload().host_process),
      user_sid:profile.user_sid,artifact:structuredClone(profile.artifact),postgres:structuredClone(profile.postgres),worktree:structuredClone(permit.worktree),sandbox:structuredClone(permit.sandbox)}),
     protectStorage:async()=>{},verifyStorage:async()=>({fixture:true,windows_acl_qualified:false})};
+   const published=await publishNativeCodingSeedOperator({sql,stateDirectory,profile_id:profile.profile_id,profile_sha256:profileSha,
+    readNativeScope:options.readNativeScope,verifyStorage:async()=>({owner_dacl_verified:true,generated_fixture:true})});
+   assert.equal(published.operator_pin_published,true);assert.equal(published.physical_execution_proven,false);
    return {generated,profile,input,observation,options,stateDirectory,device,profileSha};
   }
   await t.test('API login has no profile/seed creator or private table grant',async()=>{
@@ -136,6 +141,56 @@ test('private initial native goal admission is atomic and preserves the W30 auth
     const [r]=await sql.unsafe(`select has_function_privilege('service_role','destruktion_meta.native_coding_seed_goal_v1(uuid,uuid,text,jsonb,text,text)','execute') as effect,
      has_table_privilege('service_role','destruktion_meta.native_coding_seed_profile_h205f22','insert') as creator`);assert.deepEqual(r,{effect:false,creator:false});
    }finally{await api.end({timeout:5});}passed++;
+  });
+  await t.test('profile preparation is atomic, immutable and never publishes execution authority',async()=>{
+   const f=await fixture(),before=await count(f);
+   await assert.rejects(prepareNativeCodingSeedProfile({sql,profile:{...f.profile,branch_name:'work/changed'}}),/profile_readback_mismatch/);
+   const invalid={...structuredClone(f.profile),profile_id:randomUUID()};invalid.agents[1].role='IMPLEMENTER';
+   await assert.rejects(prepareNativeCodingSeedProfile({sql,profile:invalid}),/seed_agent_invalid|independent_pair_required/);
+   assert.equal((await sql.unsafe('select count(*)::int as n from destruktion_meta.native_coding_seed_profile_h205f22 where profile_id=$1',[invalid.profile_id]))[0].n,0);
+   const controller=new AbortController();controller.abort();await assert.rejects(prepareNativeCodingSeedProfile({sql,profile:f.profile,requestContext:{signal:controller.signal}}),/request_cancelled/);
+   const api=postgres({host:'127.0.0.1',port,user:'seed_api',database:'postgres',max:1,onnotice:()=>{}});
+   try{await assert.rejects(prepareNativeCodingSeedProfile({sql:api,profile:f.profile}),/state_owner_required/);}finally{await api.end({timeout:5});}
+   await sql.unsafe('update destruktion_meta.native_coding_seed_profile_h205f22 set revoked_at=clock_timestamp() where profile_id=$1',[f.profile.profile_id]);
+   await assert.rejects(prepareNativeCodingSeedProfile({sql,profile:f.profile}),/profile_unavailable/);assert.deepEqual(await count(f),before);passed++;
+  });
+  await t.test('profile preparation cancellation rolls back before commit and preserves committed identity after lost response',async()=>{
+   const f=await fixture(),profile={...structuredClone(f.profile),profile_id:randomUUID()},controller=new AbortController();
+   const during={begin:(options,fn)=>sql.begin(options,tx=>fn({unsafe:async(...args)=>{const rows=await tx.unsafe(...args);if(args[0].includes('insert into destruktion_meta.native_coding_seed_profile'))controller.abort();return rows;}}))};
+   await assert.rejects(prepareNativeCodingSeedProfile({sql:during,profile,requestContext:{signal:controller.signal}}),/request_cancelled/);
+   const rows=()=>sql.unsafe('select count(*)::int as n from destruktion_meta.native_coding_seed_profile_h205f22 where profile_id=$1',[profile.profile_id]);assert.equal((await rows())[0].n,0);
+   const late=new AbortController();let transactions=0;const after={begin:async(...args)=>{transactions++;const value=await sql.begin(...args);late.abort();return value;}};
+   await assert.rejects(prepareNativeCodingSeedProfile({sql:after,profile,requestContext:{signal:late.signal}}),/request_cancelled/);assert.equal(transactions,1);assert.equal((await rows())[0].n,1);
+   const observedSql={unsafe:async(...args)=>{assert.match(args[0],/^select /);return sql.unsafe(...args);}};
+   const recovered=await readPreparedNativeCodingSeedProfile({sql:observedSql,profile_id:profile.profile_id,profile_sha256:sha(profile)});assert.equal(recovered.readback_only,true);
+   await assert.rejects(readPreparedNativeCodingSeedProfile({sql:observedSql,profile_id:profile.profile_id,profile_sha256:'0'.repeat(64)}),/profile_readback_mismatch/);
+   assert.equal(recovered.profile_id,profile.profile_id);assert.equal(recovered.operator_pin_published,false);assert.equal((await rows())[0].n,1);
+   assert.deepEqual(await count(f),{seeds:0,projects:0,tasks:0,permits:0,browser_goals:0});passed++;
+  });
+  await t.test('protected operator publication refuses changed pins, missing ACL and changed physical evidence',async()=>{
+   const f=await fixture(),file=path.join(f.stateDirectory,'native-coding-seed-operator-v1.json'),bytes=await fs.readFile(file);
+   const options={sql,stateDirectory:f.stateDirectory,profile_id:f.profile.profile_id,profile_sha256:f.profileSha,readNativeScope:f.options.readNativeScope,verifyStorage:async()=>({owner_dacl_verified:true,generated_fixture:true})};
+   assert.equal((await publishNativeCodingSeedOperator(options)).existing_pin,true);
+   const other={...structuredClone(f.profile),profile_id:randomUUID()};await prepareNativeCodingSeedProfile({sql,profile:other});
+   await assert.rejects(publishNativeCodingSeedOperator({...options,profile_id:other.profile_id,profile_sha256:sha(other)}),/operator_conflict/);assert.deepEqual(await fs.readFile(file),bytes);
+   const fresh=await fs.mkdtemp(path.join(directory,'unpublished-')),freshFile=path.join(fresh,'native-coding-seed-operator-v1.json');
+   await assert.rejects(publishNativeCodingSeedOperator({...options,stateDirectory:fresh,verifyStorage:async()=>({owner_dacl_verified:false})}),/directory_unverified/);await assert.rejects(fs.stat(freshFile),{code:'ENOENT'});
+   await assert.rejects(publishNativeCodingSeedOperator({...options,stateDirectory:fresh,readNativeScope:async permit=>({...await f.options.readNativeScope(permit),user_sid:'S-1-5-21-999'})}),/physical_scope_changed/);await assert.rejects(fs.stat(freshFile),{code:'ENOENT'});
+   const controller=new AbortController();controller.abort();await assert.rejects(publishNativeCodingSeedOperator({...options,stateDirectory:fresh,requestContext:{signal:controller.signal}}),/request_cancelled/);await assert.rejects(fs.stat(freshFile),{code:'ENOENT'});
+   await fs.writeFile(freshFile,'partial-crash');await assert.rejects(publishNativeCodingSeedOperator({...options,stateDirectory:fresh}),/private_json_invalid/);assert.equal(await fs.readFile(freshFile,'utf8'),'partial-crash');
+   assert.deepEqual(await count(f),{seeds:0,projects:0,tasks:0,permits:0,browser_goals:0});passed++;
+  });
+  await t.test('interrupted selector staging never publishes partial bytes and can retry the same registered profile',async()=>{
+   const f=await fixture(),root=await fs.mkdtemp(path.join(directory,'atomic-selector-'));
+   const options={sql,stateDirectory:root,profile_id:f.profile.profile_id,profile_sha256:f.profileSha,readNativeScope:f.options.readNativeScope,verifyStorage:async()=>({owner_dacl_verified:true,generated_fixture:true})};
+   const file=path.join(root,'native-coding-seed-operator-v1.json'),originalOpen=fs.open;let intercepted=false;
+   fs.open=async(target,...args)=>{const handle=await originalOpen(target,...args);if(path.dirname(String(target))!==root||!path.basename(String(target)).startsWith('.native-seed-selector-'))return handle;intercepted=true;
+    return {writeFile:async()=>{await handle.writeFile('{partial');throw Error('GENERATED_STAGING_FAILURE');},sync:()=>handle.sync(),close:()=>handle.close()};};
+   try{await assert.rejects(publishNativeCodingSeedOperator(options),/GENERATED_STAGING_FAILURE/);}finally{fs.open=originalOpen;}
+   assert.equal(intercepted,true);await assert.rejects(fs.stat(file),{code:'ENOENT'});assert.deepEqual(await fs.readdir(root),[]);
+   const published=await publishNativeCodingSeedOperator(options);assert.equal(published.operator_pin_published,true);assert.equal(published.existing_pin,false);assert.equal((await fs.stat(file)).nlink,1);
+   assert.deepEqual(JSON.parse(await fs.readFile(file,'utf8')),{schema:'metaengine.native-coding.seed-operator.v1',profile_id:f.profile.profile_id,profile_sha256:f.profileSha});
+   assert.deepEqual(await count(f),{seeds:0,projects:0,tasks:0,permits:0,browser_goals:0});passed++;
   });
   await t.test('Host seeds four protected providers and one native root atomically, no fake meta-plan',async()=>{
    const f=await fixture(),service=await createNativeCodingHostSeedService(f.options),reply=await service.SEED_GOAL(f.input),v=reply.admission.receipt;
@@ -507,7 +562,7 @@ test('private initial native goal admission is atomic and preserves the W30 auth
    const f=await fixture({chatLed:true}),receipt=(await invoke(f)).receipt;
    assert.equal((await sql.unsafe('select role from destruktion_meta.devos_fleet_task_h205f22 where task_id=$1',[receipt.root_task_id]))[0].role,'PLANNER');passed++;
   });
-  assert.equal(passed,21);
+  assert.equal(passed,25);
   await fs.writeFile(path.join(directory,'receipt.json'),JSON.stringify({schema:'metaengine.native-coding.initial-seed.disposable-qa.v1',state:'PASS',
    postgres_version_num:identity.version,postgres_system_identifier:cluster,port,subtests:passed,migration_sha256:migrationSha,
    source_classification:'REAL_DISPOSABLE_PG_AND_HOST_SERVICE_WITH_GENERATED_ENROLLED_DEVICE_INSTALLED_IMAGE_OS_CANARY_AND_ACL_FIXTURES',

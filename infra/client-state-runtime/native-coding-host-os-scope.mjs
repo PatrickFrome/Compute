@@ -12,7 +12,7 @@ import {readNativeCodingWindowsProcess,readNativeCodingProtectedJson,readNativeC
 import {readNativeCodingOperatorPaths,resolveNativeCodingSandboxPin} from '../../apps/metaengine-browser/src/native-coding-operator-paths.mjs';
 import {readWindowsSandboxHostBoot} from '../../apps/metaengine-browser/src/codex-cli-sandbox-probe.mjs';
 export {readNativeCodingOperatorPaths};
-import {assertNativeCodingHostRequestOpen} from './native-coding-host-request-lifetime.mjs';
+import {assertNativeCodingHostRequestOpen,joinNativeCodingHostReads} from './native-coding-host-request-lifetime.mjs';
 
 const run=promisify(execFile);
 const fail=reason=>{throw new Error('native_coding_host_os_'+reason);};
@@ -46,7 +46,7 @@ export function createNativeCodingHostImageGuard(){
     catch(error){invalid=true;throw error;}};
   return Object.freeze({
     async prepare(paths){if(invalid)fail('image_preparation_invalidated');
-      await Promise.all([...new Set(paths)].map(async file=>{
+      await joinNativeCodingHostReads([...new Set(paths)].map(async file=>{
         if(!files.has(file)){const entry={pending:null,inventory:null,sha256:null};
           entry.pending=Promise.resolve().then(async()=>{const before=await inventory(file),sha256=await fileHash(file);
             if(before!==await inventory(file))fail('image_changed_during_preparation');entry.inventory=before;entry.sha256=sha256;})
@@ -90,7 +90,7 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
   }
   async function readNativeScope(permit,includeSandbox=true,reader=sql,context) {
     assertNativeCodingHostRequestOpen(context);
-    const [pg,host]=await Promise.all([postgres(reader,context),readNativeCodingWindowsProcess(parentPid,{signal:context?.signal})]);
+    const [pg,host]=await joinNativeCodingHostReads([postgres(reader,context),readNativeCodingWindowsProcess(parentPid,{signal:context?.signal})]);
     assertNativeCodingHostRequestOpen(context);
     if(permit===null) return {postgres:pg,host_process:publicProcess(host),user_sid:host.user_sid};
     const operator=await readNativeCodingOperatorPaths(config.state_directory,{signal:context?.signal});
@@ -103,11 +103,11 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
   async function readNativeScopeBatch(permits,includeSandbox=true,reader=sql,context) {
     assertNativeCodingHostRequestOpen(context);
     if(!Array.isArray(permits)||permits.length<1||permits.some(p=>!p||typeof p!=='object'))fail('scope_batch_invalid');
-    const [pg,host,operator,boot]=await Promise.all([postgres(reader,context),readNativeCodingWindowsProcess(parentPid,{signal:context?.signal}),
+    const [pg,host,operator,boot]=await joinNativeCodingHostReads([postgres(reader,context),readNativeCodingWindowsProcess(parentPid,{signal:context?.signal}),
       readNativeCodingOperatorPaths(config.state_directory,{signal:context?.signal}),includeSandbox?readWindowsSandboxHostBoot({signal:context?.signal}):null]);
     assertNativeCodingHostRequestOpen(context);
     const common={pg,host,operator,boot},results=new Array(permits.length);let cursor=0,failed=false;
-    await Promise.all(Array.from({length:Math.min(4,permits.length)},async()=>{
+    await joinNativeCodingHostReads(Array.from({length:Math.min(4,permits.length)},async()=>{
       while(!failed&&cursor<permits.length){assertNativeCodingHostRequestOpen(context);const i=cursor++;
         try{results[i]=await readScopeWithCommon(permits[i],includeSandbox,common,context);}catch(error){failed=true;throw error;}
       }
@@ -122,7 +122,7 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
     const expectedBundle=path.join(resources,'client-state-runtime');
     if(!samePath(config.bundle_directory,expectedBundle)) fail('installed_runtime_path_mismatch');
     await image.prepare([host.exe_path,path.join(resources,'app.asar'),operator.cli_executable]);
-    const [exeSha,asarSha,cliSha]=await Promise.all([image.read(host.exe_path),image.read(path.join(resources,'app.asar')),image.read(operator.cli_executable)]);
+    const [exeSha,asarSha,cliSha]=await joinNativeCodingHostReads([image.read(host.exe_path),image.read(path.join(resources,'app.asar')),image.read(operator.cli_executable)]);
     const artifact={installed_exe_sha256:exeSha,
       installed_asar_sha256:asarSha,
       runtime_bundle_sha256:config.expected_bundle_sha256,source_sha:permit.artifact.source_sha,
@@ -137,7 +137,7 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
     pending.child?.stdin?.end();const head=(await pending).stdout.trim();
     assertNativeCodingHostRequestOpen(context);
     const worktree={path:permit.worktree.path,root_identity_sha256,base_sha:head};
-    const unchanged=()=>Promise.all([host.exe_path,path.join(resources,'app.asar'),operator.cli_executable].map(file=>image.read(file)));
+    const unchanged=()=>joinNativeCodingHostReads([host.exe_path,path.join(resources,'app.asar'),operator.cli_executable].map(file=>image.read(file)));
     if(!includeSandbox){await unchanged();assertNativeCodingHostRequestOpen(context);return {...base,artifact,worktree};}
     const sandbox=await readNativeCodingSandboxEvidence({pin:resolveNativeCodingSandboxPin(operator,permit),cliPath:operator.cli_executable,
       worktreePath:permit.worktree.path,role:permit.role,hostProcessId:parentPid,signal:context?.signal,

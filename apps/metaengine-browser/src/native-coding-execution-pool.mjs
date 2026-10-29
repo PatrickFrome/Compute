@@ -1,4 +1,4 @@
-import {defaultNativePhysicalSlotBudget} from './agent-resource-admission.mjs';
+import {defaultNativePhysicalSlotBudget,readAgentResourceAdmission} from './agent-resource-admission.mjs';
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 function keyOf(lease) {
@@ -11,7 +11,7 @@ function keyOf(lease) {
 // heartbeat until completion: freshness and lease observation continue while
 // the bounded physical jobs run. No queue, timer, retry or alternate scheduler.
 export function createNativeCodingExecutionPool({executor,prepareRequest,readPriorExecution,
-  physicalSlotBudget=defaultNativePhysicalSlotBudget(),readResourceAdmission=()=>({physical_start_allowed:true})}={}) {
+  physicalSlotBudget=defaultNativePhysicalSlotBudget(),readResourceAdmission=readAgentResourceAdmission}={}) {
   if(typeof executor?.execute!=='function' || typeof prepareRequest!=='function'
       || typeof readPriorExecution!=='function' || !Number.isSafeInteger(physicalSlotBudget)
       || physicalSlotBudget<1 || typeof readResourceAdmission!=='function') throw new Error('native_coding_pool_dependencies_invalid');

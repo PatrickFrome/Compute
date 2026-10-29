@@ -55,7 +55,7 @@ export function createNativeCodingHostSeedBinding({sql,stateDirectory,readNative
   return context.run(action,checked,async input=>{
    open();assertNativeCodingHostRequestOpen(requestContext);
    const result=await current[action](input,requestContext);
-   open();return result;
+   open();assertNativeCodingHostRequestOpen(requestContext);return result;
   });
  }
  function close(){

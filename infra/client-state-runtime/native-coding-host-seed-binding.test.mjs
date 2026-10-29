@@ -181,3 +181,18 @@ test('already cancelled invocation never calls the authenticated seed operation'
  await assert.rejects(f.binding.operations.SEED_GOAL(await f.request('SEED_GOAL'),{signal:controller.signal}),/request_cancelled/);
  assert.equal(f.seen.calls.length,0);
 });
+
+test('cancellation after a seed effect suppresses the late response without replay',async t=>{
+ const ready=deferred(),entered=deferred();let effects=0;
+ const f=await fixture(t,{createService:(options,service)=>({...service(options),SEED_GOAL:async()=>{effects++;entered.resolve();return ready.promise;}})});
+ await f.binding.prepare();const controller=new AbortController(),packet=await f.request('SEED_GOAL');
+ const pending=f.binding.operations.SEED_GOAL(packet,{signal:controller.signal});await entered.promise;controller.abort();ready.resolve({state:'ADMITTED'});
+ await assert.rejects(pending,/request_cancelled/);assert.equal(effects,1);
+ await assert.rejects(f.binding.operations.SEED_GOAL(packet),/nonce_reused/);assert.equal(effects,1);
+});
+test('deadline expiring during catalog read suppresses stale readiness',async t=>{
+ const ready=deferred(),entered=deferred();
+ const f=await fixture(t,{createService:(options,service)=>({...service(options),LIST_SEEDS:async()=>{entered.resolve();return ready.promise;}})});
+ const context={deadlineAt:Date.now()+30000};const pending=f.binding.operations.LIST_SEEDS(await f.request(),context);
+ await entered.promise;context.deadlineAt=Date.now()-1;ready.resolve(catalog);await assert.rejects(pending,/request_deadline_exceeded/);
+});

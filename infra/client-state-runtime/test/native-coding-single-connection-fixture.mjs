@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import vm from 'node:vm';
-import {assertNativeCodingHostRequestOpen} from '../native-coding-host-request-lifetime.mjs';
+import {assertNativeCodingHostRequestOpen,joinNativeCodingHostReads} from '../native-coding-host-request-lifetime.mjs';
 
 // Generated SQL/OS observers exercise the real private readers. Neither this
 // max:1 pool nor the VM's Windows observations are physical execution proof.
@@ -69,7 +69,7 @@ export async function createPhysicalScopeReaders({sql,permit,host,worktree=permi
     [operator.cli_executable,artifact.cli_executable_sha256]]);
   // vm contexts do not inherit Node's structuredClone host global. Supply the
   // real primitive used by the production reader, without replacing its logic.
-  const scope={assertNativeCodingHostRequestOpen,sql,config,resources,expectedExe,parentPid:currentHost().pid,path,URL,Date,Number,Promise,structuredClone,
+  const scope={assertNativeCodingHostRequestOpen,joinNativeCodingHostReads,sql,config,resources,expectedExe,parentPid:currentHost().pid,path,URL,Date,Number,Promise,structuredClone,
     process:{env:{SystemRoot:'C:/Windows'}},fs:{readFile:async()=>pidText},
     fail:reason=>{throw Error('native_coding_host_os_'+reason);},
     samePath:(a,b)=>path.resolve(a).toLowerCase()===path.resolve(b).toLowerCase(),

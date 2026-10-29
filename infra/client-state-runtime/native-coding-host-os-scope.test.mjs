@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import vm from 'node:vm';
-import {assertNativeCodingHostRequestOpen} from './native-coding-host-request-lifetime.mjs';
+import {assertNativeCodingHostRequestOpen,joinNativeCodingHostReads} from './native-coding-host-request-lifetime.mjs';
 import {createNativeCodingHostImageGuard} from './native-coding-host-os-scope.mjs';
 import {admissionFixture} from '../../apps/metaengine-browser/test/fixtures/native-coding-admission-fixture.mjs';
 
@@ -91,7 +91,7 @@ async function scopeFixture(){
   const sql={unsafe:async()=>{counts.baseReads++;throw Error('EXTRA_BASE_POOL_BORROW');}};
   const fileHashes=new Map([[expectedExe,p.artifact.installed_exe_sha256],[path.join(resources,'app.asar'),p.artifact.installed_asar_sha256],
     [operator.cli_executable,p.artifact.cli_executable_sha256]]);
-  const scope={assertNativeCodingHostRequestOpen,sql,config,resources,expectedExe,parentPid:host.pid,path,URL,Date,Number,Promise,structuredClone,
+  const scope={assertNativeCodingHostRequestOpen,joinNativeCodingHostReads,sql,config,resources,expectedExe,parentPid:host.pid,path,URL,Date,Number,Promise,structuredClone,
     process:{env:{SystemRoot:'C:/Windows'}},fs:{readFile:async()=>pidText},
     fail:reason=>{throw Error('native_coding_host_os_'+reason);},
     samePath:(a,b)=>path.resolve(a).toLowerCase()===path.resolve(b).toLowerCase(),
@@ -205,4 +205,21 @@ test('checkpoint physical reads retain their transaction reader and forward priv
  await readers.readCheckpointScope(p,tx,context);assert.equal(gitCalls,1);const before=counts.transactionReads;
  controller.abort();await assert.rejects(readers.readCheckpointScope(p,tx,context),/request_cancelled/);
  assert.equal(counts.transactionReads,before);assert.equal(gitCalls,1);
+});
+
+test('failed native batch joins an already started sibling before rejecting',async()=>{
+ const {readers,p,tx,scope}=await scopeFixture();let release,enter,settled=false;
+ const blocked=new Promise(resolve=>{release=resolve;}),entered=new Promise(resolve=>{enter=resolve;});
+ const other={...p,provider_id:'blocked-provider',role:'CRITIC'};
+ scope.readNativeCodingSandboxEvidence=async options=>{if(options.role===p.role)throw Error('FIRST_SCOPE_FAILED');enter();await blocked;return structuredClone(p.sandbox);};
+ const outcome=assert.rejects(readers.readNativeScopeBatch([p,other],true,tx),/FIRST_SCOPE_FAILED/).then(()=>{settled=true;});
+ await entered;await new Promise(resolve=>setTimeout(resolve,30));try{assert.equal(settled,false);}finally{release();await outcome;}
+});
+test('failed common physical read does not abandon its active SQL transaction reader',async()=>{
+ const {readers,p,tx,scope}=await scopeFixture();let release,enter,settled=false;
+ const blocked=new Promise(resolve=>{release=resolve;}),entered=new Promise(resolve=>{enter=resolve;});
+ const original=tx.unsafe;tx.unsafe=async(...args)=>{enter();await blocked;return original(...args);};
+ scope.readNativeCodingOperatorPaths=async()=>{throw Error('OPERATOR_READ_FAILED');};
+ const outcome=assert.rejects(readers.readNativeScopeBatch([p],true,tx),/OPERATOR_READ_FAILED/).then(()=>{settled=true;});
+ await entered;await new Promise(resolve=>setTimeout(resolve,30));try{assert.equal(settled,false);}finally{release();await outcome;}
 });

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import ts from 'typescript';
-import { createGoalSubmissionModeObserver } from './goal-submission-mode-observer.mjs';
+import { createGoalSubmissionModeObserver, goalSubmissionModeText } from './goal-submission-mode-observer.mjs';
 
 // Execute the actual callback from GoalComposer. Parsing the TSX keeps these
 // tests coupled to the shipped submit behavior without copying its control flow.
@@ -103,4 +103,14 @@ test('mounted Browser submit sends exactly once after readiness despite a concur
   assert.deepEqual(state.errors, [null]);
   assert.deepEqual(state.pending, [true, false]);
   assert.equal(state.operation.current, null);
+});
+
+
+test('actual composer initial mode label renders before any admission response',()=>{
+ const declarations=composer.body.statements.filter(ts.isVariableStatement).flatMap(s=>[...s.declarationList.declarations]);
+ const initial=declarations.find(d=>ts.isArrayBindingPattern(d.name)&&d.name.elements[0]?.name?.getText(source)==='goalMode');
+ assert.equal(initial.initializer.arguments[0].kind,ts.SyntaxKind.NullKeyword);
+ const text=declarations.find(d=>ts.isIdentifier(d.name)&&d.name.text==='modeText');
+ const expression=ts.transpileModule(`(${text.initializer.getText(source)})`,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
+ const label=vm.runInNewContext(expression,{goalMode:null,goalSubmissionModeText});assert.equal(label.label,'Admission not checked');assert.doesNotMatch(label.label,/Codex CLI|Chat planner/);
 });

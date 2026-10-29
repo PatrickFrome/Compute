@@ -259,3 +259,11 @@ exclusion. Parser/toolbelt tests now run in the Windows component lane. Native
 wake/rejection/cancellation requirements and zero native skips remain enforced.
 The exact component list passes locally:300total299pass1expectedbaseline skip.
 YAML and both registration regressions pass. Windows execution remains required.
+
+## Continuation recovery
+
+The owner removed the dependency on any external preparation file. Source-owned
+preparation, lifetime repairs, message UI, resource recovery and worktree fixes
+are reconstructed and reverified in RECOVERY_20261029.md. Earlier unpublished
+local commit IDs are historical, not durable remote artifacts. The recovered
+candidate must pass its own checks before any installation claim.

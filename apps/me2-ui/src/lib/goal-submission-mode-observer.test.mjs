@@ -171,6 +171,7 @@ test('malformed or authority-bearing readback cannot replace HOLD with a positiv
 
 test('native diagnostics explain bounded causes without echoing unknown errors', () => {
   const causes = [
+    ['NATIVE_PROFILE_PREPARATION_REQUIRED', 'Native preparation is incomplete'],
     ['NATIVE_PROFILE_CAPABILITY_UNAVAILABLE', 'Native profile is not loaded'],
     ['NATIVE_PROFILE_STATUS_TIMEOUT', 'Native admission check timed out'],
     ['NATIVE_PROFILE_HOST_UNAVAILABLE', 'Native runtime disconnected'],

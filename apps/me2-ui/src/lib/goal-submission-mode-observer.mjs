@@ -81,6 +81,7 @@ export function createGoalSubmissionModeObserver({ read, publish }) {
 }
 
 const HOLD_TEXT = Object.freeze({
+  NATIVE_PROFILE_PREPARATION_REQUIRED: ['Native preparation is incomplete', 'Native configuration exists, but its verified goal profile has not been published. Complete native preparation before running this goal. No Browser fallback was selected.'],
   OWNED_RUNTIME_HOST_UNAVAILABLE: ['Local runtime unavailable', 'The owned local runtime is not ready. Check its status, then check admission again.'],
   NATIVE_PROFILE_PRESENCE_UNAVAILABLE: ['Native profile unavailable', 'The local runtime profile could not be inspected. Admission remains on hold.'],
   NATIVE_PROFILE_NOT_REGULAR_FILE: ['Native profile needs attention', 'The native profile file did not pass the required file checks. Admission remains on hold.'],
@@ -108,6 +109,7 @@ export function shouldPollClientGoal(entry,receipt) {
 }
 
 export function goalSubmissionModeText(mode) {
+  if (mode == null) return { label: 'Admission not checked', detail: 'Waiting for the first verified admission status. No execution mode is established yet.' };
   if (mode?.state === 'HOLD') {
     const [label, detail] = Object.hasOwn(HOLD_TEXT, mode.reason) ? HOLD_TEXT[mode.reason]
       : ['Admission on hold', 'Admission has not been verified. Check admission again to read its current state.'];

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { History, RefreshCw } from "lucide-react";
 import { getClientProjectHistoryView, type ProjectHistoryFilters } from "@/lib/client-project-history";
+import { projectMessagePresentation } from "@/lib/project-message-presentation";
 import { Sec } from "@/components/me2/ui/primitives";
 
 function displayContent(value: unknown) {
@@ -85,9 +86,18 @@ function ManagedProjectHistoryScope({ taskId }: { taskId: string | null }) {
             </div>
             {view.capacityReached ? <p role="status" className="text-[10px] text-amber-400">Достигнут предел текущего окна. Нажмите «следующее окно», чтобы продолжить с сохранённой позиции.</p> : null}
             <div className="max-h-80 space-y-1 overflow-y-auto mc-scroll" aria-live="polite">
-              {visibleEntries.map((entry) => (
+              {visibleEntries.map((entry) => {
+                const message = projectMessagePresentation(entry, view.entries);
+                return (
                 <div key={entry.seq} className="rounded border border-zinc-800/80 bg-zinc-950/50 p-1.5 font-mono text-[9px]">
                   <div className="flex flex-wrap gap-x-2 text-zinc-500"><span className="text-cyan-400">#{entry.seq}</span><span>{entry.event_type}</span><span>{entry.actor ?? "actor —"}</span><span>task {entry.task_id ?? "—"}</span><span>attempt {entry.attempt ?? "—"}</span></div>
+                  {message ? <section aria-label="Сообщение агента" className="mt-2 space-y-1 rounded border border-cyan-950 p-2 text-[11px]">
+                    <p className="break-all text-cyan-300">Получатель: {message.recipientAgentId} · задача {message.recipientTaskId}</p>
+                    <p className="whitespace-pre-wrap break-words text-zinc-200 select-text">{message.text}</p>
+                    <p className="text-zinc-500">{message.acknowledgement === 'OBSERVED'
+                      ? `Получатель подтвердил получение, событие #${message.acknowledgementSeq}. Выполнение сообщения не подтверждено.`
+                      : 'В загруженном окне подтверждение получения не найдено. Это не означает, что сообщение не прочитано.'}</p>
+                  </section> : null}
                   <details className="mt-1 text-zinc-400">
                     <summary className="cursor-pointer rounded py-1 text-cyan-300 focus-visible:outline focus-visible:outline-cyan-500">
                       Полное содержимое события #{entry.seq}
@@ -99,7 +109,7 @@ function ManagedProjectHistoryScope({ taskId }: { taskId: string | null }) {
                   </details>
                   <div className="mt-0.5 flex flex-wrap gap-x-2 text-zinc-700"><span>предыдущее событие {entry.causal_parent_seq ?? "—"}</span><span>{entry.source}</span><span>{entry.receipt_reference_verified ? "ссылка на квитанцию проверена; результат не подтверждён" : "результат независимо не подтверждён"}</span></div>
                 </div>
-              ))}
+              );})}
               {!visibleEntries.length && view.state === "READY" ? <p className="p-2 text-center text-[10px] text-zinc-600">В текущем окне событий нет.</p> : null}
             </div>
             <div className="flex gap-1.5">

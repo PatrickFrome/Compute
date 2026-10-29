@@ -522,3 +522,18 @@ for(const tamper of [r=>r.project_id=randomUUID(),r=>r.verdict='ACCEPT',r=>r.aut
   assert.throws(()=>normalizeNativeCodingGoalProgress(f.snapshot,{request_id:f.input.request_id,goal:f.input.objective,receipt:f.receipt}),/native_review_rejection_invalid/);
  });
 }
+
+test('interrupted native preparation cannot silently route a new goal to Browser',async()=>{
+ const paths=[];const mode=await readClientGoalSubmissionMode({readSummary:()=>({status_file:'C:/private/runtime/status.json'}),lstat:async file=>{
+  paths.push(file);if(file.endsWith('native-coding-seed-operator-v1.json'))throw Object.assign(Error(),{code:'ENOENT'});
+  assert.ok(file.endsWith('native-coding-operator-v1.json'));return {isFile:()=>true,isSymbolicLink:()=>false,nlink:1};
+ }});assert.equal(mode.kind,'NATIVE_CODING');assert.equal(mode.state,'HOLD');assert.equal(mode.reason,'NATIVE_PROFILE_PREPARATION_REQUIRED');assert.equal(paths.length,2);
+});
+test('inaccessible or aliased native setup marker cannot authorize Browser fallback',async()=>{
+ for(const marker of ['denied','alias']){
+  let reads=0;const mode=await readClientGoalSubmissionMode({readSummary:()=>({status_file:'C:/private/runtime/status.json'}),readNativeBusy:async()=>{reads++;},lstat:async file=>{
+   if(file.endsWith('native-coding-seed-operator-v1.json'))throw Object.assign(Error(),{code:'ENOENT'});
+   if(marker==='denied')throw Object.assign(Error('private path'),{code:'EACCES'});return {isFile:()=>true,isSymbolicLink:()=>true,nlink:1};
+  }});assert.equal(mode.state,'HOLD');assert.notEqual(mode.kind,'BROWSER');assert.equal(reads,0);assert.equal(JSON.stringify(mode).includes('private path'),false);
+ }
+});

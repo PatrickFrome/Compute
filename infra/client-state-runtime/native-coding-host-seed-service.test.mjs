@@ -71,10 +71,10 @@ test('durable bounded diagnostic survives restart but never replaces the indepen
 });
 
 test('unrecognized errors persist only a fixed generic reason and no arbitrary strings',async t=>{
- const f=await fixture(t);f.setScope(async()=>{throw Error('native_coding_host_seed_observation_window_exceeded /private/token=abc');});
+ const f=await fixture(t);f.setScope(async()=>{throw Error('native_coding_host_seed_observation_window_exceeded /private/token=never_log_this_fixture_secret');});
  await assert.rejects(f.service.SEED_GOAL(f.input));
  const diagnostic=await f.diagnostic();assert.equal(diagnostic.reason,'OBSERVATION_FAILED');
- assert.equal(/private|token|abc/.test(json(diagnostic)),false);assert.equal(f.seen.dispatches,0);
+ assert.equal(/private|token|never_log_this_fixture_secret/.test(json(diagnostic)),false);assert.equal(f.seen.dispatches,0);
 });
 
 test('failed diagnostic persistence preserves the original failure and releases only its semantic latch',async t=>{
@@ -212,4 +212,13 @@ for(const batch of [false,true])test(`seed forwards private cancellation to ${ba
  if(batch)f.native.batch=read;else f.setScope(read);
  await assert.rejects(f.service.SEED_GOAL(f.input,context),/generated_cancelled_scope|native_coding_host_request_cancelled/);
  assert.equal(f.seen.dispatches,0);
+});
+
+test('failed parallel scope waits for all started reads before releasing its semantic fence',async t=>{
+ const f=await fixture(t),entered=deferred(),release=deferred();let calls=0,settled=false;const failure=Error('generated_first_scope_failure');
+ f.setScope(async permit=>{if(++calls===1)throw failure;entered.resolve();await release.promise;return f.defaultScope(permit);});
+ const pending=f.service.SEED_GOAL(f.input),rejected=assert.rejects(pending,error=>error===failure).then(()=>{settled=true;});
+ await entered.promise;await new Promise(resolve=>setTimeout(resolve,40));
+ try{assert.equal(settled,false);assert.equal((await fs.stat(f.semanticFile)).isFile(),true);}finally{release.resolve();await rejected;}
+ assert.equal(f.seen.dispatches,0);assert.equal((await f.service.READ_SEED(f.input)).state,'REJECTED_BEFORE_DISPATCH');
 });
