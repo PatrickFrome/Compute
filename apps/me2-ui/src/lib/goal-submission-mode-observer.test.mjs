@@ -188,3 +188,10 @@ test('native diagnostics explain bounded causes without echoing unknown errors',
   }
   assert.match(goalSubmissionModeText(ready).detail, /does not prove execution/);
 });
+
+test('native admission explains the CLI executor without claiming chat pickup or execution',()=>{
+ const text=goalSubmissionModeText(ready);
+ assert.match(text.label,/Codex CLI/);
+ assert.match(text.detail,/Chat sessions/);
+ assert.match(text.detail,/does not prove execution/);
+});

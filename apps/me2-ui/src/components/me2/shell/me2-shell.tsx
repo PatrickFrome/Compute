@@ -720,7 +720,7 @@ function ChatFleetRail({ pickerOpen, onPickerOpenChange }: { pickerOpen: boolean
 
   const content = <>
       <div className="flex h-12 shrink-0 items-center justify-between border-b border-zinc-800 px-3">
-        <div><strong className="block text-[13px] font-medium text-zinc-200">Agents</strong>
+        <div><strong className="block text-[13px] font-medium text-zinc-200">Chat sessions</strong>
           <span className="text-[11px] text-zinc-400">ChatGPT · {state === "LIVE" ? `${roster.actor_count} sessions` : state === "LOADING" ? "Connecting…" : "Roster unavailable"}</span></div>
         <button type="button" onClick={() => void refresh()} className="h-8 px-2 text-[11px] text-zinc-300 hover:bg-zinc-800">Refresh</button>
       </div>

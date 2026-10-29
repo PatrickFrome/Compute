@@ -93,10 +93,10 @@ export function TopBar({ fleetPickerOpen = false, onOpenFleet }: { fleetPickerOp
                 ? "border-amber-900/60 bg-amber-950/20 text-amber-200"
                 : "border-zinc-800 bg-zinc-950 text-zinc-400"
           }`}
-           title={work ? `${work.detail} Continuous autonomy: ${capabilityLabel(work, 'continuous_autonomy')}` : "Connection status is unavailable. Open Settings for details."}
-           aria-label={`Connection: ${connection?.admin_ready && connection?.local_runtime_ready ? "Connected" : "Pending"}. Execution: ${work?.label || "Unavailable"}. Open Settings.`}
+           title={work ? `Chat coordination: ${work.detail} Continuous autonomy: ${capabilityLabel(work, 'continuous_autonomy')}` : "Connection status is unavailable. Open Settings for details."}
+           aria-label={`Connection: ${connection?.admin_ready && connection?.local_runtime_ready ? "Connected" : "Pending"}. Chat execution: ${work?.label || "Unavailable"}. Open Settings.`}
         >
-          <span className="truncate">{badge.label}</span>
+          <span className="truncate">Chat: {badge.label}</span>
         </button>
       </div>
     </header>

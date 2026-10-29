@@ -111,5 +111,5 @@ export function goalSubmissionModeText(mode) {
       : ['Admission on hold', 'Admission has not been verified. Check admission again to read its current state.'];
     return { label, detail };
   }
-  return { label: 'Native coding · Host admission', detail: 'The local runtime will verify the goal before admitting it. Admission does not prove execution.' };
+  return { label: 'Codex CLI · Host admission', detail: 'The Host verifies this task for native execution and independent review. Chat sessions have separate status. Admission does not prove execution.' };
 }
