@@ -232,6 +232,7 @@ jobs:
             'existing cycle suspends parent and child with one slot, then exact completion and restored receipts unwind without Send replay',
           ];
           const nativeRequired=[
+            'lost selector publication reply recovers by protected reads without repeating native preparation',
             'profile preparation is atomic, immutable and never publishes execution authority',
             'profile preparation cancellation rolls back before commit and preserves committed identity after lost response',
             'protected operator publication refuses changed pins, missing ACL and changed physical evidence',

@@ -35,3 +35,17 @@ Linux; package/registration combined46pass1Windowsskip;26/26 realPG seed cases
 pass with the generated Linux filesystem adapter. Windows execution is pending
 for this new source. No installed files, services, credentials or permissions
 were changed. Default installed bootstrap and REJECT-to-repair remain open.
+
+## Read-only recovery of an already published selector
+
+If the protected final selector already matches the current active SQL profile,
+preparation now returns a read-only receipt. It performs no native observation,
+no native move, no write-open and no SQL mutation. The receipt explicitly says
+physical_scope_observed=false and physical_execution_proven=false: configuration
+readback cannot be confused with new execution evidence. A revoked profile still
+fails. Missing or unverified selectors do not enter this successful fast path.
+
+The real-PG regression loses the publication reply after its file effect, then
+recovers with SELECT-only SQL and write-open/native-operation traps.27/27 cases
+pass locally. The same case is mandatory in Windows qualification. No replayed
+goal, task, permit or model execution is created.

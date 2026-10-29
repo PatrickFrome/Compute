@@ -27,11 +27,25 @@ export async function publishNativeCodingSeedOperator({sql,stateDirectory,profil
   if(!after.isDirectory()||after.isSymbolicLink()||after.dev!==stat.dev||after.ino!==stat.ino||await fs.realpath(root)!==root)fail('directory_changed');
   assertNativeCodingHostRequestOpen(requestContext);
  };
- await verifyDirectory();await readNativeScope.prepare?.();
- await observeNativeCodingSeedProfile({profile:value.profile,profileSha256:profile_sha256,readNativeScope,requestContext,
-  revalidate:async()=>{await readPreparedNativeCodingSeedProfile(selector);await verifyDirectory();}});
  const pin={schema:'metaengine.native-coding.seed-operator.v1',profile_id,profile_sha256};
  const file=path.join(root,'native-coding-seed-operator-v1.json');
+ await verifyDirectory();
+ let existing=null;
+ try{existing=await readNativeCodingProtectedJson(file,{maximumBytes:4096,verifyStorage,signal:requestContext?.signal});}
+ catch(error){if(error.code!=='ENOENT')throw error;}
+ if(existing){
+  if(canonical(existing.value)!==canonical(pin))fail('operator_conflict');
+  await readPreparedNativeCodingSeedProfile(selector);await verifyDirectory();
+  assertNativeCodingHostRequestOpen(requestContext);
+  // A lost publication reply is recovered by reads only. This proves stored
+  // configuration, not a new physical observation or admission to execute.
+  return Object.freeze({schema:'metaengine.native-coding.operator-publication.v1',profile_id,profile_sha256,
+   operator_pin_published:true,existing_pin:true,physical_scope_observed:false,readback_only:true,
+   physical_execution_proven:false,production_qualified:false,automatic_retry_allowed:false,authority_effect:false});
+ }
+ await readNativeScope.prepare?.();
+ await observeNativeCodingSeedProfile({profile:value.profile,profileSha256:profile_sha256,readNativeScope,requestContext,
+  revalidate:async()=>{await readPreparedNativeCodingSeedProfile(selector);await verifyDirectory();}});
  assertNativeCodingHostRequestOpen(requestContext);
  const temporary=path.join(root,`.native-seed-selector-${randomUUID()}.tmp`);
  let created=false,published=false;
@@ -49,6 +63,6 @@ export async function publishNativeCodingSeedOperator({sql,stateDirectory,profil
  if(canonical(actual.value)!==canonical(pin))fail('operator_conflict');
  await readPreparedNativeCodingSeedProfile(selector);assertNativeCodingHostRequestOpen(requestContext);
  return Object.freeze({schema:'metaengine.native-coding.operator-publication.v1',profile_id,profile_sha256,
-  operator_pin_published:true,existing_pin:!published,physical_scope_observed:true,
+  operator_pin_published:true,existing_pin:!published,physical_scope_observed:true,readback_only:false,
   physical_execution_proven:false,production_qualified:false,automatic_retry_allowed:false,authority_effect:false});
 }

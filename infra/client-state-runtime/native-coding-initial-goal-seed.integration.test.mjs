@@ -1,6 +1,7 @@
 import test from 'node:test';
 import {prepareNativeCodingSeedProfile,readPreparedNativeCodingSeedProfile} from './native-coding-seed-profile-preparation.mjs';
 import {publishNativeCodingSeedOperator} from './native-coding-seed-operator-publication.mjs';
+import {publishNativeSeedSelectorWindows} from './native-coding-selector-move.mjs';
 import {completeChatNativePair} from './test/native-coding-chat-pair-pg-fixture.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -195,6 +196,26 @@ test('private initial native goal admission is atomic and preserves the W30 auth
    assert.equal(intercepted,true);await assert.rejects(fs.stat(file),{code:'ENOENT'});assert.deepEqual(await fs.readdir(root),[]);
    const published=await publishNativeCodingSeedOperator(options);assert.equal(published.operator_pin_published,true);assert.equal(published.existing_pin,false);assert.equal((await fs.stat(file)).nlink,1);
    assert.deepEqual(JSON.parse(await fs.readFile(file,'utf8')),{schema:'metaengine.native-coding.seed-operator.v1',profile_id:f.profile.profile_id,profile_sha256:f.profileSha});
+   assert.deepEqual(await count(f),{seeds:0,projects:0,tasks:0,permits:0,browser_goals:0});passed++;
+  });
+  await t.test('lost selector publication reply recovers by protected reads without repeating native preparation',async()=>{
+   const f=await fixture(),root=await fs.mkdtemp(path.join(directory,'selector-readback-'));
+   const options={...publicationAdapter,sql,stateDirectory:root,profile_id:f.profile.profile_id,profile_sha256:f.profileSha,
+    readNativeScope:f.options.readNativeScope,verifyStorage:async()=>({owner_dacl_verified:true,generated_fixture:true})};
+   const publish=publicationAdapter.publishCompleted||publishNativeSeedSelectorWindows;let effects=0;
+   await assert.rejects(publishNativeCodingSeedOperator({...options,publishCompleted:async(...args)=>{effects++;await publish(...args);throw Error('GENERATED_LOST_PUBLICATION_ACK');}}),/GENERATED_LOST_PUBLICATION_ACK/);
+   const readonlySql={unsafe:async(...args)=>{assert.match(args[0],/^select /);return sql.unsafe(...args);}};
+   const originalOpen=fs.open;let observed;
+   fs.open=async(file,flags,...args)=>{assert.equal(/[wa+]/.test(String(flags)),false,'readback must not open a writer');return originalOpen(file,flags,...args);};
+   try{observed=await publishNativeCodingSeedOperator({...options,sql:readonlySql,
+    readNativeScope:async()=>{throw Error('PHYSICAL_PREPARATION_REPLAYED');},
+    publishCompleted:async()=>{throw Error('FILE_PUBLICATION_REPLAYED');}});}finally{fs.open=originalOpen;}
+   assert.equal(effects,1);assert.equal(observed.readback_only,true);assert.equal(observed.existing_pin,true);
+   assert.equal(observed.physical_scope_observed,false);assert.equal(observed.physical_execution_proven,false);
+   assert.equal(observed.profile_sha256,f.profileSha);assert.equal(observed.authority_effect,false);
+   assert.deepEqual(await fs.readdir(root),['native-coding-seed-operator-v1.json']);
+   await sql.unsafe('update destruktion_meta.native_coding_seed_profile_h205f22 set revoked_at=clock_timestamp() where profile_id=$1',[f.profile.profile_id]);
+   await assert.rejects(publishNativeCodingSeedOperator({...options,sql:readonlySql}),/profile_unavailable/);
    assert.deepEqual(await count(f),{seeds:0,projects:0,tasks:0,permits:0,browser_goals:0});passed++;
   });
   await t.test('Host seeds four protected providers and one native root atomically, no fake meta-plan',async()=>{
@@ -567,7 +588,7 @@ test('private initial native goal admission is atomic and preserves the W30 auth
    const f=await fixture({chatLed:true}),receipt=(await invoke(f)).receipt;
    assert.equal((await sql.unsafe('select role from destruktion_meta.devos_fleet_task_h205f22 where task_id=$1',[receipt.root_task_id]))[0].role,'PLANNER');passed++;
   });
-  assert.equal(passed,25);
+  assert.equal(passed,26);
   await fs.writeFile(path.join(directory,'receipt.json'),JSON.stringify({schema:'metaengine.native-coding.initial-seed.disposable-qa.v1',state:'PASS',
    postgres_version_num:identity.version,postgres_system_identifier:cluster,port,subtests:passed,migration_sha256:migrationSha,
    source_classification:'REAL_DISPOSABLE_PG_AND_HOST_SERVICE_WITH_GENERATED_ENROLLED_DEVICE_INSTALLED_IMAGE_OS_CANARY_AND_ACL_FIXTURES',
