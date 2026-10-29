@@ -16,6 +16,10 @@ const flags={production_qualified:false,automatic_retry_allowed:false,authority_
 // This allowlist deliberately excludes arbitrary exception text, stderr, paths,
 // SQL and credentials. A diagnostic is not an admission/rejection receipt.
 const observationFailureReasons=new Map([
+ ['native_coding_host_request_cancelled','REQUEST_CANCELLED'],
+ ['native_coding_observer_request_cancelled','REQUEST_CANCELLED'],
+ ['codex_sandbox_probe_request_cancelled','REQUEST_CANCELLED'],
+ ['native_coding_host_request_deadline_exceeded','REQUEST_DEADLINE_EXCEEDED'],
  ['native_coding_host_seed_observation_window_exceeded','OBSERVATION_WINDOW_EXCEEDED'],
  ['native_coding_host_seed_physical_scope_changed','PHYSICAL_SCOPE_CHANGED'],
  ['native_coding_host_seed_process_identity_invalid','PROCESS_IDENTITY_INVALID'],
@@ -157,11 +161,11 @@ export async function createNativeCodingHostSeedService({sql,stateDirectory,read
   if(typeof readNativeScope.batch==='function'){
    // The native scope implementation shares only fresh common observations
    // inside this invocation. Each returned role remains independently checked.
-   observations=await readNativeScope.batch(p.agents.map(a=>({...p,...a})),true);
+   observations=await readNativeScope.batch(p.agents.map(a=>({...p,...a})),true,undefined,requestContext);
   }else{
    observations=new Array(p.agents.length);let cursor=0;
    await Promise.all(Array.from({length:Math.min(4,p.agents.length)},async()=>{
-    while(cursor<p.agents.length){assertNativeCodingHostRequestOpen(requestContext);const i=cursor++,a=p.agents[i];observations[i]=await readNativeScope({...p,...a},true);}
+    while(cursor<p.agents.length){assertNativeCodingHostRequestOpen(requestContext);const i=cursor++,a=p.agents[i];observations[i]=await readNativeScope({...p,...a},true,undefined,requestContext);}
    }));
   }
   assertNativeCodingHostRequestOpen(requestContext);

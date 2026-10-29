@@ -185,6 +185,7 @@ test('cancellation during physical observation prevents later SQL admission and 
  await assert.rejects(f.service.SEED_GOAL(f.input,{signal:controller.signal}),/request_cancelled/);
  assert.equal(f.seen.dispatches,0);
  assert.equal((await f.service.READ_SEED(f.input)).state,'REJECTED_BEFORE_DISPATCH');
+ assert.equal((await f.diagnostic()).reason,'REQUEST_CANCELLED');
 });
 
 test('expiry after transaction acquisition cannot dispatch the seed mutation',async t=>{
@@ -200,4 +201,15 @@ test('expiry after transaction acquisition cannot dispatch the seed mutation',as
  const result=await f.service.SEED_GOAL(f.input,{signal:controller.signal});
  assert.equal(mutationCalls,0);assert.equal(result.state,'READBACK_REQUIRED');
  assert.equal(result.automatic_retry_allowed,false);
+});
+
+for(const batch of [false,true])test(`seed forwards private cancellation to ${batch?'batch':'individual'} physical scope`,async t=>{
+ const f=await fixture(t),controller=new AbortController(),context={signal:controller.signal,deadlineAt:Date.now()+30000};
+ const read=async(permits,includeSandbox,reader,received)=>{
+  assert.equal(includeSandbox,true);assert.equal(reader,undefined);
+  assert.equal(received,context);controller.abort();throw Error('generated_cancelled_scope');
+ };
+ if(batch)f.native.batch=read;else f.setScope(read);
+ await assert.rejects(f.service.SEED_GOAL(f.input,context),/generated_cancelled_scope|native_coding_host_request_cancelled/);
+ assert.equal(f.seen.dispatches,0);
 });

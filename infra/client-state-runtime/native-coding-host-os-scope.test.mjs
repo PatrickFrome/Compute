@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import vm from 'node:vm';
+import {assertNativeCodingHostRequestOpen} from './native-coding-host-request-lifetime.mjs';
 import {createNativeCodingHostImageGuard} from './native-coding-host-os-scope.mjs';
 import {admissionFixture} from '../../apps/metaengine-browser/test/fixtures/native-coding-admission-fixture.mjs';
 
@@ -90,7 +91,7 @@ async function scopeFixture(){
   const sql={unsafe:async()=>{counts.baseReads++;throw Error('EXTRA_BASE_POOL_BORROW');}};
   const fileHashes=new Map([[expectedExe,p.artifact.installed_exe_sha256],[path.join(resources,'app.asar'),p.artifact.installed_asar_sha256],
     [operator.cli_executable,p.artifact.cli_executable_sha256]]);
-  const scope={sql,config,resources,expectedExe,parentPid:host.pid,path,URL,Date,Number,Promise,structuredClone,
+  const scope={assertNativeCodingHostRequestOpen,sql,config,resources,expectedExe,parentPid:host.pid,path,URL,Date,Number,Promise,structuredClone,
     process:{env:{SystemRoot:'C:/Windows'}},fs:{readFile:async()=>pidText},
     fail:reason=>{throw Error('native_coding_host_os_'+reason);},
     samePath:(a,b)=>path.resolve(a).toLowerCase()===path.resolve(b).toLowerCase(),
@@ -183,4 +184,17 @@ test('ordinary sandbox read retains default physical observers without caller-su
   const result=await readers.readNativeScope(p,true,tx);
   assert.equal(observed,true);assert.deepEqual(result.sandbox,p.sandbox);assert.equal(counts.transactionReads,1);
   assert.equal(counts.bootReads,0);
+});
+
+test('cancelled observation cohort does not start native or SQL readers',async()=>{
+ const {readers,counts,p,tx}=await scopeFixture(),controller=new AbortController();controller.abort();
+ await assert.rejects(readers.readNativeScopeBatch([p],true,tx,{signal:controller.signal}),/request_cancelled/);
+ assert.equal(counts.transactionReads,0);assert.equal(counts.processReads,0);assert.equal(counts.operatorReads,0);
+});
+
+test('cancellation during common observation prevents per-agent reads',async()=>{
+ const {readers,counts,p,tx,scope}=await scopeFixture(),controller=new AbortController();
+ scope.readWindowsSandboxHostBoot=async()=>{controller.abort();return {kernel_boot_id:101};};
+ await assert.rejects(readers.readNativeScopeBatch([p],true,tx,{signal:controller.signal}),/request_cancelled/);
+ assert.equal(counts.worktreeReads,0);assert.equal(counts.sandboxReads,0);
 });

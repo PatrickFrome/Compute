@@ -39,10 +39,11 @@ async function canonical(file,kind) {
   if(!same(resolved,physical)||(kind==='directory'?!stat.isDirectory():!stat.isFile()||stat.nlink!==1))fail('physical_path_invalid');
   return physical;
 }
-async function hashFile(file,maxBytes=1024*1024*1024,allowEmpty=false) {
+async function hashFile(file,maxBytes=1024*1024*1024,allowEmpty=false,signal) {
+  if(signal?.aborted)fail('request_cancelled');
   const physical=await canonical(file,'file'), before=await fs.stat(physical), hash=createHash('sha256');
   if((!allowEmpty&&before.size<1)||before.size>maxBytes)fail('file_budget_exceeded');
-  for await(const chunk of createReadStream(physical))hash.update(chunk);
+  for await(const chunk of createReadStream(physical,{signal}))hash.update(chunk);
   const after=await fs.stat(physical);
   if(before.ino!==after.ino||before.size!==after.size||before.mtimeMs!==after.mtimeMs)fail('file_changed');
   return hash.digest('hex');
@@ -65,7 +66,8 @@ export async function readNativeCodingProtectedJson(file,{maximumBytes=256*1024,
 
 // Fixed native inventory. The managed Process handle pins the kernel process
 // while CIM supplies its token owner SID; no caller code/path is interpolated.
-export async function readNativeCodingWindowsProcess(pid,{exec=run,platform=process.platform}={}) {
+export async function readNativeCodingWindowsProcess(pid,{exec=run,platform=process.platform,signal}={}) {
+  if(signal?.aborted)fail('request_cancelled');
   if(platform!=='win32'||!Number.isSafeInteger(pid)||pid<1||pid>0x7fffffff)fail('native_pid_invalid');
   const script=`$ErrorActionPreference='Stop'
 $PSModuleAutoLoadingPreference='None'
@@ -89,9 +91,10 @@ try {
   try {
     const pending=exec(path.win32.join(root,'System32','WindowsPowerShell','v1.0','powershell.exe'),
       ['-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')],
-      {windowsHide:true,shell:false,timeout:15000,maxBuffer:16384,env:{...fixedWindowsNativeReadEnvironment(),METAENGINE_NATIVE_CODING_PID:String(pid)}});
+      {windowsHide:true,shell:false,timeout:15000,maxBuffer:16384,signal,env:{...fixedWindowsNativeReadEnvironment(),METAENGINE_NATIVE_CODING_PID:String(pid)}});
     pending.child?.stdin?.end();output=(await pending).stdout;
-  }catch{fail('native_process_unavailable');}
+  }catch{if(signal?.aborted)fail('request_cancelled');fail('native_process_unavailable');}
+  if(signal?.aborted)fail('request_cancelled');
   let value;try{value=JSON.parse(output.trim());}catch{fail('native_process_invalid');}
   if(value.pid!==pid||!/^S-1-\d+(?:-\d+)+$/.test(value.user_sid||'')||!/^[1-9]\d{16,18}$/.test(value.birth_100ns||''))fail('native_process_invalid');
   const created_at=new Date(value.created_at).toISOString();
@@ -212,11 +215,13 @@ export function createNativeCodingResultStore({journalRoot,indexRoot,verifyStora
 
 export async function readNativeCodingSandboxEvidence({pin,cliPath,worktreePath,role,hostProcessId=process.pid,
   readProcess=readNativeCodingWindowsProcess,readBoot=readWindowsSandboxHostBoot,verifyStorage=verifyOwnerOnlyWindowsStorage,
-  readExecutableSha256=file=>hashFile(file,512*1024*1024)}={}) {
+  signal,readExecutableSha256=file=>hashFile(file,512*1024*1024,false,signal)}={}) {
+  if(signal?.aborted)fail('request_cancelled');
   if(!pin||!HASH.test(pin.sha256||'')||!['IMPLEMENTER','CRITIC'].includes(role))fail('sandbox_receipt_not_pinned');
   if(typeof readExecutableSha256!=='function')fail('sandbox_image_reader_invalid');
-  const [{value,sha256},boot,host,cliSha]=await Promise.all([readNativeCodingProtectedJson(pin.path,{verifyStorage}),
-    readBoot(),readProcess(hostProcessId),readExecutableSha256(cliPath)]);
+  const [{value,sha256},boot,host,cliSha]=await Promise.all([readNativeCodingProtectedJson(pin.path,{verifyStorage,signal}),
+    readBoot({signal}),readProcess(hostProcessId,{signal}),readExecutableSha256(cliPath)]);
+  if(signal?.aborted)fail('request_cancelled');
   if(!HASH.test(cliSha||''))fail('sandbox_image_digest_invalid');
   const mode=role==='CRITIC'?'read-only':'workspace-write';
   if(sha256!==pin.sha256||value.schema!=='metaengine.codex-cli.sandbox-probe.v1'||value.mode!==mode
@@ -229,8 +234,9 @@ export async function readNativeCodingSandboxEvidence({pin,cliPath,worktreePath,
     completion:value.completion,hostUserSid:host.user_sid,hostBootIdentity:value.host_boot});
   if(evaluation.state!=='OBSERVED'||evaluation.boundary_observed!==true)fail('sandbox_boundary_unverified');
   await Promise.all([['stdout_path','stdout_sha256'],['stderr_path','stderr_sha256'],['exit_path','exit_sha256']].map(async([fileKey,hashKey])=>{
-    if(!HASH.test(value.logs?.[hashKey]||'')||await hashFile(value.logs[fileKey],16*1024*1024,true)!==value.logs[hashKey])fail('sandbox_log_digest_mismatch');
+    if(!HASH.test(value.logs?.[hashKey]||'')||await hashFile(value.logs[fileKey],16*1024*1024,true,signal)!==value.logs[hashKey])fail('sandbox_log_digest_mismatch');
   }));
+  if(signal?.aborted)fail('request_cancelled');
   return {backend:'CODEX_WINDOWS_ELEVATED',mode,evidence_sha256:sha256,outside_write_denied:true,worktree_write_denied:role==='CRITIC'};
 }
 

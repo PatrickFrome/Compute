@@ -12,6 +12,7 @@ import {readNativeCodingWindowsProcess,readNativeCodingProtectedJson,readNativeC
 import {readNativeCodingOperatorPaths,resolveNativeCodingSandboxPin} from '../../apps/metaengine-browser/src/native-coding-operator-paths.mjs';
 import {readWindowsSandboxHostBoot} from '../../apps/metaengine-browser/src/codex-cli-sandbox-probe.mjs';
 export {readNativeCodingOperatorPaths};
+import {assertNativeCodingHostRequestOpen} from './native-coding-host-request-lifetime.mjs';
 
 const run=promisify(execFile);
 const fail=reason=>{throw new Error('native_coding_host_os_'+reason);};
@@ -69,12 +70,13 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
     const operator=await readNativeCodingOperatorPaths(config.state_directory);
     await image.prepare([expectedExe,path.join(resources,'app.asar'),operator.cli_executable]);
   }
-  async function postgres(reader=sql) {
+  async function postgres(reader=sql,context) {
+    assertNativeCodingHostRequestOpen(context);
     const before=(await fs.readFile(path.join(config.pg_data_directory,'postmaster.pid'),'utf8')).split(/\r?\n/);
     const rows=await reader.unsafe(`select current_setting('data_directory') as data_directory,
       current_setting('server_version_num')::int as version,host(inet_server_addr()) as address,inet_server_port() as port,
       (select system_identifier::text from pg_catalog.pg_control_system()) as system_identifier`);
-    const row=rows[0],native=await readNativeCodingWindowsProcess(Number(before[0]));
+    const row=rows[0],native=await readNativeCodingWindowsProcess(Number(before[0]),{signal:context?.signal});
     if(rows.length!==1||row.version<170000||row.version>=180000||row.address!=='127.0.0.1'
         ||row.port!==Number(new URL(config.inspect_database_url).port)
         ||!samePath(row.data_directory,config.pg_data_directory)||!samePath(before[1],config.pg_data_directory)
@@ -83,31 +85,37 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
         ||Math.abs(Date.parse(native.created_at)-Number(before[2])*1000)>1000) fail('postgres_incarnation_unverified');
     const data_directory_identity_sha256=await readDirectoryIdentity(config.pg_data_directory);
     if((await fs.readFile(path.join(config.pg_data_directory,'postmaster.pid'),'utf8')).split(/\r?\n/).slice(0,4).join('\n')!==before.slice(0,4).join('\n')) fail('postgres_changed');
+    assertNativeCodingHostRequestOpen(context);
     return {system_identifier:row.system_identifier,postmaster:publicProcess(native),data_directory_identity_sha256};
   }
-  async function readNativeScope(permit,includeSandbox=true,reader=sql) {
-    const [pg,host]=await Promise.all([postgres(reader),readNativeCodingWindowsProcess(parentPid)]);
+  async function readNativeScope(permit,includeSandbox=true,reader=sql,context) {
+    assertNativeCodingHostRequestOpen(context);
+    const [pg,host]=await Promise.all([postgres(reader,context),readNativeCodingWindowsProcess(parentPid,{signal:context?.signal})]);
+    assertNativeCodingHostRequestOpen(context);
     if(permit===null) return {postgres:pg,host_process:publicProcess(host),user_sid:host.user_sid};
-    const operator=await readNativeCodingOperatorPaths(config.state_directory);
-    return readScopeWithCommon(permit,includeSandbox,{pg,host,operator});
+    const operator=await readNativeCodingOperatorPaths(config.state_directory,{signal:context?.signal});
+    return readScopeWithCommon(permit,includeSandbox,{pg,host,operator},context);
   }
   // One explicit observation cohort shares only its common physical reads.
   // Never retain the cohort after this call, accept caller-supplied evidence,
   // or reuse it for another SQL transaction. Each agent still checks its own
   // worktree, pinned sandbox receipt/logs and current immutable image identity.
-  async function readNativeScopeBatch(permits,includeSandbox=true,reader=sql) {
+  async function readNativeScopeBatch(permits,includeSandbox=true,reader=sql,context) {
+    assertNativeCodingHostRequestOpen(context);
     if(!Array.isArray(permits)||permits.length<1||permits.some(p=>!p||typeof p!=='object'))fail('scope_batch_invalid');
-    const [pg,host,operator,boot]=await Promise.all([postgres(reader),readNativeCodingWindowsProcess(parentPid),
-      readNativeCodingOperatorPaths(config.state_directory),includeSandbox?readWindowsSandboxHostBoot():null]);
+    const [pg,host,operator,boot]=await Promise.all([postgres(reader,context),readNativeCodingWindowsProcess(parentPid,{signal:context?.signal}),
+      readNativeCodingOperatorPaths(config.state_directory,{signal:context?.signal}),includeSandbox?readWindowsSandboxHostBoot({signal:context?.signal}):null]);
+    assertNativeCodingHostRequestOpen(context);
     const common={pg,host,operator,boot},results=new Array(permits.length);let cursor=0,failed=false;
     await Promise.all(Array.from({length:Math.min(4,permits.length)},async()=>{
-      while(!failed&&cursor<permits.length){const i=cursor++;
-        try{results[i]=await readScopeWithCommon(permits[i],includeSandbox,common);}catch(error){failed=true;throw error;}
+      while(!failed&&cursor<permits.length){assertNativeCodingHostRequestOpen(context);const i=cursor++;
+        try{results[i]=await readScopeWithCommon(permits[i],includeSandbox,common,context);}catch(error){failed=true;throw error;}
       }
     }));
     return results;
   }
-  async function readScopeWithCommon(permit,includeSandbox,{pg,host,operator,boot}) {
+  async function readScopeWithCommon(permit,includeSandbox,{pg,host,operator,boot},context) {
+    assertNativeCodingHostRequestOpen(context);
     const base={postgres:structuredClone(pg),host_process:publicProcess(host),user_sid:host.user_sid};
     if(path.basename(host.exe_path)!=='METAENGINE Browser Test.exe') fail('browser_parent_unverified');
     if(!samePath(host.exe_path,expectedExe))fail('browser_parent_unverified');
@@ -122,15 +130,17 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
     // Source SHA is meaningful only together with the exact protected ASAR
     // hash and verified runtime bundle; it is never accepted on its own.
     if(Object.keys(artifact).some(key=>artifact[key]!==permit.artifact[key])) fail('installed_artifact_mismatch');
+    assertNativeCodingHostRequestOpen(context);
     const root_identity_sha256=await readDirectoryIdentity(permit.worktree.path);
     const pending=run(operator.git_executable,['-c','core.fsmonitor=false','-C',permit.worktree.path,'rev-parse','--verify','HEAD'],
-      {windowsHide:true,shell:false,timeout:10000,maxBuffer:4096,env:{SystemRoot:process.env.SystemRoot,PATH:path.dirname(operator.git_executable),GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'NUL',GIT_TERMINAL_PROMPT:'0'}});
+      {windowsHide:true,shell:false,timeout:10000,maxBuffer:4096,signal:context?.signal,env:{SystemRoot:process.env.SystemRoot,PATH:path.dirname(operator.git_executable),GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'NUL',GIT_TERMINAL_PROMPT:'0'}});
     pending.child?.stdin?.end();const head=(await pending).stdout.trim();
+    assertNativeCodingHostRequestOpen(context);
     const worktree={path:permit.worktree.path,root_identity_sha256,base_sha:head};
     const unchanged=()=>Promise.all([host.exe_path,path.join(resources,'app.asar'),operator.cli_executable].map(file=>image.read(file)));
-    if(!includeSandbox){await unchanged();return {...base,artifact,worktree};}
+    if(!includeSandbox){await unchanged();assertNativeCodingHostRequestOpen(context);return {...base,artifact,worktree};}
     const sandbox=await readNativeCodingSandboxEvidence({pin:resolveNativeCodingSandboxPin(operator,permit),cliPath:operator.cli_executable,
-      worktreePath:permit.worktree.path,role:permit.role,hostProcessId:parentPid,
+      worktreePath:permit.worktree.path,role:permit.role,hostProcessId:parentPid,signal:context?.signal,
       ...(boot?{readBoot:async()=>boot,readProcess:async pid=>{
         if(pid!==parentPid)fail('scope_batch_process_mismatch');return host;
       }}:{}),
@@ -138,7 +148,7 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
       // file identity instead of reading hundreds of MB again for every role.
       // The guard permanently rejects replacement, mutation and hardlinks.
       readExecutableSha256:file=>image.read(file)});
-    await unchanged();return {...base,artifact,worktree,sandbox};
+    await unchanged();assertNativeCodingHostRequestOpen(context);return {...base,artifact,worktree,sandbox};
   }
   // Acceptance reads physical current bytes and current Host identity without
   // manufacturing a fresh launch proof for a historical worker/canary.

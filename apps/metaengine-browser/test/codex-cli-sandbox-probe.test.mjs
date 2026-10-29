@@ -123,3 +123,8 @@ test('unsupported sandbox modes and relative executable paths are refused', () =
   assert.throws(() => buildCodexSandboxProbeArgs(row), /arguments_invalid/);
   assert.throws(() => buildCodexSandboxProbeArgs({ ...row, mode: 'read-only', powershellPath: 'powershell.exe' }), /arguments_invalid/);
 });
+
+test('pre-cancelled boot inventory never invokes PowerShell',async()=>{
+  const controller=new AbortController();controller.abort();
+  await assert.rejects(readWindowsSandboxHostBoot({signal:controller.signal,exec:()=>assert.fail('must not spawn')}),/request_cancelled/);
+});

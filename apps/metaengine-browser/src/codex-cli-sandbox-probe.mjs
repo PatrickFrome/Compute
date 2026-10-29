@@ -79,7 +79,8 @@ export function windowsSandboxBootIdentity(value){
     throw Error('codex_sandbox_host_boot_unverified');
   return `${value.kernel_boot_id}:${p.created_100ns}`;
 }
-export async function readWindowsSandboxHostBoot({exec=execFileAsync,platform=process.platform}={}) {
+export async function readWindowsSandboxHostBoot({exec=execFileAsync,platform=process.platform,signal}={}) {
+  if(signal?.aborted)throw Error('codex_sandbox_probe_request_cancelled');
   if(platform!=='win32')throw Error('codex_sandbox_probe_windows_required');
   // Emit only the fixed P/Invoke signature in memory. Compiling even a tiny C#
   // class through WinPS Add-Type invokes the external compiler on this bounded
@@ -120,11 +121,12 @@ if(-not $again -or $again.CreationDate.ToUniversalTime().ToFileTimeUtc() -ne $bi
 system_process=@{pid=4;created_at=$birth.ToString('o');created_100ns=$birth.ToFileTimeUtc().ToString()};
 last_boot_at=$os.LastBootUpTime.ToUniversalTime().ToString('o');os_version=$os.Version}|ConvertTo-Json -Depth 4 -Compress`;
   const pending=exec(POWERSHELL,['-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')],
-    {windowsHide:true,shell:false,timeout:12000,maxBuffer:8192,env:fixedWindowsNativeReadEnvironment()});
+    {windowsHide:true,shell:false,timeout:12000,maxBuffer:8192,signal,env:fixedWindowsNativeReadEnvironment()});
   // This fixed encoded read has no interactive input; close its unused pipe
   // before awaiting completion, just like the native process inventory reader.
   pending.child?.stdin?.end();
   const {stdout}=await pending;
+  if(signal?.aborted)throw Error('codex_sandbox_probe_request_cancelled');
   const value=JSON.parse(stdout.trim());
   if(value.system_process)value.system_process.created_at=new Date(value.system_process.created_at).toISOString();
   windowsSandboxBootIdentity(value);return value;

@@ -2,8 +2,8 @@ import path from 'node:path';
 import {readNativeCodingProtectedJson} from './native-coding-host-observers.mjs';
 
 // Protected local paths and digest pins only. Own-PG remains the authority.
-export async function readNativeCodingOperatorPaths(stateDirectory) {
-  const {value}=await readNativeCodingProtectedJson(path.join(stateDirectory,'native-coding-operator-v1.json'));
+export async function readNativeCodingOperatorPaths(stateDirectory,options={}) {
+  const {value}=await readNativeCodingProtectedJson(path.join(stateDirectory,'native-coding-operator-v1.json'),options);
   return validateNativeCodingOperatorPaths(value);
 }
 

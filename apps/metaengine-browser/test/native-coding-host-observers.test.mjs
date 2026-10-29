@@ -274,3 +274,9 @@ test('protected JSON forwards cancellation to both ACL reads and rejects their l
  }}),/request_cancelled/);
  assert.equal(reads,2);
 });
+
+test('pre-cancelled native process and sandbox reads start no external reader',async()=>{
+  const controller=new AbortController();controller.abort();
+  await assert.rejects(readNativeCodingWindowsProcess(1,{signal:controller.signal,exec:()=>assert.fail('must not spawn')}),/request_cancelled/);
+  await assert.rejects(readNativeCodingSandboxEvidence({signal:controller.signal,readProcess:()=>assert.fail('must not read process')}),/request_cancelled/);
+});
