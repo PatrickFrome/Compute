@@ -167,6 +167,7 @@ jobs:
           // Use the installed Git launcher verified by checkout; internal toolchain directories changed in Git 2.56.
           const executable=await fs.realpath('C:/Program Files/Git/bin/git.exe');assert.ok((await fs.stat(executable)).isFile());
           const component=[
+            'infra/client-state-runtime/native-coding-selector-move.test.mjs',
             'infra/client-state-runtime/native-coding-host-seed-binding.test.mjs',
             'infra/client-state-runtime/native-coding-host-seed-service.test.mjs',
             'infra/client-state-runtime/native-coding-host-os-scope.test.mjs',
@@ -202,6 +203,7 @@ jobs:
             'infra/client-state-runtime/browser-parent-message-wake.pg17.test.mjs',
           ];
           const componentRequired=[
+            'Windows native selector move publishes one-link bytes and preserves existing bytes after lost acknowledgement',
             'cancellation after a seed effect suppresses the late response without replay',
             'deadline expiring during catalog read suppresses stale readiness',
             'failed native batch joins an already started sibling before rejecting',

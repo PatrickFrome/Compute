@@ -22,6 +22,11 @@ const migrations=new URL('../../supabase/migrations/',import.meta.url);
 const source=name=>fs.readFile(new URL(name,migrations),'utf8');
 const migration='20261025110000_native_coding_initial_goal_seed_v1.sql';
 const hash=text=>createHash('sha256').update(text,'utf8').digest('hex');
+// Linux is a generated filesystem adapter only; Windows uses the real native move.
+const publicationAdapter=process.platform==='win32'?{}:{publishCompleted:async(source,target)=>{
+ try{await fs.link(source,target);}catch(error){if(error.code==='EEXIST')return false;throw error;}
+ await fs.unlink(source);return true;
+}};
 
 // Actual isolated PG17 transactions, existing enqueue/project/claim bodies.
 // Device enrollment, installed image, OS scope, canaries and Windows ACL readers
@@ -128,7 +133,7 @@ test('private initial native goal admission is atomic and preserves the W30 auth
     readCurrentDevice:async()=>structuredClone(device),readNativeScope:async permit=>({host_process:structuredClone(generated.payload().host_process),
      user_sid:profile.user_sid,artifact:structuredClone(profile.artifact),postgres:structuredClone(profile.postgres),worktree:structuredClone(permit.worktree),sandbox:structuredClone(permit.sandbox)}),
     protectStorage:async()=>{},verifyStorage:async()=>({fixture:true,windows_acl_qualified:false})};
-   const published=await publishNativeCodingSeedOperator({sql,stateDirectory,profile_id:profile.profile_id,profile_sha256:profileSha,
+   const published=await publishNativeCodingSeedOperator({...publicationAdapter,sql,stateDirectory,profile_id:profile.profile_id,profile_sha256:profileSha,
     readNativeScope:options.readNativeScope,verifyStorage:async()=>({owner_dacl_verified:true,generated_fixture:true})});
    assert.equal(published.operator_pin_published,true);assert.equal(published.physical_execution_proven,false);
    return {generated,profile,input,observation,options,stateDirectory,device,profileSha};
@@ -169,7 +174,7 @@ test('private initial native goal admission is atomic and preserves the W30 auth
   });
   await t.test('protected operator publication refuses changed pins, missing ACL and changed physical evidence',async()=>{
    const f=await fixture(),file=path.join(f.stateDirectory,'native-coding-seed-operator-v1.json'),bytes=await fs.readFile(file);
-   const options={sql,stateDirectory:f.stateDirectory,profile_id:f.profile.profile_id,profile_sha256:f.profileSha,readNativeScope:f.options.readNativeScope,verifyStorage:async()=>({owner_dacl_verified:true,generated_fixture:true})};
+   const options={...publicationAdapter,sql,stateDirectory:f.stateDirectory,profile_id:f.profile.profile_id,profile_sha256:f.profileSha,readNativeScope:f.options.readNativeScope,verifyStorage:async()=>({owner_dacl_verified:true,generated_fixture:true})};
    assert.equal((await publishNativeCodingSeedOperator(options)).existing_pin,true);
    const other={...structuredClone(f.profile),profile_id:randomUUID()};await prepareNativeCodingSeedProfile({sql,profile:other});
    await assert.rejects(publishNativeCodingSeedOperator({...options,profile_id:other.profile_id,profile_sha256:sha(other)}),/operator_conflict/);assert.deepEqual(await fs.readFile(file),bytes);
@@ -182,7 +187,7 @@ test('private initial native goal admission is atomic and preserves the W30 auth
   });
   await t.test('interrupted selector staging never publishes partial bytes and can retry the same registered profile',async()=>{
    const f=await fixture(),root=await fs.mkdtemp(path.join(directory,'atomic-selector-'));
-   const options={sql,stateDirectory:root,profile_id:f.profile.profile_id,profile_sha256:f.profileSha,readNativeScope:f.options.readNativeScope,verifyStorage:async()=>({owner_dacl_verified:true,generated_fixture:true})};
+   const options={...publicationAdapter,sql,stateDirectory:root,profile_id:f.profile.profile_id,profile_sha256:f.profileSha,readNativeScope:f.options.readNativeScope,verifyStorage:async()=>({owner_dacl_verified:true,generated_fixture:true})};
    const file=path.join(root,'native-coding-seed-operator-v1.json'),originalOpen=fs.open;let intercepted=false;
    fs.open=async(target,...args)=>{const handle=await originalOpen(target,...args);if(path.dirname(String(target))!==root||!path.basename(String(target)).startsWith('.native-seed-selector-'))return handle;intercepted=true;
     return {writeFile:async()=>{await handle.writeFile('{partial');throw Error('GENERATED_STAGING_FAILURE');},sync:()=>handle.sync(),close:()=>handle.close()};};

@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
+import {publishNativeSeedSelectorWindows} from './native-coding-selector-move.mjs';
 import {nativeCodingCanonicalJson as canonical} from './native-coding-task-context.mjs';
 import {assertNativeCodingHostRequestOpen} from './native-coding-host-request-lifetime.mjs';
 import {readPreparedNativeCodingSeedProfile} from './native-coding-seed-profile-preparation.mjs';
@@ -10,9 +11,9 @@ import {verifyOwnerOnlyWindowsStorage} from '../../apps/metaengine-browser/src/p
 const fail=reason=>{throw Error('native_coding_seed_publication_'+reason);};
 // Private installer/operator composition. No IPC, new credentials or ACL changes.
 export async function publishNativeCodingSeedOperator({sql,stateDirectory,profile_id,profile_sha256,
- readNativeScope,requestContext,verifyStorage=verifyOwnerOnlyWindowsStorage}={}){
+ readNativeScope,requestContext,verifyStorage=verifyOwnerOnlyWindowsStorage,publishCompleted=publishNativeSeedSelectorWindows}={}){
  assertNativeCodingHostRequestOpen(requestContext);
- if(!path.isAbsolute(stateDirectory||'')||typeof readNativeScope!=='function'||typeof verifyStorage!=='function')fail('configuration_invalid');
+ if(!path.isAbsolute(stateDirectory||'')||typeof readNativeScope!=='function'||typeof verifyStorage!=='function'||typeof publishCompleted!=='function')fail('configuration_invalid');
  const selector={sql,profile_id,profile_sha256,requestContext};
  await readPreparedNativeCodingSeedProfile(selector);
  const [{value}]=await sql.unsafe('select destruktion_meta.native_coding_seed_profile_v1($1::uuid,true) as value',[profile_id]);
@@ -40,9 +41,9 @@ export async function publishNativeCodingSeedOperator({sql,stateDirectory,profil
   const staged=await readNativeCodingProtectedJson(temporary,{maximumBytes:4096,verifyStorage,signal:requestContext?.signal});
   if(canonical(staged.value)!==canonical(pin))fail('staged_operator_changed');
   await verifyDirectory();
-  // Same exclusive publication pattern as own-PG; existing targets survive.
-  try{await fs.link(temporary,file);published=true;}catch(error){if(error.code!=='EEXIST')throw error;}
- }finally{if(created)await fs.unlink(temporary);}
+  published=await publishCompleted(temporary,file,{requestContext});
+  if(typeof published!=='boolean')fail('native_publication_unconfirmed');
+ }finally{if(created)await fs.unlink(temporary).catch(error=>{if(error.code!=='ENOENT')throw error;});}
  await verifyDirectory();
  const actual=await readNativeCodingProtectedJson(file,{maximumBytes:4096,verifyStorage,signal:requestContext?.signal});
  if(canonical(actual.value)!==canonical(pin))fail('operator_conflict');
