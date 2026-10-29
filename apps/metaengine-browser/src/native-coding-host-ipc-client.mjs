@@ -64,6 +64,12 @@ function payload(action,value) {
   }
   else if(['SEED_GOAL','READ_SEED','LIST_SEEDS','SERVICE_HEARTBEAT','READ_SERVICE_HEARTBEAT'].includes(action)){try{validateNativeCodingDeviceRequest(value,action);}catch{invalid('INVALID_PAYLOAD');}}
   else if(action==='AGENT_OPERATION'){try{validateNativeCodingAgentHostRequest(value);}catch{invalid('INVALID_PAYLOAD');}}
+  else if(action==='READ_PROJECT_REJECTION'){
+    keys(value,['project_id','writer_task_id','writer_lease_generation','critic_task_id','critic_lease_generation','result_sha256']);
+    if(!['project_id','writer_task_id','critic_task_id'].every(k=>UUID.test(value[k]||''))
+      ||!['writer_lease_generation','critic_lease_generation'].every(k=>Number.isSafeInteger(value[k])&&value[k]>0)
+      ||value.writer_task_id===value.critic_task_id||!HASH.test(value.result_sha256||''))invalid('INVALID_PAYLOAD');
+  }
   else if(action==='FINISH_CHECKPOINT'||action==='READ_FINISH_CHECKPOINT'||action==='RECONCILE_FINISH_CHECKPOINT'){
     keys(value,['project_id','checkpoint_sha256']);if(!UUID.test(value.project_id||'')||!HASH.test(value.checkpoint_sha256||''))invalid('INVALID_PAYLOAD');
   }
@@ -186,6 +192,7 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
     advanceExecution:(scope,transition)=>invoke('ADVANCE_EXECUTION',{scope,transition}),
     reconcileProject:project_id=>invoke('RECONCILE_PROJECT',{project_id}),
     readProjectCheckpoint:project_id=>invoke('READ_PROJECT_CHECKPOINT',{project_id}),
+    readProjectRejection:selector=>invoke('READ_PROJECT_REJECTION',selector),
     agentOperation:request=>invoke('AGENT_OPERATION',request),
     finishCheckpoint:value=>invoke('FINISH_CHECKPOINT',value),
     readFinishCheckpoint:value=>invoke('READ_FINISH_CHECKPOINT',value),

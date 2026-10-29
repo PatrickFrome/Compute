@@ -84,3 +84,31 @@ test('seed authority forwards the private request lifetime and blocks an expired
  await assert.rejects(authority.SEED_GOAL({},{deadlineAt:Date.now()-1}),/request_deadline_exceeded/);
  assert.equal(calls,1);authority.close();
 });
+
+test('private rejection read verifies exact protected pair without any task/ledger mutation or path disclosure',async()=>{
+ const {checkpointFixture}=await import('./test/native-coding-checkpoint-fixture.mjs');
+ const f=checkpointFixture();f.critic.registration.result_receipt.result.verdict='REJECT';f.refresh(f.critic);
+ const birth=pid=>{const ms=Date.now()-10000;return {pid,created_at:new Date(ms).toISOString(),process_incarnation_id:`pid:${pid}:created_100ns:${BigInt(ms)*10000n+116444736000000000n}`};};
+ f.native.host_process=birth(20000);f.native.postgres.postmaster=birth(20001);
+ const selector={project_id:f.project.project_id,writer_task_id:f.writer.task.task_id,writer_lease_generation:1,
+  critic_task_id:f.critic.task.task_id,critic_lease_generation:1,result_sha256:f.writer.registration.result_receipt.result_sha256};
+ const queries=[];
+ const sql={unsafe:async(q,a=[])=>{
+  queries.push(q);
+  if(q.startsWith('select current_user'))return [{current_user:'state_owner',session_user:'state_owner'}];
+  if(q.startsWith('select task_id'))return [{task_id:selector.writer_task_id},{task_id:selector.critic_task_id}];
+  if(q.startsWith('select to_jsonb(r)'))return [{project:f.project}];
+  if(q.includes('native_coding_review_rejection_v1'))return [{value:{...selector,verdict:'REJECT'}}];
+  if(q.includes('from destruktion_meta.native_coding_job_registration'))return [a[0]===selector.writer_task_id?f.writer:f.critic];
+  throw Error('unexpected read query');
+ },begin:async(mode,cb)=>{assert.equal(mode,'isolation level serializable');return cb(sql);}};
+ const authority=await createNativeCodingHostAuthority({sql,readNativeScope:async()=>structuredClone(f.native),readNativeWorker:async()=>{},
+  readProtectedReceipt:f.readProtectedReceipt,readCheckpointScope:f.readCheckpointScope});
+ try{
+  const value=await authority.READ_PROJECT_REJECTION(selector);
+  assert.equal(value.state,'VERIFIED_REJECTION');assert.equal(value.repair_authorized,false);assert.equal(value.checkpoint_created,false);
+  assert.equal(value.worktree,undefined);assert.equal(value.writer_execution_scope,undefined);
+  assert(!queries.some(q=>/\b(insert|update|delete|alter|create)\b/i.test(q)));
+  await assert.rejects(authority.READ_PROJECT_REJECTION({...selector,repair_authorized:true}),/selector_invalid/);
+ }finally{authority.close();}
+});

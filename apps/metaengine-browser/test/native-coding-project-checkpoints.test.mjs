@@ -75,3 +75,28 @@ test('project reconciliation forwards only bounded native pair selectors to its 
   runtime.bindNativeCodingRuntime({observeProjectCheckpoints:candidates=>{observed=candidates;return {running:true};}});
   assert.deepEqual((await runtime.tick()).native_checkpoints,{running:true});assert.deepEqual(observed,[row]);await runtime.close();
 });
+
+test('rejection observer performs only bounded reads and never grants repair or loses an in-flight read on close',async()=>{
+ const {createNativeCodingProjectRejectionObserver}=await import('../src/native-coding-project-checkpoints.mjs');
+ let calls=0,release,now=Date.now();const gate=new Promise(resolve=>{release=resolve;});
+ const reference={schema:'metaengine.native-coding.review-rejection.v1',...candidate(),result_sha256:'a'.repeat(64),verdict:'REJECT',automatic_retry_allowed:false,authority_effect:false};
+ const response=query=>({schema:'metaengine.native-coding.project-rejection-readback.v1',state:'VERIFIED_REJECTION',...query,
+  rejection_sha256:'b'.repeat(64),git_artifact_sha256:'c'.repeat(64),source_head:'d'.repeat(40),observed_at:new Date(now).toISOString(),
+  repair_authorized:false,checkpoint_created:false,production_qualified:false,automatic_retry_allowed:false,authority_effect:false});
+ const observer=createNativeCodingProjectRejectionObserver({clock:()=>now,ownPostgres:{readProjectRejection:async query=>{calls++;await gate;return response(query);}}});
+ observer.observe(reference);observer.observe(reference);await new Promise(resolve=>setImmediate(resolve));assert.equal(calls,1);
+ release();await observer.drain();assert.equal(observer.snapshot().observations[0].state,'VERIFIED_REJECTION');
+ observer.observe(reference);await observer.drain();assert.equal(calls,1);
+ now+=16000;observer.observe(reference);await observer.drain();assert.equal(calls,2);assert.equal(observer.snapshot().repair_authorized,false);
+ observer.close();assert.equal(observer.snapshot().observations[0].state,'READBACK_REQUIRED');
+});
+test('rejection observer refuses wrong pair, stale proof and fabricated repair authorization',async()=>{
+ const {createNativeCodingProjectRejectionObserver}=await import('../src/native-coding-project-checkpoints.mjs');
+ const reference={schema:'metaengine.native-coding.review-rejection.v1',...candidate(),result_sha256:'a'.repeat(64),verdict:'REJECT',automatic_retry_allowed:false,authority_effect:false};
+ for(const change of [{writer_task_id:'00000000-0000-4000-8000-000000000099'},{repair_authorized:true},{observed_at:'2000-01-01T00:00:00.000Z'}]){
+  const observer=createNativeCodingProjectRejectionObserver({ownPostgres:{readProjectRejection:async query=>({schema:'metaengine.native-coding.project-rejection-readback.v1',state:'VERIFIED_REJECTION',...query,
+   rejection_sha256:'b'.repeat(64),git_artifact_sha256:'c'.repeat(64),source_head:'d'.repeat(40),observed_at:new Date().toISOString(),
+   repair_authorized:false,checkpoint_created:false,production_qualified:false,automatic_retry_allowed:false,authority_effect:false,...change})}});
+  observer.observe(reference);await observer.drain();assert.equal(observer.snapshot().observations[0].state,'READBACK_REQUIRED');observer.close();
+ }
+});

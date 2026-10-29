@@ -83,3 +83,21 @@ test('physical change between two reads and Host close while awaiting a read fen
   const pending=blocked.verify(request(f));await arrived;blocked.close();release(structuredClone(f.native));
   await assert.rejects(pending,/checkpoint_closed/);
 });
+
+test('a rejected pair has separately verified retained bytes, never an accepted checkpoint or repair permission',async()=>{
+ const f=make();f.critic.registration.result_receipt.result.verdict='REJECT';
+ f.critic.registration.result_receipt.result.checks=[{description:'regression',passed:false,evidence:'Generated failed check'}];f.refresh(f.critic);
+ const result=await f.verifier.verifyRejected(request(f));
+ assert.equal(result.rejection.verdict,'REJECT');assert.equal(result.rejection.repair_authorized,false);
+ assert.equal(result.rejection.checkpoint_created,false);assert.equal(result.checkpoint,undefined);
+ assert.equal(result.rejection_sha256,sha(result.rejection));
+ await assert.rejects(f.verifier.verify(request(f)),/result_not_accepted/);
+});
+test('rejection verification refuses ACCEPT, changed candidate bytes, forged receipts and a closed verifier',async()=>{
+ const accepted=make();await assert.rejects(accepted.verifier.verifyRejected(request(accepted)),/result_not_accepted/);
+ for(const change of [f=>{f.native.git.artifact_sha256='f'.repeat(64);},f=>{f.receipts.get(f.critic.task.task_id).result.summary='forged';}]){
+  const f=make();f.critic.registration.result_receipt.result.verdict='REJECT';f.refresh(f.critic);change(f);
+  await assert.rejects(f.verifier.verifyRejected(request(f)),/checkpoint_/);
+ }
+ const closed=make();closed.verifier.close();await assert.rejects(closed.verifier.verifyRejected(request(closed)),/closed/);
+});

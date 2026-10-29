@@ -680,7 +680,9 @@ test('a bound rejected native review is a blocker rather than endless child wait
    writer_task_id:writer.task_id,writer_lease_generation:1,critic_task_id:'55555555-5555-4555-8555-555555555555',critic_lease_generation:1,
    result_sha256:'a'.repeat(64),automatic_retry_allowed:false,authority_effect:false};
  });
+ const observed=[];f.runtime.bindNativeCodingRuntime({observeProjectCheckpoints:()=>{},observeProjectRejection:ref=>observed.push(ref)});
  const before=f.provider.read(),result=await f.runtime.waitForChildren(rootTask());
+ assert.equal(observed.length,1);assert.equal(observed[0].writer_task_id,writer.task_id);
  assert.equal(result.waiting,false);assert.equal(result.failed,true);assert.equal(result.reason,'NATIVE_REVIEW_REJECTED');
  assert.deepEqual(f.provider.read(),before,'observation itself must not retry, complete or release child custody');
 });

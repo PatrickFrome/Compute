@@ -33,6 +33,8 @@ test('private checkpoint Host verifies and commits a historical pair on a dispos
   let started=false,sql,passed=0,cluster;const authorities=[];
   try {
     await command('initdb',['-D',data,'--username=state_owner','--auth=trust','--no-locale','--encoding=UTF8','--no-sync']);
+    // This disposable fixture connects only over its owned loopback TCP port.
+    await fs.appendFile(path.join(data,'postgresql.conf'), "\nunix_socket_directories = ''\n");
     started=true;await command('pg_ctl',['-D',data,'-l',path.join(directory,'postgres.log'),'-o',`-h 127.0.0.1 -p ${port}`,'-w','start']);
     const postgres=(await import(pathToFileURL(driver))).default;
     sql=postgres({host:'127.0.0.1',port,user:'state_owner',database:'postgres',max:2,onnotice:()=>{},connect_timeout:5,
@@ -68,8 +70,13 @@ test('private checkpoint Host verifies and commits a historical pair on a dispos
       '20261022070000_native_coding_execution_ledger_v1.sql','20261023082533_native_coding_operator_qa_admission_v1.sql',
       '20261025070000_native_coding_project_continuation_v1.sql'])await sql.unsafe(await source(name));
 
-    async function fixture() {
+    const rejectionSource=await fs.readFile(new URL('./native-coding-review-observation-v1.sql',import.meta.url),'utf8');
+    const rejectionStart=rejectionSource.indexOf('create or replace function destruktion_meta.native_coding_review_rejection_v1(');
+    await sql.unsafe(rejectionSource.slice(rejectionStart,rejectionSource.indexOf('$$;',rejectionStart)+3));
+
+    async function fixture({verdict='ACCEPT'}={}) {
       const f=checkpointFixture(),root=sha(randomUUID());
+      f.critic.registration.result_receipt.result.verdict=verdict;
       f.native.postgres=structuredClone(f.writer.permit.postgres);f.native.postgres.system_identifier=cluster;
       f.native.host_process=structuredClone(f.writer.registration.job_envelope.payload.host_process);
       f.native.worktree.root_identity_sha256=root;
@@ -150,7 +157,21 @@ test('private checkpoint Host verifies and commits a historical pair on a dispos
       assert.equal((await sql.unsafe('select count(*)::int as n from destruktion_meta.native_coding_checkpoint_h205f22 where project_id=$1',[x.f.project.project_id]))[0].n,0);
       assert.ok((await sql.unsafe('select state from destruktion_meta.native_coding_execution_h205f22 where workspace_id=$1',[x.f.project.workspace_id])).every(row=>row.state==='RESULT_READY'));
     });
-    assert.equal(passed,2);
+    await t.test('rejected pair is verified through actual Host SQL without creating a checkpoint',async()=>{
+      const x=await fixture({verdict:'REJECT'});
+      const f=x.f;
+      const selector={project_id:f.project.project_id,writer_task_id:f.writer.task.task_id,writer_lease_generation:1,
+        critic_task_id:f.critic.task.task_id,critic_lease_generation:1,result_sha256:f.writer.registration.result_receipt.result_sha256};
+      const before=await sql.unsafe('select task_id,state,result_summary from destruktion_meta.devos_fleet_task_h205f22 where workspace_id=$1 order by task_id',[f.project.workspace_id]);
+      const proof=await x.authority.READ_PROJECT_REJECTION(selector);
+      assert.equal(proof.state,'VERIFIED_REJECTION');assert.equal(proof.repair_authorized,false);assert.equal(proof.checkpoint_created,false);
+      assert.equal((await x.authority.RECONCILE_PROJECT(x.request)).state,'PENDING');
+      assert.equal((await sql.unsafe('select count(*)::int as n from destruktion_meta.native_coding_checkpoint_h205f22 where project_id=$1',[f.project.project_id]))[0].n,0);
+      assert.deepEqual(await sql.unsafe('select task_id,state,result_summary from destruktion_meta.devos_fleet_task_h205f22 where workspace_id=$1 order by task_id',[f.project.workspace_id]),before);
+      await assert.rejects(x.authority.READ_PROJECT_REJECTION({...selector,writer_lease_generation:2}),/rejection_pair_changed/);
+      passed++;
+    });
+    assert.equal(passed,3);
     await fs.writeFile(path.join(directory,'receipt.json'),JSON.stringify({schema:'metaengine.native-coding.checkpoint-host.disposable-qa.v1',state:'PASS',
       source_classification:'REAL_DISPOSABLE_PG_WITH_GENERATED_OS_IMAGE_GIT_SANDBOX_FIXTURES',subtests:passed,port,postgres_system_identifier:cluster,
       installed_keeper_used:false,installed_autonomy_proven:false,model_calls:0,authority_effect:false},null,2));

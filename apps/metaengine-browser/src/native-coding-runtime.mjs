@@ -8,7 +8,7 @@ import {createNativeCodingExecutionPool} from './native-coding-execution-pool.mj
 import {createNativeCodingHostObservers,createNativeCodingWorkerRegistry,createNativeCodingPermitRegistry,
   createNativeCodingResultStore} from './native-coding-host-observers.mjs';
 import {buildNativeCodingExecutionScope} from './native-coding-task-context.mjs';
-import {createNativeCodingProjectCheckpointObserver} from './native-coding-project-checkpoints.mjs';
+import {createNativeCodingProjectCheckpointObserver,createNativeCodingProjectRejectionObserver} from './native-coding-project-checkpoints.mjs';
 import {createNativeCodingProjectCommitObserver} from './native-coding-project-commits.mjs';
 import {prepareNativeCodingAgentRunBridge} from './native-coding-agent-run-bridge.mjs';
 import {createNativeCodingServiceHeartbeatPublisher} from './native-coding-service-heartbeat-publisher.mjs';
@@ -52,6 +52,7 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
   const descriptors=new Map(),providerFences=new Map(),scopes=new Map(),completionAttempts=new Map();
   const checkpoints=['reconcileProject','readProjectCheckpoint'].every(name=>typeof ownPostgres[name]==='function')
     ?createNativeCodingProjectCheckpointObserver({ownPostgres}):null;
+  const rejections=typeof ownPostgres.readProjectRejection==='function'?createNativeCodingProjectRejectionObserver({ownPostgres}):null;
   const commits=['finishCheckpoint','readFinishCheckpoint'].every(name=>typeof ownPostgres[name]==='function')
     ?createNativeCodingProjectCommitObserver({ownPostgres}):null;
 
@@ -273,10 +274,10 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
     for(const entry of completionAttempts.values())if(entry.state==='COMPLETION_PENDING'){
       entry.state='READBACK_REQUIRED';entry.reason='HOST_UNAVAILABLE_DURING_COMPLETION';
     }
-    checkpoints?.close();commits?.close();serviceHeartbeat?.close();unsubscribeHost?.();unsubscribeHost=null;
+    checkpoints?.close();rejections?.close();commits?.close();serviceHeartbeat?.close();unsubscribeHost?.();unsubscribeHost=null;
     const pending=[];
     for(const operation of [()=>pool.stop(),()=>workers.close(),()=>nativeIssuer.close(),
-      ()=>Promise.all([...activeBridges].map(bridge=>bridge.close())),()=>checkpoints?.drain(),()=>commits?.drain(),()=>serviceHeartbeat?.drain()]){
+      ()=>Promise.all([...activeBridges].map(bridge=>bridge.close())),()=>checkpoints?.drain(),()=>rejections?.drain(),()=>commits?.drain(),()=>serviceHeartbeat?.drain()]){
       try{pending.push(Promise.resolve(operation()));}catch(error){pending.push(Promise.reject(error));}
     }
     const drained=Promise.allSettled(pending).then(values=>{
@@ -311,6 +312,10 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
       if(!checkpoints){if(candidates?.length)fail('private_checkpoint_capability_required');return null;}
       return checkpoints.observe(candidates);
     },
+    observeProjectRejection(reference){
+      if(closed)return fence('STOPPED',{reason:unavailableReason});
+      return rejections?.observe(reference)??{state:'PRIVATE_REJECTION_READER_UNAVAILABLE',repair_authorized:false,authority_effect:false};
+    },
     observeProjectCommits(candidates){
       if(closed)return fence('STOPPED',{reason:unavailableReason});
       if(!commits){if(candidates?.length)fail('private_commit_capability_required');return null;}
@@ -321,6 +326,7 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
     snapshot(){return {...pool.snapshot(),schema:'metaengine.native-coding.runtime.v1',provider_fences:providerFences.size,
       provider_refresh_running:refresh!==null,provider_refresh_reason:refreshReason,
       project_checkpoints:checkpoints?.snapshot()??null,
+      project_rejections:rejections?.snapshot()??null,
       project_commits:commits?.snapshot()??null,
       service_heartbeat:serviceHeartbeat?.snapshot()??{state:'PRIVATE_SERVICE_UNBOUND',authority_effect:false},
       completion_readbacks:[...completionAttempts.values()].filter(v=>v.state==='READBACK_REQUIRED').length,

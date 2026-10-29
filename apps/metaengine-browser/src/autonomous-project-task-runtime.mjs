@@ -227,6 +227,7 @@ export class AutonomousProjectTaskRuntime {
     const pending = descendants.filter(row => !['COMPLETED', 'FAILED', 'CANCELLED', 'AMBIGUOUS', 'FENCED'].includes(row.state));
     const failed = descendants.filter(row => ['FAILED', 'BLOCKED', 'CANCELLED', 'AMBIGUOUS', 'FENCED'].includes(row.state));
     const reviewRejection=normalizeNativeReviewRejection(current.snapshot.native_review_rejection,initialProject);
+    if(reviewRejection)this.#nativeCodingRuntime?.observeProjectRejection?.(reviewRejection);
     const blocked = reviewRejection!==null || failed.length > 0 || Number(current.task.blocking_children) > 0 || current.snapshot.selected_task_children_failed === true;
     // PostgreSQL counts failed/rejected children as open until completion. A
     // blocking result must reach the existing parent BLOCKED path instead of

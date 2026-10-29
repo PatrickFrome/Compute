@@ -80,7 +80,7 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
       ||checkpointSelectors.some(key=>String(k[key])!==String(record[key])))return projectResult(id,'READBACK_REQUIRED',k);
     return projectResult(id,'CHECKPOINTED_PENDING_COMMIT',record,k.checkpoint_sha256);
   }
-  async function checkpointBundle(tx,id,taskId,generation) {
+  async function checkpointBundle(tx,id,taskId,generation,readOnly=false) {
     const rows=await tx.unsafe(`select p.permit,
       jsonb_build_object('workspace_id',p.workspace_id,'device_id',p.device_id,'client_id',p.client_id,
         'admin_grant_epoch',p.admin_grant_epoch,'revoked_at',p.revoked_at) as permit_binding,
@@ -96,7 +96,7 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
       where j.task_id=$1::uuid and j.lease_generation=$2::bigint and pt.project_id=$3::uuid
         and p.revoked_at is null and d.active and d.revoked_at is null and d.access_tier='ADMIN' and d.admin_revoked_at is null
         and d.admin_grant_epoch=p.admin_grant_epoch and d.admin_scopes @> '["CONTROL_PLANE","DEVOS"]'::jsonb
-      for update of j,e for share of p,d,pt`,[taskId,generation,id]);
+      ${readOnly?'for share of j,e,p,d,pt':'for update of j,e for share of p,d,pt'}`,[taskId,generation,id]);
     if(rows.length!==1)fail('checkpoint_registered_pair_unavailable');return rows[0];
   }
   function validateContext(c) {
@@ -420,6 +420,37 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
           if(changed.length!==1||changed[0].result_receipt_sha256!==sha(receipt))fail('result_registration_unknown');
         }
         return ledger(tx).advance(scope,transition);
+      });
+    },
+    async READ_PROJECT_REJECTION(selector) {
+      open();
+      if(!exact(selector,['project_id',...checkpointSelectors,'result_sha256'])||!uuid.test(selector.project_id||'')
+        ||!['writer_task_id','critic_task_id'].every(k=>uuid.test(selector[k]||''))
+        ||!['writer_lease_generation','critic_lease_generation'].every(k=>Number.isSafeInteger(selector[k])&&selector[k]>0)
+        ||selector.writer_task_id===selector.critic_task_id||!/^[a-f0-9]{64}$/.test(selector.result_sha256||''))fail('rejection_selector_invalid');
+      if(!checkpointVerifier)fail('checkpoint_private_reader_unbound');
+      // Consistent read with the existing task -> project lock order. No
+      // checkpoint/ledger/task update, commit or new execution is permitted.
+      return sql.begin('isolation level serializable',async tx=>{
+        await owner(tx);open();
+        const tasks=await tx.unsafe('select task_id from destruktion_meta.devos_fleet_task_h205f22 where task_id in ($1::uuid,$2::uuid) order by task_id for share',
+          [selector.writer_task_id,selector.critic_task_id]);
+        if(tasks.length!==2)fail('rejection_tasks_unavailable');
+        const projects=await tx.unsafe('select to_jsonb(r) as project from destruktion_meta.project_run_h205f22 r where project_id=$1::uuid for share',[selector.project_id]);
+        if(projects.length!==1)fail('rejection_project_unavailable');
+        const rows=await tx.unsafe('select destruktion_meta.native_coding_review_rejection_v1($1::uuid,$2::uuid) as value',[selector.project_id,selector.writer_task_id]);
+        const rejected=rows[0]?.value;
+        if(rows.length!==1||rejected?.verdict!=='REJECT'||rejected.project_id!==selector.project_id||rejected.result_sha256!==selector.result_sha256
+          ||checkpointSelectors.some(k=>rejected[k]!==selector[k]))fail('rejection_pair_changed');
+        const writer=await checkpointBundle(tx,selector.project_id,selector.writer_task_id,selector.writer_lease_generation,true);
+        const critic=await checkpointBundle(tx,selector.project_id,selector.critic_task_id,selector.critic_lease_generation,true);
+        const verified=await checkpointVerifier.verifyRejected({project:projects[0].project,writer,critic},tx);open();
+        const proof=verified.rejection;
+        if(proof.result_sha256!==selector.result_sha256||checkpointSelectors.some(k=>proof[k]!==selector[k]))fail('rejection_pair_changed');
+        return {schema:'metaengine.native-coding.project-rejection-readback.v1',state:'VERIFIED_REJECTION',...selector,
+          rejection_sha256:verified.rejection_sha256,git_artifact_sha256:proof.git_artifact_sha256,source_head:proof.source_head,
+          observed_at:proof.verified_at,repair_authorized:false,checkpoint_created:false,production_qualified:false,
+          automatic_retry_allowed:false,authority_effect:false};
       });
     },
     async READ_PROJECT_CHECKPOINT({project_id}) {

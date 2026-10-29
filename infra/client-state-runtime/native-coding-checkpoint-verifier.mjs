@@ -33,7 +33,7 @@ function nativeProcess(value,now) {
 export function createNativeCodingCheckpointVerifier({readProtectedReceipt,readCheckpointScope,clock=()=>Date.now()}={}) {
   if(typeof readProtectedReceipt!=='function'||typeof readCheckpointScope!=='function'||typeof clock!=='function')fail('private_readers_required');
   let closed=false;const open=()=>{if(closed)fail('closed');};
-  async function registered(bundle,project,role,subject=null) {
+  async function registered(bundle,project,role,subject=null,verdict='ACCEPT') {
     const {permit:p,permit_binding:b,device:d,registration:j,execution:e,task:t}=bundle??{};
     if(!p||!b||!d||!j||!e||!t||p.role!==role||p.schema!=='metaengine.native-coding.operator-permit.v1'
       ||p.trust_namespace!=='LOCAL_OPERATOR_QA'||p.revoked!==false||b.revoked_at!==null
@@ -83,7 +83,7 @@ export function createNativeCodingCheckpointVerifier({readProtectedReceipt,readC
       ||receipt.sandbox_mode!==(role==='CRITIC'?'read-only':'workspace-write')
       ||receipt.git_before?.head!==p.worktree.base_sha||!HASH.test(receipt.git_after?.artifact_sha256||''))fail('protected_result_changed');
     const result=validateCodexCliResult(receipt.result,role,subject?.result_sha256??null);
-    if(result.outcome!=='DONE'||result.checks.some(check=>!check.passed)||role==='CRITIC'&&result.verdict!=='ACCEPT')fail('result_not_accepted');
+    if(result.outcome!=='DONE'||verdict==='ACCEPT'&&result.checks.some(check=>!check.passed)||role==='CRITIC'&&result.verdict!==verdict)fail('result_not_accepted');
     const expected={...payload};
     for(const name of ['permit_id','goal_id','goal_sha256','owner_epoch','user_sid','workspace_id','project_id','provider_id',
       'agent_id','role','agent_generation_epoch','device_id','artifact','postgres','worktree'])expected[name]=p[name];
@@ -107,14 +107,13 @@ export function createNativeCodingCheckpointVerifier({readProtectedReceipt,readC
     nativeProcess(value.host_process,clock());nativeProcess(value.postgres.postmaster,clock());
     return value;
   }
-  return Object.freeze({
-    async verify({project,writer,critic}={},reader) {
+  async function verifyPair({project,writer,critic}={},reader,verdict='ACCEPT') {
       open();const observed=clock();
       if(!Number.isSafeInteger(observed)||!project||project.state!=='ACTIVE'||!UUID.test(project.project_id||''))fail('project_unavailable');
-      const w=await registered(writer,project,'IMPLEMENTER');
+      const w=await registered(writer,project,'IMPLEMENTER',null,verdict);
       const subject={run_id:w.receipt.run_id,result_sha256:w.receipt.result_sha256,git_artifact_sha256:w.receipt.git_after.artifact_sha256,
         source_head:w.receipt.git_after.head,agent_id:w.receipt.agent_id,worker_process:w.job.worker_process};
-      const c=await registered(critic,project,'CRITIC',subject);
+      const c=await registered(critic,project,'CRITIC',subject,verdict);
       if(w.permit.goal_id!==c.permit.goal_id||w.permit.goal_sha256!==c.permit.goal_sha256||w.permit.owner_epoch!==c.permit.owner_epoch
         ||w.permit.user_sid!==c.permit.user_sid||!same(w.permit.artifact,c.permit.artifact)
         ||w.permit.postgres.system_identifier!==c.permit.postgres.system_identifier
@@ -131,6 +130,18 @@ export function createNativeCodingCheckpointVerifier({readProtectedReceipt,readC
       const first=current(await readCheckpointScope(w.permit,reader),w.permit,w);open();
       const last=current(await readCheckpointScope(c.permit,reader),c.permit,w);open();
       if(!same(first,last)||clock()<observed||clock()-observed>30000)fail('physical_readback_changed');
+      if(verdict==='REJECT') {
+        // This is evidence of the rejected pair and retained candidate, never
+        // an accepted checkpoint, a custody release or permission to retry.
+        const rejection={schema:'metaengine.native-coding.verified-rejection.v1',project_id:project.project_id,
+          writer_task_id:w.receipt.task_id,writer_lease_generation:w.execution_scope.lease_generation,
+          critic_task_id:c.receipt.task_id,critic_lease_generation:c.execution_scope.lease_generation,
+          writer_run_id:w.receipt.run_id,critic_run_id:c.receipt.run_id,writer_receipt_sha256:w.receipt_sha256,critic_receipt_sha256:c.receipt_sha256,
+          result_sha256:w.receipt.result_sha256,git_artifact_sha256:subject.git_artifact_sha256,source_head:subject.source_head,
+          root_identity_sha256:w.permit.worktree.root_identity_sha256,verified_at:new Date(clock()).toISOString(),
+          verdict:'REJECT',repair_authorized:false,checkpoint_created:false,production_qualified:false,automatic_retry_allowed:false,authority_effect:false};
+        return Object.freeze({rejection,rejection_sha256:sha(rejection),writer:w,critic:c});
+      }
       const checkpoint={schema:'metaengine.native-coding.checkpoint.v1',trust_namespace:'LOCAL_OPERATOR_QA',checkpoint_id:randomUUID(),
         workspace_id:project.workspace_id,project_id:project.project_id,goal_id:w.permit.goal_id,goal_sha256:w.permit.goal_sha256,owner_epoch:w.permit.owner_epoch,
         writer_task_id:w.receipt.task_id,writer_lease_generation:w.execution_scope.lease_generation,
@@ -141,7 +152,10 @@ export function createNativeCodingCheckpointVerifier({readProtectedReceipt,readC
         writer_execution_scope:w.execution_scope,critic_execution_scope:c.execution_scope,verified_at:new Date(clock()).toISOString(),
         production_qualified:false,automatic_retry_allowed:false,successor_admitted:false,authority_effect:false};
       return Object.freeze({checkpoint,canonical_checkpoint:json(checkpoint),checkpoint_sha256:sha(checkpoint),writer:w,critic:c});
-    },
+  }
+  return Object.freeze({
+    verify:(input,reader)=>verifyPair(input,reader,'ACCEPT'),
+    verifyRejected:(input,reader)=>verifyPair(input,reader,'REJECT'),
     close(){closed=true;},
   });
 }

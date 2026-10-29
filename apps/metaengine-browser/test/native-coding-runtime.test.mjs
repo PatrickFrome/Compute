@@ -470,3 +470,15 @@ test('runtime drain joins an in-flight private commit before journals and Host m
   release();const result=await closing;assert.equal(result.shutdown_state,'DRAINED');assert.equal(writes,1);
   assert.equal(result.execution_outcomes_reconciled,false);
 });
+
+test('runtime drains its private rejection read without treating it as a repair or successful execution',async t=>{
+ const f=fixture();t.after(()=>f.runtime.close());let release,enteredResolve,finished=false;
+ const entered=new Promise(resolve=>{enteredResolve=resolve;}),gate=new Promise(resolve=>{release=resolve;});
+ const runtime=createNativeCodingRuntime({...f.args,ownPostgres:{...f.args.ownPostgres,readProjectRejection:async()=>{enteredResolve();await gate;throw Error('fixture_unknown_read');}}});
+ t.after(()=>runtime.close());
+ runtime.observeProjectRejection({schema:'metaengine.native-coding.review-rejection.v1',project_id:ids.project,writer_task_id:ids.task,
+  writer_lease_generation:1,critic_task_id:ids.provider,critic_lease_generation:1,result_sha256:'a'.repeat(64),verdict:'REJECT',automatic_retry_allowed:false,authority_effect:false});
+ await entered;const closing=runtime.close().then(v=>{finished=true;return v;});
+ await new Promise(resolve=>setImmediate(resolve));assert.equal(finished,false);assert.equal(runtime.snapshot().project_rejections.repair_authorized,false);
+ release();await closing;assert.equal(runtime.snapshot().project_rejections.closed,true);assert.equal(f.runCount,0);
+});

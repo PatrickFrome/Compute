@@ -183,3 +183,36 @@ restoration of the wake layer in the same installer transaction.
 These results do not qualify actual installed Windows chat restoration or
 provider/model interaction. Next P0 remains safe rejected-result repair and
 source-owned installed CHAT_LED preparation, followed by live qualification.
+
+### Independent rejected-pair readback implemented (source prerequisite)
+
+The existing checkpoint verifier now has a separate fixed REJECT verification
+entry. ACCEPT remains the only path that creates checkpoint evidence. REJECT
+verification authenticates the same protected job/receipt identities, independent
+critic subject and two current physical candidate reads, while allowing failed
+checks as rejection evidence. It returns repair_authorized=false and creates no
+checkpoint. Caller options cannot change the verdict required by either entry.
+
+A fixed private READ_PROJECT_REJECTION operation, bounded IPC selector and
+heartbeat-driven readonly observer connect this to actual Browser/Host runtime
+composition. The observer never retries work, writes SQL state, releases custody
+or grants a repair. It validates freshness, pair/hash binding and false authority
+flags; shutdown drains its in-flight read. Public summaries omit private paths
+and execution scopes. The existing parent remains blocked after REJECT.
+
+Evidence:27 verifier/Host/observer tests,141 IPC/runtime/project wiring tests,
+and4 real PG17 checkpoint/negative/rejected-pair tests passed. Full browser:
+6950total6840pass28unchangedenvironmentfail82skip. Runtime aggregate754total,
+723pass1existingUnixIPCfail30skip. All OS/image/Git witnesses in PG tests remain
+generated; these are not installed Windows proof. The older disposable Host
+fixture now configures its already-used loopback TCP connection explicitly,
+avoiding a missing default Unix socket directory on Linux.
+
+Windows qualification now requires the actual Host rejected-pair PG test and a
+native-only message-wake PG test. Shared suspension fixture was extracted without
+removing the supplemental WASM/serial assertions. Native-only lane retains zero
+skips. YAML parsing, schema registration checks and UI TypeScript pass.
+
+Automatic repair admission remains unimplemented. REPAIR_TRANSITION_DESIGN.md
+records the required clean-root replacement and honest supersession semantics;
+none of that document is a runtime grant or a claim of completed repair.

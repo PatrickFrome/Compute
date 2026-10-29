@@ -41,6 +41,7 @@ const operations={
  RESERVE_EXECUTION:async value=>{++calls;if(mode==='exit-write')process.exit(19);if(mode==='terminal-write'){process.send({schema:'compute.runtime-host-terminal.v1',invalid_payload:true});await delay(25);}if(mode==='slow-write')await delay(180);return {state:'RESERVED',scope:value.scope};},
  ADVANCE_EXECUTION:async value=>{++calls;return {state:value.transition.to,has_job_proof:!!value.transition.job_proof,has_result_receipt:!!value.transition.result_receipt};},
  RECONCILE_PROJECT:async value=>{++calls;if(mode==='throw-write')throw Error('checkpoint_unknown');return {project_id:value.project_id,state:'CHECKPOINTED_PENDING_COMMIT'};},
+ READ_PROJECT_REJECTION:async value=>({schema:'metaengine.native-coding.project-rejection-readback.v1',state:'VERIFIED_REJECTION',...value,repair_authorized:false,checkpoint_created:false,authority_effect:false}),
  READ_PROJECT_CHECKPOINT:async value=>({project_id:value.project_id,state:'CHECKPOINTED_PENDING_COMMIT'}),
  AGENT_OPERATION:async value=>{++calls;if(mode==='slow-agent')await delay(180);return {operation:value.operation,run_id:value.binding.run_id};},
  FINISH_CHECKPOINT:async value=>{++calls;return {...value,state:'COMMITTED_NO_SUCCESSOR'};},
@@ -448,3 +449,12 @@ test('real private IPC supplies a bounded server-owned deadline and cancellation
  assert.ok(Number.isSafeInteger(result.deadline_at));
  assert.ok(result.remaining_ms>0&&result.remaining_ms<=1000);
 });
+
+ test('private rejection reader crosses the fixed child IPC contract without caller paths or repair grants',async t=>{
+  const {client}=await setup(t);
+  const query={project_id:id(),writer_task_id:id(),writer_lease_generation:1,critic_task_id:id(),critic_lease_generation:1,result_sha256:'a'.repeat(64)};
+  const result=await client.readProjectRejection(query);assert.equal(result.state,'VERIFIED_REJECTION');assert.equal(result.repair_authorized,false);
+  assert.equal(result.writer_task_id,query.writer_task_id);
+  for(const extra of [{path:'C:/caller-root'},{sql:'select 1'},{repair_authorized:true}])
+    await assert.rejects(client.readProjectRejection({...query,...extra}),error=>error.reason==='INVALID_PAYLOAD'&&error.effect_outcome==='NONE');
+ });

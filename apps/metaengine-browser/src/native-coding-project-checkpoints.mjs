@@ -93,3 +93,49 @@ export function createNativeCodingProjectCheckpointObserver({ownPostgres,maxEntr
     drain(){return running||Promise.resolve();},
   });
 }
+
+// Read-only preparation for a later repair transition. The existing heartbeat
+// drives it; no retry, checkpoint, permit mutation or process launch exists here.
+export function createNativeCodingProjectRejectionObserver({ownPostgres,clock=Date.now,minimumIntervalMs=15000,maxEntries=128}={}) {
+  if(typeof ownPostgres?.readProjectRejection!=='function'||typeof clock!=='function'
+    ||!Number.isSafeInteger(minimumIntervalMs)||minimumIntervalMs<0||!Number.isSafeInteger(maxEntries)||maxEntries<1||maxEntries>128)
+    throw Error('native_coding_rejection_observer_dependencies');
+  const entries=new Map();let running=null,closed=false;
+  const fields=['project_id','writer_task_id','writer_lease_generation','critic_task_id','critic_lease_generation','result_sha256'];
+  const snapshot=()=>({schema:'metaengine.native-coding.rejection-observer.v1',running:running!==null,closed,
+    observations:[...entries.values()].slice(-16).map(row=>({...row.public})),repair_authorized:false,authority_effect:false});
+  return Object.freeze({
+    observe(reference) {
+      if(closed)return snapshot();
+      if(reference?.schema!=='metaengine.native-coding.review-rejection.v1'||reference.verdict!=='REJECT'
+        ||reference.authority_effect!==false||reference.automatic_retry_allowed!==false
+        ||!['project_id','writer_task_id','critic_task_id'].every(k=>UUID.test(reference[k]||''))
+        ||!['writer_lease_generation','critic_lease_generation'].every(k=>Number.isSafeInteger(reference[k])&&reference[k]>0)
+        ||reference.writer_task_id===reference.critic_task_id||!HASH.test(reference.result_sha256||''))throw Error('native_coding_rejection_reference_invalid');
+      const query=Object.fromEntries(fields.map(k=>[k,reference[k]])),id=fields.map(k=>query[k]).join(':'),now=clock();
+      if(!Number.isSafeInteger(now)||now<0)throw Error('native_coding_rejection_clock_invalid');
+      if(running)return snapshot();
+      let row=entries.get(id);
+      if(row&&now>=row.checkedAt&&now-row.checkedAt<minimumIntervalMs)return snapshot();
+      if(!row){if(entries.size>=maxEntries)entries.delete(entries.keys().next().value);
+        row={checkedAt:now,public:{...query,state:'PENDING',observed_at:null,rejection_sha256:null}};entries.set(id,row);}
+      row.checkedAt=now;row.public.state='PENDING';row.public.rejection_sha256=null;
+      running=Promise.resolve().then(async()=>{
+        try{
+          const value=await ownPostgres.readProjectRejection(query);if(closed)return;
+          const ended=clock(),observed=Date.parse(value?.observed_at);
+          if(!Number.isSafeInteger(ended)||ended<now||ended-now>30000||!Number.isFinite(observed)||observed<now-5000||observed>ended+5000)throw Error('stale_rejection_readback');
+          if(value?.schema!=='metaengine.native-coding.project-rejection-readback.v1'||value.state!=='VERIFIED_REJECTION'
+            ||fields.some(k=>value[k]!==query[k])||!HASH.test(value.rejection_sha256||'')||!HASH.test(value.git_artifact_sha256||'')
+            ||!/^[a-f0-9]{40}$/.test(value.source_head||'')||!Number.isFinite(Date.parse(value.observed_at))
+            ||value.repair_authorized!==false||value.checkpoint_created!==false||value.production_qualified!==false
+            ||value.automatic_retry_allowed!==false||value.authority_effect!==false)throw Error('invalid_rejection_readback');
+          row.public={...query,state:'VERIFIED_REJECTION',observed_at:value.observed_at,rejection_sha256:value.rejection_sha256};
+        }catch{if(!closed)row.public={...query,state:'READBACK_REQUIRED',observed_at:null,rejection_sha256:null};}
+      }).finally(()=>{running=null;});
+      return snapshot();
+    },snapshot,
+    close(){closed=true;for(const row of entries.values())row.public={...row.public,state:'READBACK_REQUIRED',rejection_sha256:null};return snapshot();},
+    drain(){return running||Promise.resolve();},
+  });
+}
