@@ -4,9 +4,9 @@
 !define MUI_TEXTCOLOR "d4d7df"
 !define MUI_INSTFILESPAGE_COLORS "d7dce5 252a32"
 !define MUI_WELCOMEPAGE_TITLE "METAENGINE Browser"
-!define MUI_WELCOMEPAGE_TEXT "Install version ${VERSION}.$\r$\n$\r$\nYour existing projects and client profile are preserved. The client connects to the configured local database automatically when it starts.$\r$\n$\r$\nChoose Next to continue."
+!define MUI_WELCOMEPAGE_TEXT "Install version ${VERSION}.$\r$\n$\r$\nThis installer supports a fresh installation only. An existing installation requires the separately verified migration procedure. Do not delete its files or registration to bypass this check.$\r$\n$\r$\nChoose Next to continue."
 !define MUI_FINISHPAGE_TITLE "METAENGINE Browser installed"
-!define MUI_FINISHPAGE_TEXT "Version ${VERSION} is installed.$\r$\n$\r$\nOpen the client to review its current connection and work status."
+!define MUI_FINISHPAGE_TEXT "Version ${VERSION} is installed.$\r$\n$\r$\nOpen the client to complete setup and review its connection and work status. Installation alone does not confirm that the runtime is ready."
 
 ; MUI initializes its branding controls before this supported callback. Color
 ; the outer dialog too, so the footer does not flash white against the pages.

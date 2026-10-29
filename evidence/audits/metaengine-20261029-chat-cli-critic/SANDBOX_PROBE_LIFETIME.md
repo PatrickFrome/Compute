@@ -55,3 +55,20 @@ on Linux. These remain generated process/filesystem fixtures, not an installed
 sandbox acceptance test. The preceding 8150958c CI completed successfully:
 Windows Source 40938473294, component 475/476 with one baseline skip and native
 PG17 47/47; Runtime Contracts 40938473297, all three jobs successful.
+
+## Native observation retained through persistence failures
+
+Two further regressions reproduced a started native PID observation outliving
+its probe when log sync failed or opening the exit receipt failed after process
+completion. The successful-completion path now joins its started observations
+before fallible log and exit persistence. The process-error path already joined
+them. No new observation, retries or authority is introduced, and no late read
+can outlive a reported persistence failure.
+
+Both new cases first failed with the shipped function and then passed after the
+ordering repair. Extended local probe, runner, Windows-controller-failure,
+native-runtime and checkpoint coverage: 152 total, 144 pass, zero failures,
+eight platform skips. Generated observation and filesystem adapters demonstrate
+lifetime ordering, not actual Windows sandbox or installed bootstrap acceptance.
+The preceding bounded-output patch was published as 73eb19a948dc4e6c1b01707f28fde9b70beca9d3;
+its Windows CI was still running at this local checkpoint.

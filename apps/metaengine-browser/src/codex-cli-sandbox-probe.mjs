@@ -266,6 +266,9 @@ export async function runCodexCliSandboxProbe({ cliPath, workspaceRoot, receiptD
     await closeLogs();
     throw Error('codex_sandbox_probe_process_unconfirmed');
   }
+  // The host observation is owned work too. Join it before fallible log/exit
+  // persistence so an I/O failure cannot release the probe while it still runs.
+  await Promise.allSettled(observationTasks);
   try {
     await Promise.all([stdoutWrites, stderrWrites]);
     if (termination) await termination;
@@ -274,7 +277,6 @@ export async function runCodexCliSandboxProbe({ cliPath, workspaceRoot, receiptD
   } finally { await closeLogs(); }
   const exitFile = await fs.open(exitPath, 'wx', 0o600);
   try { await exitFile.writeFile(JSON.stringify(completion) + '\n'); await exitFile.sync(); } finally { await exitFile.close(); }
-  await Promise.allSettled(observationTasks);
   const read = async file => fs.readFile(file, 'utf8').catch(error => { if (error.code === 'ENOENT') return null; throw error; });
   const [insideExisting, insideNew, outsideExisting, outsideNew] = await Promise.all([read(files.inside_existing), read(files.inside_new), read(files.outside_existing), read(files.outside_new)]);
   const hostReadback = { inside_existing_unchanged: insideExisting === original, inside_existing_appended: insideExisting === original + nonce,

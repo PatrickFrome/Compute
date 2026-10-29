@@ -7,12 +7,12 @@ import {PassThrough} from 'node:stream';
 const source=await fs.readFile(new URL('../src/codex-cli-sandbox-probe.mjs',import.meta.url),'utf8');
 const start=source.indexOf('export async function runCodexCliSandboxProbe(');
 assert.ok(start>0);
-function fixture({failOpen=0,failSpawn=false,failResume=false,failSync=false,failTerminate=false,holdSync=false,failWrite=false,overflow=false}={}){
+function fixture({failOpen=0,failSpawn=false,failResume=false,failSync=false,failTerminate=false,holdSync=false,failWrite=false,overflow=false,emitReport=false}={}){
  const handles=[],events=[];let opens=0,finish,finishSync;
  const syncGate=new Promise(resolve=>{finishSync=resolve;});
  const completion=new Promise(resolve=>{finish=resolve;});
  const handle={proof:{fixture_only:true},stdout:new PassThrough(),stderr:new PassThrough(),completion,
-  resume:async()=>{events.push('resume');if(failWrite)handle.stdout.write(Buffer.from('generated-output'));if(overflow){handle.stdout.write(Buffer.alloc(33000,120));handle.stderr.write(Buffer.alloc(33000,120));}if(failResume)throw Error('generated_resume_failure');},
+  resume:async()=>{events.push('resume');if(emitReport)handle.stdout.write(JSON.stringify({schema:'metaengine.codex-cli.sandbox-canary.v1',pid:42})+'\n');if(failWrite)handle.stdout.write(Buffer.from('generated-output'));if(overflow){handle.stdout.write(Buffer.alloc(33000,120));handle.stderr.write(Buffer.alloc(33000,120));}if(failResume)throw Error('generated_resume_failure');},
   terminate:async()=>{events.push('terminate');if(failTerminate)throw Error('generated_termination_failure');}};
  const files={realpath:async p=>p,mkdir:async()=>{},writeFile:async()=>{},readFile:async()=>Buffer.from('fixture'),unlink:async()=>{},rmdir:async()=>{},
   open:async()=>{if(++opens===failOpen)throw Error('generated_open_failure');const h={closed:false,bytes:0,write:async()=>{throw Error('partial-write API must not be used');},writeFile:async bytes=>{if(failWrite&&handles.indexOf(h)<2)throw Error('generated_write_failure');h.bytes+=Buffer.byteLength(bytes);},sync:async()=>{if(holdSync&&handles.indexOf(h)===1)await syncGate;if(failSync)throw Error('generated_sync_failure');},close:async()=>{h.closed=true;events.push('close');}};handles.push(h);return h;}};
@@ -89,4 +89,16 @@ test('a rejected asynchronous log write and failed termination remain a blocked 
  await new Promise(resolve=>setImmediate(resolve));f.finish({exit_code:0,signal:null,tree_cleanup_confirmed:true});
  const value=await result;assert.equal(value.state,'BLOCKED');assert.equal(value.reason,'SANDBOX_PROBE_LOG_WRITE_FAILED');
  assert.equal(f.events.filter(e=>e==='terminate').length,1);assert.ok(f.handles.every(h=>h.closed));
+});
+
+for (const options of [{failSync:true},{failOpen:3}]) test(`post-completion failure retains pending native observation: ${JSON.stringify(options)}`,async()=>{
+ const f=fixture({...options,emitReport:true});let finishRead,settled=false,reads=0;
+ const readGate=new Promise(resolve=>{finishRead=resolve;});
+ const result=f.run({readNativeProcess:async()=>{reads++;await readGate;return {fixture_only:true};}}).then(()=>{settled=true;return null;},error=>{settled=true;return error;});
+ await new Promise(resolve=>setImmediate(resolve));assert.equal(reads,1);f.finish({fixture_only:true});
+ await new Promise(resolve=>setImmediate(resolve));const settledBeforeRead=settled;
+ finishRead();const error=await result;
+ assert.equal(settledBeforeRead,false,'probe must retain its started native observation even on later I/O failure');
+ assert.match(error.message,options.failSync?/log_sync_failed/:/generated_open_failure/);
+ assert.ok(f.handles.every(h=>h.closed));
 });

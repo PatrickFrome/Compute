@@ -63,3 +63,13 @@ test('QA installer checks existing Owner pin before bounded installation or GUI 
   assert.match(bootstrap, /\$preflightResult\.owner_mutated -ne \$false/);
   assert.doesNotMatch(bootstrap.slice(profileCheck, install), /Set-Content|Remove-Item|Move-Item|Set-ItemProperty|Copy-Item/);
 });
+
+test('installer copy explains fresh-only support without promising runtime readiness', () => {
+  const text = fs.readFileSync(new URL('../build/installer.nsh', import.meta.url), 'utf8');
+  assert.match(text, /This installer supports a fresh installation only/);
+  assert.match(text, /existing installation requires the separately verified migration procedure/);
+  assert.match(text, /Do not delete its files or registration to bypass this check/);
+  assert.match(text, /Installation alone does not confirm that the runtime is ready/);
+  assert.match(text, /-RequireFreshInstall/);
+  assert.doesNotMatch(text, /Your existing projects and client profile are preserved/);
+});
