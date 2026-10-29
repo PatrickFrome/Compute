@@ -110,7 +110,7 @@ export class AgentToolbelt {
       if (!requestId || rows.has(requestId) || this.#budgetWitnesses.get(key)?.request_id === requestId) continue;
       if (rows.size >= this.#maxCommandsPerLease) { deny(requestId, 'BUDGET_EXHAUSTED'); continue; }
       if (!AGENT_TOOL_ACTIONS.includes(action)) { deny(requestId, 'ACTION_NOT_ALLOWED'); continue; }
-      if (['PROJECT_SPAWN', 'PROJECT_HISTORY', 'PROJECT_MESSAGE'].includes(action)) {
+      if (['PROJECT_SPAWN', 'PROJECT_HISTORY', 'PROJECT_MESSAGE', 'PROJECT_ACK_MESSAGE'].includes(action)) {
         if (!this.#projectRuntime) { deny(requestId, 'PROJECT_RUNTIME_UNAVAILABLE'); continue; }
         try {
           const results = await this.#projectRuntime.serveToolRequests({ lease, requests: [request] });

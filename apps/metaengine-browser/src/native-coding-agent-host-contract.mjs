@@ -7,7 +7,7 @@ const plain=value=>value!==null&&typeof value==='object'&&!Array.isArray(value)
 const exact=(value,keys)=>plain(value)&&Reflect.ownKeys(value).sort().join(',')===[...keys].sort().join(',')
   &&Object.values(Object.getOwnPropertyDescriptors(value)).every(d=>d.enumerable&&Object.hasOwn(d,'value'));
 const fail=reason=>{throw Error('native_coding_agent_host_'+reason);};
-export const NATIVE_AGENT_HOST_TOOLS=Object.freeze(['project_overview','project_history_page','agent_send_message','project_propose_children']);
+export const NATIVE_AGENT_HOST_TOOLS=Object.freeze(['project_overview','project_history_page','agent_send_message','agent_ack_message','project_propose_children']);
 export function validateNativeCodingAgentHostRequest(value){
   if(!exact(value,['args','binding','job_binding','operation']))fail('request_invalid');
   validateNativeCodingAgentMcpBinding(value.binding);
@@ -25,4 +25,4 @@ export function validateNativeCodingAgentHostRequest(value){
   }
   return value;
 }
-export const nativeCodingAgentHostOperationWrites=value=>['agent_send_message','project_propose_children'].includes(value?.operation);
+export const nativeCodingAgentHostOperationWrites=value=>['agent_send_message','agent_ack_message','project_propose_children'].includes(value?.operation);

@@ -125,3 +125,27 @@ and graphical Electron limitations). Runtime aggregate 753 total, 723 pass,
 1 Unix IPC failure, 29 skip. After final recipient-type checks and prompt wiring,
 87 focused parser/toolbelt/project/route tests pass. Native PG17 integration22/22;
 fresh schema10/10 executed with2 optional WASM skips. No installer/live claim.
+
+### Explicit recipient acknowledgement implemented (source)
+
+Browser PROJECT_ACK_MESSAGE and native MCP agent_ack_message now pass through
+existing current-parent / current-Job authorization to a private shared helper.
+Only a committed message with a trusted producer source addressed to the exact
+recipient task and agent can be acknowledged. The append-only event stream
+retains the message and one acknowledgement. Receipt replay does not create
+another event. Native ACK intents have immutable receipts and historical
+READ_INTENT reconciliation; browser ACK intents use the current local journal.
+An acknowledgement is recipient_acknowledged=true, processing_verified=false:
+it cannot confer completion, execution or review acceptance.
+
+The additive migration attests old/new native intent trigger bodies and the
+precise operation constraint before adding ACK. Private helper grants remain
+revoked; public browser RPC is device/current-parent scoped. Actual PG17 tests
+cover both directions, wrong recipients, duplicate ACK, immutable receipt,
+historical intent readback, denied grants and altered-function rejection.
+Fresh schema plus suspension serial/concurrency:28pass/3optionalWASMskip.
+Focused parser/stdio/Host/runtime/route tests:128pass. Runtime aggregate:
+723pass/1existingUnixIPCfail/29skip. Full browser final:6944total,6834pass,
+28samepriorenvironmentfail,82skip. A new prompt-length failure was reproduced
+and fixed by shortening protocol wording to1182chars, preserving1200budget.
+Automatic message wake remains the next separate stage.

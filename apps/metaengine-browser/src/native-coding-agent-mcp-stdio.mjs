@@ -4,7 +4,7 @@ const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]
 const AGENT=/^agent_[a-z0-9-]{8,64}$/;
 const MODERN='2026-07-28',LEGACY=['2025-11-25','2025-06-18','2025-03-26','2024-11-05'];
 const INFO={name:'metaengine-native-agent-tools',version:'1.0.0'};
-const TOOLS=['project_overview','project_history_page','agent_send_message','project_propose_children','client_control_intent'];
+const TOOLS=['project_overview','project_history_page','agent_send_message','agent_ack_message','project_propose_children','client_control_intent'];
 const WRITES=new Set(TOOLS.slice(2));
 const plain=x=>x&&typeof x==='object'&&!Array.isArray(x)&&[Object.prototype,null].includes(Object.getPrototypeOf(x));
 const keys=(x,required,optional=[])=>plain(x)&&required.every(key=>Object.hasOwn(x,key))&&Object.keys(x).every(key=>required.includes(key)||optional.includes(key));
@@ -34,11 +34,13 @@ const requestProperty={type:'string',format:'uuid'};
 function toolDefinition(name) {
   const descriptions={project_overview:'Read the Host-scoped project and peer task overview.',
     project_history_page:'Read complete committed project history one bounded page at a time; use the returned cursor.',
+    agent_ack_message:'Acknowledge receipt of a committed message addressed to this task. This does not verify processing or authorize execution.',
     agent_send_message:'Store one durable message for a native or chat peer in this project; preserve request_id after an unknown outcome. Storage does not prove reading and does not wake a suspended chat peer.',
     project_propose_children:'Propose child work to the existing project allocator; this does not create a process or grant a lease.',
     client_control_intent:'Submit a fixed client-control intent for Host authorization and journaling; this is not arbitrary PC or shell access.'};
   const schemas={project_overview:objectSchema({after_seq:{type:'integer',minimum:0},limit:{type:'integer',minimum:1,maximum:32}},[]),
     project_history_page:objectSchema({after_seq:{type:'integer',minimum:0},limit:{type:'integer',minimum:1,maximum:16},through_seq:{type:'integer',minimum:0}},['after_seq','limit']),
+    agent_ack_message:objectSchema({request_id:requestProperty,message_seq:{type:'integer',minimum:1,maximum:Number.MAX_SAFE_INTEGER}}),
     agent_send_message:objectSchema({request_id:requestProperty,target_agent_id:{type:'string',pattern:AGENT.source},message:{type:'string',minLength:1,maxLength:8192,description:'UTF-8 body must fit 8192 bytes; Host may reject a complete serialized row that exceeds its durable page budget.'}}),
     project_propose_children:objectSchema({request_id:requestProperty,children:{type:'array',minItems:1,maxItems:16,
       items:objectSchema({role:{type:'string',enum:['IMPLEMENTER','CRITIC']},objective:{type:'string',minLength:1,maxLength:1000}})}}),
@@ -56,6 +58,7 @@ function argumentsFor(name,args) {
       ||Object.hasOwn(args,'through_seq')&&!integer(args.through_seq,args.after_seq,Number.MAX_SAFE_INTEGER))fail('arguments');
   }else {
     if(!UUID.test(args?.request_id||''))fail('arguments');
+    if(name==='agent_ack_message'&&(!keys(args,['request_id','message_seq'])||!integer(args.message_seq,1,Number.MAX_SAFE_INTEGER)))fail('arguments_invalid');
     if(name==='agent_send_message'&&(!keys(args,['request_id','target_agent_id','message'])||!AGENT.test(args.target_agent_id||'')
       ||!text(args.message,8192)||Buffer.byteLength(args.message)>8192))fail('arguments');
     if(name==='project_propose_children'&&(!keys(args,['request_id','children'])||!Array.isArray(args.children)||!args.children.length||args.children.length>16

@@ -9,7 +9,7 @@ import {createNativeCodingAgentMcpStdioAdapter} from '../src/native-coding-agent
 const binding=()=>({run_id:randomUUID(),workspace_id:randomUUID(),project_id:randomUUID(),task_id:randomUUID(),lease_generation:1,
   agent_id:'agent_native-mcp-test',agent_generation_epoch:1,provider_id:randomUUID(),role:'IMPLEMENTER'});
 const modernMeta={'io.modelcontextprotocol/protocolVersion':'2026-07-28','io.modelcontextprotocol/clientCapabilities':{}};
-const all=['project_overview','project_history_page','agent_send_message','project_propose_children','client_control_intent'];
+const all=['project_overview','project_history_page','agent_send_message','agent_ack_message','project_propose_children','client_control_intent'];
 function fixture(t,options={}) {
   const input=new PassThrough(),output=new PassThrough(),scope=binding(),calls=[],authorizations=[],messages=[],waiters=new Map();
   let pending='',next=1;
@@ -136,3 +136,13 @@ test('a real child stdio process supports discovery/list/call and exits on EOF w
   assert.equal(rows.length,3);assert.deepEqual(rows.map(row=>row.id).sort(),[1,2,3]);
   assert.equal(rows.find(row=>row.id===3).result.structuredContent.model_calls,0);
 });
+
+ test('recipient acknowledgement is a registered bounded write, not a processing proof',async t=>{
+  const f=fixture(t,{operations:{agent_ack_message:async(args,context)=>({message_seq:args.message_seq,recipient_acknowledged:true,processing_verified:false,authority_effect:false})}});
+  const tools=await f.raw('tools/list');
+  const tool=tools.result.tools.find(x=>x.name==='agent_ack_message');assert(tool);assert.equal(tool.annotations.readOnlyHint,false);
+  const id=randomUUID(),reply=await f.call('agent_ack_message',{request_id:id,message_seq:7});
+  assert(reply.result);assert.equal(reply.result.isError,false);
+  for(const args of [{request_id:randomUUID(),message_seq:0},{request_id:randomUUID(),message_seq:1,project_id:randomUUID()}])
+    assert.equal((await f.call('agent_ack_message',args)).error.code,-32602);
+ });

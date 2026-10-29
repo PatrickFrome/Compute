@@ -66,3 +66,16 @@ test('addressed project messages inject current device identity and never claim 
  assert.equal((await send(input,{...identity,admin_ready:false})).status,403);
  wrong=true;assert.equal((await send()).status,409);
 });
+
+test('message acknowledgement injects authority and refuses fabricated processing success',async()=>{
+ const calls=[];let processing=false;
+ const route=createProjectContinuityRoutes({workspaceId:workspace,rpc:async(name,args)=>{calls.push({name,args});return {
+  schema:'metaengine.devos.project-message-ack.v1',project_id:id,message_seq:5,ack_seq:9,recipient_task_id:id,recipient_agent_id:'agent_browser-peer01',
+  recipient_acknowledged:true,processing_verified:processing,replayed:false,automatic_retry_allowed:false,authority_effect:false};}});
+ const input={project_id:id,task_id:id,claim_id:1,lease_generation:1,message_seq:5};
+ const send=body=>route({req:{method:'POST'},path:'/v1/devos/project/message-ack',identity,body});
+ assert.equal((await send(input)).status,200);assert.equal(calls[0].name,'h205f22_project_message_ack_v1');
+ assert.equal(calls[0].args.p_device_id,identity.device_id);
+ assert.equal((await send({...input,recipient_agent_id:'agent_forged-peer01'})).status,400);
+ processing=true;assert.equal((await send(input)).status,409);
+});

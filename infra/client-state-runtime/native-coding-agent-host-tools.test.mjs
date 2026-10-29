@@ -23,6 +23,7 @@ function fixture(){
     if(q.startsWith('set local'))return [];
     if(q.includes('native_coding_agent_context_v1'))return [{value:structuredClone(context)}];
     if(q.includes('from destruktion_meta.native_coding_job_registration'))return [{...structuredClone(w.registration),permit:structuredClone(p),execution:structuredClone(w.execution)}];
+    if(q.includes('native_coding_agent_message_ack_v1')){staged.push(a);await hook?.();return [{value:{message_seq:a[2],recipient_acknowledged:true,processing_verified:false,authority_effect:false}}];}
     if(q.includes('native_coding_agent_message_v1')){staged.push(a);await hook?.();return [{value:{stored:true,authority_effect:false}}];}
     if(q.includes('native_coding_agent_intent_read_v1'))return [{value:{schema:'metaengine.native-coding.agent-intent.v1',run_id:a[0],request_id:a[1],readback_only:true,physical_effect_replayed:false,found:false,authority_effect:false}}];
     if(q.includes('native_coding_agent_overview_v1')||q.includes('native_coding_agent_history_v1'))return [{value:{project_id:p.project_id,rows:[],authority_effect:false}}];
@@ -87,3 +88,13 @@ test('strict request schema rejects arrays, invalid UUID/PID mismatch, identitie
   r.binding.role='CRITIC';assert.throws(()=>validateNativeCodingAgentHostRequest(r),/critic_spawn_denied/);
   assert.throws(()=>validateNativeCodingAgentHostRequest(x.request('client_control_intent',{request_id:randomUUID(),action:'CLIENT_STATUS'})),/operation_unbound/);
 });
+
+ test('native message acknowledgement passes physical Host and worker checks before its fixed SQL write',async()=>{
+  const x=fixture(),id=randomUUID();
+  const reply=await x.tools.invoke(x.request('agent_ack_message',{request_id:id,message_seq:7}));
+  assert.equal(reply.recipient_acknowledged,true);assert.equal(reply.processing_verified,false);assert.equal(x.committed,1);
+  assert(x.nativeReads>0);assert(x.workerReads>0);
+  const q=x.queries.find(x=>x.q.includes('native_coding_agent_message_ack_v1'));assert.equal(q.a[1],id);assert.equal(q.a[2],7);
+  await assert.rejects(x.tools.invoke(x.request('agent_ack_message',{request_id:randomUUID(),message_seq:0})));
+  x.tools.close();
+ });

@@ -89,6 +89,7 @@ export function createNativeCodingAgentHostTools({sql,readNativeScope,readNative
         if(value.operation==='CHECK')result={schema:'metaengine.native-coding.agent-authorized.v1',run_id:run,authorized:true,authority_effect:false};
         else if(value.operation==='project_overview')result=(await tx.unsafe('select destruktion_meta.native_coding_agent_overview_v1($1::uuid,$2::bigint,$3::integer) as value',[run,a.after_seq??0,a.limit??32]))[0]?.value;
         else if(value.operation==='project_history_page')result=(await tx.unsafe('select destruktion_meta.native_coding_agent_history_v1($1::uuid,$2::bigint,$3::bigint,$4::integer) as value',[run,a.after_seq,a.through_seq??null,a.limit]))[0]?.value;
+        else if(value.operation==='agent_ack_message')result=(await tx.unsafe('select destruktion_meta.native_coding_agent_message_ack_v1($1::uuid,$2::uuid,$3::bigint) as value',[run,a.request_id,a.message_seq]))[0]?.value;
         else if(value.operation==='agent_send_message')result=(await tx.unsafe('select destruktion_meta.native_coding_agent_message_v1($1::uuid,$2::uuid,$3::text,$4::text) as value',[run,a.request_id,a.target_agent_id,a.message]))[0]?.value;
         else if(value.operation==='project_propose_children')result=(await tx.unsafe('select destruktion_meta.native_coding_agent_spawn_v1($1::uuid,$2::uuid,$3::jsonb) as value',[run,a.request_id,JSON.stringify(a.children)]))[0]?.value;
         if(!result||typeof result!=='object'||Array.isArray(result))fail('operation_unconfirmed');

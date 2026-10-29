@@ -3,7 +3,7 @@ import {createHash,createHmac,timingSafeEqual,randomBytes,randomUUID} from 'node
 
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const AGENT=/^agent_[a-z0-9-]{8,64}$/,SHA=/^[a-f0-9]{64}$/;
-export const NATIVE_AGENT_MCP_TOOLS=Object.freeze(['project_overview','project_history_page','agent_send_message','project_propose_children','client_control_intent']);
+export const NATIVE_AGENT_MCP_TOOLS=Object.freeze(['project_overview','project_history_page','agent_send_message','agent_ack_message','project_propose_children','client_control_intent']);
 const WRITES=new Set(NATIVE_AGENT_MCP_TOOLS.slice(2));
 const SCHEMA='metaengine.native-coding.agent-mcp-channel.v1';
 const plain=x=>x!==null&&typeof x==='object'&&!Array.isArray(x)&&[Object.prototype,null].includes(Object.getPrototypeOf(x));
@@ -61,6 +61,7 @@ function argumentsFor(name,args){
       ||Object.hasOwn(args,'through_seq')&&!integer(args.through_seq,args.after_seq,Number.MAX_SAFE_INTEGER))fail('arguments');
   }else{
     if(!UUID.test(args?.request_id||''))fail('arguments');
+    if(name==='agent_ack_message'&&(!keys(args,['request_id','message_seq'])||!integer(args.message_seq,1,Number.MAX_SAFE_INTEGER)))fail('arguments_invalid');
     if(name==='agent_send_message'&&(!keys(args,['request_id','target_agent_id','message'])||!AGENT.test(args.target_agent_id||'')
       ||!text(args.message,12000)||Buffer.byteLength(args.message)>8192))fail('arguments');
     if(name==='project_propose_children'&&(!keys(args,['request_id','children'])||!Array.isArray(args.children)||!args.children.length||args.children.length>16

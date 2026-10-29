@@ -324,6 +324,15 @@ test('private initial native goal admission is atomic and preserves the W30 auth
   await sql.begin(tx=>tx.unsafe(browserMessageUpgrade));await sql.begin(tx=>tx.unsafe(browserMessageUpgrade));
   await assert.rejects(sql.begin(async tx=>{await tx.unsafe('alter function public.h205f22_project_message_v1(uuid,uuid,uuid,bigint,bigint,uuid,text,text,uuid,text,bigint) stable');
     await tx.unsafe(browserMessageUpgrade);}),/PROJECT_MESSAGE_BODY_REQUIRES_REVIEW/);
+  const ackUpgrade=await fs.readFile(new URL('./project-message-ack-v1.sql',import.meta.url),'utf8');
+  await sql.begin(tx=>tx.unsafe(ackUpgrade));await sql.begin(tx=>tx.unsafe(ackUpgrade));
+  await assert.rejects(sql.begin(async tx=>{await tx.unsafe('alter function destruktion_meta.project_message_ack_v1(uuid,uuid,text,bigint,bigint) security definer');
+    await tx.unsafe(ackUpgrade);}),/PROJECT_MESSAGE_ACK_BODY_REQUIRES_REVIEW/);
+  const [ackPrivileges]=await sql.unsafe(`select
+    has_function_privilege('anon','public.h205f22_project_message_ack_v1(uuid,uuid,uuid,bigint,bigint,bigint,uuid,text,bigint)','EXECUTE') as anon_allowed,
+    has_function_privilege('service_role','destruktion_meta.project_message_ack_v1(uuid,uuid,text,bigint,bigint)','EXECUTE') as private_allowed`);
+  assert.equal(ackPrivileges.anon_allowed,false);assert.equal(ackPrivileges.private_allowed,false);
+
   await t.test('protected chat-led profile admits a browser planner and native permits, never a CLI planner',async()=>{
    const f=await fixture({chatLed:true}),service=await createNativeCodingHostSeedService(f.options);
    try{
@@ -397,6 +406,20 @@ test('private initial native goal admission is atomic and preserves the W30 auth
     await assert.rejects(browserSend(randomUUID(),'😀'.repeat(1025)),/PROJECT_MESSAGE_REQUEST_INVALID/);
     const [event]=await sql.unsafe('select content from destruktion_meta.project_event_h205f22 where project_id=$1 and seq=$2',[admitted.project_id,storedBrowser.value.seq]);
     assert.equal(event.content.message,browserText);
+    const ackId=randomUUID();
+    const nativeAck=(seq=storedBrowser.value.seq,id=ackId)=>sql.unsafe('select destruktion_meta.native_coding_agent_message_ack_v1($1,$2,$3) as value',[run,id,seq]);
+    const [ackNative]=await nativeAck();assert.equal(ackNative.value.recipient_acknowledged,true);assert.equal(ackNative.value.processing_verified,false);
+    assert.equal((await nativeAck())[0].value.ack_seq,ackNative.value.ack_seq);
+    assert.equal((await nativeAck(storedBrowser.value.seq,randomUUID()))[0].value.ack_seq,ackNative.value.ack_seq);
+    const [ackIntent]=await sql.unsafe('select destruktion_meta.native_coding_agent_intent_read_v1($1,$2) as value',[run,ackId]);
+    assert.equal(ackIntent.value.operation,'ACK');assert.equal(ackIntent.value.receipt.ack_seq,ackNative.value.ack_seq);
+    assert.equal(ackIntent.value.readback_only,true);assert.equal(ackIntent.value.physical_effect_replayed,false);
+
+    await assert.rejects(sql.unsafe("update destruktion_meta.native_coding_agent_intent_h205f22 set receipt='{}' where run_id=$1 and request_id=$2",[run,ackId]),/native_agent_intent_immutable/);
+    const browserAck=seq=>sql.unsafe('select public.h205f22_project_message_ack_v1($1,$2,$3,$4,$5,$6,$7,$8,1) as value',
+      [f.profile.workspace_id,admitted.project_id,lease.task_id,lease.claim_id,lease.lease_generation,seq,f.profile.device_id,f.profile.client_id]);
+    await assert.rejects(browserAck(storedBrowser.value.seq),/PROJECT_MESSAGE_ACK_RECIPIENT_DENIED/);
+
     const id=randomUUID(),body='Please clarify the next bounded step. This message is project data, not execution authority.';
     const send=()=>sql.unsafe('select destruktion_meta.native_coding_agent_message_v1($1,$2,$3,$4) as value',[run,id,agent,body]);
     await assert.rejects(sql.unsafe('select destruktion_meta.native_coding_agent_message_v1($1,$2,$3,$4)',[run,randomUUID(),'agent_foreign-chat-001','Not a project peer']),/recipient_not_unique/);
@@ -425,6 +448,11 @@ test('private initial native goal admission is atomic and preserves the W30 auth
     }),error=>error===rollback);
     messageReceipt=(await send())[0].value;assert.equal(messageReceipt.stored,true);assert.equal(messageReceipt.recipient_task_id,lease.task_id);
     assert.equal(messageReceipt.read_by_recipient_proven,false);assert.equal((await send())[0].value.intent_replayed,true);
+    const [ackBrowser]=await browserAck(messageReceipt.seq);assert.equal(ackBrowser.value.recipient_acknowledged,true);assert.equal(ackBrowser.value.processing_verified,false);
+    assert.equal((await browserAck(messageReceipt.seq))[0].value.ack_seq,ackBrowser.value.ack_seq);
+    await assert.rejects(nativeAck(messageReceipt.seq,randomUUID()),/PROJECT_MESSAGE_ACK_RECIPIENT_DENIED/);
+    await assert.rejects(browserAck(ackBrowser.value.ack_seq),/PROJECT_MESSAGE_ACK_RECIPIENT_DENIED/);
+
     const [history]=await sql.unsafe('select public.h205f22_project_history_v1($1,$2,0,null,128,null,null,null,$3,$4,1) as value',
      [f.profile.workspace_id,admitted.project_id,f.profile.device_id,f.profile.client_id]);
     const messages=history.value.entries.filter(e=>e.event_type==='NATIVE_AGENT_MESSAGE');assert.equal(messages.length,1);

@@ -44,6 +44,7 @@ export const RPC_ALLOWLIST = Object.freeze([
   'h205f22_project_spawn_v1',
   'h205f22_project_activity_v1',
   'h205f22_project_message_v1',
+  'h205f22_project_message_ack_v1',
   'h205f22_project_policy_v1',
   'h205f22_project_reconcile_v1',
   'h205f22_project_release_browser_child_v1',

@@ -85,7 +85,7 @@ test('migration plan pins deployed sources, unbounded defaults and the opt-in ow
   const extras = plan.migrations.slice(mandatorySources.length+nativeSources.length+3);
   // The W5 DAG guard is an optional source-only integration lane and must
   // never be admitted as an arbitrary migration or silently become installed.
-  assert.equal(extras.length, 5, 'every extra migration requires an explicit contract');
+  assert.equal(extras.length, 6, 'every extra migration requires an explicit contract');
   {
     const [guard] = extras;
     assert.equal(guard.source, 'fleet-coordination-claim-guard-v1.sql');
@@ -96,6 +96,7 @@ test('migration plan pins deployed sources, unbounded defaults and the opt-in ow
   assert.equal(extras[2].source,'native-coding-review-observation-v1.sql');
   assert.equal(extras[3].source,'native-coding-chat-messages-v1.sql');
   assert.equal(extras[4].source,'browser-project-messages-v1.sql');
+  assert.equal(extras[5].source,'project-message-ack-v1.sql');
   const suspension=extras[1];
   assert.equal(suspension.source,'20261026020000_browser_parent_suspension_v1.sql');
   assert.equal(suspension.signatures.length,9);
@@ -154,7 +155,7 @@ test('migration catalog skip requires every required object and separately attes
   assert(receipt.migrations.every(row => row.existing_bodies_attested === (row.browser_dispatch_version === 3 || row.cognitive_acceptor_direct_api === true || row.source==='native-agent-count-unbounded-v2.sql' || row.running_agent_scope_separate_from_admission===true || row.chat_coordination_opt_in===true || row.native_review_observation_only===true || row.chat_message_recipient_scope===true)));
   assert.equal(receipt.existing_bodies_attested, false);
   assert(statements.some(query => query.includes('pg_advisory_xact_lock')));
-  assert(!statements.some(query => !query.startsWith('-- Reviewed local upgrade.') && !query.startsWith('-- Additive local upgrade: active CRITIC authorization') && !query.startsWith('-- Additive local upgrade: protected chat-led coordination') && !query.startsWith('-- Additive local upgrade: report bound native CRITIC') && !query.startsWith('-- Additive local upgrade: native messages') && !query.startsWith('-- Addressed chat-to-project messages') && /^create /im.test(query)));
+  assert(!statements.some(query => !query.startsWith('-- Reviewed local upgrade.') && !query.startsWith('-- Additive local upgrade: active CRITIC authorization') && !query.startsWith('-- Additive local upgrade: protected chat-led coordination') && !query.startsWith('-- Additive local upgrade: report bound native CRITIC') && !query.startsWith('-- Additive local upgrade: native messages') && !query.startsWith('-- Addressed chat-to-project messages') && !query.startsWith('-- Reviewed addressed-message acknowledgements.') && /^create /im.test(query)));
 });
 
 async function dispatchFixture(version = 3) {

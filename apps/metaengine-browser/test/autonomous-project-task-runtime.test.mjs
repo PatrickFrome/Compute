@@ -706,3 +706,19 @@ test('browser message journals one request across lost ACK and refuses changed p
  for(const payload of [{...message.payload,text:'😀'.repeat(1025)},{...message.payload,authority_effect:true},{...message.payload,recipient_agent_id:'other'}])
   await assert.rejects(send({...message,payload}),/message_request_invalid/);
 });
+
+test('browser acknowledgement is durable and cannot claim processing or another recipient',async t=>{
+ const f=await fixture(t),original=f.provider.request;let calls=0,wrong=false;
+ f.provider.request=async input=>{
+  if(!input.path.endsWith('/message-ack'))return original(input);
+  calls++;return {schema:'metaengine.devos.project-message-ack.v1',project_id:projectId,message_seq:input.body.message_seq,ack_seq:11,
+    recipient_task_id:rootTask().task_id,recipient_agent_id:rootTask().agent_id,recipient_acknowledged:true,processing_verified:wrong,
+    replayed:false,automatic_retry_allowed:false,authority_effect:false};
+ };
+ const request={request_id:'fixture:message:ack',action:'PROJECT_ACK_MESSAGE',payload:{message_seq:7}};
+ const send=req=>f.runtime.serveToolRequests({lease:rootTask(),requests:[req]});
+ const [value]=await send(request);assert.equal(JSON.parse(value.summary).recipient_acknowledged,true);
+ await send(request);assert.equal(calls,1);
+ await assert.rejects(send({...request,payload:{message_seq:8}}));assert.equal(calls,1);
+ wrong=true;await assert.rejects(send({...request,request_id:'fixture:message:ack2'}),/message_ack_readback_invalid/);
+});

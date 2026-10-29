@@ -39,7 +39,7 @@ export async function prepareNativeCodingAgentRunBridge({ownPostgres,runId,bindi
     if(value?.schema!=='metaengine.native-coding.agent-authorized.v1'||value.run_id!==runId||value.authorized!==true||value.authority_effect!==false)fail();
     checkContext(context);
   };
-  const tools=['project_overview','project_history_page','agent_send_message',...(binding.role==='IMPLEMENTER'?['project_propose_children']:[])];
+  const tools=['project_overview','project_history_page','agent_send_message','agent_ack_message',...(binding.role==='IMPLEMENTER'?['project_propose_children']:[])];
   const operations=Object.fromEntries(tools.map(tool=>[tool,async(args,context)=>{
     checkContext(context);return host(tool,args);
   }]));
@@ -53,7 +53,7 @@ export async function prepareNativeCodingAgentRunBridge({ownPostgres,runId,bindi
           ||typeof row.canonical_body_text!=='string'||Buffer.byteLength(row.canonical_body_text)>32768
           ||!SHA.test(row.body_sha256||'')||hash(row.canonical_body_text)!==row.body_sha256
           ||!same(JSON.parse(row.canonical_body_text),row.body)||!row.receipt||typeof row.receipt!=='object'||Array.isArray(row.receipt))fail();
-        const tool=({MESSAGE:'agent_send_message',SPAWN:'project_propose_children'})[row.operation];
+        const tool=({MESSAGE:'agent_send_message',ACK:'agent_ack_message',SPAWN:'project_propose_children'})[row.operation];
         const args={...row.body,request_id:context.request_id};
         if(tool!==context.tool||nativeCodingAgentMcpIntentBodySha256(tool,args)!==context.intent_body_sha256)fail();
         return {schema:'metaengine.native-coding.agent-tool-receipt.v1',run_id:runId,tool,request_id:context.request_id,
