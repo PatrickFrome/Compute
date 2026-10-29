@@ -160,7 +160,7 @@ test('real seed service retries a corrected initial profile but never replaces m
  await assert.rejects(f.binding.operations.LIST_SEEDS(await f.request()),/operator_invalid/);
  const value={schema:'metaengine.native-coding.seed-operator.v1',profile_id:profile.profile_id,profile_sha256:profileSha};
  operator={value,sha256:hash(json(value))};
- assert.deepEqual(await f.binding.operations.LIST_SEEDS(await f.request()),catalog);
+ assert.deepEqual(await f.binding.operations.LIST_SEEDS(await f.request()),{...catalog,coordination_mode:'CLI_LED'});
  assert.equal(f.seen.created,3);
  operator={value:{...value,profile_id:randomUUID()},sha256:hash('changed-operator')};
  await assert.rejects(f.binding.operations.LIST_SEEDS(await f.request()),/operator_changed/);
