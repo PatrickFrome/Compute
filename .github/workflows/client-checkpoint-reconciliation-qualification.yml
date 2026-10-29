@@ -150,6 +150,8 @@ jobs:
           const component=[
             'apps/metaengine-browser/test/native-coding-project-commits.test.mjs',
             'apps/metaengine-browser/test/native-coding-project-checkpoints.test.mjs',
+            'apps/metaengine-browser/test/native-coding-git-proof.test.mjs',
+            'infra/client-state-runtime/native-coding-host-authority.test.mjs',
             'apps/metaengine-browser/test/native-coding-runtime.test.mjs',
             'apps/metaengine-browser/test/native-coding-host-ipc.test.mjs',
             'infra/client-state-runtime/native-coding-host-commit-service.test.mjs',
@@ -170,6 +172,8 @@ jobs:
             'infra/client-state-runtime/browser-parent-message-wake.pg17.test.mjs',
           ];
           const componentRequired=[
+            'cancelled Git proof launches no new read and an in-flight Git child is joined before rejection',
+            'expired or cancelled private rejection requests perform no database or physical read',
             'a rejected pair has separately verified retained bytes, never an accepted checkpoint or repair permission',
             'rejection observer performs only bounded reads and never grants repair or loses an in-flight read on close',
             'initial READ is physically read-only and never creates journal directories or an anchor',

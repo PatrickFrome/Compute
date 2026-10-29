@@ -422,8 +422,8 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
         return ledger(tx).advance(scope,transition);
       });
     },
-    async READ_PROJECT_REJECTION(selector) {
-      open();
+    async READ_PROJECT_REJECTION(selector,context) {
+      const check=()=>{open();assertNativeCodingHostRequestOpen(context);};check();
       if(!exact(selector,['project_id',...checkpointSelectors,'result_sha256'])||!uuid.test(selector.project_id||'')
         ||!['writer_task_id','critic_task_id'].every(k=>uuid.test(selector[k]||''))
         ||!['writer_lease_generation','critic_lease_generation'].every(k=>Number.isSafeInteger(selector[k])&&selector[k]>0)
@@ -432,19 +432,19 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
       // Consistent read with the existing task -> project lock order. No
       // checkpoint/ledger/task update, commit or new execution is permitted.
       return sql.begin('isolation level serializable',async tx=>{
-        await owner(tx);open();
+        await owner(tx);check();
         const tasks=await tx.unsafe('select task_id from destruktion_meta.devos_fleet_task_h205f22 where task_id in ($1::uuid,$2::uuid) order by task_id for share',
           [selector.writer_task_id,selector.critic_task_id]);
-        if(tasks.length!==2)fail('rejection_tasks_unavailable');
+        check();if(tasks.length!==2)fail('rejection_tasks_unavailable');
         const projects=await tx.unsafe('select to_jsonb(r) as project from destruktion_meta.project_run_h205f22 r where project_id=$1::uuid for share',[selector.project_id]);
-        if(projects.length!==1)fail('rejection_project_unavailable');
+        check();if(projects.length!==1)fail('rejection_project_unavailable');
         const rows=await tx.unsafe('select destruktion_meta.native_coding_review_rejection_v1($1::uuid,$2::uuid) as value',[selector.project_id,selector.writer_task_id]);
-        const rejected=rows[0]?.value;
+        check();const rejected=rows[0]?.value;
         if(rows.length!==1||rejected?.verdict!=='REJECT'||rejected.project_id!==selector.project_id||rejected.result_sha256!==selector.result_sha256
           ||checkpointSelectors.some(k=>rejected[k]!==selector[k]))fail('rejection_pair_changed');
         const writer=await checkpointBundle(tx,selector.project_id,selector.writer_task_id,selector.writer_lease_generation,true);
-        const critic=await checkpointBundle(tx,selector.project_id,selector.critic_task_id,selector.critic_lease_generation,true);
-        const verified=await checkpointVerifier.verifyRejected({project:projects[0].project,writer,critic},tx);open();
+        check();const critic=await checkpointBundle(tx,selector.project_id,selector.critic_task_id,selector.critic_lease_generation,true);
+        check();const verified=await checkpointVerifier.verifyRejected({project:projects[0].project,writer,critic},tx,context);check();
         const proof=verified.rejection;
         if(proof.result_sha256!==selector.result_sha256||checkpointSelectors.some(k=>proof[k]!==selector[k]))fail('rejection_pair_changed');
         return {schema:'metaengine.native-coding.project-rejection-readback.v1',state:'VERIFIED_REJECTION',...selector,

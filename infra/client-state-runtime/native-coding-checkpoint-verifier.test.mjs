@@ -101,3 +101,13 @@ test('rejection verification refuses ACCEPT, changed candidate bytes, forged rec
  }
  const closed=make();closed.verifier.close();await assert.rejects(closed.verifier.verifyRejected(request(closed)),/closed/);
 });
+
+test('cancelled rejection verification stops before the second physical read and cannot emit a proof',async()=>{
+ const f=checkpointFixture(),controller=new AbortController(),reader={fixture_reader:true},context={signal:controller.signal,deadlineAt:Date.now()+10000};
+ f.critic.registration.result_receipt.result.verdict='REJECT';f.refresh(f.critic);let reads=0;
+ const verifier=createNativeCodingCheckpointVerifier({...f,readCheckpointScope:async(_permit,sqlReader,requestContext)=>{
+  assert.equal(sqlReader,reader);assert.equal(requestContext,context);reads++;controller.abort();return structuredClone(f.native);
+ }});
+ await assert.rejects(verifier.verifyRejected(request(f),reader,context),/request_cancelled/);assert.equal(reads,1);
+ await assert.rejects(verifier.verifyRejected(request(f),reader,context),/request_cancelled/);assert.equal(reads,1);verifier.close();
+});

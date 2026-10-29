@@ -198,3 +198,11 @@ test('cancellation during common observation prevents per-agent reads',async()=>
  await assert.rejects(readers.readNativeScopeBatch([p],true,tx,{signal:controller.signal}),/request_cancelled/);
  assert.equal(counts.worktreeReads,0);assert.equal(counts.sandboxReads,0);
 });
+
+test('checkpoint physical reads retain their transaction reader and forward private cancellation to Git',async()=>{
+ const {readers,counts,p,tx,scope}=await scopeFixture(),controller=new AbortController(),context={signal:controller.signal,deadlineAt:Date.now()+10000};
+ let gitCalls=0;scope.readNativeCodingGitProof=async(_root,options)=>{gitCalls++;assert.equal(options.signal,controller.signal);return {head:p.worktree.base_sha,artifact_sha256:'a'.repeat(64)};};
+ await readers.readCheckpointScope(p,tx,context);assert.equal(gitCalls,1);const before=counts.transactionReads;
+ controller.abort();await assert.rejects(readers.readCheckpointScope(p,tx,context),/request_cancelled/);
+ assert.equal(counts.transactionReads,before);assert.equal(gitCalls,1);
+});

@@ -152,12 +152,15 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
   }
   // Acceptance reads physical current bytes and current Host identity without
   // manufacturing a fresh launch proof for a historical worker/canary.
-  async function readCheckpointScope(permit,reader=sql) {
-    const current=await readNativeScope(permit,false,reader);
-    const operator=await readNativeCodingOperatorPaths(config.state_directory);
+  async function readCheckpointScope(permit,reader=sql,context=undefined) {
+    assertNativeCodingHostRequestOpen(context);
+    const current=await readNativeScope(permit,false,reader,context);
+    const operator=await readNativeCodingOperatorPaths(config.state_directory,{signal:context?.signal});
+    assertNativeCodingHostRequestOpen(context);
     const env={SystemRoot:process.env.SystemRoot,PATH:path.dirname(operator.git_executable),
       GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'NUL',GIT_TERMINAL_PROMPT:'0'};
-    const git=await readNativeCodingGitProof(permit.worktree.path,{env,gitExecutable:operator.git_executable});
+    const git=await readNativeCodingGitProof(permit.worktree.path,{env,gitExecutable:operator.git_executable,signal:context?.signal});
+    assertNativeCodingHostRequestOpen(context);
     if(git.head!==current.worktree.base_sha)fail('checkpoint_worktree_changed');
     return {...current,git};
   }

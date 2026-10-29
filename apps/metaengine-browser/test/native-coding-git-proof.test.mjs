@@ -38,3 +38,12 @@ test('physical Git proof rejects a changed file linked to another path and overs
   await fs.link(original,linked);await assert.rejects(f.read(),/changed_file_invalid/);await fs.unlink(linked);
   await fs.writeFile(original,Buffer.alloc(512*1024+1,65));await assert.rejects(f.read(),/changed_file_invalid/);
 });
+
+test('cancelled Git proof launches no new read and an in-flight Git child is joined before rejection',async t=>{
+ const f=await fixture(t),before=await f.read();
+ const cancelled=new AbortController();cancelled.abort();
+ await assert.rejects(readNativeCodingGitProof(f.root,{env:f.env,gitExecutable:'nonexistent-must-not-launch',signal:cancelled.signal}),/git_cancelled/);
+ const active=new AbortController();const pending=readNativeCodingGitProof(f.root,{env:f.env,gitExecutable,signal:active.signal});active.abort();
+ await assert.rejects(pending,/git_cancelled/);
+ const after=await f.read();assert.deepEqual(after,before);
+});

@@ -1,3 +1,4 @@
+import {randomUUID} from 'node:crypto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createNativeCodingHostAuthority} from './native-coding-host-authority.mjs';
@@ -111,4 +112,13 @@ test('private rejection read verifies exact protected pair without any task/ledg
   assert(!queries.some(q=>/\b(insert|update|delete|alter|create)\b/i.test(q)));
   await assert.rejects(authority.READ_PROJECT_REJECTION({...selector,repair_authorized:true}),/selector_invalid/);
  }finally{authority.close();}
+});
+
+test('expired or cancelled private rejection requests perform no database or physical read',async()=>{
+ const x=await fixture();const selector={project_id:randomUUID(),writer_task_id:randomUUID(),writer_lease_generation:1,
+  critic_task_id:randomUUID(),critic_lease_generation:1,result_sha256:'a'.repeat(64)};
+ const controller=new AbortController();controller.abort();const before=x.calls.length;
+ await assert.rejects(x.authority.READ_PROJECT_REJECTION(selector,{signal:controller.signal}),/request_cancelled/);
+ await assert.rejects(x.authority.READ_PROJECT_REJECTION(selector,{deadlineAt:Date.now()-1}),/deadline_exceeded/);
+ assert.equal(x.calls.length,before);x.authority.close();
 });

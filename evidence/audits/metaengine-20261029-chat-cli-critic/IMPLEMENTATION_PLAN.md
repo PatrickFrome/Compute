@@ -216,3 +216,18 @@ skips. YAML parsing, schema registration checks and UI TypeScript pass.
 Automatic repair admission remains unimplemented. REPAIR_TRANSITION_DESIGN.md
 records the required clean-root replacement and honest supersession semantics;
 none of that document is a runtime grant or a claim of completed repair.
+
+### Rejection-read lifetime and Git cancellation
+
+The private rejection request context now reaches the verifier and the physical
+checkpoint reader without replacing its transaction-owned PG reader. Expired or
+cancelled requests cannot issue a fresh read or emit a verified rejection.
+Native observation and Git proof receive the same AbortSignal. The Git proof
+reader waits for its owned child close after an abort/error before rejecting;
+pre-cancelled reads spawn nothing and do not alter repository bytes.
+
+Evidence:48 focused cancellation/physical-scope/verifier/transaction/Git tests
+pass;4 real PG17 checkpoint tests pass. Final browser6951total6841pass,
+28unchangedenvironmentfail82skip; runtime755total724pass1UnixIPCfail30skip.
+Windows component qualification also requires the Git abort and pre-dispatch
+cancel tests. These changes do not authorize automatic retry or code repair.

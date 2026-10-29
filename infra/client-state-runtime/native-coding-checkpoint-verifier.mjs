@@ -1,3 +1,4 @@
+import {assertNativeCodingHostRequestOpen} from './native-coding-host-request-lifetime.mjs';
 import {createPublicKey,randomUUID} from 'node:crypto';
 import {verifyNativeCodingJobProof,nativeCodingDeviceKeyFingerprint}
   from '../../apps/metaengine-browser/src/native-coding-transport-proof.mjs';
@@ -33,7 +34,8 @@ function nativeProcess(value,now) {
 export function createNativeCodingCheckpointVerifier({readProtectedReceipt,readCheckpointScope,clock=()=>Date.now()}={}) {
   if(typeof readProtectedReceipt!=='function'||typeof readCheckpointScope!=='function'||typeof clock!=='function')fail('private_readers_required');
   let closed=false;const open=()=>{if(closed)fail('closed');};
-  async function registered(bundle,project,role,subject=null,verdict='ACCEPT') {
+  async function registered(bundle,project,role,subject=null,verdict='ACCEPT',context=undefined) {
+    assertNativeCodingHostRequestOpen(context);
     const {permit:p,permit_binding:b,device:d,registration:j,execution:e,task:t}=bundle??{};
     if(!p||!b||!d||!j||!e||!t||p.role!==role||p.schema!=='metaengine.native-coding.operator-permit.v1'
       ||p.trust_namespace!=='LOCAL_OPERATOR_QA'||p.revoked!==false||b.revoked_at!==null
@@ -62,7 +64,7 @@ export function createNativeCodingCheckpointVerifier({readProtectedReceipt,readC
     // Rebuild only against the signed ORIGINAL Host birth, never today's Host.
     const expectedScope=buildNativeCodingExecutionScope(p,historical.value,payload.host_process);
     if(Object.keys(expectedScope).some(key=>saved[key]!==expectedScope[key]))fail('historical_scope_changed');
-    const receipt=await readProtectedReceipt({scope:saved,permit:p,job:envelope});open();
+    const receipt=await readProtectedReceipt({scope:saved,permit:p,job:envelope});open();assertNativeCodingHostRequestOpen(context);
     if(!same(receipt,j.result_receipt)||j.canonical_result_receipt!==json(receipt)||j.result_receipt_sha256!==sha(receipt)
       ||receipt.schema!=='metaengine.codex-cli.run-receipt.v1'||receipt.trust_namespace!=='LOCAL_OPERATOR_QA'||receipt.provider!=='CODEX_CLI'
       ||receipt.state!=='RESULT_READY'||receipt.role!==role||receipt.run_id!==payload.run_id||receipt.task_id!==saved.task_id
@@ -107,13 +109,13 @@ export function createNativeCodingCheckpointVerifier({readProtectedReceipt,readC
     nativeProcess(value.host_process,clock());nativeProcess(value.postgres.postmaster,clock());
     return value;
   }
-  async function verifyPair({project,writer,critic}={},reader,verdict='ACCEPT') {
-      open();const observed=clock();
+  async function verifyPair({project,writer,critic}={},reader,verdict='ACCEPT',context=undefined) {
+      open();assertNativeCodingHostRequestOpen(context);const observed=clock();
       if(!Number.isSafeInteger(observed)||!project||project.state!=='ACTIVE'||!UUID.test(project.project_id||''))fail('project_unavailable');
-      const w=await registered(writer,project,'IMPLEMENTER',null,verdict);
+      const w=await registered(writer,project,'IMPLEMENTER',null,verdict,context);
       const subject={run_id:w.receipt.run_id,result_sha256:w.receipt.result_sha256,git_artifact_sha256:w.receipt.git_after.artifact_sha256,
         source_head:w.receipt.git_after.head,agent_id:w.receipt.agent_id,worker_process:w.job.worker_process};
-      const c=await registered(critic,project,'CRITIC',subject,verdict);
+      const c=await registered(critic,project,'CRITIC',subject,verdict,context);
       if(w.permit.goal_id!==c.permit.goal_id||w.permit.goal_sha256!==c.permit.goal_sha256||w.permit.owner_epoch!==c.permit.owner_epoch
         ||w.permit.user_sid!==c.permit.user_sid||!same(w.permit.artifact,c.permit.artifact)
         ||w.permit.postgres.system_identifier!==c.permit.postgres.system_identifier
@@ -127,8 +129,9 @@ export function createNativeCodingCheckpointVerifier({readProtectedReceipt,readC
         ||!same(c.receipt.git_after,w.receipt.git_after))fail('independent_critic_mismatch');
       // Private callers can retain their transaction-owned PG connection;
       // standalone verification keeps the physical reader's default pool.
-      const first=current(await readCheckpointScope(w.permit,reader),w.permit,w);open();
-      const last=current(await readCheckpointScope(c.permit,reader),c.permit,w);open();
+      assertNativeCodingHostRequestOpen(context);
+      const first=current(await readCheckpointScope(w.permit,reader,context),w.permit,w);open();assertNativeCodingHostRequestOpen(context);
+      const last=current(await readCheckpointScope(c.permit,reader,context),c.permit,w);open();assertNativeCodingHostRequestOpen(context);
       if(!same(first,last)||clock()<observed||clock()-observed>30000)fail('physical_readback_changed');
       if(verdict==='REJECT') {
         // This is evidence of the rejected pair and retained candidate, never
@@ -155,7 +158,7 @@ export function createNativeCodingCheckpointVerifier({readProtectedReceipt,readC
   }
   return Object.freeze({
     verify:(input,reader)=>verifyPair(input,reader,'ACCEPT'),
-    verifyRejected:(input,reader)=>verifyPair(input,reader,'REJECT'),
+    verifyRejected:(input,reader,context)=>verifyPair(input,reader,'REJECT',context),
     close(){closed=true;},
   });
 }
