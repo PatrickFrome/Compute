@@ -32,3 +32,26 @@ Ubuntu, Windows). Its additional local broad Browser run was interrupted by a
 reported api.github.com network policy block and has no final test total. The
 previous complete local ea751466 run remains 6851 pass / 28 environment failures /
 82 skipped, not a full local green claim for this newer source.
+
+## Output overflow and failed shutdown acknowledgement
+
+A further red regression reproduced an unhandled rejected termination promise
+from the stream data handler. Shutdown requests now share one owned promise,
+retain process-completion custody, and cannot fan out or reject unobserved.
+Overflow permanently blocks the probe even if the child later exits cleanly.
+
+Both log streams retain at most 32768 bytes. After that bound, no additional
+writes are queued, including when termination fails. Retained prefixes are
+copied so queued writes cannot retain an oversized source buffer. writeFile on
+the owned file handle completes each queued prefix rather than assuming one
+write call wrote every byte. Existing request timeout and no-model policy stay
+unchanged. Overflow receipts are BLOCKED, never full-output or sandbox proof.
+
+Tests cover overflow with successful/failed termination acknowledgement and
+an asynchronous log-write failure with failed termination. They assert one
+shutdown request, bounded log bytes, closed handles and no positive receipt.
+Combined probe/lifetime/registration: 28 pass, one Windows-only boot-read skip
+on Linux. These remain generated process/filesystem fixtures, not an installed
+sandbox acceptance test. The preceding 8150958c CI completed successfully:
+Windows Source 40938473294, component 475/476 with one baseline skip and native
+PG17 47/47; Runtime Contracts 40938473297, all three jobs successful.

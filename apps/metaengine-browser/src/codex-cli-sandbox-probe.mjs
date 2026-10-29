@@ -214,19 +214,27 @@ export async function runCodexCliSandboxProbe({ cliPath, workspaceRoot, receiptD
   // Observe rejection immediately, but retain custody until the owned process
   // completion settles. A callback/resume failure is not process completion.
   const processFinished = Promise.resolve(handle.completion).then(value => ({ ok: true, value }), () => ({ ok: false }));
+  let termination = null;
+  const requestTermination = reason => {
+    // One owned shutdown request, never an unhandled rejection or retry loop.
+    termination ??= Promise.resolve().then(() => handle.terminate(reason)).catch(() => {});
+    return termination;
+  };
   try { onProcessStarted?.(Object.freeze({ run_id: runId, mode, process: handle.proof, timeout_ms: timeoutMs, temporary_path: temporaryPath, model_called: false })); }
   catch {
-    try { await handle.terminate('PROBE_OBSERVER_FAILED'); } catch { /* completion still owns the drain */ }
+    await requestTermination('PROBE_OBSERVER_FAILED');
     await processFinished; await closeLogs();
     throw Error('codex_sandbox_probe_observer_failed');
   }
-  let output = '', stderrBytes = 0, report = null, nativeProcess = null, observation = null;
+  let output = '', stdoutBytes = 0, stderrBytes = 0, outputLimitExceeded = false, report = null, nativeProcess = null, observation = null;
   const observationTasks = [];
   handle.stdout.on('data', chunk => {
-    const bytes = Buffer.from(chunk);
-    stdoutWrites = stdoutWrites.then(() => stdoutFile.write(bytes)).catch(() => { logWriteFailed = true; void handle.terminate('SANDBOX_PROBE_LOG_WRITE_FAILED'); });
-    output += chunk.toString('utf8');
-    if (Buffer.byteLength(output) > 32768) { output = output.slice(0, 32768); void handle.terminate('SANDBOX_PROBE_OUTPUT_LIMIT'); return; }
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    const retained = Buffer.from(bytes.subarray(0, Math.max(0, 32768 - stdoutBytes)));
+    stdoutBytes += bytes.length;
+    if (retained.length) stdoutWrites = stdoutWrites.then(() => stdoutFile.writeFile(retained)).catch(() => { logWriteFailed = true; void requestTermination('SANDBOX_PROBE_LOG_WRITE_FAILED'); });
+    if (stdoutBytes > 32768) { outputLimitExceeded = true; void requestTermination('SANDBOX_PROBE_OUTPUT_LIMIT'); return; }
+    output += bytes.toString('utf8');
     for (const line of output.split(/\r?\n/)) {
       if (report || !line.startsWith('{')) continue;
       try {
@@ -239,9 +247,10 @@ export async function runCodexCliSandboxProbe({ cliPath, workspaceRoot, receiptD
     }
   });
   handle.stderr.on('data', chunk => {
-    const bytes = Buffer.from(chunk);
-    stderrWrites = stderrWrites.then(() => stderrFile.write(bytes)).catch(() => { logWriteFailed = true; void handle.terminate('SANDBOX_PROBE_LOG_WRITE_FAILED'); });
-    stderrBytes += bytes.length; if (stderrBytes > 32768) void handle.terminate('SANDBOX_PROBE_STDERR_LIMIT');
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    const retained = Buffer.from(bytes.subarray(0, Math.max(0, 32768 - stderrBytes)));
+    if (retained.length) stderrWrites = stderrWrites.then(() => stderrFile.writeFile(retained)).catch(() => { logWriteFailed = true; void requestTermination('SANDBOX_PROBE_LOG_WRITE_FAILED'); });
+    stderrBytes += bytes.length; if (stderrBytes > 32768) { outputLimitExceeded = true; void requestTermination('SANDBOX_PROBE_STDERR_LIMIT'); }
   });
   let completion;
   try {
@@ -250,7 +259,7 @@ export async function runCodexCliSandboxProbe({ cliPath, workspaceRoot, receiptD
     if (!finished.ok) throw Error('codex_sandbox_probe_completion_unconfirmed');
     completion = finished.value;
   } catch {
-    try { await handle.terminate('SANDBOX_PROBE_PROCESS_UNCONFIRMED'); } catch { /* retain the same owned completion */ }
+    await requestTermination('SANDBOX_PROBE_PROCESS_UNCONFIRMED');
     await processFinished;
     await Promise.allSettled(observationTasks);
     await Promise.allSettled([stdoutWrites, stderrWrites]);
@@ -259,6 +268,7 @@ export async function runCodexCliSandboxProbe({ cliPath, workspaceRoot, receiptD
   }
   try {
     await Promise.all([stdoutWrites, stderrWrites]);
+    if (termination) await termination;
     const synced = await Promise.allSettled([stdoutFile.sync(), stderrFile.sync()]);
     if (synced.some(result => result.status !== 'fulfilled')) throw Error('codex_sandbox_probe_log_sync_failed');
   } finally { await closeLogs(); }
@@ -273,6 +283,7 @@ export async function runCodexCliSandboxProbe({ cliPath, workspaceRoot, receiptD
   observation = windowsSandboxBootIdentity(bootAfter)!==windowsSandboxBootIdentity(hostBoot)
     ?Object.freeze({state:'BLOCKED',reason:'SANDBOX_BOOT_IDENTITY_CHANGED',boundary_observed:false,execution_authorized:false,authority_effect:false})
     :evaluateCodexSandboxProbe({ mode, report, nativeProcess, hostReadback, completion, hostUserSid, hostBootIdentity:hostBoot });
+  if (outputLimitExceeded) observation = Object.freeze({ state: 'BLOCKED', reason: 'SANDBOX_PROBE_OUTPUT_LIMIT', boundary_observed: false, execution_authorized: false, authority_effect: false });
   if (logWriteFailed) observation = Object.freeze({ state: 'BLOCKED', reason: 'SANDBOX_PROBE_LOG_WRITE_FAILED', boundary_observed: false, execution_authorized: false, authority_effect: false });
   const evidence = { schema: CODEX_SANDBOX_PROBE_SCHEMA, run_id: runId, observed_at: new Date().toISOString(), ...observation,
     cli_path: await fs.realpath(cliPath), cli_sha256: cliSha, workspace_path: workspace, host_user_sid: hostUserSid,
