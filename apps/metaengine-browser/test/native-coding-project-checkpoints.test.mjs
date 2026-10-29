@@ -100,3 +100,25 @@ test('rejection observer refuses wrong pair, stale proof and fabricated repair a
   observer.observe(reference);await observer.drain();assert.equal(observer.snapshot().observations[0].state,'READBACK_REQUIRED');observer.close();
  }
 });
+
+test('cached verified rejection expires without a heartbeat and cannot survive a regressed clock',async()=>{
+ const {createNativeCodingProjectRejectionObserver}=await import('../src/native-coding-project-checkpoints.mjs');
+ let now=Date.now(),reads=0;
+ const reference={schema:'metaengine.native-coding.review-rejection.v1',...candidate(),result_sha256:'a'.repeat(64),verdict:'REJECT',automatic_retry_allowed:false,authority_effect:false};
+ const observer=createNativeCodingProjectRejectionObserver({clock:()=>now,ownPostgres:{readProjectRejection:async query=>{
+  reads++;return {schema:'metaengine.native-coding.project-rejection-readback.v1',state:'VERIFIED_REJECTION',...query,
+   rejection_sha256:'b'.repeat(64),git_artifact_sha256:'c'.repeat(64),source_head:'d'.repeat(40),observed_at:new Date(now).toISOString(),
+   repair_authorized:false,checkpoint_created:false,production_qualified:false,automatic_retry_allowed:false,authority_effect:false};
+ }}});
+ observer.observe(reference);await observer.drain();const checked=now;
+ assert.equal(observer.snapshot().observations[0].state,'VERIFIED_REJECTION');
+ now+=30001;const stale=observer.snapshot().observations[0];
+ assert.equal(stale.state,'READBACK_REQUIRED');assert.equal(stale.rejection_sha256,null);assert.equal(stale.observed_at,null);
+ assert.equal(reads,1,'snapshot must not start a background reread');
+ now=checked-6000;assert.equal(observer.snapshot().observations[0].state,'READBACK_REQUIRED');
+ now=NaN;assert.equal(observer.snapshot().observations[0].state,'READBACK_REQUIRED');
+ now=checked;assert.equal(observer.snapshot().observations[0].state,'READBACK_REQUIRED','clock reset cannot revive expired proof');
+ now=checked+40000;observer.observe(reference);await observer.drain();
+ assert.equal(reads,2);assert.equal(observer.snapshot().observations[0].state,'VERIFIED_REJECTION');
+ observer.close();assert.equal(observer.snapshot().observations[0].observed_at,null);
+});

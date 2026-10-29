@@ -102,8 +102,21 @@ export function createNativeCodingProjectRejectionObserver({ownPostgres,clock=Da
     throw Error('native_coding_rejection_observer_dependencies');
   const entries=new Map();let running=null,closed=false;
   const fields=['project_id','writer_task_id','writer_lease_generation','critic_task_id','critic_lease_generation','result_sha256'];
-  const snapshot=()=>({schema:'metaengine.native-coding.rejection-observer.v1',running:running!==null,closed,
-    observations:[...entries.values()].slice(-16).map(row=>({...row.public})),repair_authorized:false,authority_effect:false});
+  const snapshot=()=>{
+    let now;try{now=clock();}catch{now=NaN;}
+    return {schema:'metaengine.native-coding.rejection-observer.v1',running:running!==null,closed,
+      observations:[...entries.values()].slice(-16).map(row=>{
+        const value={...row.public},observed=Date.parse(value.observed_at);
+        // Verification was a fresh physical read, not a permanent fact about
+        // mutable worktree bytes. Snapshot reads never launch a replacement read.
+        if(value.state==='VERIFIED_REJECTION'&&(!Number.isSafeInteger(now)||now<0
+          ||!Number.isFinite(observed)||observed>now+5000||now-observed>30000))
+          row.public={...value,state:'READBACK_REQUIRED',observed_at:null,rejection_sha256:null};
+        // Once invalidated, a clock adjustment cannot revive this cache entry.
+        if(row.public.state==='READBACK_REQUIRED')return {...row.public};
+        return value;
+      }),repair_authorized:false,authority_effect:false};
+  };
   return Object.freeze({
     observe(reference) {
       if(closed)return snapshot();
@@ -119,7 +132,7 @@ export function createNativeCodingProjectRejectionObserver({ownPostgres,clock=Da
       if(row&&now>=row.checkedAt&&now-row.checkedAt<minimumIntervalMs)return snapshot();
       if(!row){if(entries.size>=maxEntries)entries.delete(entries.keys().next().value);
         row={checkedAt:now,public:{...query,state:'PENDING',observed_at:null,rejection_sha256:null}};entries.set(id,row);}
-      row.checkedAt=now;row.public.state='PENDING';row.public.rejection_sha256=null;
+      row.checkedAt=now;row.public.state='PENDING';row.public.observed_at=null;row.public.rejection_sha256=null;
       running=Promise.resolve().then(async()=>{
         try{
           const value=await ownPostgres.readProjectRejection(query);if(closed)return;
@@ -135,7 +148,7 @@ export function createNativeCodingProjectRejectionObserver({ownPostgres,clock=Da
       }).finally(()=>{running=null;});
       return snapshot();
     },snapshot,
-    close(){closed=true;for(const row of entries.values())row.public={...row.public,state:'READBACK_REQUIRED',rejection_sha256:null};return snapshot();},
+    close(){closed=true;for(const row of entries.values())row.public={...row.public,state:'READBACK_REQUIRED',observed_at:null,rejection_sha256:null};return snapshot();},
     drain(){return running||Promise.resolve();},
   });
 }
