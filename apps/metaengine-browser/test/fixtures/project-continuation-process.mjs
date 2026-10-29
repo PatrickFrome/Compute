@@ -77,7 +77,7 @@ if(mode==='goal'||mode==='goal-restart'){
         if(prior&&canonicalHash(prior.body)!==canonicalHash(body))throw Error('FIXTURE_SPAWN_CONFLICT');
         if(!prior){
           prior={body,response:{schema:'metaengine.devos.project-spawn.v1',project_id:m.project_id,parent_task_id:lease.task_id,
-            request_id:body.request_id,children:[{child_index:0,status:'ADMITTED',task_id:m.successor_task_id,depth:lease.depth+1,wait_reason:null}],
+            request_id:body.request_id,children:[{child_index:0,status:'ADMITTED',role:body.children[0].role==='CODER'?'IMPLEMENTER':body.children[0].role,task_id:m.successor_task_id,depth:lease.depth+1,wait_reason:null}],
             proposals_preserved:true,authority_effect:false}};
           await writeNewJson(file,prior);
         }

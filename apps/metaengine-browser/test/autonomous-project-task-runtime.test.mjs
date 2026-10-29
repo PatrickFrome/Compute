@@ -639,7 +639,7 @@ test('capacity-wait proposals do not claim task admission', async t => {
   assert.equal((await f.journal.pending()).length, 1);
 });
 
-for (const corruption of ['duplicate_task', 'parent_task', 'wait_with_task', 'admitted_with_wait_reason', 'wrong_depth']) {
+for (const corruption of ['duplicate_task', 'parent_task', 'wait_with_task', 'admitted_with_wait_reason', 'wrong_depth', 'wrong_role', 'missing_role']) {
   test(`spawn receipt rejects ${corruption} and leaves durable intent unresolved`, async t => {
     const f = await fixture(t);
     const runtime = f.own(new AutonomousProjectTaskRuntime({ journal: f.journal,
@@ -651,6 +651,8 @@ for (const corruption of ['duplicate_task', 'parent_task', 'wait_with_task', 'ad
           if (corruption === 'wait_with_task') result.children[0].status = 'CAPACITY_WAIT';
           if (corruption === 'admitted_with_wait_reason') result.children[0].wait_reason = 'NO_CAPACITY';
           if (corruption === 'wrong_depth') result.children[0].depth = 99;
+          if (corruption === 'wrong_role') result.children[0].role = 'RESEARCHER';
+          if (corruption === 'missing_role') delete result.children[0].role;
         }
         return result;
       } }));

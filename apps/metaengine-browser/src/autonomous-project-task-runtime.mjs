@@ -5,6 +5,7 @@ export const AUTONOMOUS_PROJECT_RUNTIME_SCHEMA = 'metaengine.devos.autonomous-pr
 export const PROJECT_AGENT_TOOL_ACTIONS = Object.freeze(['PROJECT_SPAWN', 'PROJECT_HISTORY']);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const REQUEST = /^[A-Za-z0-9][A-Za-z0-9:._-]{3,63}$/;
+const canonicalRole = role => role === 'CODER' ? 'IMPLEMENTER' : role === 'INTEGRATOR' ? 'SYNTHESIZER' : role;
 const ROLES = new Set(['CODER', 'IMPLEMENTER', 'RESEARCHER', 'CRITIC', 'FALSIFIER', 'PLANNER', 'INTEGRATOR', 'SYNTHESIZER']);
 const fail = code => { throw new Error(`autonomous_project_${code}`); };
 const stable = value => Array.isArray(value) ? value.map(stable) : (value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, stable(value[key])])) : value);
@@ -395,6 +396,7 @@ export class AutonomousProjectTaskRuntime {
     for (const child of value.children) {
       if (!Number.isSafeInteger(child.child_index) || child.child_index < 0 || child.child_index >= children.length
           || seen.has(child.child_index) || !['ADMITTED', 'CAPACITY_WAIT', 'BUDGET_WAIT'].includes(child.status)
+          || child.role !== canonicalRole(children[child.child_index]?.role)
           || !Number.isSafeInteger(child.depth) || child.depth !== current.task.depth + 1
           || (child.status === 'ADMITTED'
             ? (!UUID.test(child.task_id || '') || child.task_id === lease.task_id || admittedTasks.has(child.task_id) || child.wait_reason !== null)

@@ -34,15 +34,16 @@ export function createAutonomousProjectProviderFixture({ filePath, projectId, ro
           return { ...JSON.parse(existing.receipt), replayed: true };
         }
         const children = body.children.map((child, child_index) => {
-          if (state.tasks.length >= capacity) return { child_index, task_id: null, depth: selected.depth + 1, status: 'CAPACITY_WAIT', wait_reason: 'FIXTURE_CAPACITY' };
+          const role=child.role==='CODER'?'IMPLEMENTER':child.role==='INTEGRATOR'?'SYNTHESIZER':child.role;
+          if (state.tasks.length >= capacity) return { child_index, role, task_id: null, depth: selected.depth + 1, status: 'CAPACITY_WAIT', wait_reason: 'FIXTURE_CAPACITY' };
           const task_id = uuid();
           state.tasks.push({ task_id, parent_task_id: selected.task_id, root_task_id: state.root_task_id,
-            depth: selected.depth + 1, state: 'RUNNING', role: child.role, objective: child.objective,
+            depth: selected.depth + 1, state: 'RUNNING', role, objective: child.objective,
             agent_id: `agent_child-fixture-${counter}`, claim_id: counter + 10, lease_generation: 1,
             task_spec: { project_continuity: { project_id: state.project_id, depth: selected.depth + 1 } } });
           state.entries.push({ seq: state.entries.length + 1, event_type: 'CHILD_TASK_ADMITTED', task_id,
             parent_task_id: selected.task_id, source: 'DETERMINISTIC_PROVIDER_FIXTURE', verified_evidence: false });
-          return { child_index, task_id, depth: selected.depth + 1, status: 'ADMITTED', wait_reason: null };
+          return { child_index, role, task_id, depth: selected.depth + 1, status: 'ADMITTED', wait_reason: null };
         });
         const receipt = { schema: 'metaengine.devos.project-spawn.v1', project_id: state.project_id,
           request_id: body.request_id, parent_task_id: selected.task_id, replayed: false, children, proposals_preserved: true, authority_effect: false };
