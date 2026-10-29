@@ -38,3 +38,9 @@ test('native observation and Main wiring are mandatory Windows component checks'
  for(const path of ['apps/metaengine-browser/src/client-native-*.mjs','apps/metaengine-browser/src/main.mjs','apps/metaengine-browser/test/client-native-*.test.mjs'])assert.ok(workflow.includes(path),path);
  for(const name of ['client-native-runtime-observation.test.mjs','client-native-trust-boundary.test.mjs'])assert.ok(workflow.includes("'apps/metaengine-browser/test/"+name+"',"),name);
 });
+
+test('sandbox probe lifetime and actual Windows boot observation remain in the component lane',()=>{
+ for(const name of ['codex-cli-sandbox-probe.test.mjs','codex-cli-sandbox-probe-lifetime.test.mjs'])assert.ok(source.includes("'apps/metaengine-browser/test/"+name+"',"),name);
+ assert.ok(source.includes("'apps/metaengine-browser/src/codex-cli-sandbox-probe.mjs'"));
+ assert.ok(source.includes("'apps/metaengine-browser/test/codex-cli-sandbox-probe*.test.mjs'"));
+});

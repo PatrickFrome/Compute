@@ -199,14 +199,27 @@ export async function runCodexCliSandboxProbe({ cliPath, workspaceRoot, receiptD
   const codexHome = process.env.CODEX_HOME || path.join(process.env.USERPROFILE || '', '.codex');
   const env = codexCliTemporaryEnvironment(codexCliEnvironment(codexHome), temporaryPath);
   const stdoutPath = path.join(receipts, `${runId}.stdout.log`), stderrPath = path.join(receipts, `${runId}.stderr.log`), exitPath = path.join(receipts, `${runId}.exit.json`);
-  const stdoutFile = await fs.open(stdoutPath, 'wx', 0o600), stderrFile = await fs.open(stderrPath, 'wx', 0o600);
+  let stdoutFile = null, stderrFile = null;
+  const closeLogs = async () => {
+    const results = await Promise.allSettled([stdoutFile, stderrFile].filter(Boolean).map(file => file.close()));
+    if (results.some(result => result.status !== 'fulfilled')) throw Error('codex_sandbox_probe_log_cleanup_unconfirmed');
+  };
+  try { stdoutFile = await fs.open(stdoutPath, 'wx', 0o600); stderrFile = await fs.open(stderrPath, 'wx', 0o600); }
+  catch (error) { await closeLogs(); throw error; }
   let stdoutWrites = Promise.resolve(), stderrWrites = Promise.resolve(), logWriteFailed = false;
   const deadlineAt = new Date(Date.now() + timeoutMs).toISOString();
   let handle;
   try { handle = await processController.spawn({ executablePath: cliPath, args, cwd: workspace, env, timeoutMs, deadlineAt, runId, expectedExecutableSha256: cliSha }); }
-  catch (error) { await stdoutFile.close(); await stderrFile.close(); throw error; }
+  catch (error) { await closeLogs(); throw error; }
+  // Observe rejection immediately, but retain custody until the owned process
+  // completion settles. A callback/resume failure is not process completion.
+  const processFinished = Promise.resolve(handle.completion).then(value => ({ ok: true, value }), () => ({ ok: false }));
   try { onProcessStarted?.(Object.freeze({ run_id: runId, mode, process: handle.proof, timeout_ms: timeoutMs, temporary_path: temporaryPath, model_called: false })); }
-  catch { await handle.terminate('PROBE_OBSERVER_FAILED'); throw Error('codex_sandbox_probe_observer_failed'); }
+  catch {
+    try { await handle.terminate('PROBE_OBSERVER_FAILED'); } catch { /* completion still owns the drain */ }
+    await processFinished; await closeLogs();
+    throw Error('codex_sandbox_probe_observer_failed');
+  }
   let output = '', stderrBytes = 0, report = null, nativeProcess = null, observation = null;
   const observationTasks = [];
   handle.stdout.on('data', chunk => {
@@ -230,11 +243,25 @@ export async function runCodexCliSandboxProbe({ cliPath, workspaceRoot, receiptD
     stderrWrites = stderrWrites.then(() => stderrFile.write(bytes)).catch(() => { logWriteFailed = true; void handle.terminate('SANDBOX_PROBE_LOG_WRITE_FAILED'); });
     stderrBytes += bytes.length; if (stderrBytes > 32768) void handle.terminate('SANDBOX_PROBE_STDERR_LIMIT');
   });
-  await handle.resume('', { deadlineAt });
-  const completion = await handle.completion;
-  await Promise.all([stdoutWrites, stderrWrites]);
-  await Promise.all([stdoutFile.sync(), stderrFile.sync()]);
-  await Promise.all([stdoutFile.close(), stderrFile.close()]);
+  let completion;
+  try {
+    await handle.resume('', { deadlineAt });
+    const finished = await processFinished;
+    if (!finished.ok) throw Error('codex_sandbox_probe_completion_unconfirmed');
+    completion = finished.value;
+  } catch {
+    try { await handle.terminate('SANDBOX_PROBE_PROCESS_UNCONFIRMED'); } catch { /* retain the same owned completion */ }
+    await processFinished;
+    await Promise.allSettled(observationTasks);
+    await Promise.allSettled([stdoutWrites, stderrWrites]);
+    await closeLogs();
+    throw Error('codex_sandbox_probe_process_unconfirmed');
+  }
+  try {
+    await Promise.all([stdoutWrites, stderrWrites]);
+    const synced = await Promise.allSettled([stdoutFile.sync(), stderrFile.sync()]);
+    if (synced.some(result => result.status !== 'fulfilled')) throw Error('codex_sandbox_probe_log_sync_failed');
+  } finally { await closeLogs(); }
   const exitFile = await fs.open(exitPath, 'wx', 0o600);
   try { await exitFile.writeFile(JSON.stringify(completion) + '\n'); await exitFile.sync(); } finally { await exitFile.close(); }
   await Promise.allSettled(observationTasks);
