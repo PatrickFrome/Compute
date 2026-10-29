@@ -19,7 +19,8 @@
     "test:w73:source": "node --test client-source-candidate-w73.test.mjs",
     "test:critical:source": "node --test --test-concurrency=1 client-source-candidate-w73.test.mjs client-critical-closure.test.mjs",
     "test:fresh-schema:pg17": "node --test fresh-schema-pg17.integration.test.mjs",
-    "test:fresh-provider:pg17": "node --test fresh-schema-application-plan.test.mjs fresh-client-provider.integration.test.mjs browser-parent-suspension.sql.test.mjs browser-parent-suspension.concurrency.test.mjs fresh-device-owner.integration.test.mjs guardian-owner-consume.integration.test.mjs"
+    "test:fresh-provider:pg17": "node --test fresh-schema-application-plan.test.mjs fresh-client-provider.integration.test.mjs browser-parent-suspension.sql.test.mjs browser-parent-suspension.concurrency.test.mjs fresh-device-owner.integration.test.mjs guardian-owner-consume.integration.test.mjs",
+    "test:chat-cli:pg17": "node --test --test-concurrency=1 native-coding-initial-goal-seed.integration.test.mjs"
   },
   "dependencies": {
     "postgres": "3.4.7"

@@ -135,3 +135,21 @@ test('PG17 binary producer shares package pins and remains registered for push a
     }
   }
 });
+
+test('chat-to-CLI integration is mandatory in the hosted Windows native PG17 qualification',()=>{
+ const candidate=readFileSync(new URL('workflows/client-checkpoint-reconciliation-qualification.yml',import.meta.url),'utf8');
+ const file='infra/client-state-runtime/native-coding-initial-goal-seed.integration.test.mjs';
+ assert.match(candidate,/const native=\[[\s\S]*?native-coding-initial-goal-seed\.integration\.test\.mjs[\s\S]*?\];/);
+ for(const name of [
+  'protected chat-led profile admits a browser planner and native permits, never a CLI planner',
+  'real browser-parent claim hands IMPLEMENTER children to protected native permits without fallback',
+  'chat profile revocation cannot downgrade native handoff to a browser implementation',
+ ])assert(candidate.includes("            '"+name+"',"));
+ assert(candidate.includes("if(name==='native-pg17'&&checked.counts.tests<37)"));
+ assert(candidate.includes("await runSuite('native-pg17',native,nativeRequired,await createSuiteEnvironment('native-pg17',true),false)"));
+ assert(candidate.includes("      - 'work/chat-cli-critic-integration-20261029'"));
+ assert(candidate.includes("'refs/heads/work/chat-cli-critic-integration-20261029'"));
+ assert(candidate.includes("      - 'infra/client-state-runtime/native-coding-*.sql'"));
+ const pkg=JSON.parse(readFileSync(new URL('../infra/client-state-runtime/package.json',import.meta.url),'utf8'));
+ assert.equal(pkg.scripts['test:chat-cli:pg17'],'node --test --test-concurrency=1 '+file.split('/').at(-1));
+});

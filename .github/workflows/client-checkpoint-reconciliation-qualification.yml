@@ -16,6 +16,10 @@ on:
       - 'apps/metaengine-browser/test/fixtures/autonomous-project-*.mjs'
       - 'apps/metaengine-browser/test/fixtures/browser-parent-suspension-fixture.mjs'
       - 'infra/client-state-runtime/native-coding-*.mjs'
+      - 'infra/client-state-runtime/native-coding-*.sql'
+      - 'infra/client-state-runtime/native-agent-count-unbounded-v2.sql'
+      - 'infra/client-state-runtime/local-runtime-migrations.mjs'
+      - 'infra/client-state-runtime/fresh-schema-candidate-plan.json'
       - 'infra/client-state-runtime/test/native-coding-*.mjs'
       - 'infra/client-state-runtime/package.json'
       - 'infra/client-state-runtime/package-lock.json'
@@ -27,6 +31,7 @@ on:
     branches:
       - 'work/preinstall-shared-inputs-20261027'
       - 'work/preinstall-closure-20261027'
+      - 'work/chat-cli-critic-integration-20261029'
 
 permissions:
   contents: read
@@ -49,7 +54,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           if ($env:GITHUB_ACTIONS -cne 'true' -or $env:CI -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:RUNNER_OS -cne 'Windows' -or $env:RUNNER_ARCH -cne 'X64') { throw 'checkpoint_ci_hosted_windows_x64_required' }
           if ($env:GITHUB_REPOSITORY -cne 'PatrickFrome/Compute' -or $env:GITHUB_EVENT_NAME -notin @('push','pull_request')) { throw 'checkpoint_ci_event_refused' }
-          if ($env:GITHUB_EVENT_NAME -ceq 'push' -and $env:GITHUB_REF -notin @('refs/heads/work/preinstall-shared-inputs-20261027','refs/heads/work/preinstall-closure-20261027')) { throw 'checkpoint_ci_push_branch_refused' }
+          if ($env:GITHUB_EVENT_NAME -ceq 'push' -and $env:GITHUB_REF -notin @('refs/heads/work/preinstall-shared-inputs-20261027','refs/heads/work/preinstall-closure-20261027','refs/heads/work/chat-cli-critic-integration-20261029')) { throw 'checkpoint_ci_push_branch_refused' }
           git config --global core.autocrlf false
           if ($LASTEXITCODE -ne 0) { throw 'checkpoint_ci_literal_source_setup_failed' }
 
@@ -159,6 +164,7 @@ jobs:
             'infra/client-state-runtime/native-coding-checkpoint-reconciliation.integration.test.mjs',
             'infra/client-state-runtime/native-coding-host-commit.integration.test.mjs',
             'infra/client-state-runtime/native-coding-host-commit-profile.integration.test.mjs',
+            'infra/client-state-runtime/native-coding-initial-goal-seed.integration.test.mjs',
           ];
           const componentRequired=[
             'initial READ is physically read-only and never creates journal directories or an anchor',
@@ -176,6 +182,12 @@ jobs:
             'existing cycle suspends parent and child with one slot, then exact completion and restored receipts unwind without Send replay',
           ];
           const nativeRequired=[
+            'private initial native goal admission is atomic and preserves the W30 authority boundaries',
+            'protected chat-led profile admits a browser planner and native permits, never a CLI planner',
+            'real browser-parent claim hands IMPLEMENTER children to protected native permits without fallback',
+            'chat profile revocation cannot downgrade native handoff to a browser implementation',
+            'chat upgrade rejects unreviewed predecessor bodies without changing the live test schema',
+            'cancelled physical observation cannot admit any real PostgreSQL task or permit',
             'native PG17 checkpoint reconciliation: real crash intervals, concurrent first finalize, ACK loss and negative controls',
             'killed Git-complete child resumes through observer once, repeated selector and second restart are read-only',
             'two independent Host processes race at exclusive intent creation and invoke native SQL once',
@@ -303,8 +315,8 @@ jobs:
             const checked=inspectTap(outcome.stdout,required,allowBaseline);
             if(outcome.code!==0||outcome.reason)checked.bad.push(outcome.reason||'PROCESS_FAILED');
             let profileUnchanged=false;try{await isolated.verify();profileUnchanged=true;}catch{checked.bad.push('isolated_profile_or_owner_changed');}
-            // Separate native output must contain all 9 + 4 + 2 current tests.
-            if(name==='native-pg17'&&checked.counts.tests<15)checked.bad.push('native_test_count_incomplete');
+            // Retain the existing native cases plus all 22 seed/chat integration tests.
+            if(name==='native-pg17'&&checked.counts.tests<37)checked.bad.push('native_test_count_incomplete');
             await fs.writeFile(path.join(publicDir,name+'.tap'),checked.tap,{flag:'wx'});
             suites.push({name,state:checked.bad.length?'FAIL':'PASS',counts:checked.counts,refusals:checked.bad,
               raw_tap_sha256:hash(outcome.stdout),sanitized_tap_sha256:hash(checked.tap),required_cases:required.length,
@@ -331,6 +343,13 @@ jobs:
             'infra/client-state-runtime/test/native-coding-checkpoint-reconciliation-pg-child.mjs',
             'infra/client-state-runtime/test/native-coding-checkpoint-reconciliation-pg-fixture.mjs',
             'infra/client-state-runtime/test/native-coding-host-commit-git-fixture.mjs',
+            'infra/client-state-runtime/test/native-coding-chat-pair-pg-fixture.mjs',
+            'infra/client-state-runtime/native-coding-chat-coordination-v1.sql',
+            'infra/client-state-runtime/native-coding-review-observation-v1.sql',
+            'infra/client-state-runtime/native-coding-chat-messages-v1.sql',
+            'infra/client-state-runtime/native-agent-count-unbounded-v2.sql',
+            'infra/client-state-runtime/local-runtime-migrations.mjs',
+            'infra/client-state-runtime/fresh-schema-candidate-plan.json',
             'infra/client-state-runtime/package-lock.json','.github/prepare-runtime-contract-pg17.mjs',
             '.github/workflows/client-checkpoint-reconciliation-qualification.yml'];
           const sources=[];for(const file of sourcePaths)sources.push({path:file,sha256:hash(await fs.readFile(path.join(root,file)))});
