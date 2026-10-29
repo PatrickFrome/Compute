@@ -5,7 +5,9 @@ on:
     paths:
       - 'apps/metaengine-browser/src/native-coding-*.mjs'
       - 'apps/metaengine-browser/src/autonomous-project-*.mjs'
-      - 'apps/metaengine-browser/src/devos-native-task-cycle.mjs'
+      - 'apps/metaengine-browser/src/devos-native-task-cycle*.mjs'
+      - 'apps/metaengine-browser/src/agent-tool*.mjs'
+      - 'apps/metaengine-browser/test/agent-tool*.test.mjs'
       - 'apps/metaengine-browser/src/browser-parent-*.mjs'
       - 'apps/metaengine-browser/src/private-windows-storage-acl.mjs'
       - 'apps/metaengine-browser/test/native-coding-*.mjs'
@@ -18,6 +20,15 @@ on:
       - 'infra/client-state-runtime/native-coding-*.mjs'
       - 'infra/client-state-runtime/native-coding-*.sql'
       - 'infra/client-state-runtime/native-agent-count-unbounded-v2.sql'
+      - 'infra/client-state-runtime/browser-parent-*.mjs'
+      - 'infra/client-state-runtime/browser-project-*.sql'
+      - 'infra/client-state-runtime/project-message-*.sql'
+      - 'infra/client-state-runtime/fresh-schema-*.mjs'
+      - 'infra/client-state-runtime/canonical-empty-schema-contract.mjs'
+      - 'infra/client-state-runtime/reviewed-empty-schema.test.mjs'
+      - 'infra/client-state-runtime/windows-qualification-registration.test.mjs'
+      - 'infra/client-state-runtime/test/browser-parent-*.mjs'
+      - 'infra/client-state-runtime/test/fresh-schema-disposable.mjs'
       - 'infra/client-state-runtime/local-runtime-migrations.mjs'
       - 'infra/client-state-runtime/fresh-schema-candidate-plan.json'
       - 'infra/client-state-runtime/test/native-coding-*.mjs'
@@ -148,6 +159,9 @@ jobs:
           // Use the installed Git launcher verified by checkout; internal toolchain directories changed in Git 2.56.
           const executable=await fs.realpath('C:/Program Files/Git/bin/git.exe');assert.ok((await fs.stat(executable)).isFile());
           const component=[
+            'infra/client-state-runtime/windows-qualification-registration.test.mjs',
+            'apps/metaengine-browser/test/agent-toolbelt.test.mjs',
+            'apps/metaengine-browser/test/agent-tool-protocol-malformed.test.mjs',
             'apps/metaengine-browser/test/native-coding-project-commits.test.mjs',
             'apps/metaengine-browser/test/native-coding-project-checkpoints.test.mjs',
             'apps/metaengine-browser/test/native-coding-git-proof.test.mjs',

@@ -248,3 +248,14 @@ used the correct helper, but the ordinary path did not. Both now use the same
 Windows-safe helper; the assertion/gate remains required.40 startup/contract
 regressions and the real native parent-wake PG case pass locally. Windows CI
 must confirm whether this fixes the observed failure; no pass is inferred.
+
+### Windows CI applicability and tool-path coverage
+
+The PR path filters did not cover the newly added message/ACK/wake SQL files,
+the native-only wake test, its shared fixture, or the ordinary fresh-schema
+factory. They also matched only the task-cycle wrapper, not its core. Added
+narrow relevant paths and a registration regression, preserving unrelated-path
+exclusion. Parser/toolbelt tests now run in the Windows component lane. Native
+wake/rejection/cancellation requirements and zero native skips remain enforced.
+The exact component list passes locally:300total299pass1expectedbaseline skip.
+YAML and both registration regressions pass. Windows execution remains required.
