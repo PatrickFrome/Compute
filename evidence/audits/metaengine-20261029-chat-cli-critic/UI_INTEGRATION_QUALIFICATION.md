@@ -38,3 +38,18 @@ It retains source-only screenshots/report/inventories and requires unchanged
 tracked sources. Node24.21.0 is pinned to the packaged runtime generation.
 The fixture bridge is explicitly inert; none of these artifacts is an installed
 Owner, live PostgreSQL, real agent execution or installer acceptance receipt.
+
+## Real renderer qualification and evidence stability
+
+GitHub UI run40918858111 on f8a6730405ca3476d1d0f200c71ebb932c095581 passed
+clean build/package and five actual browser scenarios with the inert bridge.
+Artifact12917786548 SHA2563521ecde5bc0f2d62a7c2e0bd63d6ff47d2c96578d88e827c5fd1a866131c054
+contains the report, inventories and three screenshots. Owned graceful shutdown
+and unchanged post-exit inventories were verified; installed_owner remains false.
+
+Visual inspection found one capture during the dialog's finite entrance fade/
+zoom, while the later dialog capture is fully opaque. This is not established as
+a product stacking defect. Capture now finishes finite animations only for the
+snapshot and checks final dialog opacity. Production animation behavior is not
+changed. Added actual Escape/Enter/Close focus restoration and no-submit checks
+for the next renderer run. Unit coverage also refuses screenshot path escape.

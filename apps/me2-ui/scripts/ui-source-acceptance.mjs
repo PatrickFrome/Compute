@@ -191,6 +191,13 @@ async function attributeEquals(page, selector, attribute, expected) {
   await page.waitForFunction(({ selector, attribute, expected }) => document.querySelector(selector)?.getAttribute(attribute) === expected,
     { selector, attribute, expected }, { timeout: 10_000 });
 }
+export async function captureUiAcceptanceScreenshot(page,evidenceDir,name) {
+  assert.match(name,/^renderer-[a-z0-9-]+\.png$/,'acceptance_screenshot_name_invalid');
+  // Freeze finite entrance transitions only for evidence capture. A snapshot
+  // taken mid-fade can incorrectly look like a broken modal stacking order.
+  return page.screenshot({path:path.join(evidenceDir,name),animations:'disabled',caret:'hide'});
+}
+
 async function browserMatrix(browser, origin, evidenceDir, report) {
   const contexts = [];
   const external = report.browser_external_requests = [];
@@ -230,7 +237,7 @@ async function browserMatrix(browser, origin, evidenceDir, report) {
     await textContains(absent, '[data-testid="chat-fleet-rail"]', 'Roster unavailable');
     await textContains(absent, '[data-testid="client-native-goal-mode"]', 'Admission status unavailable');
     assert.equal(await absent.evaluate(() => typeof window.metaengineClient), 'undefined');
-    await absent.screenshot({ path: path.join(evidenceDir, 'renderer-no-bridge.png') });
+    await captureUiAcceptanceScreenshot(absent,evidenceDir,'renderer-no-bridge.png');
     passed('no_native_bridge_is_unavailable', 'Real shell renders unavailable connection, roster and admission.');
     await absent.context().close();
 
@@ -241,9 +248,20 @@ async function browserMatrix(browser, origin, evidenceDir, report) {
     await textContains(result, '[data-testid="client-goal-execution-proof"]', 'Received · review pending');
     const resultDialog = result.getByTestId('client-goal-status-dialog');
     assert.match(await resultDialog.innerText(), /independent verification before acceptance/);
-    await result.screenshot({ path: path.join(evidenceDir, 'renderer-result-review-pending.png') });
+    await captureUiAcceptanceScreenshot(result,evidenceDir,'renderer-result-review-pending.png');
+    assert.equal(await resultDialog.evaluate(element=>Number(getComputedStyle(element).opacity)),1,'acceptance_modal_snapshot_translucent');
     passed('simulated_result_remains_review_pending', 'Rendered result flag does not become independent acceptance.');
+    await result.keyboard.press('Escape');
+    await resultDialog.waitFor({state:'hidden'});
+    await result.waitForFunction(()=>document.activeElement?.getAttribute('data-testid')==='client-goal-details');
+    await result.keyboard.press('Enter');
+    await resultDialog.waitFor({state:'visible'});
+    await textContains(result, '[data-testid="client-goal-execution-proof"]', 'Received · review pending');
     await resultDialog.getByRole('button', { name: 'Close', exact: true }).click();
+    await resultDialog.waitFor({state:'hidden'});
+    await result.waitForFunction(()=>document.activeElement?.getAttribute('data-testid')==='client-goal-details');
+    assert.equal(await result.evaluate(()=>window.__me2SourceAcceptance.submissions.length),0);
+    passed('dialog_keyboard_dismissal_restores_focus_without_submit', 'Escape and the Close button return focus to Status; Enter reopens details without submitting a goal.');
     await result.evaluate(() => { window.__me2SourceAcceptance.connected = false; });
     await attributeEquals(result, '[data-testid="admin-connection-badge"]', 'data-work-state', 'UNAVAILABLE');
     await textContains(result, '[data-testid="admin-connection-badge"]', 'Status unavailable');
@@ -281,7 +299,7 @@ async function browserMatrix(browser, origin, evidenceDir, report) {
     assert.ok(state.statusRequests.slice(beforeRefresh).every(id => id === 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'));
     rendered = await dialog.innerText();
     assert.ok(!rendered.includes('11111111-2222-4333-8444-555555555555'));
-    await native.screenshot({ path: path.join(evidenceDir, 'renderer-journal-read-failure.png') });
+    await captureUiAcceptanceScreenshot(native,evidenceDir,'renderer-journal-read-failure.png');
     passed('failed_read_visible_refresh_correlated_no_resend', { new_request_refreshes: state.statusRequests.slice(beforeRefresh), submit_count: state.submissions.length });
     assert.deepEqual(external, [], 'acceptance_browser_external_request_attempted');
     assert.deepEqual(pageErrors, [], 'acceptance_browser_page_error');

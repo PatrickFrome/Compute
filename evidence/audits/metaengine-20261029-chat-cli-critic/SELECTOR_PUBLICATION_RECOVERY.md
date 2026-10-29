@@ -39,8 +39,9 @@ were changed. Default installed bootstrap and REJECT-to-repair remain open.
 ## Read-only recovery of an already published selector
 
 If the protected final selector already matches the current active SQL profile,
-preparation now returns a read-only receipt. It performs no native observation,
-no native move, no write-open and no SQL mutation. The receipt explicitly says
+preparation now returns a read-only receipt. It does not repeat execution-scope/canary observation,
+native move, write-open or SQL mutation. Native storage ACL and profile checks
+are retained. The receipt explicitly says
 physical_scope_observed=false and physical_execution_proven=false: configuration
 readback cannot be confused with new execution evidence. A revoked profile still
 fails. Missing or unverified selectors do not enter this successful fast path.

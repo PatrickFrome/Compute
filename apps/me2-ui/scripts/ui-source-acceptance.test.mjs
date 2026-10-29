@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { runSourceAcceptance, stopOwnedChild } from './ui-source-acceptance.mjs';
+import { runSourceAcceptance, stopOwnedChild, captureUiAcceptanceScreenshot } from './ui-source-acceptance.mjs';
 
 test('the harness refuses an original root symlink or Windows junction before creating evidence or launching children', async t => {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'me2-source-root-'));
@@ -81,4 +81,13 @@ test('SIGKILL cleanup of an unresponsive owned child never qualifies as graceful
     return true;
   });
   assert.equal(f.child.signalCode, 'SIGKILL');
+});
+
+
+test('renderer evidence finishes finite transitions and cannot escape its output directory',async()=>{
+ const calls=[],page={screenshot:async options=>{calls.push(options);return Buffer.from('generated');}};
+ await captureUiAcceptanceScreenshot(page,path.resolve('evidence'),'renderer-result-review-pending.png');
+ assert.deepEqual(calls,[{path:path.join(path.resolve('evidence'),'renderer-result-review-pending.png'),animations:'disabled',caret:'hide'}]);
+ await assert.rejects(captureUiAcceptanceScreenshot(page,path.resolve('evidence'),'../private.png'),/acceptance_screenshot_name_invalid/);
+ assert.equal(calls.length,1);
 });
