@@ -39,6 +39,9 @@ test('private initial native goal admission is atomic and preserves the W30 auth
  let started=false,sql,cluster,passed=0,migrationSha=null;
  try{
   await command('initdb',['-D',data,'--username=state_owner','--auth=trust','--no-locale','--encoding=UTF8','--no-sync']);
+  // This fixture connects only over loopback TCP. Do not depend on a distro's
+  // shared /var/run/postgresql socket directory or modify the host OS.
+  await fs.appendFile(path.join(data,'postgresql.conf'), "\nunix_socket_directories = ''\n");
   started=true;await command('pg_ctl',['-D',data,'-l',log,'-o',`-h 127.0.0.1 -p ${port}`,'-w','start']);
   const postgres=(await import(pathToFileURL(driver))).default;
   sql=postgres({host:'127.0.0.1',port,user:'state_owner',database:'postgres',max:4,onnotice:()=>{},connect_timeout:5,idle_timeout:10,
@@ -145,6 +148,18 @@ test('private initial native goal admission is atomic and preserves the W30 auth
    const direct=await invoke(f);assert.equal(direct.receipt_sha256,reply.admission.receipt_sha256);assert.deepEqual(await count(f),{seeds:1,projects:1,tasks:1,permits:4,browser_goals:0});
    const page=await service.LIST_SEEDS({after_seq:0,limit:1});assert.equal(page.entries[0].request_id,f.input.request_id);assert.equal(page.has_more,false);
    await assert.rejects(service.SEED_GOAL({...f.input,worktree:'C:\\arbitrary'}),/request_invalid/);service.close();passed++;
+  });
+  await t.test('cancelled physical observation cannot admit any real PostgreSQL task or permit',async()=>{
+   const f=await fixture(),controller=new AbortController(),original=f.options.readNativeScope;
+   const service=await createNativeCodingHostSeedService({...f.options,readNativeScope:async(...args)=>{
+    const value=await original(...args);controller.abort();return value;
+   }});
+   try{
+    await assert.rejects(service.SEED_GOAL(f.input,{signal:controller.signal}),/request_cancelled/);
+    assert.deepEqual(await count(f),{seeds:0,projects:0,tasks:0,permits:0,browser_goals:0});
+    const readback=await service.READ_SEED(f.input);
+    assert.equal(readback.state,'REJECTED_BEFORE_DISPATCH');assert.equal(readback.rejection.admission_absent,true);
+   }finally{service.close();}passed++;
   });
   await t.test('same UUID with different objective and public-goal UUID collision cannot create a task',async()=>{
    const f=await fixture();await invoke(f);
@@ -293,7 +308,7 @@ test('private initial native goal admission is atomic and preserves the W30 auth
     assert.deepEqual(reply.admission.receipt.logical_policy,{max_depth:null,max_tasks:null,max_children:null});
    }finally{service.close();}passed++;
   });
-  assert.equal(passed,15);
+  assert.equal(passed,16);
   await fs.writeFile(path.join(directory,'receipt.json'),JSON.stringify({schema:'metaengine.native-coding.initial-seed.disposable-qa.v1',state:'PASS',
    postgres_version_num:identity.version,postgres_system_identifier:cluster,port,subtests:passed,migration_sha256:migrationSha,
    source_classification:'REAL_DISPOSABLE_PG_AND_HOST_SERVICE_WITH_GENERATED_ENROLLED_DEVICE_INSTALLED_IMAGE_OS_CANARY_AND_ACL_FIXTURES',
