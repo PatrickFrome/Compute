@@ -670,3 +670,17 @@ test('chat-led planner cannot persist a review without an exact writer subject',
  }]}),/native_review_subject_required/);
  assert.equal((await f.journal.pending()).length,0);assert.equal(f.provider.read().tasks.length,1);
 });
+
+test('a bound rejected native review is a blocker rather than endless child waiting',async t=>{
+ const f=await fixture(t);await f.runtime.serveToolRequests({lease:rootTask(),requests:[spawnRequest()]});
+ const writer=f.provider.read().tasks[1];
+ f.provider.update(state=>{
+  state.tasks[1].state='RESULT_READY';state.tasks[0].open_children=1;
+  state.native_review_rejection={schema:'metaengine.native-coding.review-rejection.v1',project_id:projectId,verdict:'REJECT',
+   writer_task_id:writer.task_id,writer_lease_generation:1,critic_task_id:'55555555-5555-4555-8555-555555555555',critic_lease_generation:1,
+   result_sha256:'a'.repeat(64),automatic_retry_allowed:false,authority_effect:false};
+ });
+ const before=f.provider.read(),result=await f.runtime.waitForChildren(rootTask());
+ assert.equal(result.waiting,false);assert.equal(result.failed,true);assert.equal(result.reason,'NATIVE_REVIEW_REJECTED');
+ assert.deepEqual(f.provider.read(),before,'observation itself must not retry, complete or release child custody');
+});

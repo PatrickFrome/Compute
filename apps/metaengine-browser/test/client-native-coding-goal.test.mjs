@@ -500,3 +500,25 @@ test('chat-led native project retains suspended planner progress across journal 
  assert.equal(restored.latest().state,'SUSPENDED');assert.equal(restored.latest().progress.terminal,false);
  f.snapshot.selected_task.state='RUNNING';await router.refresh(f.journal.latest());assert.equal(f.journal.latest().state,'RUNNING');
 });
+
+function rejectedReview(project_id){return {schema:'metaengine.native-coding.review-rejection.v1',project_id,verdict:'REJECT',
+ writer_task_id:randomUUID(),writer_lease_generation:1,critic_task_id:randomUUID(),critic_lease_generation:1,result_sha256:'a'.repeat(64),
+ automatic_retry_allowed:false,authority_effect:false};}
+
+test('bound review rejection remains visible and nonterminal across goal journal reload',async()=>{
+ const f=fixture();f.snapshot.state='BLOCKED';f.snapshot.native_review_rejection=rejectedReview(f.receipt.project_id);
+ const router=createClientNativeCodingGoalRouter({journal:f.journal,request:async()=>f.result,projectSnapshot:async()=>f.snapshot});
+ await router.submit({request_id:f.input.request_id,goal:f.input.objective});
+ assert.equal(f.journal.latest().progress.blocked_reason,'NATIVE_REVIEW_REJECTED');assert.equal(f.journal.latest().progress.terminal,false);
+ assert.equal(f.journal.latest().progress.physical_execution_proven,false);
+ const restored=new ClientGoalJournal(f.storage);await restored.load();
+ assert.deepEqual(restored.latest().progress.review_rejection,f.snapshot.native_review_rejection);
+});
+
+for(const tamper of [r=>r.project_id=randomUUID(),r=>r.verdict='ACCEPT',r=>r.authority_effect=true,
+ r=>r.critic_task_id=r.writer_task_id,r=>r.critic_lease_generation=0,r=>r.result_sha256='invalid',r=>r.secret='not allowed']){
+ test('malformed review rejection cannot be accepted as project progress',()=>{
+  const f=fixture();f.snapshot.native_review_rejection=rejectedReview(f.receipt.project_id);tamper(f.snapshot.native_review_rejection);
+  assert.throws(()=>normalizeNativeCodingGoalProgress(f.snapshot,{request_id:f.input.request_id,goal:f.input.objective,receipt:f.receipt}),/native_review_rejection_invalid/);
+ });
+}

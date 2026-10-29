@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import {normalizeNativeReviewRejection} from './client-project-continuity.mjs';
 import { BrowserParentSuspension } from './browser-parent-suspension.mjs';
 
 export const AUTONOMOUS_PROJECT_RUNTIME_SCHEMA = 'metaengine.devos.autonomous-project-runtime.v1';
@@ -216,13 +217,15 @@ export class AutonomousProjectTaskRuntime {
     const proposals = (current.snapshot.proposals || []).filter(row => row.parent_task_id === lease.task_id && row.status !== 'ADMITTED');
     const pending = descendants.filter(row => !['COMPLETED', 'FAILED', 'CANCELLED', 'AMBIGUOUS', 'FENCED'].includes(row.state));
     const failed = descendants.filter(row => ['FAILED', 'BLOCKED', 'CANCELLED', 'AMBIGUOUS', 'FENCED'].includes(row.state));
-    const blocked = failed.length > 0 || Number(current.task.blocking_children) > 0 || current.snapshot.selected_task_children_failed === true;
+    const reviewRejection=normalizeNativeReviewRejection(current.snapshot.native_review_rejection,initialProject);
+    const blocked = reviewRejection!==null || failed.length > 0 || Number(current.task.blocking_children) > 0 || current.snapshot.selected_task_children_failed === true;
     // PostgreSQL counts failed/rejected children as open until completion. A
     // blocking result must reach the existing parent BLOCKED path instead of
     // being hidden indefinitely by those open/queued-work counts.
     return { waiting: !blocked && (pending.length > 0 || proposals.length > 0 || Number(current.task.open_children) > 0
         || Number(current.task.pending_proposals) > 0 || current.snapshot.selected_task_children_pending === true),
       failed: blocked,
+      ...(reviewRejection?{reason:'NATIVE_REVIEW_REJECTED',review_rejection:reviewRejection}:{}),
       children: descendants.map(row => ({ task_id: row.task_id, state: row.state, role: row.role })),
       queued_proposals: proposals.length, ...flags };
   }

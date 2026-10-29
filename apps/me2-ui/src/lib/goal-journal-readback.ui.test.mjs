@@ -200,3 +200,22 @@ test('a failed submit plus failed readonly reconciliation settles without resend
   await f.refresh();
   assert.deepEqual(f.observations.submissions, ['Next isolated goal']);
 });
+
+function actualStatus(context){
+ const labels=declarations.find(node=>node.name?.text==='labels');
+ const status=declarations.find(node=>node.name?.text==='status');
+ assert.ok(labels?.initializer&&status?.initializer);
+ const executable=ts.transpileModule(`const labels=${labels.initializer.getText(source)}; (${status.initializer.getText(source)});`,{
+  compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext},
+ }).outputText;
+ return vm.runInNewContext(executable,{journalEntry:entry(),error:null,proof:null,isNative:true,receipt:receipt(),nativeReceipt:receipt(),...context});
+}
+
+test('goal status distinguishes suspended waiting from a rejected native review',()=>{
+ assert.equal(actualStatus({progress:{found:true,task_state:'SUSPENDED'}}),'Waiting for child tasks');
+ for(const task_state of ['RUNNING','SUSPENDED','RESULT_READY'])assert.equal(
+  actualStatus({progress:{found:true,task_state,blocked_reason:'NATIVE_REVIEW_REJECTED'}}),
+  'CRITIC rejected result · repair required');
+ assert.equal(actualStatus({journalEntry:{...entry(),project_error:'unavailable'},progress:{found:true,task_state:'SUSPENDED',blocked_reason:'NATIVE_REVIEW_REJECTED'}}),
+  'Native observation unavailable','stale observations must remain labelled unavailable');
+});

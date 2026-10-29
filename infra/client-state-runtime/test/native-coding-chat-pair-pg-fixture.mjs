@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {nativeCodingCanonicalJson as canonical,nativeCodingCanonicalSha256 as sha} from '../native-coding-task-context.mjs';
-export async function completeChatNativePair({sql,fixture,writerPermitId}) {
+export async function completeChatNativePair({sql,fixture,writerPermitId,verdict='ACCEPT'}) {
  const generated=fixture.generated;
  const [row]=await sql.unsafe('select permit from destruktion_meta.native_coding_operator_permit_h205f22 where permit_id=$1',[writerPermitId]);
  const p=row.permit;
@@ -119,7 +119,8 @@ export async function completeChatNativePair({sql,fixture,writerPermitId}) {
 
  await register(p);await register(criticPermit);
  const writer=await finish(p,await lease(p));await reconcile();
- const critic=await finish(criticPermit,await lease(criticPermit),{subject:writer.subject});
+ const critic=await finish(criticPermit,await lease(criticPermit),{subject:writer.subject,verdict});
+ if(verdict==='REJECT'){await reconcile();return {writer,critic};}
  const staged=await checkpointFixture({p,generated},writer,critic);
  assert.equal((await staged.commit()).state,'CHECKPOINTED_PENDING_COMMIT');
  const k=staged.checkpoint;

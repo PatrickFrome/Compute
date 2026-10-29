@@ -5,6 +5,19 @@ const count = (value, min = 0) => Number.isSafeInteger(value) && value >= min;
 const id = value => typeof value === 'string' && UUID.test(value);
 const text = (value, max = 240) => typeof value === 'string' && value.length <= max && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(value);
 
+export function normalizeNativeReviewRejection(value, projectId) {
+  if(value == null)return null;
+  const keys=['schema','project_id','verdict','writer_task_id','writer_lease_generation',
+    'critic_task_id','critic_lease_generation','result_sha256','automatic_retry_allowed','authority_effect'];
+  if(!object(value)||Object.keys(value).sort().join('|')!==keys.sort().join('|')
+    ||value.schema!=='metaengine.native-coding.review-rejection.v1'||value.project_id!==projectId
+    ||value.verdict!=='REJECT'||!id(value.writer_task_id)||!id(value.critic_task_id)||value.writer_task_id===value.critic_task_id
+    ||!count(value.writer_lease_generation,1)||!count(value.critic_lease_generation,1)
+    ||!/^[a-f0-9]{64}$/.test(value.result_sha256||'')||value.authority_effect!==false||value.automatic_retry_allowed!==false)
+    fail('native_review_rejection_invalid');
+  return Object.freeze({...value});
+}
+
 export function normalizeClientProjectRegistration(value, requestId) {
   if (!object(value) || value.schema !== 'metaengine.devos.project-registration.v1' || value.authority_effect !== false
       || !id(value.project_id) || !id(value.root_task_id) || value.request_id !== requestId
@@ -50,6 +63,7 @@ export function normalizeClientProjectSnapshot(value, expected) {
   return Object.freeze({ schema: value.schema, found: true, project_id: value.project_id, root_task_id: value.root_task_id,
     request_id: value.request_id, state: value.state, goal: value.goal,
     total_tasks: value.total_tasks, selected_task: selected, immediate_children: children,
+    ...(Object.hasOwn(value,'native_review_rejection')?{native_review_rejection:normalizeNativeReviewRejection(value.native_review_rejection,value.project_id)}:{}),
     children_truncated: value.children_truncated === true,
     tasks, last_seq: value.last_seq,
     task_cursor: object(value.task_cursor) ? { after_seq: value.task_cursor.after_seq, next_seq: value.task_cursor.next_seq,

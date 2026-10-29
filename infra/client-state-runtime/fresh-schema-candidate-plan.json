@@ -255,6 +255,10 @@
     {
       "path": "supabase/migrations/20261026020000_browser_parent_suspension_v1.sql",
       "sha256": "519b38712d5e66be6004a1ba568c7f5aea003381e9791557b1dbe3cd9c68ce36"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-review-observation-v1.sql",
+      "sha256": "70a1dac528d94e4c16cf9fdff713fb77b15158d6cac0e0cdbeac8fb5bf0f0043"
     }
   ],
   "unresolved_dependencies": [

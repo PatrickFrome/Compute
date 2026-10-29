@@ -89,7 +89,8 @@ type ClientGoalProgress = {
   request_id: string;
   found: boolean;
   task_id?: string;
-  task_state?: "READY" | "LEASED" | "RUNNING" | "RESULT_READY" | "BLOCKED" | "COMPLETED" | "FAILED" | "AMBIGUOUS" | "FENCED";
+  task_state?: "READY" | "LEASED" | "RUNNING" | "SUSPENDED" | "RESULT_READY" | "BLOCKED" | "COMPLETED" | "FAILED" | "AMBIGUOUS" | "FENCED";
+  blocked_reason?: "NATIVE_REVIEW_REJECTED";
   terminal: boolean;
   reconciliation_required: boolean;
   automatic_retry_allowed: false;
@@ -476,7 +477,7 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
   const proof = journalEntry?.execution_proof;
   const labels: Record<string, string> = {
     READY: "Queued", LEASED: "Assigned", RUNNING: "Working", RESULT_READY: "Reviewing result",
-    COMPLETED: "Completed · proof pending", BLOCKED: "Blocked", FAILED: "Failed",
+    SUSPENDED: "Waiting for child tasks", COMPLETED: "Completed · proof pending", BLOCKED: "Blocked", FAILED: "Failed",
     AMBIGUOUS: "Needs reconciliation", FENCED: "Stopped",
   };
   const status = journalEntry?.state === "FAILED" && journalEntry.last_error === "native_goal_rejected_before_dispatch"
@@ -485,6 +486,7 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
     : proof?.user_goal_to_result_readback === true ? "Result received"
     : journalEntry?.state === "RECONCILE_REQUIRED" ? "Needs reconciliation"
     : isNative&&journalEntry?.project_error?"Native observation unavailable"
+    : isNative&&progress?.blocked_reason==="NATIVE_REVIEW_REJECTED"?"CRITIC rejected result · repair required"
     : isNative&&progress?.found&&progress.task_state==="COMPLETED"?`Root completed · project ${progress.project_state?.toLowerCase()||"unknown"}`
     : progress?.found ? labels[progress.task_state || ""] || "Awaiting status"
     : nativeReceipt?"Native goal admitted · execution pending"

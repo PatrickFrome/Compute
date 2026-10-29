@@ -316,6 +316,8 @@ test('private initial native goal admission is atomic and preserves the W30 auth
   const bindingSource=await source('20260831152000_a2_workspace_binding_registry_v1.sql');
   await sql.unsafe(bindingSource.slice(bindingSource.indexOf('create table public.compute_fabric_a2_workspace_binding_h205f22'),bindingSource.indexOf('alter table public.compute_fabric_a2_workspace_binding_h205f22')));
   await sql.unsafe(await source('20261026020000_browser_parent_suspension_v1.sql'));
+  const reviewUpgrade=await fs.readFile(new URL('./native-coding-review-observation-v1.sql',import.meta.url),'utf8');
+  await sql.begin(tx=>tx.unsafe(reviewUpgrade));await sql.begin(tx=>tx.unsafe(reviewUpgrade));
   await t.test('protected chat-led profile admits a browser planner and native permits, never a CLI planner',async()=>{
    const f=await fixture({chatLed:true}),service=await createNativeCodingHostSeedService(f.options);
    try{
@@ -377,7 +379,17 @@ test('private initial native goal admission is atomic and preserves the W30 auth
    const [next]=await sql.unsafe('select base_sha,task_spec from destruktion_meta.devos_fleet_task_h205f22 where task_id=$1',[continued.children[0].task_id]);
    assert.equal(next.base_sha,pair.receipt.head);assert.equal(next.task_spec.native_coding.permit_id,pair.finalized.next_writer_permit_id);
    assert.notEqual(next.task_spec.native_coding.permit_id,selected);
-   assert.equal((await spawn(pendingId,pendingChildren)).children[0].task_id,continued.children[0].task_id);passed++;
+   assert.equal((await spawn(pendingId,pendingChildren)).children[0].task_id,continued.children[0].task_id);
+   const rejected=await completeChatNativePair({sql,fixture:f,writerPermitId:tasks[1].task_spec.native_coding.permit_id,verdict:'REJECT'});
+   const [observed]=await sql.unsafe('select public.h205f22_project_snapshot_v1($1,$2,null,0,16,$3,$4,1) as value',
+    [f.profile.workspace_id,admitted.project_id,f.profile.device_id,f.profile.client_id]);
+   assert.equal(observed.value.state,'BLOCKED');assert.equal(observed.value.native_review_rejection.verdict,'REJECT');
+   assert.equal(observed.value.native_review_rejection.writer_task_id,rejected.writer.scope.task_id);
+   assert.equal(observed.value.native_review_rejection.critic_task_id,rejected.critic.scope.task_id);
+   assert.equal((await sql.unsafe('select state from destruktion_meta.native_coding_worktree_fence_h205f22 where writer_task_id=$1',[rejected.writer.scope.task_id]))[0].state,'HELD');
+   assert.equal((await sql.unsafe('select count(*)::int as n from destruktion_meta.native_coding_commit_h205f22 where project_id=$1',[admitted.project_id]))[0].n,1);
+   const [otherBranch]=await sql.unsafe('select destruktion_meta.native_coding_review_rejection_v1($1,$2) as value',[admitted.project_id,continued.children[0].task_id]);
+   assert.equal(otherBranch.value,null);passed++;
   });
   await t.test('chat profile revocation cannot downgrade native handoff to a browser implementation',async()=>{
    const f=await fixture({chatLed:true}),g=await fixture({chatLed:true});

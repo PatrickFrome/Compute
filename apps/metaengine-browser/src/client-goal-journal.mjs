@@ -1,6 +1,6 @@
 import { clientGoalExecutionProofMatchesProgress } from './client-control-contract.mjs';
 import { clientUsefulWorkProofMatchesExecutionProof } from './client-useful-work-proof.mjs';
-import { normalizeClientProjectRegistration } from './client-project-continuity.mjs';
+import { normalizeClientProjectRegistration, normalizeNativeReviewRejection } from './client-project-continuity.mjs';
 import {normalizeNativeCodingGoalAdmission,nativeCodingGoalProject,normalizeNativeCodingSeedRejection} from './client-native-coding-goal.mjs';
 import {isDeepStrictEqual} from 'node:util';
 
@@ -67,6 +67,10 @@ function normalizeEntry(value) {
       ||progress.request_id!==id||progress.project_id!==receipt.project_id||progress.task_id!==receipt.root_task_id
       ||progress.found!==true||progress.authority_effect!==false||progress.automatic_retry_allowed!==false
       ||progress.physical_execution_proven!==false||!STATES.has(progress.task_state)))throw new Error('client_goal_journal_native_progress_invalid');
+    if(progress?.review_rejection!=null){
+      normalizeNativeReviewRejection(progress.review_rejection,receipt.project_id);
+      if(progress.blocked_reason!=='NATIVE_REVIEW_REJECTED')throw new Error('client_goal_journal_native_review_invalid');
+    }else if(progress?.blocked_reason!=null)throw new Error('client_goal_journal_native_review_invalid');
   }else project=value.project == null ? null : normalizeClientProjectRegistration(value.project, id);
   const knownAdmission = value.admitted_task_id == null ? null : requestId(value.admitted_task_id);
   const admittedTask = (kind==='NATIVE_CODING'?receipt?.root_task_id:receipt?.task_id) || (progress?.found === true ? progress.task_id : null) || knownAdmission;

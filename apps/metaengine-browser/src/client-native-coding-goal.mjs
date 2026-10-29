@@ -116,6 +116,7 @@ export function normalizeNativeCodingGoalProgress(raw,entry){
     project_id:receipt.project_id,task_id:receipt.root_task_id,task_state:snapshot.selected_task.state,
     project_state:snapshot.state,total_tasks:snapshot.total_tasks,last_seq:snapshot.last_seq,
     observed_at:new Date().toISOString(),source:'OWN_PG_PROJECT_SNAPSHOT',
+    ...(snapshot.native_review_rejection?{blocked_reason:'NATIVE_REVIEW_REJECTED',review_rejection:snapshot.native_review_rejection}:{}),
     terminal:['COMPLETED','FAILED','CANCELLED'].includes(snapshot.state),reconciliation_required:false,physical_execution_proven:false,
     automatic_retry_allowed:false,authority_effect:false});
 }
