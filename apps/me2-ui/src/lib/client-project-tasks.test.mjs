@@ -118,3 +118,11 @@ test('rejected pair panel only selects confirmed page rows and exposes no repair
   assert.match(text,/Автоматическое исправление пока недоступно/);
   assert.doesNotMatch(text,/\.retry\(|\.repair\(|\.send\(|\.enqueue\(/);
 });
+
+test('task presentation does not impose an extra logical depth ceiling',()=>{
+ const p=project(),page=p.page();page.tasks[1].depth=2147483647;
+ const parsed=readNativeProjectTaskPage(page);assert.equal(parsed.tasks[1].depth,2147483647);
+ for(const depth of [-1,1.5,NaN,Infinity,Number.MAX_SAFE_INTEGER+1]){
+  assert.throws(()=>readNativeProjectTaskPage({...page,tasks:page.tasks.map((row,index)=>index?{...row,depth}:row)}));
+ }
+});

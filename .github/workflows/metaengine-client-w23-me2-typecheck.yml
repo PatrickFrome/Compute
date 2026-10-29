@@ -1,6 +1,12 @@
 name: METAENGINE Client W23 ME2 TypeScript and package
 
 on:
+  push:
+    branches:
+      - 'work/chat-cli-critic-integration-20261029'
+    paths:
+      - 'apps/me2-ui/**'
+      - '.github/workflows/metaengine-client-w23-me2-typecheck.yml'
   pull_request:
     paths:
       - 'apps/me2-ui/**'
@@ -15,17 +21,17 @@ jobs:
     timeout-minutes: 25
     env:
       NEXT_TELEMETRY_DISABLED: '1'
-      ME2_BUILD_SHA: ${{ github.event.pull_request.head.sha }}
+      ME2_BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Checkout exact W23 candidate (read-only)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Setup Node 24
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: '24'
+          node-version: '24.21.0'
       - name: Setup pinned Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
@@ -67,3 +73,28 @@ jobs:
           test -d me2-ui-dist/.next/static
           test -f me2-ui-dist/me2-ui-manifest.json
           node -e "const m=require('./me2-ui-dist/me2-ui-manifest.json'); if(m.schema!=='me2.ui-bundle-manifest.v1'||m.git_sha!==process.env.ME2_BUILD_SHA) process.exit(1)"
+      - name: Prepare pinned disposable browser qualification tools
+        run: |
+          echo "PLAYWRIGHT_BROWSERS_PATH=$RUNNER_TEMP/me2-ui-browsers" >> "$GITHUB_ENV"
+          npm install --prefix "$RUNNER_TEMP/me2-ui-browser-tools" --ignore-scripts --no-save --no-audit --no-fund playwright@1.62.1
+          PLAYWRIGHT_BROWSERS_PATH="$RUNNER_TEMP/me2-ui-browsers" node "$RUNNER_TEMP/me2-ui-browser-tools/node_modules/playwright/cli.js" install chromium
+      - name: Qualify real standalone server and renderer contracts
+        run: |
+          chromium=$(node -e "const {chromium}=require(process.argv[1]);process.stdout.write(chromium.executablePath())" "$RUNNER_TEMP/me2-ui-browser-tools/node_modules/playwright-core")
+          node apps/me2-ui/scripts/ui-source-acceptance.mjs --root "$GITHUB_WORKSPACE/apps/me2-ui/me2-ui-dist" --expected-sha "$ME2_BUILD_SHA" --evidence-dir "$RUNNER_TEMP/me2-ui-source-acceptance" --chromium "$chromium" --playwright-module "$RUNNER_TEMP/me2-ui-browser-tools/node_modules/playwright-core/index.mjs"
+      - name: Require unchanged tracked sources after qualification
+        run: |
+          git diff --exit-code
+          git diff --cached --exit-code
+          test "$(git rev-parse HEAD)" = "$ME2_BUILD_SHA"
+      - name: Retain source-only renderer evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
+        with:
+          name: me2-ui-source-acceptance-${{ env.ME2_BUILD_SHA }}
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/me2-ui-source-acceptance/source-acceptance.json
+            ${{ runner.temp }}/me2-ui-source-acceptance/inventory-*.json
+            ${{ runner.temp }}/me2-ui-source-acceptance/renderer-*.png

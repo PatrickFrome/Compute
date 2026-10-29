@@ -54,7 +54,7 @@ export function readNativeProjectTaskPage(value:unknown,{projectId=null,afterSeq
   const ids=new Set<string>();let sequence=afterSeq;
   const tasks=v.tasks.map((raw:unknown):ProjectTask=>{
     if(!plain(raw)||!integer(raw.task_seq,sequence+1)||raw.task_seq>Number(v.total_tasks)||!UUID.test(String(raw.task_id??''))
-      ||ids.has(String(raw.task_id))||raw.root_task_id!==v.root_task_id||!integer(raw.depth)||raw.depth>1000000
+      ||ids.has(String(raw.task_id))||raw.root_task_id!==v.root_task_id||!integer(raw.depth)
       ||!(raw.parent_task_id===null||UUID.test(String(raw.parent_task_id??'')))||!STATES.has(String(raw.state))||!text(raw.role,64)
       ||!(raw.objective===null||text(raw.objective,4000))||!(raw.agent_id===null||text(raw.agent_id,128))
       ||!(raw.lease_generation===null||integer(raw.lease_generation))
