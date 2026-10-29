@@ -3145,7 +3145,10 @@ function readClientConnectionStatus() {
   });
   let localProvider = null;
   try { localProvider = explicitLocalSupervisorBase(); } catch { /* untrusted Owner state: fail closed */ }
-  return projectOwnPostgresClientConnection(status, { localProviderAttested: Boolean(localProvider) });
+  let nativeRuntime;
+  try { nativeRuntime = nativeCodingRuntime ? nativeCodingRuntime.snapshot() : null; }
+  catch { /* Keep native diagnostic failure separate from chat connection state. */ }
+  return projectOwnPostgresClientConnection(status, { localProviderAttested: Boolean(localProvider), nativeRuntime });
 }
 ipcMain.handle('metaengine:client:connection-status', async (event) => {
   assertShellSender(event);

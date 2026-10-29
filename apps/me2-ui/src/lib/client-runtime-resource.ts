@@ -1,4 +1,5 @@
 export type ClientConnectionStatus = {
+  native_runtime?: unknown;
   schema: "metaengine.client.connection-status.v1";
   local_runtime_ready: boolean;
   admin_ready: boolean;

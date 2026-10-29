@@ -146,7 +146,12 @@ function installFixture({ kind }) {
     connectionStatus: async () => {
       if (!state.connected) throw new Error('simulated_native_bridge_disconnected');
       return { schema: 'metaengine.client.connection-status.v1', local_runtime_ready: true,
-        admin_ready: true, cloud_control_state: 'CONNECTED', authority_effect: false };
+        admin_ready: true, cloud_control_state: 'CONNECTED', authority_effect: false,
+        native_runtime: { schema: 'metaengine.client.native-runtime-observation.v1', observed_at: new Date().toISOString(),
+          state: 'OBSERVED', closed: false, physical_slot_budget: 4, retained_records: 2,
+          counts: { preparing: 0, running: 1, result_ready: 0, readback_required: 1, other: 0 },
+          logical_agent_limit: null, readback_only: true, physical_execution_proven: false,
+          useful_work_verified: false, authority_effect: false } };
     },
     workReadiness: async () => {
       if (!state.connected) throw new Error('simulated_native_bridge_disconnected');
@@ -235,6 +240,7 @@ async function browserMatrix(browser, origin, evidenceDir, report) {
     const absent = await pageFor(null);
     await textContains(absent, '[data-testid="admin-connection-badge"]', 'Status unavailable');
     await textContains(absent, '[data-testid="chat-fleet-rail"]', 'Roster unavailable');
+    await textContains(absent, '[data-testid="native-runtime-badge"]', 'Native: unknown');
     await textContains(absent, '[data-testid="client-native-goal-mode"]', 'Admission status unavailable');
     assert.equal(await absent.evaluate(() => typeof window.metaengineClient), 'undefined');
     await captureUiAcceptanceScreenshot(absent,evidenceDir,'renderer-no-bridge.png');
@@ -244,6 +250,9 @@ async function browserMatrix(browser, origin, evidenceDir, report) {
     const result = await pageFor('BROWSER');
     await attributeEquals(result, '[data-testid="admin-connection-badge"]', 'data-work-state', 'READY');
     await textContains(result, '[data-testid="client-goal-readback"]', 'Result received');
+    await textContains(result, '[data-testid="native-runtime-badge"]', 'Native: 1 need readback');
+    assert.match(await result.getByTestId('native-runtime-badge').getAttribute('title'), /require separate verification/);
+    passed('native_records_are_not_execution_proof', 'Real topbar separates native readback-required bookkeeping from Chat readiness.');
     await result.getByTestId('client-goal-details').click();
     await textContains(result, '[data-testid="client-goal-execution-proof"]', 'Received · review pending');
     const resultDialog = result.getByTestId('client-goal-status-dialog');
@@ -265,6 +274,7 @@ async function browserMatrix(browser, origin, evidenceDir, report) {
     await result.evaluate(() => { window.__me2SourceAcceptance.connected = false; });
     await attributeEquals(result, '[data-testid="admin-connection-badge"]', 'data-work-state', 'UNAVAILABLE');
     await textContains(result, '[data-testid="admin-connection-badge"]', 'Status unavailable');
+    await textContains(result, '[data-testid="native-runtime-badge"]', 'Native: unknown');
     passed('simulated_disconnect_clears_ready_badge', 'Native runtime polling clears the previously READY presentation.');
     assert.equal(await result.evaluate(() => window.__me2SourceAcceptance.submissions.length), 0);
     await result.context().close();

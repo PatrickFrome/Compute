@@ -4,6 +4,7 @@
 
 import { useMe2 } from "@/components/me2/store";
 import { useClientRuntimeStatus } from "@/hooks/use-client-runtime-status";
+import { projectNativeRuntimeBadge } from "@/lib/client-native-runtime-badge";
 import { capabilityLabel } from "@/lib/client-readiness-labels";
 import { projectClientWorkBadge } from "@/lib/client-work-badge-text.mjs";
 
@@ -13,6 +14,7 @@ export function TopBar({ fleetPickerOpen = false, onOpenFleet }: { fleetPickerOp
   const connection = runtime.readback?.connection;
   const work = runtime.readback?.work;
   const badge = projectClientWorkBadge({ connection, work });
+  const nativeBadge = projectNativeRuntimeBadge(connection,{live:runtime.state==='LIVE'});
   const setPalette = useMe2((s) => s.setPalette);
   const setPage = useMe2((s) => s.setPage);
   const mainWorkspace = page === "browser";
@@ -98,6 +100,9 @@ export function TopBar({ fleetPickerOpen = false, onOpenFleet }: { fleetPickerOp
         >
           <span className="truncate">Chat: {badge.label}</span>
         </button>
+        <span data-testid="native-runtime-badge" data-native-state={nativeBadge.state}
+          className={`flex h-7 max-w-[180px] items-center truncate border px-2 text-[10px] ${nativeBadge.attention?'border-amber-900/60 text-amber-200':'border-zinc-800 text-zinc-400'}`}
+          title={nativeBadge.detail} aria-label={nativeBadge.detail}>{nativeBadge.label}</span>
       </div>
     </header>
   );

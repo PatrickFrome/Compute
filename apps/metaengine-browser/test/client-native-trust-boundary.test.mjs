@@ -152,7 +152,7 @@ test('W35: source audit — primary preload has no generic command and all nativ
   assert.doesNotMatch(primary, /command:\s*\(|ipcRenderer\.send\(|ipcRenderer\.invoke\(\s*\w/);
   assert.match(main, /function assertShellSender\(event\)\s*\{\s*return assertClientNativeShellIpcSender/);
   assert.match(main, /ipcMain\.handle\('metaengine:shell:command'[\s\S]*?assertGenericShellCommandAllowed\(primaryShellMode\)/);
-  assert.match(main, /return projectOwnPostgresClientConnection\(status, \{ localProviderAttested: Boolean\(localProvider\) \}\)/);
+  assert.match(main, /return projectOwnPostgresClientConnection\(status, \{ localProviderAttested: Boolean\(localProvider\), nativeRuntime \}\)/);
   assert.doesNotMatch(main, /state_provider:\s*localProvider\s*\?\s*'LOCAL_POSTGRES'\s*:\s*'HOSTED'/);
   assert.match(endpoints, /NATIVE_SUPERVISOR_DEFAULT_BASE = null/);
   assert.doesNotMatch(endpoints, /supabase\.co|SUPABASE_URL/);

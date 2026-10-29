@@ -3,6 +3,9 @@ name: Windows Checkpoint Reconciliation Source Qualification
 on:
   pull_request:
     paths:
+      - 'apps/metaengine-browser/src/client-native-*.mjs'
+      - 'apps/metaengine-browser/src/main.mjs'
+      - 'apps/metaengine-browser/test/client-native-*.test.mjs'
       - 'apps/metaengine-browser/src/client-native-coding-goal.mjs'
       - 'apps/metaengine-browser/test/client-native-coding-goal.test.mjs'
       - 'apps/metaengine-browser/src/agent-resource-admission.mjs'
@@ -167,6 +170,8 @@ jobs:
           // Use the installed Git launcher verified by checkout; internal toolchain directories changed in Git 2.56.
           const executable=await fs.realpath('C:/Program Files/Git/bin/git.exe');assert.ok((await fs.stat(executable)).isFile());
           const component=[
+            'apps/metaengine-browser/test/client-native-runtime-observation.test.mjs',
+            'apps/metaengine-browser/test/client-native-trust-boundary.test.mjs',
             'infra/client-state-runtime/native-coding-selector-move.test.mjs',
             'infra/client-state-runtime/native-coding-host-seed-binding.test.mjs',
             'infra/client-state-runtime/native-coding-host-seed-service.test.mjs',
