@@ -6,6 +6,7 @@ import os from 'node:os';
 import {fork} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {createNativeCodingRuntime} from '../src/native-coding-runtime.mjs';
+import {projectNativeRuntimeObservation} from '../src/client-native-runtime-observation.mjs';
 import {nativeCodingEnvelopeSha256} from '../src/native-coding-transport-proof.mjs';
 import {createNativeCodingHostIpcClient} from '../src/native-coding-host-ipc-client.mjs';
 
@@ -132,6 +133,9 @@ test('real executor/pool composition durably registers exact job before W30 RUNN
   const result=await f.runtime.observeLease(f.lease);assert.equal(result.state,'RESULT_ACKNOWLEDGED');
   assert.equal(f.runtime.snapshot().occupied_slots,0);assert.equal(f.calls.filter(x=>x==='complete').length,1);
   assert.equal(f.runtime.snapshot().useful_work_verified,false);
+  const ui=projectNativeRuntimeObservation(f.runtime.snapshot(),{localProviderAttested:true});
+  assert.equal(ui.state,'OBSERVED');assert.equal(ui.retained_records,0);
+  assert.equal(ui.physical_execution_proven,false);assert.equal(ui.useful_work_verified,false);
 });
 
 test('heartbeat dispatch is nonblocking and duplicate ticks cannot execute a second model process',async t=>{
@@ -145,6 +149,9 @@ test('heartbeat dispatch is nonblocking and duplicate ticks cannot execute a sec
 for(const failure of ['unknownBarrier','unknownRunning'])test(`${failure} fences before resume and never executes a retry`,async t=>{
   const f=fixture({[failure]:true});t.after(()=>f.runtime.close());f.runtime.dispatchLease(f.lease);
   assert.equal(await settled(f),'READBACK_REQUIRED');assert.equal(f.calls.includes('resume'),false);
+  const ui=projectNativeRuntimeObservation(f.runtime.snapshot(),{localProviderAttested:true});
+  assert.equal(ui.state,'OBSERVED');assert.equal(ui.counts.readback_required,1);
+  assert.equal(ui.retained_records,1);assert.equal(ui.physical_execution_proven,false);
   for(let i=0;i<3;i++){f.runtime.dispatchLease(f.lease);await f.runtime.observeLease(f.lease);}
   assert.equal(f.runCount,1);assert.equal(f.transitionEvents.length,1);assert(f.readCount>0);
 });

@@ -38,6 +38,21 @@ export type ClientWorkReadiness = {
 };
 
 type RuntimeReadback = { connection: ClientConnectionStatus; work: ClientWorkReadiness };
+// Both IPC observations belong to one physical read. A fast rejection must not
+// release the polling slot while its sibling is still running.
+export async function readClientRuntimePair(
+  readConnection: () => Promise<ClientConnectionStatus>,
+  readWork: () => Promise<ClientWorkReadiness>,
+): Promise<RuntimeReadback> {
+  const [connection, work] = await Promise.allSettled([
+    Promise.resolve().then(readConnection), Promise.resolve().then(readWork),
+  ]);
+  if (connection.status !== "fulfilled" || work.status !== "fulfilled") {
+    throw new Error("client_runtime_observation_failed");
+  }
+  return { connection: connection.value, work: work.value };
+}
+
 type ResourceSnapshot = { state: "LOADING" | "LIVE" | "UNAVAILABLE"; readback: RuntimeReadback | null };
 export const INITIAL_CLIENT_RUNTIME: ResourceSnapshot = Object.freeze({ state: "LOADING", readback: null });
 
@@ -106,6 +121,7 @@ export function createClientRuntimeResource({
   let removeVisibility: (() => void) | null = null;
   let epoch = 0;
   let pending: Promise<void> | null = null;
+  let inFlight: Promise<RuntimeReadback> | null = null;
 
   const publish = (next: ResourceSnapshot) => {
     snapshot = Object.freeze(next);
@@ -115,12 +131,31 @@ export function createClientRuntimeResource({
   const refresh = (): Promise<void> => {
     if (listeners.size === 0 || !isVisible()) return Promise.resolve();
     if (pending) return pending;
+    // A UI deadline cannot cancel an IPC invoke. Retain its physical read slot
+    // until settlement; repeated refreshes must not accumulate abandoned reads.
+    if (inFlight) {
+      if (snapshot.state !== "UNAVAILABLE") publish({ state: "UNAVAILABLE", readback: null });
+      return Promise.resolve();
+    }
     stopTimer();
     const requestEpoch = epoch;
+    const physicalRead = Promise.resolve().then(read);
+    inFlight = physicalRead;
+    const settled = () => {
+      if (inFlight !== physicalRead) return;
+      inFlight = null;
+      // A timed-out result is discarded. Resume observation with a fresh read,
+      // only through the existing polling loop and only while subscribed.
+      if (pending === null && listeners.size > 0 && isVisible()) {
+        stopTimer();
+        timer = schedule(() => { timer = null; void refresh(); }, intervalMs);
+      }
+    };
+    void physicalRead.then(settled, settled);
     pending = (async () => {
       try {
         const next = await Promise.race([
-          Promise.resolve().then(read),
+          physicalRead,
           new Promise<never>((_, reject) => {
             timeout = schedule(() => reject(new Error("client_runtime_read_deadline")), deadlineMs);
           }),
@@ -133,7 +168,7 @@ export function createClientRuntimeResource({
         if (timeout !== null) cancel(timeout);
         timeout = null;
         pending = null;
-        if (listeners.size > 0 && isVisible()) timer = schedule(() => { timer = null; void refresh(); }, intervalMs);
+        if (inFlight === null && listeners.size > 0 && isVisible()) timer = schedule(() => { timer = null; void refresh(); }, intervalMs);
       }
     })();
     return pending;
@@ -142,7 +177,7 @@ export function createClientRuntimeResource({
     stopTimer();
     epoch += 1;
     // A cached pre-background success is not current readback.
-    publish({ state: "LOADING", readback: null });
+    publish({ state: inFlight ? "UNAVAILABLE" : "LOADING", readback: null });
     if (isVisible()) void refresh();
   };
   return {
@@ -151,6 +186,7 @@ export function createClientRuntimeResource({
     subscribe: (listener: () => void) => {
       listeners.add(listener);
       if (listeners.size === 1) {
+        if (inFlight) publish({ state: "UNAVAILABLE", readback: null });
         removeVisibility = onVisibilityChange(visibilityChanged);
         void refresh();
       }

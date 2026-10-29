@@ -31,3 +31,10 @@ test('Windows qualification retains required native wake, rejected-pair and canc
  assert.match(source,/counts\.skipped!==0\|\|skipped\.length/);
  assert.match(source,/source_sha:expected/);assert.match(source,/installed_autonomy_proven:false/);
 });
+
+
+test('native observation and Main wiring are mandatory Windows component checks',()=>{
+ const workflow=source;
+ for(const path of ['apps/metaengine-browser/src/client-native-*.mjs','apps/metaengine-browser/src/main.mjs','apps/metaengine-browser/test/client-native-*.test.mjs'])assert.ok(workflow.includes(path),path);
+ for(const name of ['client-native-runtime-observation.test.mjs','client-native-trust-boundary.test.mjs'])assert.ok(workflow.includes("'apps/metaengine-browser/test/"+name+"',"),name);
+});
