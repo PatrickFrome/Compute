@@ -49,3 +49,14 @@ roots. Do not remove checks to manufacture autonomous progress.
 
 A source test pass does not close live/installer gates. Record exact evidence and
 remaining limitations for each stage. Windows VM work remains cancelled.
+
+### Rejected-review visibility prerequisite
+
+The native project UI decoder also discarded the existing bound rejection
+projection. It now retains and strictly validates its exact fields and project
+identity, with no execution authority. The task screen explains retained custody
+and links to the writer/critic history only when that exact row is present on
+the confirmed page. Cross-page references remain visible without fake selection.
+Forged/malformed rejection responses degrade readback rather than enabling a
+retry. All UI library plus task-surface tests:98/98; TypeScript passed. The
+actual repair transition remains pending, not disguised as a Retry button.

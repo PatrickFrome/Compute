@@ -86,3 +86,35 @@ test('retained primary UI has no decorative legacy screens, command bus, token e
     assert.equal(view.getSnapshot().selectedTaskId,p.root);
   }
  });
+
+function rejection(page){return {schema:'metaengine.native-coding.review-rejection.v1',project_id:page.project_id,verdict:'REJECT',
+  writer_task_id:page.tasks[0].task_id,writer_lease_generation:1,critic_task_id:page.tasks[1].task_id,critic_lease_generation:2,
+  result_sha256:'a'.repeat(64),automatic_retry_allowed:false,authority_effect:false};}
+test('project tasks retain an exact rejected pair without inventing task failure or execution authority',()=>{
+  const raw=project().page();raw.native_review_rejection=rejection(raw);
+  const parsed=readNativeProjectTaskPage(raw);
+  assert.deepEqual(parsed.native_review_rejection,raw.native_review_rejection);
+  assert.equal(parsed.tasks[0].state,'RUNNING');
+  assert.equal(Object.isFrozen(parsed.native_review_rejection),true);
+  assert.equal(readNativeProjectTaskPage(project().page()).native_review_rejection,null);
+  for(const change of [{project_id:randomUUID()},{verdict:'ACCEPT'},{writer_lease_generation:0},{critic_lease_generation:1.5},
+    {critic_task_id:raw.tasks[0].task_id},{result_sha256:'bad'},{automatic_retry_allowed:true},{authority_effect:true},{repair_authorized:true}]){
+    assert.throws(()=>readNativeProjectTaskPage({...raw,native_review_rejection:{...raw.native_review_rejection,...change}}));
+  }
+});
+test('rejection readback survives pagination without requiring both tasks on the current page',async t=>{
+  const p=project(),first=p.page(0,2,4),review=rejection(first);first.native_review_rejection=review;
+  const view=resource(t,{projectOverview:async()=>first,projectSnapshot:async()=>({...p.page(2,2,4),native_review_rejection:review})});
+  await view.refresh();await view.nextPage();
+  assert.equal(view.getSnapshot().state,'OBSERVED');
+  assert.deepEqual(view.getSnapshot().page.native_review_rejection,review);
+  assert.equal(view.selectTask(review.writer_task_id),false);
+});
+test('rejected pair panel only selects confirmed page rows and exposes no repair/retry effect',async()=>{
+  const text=await fs.readFile(new URL('../components/me2/pages/tasks.tsx',import.meta.url),'utf8');
+  assert.match(text,/page\.native_review_rejection/);
+  assert.match(text,/page\.tasks\.some\(task=>task\.task_id===id\)/);
+  assert.match(text,/setFilter\('Все'\);setQuery\(''\);resource\.selectTask\(id\)/);
+  assert.match(text,/Автоматическое исправление пока недоступно/);
+  assert.doesNotMatch(text,/\.retry\(|\.repair\(|\.send\(|\.enqueue\(/);
+});

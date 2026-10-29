@@ -22,6 +22,16 @@ export function TasksPage(){
       <section className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-4"><h2 className="whitespace-pre-wrap break-words text-sm">{page.goal}</h2>
         <p className="mt-2 break-all font-mono text-xs text-zinc-500">Проект {page.project_id} · {page.state} · всего задач {page.total_tasks}</p>
         <p className="mt-1 text-xs text-zinc-400">На странице {page.tasks.length} задач; фильтры и очередь относятся только к этой странице.</p></section>
+      {page.native_review_rejection?<section role="status" aria-label="Причина блокировки проекта" className="space-y-2 rounded-xl border border-amber-800 bg-amber-950/20 p-4">
+        <h2 className="text-sm font-medium text-amber-200">CRITIC отклонил результат: требуется исправление</h2>
+        <p className="text-sm text-zinc-300">Изменения ещё не приняты. Рабочий каталог остаётся закреплён за прежним исполнением. Автоматическое исправление пока недоступно; повторный Run не является восстановлением.</p>
+        <p className="text-xs text-zinc-400">Откройте историю исполнителя и проверки. Сохранённый результат не означает, что задача завершена.</p>
+        {([['Исполнитель',page.native_review_rejection.writer_task_id],['CRITIC',page.native_review_rejection.critic_task_id]] as const).map(([label,id])=><div key={id} className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="break-all">{label}: {id}</span>
+          {page.tasks.some(task=>task.task_id===id)?<button type="button" className="min-h-8 rounded border border-amber-700 px-2" onClick={()=>{setFilter('Все');setQuery('');resource.selectTask(id);}}>Открыть историю</button>
+            :<span className="text-zinc-400">Задача на другой странице проекта</span>}
+        </div>)}
+      </section>:null}
       <div className="flex flex-wrap gap-2" role="group" aria-label="Фильтр состояния задач">{GROUPS.map(name=><button key={name} type="button" onClick={()=>setFilter(name)} aria-pressed={filter===name}
         className={`min-h-8 rounded border px-3 text-xs ${filter===name?'border-cyan-700 text-cyan-200':'border-zinc-700 text-zinc-400'}`}>{name}</button>)}</div>
       <input aria-label="Поиск по задачам текущей страницы" value={query} onChange={event=>setQuery(event.target.value)} placeholder="ID, роль или цель задачи" className="h-9 w-full rounded border border-zinc-700 bg-zinc-950 px-3 text-sm" />

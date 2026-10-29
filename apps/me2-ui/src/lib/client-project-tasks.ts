@@ -1,8 +1,11 @@
 // Native own-PG project read model. No legacy daemon, scheduler or task mutation.
 export type ProjectTask = Readonly<{task_seq:number;task_id:string;root_task_id:string;parent_task_id:string|null;
   depth:number;state:string;role:string;objective:string|null;agent_id:string|null;lease_generation:number|null;lease_expires_at:string|null}>;
+export type NativeReviewRejection=Readonly<{schema:'metaengine.native-coding.review-rejection.v1';project_id:string;
+  verdict:'REJECT';writer_task_id:string;writer_lease_generation:number;critic_task_id:string;critic_lease_generation:number;
+  result_sha256:string;automatic_retry_allowed:false;authority_effect:false}>;
 export type TaskPage = Readonly<{project_id:string;root_task_id:string;request_id:string;goal:string;state:string;total_tasks:number;
-  last_seq:number;tasks:readonly ProjectTask[];cursor:Readonly<{after_seq:number;next_seq:number;has_more:boolean}>}>;
+  last_seq:number;native_review_rejection:NativeReviewRejection|null;tasks:readonly ProjectTask[];cursor:Readonly<{after_seq:number;next_seq:number;has_more:boolean}>}>;
 export type ProjectTasksBridge = {projectOverview:()=>Promise<unknown>;
   projectSnapshot:(request:{project_id:string;task_after_seq:number;limit:number})=>Promise<unknown>};
 export type ProjectTasksState = Readonly<{state:"UNBOUND"|"LOADING"|"OBSERVED"|"DEGRADED"|"UNAVAILABLE";
@@ -24,6 +27,19 @@ const integer=(value:unknown,min=0):value is number=>Number.isSafeInteger(value)
 const text=(value:unknown,max:number):value is string=>typeof value==='string'&&value.length<=max&&!/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(value);
 const plain=(value:unknown):value is Record<string,unknown>=>value!==null&&typeof value==='object'&&!Array.isArray(value);
 const denied=()=>{throw Error('native_project_tasks_invalid');};
+function readReviewRejection(value:unknown,projectId:string):NativeReviewRejection|null {
+  if(value==null)return null;
+  const keys=['schema','project_id','verdict','writer_task_id','writer_lease_generation','critic_task_id','critic_lease_generation',
+    'result_sha256','automatic_retry_allowed','authority_effect'];
+  if(!plain(value)||Object.keys(value).sort().join('|')!==keys.sort().join('|')
+    ||value.schema!=='metaengine.native-coding.review-rejection.v1'||value.project_id!==projectId||value.verdict!=='REJECT'
+    ||typeof value.writer_task_id!=='string'||!UUID.test(value.writer_task_id)
+    ||typeof value.critic_task_id!=='string'||!UUID.test(value.critic_task_id)||value.writer_task_id===value.critic_task_id
+    ||!integer(value.writer_lease_generation,1)||!integer(value.critic_lease_generation,1)
+    ||typeof value.result_sha256!=='string'||!/^[a-f0-9]{64}$/.test(value.result_sha256)
+    ||value.automatic_retry_allowed!==false||value.authority_effect!==false)return denied();
+  return Object.freeze({...value}) as NativeReviewRejection;
+}
 export const EMPTY_PROJECT_TASKS:ProjectTasksState=Object.freeze({state:'UNBOUND',busy:false,page:null,selectedTaskId:null,observedAt:null,canGoBack:false});
 
 export function readNativeProjectTaskPage(value:unknown,{projectId=null,afterSeq=0,limit=128}:{projectId?:string|null;afterSeq?:number;limit?:number}={}):TaskPage|null{
@@ -51,7 +67,7 @@ export function readNativeProjectTaskPage(value:unknown,{projectId=null,afterSeq
   });
   if(cursor.next_seq!==sequence||cursor.has_more!==(cursor.next_seq<v.total_tasks)||cursor.has_more&&!tasks.length)return denied();
   return Object.freeze({project_id:v.project_id as string,root_task_id:v.root_task_id as string,request_id:v.request_id as string,
-    goal:v.goal,state:v.state,total_tasks:v.total_tasks,last_seq:v.last_seq,tasks:Object.freeze(tasks),
+    goal:v.goal,state:v.state,native_review_rejection:readReviewRejection(v.native_review_rejection,v.project_id as string),total_tasks:v.total_tasks,last_seq:v.last_seq,tasks:Object.freeze(tasks),
     cursor:Object.freeze({after_seq:afterSeq,next_seq:cursor.next_seq,has_more:cursor.has_more})});
 }
 
