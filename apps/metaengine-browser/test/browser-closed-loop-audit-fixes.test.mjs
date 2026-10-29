@@ -252,7 +252,8 @@ test('dispatch and observation budgets scale with the live fleet', async () => {
   const source = readSource('devos-native-task-cycle-core.mjs');
   assert.match(source, /function runningObservationBudget\(liveAgents\)/);
   assert.match(source, /function fleetLeaseDispatchConcurrency\(liveAgents\)/);
-  assert.match(source, /const dispatchConcurrency = fleetLeaseDispatchConcurrency\(liveAgents\)/);
+  assert.match(source, /const concurrency = fleetLeaseDispatchConcurrency\(Array\.isArray\(fleetSnapshot\?\.agents\)/);
+  assert.doesNotMatch(source, /rawLeases\.slice\(0, concurrency\)/, 'parallelism must not truncate allocated leases');
   assert.match(source, /const observationBudget = runningObservationBudget\(liveAgents\)/);
 });
 

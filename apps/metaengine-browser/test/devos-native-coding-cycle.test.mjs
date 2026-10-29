@@ -29,3 +29,37 @@ test('a native lease cannot fall through to the browser dispatcher when the priv
   await assert.rejects(cycle.cycle(),/native_coding_runtime_unbound/);
   assert.throws(()=>cycle.bindNativeCodingRuntime({dispatchLease(){}}),/runtime_invalid/);
 });
+
+for(const failOne of [false,true])test(`all accepted native leases are serviced with bounded concurrency (failure=${failOne})`,async()=>{
+ const leases=Array.from({length:9},(_,i)=>{
+  const uuid='00000000-0000-4000-8000-'+String(i+1).padStart(12,'0');
+  return {...lease,task_id:uuid,agent_id:'agent_'+uuid,target_id:'codex-cli:'+uuid,tab_id:'native-coding:'+uuid};
+ });
+ let active=0,peak=0;const calls=[];
+ const runtime={observeProviders:async()=>({schema:'metaengine.native-coding.providers.v1',providers:[]}),
+  dispatchLease:async raw=>{calls.push(raw.task_id);active++;peak=Math.max(peak,active);
+   try{await new Promise(resolve=>setTimeout(resolve,5));if(failOne&&raw.task_id===leases[1].task_id)throw Error('one_fixture_failure');return {state:'STARTED',task_id:raw.task_id};}
+   finally{active--;}
+  },observeLease:async()=>({state:'RUNNING'}),completeFromTrustedCommand:async()=>({state:'RESULT_READY'})};
+ const cycle=new DevOsNativeTaskCycle({getState:async()=>({fleet}),executeCommand:async()=>{throw Error('unexpected_browser_effect');},
+  signedRequest:async()=>({status:200,ok:true,json:async()=>({schema:'metaengine.devos.browser-cycle.v1',leases,running:[]})})});
+ cycle.bindNativeCodingRuntime(runtime);
+ const result=await cycle.cycle();
+ assert.equal(calls.length,9,'a concurrency budget must not discard already allocated leases');
+ assert.deepEqual(new Set(calls),new Set(leases.map(row=>row.task_id)));
+ assert.ok(peak<=4&&peak>1);assert.equal(active,0);
+ assert.equal(result.dispatch.results.length,9);
+ assert.equal(result.dispatch.dispatched,failOne?8:9);assert.equal(result.dispatch.failed,failOne?1:0);
+});
+
+test('running native leases beyond the browser-sized observation budget are not starved',async()=>{
+ const running=Array.from({length:9},(_,i)=>({...lease,task_id:'00000000-0000-4000-8000-'+String(i+1).padStart(12,'0')}));
+ const observed=[];
+ const runtime={observeProviders:async()=>({schema:'metaengine.native-coding.providers.v1',providers:[]}),
+  dispatchLease:async()=>{throw Error('unexpected_new_dispatch');},observeLease:async raw=>{observed.push(raw.task_id);return {state:'RUNNING'};},completeFromTrustedCommand:async()=>({state:'RESULT_READY'})};
+ const cycle=new DevOsNativeTaskCycle({getState:async()=>({fleet}),executeCommand:async()=>{throw Error('unexpected_browser_effect');},
+  signedRequest:async()=>({status:200,ok:true,json:async()=>({schema:'metaengine.devos.browser-cycle.v1',leases:[],running})})});
+ cycle.bindNativeCodingRuntime(runtime);
+ for(let i=0;i<3;i++)assert.equal((await cycle.cycle()).result_ready_batch.observed,4);
+ assert.equal(new Set(observed).size,9,'later running leases must eventually receive readback even when earlier workers stay running');
+});

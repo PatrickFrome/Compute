@@ -366,6 +366,7 @@ export class DevOsNativeTaskCycle {
   // of the most recent cycle (fleet-scaled) — surfaced numerically in the
   // cycle snapshot so operators and tests can audit the scaling.
   #lastObservationBudget = RUNNING_OBSERVATION_BUDGET_FLOOR;
+  #runningObservationCursor = 0;
   #projectRuntime = null;
   #nativeCodingRuntime = null;
   #projectCoordination = { state: 'NOT_BOUND', reason: null, coordination_sweep_available: false, authority_effect: false };
@@ -593,7 +594,6 @@ export class DevOsNativeTaskCycle {
     // with the live fleet (floor 4, cap 16) — a 24-agent fleet is no longer
     // starved by the historical fixed fan-out.
     const liveAgents = Array.isArray(fleetSnapshot?.agents) ? fleetSnapshot.agents.length : 0;
-    const dispatchConcurrency = fleetLeaseDispatchConcurrency(liveAgents);
     const observationBudget = runningObservationBudget(liveAgents);
     this.#lastObservationBudget = observationBudget;
     // D-C2: the server may return a batch of leases (one per idle agent).
@@ -601,7 +601,7 @@ export class DevOsNativeTaskCycle {
     // commands must work multiply and simultaneously. The single-lease field
     // remains the backward-compatible shape for older edges.
     const leaseBatch = Array.isArray(plan.leases) && plan.leases.length
-      ? plan.leases.slice(0, dispatchConcurrency)
+      ? plan.leases
       : (plan.lease ? [plan.lease] : []);
     let dispatch = null;
     if (leaseBatch.length === 1) dispatch = await this.#dispatchAnyLease(leaseBatch[0], postState?.fleet);
@@ -609,7 +609,13 @@ export class DevOsNativeTaskCycle {
     let resultReady = null;
     let resultReadyBatch = null;
     if (Array.isArray(plan.running) && plan.running.length) {
-      const batch = plan.running.slice(0, observationBudget);
+      // Native and browser leases share this bounded readback budget. Rotate
+      // through the complete list so long-running early entries cannot hide
+      // completed or failed workers later in the server's snapshot.
+      const start = this.#runningObservationCursor % plan.running.length;
+      const count = Math.min(observationBudget, plan.running.length);
+      const batch = Array.from({length:count},(_,offset)=>plan.running[(start+offset)%plan.running.length]);
+      this.#runningObservationCursor = (start+count)%plan.running.length;
       // D-C2: running observations fan out in parallel — each observation is
       // an independent read-back of its own bound tab. Failures are collected
       // per task; the first error is rethrown only when EVERY observation
@@ -1025,10 +1031,22 @@ export class DevOsNativeTaskCycle {
   async #dispatchLeases(rawLeases, fleetSnapshot) {
     // Closed-loop audit fix (fleet scale): budget scales with the live fleet.
     const concurrency = fleetLeaseDispatchConcurrency(Array.isArray(fleetSnapshot?.agents) ? fleetSnapshot.agents.length : 0);
-    const batch = Array.isArray(rawLeases) ? rawLeases.slice(0, concurrency) : [];
-    const settled = await Promise.allSettled(batch.map((raw) => String(raw?.target_id || '').startsWith('codex-cli:')
-      ? this.#dispatchAnyLease(raw,fleetSnapshot)
-      : this.#withTabGate(raw?.tab_id, () => this.#dispatchLease(raw, fleetSnapshot))));
+    // The server has already allocated every returned lease. Concurrency
+    // limits simultaneous work, not how many accepted leases may be forgotten.
+    const batch = Array.isArray(rawLeases) ? rawLeases : [];
+    const settled = new Array(batch.length);
+    let cursor = 0;
+    await Promise.all(Array.from({length:Math.min(concurrency,batch.length)},async()=>{
+      while(cursor<batch.length){
+        const index=cursor++,raw=batch[index];
+        try{
+          const value=await (String(raw?.target_id || '').startsWith('codex-cli:')
+            ? this.#dispatchAnyLease(raw,fleetSnapshot)
+            : this.#withTabGate(raw?.tab_id, () => this.#dispatchLease(raw, fleetSnapshot)));
+          settled[index]={status:'fulfilled',value};
+        }catch(reason){settled[index]={status:'rejected',reason};}
+      }
+    }));
     const results = [];
     const failures = [];
     settled.forEach((outcome, index) => {
