@@ -60,3 +60,26 @@ the confirmed page. Cross-page references remain visible without fake selection.
 Forged/malformed rejection responses degrade readback rather than enabling a
 retry. All UI library plus task-surface tests:98/98; TypeScript passed. The
 actual repair transition remains pending, not disguised as a Retry button.
+
+### Resource admission defect repaired
+
+The execution pool previously read only physical_start_allowed and ignored the
+newly observed physical_parallelism after construction. It now applies the
+current valid integer budget to new dispatches, retaining the configured upper
+budget and all existing jobs/unknown receipts. Zero/malformed budgets hold new
+starts; exact same-lease observation still returns retained state. Legacy
+boolean-only adapters retain their explicit budget. Regression first reproduced
+both ignored capacity and malformed-budget starts; after repair 57 pool/runtime/
+lease-executor/resource tests pass. This is not a complete memory/disk/provider
+feedback controller and does not add a logical agent-count cap.
+
+### Repair transition dependency discovered
+
+codex-cli-runner.mjs currently requires IMPLEMENTER worktrees to be clean.
+Rejected results intentionally retain dirty bytes and HELD custody. Therefore a
+new repair task alone cannot work: the authenticated task/job contract must bind
+a specific rejected baseline, and both preflight and custody transfer must
+validate it. Removing the clean check or using a caller flag is not acceptable.
+The current accepted-checkpoint path must remain unable to accept REJECT. A
+repair lineage also needs terminal accounting for superseded attempts without
+reporting their rejected artifacts as accepted. No such mutation has been added.

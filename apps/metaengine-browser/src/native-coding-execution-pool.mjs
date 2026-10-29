@@ -26,7 +26,14 @@ export function createNativeCodingExecutionPool({executor,prepareRequest,readPri
       if(jobs.has(key)) return observation(jobs.get(key));
       // Pending receipts retain their slot until the SAME heartbeat has a
       // confirmed W30 completion. Losing a write ACK cannot drop the result.
-      if(jobs.size>=physicalSlotBudget||readResourceAdmission().physical_start_allowed!==true) return Object.freeze({state:'PHYSICAL_POOL_BUSY',
+      const resources=readResourceAdmission();
+      // Re-read capacity at each start, not only at pool construction. A lower
+      // budget never cancels retained work or discards an unacknowledged result.
+      // Boolean-only adapters retain their explicit configured slot budget.
+      const dynamicBudget=resources&&Object.hasOwn(resources,'physical_parallelism')
+        ?resources.physical_parallelism:physicalSlotBudget;
+      if(resources?.physical_start_allowed!==true||!Number.isSafeInteger(dynamicBudget)||dynamicBudget<1
+        ||jobs.size>=Math.min(physicalSlotBudget,dynamicBudget)) return Object.freeze({state:'PHYSICAL_POOL_BUSY',
         automatic_retry_allowed:false,authority_effect:false});
       const row={lease:structuredClone(lease),state:'PREPARING',result:null,reason:null,
         controller:new AbortController(),done:null};

@@ -46,3 +46,36 @@ test('browser fleet grows beyond 128, retains its operator target and survives a
  const plan=planElasticFleetCapacity({backlog:{ready:500,running:140},fleetSnapshot:fleet.snapshot(),maxTargetAgents:2});
  assert(plan.target_agents>140);assert.equal(plan.max_target_agents,null);
 });
+
+test('native pool honors changing physical parallelism without dropping existing jobs or replaying them',async()=>{
+ let parallelism=2,calls=0;
+ const pool=createNativeCodingExecutionPool({physicalSlotBudget:8,
+  readResourceAdmission:()=>({physical_start_allowed:true,physical_parallelism:parallelism}),
+  prepareRequest:async lease=>({lease}),executor:{execute:async()=>{calls++;return {state:'RESULT_READY',result:{result_sha256:'b'.repeat(64)}};}},readPriorExecution:async()=>null});
+ const leases=Array.from({length:4},()=>({task_id:randomUUID(),lease_generation:1,agent_id:'agent_'+randomUUID(),agent_generation_epoch:1}));
+ try{
+  assert.equal(pool.dispatch(leases[0]).state,'PREPARING');
+  assert.equal(pool.dispatch(leases[1]).state,'PREPARING');
+  assert.equal(pool.dispatch(leases[2]).state,'PHYSICAL_POOL_BUSY');
+  await turn();assert.equal(calls,2);
+  parallelism=0;
+  assert.equal(pool.dispatch(leases[0]).state,'RESULT_READY');
+  assert.equal(pool.dispatch(leases[2]).state,'PHYSICAL_POOL_BUSY');
+  assert.equal(pool.snapshot().occupied_slots,2);
+  parallelism=3;
+  assert.equal(pool.dispatch(leases[2]).state,'PREPARING');
+  assert.equal(pool.dispatch(leases[3]).state,'PHYSICAL_POOL_BUSY');
+  await turn();assert.equal(calls,3);
+  for(const lease of leases.slice(0,3))pool.acknowledge(lease,{state:'RESULT_READY',lease_generation:1,result_sha256:'b'.repeat(64)});
+  assert.equal(pool.snapshot().occupied_slots,0);
+ }finally{await pool.stop();}
+});
+test('malformed dynamic physical budgets never start a worker',async()=>{
+ for(const physical_parallelism of [-1,NaN,Infinity,1.5,'2',null]){
+  let calls=0;
+  const pool=createNativeCodingExecutionPool({physicalSlotBudget:8,readResourceAdmission:()=>({physical_start_allowed:true,physical_parallelism}),
+   prepareRequest:async lease=>({lease}),executor:{execute:async()=>{calls++;}},readPriorExecution:async()=>null});
+  try{assert.equal(pool.dispatch({task_id:randomUUID(),lease_generation:1}).state,'PHYSICAL_POOL_BUSY');await turn();assert.equal(calls,0);}
+  finally{await pool.stop();}
+ }
+});
