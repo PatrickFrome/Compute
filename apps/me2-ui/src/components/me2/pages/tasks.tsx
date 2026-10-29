@@ -4,15 +4,12 @@ import {useClientProjectTasks} from '@/hooks/use-client-project-tasks';
 import {ManagedProjectHistory} from '@/components/me2/managed-project-history';
 import {useMe2} from '@/components/me2/store';
 
-const GROUPS=['Все','Очередь','В работе','Требуют внимания','Завершены'] as const;
-const WAITING=new Set(['READY']),WORKING=new Set(['LEASED','RUNNING','RESULT_READY']),ATTENTION=new Set(['BLOCKED','FAILED','AMBIGUOUS','FENCED']);
+import {PROJECT_TASK_GROUPS as GROUPS,projectTaskMatchesGroup} from '@/lib/client-project-tasks';
 export function TasksPage(){
   const {resource,view}=useClientProjectTasks(),setPage=useMe2(state=>state.setPage);
   const [filter,setFilter]=useState<typeof GROUPS[number]>('Все'),[query,setQuery]=useState('');
   const page=view.page,search=query.trim().toLowerCase();
-  const tasks=(page?.tasks??[]).filter(task=>(filter==='Все'||filter==='Очередь'&&WAITING.has(task.state)
-    ||filter==='В работе'&&WORKING.has(task.state)||filter==='Требуют внимания'&&ATTENTION.has(task.state)
-    ||filter==='Завершены'&&task.state==='COMPLETED')&&(!search||`${task.task_id} ${task.role} ${task.objective??''}`.toLowerCase().includes(search)));
+  const tasks=(page?.tasks??[]).filter(task=>projectTaskMatchesGroup(task.state,filter)&&(!search||`${task.task_id} ${task.role} ${task.objective??''}`.toLowerCase().includes(search)));
   const selected=page?.tasks.find(task=>task.task_id===view.selectedTaskId);
   return <div className="mx-auto max-w-[1200px] space-y-4" data-testid="page-tasks" data-source="NATIVE_PROJECT_API">
     <header className="flex flex-wrap items-center justify-between gap-3"><div><h1 className="text-xl font-medium">Задачи проекта</h1>

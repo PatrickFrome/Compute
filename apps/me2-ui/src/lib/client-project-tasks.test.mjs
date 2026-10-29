@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import fs from 'node:fs/promises';
-import {createClientProjectTasksView,readNativeProjectTaskPage} from './client-project-tasks.ts';
+import {createClientProjectTasksView,readNativeProjectTaskPage,PROJECT_TASK_GROUPS,projectTaskMatchesGroup} from './client-project-tasks.ts';
 
 function project(){const root=randomUUID(),id=randomUUID(),request=randomUUID();return {id,root,request,
   page(after=0,count=2,total=2){const rows=Array.from({length:count},(_,index)=>({task_seq:after+index+1,task_id:after+index===0?root:randomUUID(),root_task_id:root,
@@ -61,3 +61,28 @@ test('retained primary UI has no decorative legacy screens, command bus, token e
   assert.match(files[2],/useClientProjectTasks/);assert.match(files[3],/useClientProjectTasks/);
   assert.equal(/s\.snap|state\.snap|openTask\(/.test(files[2]+files[3]),false);
 });
+
+ test('every accepted task state has a specific filter; suspension is not queued or completed',()=>{
+  const expected={READY:'Очередь',LEASED:'В работе',RUNNING:'В работе',RESULT_READY:'В работе',SUSPENDED:'Приостановлены',
+    BLOCKED:'Требуют внимания',FAILED:'Требуют внимания',AMBIGUOUS:'Требуют внимания',FENCED:'Требуют внимания',COMPLETED:'Завершены'};
+  for(const [state,group] of Object.entries(expected)){
+    const raw=project().page();raw.tasks[0].state=state;
+    assert.equal(readNativeProjectTaskPage(raw).tasks[0].state,state);
+    assert.equal(projectTaskMatchesGroup(state,'Все'),true);
+    assert.deepEqual(PROJECT_TASK_GROUPS.filter(g=>g!=='Все'&&projectTaskMatchesGroup(state,g)),[group]);
+  }
+  assert.equal(projectTaskMatchesGroup('IMAGINARY_READY','В работе'),false);
+  assert.equal(projectTaskMatchesGroup('toString','В работе'),false);
+ });
+
+ test('suspended project readback stays observed and preserves selection through resume',async t=>{
+  const p=project(),raw=p.page();
+  const view=resource(t,{projectOverview:async()=>raw,projectSnapshot:async()=>null});
+  await view.refresh();assert.equal(view.selectTask(p.root),true);
+  for(const state of ['SUSPENDED','RUNNING']){
+    raw.tasks[0].state=state;await view.refresh();
+    assert.equal(view.getSnapshot().state,'OBSERVED');
+    assert.equal(view.getSnapshot().page.tasks[0].state,state);
+    assert.equal(view.getSnapshot().selectedTaskId,p.root);
+  }
+ });

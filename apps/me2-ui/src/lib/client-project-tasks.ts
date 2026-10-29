@@ -8,7 +8,18 @@ export type ProjectTasksBridge = {projectOverview:()=>Promise<unknown>;
 export type ProjectTasksState = Readonly<{state:"UNBOUND"|"LOADING"|"OBSERVED"|"DEGRADED"|"UNAVAILABLE";
   busy:boolean;page:TaskPage|null;selectedTaskId:string|null;observedAt:string|null;canGoBack:boolean}>;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const STATES=new Set(['READY','LEASED','RUNNING','RESULT_READY','BLOCKED','COMPLETED','FAILED','AMBIGUOUS','FENCED']);
+// One presentation mapping keeps accepted states and their filters in sync.
+// Suspension means retained work awaiting continuation, not a new queued run.
+export const PROJECT_TASK_GROUPS=['Все','Очередь','В работе','Приостановлены','Требуют внимания','Завершены'] as const;
+export type ProjectTaskGroup=typeof PROJECT_TASK_GROUPS[number];
+const STATE_GROUP:Readonly<Record<string,ProjectTaskGroup>>=Object.freeze({
+  READY:'Очередь',LEASED:'В работе',RUNNING:'В работе',RESULT_READY:'В работе',SUSPENDED:'Приостановлены',
+  BLOCKED:'Требуют внимания',FAILED:'Требуют внимания',AMBIGUOUS:'Требуют внимания',FENCED:'Требуют внимания',COMPLETED:'Завершены',
+});
+const STATES=new Set(Object.keys(STATE_GROUP));
+export function projectTaskMatchesGroup(state:string,group:ProjectTaskGroup):boolean {
+  return STATES.has(state)&&(group==='Все'||STATE_GROUP[state]===group);
+}
 const integer=(value:unknown,min=0):value is number=>Number.isSafeInteger(value)&&Number(value)>=min;
 const text=(value:unknown,max:number):value is string=>typeof value==='string'&&value.length<=max&&!/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(value);
 const plain=(value:unknown):value is Record<string,unknown>=>value!==null&&typeof value==='object'&&!Array.isArray(value);

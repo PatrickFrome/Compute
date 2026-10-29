@@ -1,0 +1,51 @@
+# Critical audit implementation plan
+
+Authorized by the owner on 2026-10-29. Starting published source:
+2c533edc6ec09d1f84583349f391bece8398e9a1 (same tree as local ab9e5ad5e).
+Continue in this worktree. No main merge or installed-machine mutation follows
+from a source-only pass. Preserve own PostgreSQL, existing allocator and trust
+roots. Do not remove checks to manufacture autonomous progress.
+
+## Stages and acceptance
+
+1. **Suspended task presentation — source verified.** Accept SUSPENDED in the
+   native task page decoder and give it an explicit filter, derived from the
+   same state mapping. Preserve selection across suspend/resume. Unknown states
+   remain refused. Evidence: all UI library tests 92/92, task-surface quarantine
+   3/3, TypeScript noEmit passed. No visual installed UI claim.
+2. **Rejected-review repair — pending implementation.** Retain rejected evidence;
+   verify old writer/critic quiescence and actual dirty tree; create an explicit
+   repair lineage through existing custody/lease paths; new independent review
+   must bind the repaired subject. Test replay, unknown ACK, process alive,
+   changed bytes, foreign project, restart, repeated rejection and acceptance.
+3. **Bidirectional addressed messages — pending.** Existing authority only;
+   durable delivery identity, recipient read/processed cursor, browser-to-native
+   action, and wake through existing suspension reconciliation. Test duplicate,
+   stale incarnation, foreign project, concurrent readers and restart. Stored
+   is not read; read is not acted upon.
+4. **Installed CHAT_LED preparation — pending.** Source-owned protected profile,
+   project/worktree and native permit preparation; legitimate Guardian/Owner
+   binding. Existing local preparation script remains unread/unintegrated.
+   Qualify fresh and interrupted bootstrap, no public renderer authority.
+5. **Live chain and recovery — unqualified.** Actual chat -> CLI -> critic ->
+   rejection -> repair -> acceptance -> parent resume -> next task. Kill and
+   restart each component, lose replies and interrupt provider availability.
+6. **Parallel integration — pending qualification.** Conflicting worker edits,
+   branch/worktree preservation, integrated test/review, no lost accepted work.
+7. **Resource adaptation — pending.** Measured CPU/memory/disk/DB/provider pressure,
+   backpressure and fairness. Logical agent count has no arbitrary fixed cap;
+   physical concurrency remains constrained by available resources.
+8. **Development learning — pending qualification.** Bind coding outcomes to
+   evidence-backed experience and existing RSI routing; held-out evaluation,
+   regression rejection and rollback. Browser RSI is wired, not classified dead.
+9. **Unified operator UI — pending.** Goal/task/process/worktree/review/artifact
+   links, causal blockers, task tree, addressed inbox, diff and test results,
+   supported recovery actions, consistent language and model observability.
+10. **Runtime composition — pending.** Map installed entry and activated wrappers;
+    test actual composition, reduce unnecessary coupling, prove reachability
+    before deleting purported dead code.
+11. **Release — pending.** One source SHA, immutable installer/provenance; fresh
+    install and upgrade preserving data; real Windows long-running/chaos tests.
+
+A source test pass does not close live/installer gates. Record exact evidence and
+remaining limitations for each stage. Windows VM work remains cancelled.
