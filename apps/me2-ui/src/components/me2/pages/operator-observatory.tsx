@@ -7,6 +7,7 @@
 // Without that bridge, every facet and the event cursor remain UNKNOWN.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPhysicalReadGate } from "@/lib/ui-read-flight.mjs";
 import { OBSERVATORY_VIEWS } from "@/lib/operator-observatory.mjs";
 import { projectPrimaryOperatorView, type PrimaryDelivery } from "@/lib/operator-primary-views.mjs";
 import {
@@ -47,7 +48,10 @@ const STATE_HINTS: Record<string, string> = {
 
 type ObservatoryFrame = ReturnType<typeof advanceOperatorObservatoryResync>;
 
-export function OperatorObservatoryPage() {
+// Shared across route mounts. Only physical settlement frees this readonly slot.
+const observatoryReadFlight = createPhysicalReadGate();
+
+export function OperatorObservatoryPage({ observationScope = "primary" }: { observationScope?: string } = {}) {
   const [view, setView] = useState<ViewName>("Now");
   // Do not infer the initial UNKNOWN/null-only shape as the permanent state:
   // a real readback may carry a run, cursor, identity and all seven planes.
@@ -59,7 +63,8 @@ export function OperatorObservatoryPage() {
   // A single shared checkpoint governs all seven panels. Keep it across
   // transport failures, remount-free navigation and expired readbacks.
   const checkpoint = useRef<ObservatoryFrame>(emptyOperatorObservatoryResync());
-  const flight = useRef(false);
+  const lifecycle = useRef(0);
+  const lastScope = useRef(observationScope);
   const mounted = useRef(false);
 
   const update = useCallback((next: ObservatoryFrame) => {
@@ -75,46 +80,52 @@ export function OperatorObservatoryPage() {
   }, []);
 
   const refresh = useCallback(async (explicitResync = false) => {
-    if (flight.current || (checkpoint.current.requires_explicit_resync && !explicitResync)) return;
+    if (!mounted.current || observatoryReadFlight.isBusy() || (checkpoint.current.requires_explicit_resync && !explicitResync)) return;
     const bridge = operatorBridge();
     if (!bridge?.readContext) {
       update(advanceOperatorObservatoryResync(checkpoint.current, null));
       if (mounted.current) setDelivery("UNBOUND");
       return;
     }
-    flight.current = true;
+    const epoch = lifecycle.current;
+    const current = () => mounted.current && lifecycle.current === epoch;
+    const physicalRead = observatoryReadFlight.run(() => {
+      if (!bridge.readContext) throw new Error("operator_bridge_unavailable");
+      return bridge.readContext();
+    });
+    if (!physicalRead) return;
     if (mounted.current) {
       setConnection("READING");
       setDelivery(checkpoint.current.mode === "TRACKING" ? "READING" : "LOADING");
     }
-    let timer: ReturnType<typeof setTimeout> | null = null;
+    let expired = false;
+    const timer = setTimeout(() => {
+      expired = true;
+      if (!current()) return;
+      update(advanceOperatorObservatoryResync(checkpoint.current, null, {
+        intent: explicitResync ? "EXPLICIT_RESYNC" : "POLL",
+      }));
+      setDelivery("TIMED_OUT");
+    }, 2500);
     try {
-      // One read of the canonical in-process Owner context, no HTTP from the
-      // renderer, no effect authority, no automatic resync/retry. A manual
-      // resync still requires a source-bound witness in that same context.
-      const result = await Promise.race([
-        bridge.readContext(),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error("operator_read_timeout")), 2500);
-        }),
-      ]);
-      if (!mounted.current) return;
+      // The deadline changes presentation only. The native API has no cancel.
+      // A late result is discarded; normal polling resumes after settlement.
+      const result = await physicalRead;
+      if (!current() || expired) return;
       update(advanceOperatorObservatoryResync(checkpoint.current, result, {
         intent: explicitResync ? "EXPLICIT_RESYNC" : "POLL",
       }));
       setDelivery("IDLE");
-    } catch (error) {
-      if (mounted.current) {
+    } catch {
+      if (current() && !expired) {
         update(advanceOperatorObservatoryResync(checkpoint.current, null, {
           intent: explicitResync ? "EXPLICIT_RESYNC" : "POLL",
         }));
         // Do not render the exception message: it may contain native secrets.
-        setDelivery(error instanceof Error && error.message === "operator_read_timeout"
-          ? "TIMED_OUT" : "FAILED");
+        setDelivery("FAILED");
       }
     } finally {
-      if (timer) clearTimeout(timer);
-      flight.current = false;
+      clearTimeout(timer);
     }
   }, [update]);
 
@@ -126,8 +137,25 @@ export function OperatorObservatoryPage() {
 
   useEffect(() => {
     mounted.current = true;
+    const epoch = ++lifecycle.current;
+    if (lastScope.current !== observationScope) {
+      lastScope.current = observationScope;
+      checkpoint.current = emptyOperatorObservatoryResync();
+      firstReadStart.current = null;
+    }
     firstReadStart.current ??= performance.now();
-    void refresh();
+    let waitingTimer: ReturnType<typeof setTimeout> | null = null;
+    queueMicrotask(() => {
+      if (!mounted.current || lifecycle.current !== epoch) return;
+      update(checkpoint.current);
+      if (checkpoint.current.mode !== "TRACKING") setFirstTruthMs(null);
+      if (observatoryReadFlight.isBusy()) {
+        setDelivery("READING");
+        waitingTimer = setTimeout(() => {
+          if (mounted.current && lifecycle.current === epoch && observatoryReadFlight.isBusy()) setDelivery("TIMED_OUT");
+        }, 2500);
+      } else void refresh();
+    });
     const ticker = window.setInterval(() => {
       // Expire visual truth on the clock EVEN if the window is hidden, the
       // trusted bridge is stalled or the network was lost. No cached ACTIVE.
@@ -138,9 +166,11 @@ export function OperatorObservatoryPage() {
     }, 5000);
     return () => {
       mounted.current = false;
+      lifecycle.current += 1;
+      if (waitingTimer !== null) clearTimeout(waitingTimer);
       window.clearInterval(ticker);
     };
-  }, [refresh, update]);
+  }, [observationScope, refresh, update]);
 
   const names = OBSERVATORY_VIEWS[view];
   const cursor = projection.cursor_state === "VERIFIED_CURSOR"

@@ -6,6 +6,9 @@
 
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { useMe2, type PageKey } from "@/components/me2/store";
+import { useGoalDraft } from "@/hooks/use-goal-draft";
+import { goalDraftStorageKey, type GoalDraftScope } from "@/lib/goal-draft.mjs";
+import { createPhysicalReadGate, PRIMARY_ROSTER_FRESH_MS, isPrimaryRosterFresh, primaryChatActivity } from "@/lib/ui-read-flight.mjs";
 import { useToast } from "@/hooks/use-toast";
 import { refreshClientRuntimeStatus, useClientRuntimeStatus } from "@/hooks/use-client-runtime-status";
 import { createGoalSubmissionModeObserver, goalSubmissionModeText, shouldPollClientGoal, type GoalSubmissionMode } from "@/lib/goal-submission-mode-observer.mjs";
@@ -229,60 +232,79 @@ function clientControlBridge(): ClientControlBridge | null {
   return (window as Window & { metaengineClient?: ClientControlBridge }).metaengineClient ?? null;
 }
 
+// The physical slot survives route unmount/remount and React effect restarts.
+const rosterReadFlight = createPhysicalReadGate();
+
 function usePrimaryChatRoster() {
   const [roster, setRoster] = useState<PrimaryChatRoster>(EMPTY_ROSTER);
-  const [state, setState] = useState<"LOADING" | "LIVE" | "UNAVAILABLE">("LOADING");
-  const inFlight = useRef(false);
-  const live = useRef(false);
+  const [state, setState] = useState<"LOADING" | "LIVE" | "STALE" | "UNAVAILABLE">("LOADING");
+  const [observedAt, setObservedAt] = useState<number | null>(null);
+  const [expiresAt, setExpiresAt] = useState<number | null>(null);
+  const observation = useRef<{ observedAt: number; expiresAt: number } | null>(null);
+  const lifecycle = useRef(0);
 
   const refresh = useCallback(async () => {
-    if (inFlight.current) return;
+    const epoch = lifecycle.current;
+    if (epoch % 2 === 0) return;
     const bridge = shellBridge();
-    if (!bridge?.primaryChatFleetRoster) {
-      setState("UNAVAILABLE");
-      return;
-    }
-    inFlight.current = true;
+    if (!bridge?.primaryChatFleetRoster) { setState("UNAVAILABLE"); return; }
+    const startedAt = Date.now();
+    const read = rosterReadFlight.run(() => bridge.primaryChatFleetRoster!());
+    if (!read) { if (!observation.current) setState("UNAVAILABLE"); return; }
+    const current = () => lifecycle.current === epoch;
+    let expired = false;
+    const timer = window.setTimeout(() => {
+      expired = true;
+      if (current()) setState(observation.current ? "STALE" : "UNAVAILABLE");
+    }, PRIMARY_ROSTER_FRESH_MS);
     try {
-      const next = await bridge.primaryChatFleetRoster();
-      if (!live.current) return;
+      const next = await read;
+      if (!current() || expired) return;
       if (next?.schema !== "metaengine.browser.primary-chat-fleet-roster.v1" || !Array.isArray(next.actors)) {
-        setState("UNAVAILABLE");
-        return;
+        setState("UNAVAILABLE"); return;
       }
+      const confirmedAt = Date.now();
+      const expiry = startedAt + PRIMARY_ROSTER_FRESH_MS;
+      if (!isPrimaryRosterFresh(expiry, confirmedAt)) { setState(observation.current ? "STALE" : "UNAVAILABLE"); return; }
+      observation.current = { observedAt: confirmedAt, expiresAt: expiry };
+      setObservedAt(confirmedAt);
+      setExpiresAt(expiry);
       setRoster(next);
       setState("LIVE");
     } catch {
-      if (live.current) setState("UNAVAILABLE");
-    } finally {
-      inFlight.current = false;
-    }
+      if (current() && !expired) setState("UNAVAILABLE");
+    } finally { window.clearTimeout(timer); }
   }, []);
 
   useEffect(() => {
-    live.current = true;
-    let cancelled = false;
-    const load = async () => {
-      if (cancelled) return;
-      await refresh();
+    const epoch = ++lifecycle.current;
+    queueMicrotask(() => { if (lifecycle.current === epoch) void refresh(); });
+    const expire = () => {
+      if (observation.current && !isPrimaryRosterFresh(observation.current.expiresAt)) {
+        setState(previous => previous === "LIVE" ? "STALE" : previous);
+      }
     };
-    void load();
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") void load();
+    // Expiry is independent of polling and continues in a hidden window.
+    const expiryTimer = window.setInterval(expire, 1_000);
+    const pollTimer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refresh();
     }, 2_000);
+    document.addEventListener("visibilitychange", expire);
     return () => {
-      cancelled = true;
-      live.current = false;
-      window.clearInterval(timer);
+      lifecycle.current += 1;
+      window.clearInterval(expiryTimer);
+      window.clearInterval(pollTimer);
+      document.removeEventListener("visibilitychange", expire);
     };
   }, [refresh]);
 
-  return { roster, state, refresh };
+  return { roster, state, observedAt, expiresAt, refresh };
 }
 
-function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean; onDetailOpenChange: (open: boolean) => void }) {
+function GoalComposer({ detailOpen, onDetailOpenChange, draft }: { detailOpen: boolean; onDetailOpenChange: (open: boolean) => void; draft: ReturnType<typeof useGoalDraft> }) {
   const setPage = useMe2((s) => s.setPage);
-  const [goal, setGoal] = useState("");
+  const { goal, setGoal, acknowledgeGoal, draftStorage } = draft;
+  const detailTrigger = useRef<HTMLButtonElement | null>(null);
   const [pending, setPending] = useState(false);
   const [receipt, setReceipt] = useState<GoalReceipt | null>(null);
   const [goalMode,setGoalMode]=useState<GoalSubmissionMode|null>(null);
@@ -478,7 +500,7 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
         :next?.schema !== "metaengine.client.goal-submission.v1" || next.exact_activation_readback !== true) {
         throw new Error("goal_readback_invalid");
       }
-      if (mounted.current) { setReceipt(next); setJournalEntry(null); setGoal(""); }
+      if (mounted.current) { setReceipt(next); setJournalEntry(null); acknowledgeGoal(); }
       await loadLatest();
     } catch (cause) {
       if (!mounted.current || submissionSequence !== loadSequence.current) return;
@@ -491,7 +513,7 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
       operation.current = null;
       if (mounted.current) setPending(false);
     }
-  }, [goal, journalEntry?.state, loadLatest, loadReadiness, modeObserver]);
+  }, [goal, acknowledgeGoal, journalEntry?.state, loadLatest, loadReadiness, modeObserver]);
 
   const progress = journalEntry?.progress;
   const nativeReceipt=receipt?.schema==="metaengine.native-coding.goal-admission.v1"?receipt:null;
@@ -517,6 +539,11 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
     : receipt?.schema==="metaengine.native-coding.pending-goal-admission.v1"?"Project awaiting Owner activation · not running"
     : nativeReceipt?"Native goal admitted · execution pending"
     : receipt ? "Queued · accepted" : "";
+  const draftWarning = draftStorage === "UNBOUND"
+    ? "Draft kept in this window only. Your current identity and workspace are not confirmed; copy the text before closing."
+    : draftStorage === "UNAVAILABLE"
+      ? "Draft kept in this window only. Local storage is unavailable; copy the text before closing."
+      : null;
 
   return (
     <section
@@ -524,28 +551,36 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
       data-testid="client-goal-composer"
       aria-label="Client goal"
     >
-      <label htmlFor="client-goal" className="shrink-0 text-[12px] font-medium text-zinc-300">Task</label>
-      <input
-        id="client-goal"
-        value={goal}
-        onChange={(event) => setGoal(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-            event.preventDefault();
-            void submit();
-          }
-        }}
-        maxLength={480}
-        disabled={pending || journalEntry?.state === "RECONCILE_REQUIRED"}
-        placeholder="Describe the task for your agents…"
-        aria-label="User goal"
-        data-testid="client-goal-input"
-        className="h-8 min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 text-[13px] text-zinc-100 placeholder:text-zinc-400 disabled:opacity-60"
-      />
+      <label htmlFor="client-goal" className="hidden shrink-0 sm:block text-[12px] font-medium text-zinc-300">Task</label>
+      <div className="relative min-w-[120px] flex-1">
+        <input
+          id="client-goal"
+          value={goal}
+          onChange={(event) => setGoal(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              void submit();
+            }
+          }}
+          maxLength={480}
+          disabled={draftStorage === "LOADING"}
+          placeholder="Describe the task for your agents…"
+          aria-label="User goal"
+          aria-describedby={draftStorage === "UNAVAILABLE" || draftStorage === "UNBOUND" ? "client-goal-draft-warning" : undefined}
+          data-testid="client-goal-input"
+          className="h-8 w-full min-w-0 rounded-lg border border-zinc-700 bg-zinc-950 pl-3 pr-8 text-[13px] text-zinc-100 placeholder:text-zinc-400 disabled:opacity-60"
+        />
+        {draftWarning ? <button id="client-goal-draft-warning" type="button" data-testid="client-goal-draft-warning"
+          onClick={(event) => { detailTrigger.current = event.currentTarget; onDetailOpenChange(true); }} aria-label={draftWarning} title={draftWarning}
+          className="absolute right-1 top-1 h-6 w-6 rounded text-[12px] font-semibold text-amber-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400">
+          <span aria-hidden="true">!</span><span className="sr-only">{draftWarning}</span>
+        </button> : null}
+      </div>
       <button
         type="button"
         onClick={() => void submit()}
-        disabled={pending || refreshing || recoveryPending || modeRefreshing || !goal.trim() || journalEntry?.state === "RECONCILE_REQUIRED"||goalMode?.state==="HOLD"}
+        disabled={draftStorage === "LOADING" || pending || refreshing || recoveryPending || modeRefreshing || !goal.trim() || journalEntry?.state === "RECONCILE_REQUIRED"||goalMode?.state==="HOLD"}
         data-testid="client-goal-submit"
         className="mc-soft-action h-8 shrink-0 rounded-lg px-4 text-[12px] font-medium disabled:opacity-40"
       >
@@ -569,7 +604,7 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
         disabled={modeRefreshing || pending || refreshing || recoveryPending}
         className="h-8 shrink-0 px-2.5 text-[12px] text-zinc-300" data-testid="client-goal-mode-refresh"
         title="Read the current admission status without submitting or retrying a goal">
-        {modeRefreshing ? "Checking…" : "Check admission"}
+        {modeRefreshing ? "Checking…" : <><span className="hidden sm:inline">Check admission</span><span className="sm:hidden">Check</span></>}
       </button> : null}
       {goalMode?.reason==="NATIVE_PROFILE_BUSY"?<button type="button" onClick={()=>setPage("tasks")}
         className="h-8 shrink-0 px-2.5 text-[12px] text-zinc-300" data-testid="client-native-current-project">View current project</button>:null}
@@ -588,14 +623,15 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
         </button>
       ) : null}
       {(receipt || journalEntry || error || (readiness && !readiness.execution_ready)) ? (
-        <button type="button" onClick={() => onDetailOpenChange(true)} data-testid="client-goal-details"
+        <button type="button" onClick={(event) => { detailTrigger.current = event.currentTarget; onDetailOpenChange(true); }} data-testid="client-goal-details"
           className="h-8 shrink-0 px-2 text-[12px] text-zinc-300 hover:bg-zinc-800">Status</button>
       ) : null}
       {detailOpen ? <Dialog open onOpenChange={onDetailOpenChange}>
         <DialogContent showCloseButton={false} className="mc-dark max-h-[85vh] overflow-y-auto border-zinc-700 bg-[#111114] text-zinc-100" data-testid="client-goal-status-dialog"
-          onCloseAutoFocus={(event) => { event.preventDefault(); document.querySelector<HTMLButtonElement>('[data-testid="client-goal-details"]')?.focus(); }}>
+          onCloseAutoFocus={(event) => { event.preventDefault(); (detailTrigger.current?.isConnected ? detailTrigger.current : document.querySelector<HTMLButtonElement>('[data-testid="client-goal-details"]'))?.focus(); }}>
           <DialogTitle>Task status</DialogTitle>
           <DialogDescription className="text-zinc-400">{status || "No task submitted"}. {pendingReceipt?"Project PAUSED; root BLOCKED. Zero execution permits. Owner activation is required; this is not running or completed.":isNative?"Admission records a native project and task. Execution, independent review, checkpoint and continuation require separate runtime evidence.":"A queued task has been accepted for execution. A received result still requires independent verification before acceptance."}</DialogDescription>
+          {draftWarning ? <p role="status" className="text-[12px] text-amber-200" data-testid="client-goal-draft-detail">{draftWarning}</p> : null}
           {!isNative&&readiness ? <p className="text-[12px] text-zinc-400" data-testid="client-work-readiness-detail">
             Execution: {readiness.label}. {readiness.detail}
           </p> : null}
@@ -646,16 +682,9 @@ function PageOutlet({ page }: { page: PageKey }) {
   }
 }
 
-function actorTone(actor: PrimaryChatActor) {
-  const state = String(actor.state || "").toUpperCase();
-  if (state === "ACTIVE") return "bg-emerald-400";
-  if (state === "BOUND_UNVERIFIED" || state === "PROVISIONING") return "bg-amber-400";
-  return "bg-rose-400";
-}
-
 function ChatFleetRail({ pickerOpen, onPickerOpenChange }: { pickerOpen: boolean; onPickerOpenChange: (open: boolean) => void }) {
   const setPage = useMe2((s) => s.setPage);
-  const { roster, state, refresh } = usePrimaryChatRoster();
+  const { roster, state, observedAt, expiresAt, refresh } = usePrimaryChatRoster();
   const attemptedInitial = useRef<string | null>(null);
   const selectionInFlight = useRef(false);
   const [selecting, setSelecting] = useState<string | null>(null);
@@ -670,7 +699,7 @@ function ChatFleetRail({ pickerOpen, onPickerOpenChange }: { pickerOpen: boolean
   const selectedActorId = roster.selected_actor_id;
 
   const select = useCallback(async (actor: PrimaryChatActor) => {
-    if (selectionInFlight.current || state !== "LIVE" || !actor.exact_native_binding) return;
+    if (selectionInFlight.current || state !== "LIVE" || !isPrimaryRosterFresh(expiresAt) || !actor.exact_native_binding) return;
     selectionInFlight.current = true;
     setSelecting(actor.actor_id);
     setSelectionError(null);
@@ -693,7 +722,7 @@ function ChatFleetRail({ pickerOpen, onPickerOpenChange }: { pickerOpen: boolean
       selectionInFlight.current = false;
       setSelecting(null);
     }
-  }, [onPickerOpenChange, refresh, state]);
+  }, [expiresAt, onPickerOpenChange, refresh, state]);
 
   // One bounded startup choice only when Browser has no selected managed actor.
   // No retry loop: exact binding must already exist for selection to succeed.
@@ -712,6 +741,7 @@ function ChatFleetRail({ pickerOpen, onPickerOpenChange }: { pickerOpen: boolean
       </div>
       {rows.map((actor) => {
         const selected = selectedActorId === actor.actor_id;
+        const activity = primaryChatActivity(actor, state, expiresAt);
         return (
           <button
             key={actor.actor_id}
@@ -737,8 +767,8 @@ function ChatFleetRail({ pickerOpen, onPickerOpenChange }: { pickerOpen: boolean
               </small>
             </span>
             <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-zinc-400">
-              <i aria-hidden className={`h-1.5 w-1.5 rounded-full ${actorTone(actor)}`} />
-              {selecting === actor.actor_id ? "Opening…" : actor.recovery_required ? "Check session" : actor.state.toLowerCase().replaceAll("_", " ")}
+              <i aria-hidden className={`h-1.5 w-1.5 rounded-full ${activity.tone}`} />
+              {selecting === actor.actor_id ? "Opening…" : activity.label}
             </span>
           </button>
         );
@@ -749,13 +779,17 @@ function ChatFleetRail({ pickerOpen, onPickerOpenChange }: { pickerOpen: boolean
   const content = <>
       <div className="flex h-12 shrink-0 items-center justify-between border-b border-zinc-800 px-3">
         <div><strong className="block text-[13px] font-medium text-zinc-200">Chat sessions</strong>
-          <span className="text-[11px] text-zinc-400">ChatGPT · {state === "LIVE" ? `${roster.actor_count} sessions` : state === "LOADING" ? "Connecting…" : "Roster unavailable"}</span></div>
+          <span className="text-[11px] text-zinc-400">ChatGPT · {state === "LIVE" ? `${roster.actor_count} sessions` : state === "LOADING" ? "Connecting…" : state === "STALE" ? "Roster stale" : "Roster unavailable"}</span></div>
         <button type="button" onClick={() => void refresh()} className="h-8 px-2 text-[11px] text-zinc-300 hover:bg-zinc-800">Refresh</button>
       </div>
+      {observedAt !== null ? <p className="px-3 pt-2 text-[10px] text-zinc-500" data-testid="chat-roster-observed-at">
+        Last confirmed read: {new Date(observedAt).toISOString()} · fresh for at most 6 seconds
+      </p> : null}
       <div className="shrink-0 p-3"><input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Find an agent…"
         aria-label="Filter chat agents" className="h-8 w-full border border-zinc-700 bg-zinc-950 px-2 text-[12px] text-zinc-200" /></div>
       <div className="mc-scroll min-h-0 flex-1 overflow-y-auto pb-3">
         {state === "LOADING" && ordered.length === 0 ? <p role="status" className="px-3 py-4 text-[12px] text-zinc-400">Connecting to the Browser…</p> : null}
+        {state === "STALE" ? <p role="status" className="px-3 py-4 text-[12px] text-amber-300">Previous chat sessions are shown. Current activity is unconfirmed.</p> : null}
         {state === "UNAVAILABLE" ? <p role="status" className="px-3 py-4 text-[12px] text-amber-300">The Browser roster is unavailable. Refresh to reconnect.{roster.actor_count ? " Previous agents are shown below." : ""}</p> : null}
         {selectionError ? <p role="alert" className="px-3 pb-3 text-[12px] text-amber-300">{selectionError}</p> : null}
         {state === "LIVE" && ordered.length === 0 ? <div className="mx-3 rounded-xl bg-zinc-900/70 p-4 text-[13px] leading-relaxed text-zinc-400">
@@ -810,7 +844,11 @@ function PrimaryChatFleetWorkspace({ pickerOpen, onPickerOpenChange }: { pickerO
   );
 }
 
-export function Me2Shell() {
+export function Me2Shell({ draftScope = null }: { draftScope?: GoalDraftScope | null } = {}) {
+  // No authenticated scope is exposed by the current native UI contract.
+  // Keep unknown drafts in this shell only; never restore from a global key.
+  const goalDraft = useGoalDraft(draftScope);
+  const goalDraftScopeKey = draftScope === null ? "unbound" : goalDraftStorageKey(draftScope);
   const page = useMe2((s) => s.page);
   const init = useMe2((s) => s.init);
   const paletteOpen = useMe2((s) => s.paletteOpen);
@@ -852,7 +890,7 @@ export function Me2Shell() {
       data-main-workspace={mainWorkspace ? "chat-fleet" : "advanced"}
     >
       <TopBar fleetPickerOpen={fleetPickerOpen} onOpenFleet={() => setFleetPickerOpen(true)} />
-      {mainWorkspace ? <GoalComposer detailOpen={goalDetailOpen} onDetailOpenChange={setGoalDetailOpen} /> : null}
+      {mainWorkspace ? <GoalComposer key={goalDraftScopeKey} draft={goalDraft} detailOpen={goalDetailOpen} onDetailOpenChange={setGoalDetailOpen} /> : null}
       <main
         className={mainWorkspace ? "min-h-0 min-w-0 flex-1 overflow-hidden" : "min-h-0 min-w-0 flex-1 overflow-auto p-5 sm:p-6"}
         data-testid="page-outlet"

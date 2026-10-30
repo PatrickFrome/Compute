@@ -55,7 +55,8 @@ function fixture(t) {
     loadReadiness: () => { readinessStarted.resolve(); return bridge.workReadiness(); },
     loadLatest: async () => {},
     setError: value => errors.push(value), setPending: value => pending.push(value),
-    setReceipt: value => receipts.push(value), setGoal: value => goals.push(value), setJournalEntry() {},
+    setReceipt: value => receipts.push(value), setGoal: value => goals.push(value),
+    acknowledgeGoal: () => goals.push(''), setJournalEntry() {},
   });
   return {
     invoke, readiness, readinessStarted, sent, errors, pending, receipts, goals, operation,
