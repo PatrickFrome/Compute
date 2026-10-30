@@ -61,3 +61,17 @@ test('current security, PG and release checks are still registered (never infer 
   assert.match(workflow('metaengine-browser-self-update-e2e'), /windows-2022/);
   assert.match(workflow('client-c2-existing-worker-w71'), /postgres:17/);
 });
+
+test('superseded source qualifications cancel within their own PR while immutable package reservation stays serialized',()=>{
+ for(const [name,group] of [['client-source-candidate-w73','client-current-source'],['client-live-mechanics-recovery-v1','client-live-mechanics'],['client-checkpoint-reconciliation-qualification','checkpoint-reconciliation']]){
+  const text=workflow(name);
+  assert.ok(text.includes('group: '+group+'-${{ github.event.pull_request.number || github.ref }}'));
+  const block=/^concurrency:\r?\n([\s\S]*?)(?=^\S)/m.exec(text)?.[1];
+  assert.ok(block,'bounded workflow concurrency block');
+  assert.match(block,/^  cancel-in-progress: true\r?$/m);
+  assert.match(text,/windows-2025/);
+ }
+ const packaging=workflow('browser-windows-package-smoke');
+ assert.ok(packaging.includes('group: browser-windows-package-version-${{ needs.package_identity_preflight.outputs.package_version }}'));
+ assert.match(packaging,/cancel-in-progress: false/);
+});

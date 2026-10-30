@@ -23,6 +23,11 @@ on:
 permissions:
   contents: read
 
+# Superseded source-only generations cannot qualify the current candidate.
+concurrency:
+  group: client-current-source-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   exact-integrated-source:
     strategy:

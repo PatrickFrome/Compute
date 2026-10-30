@@ -112,10 +112,10 @@ function Read-KernelBootId {
  } finally {[Runtime.InteropServices.Marshal]::FreeHGlobal($buffer)}
 }
 $boot=Read-KernelBootId
-$system=Get-CimInstance Win32_Process -Filter 'ProcessId=4'
+$system=Get-CimInstance Win32_Process -Filter 'ProcessId=4' -Property Name,CreationDate
 if(-not $system -or $system.Name -ne 'System' -or -not $system.CreationDate){throw 'system_process_absent'}
-$birth=$system.CreationDate.ToUniversalTime();$os=Get-CimInstance Win32_OperatingSystem
-$again=Get-CimInstance Win32_Process -Filter 'ProcessId=4'
+$birth=$system.CreationDate.ToUniversalTime();$os=Get-CimInstance Win32_OperatingSystem -Property LastBootUpTime,Version
+$again=Get-CimInstance Win32_Process -Filter 'ProcessId=4' -Property Name,CreationDate
 if(-not $again -or $again.CreationDate.ToUniversalTime().ToFileTimeUtc() -ne $birth.ToFileTimeUtc() -or (Read-KernelBootId) -ne $boot){throw 'kernel_boot_changed'}
 @{schema='metaengine.windows.kernel-boot.v1';kernel_boot_id=$boot;
 system_process=@{pid=4;created_at=$birth.ToString('o');created_100ns=$birth.ToFileTimeUtc().ToString()};
