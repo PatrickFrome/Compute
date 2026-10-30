@@ -7,7 +7,7 @@ import {PassThrough} from 'node:stream';
 const source=await fs.readFile(new URL('../src/codex-cli-sandbox-probe.mjs',import.meta.url),'utf8');
 const start=source.indexOf('export async function runCodexCliSandboxProbe(');
 assert.ok(start>0);
-function fixture({failOpen=0,failSpawn=false,failResume=false,failSync=false,failTerminate=false,holdSync=false,failWrite=false,overflow=false,emitReport=false}={}){
+function fixture({failOpen=0,failSpawn=false,failResume=false,failSync=false,failTerminate=false,holdSync=false,failWrite=false,overflow=false,emitReport=false,pathApi=path}={}){
  const handles=[],events=[];let opens=0,finish,finishSync;
  const syncGate=new Promise(resolve=>{finishSync=resolve;});
  const completion=new Promise(resolve=>{finish=resolve;});
@@ -17,8 +17,8 @@ function fixture({failOpen=0,failSpawn=false,failResume=false,failSync=false,fai
  const files={realpath:async p=>p,mkdir:async()=>{},writeFile:async()=>{},readFile:async()=>Buffer.from('fixture'),unlink:async()=>{},rmdir:async()=>{},
   open:async()=>{if(++opens===failOpen)throw Error('generated_open_failure');const h={closed:false,bytes:0,write:async()=>{throw Error('partial-write API must not be used');},writeFile:async bytes=>{if(failWrite&&handles.indexOf(h)<2)throw Error('generated_write_failure');h.bytes+=Buffer.byteLength(bytes);},sync:async()=>{if(holdSync&&handles.indexOf(h)===1)await syncGate;if(failSync)throw Error('generated_sync_failure');},close:async()=>{h.closed=true;events.push('close');}};handles.push(h);return h;}};
  const run=vm.runInNewContext(source.slice(start).replace('export async function','async function')+'\nrunCodexCliSandboxProbe',{
-  fs:files,path,Buffer,process:{platform:'win32',env:{LOCALAPPDATA:'/fixture/local',USERPROFILE:'/fixture/user'}},
-  randomUUID:()=> '11111111-1111-4111-8111-111111111111',modeValid:()=>true,isWithin:(a,b)=>{const r=path.relative(a,b);return r!==''&&!r.startsWith('..')&&!path.isAbsolute(r);},
+  fs:files,path:pathApi,Buffer,process:{platform:'win32',env:{LOCALAPPDATA:'/fixture/local',USERPROFILE:'/fixture/user'}},
+  randomUUID:()=> '11111111-1111-4111-8111-111111111111',modeValid:()=>true,isWithin:(a,b)=>{const r=pathApi.relative(a,b);return r!==''&&!r.startsWith('..')&&!pathApi.isAbsolute(r);},
   CODEX_SANDBOX_PROBE_SCHEMA:'metaengine.codex-cli.sandbox-probe.v1',evaluateCodexSandboxProbe:()=>({state:'OBSERVED',reason:null,boundary_observed:true,execution_authorized:false,authority_effect:false}),
   canaryScript:()=> 'fixture-only',windowsSandboxBootIdentity:()=> 'fixture',protectOwnerOnlyWindowsDirectory:async()=>({owner_dacl_verified:true}),
   verifyOwnerOnlyWindowsStorage:async()=>({owner_dacl_verified:true}),digest:()=> 'a'.repeat(64),buildCodexSandboxProbeArgs:()=>[],
@@ -34,9 +34,16 @@ test('probe refuses absent explicit home or scratch selection before creating fi
   assert.equal(f.handles.length,0);assert.equal(f.events.includes('spawn'),false);
  }
 });
-test('probe refuses authentication home overlapping worktree, receipts or scratch',async()=>{
- for(const codexHome of ['/fixture/work','/fixture/work/auth','/fixture/receipts','/fixture/scratch','/fixture/scratch/auth']){
-  const f=fixture();await assert.rejects(f.run({codexHome}),/home_scope_invalid/);
+test('probe refuses authentication home overlapping worktree, receipts or scratch',{timeout:5000},async()=>{
+ for(const pathApi of [path,path.win32])for(const codexHome of ['/fixture/work','/fixture/work/auth','/fixture/receipts','/fixture/scratch','/fixture/scratch/auth']){
+  const f=fixture({pathApi});await assert.rejects(f.run({codexHome}),/home_scope_invalid/);
+  assert.equal(f.handles.length,0);assert.equal(f.events.includes('spawn'),false);
+ }
+});
+test('Windows drive and case aliases cannot bypass probe root separation',{timeout:5000},async()=>{
+ for(const codexHome of ['c:/FIXTURE/work','c:/fixture/RECEIPTS','c:/FIXTURE/scratch','C:/fixture/scratch/']){
+  const f=fixture({pathApi:path.win32});
+  await assert.rejects(f.run({codexHome,workspaceRoot:'C:/fixture/work',receiptDirectory:'C:/fixture/receipts',scratchRoot:'C:/fixture/scratch'}),/home_scope_invalid/);
   assert.equal(f.handles.length,0);assert.equal(f.events.includes('spawn'),false);
  }
 });

@@ -178,8 +178,9 @@ export async function runCodexCliSandboxProbe({ cliPath, workspaceRoot, receiptD
   // The authenticated preparation caller must select these roots explicitly.
   // Ambient profile/home variables are never a substitute for that choice.
   const home=await fs.realpath(codexHome),scratchParent=path.resolve(scratchRoot);
-  if (home===workspace||home===receipts||isWithin(workspace,home)||isWithin(home,workspace)
-    ||isWithin(receipts,home)||isWithin(home,receipts)||home===scratchParent
+  const sameRoot=(a,b)=>path.relative(a,b)==='';
+  if (sameRoot(home,workspace)||sameRoot(home,receipts)||isWithin(workspace,home)||isWithin(home,workspace)
+    ||isWithin(receipts,home)||isWithin(home,receipts)||sameRoot(home,scratchParent)
     ||isWithin(home,scratchParent)||isWithin(scratchParent,home)) throw Error('codex_sandbox_probe_home_scope_invalid');
   await verifyOwnerOnlyWindowsStorage(home,{operation:'VERIFY_DIRECTORY'});
   if (!path.isAbsolute(scratchParent) || isWithin(receipts, scratchParent) || isWithin(workspace, scratchParent)) throw Error('codex_sandbox_probe_scratch_root_invalid');
