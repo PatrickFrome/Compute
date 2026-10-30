@@ -9,5 +9,5 @@ import {nativeCodingCanonicalJson} from '../../src/native-coding-task-context.mj
 const source=await fs.readFile(new URL('../../src/native-coding-agent-run-bridge.mjs',import.meta.url),'utf8');
 export const prepareUnqualifiedBridgeFixture=new Function('requireNativeRunCallbackPublication','createHash','createNativeCodingAgentMcpBroker',
  'nativeCodingAgentMcpIntentBodySha256','createNativeCodingAgentMcpLaunch','validateNativeCodingAgentHostRequest','canonical',
- source.replace(/^import .*;\n/gm,'').replace('export async function','async function')+'\nreturn prepareNativeCodingAgentRunBridge;')
+ source.replace(/^import .*;\r?\n/gm,'').replace('export async function','async function')+'\nreturn prepareNativeCodingAgentRunBridge;')
  (()=>{},createHash,createNativeCodingAgentMcpBroker,nativeCodingAgentMcpIntentBodySha256,createNativeCodingAgentMcpLaunch,validateNativeCodingAgentHostRequest,nativeCodingCanonicalJson);
