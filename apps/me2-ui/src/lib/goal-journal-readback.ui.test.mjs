@@ -68,6 +68,8 @@ function fixture(initial = entry()) {
     setRefreshing() {},
     setPending(value) { observations.pending.push(value); },
     setGoal(value) { context.goal = value; },
+    acknowledgeGoal() { context.goal = ''; },
+    isDraftCurrent: () => true,
   });
   context.loadLatest = callback('loadLatest', context);
   return { context, bridge, observations, load: context.loadLatest,
@@ -281,7 +283,7 @@ function renderElement(node,context){
 }
 test('actual prepared button says Save goal, HOLD disables it, Enter invokes the same callback',async()=>{
  let submissions=0;const submit=async()=>{submissions++;};
- const context={pending:false,refreshing:false,recoveryPending:false,modeRefreshing:false,goal:'My objective',journalEntry:null,
+ const context={pending:false,refreshing:false,recoveryPending:false,modeRefreshing:false,draftStorage:'SAVED',goal:'My objective',journalEntry:null,
   goalMode:{kind:'PREPARED_GOAL',state:'HOST_VERIFICATION_REQUIRED'},submit};
  const button=renderElement(jsxByTestId('client-goal-submit'),context);assert.equal(button.children[0],'Save goal');assert.equal(button.props.disabled,false);
  button.props.onClick();assert.equal(submissions,1);

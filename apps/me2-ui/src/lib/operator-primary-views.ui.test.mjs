@@ -23,7 +23,8 @@ test('bounded initial loading, native reader unbound, timeout and opaque error e
   assert.match(page, /useState<PrimaryDelivery>\("LOADING"\)/);
   assert.match(page, /setDelivery\("UNBOUND"\)/);
   assert.match(page, /setDelivery\(checkpoint\.current\.mode === "TRACKING" \? "READING" : "LOADING"\)/);
-  assert.match(page, /"TIMED_OUT" : "FAILED"/);
+  assert.match(page, /setDelivery\("TIMED_OUT"\)/);
+  assert.match(page, /setDelivery\("FAILED"\)/);
   assert.match(page, /data-testid="operator-primary-boundary"/);
   assert.match(page, /data-testid="operator-primary-missing"/);
 });

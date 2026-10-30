@@ -552,7 +552,7 @@ async function main() {
     await waitFor(shellView.webContents, "document.querySelector('[data-testid=admin-connection-badge]')?.getAttribute('data-admin-ready') === 'true' && document.querySelector('[data-testid=admin-connection-badge]')?.getAttribute('data-work-reason') === 'SUPERVISOR_RECOVERY_REQUIRED'");
     const mainCapture = await capture(shellView, 'r97-chat-fleet-main-1440x960');
     assertMain(mainCapture);
-    if (mainCapture.metrics.work_badge?.state !== 'BLOCKED' || mainCapture.metrics.work_badge?.text !== 'Recovery required') throw new Error('ui1_admin_connection_masquerades_as_execution_ready');
+    if (mainCapture.metrics.work_badge?.state !== 'BLOCKED' || mainCapture.metrics.work_badge?.text !== 'Chat: Recovery required') throw new Error('ui1_admin_connection_masquerades_as_execution_ready');
     evidence.captures.push(mainCapture);
     evidence.exact_main_workspace = true;
     evidence.connected_not_ready_verified = true;
@@ -562,7 +562,7 @@ async function main() {
     runtimeFixtureMode = 'READY';
     await waitFor(shellView.webContents, "document.querySelector('[data-testid=admin-connection-badge]')?.getAttribute('data-work-state') === 'READY'");
     const readyCapture = await capture(shellView, 'ui1-readiness-ready-1440x960');
-    if (readyCapture.metrics.work_badge?.text !== 'Chats ready') throw new Error('ui1_positive_chat_readiness_label_missing');
+    if (readyCapture.metrics.work_badge?.text !== 'Chat: Chats ready') throw new Error('ui1_positive_chat_readiness_label_missing');
     if (readyCapture.metrics.work_badge?.autonomous_ready_color === true) throw new Error('ui1_chat_readiness_masquerades_as_autonomous_coding');
     evidence.captures.push(readyCapture);
     evidence.positive_readiness_verified = true;
