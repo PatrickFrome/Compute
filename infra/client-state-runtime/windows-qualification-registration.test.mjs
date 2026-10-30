@@ -76,3 +76,10 @@ test('identity persistence and sealed Owner races remain in Windows qualificatio
  }
  assert.ok(paths.some(pattern=>matches('apps/metaengine-browser/src/supervisor-device-identity.mjs',pattern)));
 });
+
+
+test('W74 pre-seal lifetime has real PostgreSQL coverage in Windows qualification',()=>{
+ const file='infra/client-state-runtime/host-owner-preseal-w74.pg17.test.mjs';
+ assert.ok(source.includes("'"+file+"',"));assert.ok(paths.some(pattern=>matches(file,pattern)));
+ assert.ok(paths.some(pattern=>matches('apps/metaengine-browser/src/host-owner-genesis-custody-w74.mjs',pattern)));
+});

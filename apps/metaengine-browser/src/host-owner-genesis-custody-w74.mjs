@@ -36,32 +36,45 @@ export const W74_SCOPE_LOCK_SQL = `SELECT pg_catalog.pg_advisory_xact_lock(
 export function createHostOwnerGenesisCustodyW74({
   identity, transaction, readAuthenticatedAdmin, readGuardian,
   readSourceProof, readNativeKernel, readSealed, writeSealed,
-  now = Date.now, staging = false,
+  now = Date.now, staging = false, assertLifetime = () => {},
 } = {}) {
   if (!identity || typeof identity.ensure !== 'function' ||
       typeof identity.snapshot !== 'function' ||
       [transaction,readAuthenticatedAdmin,readGuardian,readSourceProof,
-        readNativeKernel,readSealed,writeSealed,now].some(f=>typeof f !== 'function'))
+        readNativeKernel,readSealed,writeSealed,now,assertLifetime].some(f=>typeof f !== 'function'))
     throw new Error('w74_private_authorities_required');
-  let closed = false, pending = Promise.resolve();
+  let closed = false, pending = Promise.resolve(), invalidLifetimeWork = Promise.resolve();
   const serialized = action => {
     const p = pending.then(action,action);
     pending = p.catch(()=>null);
     return p;
   };
+  const open = () => {
+    if (closed) throw new Error('w74_custody_closed');
+    // This private synchronous gate can only remove authority (e.g. Host
+    // generation loss/cancellation). It cannot replace any native/SQL proof.
+    const result = assertLifetime();
+    if (result && typeof result.then === 'function') {
+      // A misconfigured async refusal gate must never become authority, leak
+      // an unhandled rejection, or escape lifecycle draining.
+      invalidLifetimeWork = Promise.all([invalidLifetimeWork,
+        Promise.resolve(result).catch(()=>null)]).then(()=>undefined);
+      throw new Error('w74_synchronous_lifetime_required');
+    }
+  };
   const check = async () => {
-    if (closed) return null;
-    await identity.ensure();
+    open();
+    await identity.ensure();open();
     const device = identity.snapshot();
     if (!UUID.test(device?.client_id || '') || !UUID.test(device?.device_id || '') ||
         !HEX.test(device?.key_fingerprint_sha256 || '') || device?.enrolled !== true) return null;
-    const admin = await readAuthenticatedAdmin();
+    const admin = await readAuthenticatedAdmin();open();
     if (!admin || admin.device_id !== device.device_id ||
         admin.client_id !== device.client_id ||
         !Number.isSafeInteger(admin.admin_grant_epoch) || admin.admin_grant_epoch < 1 ||
         admin.access_tier !== 'ADMIN' || admin.admin_ready !== true || mark(admin)) return null;
-    const native = await readGuardian();
-    const second = await readGuardian();
+    const native = await readGuardian();open();
+    const second = await readGuardian();open();
     if (!same(native,second,['guardian_client_pid','guardian_client_created_at',
       'guardian_client_process_incarnation_id','guardian_device_key_fingerprint_sha256',
       'guardian_enrollment_evidence_sha256','schema','state',
@@ -80,10 +93,10 @@ export function createHostOwnerGenesisCustodyW74({
       client_creation_time_100ns:m[2],client_process_incarnation_id:
         native.guardian_client_process_incarnation_id});
     if (!decoded || time(decoded.created_at) !== time(native.guardian_client_created_at)) return null;
-    const kernel = await readNativeKernel(native.guardian_client_pid);
+    const kernel = await readNativeKernel(native.guardian_client_pid);open();
     if (!validKernel(kernel) || kernel.pid !== native.guardian_client_pid ||
         time(kernel.created_at) !== time(native.guardian_client_created_at)) return null;
-    const source = await readSourceProof();
+    const source = await readSourceProof();open();
     // The existing release signer / exact executable bytes must be
     // independently attested by W68. A generated fixture is always STAGING.
     if (!source || source.source !== 'INSTALLED_EXE_NATIVE_VERIFIER' ||
@@ -101,6 +114,11 @@ export function createHostOwnerGenesisCustodyW74({
         !HEX.test(source.installed_exe_sha256 || '') ||
         !HEX.test(source.proof_identity || '') ||
         (!staging && mark(source))) return null;
+    const currentAdmin = await readAuthenticatedAdmin();open();
+    const currentDevice = identity.snapshot();
+    if (!same(device,currentDevice,['client_id','device_id','key_fingerprint_sha256','enrolled']) ||
+        !same(admin,currentAdmin,['device_id','client_id','admin_grant_epoch','access_tier','admin_ready']) ||
+        mark(currentAdmin)) return null;
     return {device,admin,native,kernel,source};
   };
   const scope = async (tx, x, {lock = false} = {}) => {
@@ -127,6 +145,12 @@ export function createHostOwnerGenesisCustodyW74({
     record.process_incarnation_id === x.native.guardian_client_process_incarnation_id &&
     Number.isSafeInteger(record.generation) && record.generation > 0 &&
     (staging ? mark(x.source) : !mark(x.source));
+  const sameEvidence = (before, after) => !!after &&
+    before.admin.admin_grant_epoch === after.admin.admin_grant_epoch &&
+    same(before.device,after.device,['client_id','device_id','key_fingerprint_sha256']) &&
+    same(before.native,after.native,['guardian_client_pid','guardian_client_process_incarnation_id',
+      'guardian_enrollment_evidence_sha256']) &&
+    same(before.source,after.source,['source_sha','installed_exe_sha256','proof_identity','package_code_sha256']);
   const read = () => serialized(async () => {
     try {
       const x = await check();
@@ -196,7 +220,26 @@ export function createHostOwnerGenesisCustodyW74({
           observed_at:new Date(now()).toISOString(),authority_effect:false,
           ...(staging?{fixture_classification:'STAGING'}:{}),
         });
-        await writeSealed(next,previous);
+        // Native/file/old-process observations above are asynchronous. Neither
+        // a still-open closure nor the earlier project row proves this scope
+        // is current now. Recheck native evidence, then the SAME locked SQL
+        // transaction immediately before entering the protected write.
+        const assertCurrent = async () => {
+          open();
+          const current = await check();
+          if (!sameEvidence(x,current)) throw new Error('w74_preseal_evidence_changed');
+          const locked = await scope(tx,current,{lock:true});
+          open();
+          if (!locked || locked.project_id !== row.project_id ||
+              locked.admin_grant_epoch !== row.admin_grant_epoch)
+            throw new Error('w74_preseal_scope_changed');
+        };
+        await assertCurrent();
+        // The actual identity writer repeats this guard INSIDE its persistence
+        // queue, not merely before queue admission. A queued write cannot outlive
+        // a closed custody binding and begin a new seal with stale authority.
+        await writeSealed(next,previous,{assertCurrent,assertOpen:open});
+        if (closed) return null;
         return next;
       },{readOnly:false,isolationLevel:'serializable'});
       if (!candidate) return null;
@@ -210,11 +253,13 @@ export function createHostOwnerGenesisCustodyW74({
       const postScope = await transaction(tx=>scope(tx,after),{readOnly:true});
       if (!postScope || postScope.project_id !== candidate.project_id ||
           postScope.admin_grant_epoch !== candidate.epoch) return null;
-      const verified = await readSealed();
+      const verified = await readSealed();open();
       if (!same(candidate,verified,identityKeys)) return null;
       if (staging) return Object.freeze({...candidate,fixture_classification:'STAGING'});
       return Object.freeze({...candidate,observed_at:new Date(now()).toISOString()});
     } catch { return null; }
   });
-  return Object.freeze({schema:HOST_OWNER_GENESIS_W74,create,read,close:()=>{closed=true;}});
+  const drain = async () => {await pending;await invalidLifetimeWork;};
+  return Object.freeze({schema:HOST_OWNER_GENESIS_W74,create,read,
+    close:()=>{closed=true;return drain();},drain});
 }

@@ -204,3 +204,85 @@ test('W74 only transfers generation on independently verified old PID death (STA
   assert.equal(successor?.fixture_classification,'STAGING');
   assert.equal(successor?.pid,nextPid);
 });
+
+for (const drift of ['close','source','epoch','host']) test(`W74 pre-seal ${drift} invalidation cannot start a sealed write (STAGING)`,async()=>{
+  const f=fixture();let binding,hostCurrent=true;
+  f.opts.assertLifetime=()=>{if(!hostCurrent)throw Error('TEST_HOST_REPLACED');};
+  const read=f.opts.readSealed;
+  f.opts.readSealed=async()=>{
+    const value=await read();
+    if(drift==='close')void binding.close();
+    if(drift==='source')f.revokeSource();
+    if(drift==='epoch')f.driftEpoch();
+    if(drift==='host')hostCurrent=false;
+    return value;
+  };
+  binding=createHostOwnerGenesisCustodyW74(f.opts);
+  assert.equal(await binding.create(),null);
+  await binding.close();assert.equal(f.writes,0);
+});
+
+test('W74 rechecks SQL after native pre-seal evidence, not before it (STAGING)',async()=>{
+  const f=fixture(),read=f.opts.readSourceProof;let observations=0;
+  f.opts.readSourceProof=async()=>{
+    const result=await read();if(++observations===2)f.dropRows();return result;
+  };
+  const binding=createHostOwnerGenesisCustodyW74(f.opts);
+  assert.equal(await binding.create(),null);assert.equal(f.writes,0);
+  assert.equal(observations,2);await binding.close();
+});
+
+test('W74 close joins already-started native work and fences queued creation (STAGING)',async()=>{
+  const f=fixture(),read=f.opts.readNativeKernel;let entered,release;
+  const started=new Promise(resolve=>entered=resolve),gate=new Promise(resolve=>release=resolve);
+  f.opts.readNativeKernel=async pid=>{entered();await gate;return read(pid);};
+  const binding=createHostOwnerGenesisCustodyW74(f.opts);
+  const first=binding.create();await started;const queued=binding.create();
+  let drained=false;const closing=binding.close().then(()=>{drained=true;});
+  await new Promise(resolve=>setImmediate(resolve));assert.equal(drained,false);
+  release();assert.equal(await first,null);assert.equal(await queued,null);await closing;
+  assert.equal(drained,true);assert.equal(f.writes,0);
+});
+
+test('W74 late close after an irreversible seal joins but cannot return a confirmed Owner (STAGING)',async()=>{
+  const f=fixture(),write=f.opts.writeSealed;let entered,release;
+  const started=new Promise(resolve=>entered=resolve),gate=new Promise(resolve=>release=resolve);
+  f.opts.writeSealed=async(...args)=>{await write(...args);entered();await gate;};
+  const binding=createHostOwnerGenesisCustodyW74(f.opts),attempt=binding.create();
+  await started;let drained=false;const closing=binding.close().then(()=>{drained=true;});
+  await new Promise(resolve=>setImmediate(resolve));assert.equal(drained,false);
+  release();assert.equal(await attempt,null);await closing;
+  assert.equal(f.writes,1,'already-started seal is retained as unconfirmed, not rolled back');
+  assert.equal(await binding.create(),null);assert.equal(f.writes,1,'closed binding cannot retry');
+});
+
+test('W74 current Admin and device must still agree after native evidence awaits (STAGING)',async()=>{
+  for(const drift of ['admin','device']) {
+    const f=fixture(),read=f.opts.readSourceProof;
+    let current=f.opts.identity.snapshot();f.opts.identity={ensure:async()=>{},snapshot:()=>({...current})};
+    f.opts.readSourceProof=async()=>{
+      const proof=await read();
+      if(drift==='admin')f.driftEpoch();else current={...current,device_id:'44444444-4444-4444-8444-444444444444'};
+      return proof;
+    };
+    const binding=createHostOwnerGenesisCustodyW74(f.opts);
+    assert.equal(await binding.create(),null);assert.equal(f.writes,0);await binding.close();
+  }
+});
+
+test('W74 invalid asynchronous lifetime gate is refused and joined without an unhandled rejection',async()=>{
+  const f=fixture();let release;
+  const gate=new Promise(r=>release=r);
+  f.opts.assertLifetime=async()=>{await gate;throw Error('TEST_ASYNC_GATE_REFUSAL');};
+  const binding=createHostOwnerGenesisCustodyW74(f.opts);
+  assert.equal(await binding.create(),null);assert.equal(f.writes,0);
+  let drained=false;const closing=binding.close().then(()=>{drained=true;});
+  await new Promise(r=>setImmediate(r));assert.equal(drained,false);
+  release();await closing;assert.equal(drained,true);assert.equal(f.writes,0);
+});
+
+for(const outcome of ['resolve','reject'])test(`W74 already-settled async lifetime ${outcome} never authorizes a seal`,async()=>{
+  const f=fixture();f.opts.assertLifetime=()=>outcome==='resolve'?Promise.resolve():Promise.reject(Error('TEST_ASYNC_GATE_REJECTED'));
+  const binding=createHostOwnerGenesisCustodyW74(f.opts);
+  assert.equal(await binding.create(),null);await binding.close();assert.equal(f.writes,0);
+});

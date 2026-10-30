@@ -98,11 +98,12 @@ export class SupervisorDeviceIdentity {
     this.#secureStorage = secureStorage;
   }
 
-  #persist(mutate) {
+  #persist(mutate, {beforeReplace = null, assertReplaceOpen = null} = {}) {
     // Mutation and Owner CAS execute together, never against a queued snapshot.
     const operation = this.#writes.then(async () => {
       if (this.#persistenceUncertain) throw new Error('supervisor_device_persistence_uncertain');
-      const shaped = atomicStateShape(await mutate(this.#state));
+      const priorState = this.#state;
+      const shaped = atomicStateShape(await mutate(priorState));
       const temp = `${this.#statePath}.${crypto.randomUUID()}.tmp`;
       let handle = null, owned = false, renameStarted = false;
       try {
@@ -113,6 +114,15 @@ export class SupervisorDeviceIdentity {
         await handle.sync();
         await handle.close();
         handle = null;
+        // W74 alone supplies this private guard. Expensive native/SQL checks
+        // after temp flush cannot race the preceding queued identity mutation.
+        // No await separates the final state fence and initiating replacement.
+        if (beforeReplace) {
+          await beforeReplace();
+          if (this.#persistenceUncertain || this.#state !== priorState)
+            throw new Error('supervisor_device_replacement_state_changed');
+        }
+        assertReplaceOpen?.();
         renameStarted = true;
         await fs.rename(temp, this.#statePath);
         owned = false;
@@ -392,7 +402,7 @@ export class SupervisorDeviceIdentity {
   // incarnation + installed source proof before returning any Host Owner.
   // Only the authenticated private Host/bootstrap composition may bind this.
   bindHostOwnerGenesisW74({ transaction, readAuthenticatedAdmin,
-    readSourceProof, readNativeKernel, staging = false } = {}) {
+    readSourceProof, readNativeKernel, staging = false, assertLifetime = () => {} } = {}) {
     if (this.#w74OwnerCustody || !this.#w67GuardianObservation)
       throw new Error('w74_native_guardian_not_bound');
     const readSealed = async () => {
@@ -407,30 +417,45 @@ export class SupervisorDeviceIdentity {
         throw new Error('w74_protected_owner_record_invalid');
       return record;
     };
-    const writeSealed = async (next, previous) => {
+    const writeSealed = async (next, previous, {assertCurrent,assertOpen} = {}) => {
       await this.ensure();
-      await this.#persist(async state => {
+      const assertPrevious = async state => {
         const current = await readSealed();
         if (JSON.stringify(current) !== JSON.stringify(previous))
           throw new Error('w74_owner_cas_changed');
         if (!state?.device_id || state.device_id !== next.device_id ||
             state.client_id !== next.owner_id)
           throw new Error('w74_owner_device_changed');
+        if (typeof assertCurrent !== 'function' || typeof assertOpen !== 'function')
+          throw new Error('w74_preseal_guard_required');
+        await assertCurrent();
+      };
+      let expectedState;
+      await this.#persist(async state => {
+        expectedState = state;
+        await assertPrevious(state);
         const encoded = Buffer.from(this.#secureStorage.encryptString(
           JSON.stringify(next))).toString('base64');
         return { ...state, encrypted_host_owner_record_b64: encoded };
-      });
+      }, {beforeReplace:async () => {
+        if (this.#state !== expectedState) throw new Error('w74_owner_cas_changed');
+        await assertPrevious(expectedState);
+      },assertReplaceOpen:assertOpen});
     };
     const bound = createHostOwnerGenesisCustodyW74({
       identity:this,transaction,readAuthenticatedAdmin,
       readGuardian:()=>this.readGuardianOwnerEvidenceW67(),
-      readSourceProof,readNativeKernel,readSealed,writeSealed,staging,
+      readSourceProof,readNativeKernel,readSealed,writeSealed,staging,assertLifetime,
     });
     this.#w74OwnerCustody = bound;
     return () => {
       if (this.#w74OwnerCustody !== bound) return;
-      bound.close();
-      this.#w74OwnerCustody = null;
+      const drained = bound.close();
+      // Retain this closed binding until every started native read and queued
+      // persistence operation has settled. Rebinding cannot race its drain.
+      return drained.then(() => {
+        if (this.#w74OwnerCustody === bound) this.#w74OwnerCustody = null;
+      });
     };
   }
 

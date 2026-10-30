@@ -11,6 +11,8 @@ on:
       - 'apps/metaengine-browser/src/client-goal-journal.mjs'
       - 'apps/metaengine-browser/src/main.mjs'
       - 'apps/metaengine-browser/src/supervisor-device-identity.mjs'
+      - 'apps/metaengine-browser/src/host-owner-genesis-custody-w74.mjs'
+      - 'infra/client-state-runtime/host-owner-preseal-w74.pg17.test.mjs'
       - 'apps/metaengine-browser/test/supervisor-device-identity-concurrency.test.mjs'
       - 'apps/metaengine-browser/test/host-owner-*-w74.test.mjs'
       - 'apps/metaengine-browser/test/client-native-*.test.mjs'
@@ -220,6 +222,7 @@ jobs:
           const native=[
             'infra/client-state-runtime/native-coding-workspace-preparation.pg17.test.mjs',
             'infra/client-state-runtime/native-coding-pending-goal.pg17.test.mjs',
+            'infra/client-state-runtime/host-owner-preseal-w74.pg17.test.mjs',
             'infra/client-state-runtime/native-coding-checkpoint-reconciliation.integration.test.mjs',
             'infra/client-state-runtime/native-coding-host-commit.integration.test.mjs',
             'infra/client-state-runtime/native-coding-host-commit-profile.integration.test.mjs',
