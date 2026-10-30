@@ -59,3 +59,20 @@ test('pending goal actual caller and native PG anti-execution guards are mandato
  for(const file of ['apps/metaengine-browser/src/client-prepared-goal.mjs','apps/metaengine-browser/test/client-prepared-goal.test.mjs','apps/metaengine-browser/src/client-goal-journal.mjs','infra/client-state-runtime/native-coding-pending-goal-v1.sql'])assert.ok(paths.some(pattern=>matches(file,pattern)),file);
  for(const name of ['apps/metaengine-browser/test/client-prepared-goal.test.mjs','infra/client-state-runtime/native-coding-pending-goal.pg17.test.mjs'])assert.ok(source.includes("'"+name+"',"),name);
 });
+
+
+test('Windows suites isolate file-owned identity and journal singletons without removing cases',()=>{
+ assert.ok(source.includes("'--test-isolation=process'"));
+ assert.ok(!source.includes("'--test-isolation=none'"));
+ assert.ok(source.includes("'--test-concurrency=1'"));
+ assert.ok(source.includes("'apps/metaengine-browser/test/client-prepared-goal.test.mjs'"));
+ assert.ok(source.includes("'apps/metaengine-browser/test/devos-native-task-cycle.test.mjs'"));
+});
+
+
+test('identity persistence and sealed Owner races remain in Windows qualification',()=>{
+ for(const file of ['supervisor-device-identity-concurrency.test.mjs','host-owner-protected-identity-w74.test.mjs','host-owner-genesis-custody-w74.test.mjs']){
+  const full='apps/metaengine-browser/test/'+file;assert.ok(source.includes("'"+full+"',"));assert.ok(paths.some(pattern=>matches(full,pattern)));
+ }
+ assert.ok(paths.some(pattern=>matches('apps/metaengine-browser/src/supervisor-device-identity.mjs',pattern)));
+});

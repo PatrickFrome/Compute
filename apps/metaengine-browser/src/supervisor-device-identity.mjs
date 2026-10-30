@@ -87,6 +87,8 @@ export class SupervisorDeviceIdentity {
   #w67PrivatePostgresBirth = null;
   #w67GuardianObservation = null;
   #w74OwnerCustody = null;
+  #writes = Promise.resolve();
+  #persistenceUncertain = false;
 
   constructor({ statePath, secureStorage }) {
     if (!statePath) throw new Error('supervisor_device_state_path_required');
@@ -96,15 +98,38 @@ export class SupervisorDeviceIdentity {
     this.#secureStorage = secureStorage;
   }
 
-  async #persist(next) {
-    const shaped = atomicStateShape(next);
-    const dir = path.dirname(this.#statePath);
-    const temp = `${this.#statePath}.tmp`;
-    await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(temp, `${JSON.stringify(shaped, null, 2)}\n`, { mode: 0o600 });
-    await fs.rename(temp, this.#statePath);
-    this.#state = shaped;
-    return this.snapshot();
+  #persist(mutate) {
+    // Mutation and Owner CAS execute together, never against a queued snapshot.
+    const operation = this.#writes.then(async () => {
+      if (this.#persistenceUncertain) throw new Error('supervisor_device_persistence_uncertain');
+      const shaped = atomicStateShape(await mutate(this.#state));
+      const temp = `${this.#statePath}.${crypto.randomUUID()}.tmp`;
+      let handle = null, owned = false, renameStarted = false;
+      try {
+        await fs.mkdir(path.dirname(this.#statePath), { recursive: true });
+        handle = await fs.open(temp, 'wx', 0o600);
+        owned = true;
+        await handle.writeFile(`${JSON.stringify(shaped, null, 2)}\n`);
+        await handle.sync();
+        await handle.close();
+        handle = null;
+        renameStarted = true;
+        await fs.rename(temp, this.#statePath);
+        owned = false;
+        this.#state = shaped;
+        return this.snapshot();
+      } catch (error) {
+        // A rename error need not prove that replacement did not happen. Never
+        // retry or authorize further writes from the possibly stale cache.
+        if (renameStarted) this.#persistenceUncertain = true;
+        throw error;
+      } finally {
+        if (handle) await handle.close().catch(() => {});
+        if (owned) await fs.unlink(temp).catch(() => {});
+      }
+    });
+    this.#writes = operation.catch(() => {});
+    return operation;
   }
 
   async #loadExisting() {
@@ -144,6 +169,7 @@ export class SupervisorDeviceIdentity {
   }
 
   async ensure() {
+    if (this.#persistenceUncertain) throw new Error('supervisor_device_persistence_uncertain');
     // Startup consumers share one load/create operation. Publishing a key
     // before its identity is durable lets another caller overwrite the signer
     // while enrollment still carries the first public key.
@@ -189,6 +215,7 @@ export class SupervisorDeviceIdentity {
   }
 
   snapshot() {
+    if (this.#persistenceUncertain) throw new Error('supervisor_device_persistence_uncertain');
     if (!this.#state) return null;
     const { encrypted_private_key_b64: _secret,
       encrypted_host_owner_record_b64: _ownerSecret, ...safe } = this.#state;
@@ -207,12 +234,15 @@ export class SupervisorDeviceIdentity {
   }
 
   async readGuardianOwnerEvidenceW67() {
+    if (this.#persistenceUncertain) return null;
     const reader = this.#w67GuardianObservation;
     if (!reader || !this.#state?.device_id) return null;
     try {
       const before = this.#state.device_id;
       const g = await reader();
+      if (this.#persistenceUncertain) return null;
       const after = await reader(); // independent native nonce/challenge readback
+      if (this.#persistenceUncertain) return null;
       if (after?.schema !== g?.schema || after?.state !== g?.state ||
           after?.guardian_client_pid !== g?.guardian_client_pid ||
           after?.guardian_client_created_at !== g?.guardian_client_created_at ||
@@ -259,10 +289,12 @@ export class SupervisorDeviceIdentity {
   }
 
   async readHostOwnerIncarnation() {
+    if (this.#persistenceUncertain) return null;
     const client = this.#w67HostAgent;
     if (!client || !this.#state?.device_id) return null;
     try {
       const response = await client.request('OWNER_NATIVE_READBACK', {}, { timeoutMs: 1500 });
+      if (this.#persistenceUncertain) return null;
       const owner = response?.owner;
       const kernel = response?.kernel;
       // An authenticated IPC frame only proves its sender, NOT Owner. Host
@@ -299,13 +331,17 @@ export class SupervisorDeviceIdentity {
   }
 
   async readPrivateOwnerGatewayCredential(ownerId, generation) {
+    if (this.#persistenceUncertain) return null;
     const reader = this.#w67PrivateGatewayReadback;
     if (!reader || !this.#w67HostAgent) return null;
     const owner = await this.readHostOwnerIncarnation();
+    if (this.#persistenceUncertain) return null;
     if (!owner || owner.owner_id !== ownerId || owner.generation !== generation) return null;
     try {
       const secret = await reader(ownerId, generation);
+      if (this.#persistenceUncertain) return null;
       const latest = await this.readHostOwnerIncarnation();
+      if (this.#persistenceUncertain) return null;
       if (!latest || latest.owner_id !== ownerId || latest.generation !== generation ||
           latest.epoch !== owner.epoch || latest.process_incarnation_id !== owner.process_incarnation_id ||
           secret?.owner_id !== ownerId || secret?.owner_generation !== generation ||
@@ -319,13 +355,17 @@ export class SupervisorDeviceIdentity {
   }
 
   async readPrivateOwnPostgresBirthW67(ownerId, epoch) {
+    if (this.#persistenceUncertain) return null;
     const reader = this.#w67PrivatePostgresBirth;
     if (!reader || !this.#w67HostAgent) return null;
     const owner = await this.readHostOwnerIncarnation();
+    if (this.#persistenceUncertain) return null;
     if (!owner || owner.owner_id !== ownerId || owner.epoch !== epoch) return null;
     try {
       const result = await reader(ownerId, epoch);
+      if (this.#persistenceUncertain) return null;
       const latest = await this.readHostOwnerIncarnation();
+      if (this.#persistenceUncertain) return null;
       if (!result || result.schema !== 'metaengine.own-pg.birth-w61.v1' ||
           result.source !== 'OWN_PG_POSTMASTER_READBACK' ||
           result.fixture_classification != null || result.staging === true ||
@@ -368,17 +408,17 @@ export class SupervisorDeviceIdentity {
       return record;
     };
     const writeSealed = async (next, previous) => {
-      const current = await readSealed();
-      // Do not repair a corrupt record or race a different Owner transition.
-      if (JSON.stringify(current) !== JSON.stringify(previous))
-        throw new Error('w74_owner_cas_changed');
-      if (!this.#state?.device_id || this.#state.device_id !== next.device_id ||
-          this.#state.client_id !== next.owner_id)
-        throw new Error('w74_owner_device_changed');
-      const encoded = Buffer.from(this.#secureStorage.encryptString(
-        JSON.stringify(next))).toString('base64');
-      await this.#persist({
-        ...this.#state, encrypted_host_owner_record_b64: encoded,
+      await this.ensure();
+      await this.#persist(async state => {
+        const current = await readSealed();
+        if (JSON.stringify(current) !== JSON.stringify(previous))
+          throw new Error('w74_owner_cas_changed');
+        if (!state?.device_id || state.device_id !== next.device_id ||
+            state.client_id !== next.owner_id)
+          throw new Error('w74_owner_device_changed');
+        const encoded = Buffer.from(this.#secureStorage.encryptString(
+          JSON.stringify(next))).toString('base64');
+        return { ...state, encrypted_host_owner_record_b64: encoded };
       });
     };
     const bound = createHostOwnerGenesisCustodyW74({
@@ -404,12 +444,12 @@ export class SupervisorDeviceIdentity {
 
   async bindEnrollmentRequest(requestId) {
     await this.ensure();
-    return this.#persist({ ...this.#state, enrollment_request_id: String(requestId || ''), device_id: null });
+    return this.#persist(state => ({ ...state, enrollment_request_id: String(requestId || ''), device_id: null }));
   }
 
   async clearEnrollmentRequest() {
     await this.ensure();
-    return this.#persist({ ...this.#state, enrollment_request_id: null });
+    return this.#persist(state => ({ ...state, enrollment_request_id: null }));
   }
 
   async clearDeviceBindingForReenrollment() {
@@ -419,22 +459,23 @@ export class SupervisorDeviceIdentity {
     // ordinary approval enrollment path without rotating identity or embedding
     // another credential. Revocation is never bypassed: the replacement device
     // still requires server approval before any signed privileged route works.
-    return this.#persist({
-      ...this.#state,
+    return this.#persist(state => ({
+      ...state,
       enrollment_request_id: null,
       device_id: null,
       encrypted_host_owner_record_b64: '',
-    });
+    }));
   }
 
   async bindDevice(deviceId) {
     await this.ensure();
     if (!/^[0-9a-f-]{36}$/i.test(String(deviceId || ''))) throw new Error('supervisor_device_id_invalid');
-    return this.#persist({ ...this.#state, device_id: String(deviceId),
-      enrollment_request_id: null, encrypted_host_owner_record_b64: '' });
+    return this.#persist(state => ({ ...state, device_id: String(deviceId),
+      enrollment_request_id: null, encrypted_host_owner_record_b64: '' }));
   }
 
   #sign(material) {
+    if (this.#persistenceUncertain) throw new Error('supervisor_device_persistence_uncertain');
     if (!this.#privateKey) throw new Error('supervisor_private_key_not_loaded');
     return crypto.sign('sha256', Buffer.from(material, 'utf8'), {
       key: this.#privateKey,

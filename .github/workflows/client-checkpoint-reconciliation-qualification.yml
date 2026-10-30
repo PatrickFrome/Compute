@@ -10,6 +10,9 @@ on:
       - 'apps/metaengine-browser/test/client-prepared-goal.test.mjs'
       - 'apps/metaengine-browser/src/client-goal-journal.mjs'
       - 'apps/metaengine-browser/src/main.mjs'
+      - 'apps/metaengine-browser/src/supervisor-device-identity.mjs'
+      - 'apps/metaengine-browser/test/supervisor-device-identity-concurrency.test.mjs'
+      - 'apps/metaengine-browser/test/host-owner-*-w74.test.mjs'
       - 'apps/metaengine-browser/test/client-native-*.test.mjs'
       - 'apps/metaengine-browser/src/client-native-coding-goal.mjs'
       - 'apps/metaengine-browser/test/client-native-coding-goal.test.mjs'
@@ -186,6 +189,9 @@ jobs:
             'infra/client-state-runtime/native-coding-preparation-transaction.test.mjs',
             'apps/metaengine-browser/test/native-coding-workspace-preparation.test.mjs',
             'apps/metaengine-browser/test/client-prepared-goal.test.mjs',
+            'apps/metaengine-browser/test/supervisor-device-identity-concurrency.test.mjs',
+            'apps/metaengine-browser/test/host-owner-protected-identity-w74.test.mjs',
+            'apps/metaengine-browser/test/host-owner-genesis-custody-w74.test.mjs',
             'infra/client-state-runtime/native-coding-host-seed-service.test.mjs',
             'infra/client-state-runtime/native-coding-host-os-scope.test.mjs',
             'infra/client-state-runtime/native-coding-host-transaction-scope.test.mjs',
@@ -376,7 +382,9 @@ jobs:
           const suites=[];
           async function runSuite(name,files,required,isolated,allowBaseline){
             await isolated.verify();const env=isolated.env;
-            const args=['--test','--test-isolation=none','--test-concurrency=1','--test-reporter=tap',...files];
+            // Test files own module singletons (device identity/journals). Keep
+            // standard per-file process isolation; in-file concurrency tests stay intact.
+            const args=['--test','--test-isolation=process','--test-concurrency=1','--test-reporter=tap',...files];
             const outcome=await new Promise(resolve=>{
               const child=spawn(process.execPath,args,{cwd:root,env,windowsHide:true,shell:false,stdio:['ignore','pipe','pipe']});
               const stdout=[],stderr=[];let bytes=0,reason=null;
