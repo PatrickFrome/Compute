@@ -64,7 +64,7 @@ function safeState(value, fallback) {
 // A status response to any page is an allowlisted projection, never a spread
 // of native supervisor/Owner data (which may carry credentials or endpoint
 // descriptions). Missing Owner never changes the chosen provider to HOSTED.
-export function projectOwnPostgresClientConnection(raw, { localProviderAttested = false, nativeRuntime = undefined } = {}) {
+export function projectOwnPostgresClientConnection(raw, { localProviderAttested = false, nativeRuntime = undefined, nativeMountAttempt = null } = {}) {
   const s = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   const local = localProviderAttested === true;
   const ready = local && s.local_runtime_ready === true;
@@ -73,7 +73,7 @@ export function projectOwnPostgresClientConnection(raw, { localProviderAttested 
   const admin = tier === 'ADMIN' && s.admin_ready === true;
   return Object.freeze({
     schema: 'metaengine.client.connection-status.v1',
-    native_runtime: projectNativeRuntimeObservation(nativeRuntime,{localProviderAttested:ready}),
+    native_runtime: projectNativeRuntimeObservation(nativeRuntime,{localProviderAttested:ready,mountAttempt:nativeMountAttempt}),
     state_provider: local ? LOCAL_PROVIDER : 'UNVERIFIED',
     local_runtime_ready: ready,
     secure_device_key_ready: ready && s.secure_device_key_ready === true,

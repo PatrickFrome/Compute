@@ -142,6 +142,7 @@ let nativeCodingHostCapability = null;
 let nativeCodingRuntimeMountPromise = null;
 let nativeCodingRuntimeMountGeneration = null;
 let nativeCodingRuntimeMountFailure = null;
+let nativeCodingRuntimeMountDiagnostic = null;
 let managedTaskProjectHostClosing = Promise.resolve();
 let managedTaskProjectHostDrainPending = false;
 let managedTaskProjectQuitReady = false;
@@ -852,6 +853,11 @@ function ensureNativeCodingRuntimeMounted() {
     assertNativeCodingRuntimeMountOpen(summary);
     if(managedTaskProjectHostClosing!==closing)throw Error('native_coding_runtime_mount_drain_changed');
   };
+  let diagnosticHost;
+  nativeCodingRuntimeMountDiagnostic=null;
+  const recordMountFailure=reason=>{
+    if(diagnosticHost!==undefined)nativeCodingRuntimeMountDiagnostic={host:diagnosticHost,barrier:closing,reason,attempted_at:new Date().toISOString()};
+  };
   const pending=Promise.resolve().then(async()=>{
     assertOpen();
     // Startup may not have constructed the Supervisor yet. Preserve admission
@@ -859,10 +865,10 @@ function ensureNativeCodingRuntimeMounted() {
     // here would deadlock when startup itself calls this helper.
     if(!nativeSupervisor)throw Error('native_coding_runtime_mount_supervisor_unavailable');
     await closing;assertOpen();
-    const summary=readOwnedLocalRuntimeHostSummary();
+    const summary=readOwnedLocalRuntimeHostSummary();diagnosticHost=summary;
     if(!summary){
       if(nativeCodingRuntime||nativeCodingHostCapability)throw Error('native_coding_runtime_mount_host_unavailable');
-      return null;
+      recordMountFailure('HOST_UNAVAILABLE');return null;
     }
     const generation=await readOwnedLocalRuntimeHostRecoveryObservation();
     assertOpen(summary);assertNativeCodingRuntimeMountGeneration(generation,summary);
@@ -874,7 +880,7 @@ function ensureNativeCodingRuntimeMounted() {
     }
     const directory=path.dirname(summary.status_file);
     const present=await fs.lstat(path.join(directory,'native-coding-operator-v1.json')).catch(error=>{if(error.code==='ENOENT')return null;throw error;});
-    assertOpen(summary);if(!present)return null;
+    assertOpen(summary);if(!present){recordMountFailure('OPERATOR_CONFIGURATION_MISSING');return null;}
     const operator=await readNativeCodingOperatorPaths(directory);assertOpen(summary);
     const capability=createOwnedNativeCodingHostCapability(summary);let candidate=null,bindingAttempted=false;
     try{
@@ -932,7 +938,10 @@ function ensureNativeCodingRuntimeMounted() {
   });
   nativeCodingRuntimeMountPromise=pending;nativeRuntimeInitializations.add(pending);
   const settled=()=>{nativeRuntimeInitializations.delete(pending);if(nativeCodingRuntimeMountPromise===pending)nativeCodingRuntimeMountPromise=null;};
-  pending.then(settled,settled);return pending;
+  pending.then(settled,error=>{
+    recordMountFailure(error?.message==='native_coding_protected_permits_required'?'PROTECTED_PERMITS_UNAVAILABLE':'SETUP_READBACK_FAILED');
+    settled();
+  });return pending;
 }
 
 function createNativeGoalRouter(journal){
@@ -3148,7 +3157,17 @@ function readClientConnectionStatus() {
   let nativeRuntime;
   try { nativeRuntime = nativeCodingRuntime ? nativeCodingRuntime.snapshot() : null; }
   catch { /* Keep native diagnostic failure separate from chat connection state. */ }
-  return projectOwnPostgresClientConnection(status, { localProviderAttested: Boolean(localProvider), nativeRuntime });
+  // Historical mount outcome only, tied to the same owned Host observation.
+  // A new Host, active attempt or drain invalidates it; raw errors never leave main.
+  let nativeMountAttempt=null;
+  try { if(!nativeCodingRuntime&&!nativeCodingRuntimeMountPromise&&!managedTaskProjectHostDrainPending
+    &&!runtimeRecoveryGenerationLost&&!shutdownRequested&&nativeCodingRuntimeMountDiagnostic
+    &&nativeCodingRuntimeMountDiagnostic.barrier===managedTaskProjectHostClosing
+    &&nativeCodingRuntimeMountDiagnostic.host===readOwnedLocalRuntimeHostSummary()) {
+    const {reason,attempted_at}=nativeCodingRuntimeMountDiagnostic;
+    nativeMountAttempt={reason,attempted_at};
+  }} catch { /* Diagnostic read failure must not take chat connection status offline. */ }
+  return projectOwnPostgresClientConnection(status, { localProviderAttested: Boolean(localProvider), nativeRuntime, nativeMountAttempt });
 }
 ipcMain.handle('metaengine:client:connection-status', async (event) => {
   assertShellSender(event);

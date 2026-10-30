@@ -30,7 +30,9 @@ test('actual main connection-status reader uses its owned native runtime and iso
  const source=await fs.readFile(new URL('../src/main.mjs',import.meta.url),'utf8');
  const start=source.indexOf('function readClientConnectionStatus() {'),end=source.indexOf("ipcMain.handle('metaengine:client:connection-status'",start);assert.ok(start>0&&end>start);
  const context={nativeSupervisor:{connectionStatus:()=>({local_runtime_ready:true,access_tier:'ADMIN',admin_ready:true})},
-  explicitLocalSupervisorBase:()=> 'http://127.0.0.1:9999',nativeCodingRuntime:{snapshot},projectOwnPostgresClientConnection};
+  explicitLocalSupervisorBase:()=> 'http://127.0.0.1:9999',nativeCodingRuntime:{snapshot},projectOwnPostgresClientConnection,
+  nativeCodingRuntimeMountPromise:null,managedTaskProjectHostDrainPending:false,runtimeRecoveryGenerationLost:false,shutdownRequested:false,
+  nativeCodingRuntimeMountDiagnostic:null,managedTaskProjectHostClosing:null,readOwnedLocalRuntimeHostSummary:()=>null};
  const read=vm.runInNewContext(source.slice(start,end)+'\nreadClientConnectionStatus',context);
  assert.equal(read().native_runtime.retained_records,2);assert.equal(read().admin_ready,true);
  context.nativeCodingRuntime={snapshot:()=>{throw Error('secret');}};const failed=read();assert.equal(failed.native_runtime.state,'UNAVAILABLE');assert.equal(failed.admin_ready,true);
@@ -44,4 +46,33 @@ test('supervisor-supplied native observations cannot substitute for owned runtim
  assert.equal(value.native_runtime.state,'UNAVAILABLE');
  assert.equal(value.native_runtime.observed_at,null);
  assert.equal(value.native_runtime.retained_records,null);
+});
+
+test('mount diagnostic is a fixed historical projection, never raw errors or supervisor data',()=>{
+ const attempt={reason:'OPERATOR_CONFIGURATION_MISSING',attempted_at:new Date(options.now-86400000).toISOString()};
+ assert.deepEqual(project(null,{...options,mountAttempt:attempt}).last_mount_attempt,attempt);
+ for(const a of [{...attempt,reason:'/private/secret'}, {...attempt,secret:'hidden'}, {...attempt,attempted_at:new Date(options.now+5001).toISOString()}])
+  assert.equal(project(null,{...options,mountAttempt:a}).last_mount_attempt,null);
+ assert.equal(project(snapshot(),{...options,mountAttempt:attempt}).last_mount_attempt,null);
+ const raw={local_runtime_ready:true,nativeMountAttempt:attempt,native_runtime:{last_mount_attempt:attempt}};
+ assert.equal(projectOwnPostgresClientConnection(raw,{localProviderAttested:true,nativeRuntime:null}).native_runtime.last_mount_attempt,null);
+});
+
+test('actual main diagnostic clears on new Host, active mount, shutdown and runtime replacement',async()=>{
+ const source=await fs.readFile(new URL('../src/main.mjs',import.meta.url),'utf8');
+ const start=source.indexOf('function readClientConnectionStatus() {'),end=source.indexOf("ipcMain.handle('metaengine:client:connection-status'",start);
+ const host={instance_id:'private-host',status_file:'/secret'};
+ const context={nativeSupervisor:{connectionStatus:()=>({local_runtime_ready:true})},explicitLocalSupervisorBase:()=>true,nativeCodingRuntime:null,projectOwnPostgresClientConnection,
+  nativeCodingRuntimeMountPromise:null,managedTaskProjectHostDrainPending:false,runtimeRecoveryGenerationLost:false,shutdownRequested:false,
+  managedTaskProjectHostClosing:null,nativeCodingRuntimeMountDiagnostic:{host,barrier:null,reason:'OPERATOR_CONFIGURATION_MISSING',attempted_at:new Date().toISOString()},readOwnedLocalRuntimeHostSummary:()=>host};
+ const read=vm.runInNewContext(source.slice(start,end)+'\nreadClientConnectionStatus',context);
+ assert.equal(read().native_runtime.last_mount_attempt.reason,'OPERATOR_CONFIGURATION_MISSING');
+ assert.doesNotMatch(JSON.stringify(read()),/private-host|\/secret|status_file/);
+ for(const key of ['nativeCodingRuntimeMountPromise','managedTaskProjectHostDrainPending','runtimeRecoveryGenerationLost','shutdownRequested']){
+  const old=context[key];context[key]=true;assert.equal(read().native_runtime.last_mount_attempt,null);context[key]=old;
+ }
+ context.managedTaskProjectHostClosing=Promise.resolve();assert.equal(read().native_runtime.last_mount_attempt,null);context.managedTaskProjectHostClosing=null;
+ context.readOwnedLocalRuntimeHostSummary=()=>{throw Error('private read failure');};assert.equal(read().native_runtime.last_mount_attempt,null);
+ context.readOwnedLocalRuntimeHostSummary=()=>({...host});assert.equal(read().native_runtime.last_mount_attempt,null);
+ context.readOwnedLocalRuntimeHostSummary=()=>host;context.nativeCodingRuntime={snapshot};assert.equal(read().native_runtime.last_mount_attempt,null);
 });

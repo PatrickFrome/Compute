@@ -8,8 +8,17 @@ export function projectNativeRuntimeBadge(connection:unknown,{live=true,now=Date
  if(value.schema!=='metaengine.client.native-runtime-observation.v1'||value.authority_effect!==false
   ||value.readback_only!==true||value.physical_execution_proven!==false||value.useful_work_verified!==false||value.logical_agent_limit!==null
   ||!Number.isFinite(observed)||!integer(now)||observed>now+5000||now-observed>30000)return unknown();
- if(value.state==='UNBOUND'&&value.retained_records===null&&value.counts===null&&value.closed===null&&value.physical_slot_budget===null)
+ if(value.state==='UNBOUND'&&value.retained_records===null&&value.counts===null&&value.closed===null&&value.physical_slot_budget===null){
+  const attempt=value.last_mount_attempt;
+  const reasons:Record<string,string>={HOST_UNAVAILABLE:'the owned local Host was unavailable',OPERATOR_CONFIGURATION_MISSING:'protected native setup was missing',PROTECTED_PERMITS_UNAVAILABLE:'protected execution permits were unavailable',SETUP_READBACK_FAILED:'native setup could not be verified'};
+  if(attempt!=null){
+   if(!plain(attempt)||Object.keys(attempt).sort().join(',')!=='attempted_at,reason'||typeof attempt.reason!=='string'||!Object.hasOwn(reasons,attempt.reason)||typeof attempt.attempted_at!=='string')return unknown();
+   const at=Date.parse(attempt.attempted_at);
+   if(!Number.isFinite(at)||at<0||at>now+5000||new Date(at).toISOString()!==attempt.attempted_at)return unknown();
+   return {state:'UNBOUND',label:'Native: last setup blocked',detail:`Last mount attempt (${attempt.attempted_at}): ${reasons[attempt.reason]}. This is a historical setup observation, not current permission or proof that no worker exists.`,attention:true};
+  }
   return {state:'UNBOUND',label:'Native: not mounted',detail:'No native runtime is bound. This is not an OS process census or execution permission.',attention:false};
+ }
  if(value.state!=='OBSERVED'||typeof value.closed!=='boolean'||!integer(value.physical_slot_budget,1)||!integer(value.retained_records)
   ||value.retained_records>value.physical_slot_budget||!plain(value.counts))return unknown();
  const keys=['preparing','running','result_ready','readback_required','other'];

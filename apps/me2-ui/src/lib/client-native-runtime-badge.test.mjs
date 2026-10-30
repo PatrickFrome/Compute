@@ -25,3 +25,13 @@ test('an explicitly unbound runtime is not interpreted as an empty process censu
  const c=connection();c.native_runtime={...observation(),state:'UNBOUND',closed:null,physical_slot_budget:null,retained_records:null,counts:null};
  const v=badge(c,{now});assert.equal(v.state,'UNBOUND');assert.equal(v.label,'Native: not mounted');assert.match(v.detail,/not an OS process census/);
 });
+
+test('unbound mount explanation is explicitly historical and fixed rather than a raw failure',()=>{
+ const c=connection();c.native_runtime={...observation(),state:'UNBOUND',closed:null,physical_slot_budget:null,retained_records:null,counts:null,
+  last_mount_attempt:{reason:'OPERATOR_CONFIGURATION_MISSING',attempted_at:new Date(now-86400000).toISOString()}};
+ const v=badge(c,{now});assert.equal(v.label,'Native: last setup blocked');assert.equal(v.attention,true);
+ assert.match(v.detail,/historical setup observation/);assert.match(v.detail,/protected native setup was missing/);
+ for(const attempt of [{reason:'/private/error',attempted_at:new Date(now).toISOString()},{reason:'HOST_UNAVAILABLE',attempted_at:new Date(now+5001).toISOString()}]){
+  c.native_runtime.last_mount_attempt=attempt;const value=badge(c,{now});assert.equal(value.state,'UNAVAILABLE');assert.doesNotMatch(value.detail,/private/);
+ }
+});

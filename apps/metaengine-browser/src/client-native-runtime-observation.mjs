@@ -2,13 +2,21 @@ const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]
 const integer=(value,min=0)=>Number.isSafeInteger(value)&&value>=min;
 // Private runtime memory -> credential-free UI counts. This is bookkeeping,
 // never an OS process census, admission permission or accepted-result proof.
-export function projectNativeRuntimeObservation(snapshot,{localProviderAttested=false,now=Date.now()}={}){
+export function projectNativeRuntimeObservation(snapshot,{localProviderAttested=false,now=Date.now(),mountAttempt=null}={}){
  const observed=integer(now)&&now<=8640000000000000?new Date(now).toISOString():null;
  const base={schema:'metaengine.client.native-runtime-observation.v1',observed_at:null,
   state:'UNAVAILABLE',closed:null,physical_slot_budget:null,retained_records:null,counts:null,
-  logical_agent_limit:null,readback_only:true,physical_execution_proven:false,useful_work_verified:false,authority_effect:false};
+  last_mount_attempt:null,logical_agent_limit:null,readback_only:true,physical_execution_proven:false,useful_work_verified:false,authority_effect:false};
  if(localProviderAttested!==true||observed===null)return Object.freeze(base);
- if(snapshot===null)return Object.freeze({...base,state:'UNBOUND',observed_at:observed});
+ if(snapshot===null){
+  let attempt=null;
+  const at=typeof mountAttempt?.attempted_at==='string'?Date.parse(mountAttempt.attempted_at):NaN;
+  if(mountAttempt&&Object.keys(mountAttempt).sort().join(',')==='attempted_at,reason'
+   &&['HOST_UNAVAILABLE','OPERATOR_CONFIGURATION_MISSING','PROTECTED_PERMITS_UNAVAILABLE','SETUP_READBACK_FAILED'].includes(mountAttempt.reason)
+   &&Number.isFinite(at)&&at>=0&&at<=now+5000&&new Date(at).toISOString()===mountAttempt.attempted_at)
+   attempt=Object.freeze({reason:mountAttempt.reason,attempted_at:mountAttempt.attempted_at});
+  return Object.freeze({...base,state:'UNBOUND',observed_at:observed,last_mount_attempt:attempt});
+ }
  try{
   if(snapshot?.schema!=='metaengine.native-coding.runtime.v1'||snapshot.authority_effect!==false
    ||snapshot.scheduler_authority!==false||snapshot.automatic_retry_allowed!==false

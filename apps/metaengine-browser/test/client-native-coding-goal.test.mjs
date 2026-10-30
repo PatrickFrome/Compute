@@ -205,7 +205,7 @@ async function mainMountFixture(){
     readScope:async()=>{if(scopeWait)await scopeWait;if(failScope){failScope=false;throw Error('transient scope read');}
       return {bindings:[{device_id:'device',client_id:'client',permit:{artifact:{cli_executable_sha256:'a'.repeat(64)}}}]};},
     close:()=>{counts.capabilityClosed++;capClosed=true;}};
-  const scope={nativeCodingRuntime:null,nativeCodingHostCapability:null,nativeCodingRuntimeMountPromise:null,nativeCodingRuntimeMountGeneration:null,nativeCodingRuntimeMountFailure:null,
+  const scope={nativeCodingRuntime:null,nativeCodingHostCapability:null,nativeCodingRuntimeMountPromise:null,nativeCodingRuntimeMountGeneration:null,nativeCodingRuntimeMountFailure:null,nativeCodingRuntimeMountDiagnostic:null,
     runtimeRecoveryGenerationLost:false,shutdownRequested:false,managedTaskProjectHostDrainPending:false,
     managedTaskProjectHostClosing:Promise.resolve(),nativeRuntimeInitializations:new Set(),nativeInitializationCleanupCandidates:new Set(),
     nativeSupervisor:{bindNativeCodingRuntime:value=>{counts.bind++;bound=value;},bindDevosProjectRuntime:()=>{},stop:()=>{},snapshot:()=>({})},autonomousProjectRuntime:null,
@@ -536,4 +536,31 @@ test('inaccessible or aliased native setup marker cannot authorize Browser fallb
    if(marker==='denied')throw Object.assign(Error('private path'),{code:'EACCES'});return {isFile:()=>true,isSymbolicLink:()=>true,nlink:1};
   }});assert.equal(mode.state,'HOLD');assert.notEqual(mode.kind,'BROWSER');assert.equal(reads,0);assert.equal(JSON.stringify(mode).includes('private path'),false);
  }
+});
+
+test('actual mount records missing protected setup and clears it on successful later mount',async()=>{
+ const f=await mainMountFixture();f.scope.fs.lstat=async()=>null;
+ assert.equal(await f.context.ensureNativeCodingRuntimeMounted(),null);
+ assert.equal(f.scope.nativeCodingRuntimeMountDiagnostic.reason,'OPERATOR_CONFIGURATION_MISSING');
+ assert.equal(f.scope.nativeCodingRuntimeMountDiagnostic.host,f.summary);
+ assert.equal(f.counts.capability,0);
+ f.scope.fs.lstat=async()=>({});await f.context.ensureNativeCodingRuntimeMounted();
+ assert.equal(f.scope.nativeCodingRuntimeMountDiagnostic,null);
+});
+test('actual mount failure diagnostic does not retain raw read errors',async()=>{
+ const f=await mainMountFixture();f.failScopeOnce();
+ await assert.rejects(f.context.ensureNativeCodingRuntimeMounted(),/transient scope read/);
+ assert.equal(f.scope.nativeCodingRuntimeMountDiagnostic.reason,'SETUP_READBACK_FAILED');
+ assert.doesNotMatch(JSON.stringify(f.scope.nativeCodingRuntimeMountDiagnostic),/transient scope read/);
+ await f.context.ensureNativeCodingRuntimeMounted();assert.equal(f.scope.nativeCodingRuntimeMountDiagnostic,null);
+});
+
+test('actual mount distinguishes absent Host from unavailable protected permits',async()=>{
+ const absent=await mainMountFixture();absent.scope.readOwnedLocalRuntimeHostSummary=()=>null;
+ assert.equal(await absent.context.ensureNativeCodingRuntimeMounted(),null);
+ assert.equal(absent.scope.nativeCodingRuntimeMountDiagnostic.reason,'HOST_UNAVAILABLE');
+ const missing=await mainMountFixture();missing.capability.readScope=async()=>({bindings:[]});
+ await assert.rejects(missing.context.ensureNativeCodingRuntimeMounted(),/protected_permits_required/);
+ assert.equal(missing.scope.nativeCodingRuntimeMountDiagnostic.reason,'PROTECTED_PERMITS_UNAVAILABLE');
+ assert.equal(missing.counts.capabilityClosed,1);assert.equal(missing.counts.construct,0);
 });
