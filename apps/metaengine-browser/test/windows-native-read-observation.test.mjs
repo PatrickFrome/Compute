@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
-import {observeWindowsNativeReads,parseWindowsNativeReadPhases} from '../../../.github/windows-native-read-observation.mjs';
+import {observeWindowsNativeReads,parseWindowsNativeReadPhases,instrumentWindowsNativeReadScript} from '../../../.github/windows-native-read-observation.mjs';
 import {readWindowsSandboxHostBoot} from '../src/codex-cli-sandbox-probe.mjs';
 import {readNativeCodingWindowsProcess} from '../src/native-coding-host-observers.mjs';
 
@@ -118,4 +118,23 @@ test('read-duration diagnostics run only after a failed Windows probe, never rep
   assert.ok(source.indexOf('name: Exercise all Browser mechanics including real local IPC')<at);
   assert.ok(source.includes("      - '.github/windows-native-read-observation.mjs'"));
   assert.ok(source.includes('node --test test/windows-native-read-observation.test.mjs'));
+});
+
+test('diagnostic markers never split fixed native commands or consume their trailing arguments',()=>{
+ for(const reader of ['kernel_boot','own_process'])for(const eol of ['\n','\r\n']){
+  const original=Buffer.from(commands[reader].at(-1),'base64').toString('utf16le').replace(/\r?\n/g,eol);
+  const observed=instrumentWindowsNativeReadScript(reader,original);
+  const queries=original.match(/\$(?:system|os|again|c)=Get-CimInstance[^\r\n]*/g);
+  assert.ok(queries.length>0);
+  for(const query of queries)assert.ok(observed.includes(query),reader+' complete query must remain intact: '+query);
+
+ }
+});
+
+test('diagnostics refuse unreviewed command suffixes rather than inserting markers into arguments',()=>{
+ const original=Buffer.from(commands.kernel_boot.at(-1),'base64').toString('utf16le');
+ for(const suffix of [' -Property Unexpected',' -ErrorAction SilentlyContinue']){
+  const changed=original.replace("-Property Name,CreationDate", "-Property Name,CreationDate"+suffix);
+  assert.throws(()=>instrumentWindowsNativeReadScript('kernel_boot',changed),/source_anchor_invalid/);
+ }
 });
