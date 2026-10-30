@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { HostAgentClient } from './host-agent-ipc.mjs';
-import { createHostOwnerGenesisCustodyW74 } from './host-owner-genesis-custody-w74.mjs';
+import { createHostOwnerGenesisCustodyW74,createLoadedHostOwnerReadW74 } from './host-owner-genesis-custody-w74.mjs';
 
 export const SUPERVISOR_DEVICE_PROFILE = 'A2_DEVICE_HTTP_SIGNATURE_V1';
 export const ENROLLMENT_SIGNATURE_PROFILE = 'METAENGINE_NATIVE_ENROLLMENT_V1';
@@ -89,6 +89,7 @@ export class SupervisorDeviceIdentity {
   #w67PrivateGatewayReadback = null;
   #w67PrivatePostgresBirth = null;
   #w67GuardianObservation = null;
+  #w74LoadedGuardianObservation = null;
   #w74OwnerCustody = null;
   #writes = Promise.resolve();
   #persistenceUncertain = false;
@@ -243,12 +244,16 @@ export class SupervisorDeviceIdentity {
         typeof guardianLauncher.status !== 'function')
       throw new Error('w67_guardian_native_launcher_required');
     this.#w67GuardianObservation = () => guardianLauncher.status();
-    return () => { this.#w67GuardianObservation = null; };
+    this.#w74LoadedGuardianObservation=typeof guardianLauncher.statusLoaded==='function'?options=>guardianLauncher.statusLoaded(options):null;
+    return () => { this.#w67GuardianObservation = null;this.#w74LoadedGuardianObservation=null; };
   }
 
   async readGuardianOwnerEvidenceW67() {
+    return this.#readGuardianOwnerEvidence(this.#w67GuardianObservation);
+  }
+
+  async #readGuardianOwnerEvidence(reader) {
     if (this.#persistenceUncertain) return null;
-    const reader = this.#w67GuardianObservation;
     if (!reader || !this.#state?.device_id) return null;
     try {
       const before = this.#state.device_id;
@@ -470,6 +475,29 @@ export class SupervisorDeviceIdentity {
     return this.#w74OwnerCustody?.read() ?? null;
   }
 
+  // Native Main only. Reads current encrypted custody already held by this
+  // loaded identity; no file/key initialization and no global W74 rebind.
+  async readLoadedRunOwnerW74({scope,readSourceProof,readNativeKernel,assertLifetime,signal}={}) {
+    if(typeof assertLifetime!=='function')throw Error('w74_loaded_lifetime_required');
+    if(!this.#state?.device_id||!this.#privateKey||this.#persistenceUncertain||!this.#w74LoadedGuardianObservation)return null;
+    const state=this.#state,guardian=this.#w74LoadedGuardianObservation;
+    const open=()=>{
+      if(signal?.aborted||this.#persistenceUncertain||this.#state!==state||this.#w74LoadedGuardianObservation!==guardian)
+        throw Error('w74_loaded_identity_changed');
+      assertLifetime();scope.assertOpen();
+    };
+    const readSealed=async()=>{
+      open();const encoded=state.encrypted_host_owner_record_b64;if(!encoded)return null;
+      if(this.#secureStorage.isEncryptionAvailable?.()===false)throw Error('w74_secure_storage_unavailable');
+      const record=JSON.parse(this.#secureStorage.decryptString(Buffer.from(encoded,'base64')));open();
+      if(record?.schema!=='metaengine.host.owner-incarnation.v1')throw Error('w74_protected_owner_record_invalid');
+      return record;
+    };
+    const bound=createLoadedHostOwnerReadW74({identity:this,scope,readSealed,readSourceProof,readNativeKernel,
+      readGuardian:()=>this.#readGuardianOwnerEvidence(()=>guardian({signal})),assertLifetime:open});
+    try{return await bound.read();}finally{await bound.close();}
+  }
+
   async bindEnrollmentRequest(requestId) {
     await this.ensure();
     return this.#persist(state => ({ ...state, enrollment_request_id: String(requestId || ''), device_id: null }));
@@ -533,6 +561,19 @@ export class SupervisorDeviceIdentity {
 
   async guardianOwnerChallenge({ command_id, request_nonce, enrollment_ticket_sha256 = null } = {}) {
     const state = await this.ensure();
+    return this.#guardianOwnerChallengeLoaded(state,{command_id,request_nonce,enrollment_ticket_sha256});
+  }
+
+  // Fixed read purpose: never loads/creates/enrolls a key, and cannot sign an
+  // enrollment ticket. Uses the identical canonical challenge implementation.
+  guardianOwnerReadChallenge(input={}) {
+    if(!input||Object.keys(input).sort().join('|')!=='command_id|request_nonce')throw Error('guardian_owner_read_input_invalid');
+    const state=this.snapshot();
+    if(!state?.enrolled||!this.#privateKey)throw Error('supervisor_device_not_loaded');
+    return this.#guardianOwnerChallengeLoaded(state,input);
+  }
+
+  #guardianOwnerChallengeLoaded(state,{command_id,request_nonce,enrollment_ticket_sha256=null}) {
     if (!state.device_id) throw new Error('supervisor_device_not_enrolled');
     const commandId = exactUuid(command_id, 'guardian_command_id');
     const requestNonce = exactNonce(request_nonce, 'guardian_request_nonce');
