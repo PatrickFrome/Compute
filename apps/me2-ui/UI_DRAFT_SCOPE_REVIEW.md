@@ -50,6 +50,10 @@ directory/random-ID fallback for identity or workspace.
   or UUID, noncanonical/future/pre-request timestamps, flags granting authority
   or retries, non-null projects and inconsistent TTL. Effective expiry is capped
   at renderer dispatch + 5000 ms as well as native expiry; receipt cannot renew it.
+- A monotonic deadline from dispatch independently bounds the wall-clock lease.
+  Frozen or rolled-back wall time cannot preserve READY, admit a late response,
+  or accept an old ACK before overdue timers run. Expiry callbacks are bound to
+  the specific observation, so an older queued callback cannot expire a renewal.
 - The controller exposes UNKNOWN, READY and a CHANGED transition. A separate
   expiry timer hides old scope during a hung read. One physical native read is
   retained through timeout and Page unmount/remount; no cancellation is claimed.
@@ -92,10 +96,13 @@ rerun passed. Both logs are retained, and this is not claimed as a product fix.
 
 Commands from `apps/me2-ui`:
 
-The consumer checkpoint passed 233/233 UI tests, 40/40 Browser contract checks,
+The corrected consumer checkpoint passed 238/238 UI tests, 40/40 Browser contract checks,
 TypeScript (also after removing dev-generated files), lint and the browser cases
 above. The final browser harness waits for dialog closure and restored focus
-instead of assuming both happen synchronously after Escape.
+instead of assuming both happen synchronously after Escape. The monotonic fix
+first reproduced four failures with independent clocks, then passed those cases
+and the queued-old-expiry regression. Chromium also verified frozen/rolled-back
+wall time and a late ACK before timer delivery through the real Page.
 
 ```sh
 node --test src/lib/*.test.mjs scripts/*.test.mjs

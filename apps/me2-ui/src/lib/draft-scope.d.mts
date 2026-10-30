@@ -10,6 +10,7 @@ export function normalizeDraftScopeObservation(value: unknown, options: {now: nu
 export function createDraftScopeResource(options: {
  bridge(): DraftScopeBridge | null | undefined;
  now?: () => number;
+ monotonicNow?: () => number;
  schedule?: typeof setTimeout;
  cancel?: typeof clearTimeout;
  onVisibilityChange?: (listener: () => void) => () => void;

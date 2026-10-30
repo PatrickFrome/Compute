@@ -35,14 +35,18 @@ export function normalizeDraftScopeObservation(value,{now,requestedAt}){
 const INITIAL=Object.freeze({state:'UNKNOWN',scope:null,generation:0,observedAt:null,expiresAt:null});
 const sameScope=(a,b)=>a&&b&&a.principalId===b.principalId&&a.workspaceId===b.workspaceId&&a.projectId===b.projectId;
 
-export function createDraftScopeResource({bridge,now=Date.now,schedule=setTimeout,cancel=clearTimeout,
+export function createDraftScopeResource({bridge,now=Date.now,monotonicNow=()=>performance.now(),schedule=setTimeout,cancel=clearTimeout,
  onVisibilityChange=()=>()=>{}}){
  const flight=createPhysicalReadGate(),listeners=new Set();
- let snapshot=INITIAL,lifetime=0,poll=null,expiry=null,unsubscribeVisibility=null;
+ let snapshot=INITIAL,lifetime=0,poll=null,expiry=null,lease=null,unsubscribeVisibility=null;
  const current=epoch=>listeners.size>0&&lifetime===epoch;
  const publish=value=>{snapshot=Object.freeze(value);for(const listener of listeners)listener();};
- const fresh=()=>snapshot.state==='READY'&&now()>=snapshot.observedAt&&now()<snapshot.expiresAt;
- const clearExpiry=()=>{if(expiry!==null)cancel(expiry);expiry=null;};
+ const fresh=()=>{
+  const wall=now(),monotonic=monotonicNow();
+  return snapshot.state==='READY'&&lease!==null&&wall>=snapshot.observedAt&&wall<snapshot.expiresAt
+   &&monotonic>=lease.startedAt&&monotonic<lease.deadline;
+ };
+ const clearExpiry=()=>{if(expiry!==null)cancel(expiry);expiry=null;lease=null;};
  const unknown=()=>{
   clearExpiry();
   if(snapshot.state!=='UNKNOWN')publish({...INITIAL,generation:snapshot.generation+1});
@@ -55,7 +59,8 @@ export function createDraftScopeResource({bridge,now=Date.now,schedule=setTimeou
   let channel;
   try{channel=bridge();if(typeof channel?.draftScope!=='function'){unknown();return;}}
   catch{unknown();return;}
-  const epoch=lifetime,requestedAt=now();let timedOut=false;
+  const epoch=lifetime,requestedAt=now(),startedAt=monotonicNow();let timedOut=false;
+  if(!Number.isFinite(startedAt)){unknown();return;}
   const read=flight.run(()=>{
    if(!current(epoch))throw Error('draft_scope_lifetime_changed');
    return channel.draftScope(); // The contract accepts no renderer arguments.
@@ -65,6 +70,8 @@ export function createDraftScopeResource({bridge,now=Date.now,schedule=setTimeou
    const value=await read;
    if(!current(epoch)||timedOut)return;
    expire();
+   const elapsed=monotonicNow()-startedAt;
+   if(!(elapsed>=0&&elapsed<DRAFT_SCOPE_TTL_MS)){unknown();return;}
    if(bridge()!==channel){unknown();return;}
    const next=normalizeDraftScopeObservation(value,{now:now(),requestedAt});
    if(!next||next.state!=='READY'){unknown();return;}
@@ -73,8 +80,12 @@ export function createDraftScopeResource({bridge,now=Date.now,schedule=setTimeou
     generation++;
     if(snapshot.state==='READY')publish({...INITIAL,state:'CHANGED',generation});
    }
-   clearExpiry();publish({...next,generation});
-   expiry=schedule(expire,Math.max(0,next.expiresAt-now()));
+   const acceptedLease={startedAt,deadline:startedAt+DRAFT_SCOPE_TTL_MS};
+   clearExpiry();lease=acceptedLease;publish({...next,generation});
+   // Timer delivery expires this exact observation even if wall time stopped
+   // or moved backwards. A queued older timer cannot revoke a renewed lease.
+   expiry=schedule(()=>{if(lease===acceptedLease)unknown();},
+    Math.max(0,Math.min(next.expiresAt-now(),acceptedLease.deadline-monotonicNow())));
   }catch{if(current(epoch)&&!timedOut)unknown();}
   finally{cancel(deadline);}
  }

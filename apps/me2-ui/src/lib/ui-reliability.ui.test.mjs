@@ -303,7 +303,7 @@ test('production page fails closed without a confirmed scope, including after re
     const shell = loadUi('../components/me2/shell/me2-shell.tsx', ['Me2Shell', 'GoalComposer'], context);
     const pageUi = harness();
     const pageContext = { ...context, ...pageUi, createDraftScopeResource: options => draftScope.createDraftScopeResource({
-      ...options, now: time.now, schedule: time.setTimeout, cancel: time.clearTimeout,
+      ...options, now: time.now, monotonicNow: time.now, schedule: time.setTimeout, cancel: time.clearTimeout,
     }) };
     const { useDraftScope } = loadUi('../hooks/use-draft-scope.ts', ['useDraftScope'], pageContext);
     const { Page } = loadUi('../app/page.tsx', ['Page'], { ...pageContext, Me2Shell: shell.Me2Shell, useDraftScope });
@@ -320,8 +320,9 @@ test('production page fails closed without a confirmed scope, including after re
   assert.equal(storageCalls, 0); assert.equal(submits, 0);
 });
 
-function scopedProductionPage({ records = new Map(), storageFails = false } = {}) {
+function scopedProductionPage({ records = new Map(), storageFails = false, wallNow, monotonicNow } = {}) {
   const ui = harness(), pageUi = harness(), time = clock(), effects = [], reads = [];
+  const scopeNow = wallNow ?? time.now, scopeMonotonicNow = monotonicNow ?? time.now;
   const state = { page: 'browser', init() {}, paletteOpen: false, recentPages: [], setPage() {} };
   let principal = 'a'.repeat(64), response = 'READY', pending = null, key;
   let workspace = '12345678-1234-4234-8234-123456789abc';
@@ -330,7 +331,7 @@ function scopedProductionPage({ records = new Map(), storageFails = false } = {}
       workspace_id: workspace, project_id: null } : null,
     observed_at: new Date(at).toISOString(), expires_at: response === 'READY' ? new Date(at + 5000).toISOString() : null,
     authority_effect: false, automatic_retry_allowed: false });
-  const bridge = { draftScope(...args) { assert.deepEqual(args, []); reads.push(time.now()); return pending?.promise ?? Promise.resolve(value(time.now())); },
+  const bridge = { draftScope(...args) { assert.deepEqual(args, []); reads.push(scopeNow()); return pending?.promise ?? Promise.resolve(value(scopeNow())); },
     submitGoal: async () => { effects.push('submit'); } };
   const context = environment(ui, time, { metaengineClient: bridge,
     localStorage: { getItem: k => { if (storageFails) throw Error('storage denied'); return records.get(k) ?? null; },
@@ -338,7 +339,7 @@ function scopedProductionPage({ records = new Map(), storageFails = false } = {}
   context.useMe2 = select => select(state);
   const shell = loadUi('../components/me2/shell/me2-shell.tsx', ['Me2Shell', 'GoalComposer'], context);
   const pageContext = { ...context, ...pageUi, createDraftScopeResource: options => draftScope.createDraftScopeResource({
-    ...options, now: time.now, schedule: time.setTimeout, cancel: time.clearTimeout,
+    ...options, now: scopeNow, monotonicNow: scopeMonotonicNow, schedule: time.setTimeout, cancel: time.clearTimeout,
   }) };
   const { useDraftScope } = loadUi('../hooks/use-draft-scope.ts', ['useDraftScope'], pageContext);
   const { Page } = loadUi('../app/page.tsx', ['Page'], { ...pageContext, useDraftScope, Me2Shell: shell.Me2Shell });
@@ -351,7 +352,7 @@ function scopedProductionPage({ records = new Map(), storageFails = false } = {}
   pageUi.mount(Page);
   return { time, records, reads, effects, bridge, render, state,
     response: next => { response = next; }, principal: next => { principal = next; }, workspace: next => { workspace = next; },
-    scopeValue: () => value(time.now()),
+    scopeValue: () => value(scopeNow()),
     hang: () => { pending = deferred(); return pending; },
     unhang: () => { pending = null; },
     unmount: () => { ui.unmount(); pageUi.unmount(); },
@@ -478,4 +479,18 @@ test('Observatory explicit reconciliation fence still blocks automatic reads', a
   element(f.ui.render(), 'operator-observatory-explicit-resync').props.onClick(); await flush(); assert.equal(f.reads.length, 3);
   f.reads[2].resolve(verifiedContext(f.time.now(), 13)); await flush();
   assert.ok(element(f.ui.render(), 'operator-observatory-explicit-resync'), 'clicking without a source-bound witness does not clear the fence'); f.ui.unmount();
+});
+
+test('production Page rejects a late ACK at the monotonic deadline before expiry timers execute', async () => {
+  let wall = 1800000000000, monotonic = 100;
+  const f = scopedProductionPage({ wallNow: () => wall, monotonicNow: () => monotonic });
+  f.render(); await flush(); f.render().setGoal('Keep submitted draft after expired scope');
+  const acknowledge = f.render().acknowledgeGoal;
+  // Timers are deliberately not advanced: the old ACK runs before the overdue
+  // expiry callback, while wall time still lies inside the original lease.
+  wall += 1000; monotonic += 5000;
+  assert.equal(acknowledge(), false);
+  assert.equal(f.render().goal, '');
+  assert.ok([...f.records.values()].some(value => JSON.parse(value).text === 'Keep submitted draft after expired scope'));
+  assert.deepEqual(f.effects, []); f.unmount();
 });

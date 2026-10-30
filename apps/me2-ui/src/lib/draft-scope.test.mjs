@@ -12,7 +12,7 @@ function fixture(){
  const time=clock(),reads=[],states=[];let channel;
  const bridge={draftScope(){const next=deferred();reads.push({at:time.now(),...next});return next.promise;}};
  channel=bridge;
- const resource=createDraftScopeResource({bridge:()=>channel,now:time.now,schedule:time.setTimeout,cancel:time.clearTimeout});
+ const resource=createDraftScopeResource({bridge:()=>channel,now:time.now,monotonicNow:time.now,schedule:time.setTimeout,cancel:time.clearTimeout});
  return {time,reads,states,resource,bridge,replace:value=>{channel=value;},
   start:()=>resource.subscribe(()=>states.push(resource.getSnapshot())),
   resolve:(i,principal)=>reads[i].resolve(ready(reads[i].at,principal))};
@@ -94,4 +94,45 @@ test('missing bridge, malformed reply, rejection and replaced bridge hide the pr
   if(mode==='replaced'){f.replace({draftScope:()=>Promise.resolve(unknown(f.time.now()))});f.resolve(1);}
   await flush();assert.equal(f.resource.getSnapshot().state,'UNKNOWN',mode);assert.equal(f.resource.getSnapshot().scope,null);stop();
  }
+});
+
+for(const change of ['frozen','rollback'])test(`scope expires at dispatch + 5000 monotonic ms with ${change} wall time and a hung next read`,async()=>{
+ const time=clock(),initialWall=time.now(),reads=[];let wall=initialWall;
+ const resource=createDraftScopeResource({now:()=>wall,monotonicNow:time.now,schedule:time.setTimeout,cancel:time.clearTimeout,
+  bridge:()=>bridge});
+ const bridge={draftScope(){const next=deferred();reads.push({at:wall,...next});return next.promise;}};
+ const stop=resource.subscribe(()=>{});await flush();reads[0].resolve(ready(initialWall));await flush();
+ const first=resource.getSnapshot();assert.equal(first.state,'READY');
+ if(change==='rollback')wall=initialWall+2000;
+ await time.advance(2000);assert.equal(reads.length,2);
+ if(change==='rollback')wall=initialWall+1000;
+ await time.advance(2999);assert.equal(resource.isCurrent(first.generation),true);
+ await time.advance(1);
+ assert.equal(resource.getSnapshot().state,'UNKNOWN');assert.equal(resource.getSnapshot().scope,null);
+ assert.equal(resource.isCurrent(first.generation),false);assert.equal(reads.length,2);
+ await time.advance(10000);assert.equal(reads.length,2);stop();
+});
+
+test('a scope reply cannot become READY after its monotonic deadline before overdue timers execute',async()=>{
+ const wall=1800000000000,timers=new Map(),read=deferred();let monotonic=100,id=0;
+ const bridge={draftScope:()=>read.promise};
+ const resource=createDraftScopeResource({bridge:()=>bridge,now:()=>wall,monotonicNow:()=>monotonic,
+  schedule:fn=>{timers.set(++id,fn);return id;},cancel:timer=>timers.delete(timer)});
+ const stop=resource.subscribe(()=>{});await flush();
+ monotonic+=5000;read.resolve(ready(wall));await flush();
+ assert.equal(resource.getSnapshot().state,'UNKNOWN');assert.equal(resource.getSnapshot().scope,null);stop();
+});
+
+test('an already queued expiry cannot revoke a newer confirmed observation',async()=>{
+ const wall=1800000000000,timers=new Map();let monotonic=100,id=0;
+ const bridge={draftScope:async()=>ready(wall)};
+ const resource=createDraftScopeResource({bridge:()=>bridge,now:()=>wall,monotonicNow:()=>monotonic,
+  schedule:(fn,ms)=>{timers.set(++id,{fn,ms});return id;},cancel:timer=>timers.delete(timer)});
+ const stop=resource.subscribe(()=>{});await flush();
+ const first=resource.getSnapshot(),queuedOldExpiry=[...timers.values()].find(t=>t.ms===5000).fn;
+ monotonic+=2000;await resource.refresh();
+ monotonic+=3000;queuedOldExpiry();
+ assert.equal(resource.getSnapshot().state,'READY');assert.equal(resource.isCurrent(first.generation),true);
+ monotonic+=2000;assert.equal(resource.isCurrent(first.generation),false);
+ [...timers.values()].find(t=>t.ms===5000).fn();assert.equal(resource.getSnapshot().state,'UNKNOWN');stop();
 });
