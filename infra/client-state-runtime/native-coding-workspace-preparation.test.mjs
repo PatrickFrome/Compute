@@ -10,7 +10,8 @@ import {readNativeWorkspaceStage,NATIVE_WORKSPACE_STAGE,validateNativeWorkspaceS
 const h=n=>String(n).repeat(64),sha=n=>String(n).repeat(40);
 const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});return{promise,resolve};};
 async function fixture(t){
- const directory=await fs.mkdtemp(path.join(os.tmpdir(),'workspace-preparation-'));t.after(()=>fs.rm(directory,{recursive:true,force:true}));
+ // Canonicalize only this freshly generated fixture root, never production inputs.
+ const directory=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'workspace-preparation-')));t.after(()=>fs.rm(directory,{recursive:true,force:true}));
  const c=generatedStage();await fs.writeFile(path.join(directory,NATIVE_WORKSPACE_STAGE),JSON.stringify(c));
  const device={device_id:randomUUID(),client_id:randomUUID(),key_fingerprint_sha256:h(8),admin_grant_epoch:3};
  const row={coordination_workspace_id:c.workspace_id,device_id:device.device_id,client_id:device.client_id,admin_grant_epoch:'3',repo_id:c.repo_id,repo_root:c.repo_root,managed_root:c.managed_root};

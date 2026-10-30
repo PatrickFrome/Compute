@@ -20,7 +20,7 @@ const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});retur
 // observations are generated: no installed PC, enrollment or model effects.
 test('native PG17 workspace preparation locks the same-cluster grant through durable publication and refuses revocation',
  {skip:!bin||!driver,timeout:120000},async t=>{
- const directory=await fs.mkdtemp(path.join(os.tmpdir(),'native-workspace-pg-')),data=path.join(directory,'data');
+ const directory=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'native-workspace-pg-'))),data=path.join(directory,'data');
  const listener=net.createServer();await new Promise((r,j)=>{listener.once('error',j);listener.listen(0,'127.0.0.1',r);});
  const port=listener.address().port;await new Promise(r=>listener.close(r));
  const command=(name,args)=>new Promise((resolve,reject)=>{const child=spawn(path.join(bin,name+(process.platform==='win32'?'.exe':'')),args,{stdio:'ignore',windowsHide:true,shell:false});

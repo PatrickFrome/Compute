@@ -8,7 +8,8 @@ import {SupervisorDeviceIdentity} from '../src/supervisor-device-identity.mjs';
 import {prepareNativeWorkspaceFromStage} from '../src/native-coding-workspace-preparation.mjs';
 import {validateNativeCodingDeviceRequest} from '../src/native-coding-device-request.mjs';
 async function fixture(t){
- const directory=await fs.mkdtemp(path.join(os.tmpdir(),'native-preparation-caller-'));t.after(()=>fs.rm(directory,{recursive:true,force:true}));
+ // Windows temp may use an 8.3 alias; bind generated fixtures to their physical root.
+ const directory=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'native-preparation-caller-')));t.after(()=>fs.rm(directory,{recursive:true,force:true}));
  const identity=new SupervisorDeviceIdentity({statePath:path.join(directory,'identity.json'),secureStorage:{isEncryptionAvailable:()=>true,encryptString:v=>Buffer.from(v),decryptString:v=>v.toString()}});
  await identity.ensure();await identity.bindDevice(randomUUID());const input={preparation_id:randomUUID(),configuration_sha256:'a'.repeat(64)};
  const calls=[],binding={instance_id:randomUUID(),host_pid:123};let state='NOT_STARTED',fail=false,alter=null;

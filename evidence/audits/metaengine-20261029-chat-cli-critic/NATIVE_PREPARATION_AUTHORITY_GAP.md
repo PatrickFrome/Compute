@@ -402,3 +402,19 @@ An earlier concurrent aggregate had one child-startup timeout; unchanged isolate
 IPC passed 41/41 and the complete serial rerun passed without increasing deadlines
 or skipping the case. Source syntax catalog: 252 passed. These source and generated
 physical-adapter results do not close installed Windows/bootstrap acceptance.
+
+## Windows aggregate fixture correction
+
+Published 8145a690 passed Windows Source (519 pass, one baseline skip) and its
+native PG17 group (51/51), but the separate full Windows Runtime job failed nine
+new preparation cases in readNativeWorkspaceStage, before their business checks:
+readNativeCodingProtectedJson rejected physical_path_invalid. The new fixture
+used raw os.tmpdir/mkdtemp paths, unlike existing native fixtures that resolve
+the newly generated directory first. Windows temp roots may contain 8.3 aliases.
+
+All three new preparation fixtures now resolve only their freshly created temp
+root before creating or reading protected files. Production path identity/alias,
+ACL and hardlink refusals are unchanged; no skip or timeout was added. Local
+stage tests 18/18 and actual PG17 3/3 pass. The new exact-head Windows aggregate
+must confirm this correction; its result is not inferred from local tests or the
+previous component lane.
