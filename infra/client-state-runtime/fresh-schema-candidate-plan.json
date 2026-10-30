@@ -282,7 +282,15 @@
     },
     {
       "path": "infra/client-state-runtime/native-coding-pending-goal-v1.sql",
-      "sha256": "e8457593dd5c8c12a372e594243b000e84b5eb0d3998cc8182b7fae4a0f89530"
+      "sha256": "e891a02a63b95ba72d7ab5b7b717c45cf5ccb10cad01d2d19b8bccb5a0572dd9"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-pending-activation-v1.sql",
+      "sha256": "477be2175c6d0220c4ce1e1942301eca1280d18f5e96da8849d3683b832e8784"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-setup-operation-v1.sql",
+      "sha256": "18cf78ff5400706ba42749a468cffdc9405e3612c405eee94824873518c1bf5a"
     }
   ],
   "unresolved_dependencies": [

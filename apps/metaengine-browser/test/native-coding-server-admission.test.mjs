@@ -54,3 +54,19 @@ test('native typed routes call existing mutators with server-derived summary',as
   assert.equal((await response.json()).native_coding_ack.result_sha256,f.receipt.result_sha256);
   assert.equal(mutate[1].p_state,'RESULT_READY');assert.equal(mutate[1].p_summary.useful_work_verified,false);
 });
+
+test('cycle returns retained LEASED native binding for the existing first-dispatch tick, without allocating again',async()=>{
+ const f=admissionFixture(),calls=[];
+ const row={task_id:f.binding.task_id,state:'LEASED',role:'IMPLEMENTER',base_sha:'a'.repeat(40),
+  lease_generation:f.binding.lease_generation,lease_agent_id:f.binding.agent_id,lease_tab_id:f.binding.tab_id,
+  lease_target_id:f.binding.target_id,lease_agent_generation_epoch:f.binding.agent_generation_epoch};
+ const rpc=async(name,input)=>{calls.push([name,input]);if(name==='native_coding_admission_context_v1')return f.context();
+  if(name==='devos_fleet_snapshot_v1')return {active_tasks:[row,{...row,task_id:'11111111-1111-4111-8111-111111111111',lease_target_id:'webcontents:10'},
+   {...row,task_id:'22222222-2222-4222-8222-222222222222',lease_agent_id:'agent_foreign'}],active_claims:[]};
+  if(name==='devos_fleet_lease_v1')assert.fail('no READY task should allocate');return {};};
+ const response=await createDevosSupervisorRoutes({rpc,workspaceId:f.workspaceId})({req:{method:'POST'},path:'/v1/devos/cycle',clientId:f.clientId,identity:f.identity,
+  body:{fleet:{agents:[]},native_coding:{schema:'metaengine.native-coding.providers.v1',providers:[f.provider]}}});
+ const result=await response.json();assert.equal(response.status,200);assert.equal(result.running.length,1);assert.deepEqual(result.leases,[]);
+ for(const key of ['task_id','lease_generation','agent_id','tab_id','target_id','agent_generation_epoch'])assert.equal(result.running[0][key],f.binding[key]);
+ assert.equal(calls.some(([name])=>name==='devos_fleet_lease_v1'),false);
+});

@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
-  installLocalRuntimeHostShutdown, localRuntimeHostEnvironment,
+  subscribeOwnedLocalRuntimeHostGeneration,createOwnedNativeCodingHostCapability,readOwnedLocalRuntimeHostSummary,installLocalRuntimeHostShutdown, localRuntimeHostEnvironment,
   startConfiguredLocalRuntimeHost, stopOwnedLocalRuntimeHost, validatePackagedLocalRuntimeBinding,
 } from '../src/local-runtime-host-controller.mjs';
 import { LOCAL_STATE_PROVIDER_CONFIG_SCHEMA, LOCAL_STATE_PROVIDER_PROFILE, localStateProviderConnectionReady, validateLocalStateProviderConfig } from '../src/local-state-provider-policy.mjs';
@@ -375,4 +375,32 @@ test('stale packaged Owner pin leaves the old profile intact and exits without a
   assert.ok(reject >= 0 && stop > reject && rethrow > stop, 'mismatch remains an explicit fail-closed admission error');
   assert.match(source.slice(stop, rethrow), /app\.exit\(1\);\s*return;/);
   assert.match(source, /Do not delete the Owner profile or PostgreSQL database/);
+});
+
+test('owned native scope cleanup joins exact verified Host shutdown, never stops live Host on its own',async t=>{
+ const f=await fixture(t);await startConfiguredLocalRuntimeHost({...f,startupTimeoutMs:FIXTURE_START_TIMEOUT_MS,stopTimeoutMs:2000});
+ const summary=readOwnedLocalRuntimeHostSummary(),cap=createOwnedNativeCodingHostCapability(summary);
+ const pending=cap.readScope();pending.catch(()=>{});cap.close();await assert.rejects(pending);
+ await assert.rejects(cap.drainPhysical({wait:false}),e=>e.reason==='PHYSICAL_CLEANUP_UNCONFIRMED');assert.equal(readOwnedLocalRuntimeHostSummary(),summary);
+ assert.equal(f.children[0].child.connected,true);assert.equal(cap.snapshot().physical_inflight,1);
+ const stopped=await stopOwnedLocalRuntimeHost({timeoutMs:2000});assert.equal(stopped.cleanup_confirmed,true);
+ assert.equal((await cap.drainPhysical()).cleanup_confirmed,true);assert.equal(cap.snapshot().physical_inflight,0);
+});
+test('concurrent owned shutdown requests share one exact-child stop send and wait for exit',async t=>{
+ const f=await fixture(t,{holdExit:true});await startConfiguredLocalRuntimeHost({...f,startupTimeoutMs:FIXTURE_START_TIMEOUT_MS,stopTimeoutMs:2000});
+ const child=f.children[0].child,send=child.send.bind(child);let stops=0;
+ child.send=(message,...args)=>{if(message?.schema==='compute.runtime-host-control.v1'&&message.command==='stop')stops++;return send(message,...args);};
+ const observed=new Promise(resolve=>{const read=m=>{if(m?.schema==='fixture.stop-observed'){child.off('message',read);resolve();}};child.on('message',read);});
+ const a=stopOwnedLocalRuntimeHost({timeoutMs:2000}),b=stopOwnedLocalRuntimeHost({timeoutMs:2000});await observed;assert.equal(stops,1);
+ send({schema:'fixture.control',command:'release-exit'});assert.equal((await a).cleanup_confirmed,true);assert.equal((await b).cleanup_confirmed,true);assert.equal(stops,1);
+});
+
+test('synchronous stopping-generation observer reentry shares already-owned shutdown work',async t=>{
+ const f=await fixture(t,{holdExit:true});await startConfiguredLocalRuntimeHost({...f,startupTimeoutMs:FIXTURE_START_TIMEOUT_MS,stopTimeoutMs:2000});
+ const child=f.children[0].child,send=child.send.bind(child);let stops=0,reentrant;
+ child.send=(message,...args)=>{if(message?.schema==='compute.runtime-host-control.v1'&&message.command==='stop')stops++;return send(message,...args);};
+ const unsubscribe=subscribeOwnedLocalRuntimeHostGeneration(snapshot=>{if(snapshot.stopping&&!reentrant)reentrant=stopOwnedLocalRuntimeHost({timeoutMs:2000});});t.after(unsubscribe);
+ const observed=new Promise(resolve=>{const read=m=>{if(m?.schema==='fixture.stop-observed'){child.off('message',read);resolve();}};child.on('message',read);});
+ const first=stopOwnedLocalRuntimeHost({timeoutMs:2000});await observed;assert.ok(reentrant);assert.equal(stops,1);
+ send({schema:'fixture.control',command:'release-exit'});assert.equal((await first).cleanup_confirmed,true);assert.equal((await reentrant).cleanup_confirmed,true);assert.equal(stops,1);
 });

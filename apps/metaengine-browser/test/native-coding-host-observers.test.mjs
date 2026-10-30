@@ -1,3 +1,4 @@
+import {joinedSettlementFixture} from './fixtures/codex-cli-joined-settlement-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -137,7 +138,7 @@ test('PID reuse or changed owner cannot become a suspended job observation',asyn
   }
 });
 
-for(const outcome of ['unconfirmed','rejected','missing'])test(`worker shutdown retains ${outcome} native cleanup as unknown`,async()=>{
+for(const outcome of ['unconfirmed','rejected','missing','bare-true'])test(`worker shutdown retains ${outcome} native cleanup as unknown`,async()=>{
   const runId=randomUUID(),scope={provider_id:provider,agent_id:agent,task_id:id,lease_generation:1,prompt_sha256:hash('prompt')};
   let finish,rejectCompletion,terminated=0;
   const completion=new Promise((resolve,reject)=>{finish=resolve;rejectCompletion=reject;});
@@ -145,19 +146,19 @@ for(const outcome of ['unconfirmed','rejected','missing'])test(`worker shutdown 
     proof:{...proc,job_id:runId},completion,resume:async()=>{},terminate:async()=>{terminated++;throw Error('fixture_terminate_unconfirmed');}})}});
   await registry.controllerFor(scope).spawn({runId,binding:scope});
   if(outcome==='rejected')rejectCompletion(Error('fixture_native_completion_rejected'));
-  else finish(outcome==='missing'?undefined:{exit_code:0,tree_cleanup_confirmed:false});
+  else finish(outcome==='missing'?undefined:{exit_code:0,tree_cleanup_confirmed:outcome==='bare-true'});
   await new Promise(resolve=>setImmediate(resolve));
   const first=registry.close(),second=registry.close();assert.equal(first,second);
   const closed=await first;assert.equal(closed.cleanup_confirmed,false);assert.deepEqual(closed.unconfirmed_runs,[runId]);
   assert.equal(terminated,1);assert.equal(closed.automatic_retry_allowed,false);
 });
 
-test('only explicit native tree cleanup permits a confirmed worker drain',async()=>{
+test('only request-bound joined native cleanup permits a confirmed worker drain',async()=>{
   const runId=randomUUID(),scope={provider_id:provider,agent_id:agent,task_id:id,lease_generation:1,prompt_sha256:hash('prompt')};
-  let finish,terminated=0;
+  let finish,terminated=0;const generated=joinedSettlementFixture({runId,binding:scope},{pid:proc.pid,birth:proc.process_incarnation_id.split(':')[3],sid:proc.user_sid});
   const registry=createNativeCodingWorkerRegistry({readProcess:async()=>proc,processController:{spawn:async()=>({
-    proof:{...proc,job_id:runId},completion:new Promise(resolve=>{finish=resolve;}),resume:async()=>{},
-    terminate:async()=>{terminated++;finish({exit_code:1,tree_cleanup_confirmed:true});}})}});
+    proof:generated.proof,completion:new Promise(resolve=>{finish=resolve;}),resume:async()=>{},
+    terminate:async()=>{terminated++;finish(generated.complete({exit_code:1}));}})}});
   await registry.controllerFor(scope).spawn({runId,binding:scope});
   const closed=await registry.close();assert.equal(closed.cleanup_confirmed,true);assert.equal(closed.worker_count,1);
   assert.deepEqual(closed.unconfirmed_runs,[]);assert.equal(terminated,1);
@@ -165,7 +166,7 @@ test('only explicit native tree cleanup permits a confirmed worker drain',async(
 
 test('shutdown captures a suspended native handle that arrives after close and forbids duplicate pending spawn',async()=>{
   const runId=randomUUID(),scope={provider_id:provider,agent_id:agent,task_id:id,lease_generation:1,prompt_sha256:hash('prompt')};
-  let release,finish,terminated=0,resumed=0;
+  let release,finish,terminated=0,resumed=0;const generated=joinedSettlementFixture({runId,binding:scope},{pid:proc.pid,birth:proc.process_incarnation_id.split(':')[3],sid:proc.user_sid});
   const pending=new Promise(resolve=>{release=resolve;});
   const registry=createNativeCodingWorkerRegistry({readProcess:async()=>proc,processController:{spawn:async()=>pending}});
   const controller=registry.controllerFor(scope),spec={runId,binding:scope};
@@ -173,8 +174,8 @@ test('shutdown captures a suspended native handle that arrives after close and f
   await assert.rejects(controller.spawn(spec),/worker_scope_changed/);
   const closing=registry.close();let closed=false;closing.then(()=>{closed=true;});
   await new Promise(resolve=>setImmediate(resolve));assert.equal(closed,false);
-  release({proof:{...proc,job_id:runId},completion:new Promise(resolve=>{finish=resolve;}),resume:async()=>{resumed++;},
-    terminate:async()=>{terminated++;finish({tree_cleanup_confirmed:true});}});
+  release({proof:generated.proof,completion:new Promise(resolve=>{finish=resolve;}),resume:async()=>{resumed++;},
+    terminate:async()=>{terminated++;finish(generated.complete());}});
   await rejected;assert.equal((await closing).cleanup_confirmed,true);assert.equal(terminated,1);assert.equal(resumed,0);
 });
 
@@ -279,4 +280,27 @@ test('pre-cancelled native process and sandbox reads start no external reader',a
   const controller=new AbortController();controller.abort();
   await assert.rejects(readNativeCodingWindowsProcess(1,{signal:controller.signal,exec:()=>assert.fail('must not spawn')}),/request_cancelled/);
   await assert.rejects(readNativeCodingSandboxEvidence({signal:controller.signal,readProcess:()=>assert.fail('must not read process')}),/request_cancelled/);
+});
+
+test('protected JSON joins the exact held ACL sibling before propagating original rejection',async t=>{
+ const root=await temporary(t),file=path.join(root,'held-acl.json');await fs.writeFile(file,'{"schema":"fixture"}');
+ let release,entered;const started=new Promise(r=>{entered=r;}),held=new Promise(r=>{release=r;}),original=Error('generated_original_acl_failure');
+ let ended=false,calls=0;
+ const work=readNativeCodingProtectedJson(file,{verifyStorage:(_target,{operation})=>{
+  calls++;if(operation==='VERIFY_DIRECTORY')throw original;entered();return held;
+ }});work.then(()=>{ended=true;},()=>{ended=true;});
+ await started;await new Promise(r=>setImmediate(r));assert.equal(ended,false);assert.equal(calls,2);
+ release({owner_dacl_verified:true});await assert.rejects(work,error=>error===original);assert.equal(ended,true);
+});
+
+test('abort reaches held ACL observation without waiting for its join; late success remains denied',async t=>{
+ const root=await temporary(t),file=path.join(root,'abort-acl.json');await fs.writeFile(file,'{"schema":"fixture"}');
+ const controller=new AbortController();let entered,release,aborted=false,ended=false;
+ const started=new Promise(r=>{entered=r;}),cleanup=new Promise(r=>{release=r;});
+ const work=readNativeCodingProtectedJson(file,{signal:controller.signal,verifyStorage:async(_target,{operation,signal})=>{
+  if(operation==='VERIFY_DIRECTORY')return yes();assert.equal(signal,controller.signal);
+  signal.addEventListener('abort',()=>{aborted=true;},{once:true});entered();await cleanup;return yes();
+ }});work.then(()=>{ended=true;},()=>{ended=true;});
+ await started;controller.abort();assert.equal(aborted,true);await new Promise(r=>setImmediate(r));assert.equal(ended,false);
+ release();await assert.rejects(work,/request_cancelled/);
 });

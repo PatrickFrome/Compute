@@ -1,3 +1,8 @@
+import {readManagedTaskProjectRepository} from './managed-task-project-repository.mjs';
+import {readClientDraftScope} from './client-draft-scope.mjs';
+import {readClientNativeSetupRoute,readLoadedClientNativeSetupRoute} from './client-native-setup-route.mjs';
+import {createNativeHostScopeCleanup,drainNativeHostScopeCleanups,nativeHostScopeCleanupHeld,nativeHostScopeCleanupHold} from './native-host-scope-cleanup.mjs';
+import {createPreparedActivationRouter,readPreparedActivationProfilePin} from './client-prepared-goal-activation.mjs';
 import {readWindowsKernelProcessW60} from './host-native-owner-producers-w60.mjs';
 import {readVerifiedInstalledExecutableW68} from './installed-executable-provenance-w68.mjs';
 import {prepareNativeWorkspaceFromStage} from './native-coding-workspace-preparation.mjs';
@@ -94,14 +99,15 @@ import { createClientAdmissionRecoveryJournalFileStore } from './client-admissio
 import { createBrowserGuardianMachineBootstrapLauncher } from './browser-guardian-machine-bootstrap-launcher.mjs';
 import { createBrowserGuardianStatusObserver } from './browser-guardian-status-observer.mjs';
 import { notifyPrimaryWindowShown } from './browser-startup-observability.mjs';
-import {readOwnedLocalRuntimeHostSummary,createOwnedNativeCodingHostCapability,subscribeOwnedLocalRuntimeHostGeneration,
+import {stopOwnedLocalRuntimeHost,readOwnedLocalRuntimeHostSummary,createOwnedNativeCodingHostCapability,subscribeOwnedLocalRuntimeHostGeneration,
   readOwnedLocalRuntimeHostRecoveryObservation} from './local-runtime-host-controller.mjs';
 import {persistentLocalProviderBootstrap} from './local-state-provider-bootstrap.mjs';
 import {createInstalledRuntimeRecoveryBindingReader} from './runtime-recovery-installed-binding.mjs';
 import {createRuntimeRecoveryMainController} from './runtime-recovery-main.mjs';
 import {readNativeCodingOperatorPaths,resolveNativeCodingSandboxPin} from './native-coding-operator-paths.mjs';
+import {createNativeCodingCapacityOwner} from './native-coding-capacity-owner.mjs';
 import {createNativeCodingRuntime} from './native-coding-runtime.mjs';
-import {drainManagedRuntimeBindings} from './managed-runtime-drain.mjs';
+import {drainManagedRuntimeBindings,drainManagedRuntimeWorkers} from './managed-runtime-drain.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, '..');
@@ -134,6 +140,8 @@ const nativeSupervisorInitializationsByBarrier = new Map();
 const nativeRelayInitializationsByBarrier = new Map();
 const nativeRecoveryInitializationsByBarrier = new Map();
 const pendingOwnerInitializationsByBarrier = new Map();
+const nativeSetupRouteInitializationsByBarrier = new Map();
+const nativeDraftScopeInitializationsByBarrier = new Map();
 const nativeInitializationCleanupCandidates = new Set();
 let managedTaskProjectHost = null;
 let interruptedSetupRecovery = null;
@@ -142,9 +150,14 @@ let interruptedSetupRecoverySupervisor = null;
 let interruptedSetupRecoveryFleet = null;
 let interruptedSetupPhysicalMutationsInFlight = 0;
 let autonomousProjectRuntime = null;
+// One Main-lifetime execution custody owner exists before any descriptor mount.
+const nativeCodingCapacityOwner = createNativeCodingCapacityOwner();
 let nativeCodingRuntime = null;
 let nativeCodingHostCapability = null;
 let nativeCodingRuntimeMountPromise = null;
+// Exact unpublished Host scope, installed before its first remote request.
+let nativeCodingRuntimeMountCustody = null;
+const nativeSupervisorMountWaits = new Set();
 let nativeCodingRuntimeMountGeneration = null;
 let nativeCodingRuntimeMountFailure = null;
 let nativeCodingRuntimeMountDiagnostic = null;
@@ -798,7 +811,7 @@ async function latestClientGoal() {
   let latest = journal.latest();
   if (!latest) return null;
   if(latest.kind==='PREPARED_GOAL'){
-    try{await createPreparedGoalRouter(journal).refresh(latest);}catch{}
+    try{if(latest.activation_input)await createPreparedGoalActivationRouter(journal).refresh(latest);else await createPreparedGoalRouter(journal).refresh(latest);}catch{}
     return structuredClone(journal.get(latest.request_id));
   }
   if(latest.kind==='NATIVE_CODING'){
@@ -826,10 +839,10 @@ async function refreshClientGoal(rawRequestId) {
   const entry = journal.get(requestId);
   if (!entry) throw new Error('client_goal_request_unknown');
   if(entry.kind==='PREPARED_GOAL'){
-    const observed=await createPreparedGoalRouter(journal).refresh(entry);
-    try{await continuePreparedGoalOwnerCustody(journal.get(entry.request_id),false);}catch{}
+    const observed=entry.activation_input?await createPreparedGoalActivationRouter(journal).refresh(entry):await createPreparedGoalRouter(journal).refresh(entry);
+    if(!entry.activation_input)try{await continuePreparedGoalOwnerCustody(journal.get(entry.request_id),false);}catch{}
     return {schema:'metaengine.client.pending-goal-progress.v1',request_id:requestId,state:observed.state,
-      execution_ready:false,terminal:false,reconciliation_required:observed.state!=='PENDING_ACTIVATION',automatic_retry_allowed:false,authority_effect:false};
+      execution_ready:false,terminal:false,reconciliation_required:!['PENDING_ACTIVATION','ACTIVATED'].includes(observed.state),automatic_retry_allowed:false,authority_effect:false};
   }
   if(entry.kind==='NATIVE_CODING'){
     const observed=await createNativeGoalRouter(journal).refresh(entry);
@@ -907,6 +920,7 @@ function ensureNativeCodingRuntimeMounted() {
     assertOpen(summary);if(!present){recordMountFailure('OPERATOR_CONFIGURATION_MISSING');return null;}
     const operator=await readNativeCodingOperatorPaths(directory);assertOpen(summary);
     const capability=createOwnedNativeCodingHostCapability(summary);let candidate=null,bindingAttempted=false;
+    const custody={capability,runtime:null,failed:false,cleaned:false};nativeCodingRuntimeMountCustody=custody;
     try{
       // Explicit signed preparation is distinct from readonly seed discovery.
       // Missing stage is a no-op; unknown/revoked preparation blocks this mount.
@@ -919,7 +933,8 @@ function ensureNativeCodingRuntimeMounted() {
       const hashes=[...new Set(permits.map(permit=>permit.artifact.cli_executable_sha256))];
       if(permits.length===0||hashes.length!==1)throw Error('native_coding_protected_permits_required');
       const sandboxReceipts=permits.map(permit=>({...resolveNativeCodingSandboxPin(operator,permit),provider_id:permit.provider_id,agent_id:permit.agent_id,role:permit.role}));
-      candidate=createNativeCodingRuntime({identity,ownPostgres:capability,readResourceAdmission:readAgentResourceAdmission,
+      candidate=createNativeCodingRuntime({identity,ownPostgres:capability,capacityOwner:nativeCodingCapacityOwner,
+        capacityDevice:scope.bindings.find(row=>row.device_id===device.device_id&&row.client_id===device.client_id)?.device,readResourceAdmission:readAgentResourceAdmission,
         readServiceControl:()=>{
           const snapshot=nativeSupervisor?.snapshot?.();
           return snapshot?{supervisor_mode:snapshot.supervisor_mode,armed:snapshot.armed,
@@ -931,7 +946,7 @@ function ensureNativeCodingRuntimeMounted() {
         runnerOptions:{executablePath:operator.cli_executable,expectedExecutableSha256:hashes[0],codexHome:operator.codex_home,
           gitExecutable:operator.git_executable,journalRoot:operator.journal_root,workerTempRoot:operator.worker_temp_root},
         resultIndexRoot:operator.result_index_root,physicalSlotBudget:permits.reduce((budget,permit)=>Math.min(budget,permit.physical_slot_budget),Number.MAX_SAFE_INTEGER)});
-      assertOpen(summary);
+      custody.runtime=candidate;assertOpen(summary);
       const mounted=nativeCodingRuntimeMountReadback(candidate,capability,summary);
       if(!mounted)throw Error('native_coding_runtime_mount_candidate_unavailable');
       bindingAttempted=true;nativeSupervisor.bindNativeCodingRuntime(candidate);
@@ -939,6 +954,7 @@ function ensureNativeCodingRuntimeMounted() {
       assertOpen(summary);
       if(!nativeCodingRuntimeMountReadback(candidate,capability,summary))throw Error('native_coding_runtime_mount_binding_closed');
       nativeCodingRuntime=candidate;nativeCodingHostCapability=capability;nativeCodingRuntimeMountGeneration=current;
+      if(nativeCodingRuntimeMountCustody===custody)nativeCodingRuntimeMountCustody=null;
       return mounted;
     }catch(error){
       if(bindingAttempted){
@@ -952,12 +968,17 @@ function ensureNativeCodingRuntimeMounted() {
           cleanupConfirmed=drained.closed===true&&drained.shutdown_state==='DRAINED'&&drained.worker_cleanup_confirmed===true;
         }catch{cleanupConfirmed=false;}
       }
-      if(cleanupConfirmed)try{capability.close();}catch{cleanupConfirmed=false;}
+      if(cleanupConfirmed)try{
+        const physical=await capability.drainPhysical({wait:false});
+        cleanupConfirmed=physical?.schema==='metaengine.native-coding.physical-drain.v1'&&physical.cleanup_confirmed===true;
+        if(cleanupConfirmed){capability.close();custody.cleaned=true;}
+      }catch{cleanupConfirmed=false;}
+      if(cleanupConfirmed&&nativeCodingRuntimeMountCustody===custody)nativeCodingRuntimeMountCustody=null;
       if(!cleanupConfirmed){
         // Retain closed/HOLD custody for the existing physical drain. Losing
         // these references would let recovery confirm an empty drain while an
         // unconfirmed candidate/journal still exists. Never bind them again.
-        nativeCodingRuntimeMountFailure='native_coding_runtime_mount_cleanup_unconfirmed';
+        custody.failed=true;nativeCodingRuntimeMountFailure='native_coding_runtime_mount_cleanup_unconfirmed';
         nativeCodingRuntime=candidate;nativeCodingHostCapability=capability;
       }
       throw error;
@@ -1001,8 +1022,10 @@ function continuePreparedGoalOwnerCustody(entry,write=false){
     const identity=ensureSupervisorIdentity();await identity.ensure();
     const before=identity.snapshot(),capability=createOwnedNativeCodingHostCapability(summary);
     let unbind=null;
+    const cleanup={kind:'HOST_SCOPE',candidate:createNativeHostScopeCleanup({capability,unbind:()=>unbind?.()})};
+    nativeInitializationCleanupCandidates.add(cleanup);
     const assertLifetime=()=>{
-      assertNativeSupervisorInitializationOpen(closing);assertNativeCodingRuntimeMountOpen(summary);
+      assertNativeSupervisorInitializationOpen(closing,cleanup);assertNativeCodingRuntimeMountOpen(summary);
       if(capability.snapshot().closed)throw Error('pending_owner_host_closed');
       const current=identity.snapshot();
       if(['device_id','client_id','key_fingerprint_sha256'].some(k=>current[k]!==before[k]))throw Error('pending_owner_identity_changed');
@@ -1033,9 +1056,65 @@ function continuePreparedGoalOwnerCustody(entry,write=false){
     }finally{
       // Keep the channel and current binding alive until started native checks
       // and queued DPAPI persistence settle, even after an IPC timeout.
-      await unbind?.();capability.close();
+      await cleanupPendingNativeHostScope(cleanup);
     }
   });
+}
+
+// An explicit renderer action selects only an existing pending request. Profile
+// pins and activation identity originate in native main, never renderer input.
+function createPreparedGoalActivationRouter(journal){
+  return createPreparedActivationRouter({journal,newId:()=>randomUUID().toLowerCase(),
+    onActivated:async()=>{
+      try{const mounted=await ensureNativeCodingRuntimeMounted();if(!mounted)throw Error('activation_runtime_mount_unavailable');return mounted;}
+      catch(error){recordStartupSubsystemDegraded('PENDING_ACTIVATION_RUNTIME_MOUNT',error);throw error;}
+    },
+    readProfilePin:async()=>{
+      const summary=readOwnedLocalRuntimeHostSummary();assertNativeCodingRuntimeMountOpen(summary);
+      if(!summary?.status_file)throw Error('activation_host_unavailable');
+      return readPreparedActivationProfilePin(path.dirname(summary.status_file));
+    },request:async(operation,input)=>{
+      const closing=managedTaskProjectHostClosing;
+      if(pendingOwnerInitializationsByBarrier.has(closing))throw Error('activation_native_scope_busy');
+      return runNativeInitialization(closing,pendingOwnerInitializationsByBarrier,async()=>{
+        assertNativeSupervisorInitializationOpen(closing);
+        const summary=readOwnedLocalRuntimeHostSummary();assertNativeCodingRuntimeMountOpen(summary);
+        const identity=ensureSupervisorIdentity();await identity.ensure();
+        const before=identity.snapshot(),capability=createOwnedNativeCodingHostCapability(summary);
+        let unbind=null,activationResult=null;
+        const cleanup={kind:'HOST_SCOPE',candidate:createNativeHostScopeCleanup({capability,unbind:()=>unbind?.()})};
+        nativeInitializationCleanupCandidates.add(cleanup);
+        const assertLifetime=()=>{
+          assertNativeSupervisorInitializationOpen(closing,cleanup);assertNativeCodingRuntimeMountOpen(summary);
+          if(capability.snapshot().closed||['device_id','client_id','key_fingerprint_sha256'].some(k=>identity.snapshot()[k]!==before[k]))throw Error('activation_lifetime_changed');
+        };
+        try{
+          const signed=await signNativeCodingDeviceRequest({identity,binding:capability.snapshot(),operation,input});assertLifetime();
+          if(operation==='READ_PREPARED_GOAL_ACTIVATION_V1'){
+            const value=await capability.readPreparedGoalActivation(signed);assertLifetime();return value;
+          }
+          if(operation!=='ACTIVATE_PREPARED_GOAL_V1')throw Error('activation_operation_invalid');
+          ensureGuardianBootstrapLauncher();
+          unbind=identity.bindHostOwnerGenesisW74({assertLifetime,
+            readNativeKernel:pid=>readWindowsKernelProcessW60(pid),readSourceProof:()=>readVerifiedInstalledExecutableW68(app),
+            withOwnerScope:async(mode,body)=>{
+              if(mode!=='READ_CUSTODY')throw Error('activation_read_custody_only');
+              let verified=null;
+              activationResult=await capability.withPendingActivationScope(signed,async tx=>{verified=await body(tx);return verified;});
+              assertLifetime();return verified;
+            },
+          });
+          const owner=await identity.readTrustedHostOwnerIncarnationW74();assertLifetime();
+          if(!owner||!activationResult)throw Error('activation_readback_required');
+          return activationResult;
+        }finally{await cleanupPendingNativeHostScope(cleanup);}
+      });
+    }});
+}
+async function activatePreparedClientGoal(rawRequestId){
+  const requestId=normalizeClientGoalRequestId(rawRequestId),journal=await ensureClientGoalJournal();
+  const entry=journal.get(requestId);if(!entry)throw Error('activation_goal_missing');
+  return createPreparedGoalActivationRouter(journal).activate(entry);
 }
 
 async function readPreparedGoalSelector(){
@@ -1067,11 +1146,32 @@ function createPreparedGoalRouter(journal){
   }});
 }
 
+async function readNativeSetupRoute(){
+  const closing=managedTaskProjectHostClosing;
+  return runNativeInitialization(closing,nativeSetupRouteInitializationsByBarrier,async()=>{
+    assertNativeSupervisorInitializationOpen(closing);
+    const repository=await readManagedTaskProjectRepository({userDataPath:app.getPath('userData')});
+    assertNativeSupervisorInitializationOpen(closing);
+    const identity=ensureSupervisorIdentity();await identity.ensure();
+    const summary=readOwnedLocalRuntimeHostSummary();assertNativeCodingRuntimeMountOpen(summary);
+    const capability=createOwnedNativeCodingHostCapability(summary);
+    const cleanup={kind:'HOST_SCOPE',candidate:createNativeHostScopeCleanup({capability})};
+    nativeInitializationCleanupCandidates.add(cleanup);
+    try{
+      const assertOpen=()=>{assertNativeSupervisorInitializationOpen(closing,cleanup);assertNativeCodingRuntimeMountOpen(summary);};
+      const result=await readClientNativeSetupRoute({repository,identity,capability,assertOpen});
+      const current=await readManagedTaskProjectRepository({userDataPath:app.getPath('userData')});assertOpen();
+      if(JSON.stringify(current)!==JSON.stringify(repository))throw Error('client_native_setup_repository_changed');
+      return result;
+    }finally{await cleanupPendingNativeHostScope(cleanup);}
+  });
+}
+
 async function readNativeGoalSubmissionMode(){
   const pending=(await ensureClientGoalJournal()).snapshot().entries.find(entry=>entry.kind==='PREPARED_GOAL');
   if(pending)return {schema:'metaengine.client.goal-submission-mode.v1',kind:'PREPARED_GOAL',state:'HOLD',
     reason:pending.state==='PENDING_ACTIVATION'?'PREPARED_GOAL_OWNER_ACTIVATION_REQUIRED':'PREPARED_GOAL_READBACK_REQUIRED',automatic_retry_allowed:false,authority_effect:false};
-  return readClientGoalSubmissionMode({readPreparedGoal:readPreparedGoalSelector,readSummary:readOwnedLocalRuntimeHostSummary,readNativeBusy:async()=>{
+  return readClientGoalSubmissionMode({readNativeSetupRoute,readPreparedGoal:readPreparedGoalSelector,readSummary:readOwnedLocalRuntimeHostSummary,readNativeBusy:async()=>{
     const journal=await ensureClientGoalJournal();
     const active=[...journal.snapshot().entries].reverse().find(entry=>entry.kind==='NATIVE_CODING'&&entry.receipt
       &&(!entry.progress||entry.progress.project_state==='ACTIVE'));
@@ -2425,12 +2525,12 @@ async function initGithubChatRelay(closing=managedTaskProjectHostClosing,owned=n
   });
 }
 
-function assertNativeSupervisorInitializationOpen(closing) {
+function assertNativeSupervisorInitializationOpen(closing,ownedCleanup=null) {
   if(runtimeRecoveryGenerationLost)throw Error('local_runtime_host_generation_lost_fresh_browser_required');
   if(shutdownRequested||globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__===true
     ||managedTaskProjectHostDrainPending||managedTaskProjectHostClosing!==closing)
     throw Error('native_supervisor_initialization_lifetime_changed');
-  if(nativeInitializationCleanupCandidates.size)throw Error('native_supervisor_initialization_cleanup_unconfirmed');
+  if(nativeCodingRuntimeMountCustody?.failed||[...nativeInitializationCleanupCandidates].some(record=>record!==ownedCleanup))throw Error('native_supervisor_initialization_cleanup_unconfirmed');
 }
 
 function runNativeInitialization(closing,byBarrier,operation) {
@@ -2438,6 +2538,37 @@ function runNativeInitialization(closing,byBarrier,operation) {
   const pending=Promise.resolve().then(operation);byBarrier.set(closing,pending);nativeRuntimeInitializations.add(pending);
   const settled=()=>{nativeRuntimeInitializations.delete(pending);if(byBarrier.get(closing)===pending)byBarrier.delete(closing);};
   pending.then(settled,settled);return pending;
+}
+
+function readCurrentClientDraftScope(){
+  const dispatchedAt=Date.now(),dispatchedMonotonic=performance.now(),closing=managedTaskProjectHostClosing;
+  return runNativeInitialization(closing,nativeDraftScopeInitializationsByBarrier,async()=>{
+    const identity=supervisorIdentity,summary=readOwnedLocalRuntimeHostSummary();let cleanup=null;
+    const assertOpen=()=>{
+      assertNativeSupervisorInitializationOpen(closing,cleanup);assertNativeCodingRuntimeMountOpen(summary);
+      if(supervisorIdentity!==identity)throw Error('client_draft_identity_changed');
+    };
+    return readClientDraftScope({identity,dispatchedAt,dispatchedMonotonic,assertOpen,
+      readRepository:()=>readManagedTaskProjectRepository({userDataPath:app.getPath('userData')}),
+      readVerifiedRoute:async({repository,identity,assertCurrent})=>{
+        assertCurrent();const capability=createOwnedNativeCodingHostCapability(summary);
+        cleanup={kind:'HOST_SCOPE',candidate:createNativeHostScopeCleanup({capability})};nativeInitializationCleanupCandidates.add(cleanup);
+        try{return await readLoadedClientNativeSetupRoute({repository,identity,capability,assertOpen:assertCurrent});}
+        finally{await cleanupPendingNativeHostScope(cleanup);}
+      },
+    });
+  });
+}
+
+async function cleanupPendingNativeHostScope(record){
+  try{await cleanupNativeInitializationCandidate(record);}catch(error){
+    if(nativeHostScopeCleanupHeld(error)&&!record.joining){
+      // The record stays in managed custody, independently of the caller's
+      // UNKNOWN. Quit can stop the exact Host without waiting on this join.
+      record.joining=record.candidate.whenSettled().then(()=>cleanupNativeInitializationCandidate(record)).catch(()=>{});
+    }
+    throw error;
+  }
 }
 
 async function cleanupNativeInitializationCandidate(record) {
@@ -2450,6 +2581,7 @@ async function cleanupNativeInitializationCandidate(record) {
   const confirmed=kind==='RPC'?state.state==='STOPPED'&&state.port===null
     :kind==='RELAY'?state.state==='REVOKED'
     :kind==='MANAGED'?state.state==='CLOSED'&&state.in_flight===0
+    :kind==='HOST_SCOPE'?state.state==='CLOSED'&&state.cleanup_confirmed===true
     :kind==='AUTONOMOUS'?state.pending_effects===0&&state.in_flight_operations===0:false;
   if(!confirmed)throw Error('native_supervisor_initialization_cleanup_unconfirmed');
   if(kind==='RPC'&&supervisorLoopbackRpc===candidate)supervisorLoopbackRpc=null;
@@ -2489,36 +2621,87 @@ async function connectGithubChat() {
   return githubChatSetup;
 }
 
+let managedTaskProjectHostDrainHeld=false,nativeHostQuitShutdownPromise=null,managedTaskProjectHostQuitUpgrade=null;
 function closeManagedTaskProjectHost() {
-  if (managedTaskProjectHostDrainPending) return managedTaskProjectHostClosing;
+  if (managedTaskProjectHostDrainPending&&!managedTaskProjectHostDrainHeld) {
+    if(shutdownRequested)managedTaskProjectHostQuitUpgrade?.();
+    return managedTaskProjectHostClosing;
+  }
+  managedTaskProjectHostDrainHeld=false;
+  let signalQuit;const quitUpgrade=new Promise(resolve=>{signalQuit=resolve;});
+  managedTaskProjectHostQuitUpgrade=signalQuit;
   const previous=managedTaskProjectHostClosing,initializations=[...nativeRuntimeInitializations];
-  const mount=nativeCodingRuntimeMountPromise;if(mount&&!initializations.includes(mount))initializations.push(mount);
+  const hostScopes=new Set([...pendingOwnerInitializationsByBarrier.values(),...nativeSetupRouteInitializationsByBarrier.values(),...nativeDraftScopeInitializationsByBarrier.values()]);
+  const mount=nativeCodingRuntimeMountPromise,mountCustody=nativeCodingRuntimeMountCustody;
+  if(mount&&!initializations.includes(mount))initializations.push(mount);
+  if(mount&&mountCustody){hostScopes.add(mount);for(const work of nativeSupervisorMountWaits)hostScopes.add(work);}
   // Published listeners belong to this lifetime too. Retain the exact owner
   // until its accepted requests and manifest cleanup have both drained.
   if(supervisorLoopbackRpc)nativeInitializationCleanupCandidates.add({kind:'RPC',candidate:supervisorLoopbackRpc});
   managedTaskProjectHostDrainPending=true;
+  const coding=nativeCodingRuntime||mountCustody?.runtime||null,codingHost=nativeCodingHostCapability||mountCustody?.capability||null;
+  // Start the existing close owner synchronously: a queued authorization must
+  // see closed admission before any unrelated initialization can hold this join.
+  let workerDrainPending;
   let fenceError=null;
   // Publish a new barrier even with empty globals. An unpublished mount owns
   // its previous barrier and must reject this changed lifetime before binding.
   const closing=Promise.resolve().then(async()=>{
-    const [prior]=await Promise.allSettled([previous,...initializations]);
-    if(prior.status!=='fulfilled')throw prior.reason;
+    // Do not let an in-flight Host query prevent explicit quit from reaching
+    // the existing Host stop lifecycle. An unpublished mount with retained
+    // capability is Host-dependent too. The synchronously changed barrier
+    // prevents any later runtime creation; an existing candidate is joined below.
+    const [prior]=await Promise.allSettled([previous,...initializations.filter(work=>!hostScopes.has(work))]);
+    if(prior.status!=='fulfilled'&&!nativeHostScopeCleanupHeld(prior.reason))throw prior.reason;
     if(fenceError)throw fenceError.error;
-    for(const record of [...nativeInitializationCleanupCandidates])await cleanupNativeInitializationCandidate(record);
-    // A failed pending mount may have retained CLOSED/HOLD custody while
-    // settling. Read these references now, not before its cleanup completed.
+    const joinedHostScopes=Promise.allSettled(initializations.filter(work=>hostScopes.has(work)));
+    // Fence/admission and the exact worker registry are separate from full
+    // runtime close: a pending authorization/callback may require Host stop.
+    const workerDrain=await workerDrainPending;
+    const join=async()=>{
+      await joinedHostScopes;
+      await drainNativeHostScopeCleanups([...nativeInitializationCleanupCandidates],{
+        cleanup:cleanupNativeInitializationCandidate,quit:false,
+      });
+      return drainManagedRuntimeBindings({coding,
+        codingHost:mountCustody?.cleaned&&mountCustody.capability===codingHost?null:codingHost,
+        projectRuntime:autonomousProjectRuntime,host:managedTaskProjectHost,workerDrain});
+    };
+    let joined=null,outcome=null;
+    const startJoin=()=>joined??=(join().then(value=>({value}),error=>({error})));
+    // Quit upgrades THIS owner even if it is already waiting in the published
+    // runtime/capability join, not only in an initialization callback.
+    if(!shutdownRequested){
+      outcome=await Promise.race([startJoin(),quitUpgrade.then(()=>null)]);
+      if(!shutdownRequested&&outcome?.error)throw outcome.error;
+    }
+    if(shutdownRequested&&(codingHost||[...nativeInitializationCleanupCandidates].some(record=>record.kind==='HOST_SCOPE'))){
+      const stopped=await (nativeHostQuitShutdownPromise||(nativeHostQuitShutdownPromise=stopOwnedLocalRuntimeHost()));
+      if(stopped?.cleanup_confirmed!==true)throw nativeHostScopeCleanupHold();
+    }
+    outcome??=await startJoin();
+    if(outcome.error){
+      // A finite HOST_SCOPE probe can have failed immediately before quit.
+      // Retry only cleanup against the same stopped Host, never its operation.
+      if(!shutdownRequested||!nativeHostScopeCleanupHeld(outcome.error))throw outcome.error;
+      outcome={value:await join()};
+    }
+    const receipt=outcome.value;
     const host=managedTaskProjectHost,projectRuntime=autonomousProjectRuntime;
-    const coding=nativeCodingRuntime,codingHost=nativeCodingHostCapability;
-    const receipt=await drainManagedRuntimeBindings({coding,codingHost,projectRuntime,host});
     // A rejection retains the same custody, failure barrier and admission hold.
     if(nativeCodingRuntime===coding)nativeCodingRuntime=null;
     if(nativeCodingHostCapability===codingHost)nativeCodingHostCapability=null;
+    if(nativeCodingRuntimeMountCustody===mountCustody)nativeCodingRuntimeMountCustody=null;
     if(managedTaskProjectHost===host)managedTaskProjectHost=null;
     if(autonomousProjectRuntime===projectRuntime)autonomousProjectRuntime=null;
     managedTaskProjectHostDrainPending=false;
     return receipt;
   });
+  const finished=()=>{if(managedTaskProjectHostQuitUpgrade===signalQuit)managedTaskProjectHostQuitUpgrade=null;};
+  closing.then(finished,finished);
+  closing.catch(error=>{if(nativeHostScopeCleanupHeld(error))managedTaskProjectHostDrainHeld=true;});
   managedTaskProjectHostClosing=closing;
+  workerDrainPending=drainManagedRuntimeWorkers(coding);void workerDrainPending.catch(()=>{});
   try{
     nativeSupervisor?.bindDevosProjectRuntime(null);
     nativeSupervisor?.bindNativeCodingRuntime(null);
@@ -2742,7 +2925,10 @@ async function initNativeSupervisor() {
   }
   assertCurrent();
   try{
-    const mounted=await ensureNativeCodingRuntimeMounted();
+    const initialization=nativeSupervisorInitializationsByBarrier.get(closing);
+    if(initialization)nativeSupervisorMountWaits.add(initialization);
+    let mounted;try{mounted=await ensureNativeCodingRuntimeMounted();}
+    finally{if(initialization)nativeSupervisorMountWaits.delete(initialization);}
     assertCurrent();
     if(mounted)autonomousProjectRuntime?.bindNativeCodingRuntime(nativeCodingRuntime);
   }
@@ -3183,6 +3369,12 @@ ipcMain.handle('metaengine:shell:primary-chat-actor-select', async (event, rawAc
 ipcMain.handle('metaengine:client:submit-goal', async (event, rawInput) => {
   assertShellSender(event);
   return submitClientGoal(rawInput);
+});
+ipcMain.handle('metaengine:client:activate-prepared-goal',async(event,requestId,...extra)=>{
+  assertShellSender(event);if(extra.length)throw Error('activation_extra_args');return activatePreparedClientGoal(requestId);
+});
+ipcMain.handle('metaengine:client:draft-scope',async(event,...args)=>{
+  assertShellSender(event);if(args.length)throw Error('client_draft_scope_params_forbidden');return readCurrentClientDraftScope();
 });
 ipcMain.handle('metaengine:client:goal-submission-mode',async(event,...args)=>{
   assertShellSender(event);

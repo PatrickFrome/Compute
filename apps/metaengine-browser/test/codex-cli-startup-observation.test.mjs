@@ -48,7 +48,7 @@ test('startup instrumentation has exact source anchors and never changes the pro
     && !['REQUEST_LINE_READ', 'REQUEST_JSON_BEGIN', 'REQUEST_JSON_END'].includes(stage))) assert.equal(traced.split(prefix + stage).length, 2, stage);
   assert.ok(traced.indexOf(prefix + 'PS_ENTER') < traced.indexOf("$ErrorActionPreference = 'Stop'"));
   assert.doesNotMatch(traced, /ME_CODEX_STARTUP_V1 (?:ADD_TYPE|ASSEMBLY_LOAD)_/);
-  const request = traced.indexOf('$request = [Console]::In.ReadLine() | ConvertFrom-Json');
+  const request = traced.indexOf('$line = [Console]::In.ReadLine()');
   assert.ok(traced.indexOf(prefix + 'REQUEST_READ_BEGIN') < request);
   assert.ok(request < traced.indexOf(prefix + 'REQUEST_READ_END'));
   let previous = -1;
@@ -63,12 +63,16 @@ test('startup instrumentation has exact source anchors and never changes the pro
   }
 });
 
-test('prepared-helper instrumentation reuses the assembly and separates explicit import, input wait and JSON parsing without exporting input', () => {
+test('prepared-helper instrumentation reuses the assembly and separates explicit import, input wait and JSON parsing without exporting input', async () => {
   const loader = CODEX_CLI_JOB_ASSEMBLY_LOAD_PREFIX + 'c3ludGhldGljLWJ5dGVz' + CODEX_CLI_JOB_ASSEMBLY_LOAD_SUFFIX;
   const moduleImport = String.raw`  Microsoft.PowerShell.Core\Import-Module -Name 'C:\Windows\System32\WindowsPowerShell\v1.0\Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1' -ErrorAction Stop`;
-  const request = '  $request = [Console]::In.ReadLine() | ConvertFrom-Json';
+  const request='  $line = [Console]::In.ReadLine()';
+  const envelope='  $envelope = $line | ConvertFrom-Json';
+  const bodyParse='  $request = ([Text.UTF8Encoding]::new($false,$true)).GetString($bytes) | ConvertFrom-Json';
+  const original=(await fs.readFile(resolveCodexCliJobHelperSource(),'utf8')).split("\n'@\n")[1];
+  assert.ok(original);
   for (const eol of ['\n', '\r\n']) {
-    const source = ['# generated protocol fixture, not a native assembly', loader, 'try {', moduleImport, request, '}'].join(eol);
+    const source = ['# generated assembly bytes; actual original v2 transport statements', loader, original].join('\n').replaceAll('\n',eol);
     const traced = instrumentCodexCliRuntimeStartup(source);
     assert.ok(traced.indexOf(prefix + 'ASSEMBLY_LOAD_BEGIN') < traced.indexOf(loader));
     assert.ok(traced.indexOf(prefix + 'ASSEMBLY_LOAD_END') > traced.indexOf(loader));
@@ -77,20 +81,20 @@ test('prepared-helper instrumentation reuses the assembly and separates explicit
     assert.ok(traced.indexOf(prefix + 'ASSEMBLY_LOAD_END') < importBegin && importBegin < traced.indexOf(moduleImport)
       && traced.indexOf(moduleImport) < importEnd);
     assert.equal(traced.split(moduleImport).length, 2, 'the same fixed module import executes once');
-    const lineRead = traced.indexOf('$metaengineStartupRequestLine = [Console]::In.ReadLine()');
+    const lineRead = traced.indexOf(request);
     const lineReadMarker = traced.indexOf(prefix + 'REQUEST_LINE_READ');
     const jsonBegin = traced.indexOf(prefix + 'REQUEST_JSON_BEGIN');
-    const parse = traced.indexOf('$request = $metaengineStartupRequestLine | ConvertFrom-Json');
+    const parse = traced.indexOf(envelope), body = traced.indexOf(bodyParse);
     const jsonEnd = traced.indexOf(prefix + 'REQUEST_JSON_END');
-    assert.ok(importEnd < lineRead && lineRead < lineReadMarker && lineReadMarker < jsonBegin && jsonBegin < parse && parse < jsonEnd);
+    assert.ok(importEnd < lineRead && lineRead < lineReadMarker && lineReadMarker < jsonBegin && jsonBegin < parse && parse < body && body < jsonEnd);
     assert.equal(traced.split('[Console]::In.ReadLine()').length, 2, 'input is read once');
-    assert.equal(traced.split('ConvertFrom-Json').length, 2, 'the same parser is invoked once');
+    assert.equal(traced.split('ConvertFrom-Json').length, 3, 'the exact envelope and body parsers each remain once');
     for (const line of traced.split(eol).filter(line => line.includes('[Console]::Error.WriteLine')))
-      assert.doesNotMatch(line, /\$request|\$metaengineStartupRequestLine/);
+      assert.doesNotMatch(line, /\$(?:request|line|bytes|envelope)/);
     if (eol === '\r\n') assert.ok(!traced.replaceAll('\r\n', '').includes('\n'));
     for (const bad of [traced, source + eol + loader, source.replace(loader, ''), source + "\nAdd-Type -TypeDefinition @'",
       source.replace(moduleImport, ''), source + eol + moduleImport,
-      source.replace(request, ''), source + eol + request, source + eol + '$metaengineStartupRequestLine = "collision"'])
+      source.replace(request, ''), source + eol + request, source.replace(envelope,''), source+eol+bodyParse])
       assert.throws(() => instrumentCodexCliRuntimeStartup(bad), /source_anchor_invalid/);
   }
 });

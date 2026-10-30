@@ -1,3 +1,6 @@
+import {NATIVE_SETUP_ACTIONS} from '../../apps/metaengine-browser/src/native-coding-setup-contract.mjs';
+import {nativeCodingHostSettlement,nativePhysicalSettlementUnconfirmed,runNativePhysicalSettlementScope} from '../../apps/metaengine-browser/src/native-coding-host-settlement.mjs';
+import {PENDING_ACTIVATION_PHASE,createPendingActivationHostPhases} from '../../apps/metaengine-browser/src/native-coding-pending-activation-phase.mjs';
 import {PENDING_OWNER_PHASE,PENDING_OWNER_ACTIONS,createPendingOwnerHostPhases} from '../../apps/metaengine-browser/src/native-coding-pending-owner-phase.mjs';
 import { createHash } from 'node:crypto';
 import {validateNativeCodingAgentHostRequest,nativeCodingAgentHostOperationWrites} from '../../apps/metaengine-browser/src/native-coding-agent-host-contract.mjs';
@@ -6,8 +9,8 @@ import {validateNativeCodingDeviceRequest} from '../../apps/metaengine-browser/s
 export const NATIVE_CODING_HOST_IPC_REQUEST = 'metaengine.native-coding.host-ipc.request.v1';
 export const NATIVE_CODING_HOST_IPC_RESPONSE = 'metaengine.native-coding.host-ipc.response.v1';
 const ACTIONS = ['READ_SCOPE','READ_LEASE','REGISTER_PROVIDER','READ_EXECUTION','RESERVE_EXECUTION','ADVANCE_EXECUTION','RECONCILE_PROJECT','READ_PROJECT_CHECKPOINT','AGENT_OPERATION','FINISH_CHECKPOINT','READ_FINISH_CHECKPOINT'];
-const OPTIONAL_ACTIONS=['ESTABLISH_PENDING_OWNER_V1','READ_PENDING_OWNER_V1','ADMIT_PREPARED_GOAL_V1','READ_PREPARED_GOAL_V1','PREPARE_WORKSPACE_V1','READ_WORKSPACE_PREPARATION_V1','READ_PROJECT_REJECTION','SEED_GOAL','READ_SEED','LIST_SEEDS','SERVICE_HEARTBEAT','READ_SERVICE_HEARTBEAT','READ_PRIOR_EXECUTION','RECONCILE_FINISH_CHECKPOINT'];
-const WRITES = new Set(['ESTABLISH_PENDING_OWNER_V1','ADMIT_PREPARED_GOAL_V1','PREPARE_WORKSPACE_V1','REGISTER_PROVIDER','RESERVE_EXECUTION','ADVANCE_EXECUTION','RECONCILE_PROJECT','FINISH_CHECKPOINT','RECONCILE_FINISH_CHECKPOINT','SEED_GOAL','SERVICE_HEARTBEAT']);
+const OPTIONAL_ACTIONS=['SERVICE_HEARTBEAT_V2','READ_SERVICE_HEARTBEAT_V2','READ_NATIVE_CAPACITY_V1',...NATIVE_SETUP_ACTIONS,'ACTIVATE_PREPARED_GOAL_V1','READ_PREPARED_GOAL_ACTIVATION_V1','ESTABLISH_PENDING_OWNER_V1','READ_PENDING_OWNER_V1','ADMIT_PREPARED_GOAL_V1','READ_PREPARED_GOAL_V1','PREPARE_WORKSPACE_V1','READ_WORKSPACE_PREPARATION_V1','READ_PROJECT_REJECTION','SEED_GOAL','READ_SEED','LIST_SEEDS','SERVICE_HEARTBEAT','READ_SERVICE_HEARTBEAT','READ_PRIOR_EXECUTION','RECONCILE_FINISH_CHECKPOINT'];
+const WRITES = new Set(['BEGIN_NATIVE_SETUP_V1','CANCEL_NATIVE_SETUP_V1','ACTIVATE_PREPARED_GOAL_V1','ESTABLISH_PENDING_OWNER_V1','ADMIT_PREPARED_GOAL_V1','PREPARE_WORKSPACE_V1','REGISTER_PROVIDER','RESERVE_EXECUTION','ADVANCE_EXECUTION','RECONCILE_PROJECT','FINISH_CHECKPOINT','RECONCILE_FINISH_CHECKPOINT','SEED_GOAL','SERVICE_HEARTBEAT','SERVICE_HEARTBEAT_V2']);
 const writes=(action,value)=>WRITES.has(action)||action==='AGENT_OPERATION'&&nativeCodingAgentHostOperationWrites(value);
 const REASONS = new Set(['INVALID_FRAME','INVALID_PAYLOAD','MESSAGE_TOO_LARGE','UNSUPPORTED_ACTION','INSTANCE_MISMATCH',
   'HOST_PID_MISMATCH','INFLIGHT_LIMIT','REQUEST_ID_REUSED','OPERATION_FAILED','WRITE_OUTCOME_UNKNOWN','RESPONSE_INVALID',
@@ -116,7 +119,9 @@ export function createNativeCodingHostIpcServer({instanceId,operations,send=proc
     ||!Number.isSafeInteger(timeoutMs)||timeoutMs<1||timeoutMs>30000)invalid('CHANNEL_CLOSED');
   // close is a private lifecycle method on the real authority. It is never a
   // dispatchable IPC action; reject every other unexpected property.
-  const mountedActions=[...ACTIONS,...OPTIONAL_ACTIONS.filter(action=>Object.hasOwn(operations||{},action))];
+  const full=ACTIONS.every(action=>typeof operations?.[action]==='function'),setup=NATIVE_SETUP_ACTIONS.every(action=>typeof operations?.[action]==='function');
+  if(!full&&!setup||NATIVE_SETUP_ACTIONS.some(action=>Object.hasOwn(operations||{},action))&&!setup)invalid('INVALID_PAYLOAD');
+  const mountedActions=[...(full?ACTIONS:[]),...(full?OPTIONAL_ACTIONS:[...NATIVE_SETUP_ACTIONS,'READ_NATIVE_CAPACITY_V1']).filter(action=>Object.hasOwn(operations||{},action))];
   keys(operations,[...mountedActions,...(Object.hasOwn(operations||{},'close')?['close']:[])]);
   for(const action of mountedActions)if(typeof operations[action]!=='function')invalid('INVALID_PAYLOAD');
   if(Object.hasOwn(operations,'close')&&typeof operations.close!=='function')invalid('INVALID_PAYLOAD');
@@ -134,11 +139,21 @@ export function createNativeCodingHostIpcServer({instanceId,operations,send=proc
     let frame=response(row.request,row.digest,outcome,value,reason);
     try{json(frame);}catch{frame=response(row.request,row.digest,row.write?'UNKNOWN':'REJECTED',null,
       row.write?'WRITE_OUTCOME_UNKNOWN':'OPERATION_FAILED');}
-    row.response=frame;clearTimeout(row.timer);completed.set(row.request.request_id,{digest:row.digest,frame});
+    row.response=frame;clearTimeout(row.timer);completed.set(row.request.request_id,{digest:row.digest,frame,settlement:row.settlement||null});
     // This response cache is not a durable execution ledger. Task/lease scope
     // uniqueness and transition CAS remain in the existing own-PG operations.
     while(completed.size>256)completed.delete(completed.keys().next().value);
     emit(frame);
+  }
+  function settle(row,held=false){
+    row.settlement=nativeCodingHostSettlement({instance_id:instanceId,host_pid:hostPid,request_id:row.request.request_id,
+      action:row.request.action,request_sha256:row.digest},held);
+    const cached=completed.get(row.request.request_id);if(cached)cached.settlement=row.settlement;
+    emit(row.settlement);
+  }
+  function rejectUndispatched(request,requestDigest,reason){
+    const row={request,digest:requestDigest,write:false,timer:null,response:null};
+    settle(row);seal(row,'REJECTED',null,reason);
   }
   function close() {
     if(closed)return;closed=true;
@@ -150,7 +165,7 @@ export function createNativeCodingHostIpcServer({instanceId,operations,send=proc
   }
   const onDisconnect=()=>close();process.on('disconnect',onDisconnect);
   function handleMessage(message,sendHandle) {
-    if(message?.schema===PENDING_OWNER_PHASE){
+    if((message?.schema===PENDING_OWNER_PHASE||message?.schema===PENDING_ACTIVATION_PHASE)){
       active.get(message.request_id)?.ownerPhases?.receive(message,sendHandle);return true;
     }
     if(!plain(message)||message.schema!==NATIVE_CODING_HOST_IPC_REQUEST)return false;
@@ -166,20 +181,19 @@ export function createNativeCodingHostIpcServer({instanceId,operations,send=proc
       payload(message.action,message.payload);requestDigest=digest(message);
     }catch(error){protocolError(REASONS.has(error.reason)?error.reason:'INVALID_FRAME');return true;}
     const old=completed.get(message.request_id),running=active.get(message.request_id);
-    if(old){if(old.digest===requestDigest)emit(old.frame);else emit(response(message,requestDigest,'UNKNOWN',null,'REQUEST_ID_REUSED'));return true;}
+    if(old){if(old.digest===requestDigest){if(old.settlement)emit(old.settlement);emit(old.frame);}else emit(response(message,requestDigest,'UNKNOWN',null,'REQUEST_ID_REUSED'));return true;}
     if(running){emit(response(message,requestDigest,running.write||writes(message.action,message.payload)?'UNKNOWN':'REJECTED',null,'REQUEST_ID_REUSED'));return true;}
     if(!mountedActions.includes(message.action)){
       // A fully validated request for a known optional capability was never
       // dispatched. Reply on this exact private channel instead of silently
       // forcing discovery to time out (or making an unattempted write UNKNOWN).
       // Malformed/foreign frames still receive no correlated response above.
-      seal({request:structuredClone(message),digest:requestDigest,write:false,timer:null,response:null},
-        'REJECTED',null,'UNSUPPORTED_ACTION');
+      rejectUndispatched(structuredClone(message),requestDigest,'UNSUPPORTED_ACTION');
       return true;
     }
-    if(active.size>=maxInflight){emit(response(message,requestDigest,'REJECTED',null,'INFLIGHT_LIMIT'));return true;}
+    if(active.size>=maxInflight){rejectUndispatched(structuredClone(message),requestDigest,'INFLIGHT_LIMIT');return true;}
     const row={request:structuredClone(message),write:writes(message.action,message.payload),digest:requestDigest,abort:new AbortController(),deadlineAt:Date.now()+timeoutMs,timer:null,response:null};
-    if(PENDING_OWNER_ACTIONS.includes(message.action))row.ownerPhases=createPendingOwnerHostPhases({
+    if(PENDING_OWNER_ACTIONS.includes(message.action)||message.action==='ACTIVATE_PREPARED_GOAL_V1')row.ownerPhases=(message.action==='ACTIVATE_PREPARED_GOAL_V1'?createPendingActivationHostPhases:createPendingOwnerHostPhases)({
       binding:{instance_id:instanceId,host_pid:hostPid,request_id:message.request_id,action:message.action,
         request_sha256:requestDigest,body_sha256:message.payload.headers['x-a2-device-body-sha256']},
       signal:row.abort.signal,send:frame=>{json(frame);send(frame,error=>{if(error)row.abort.abort();});},
@@ -190,13 +204,23 @@ export function createNativeCodingHostIpcServer({instanceId,operations,send=proc
       // Keep the physical operation counted until it really settles. A timeout
       // must not create unbounded parallel work or authorize a second write.
     },timeoutMs);
-    Promise.resolve().then(()=>operations[message.action](Object.freeze(structuredClone(message.payload)),
+    const physical=runNativePhysicalSettlementScope(()=>operations[message.action](Object.freeze(structuredClone(message.payload)),
       Object.freeze({signal:row.abort.signal,deadlineAt:row.deadlineAt,instanceId,hostPid,requestId:message.request_id,action:message.action,
-        ...(row.ownerPhases?{pendingOwnerPhases:row.ownerPhases,requestDigest,bodyDigest:message.payload.headers['x-a2-device-body-sha256']}: {})})))
-      .then(value=>{if(!row.response){json(value);seal(row,'OK',structuredClone(value),null);}})
-      .catch(()=>seal(row,row.write?'UNKNOWN':'REJECTED',null,row.write?'WRITE_OUTCOME_UNKNOWN':'OPERATION_FAILED'))
-      .finally(()=>{row.ownerPhases?.close();clearTimeout(row.timer);active.delete(message.request_id);});
+        ...(row.ownerPhases?{[message.action==='ACTIVATE_PREPARED_GOAL_V1'?'pendingActivationPhases':'pendingOwnerPhases']:row.ownerPhases,requestDigest,bodyDigest:message.payload.headers['x-a2-device-body-sha256']}: {})})));
+    physical.promise
+      .then(value=>{json(value);row.result=structuredClone(value);row.succeeded=true;})
+      .catch(error=>{row.held=nativePhysicalSettlementUnconfirmed(error);})
+      .finally(()=>{
+        row.held=row.held===true||physical.unconfirmed();
+        row.ownerPhases?.close();clearTimeout(row.timer);
+        // A finished JS promise cannot release a poisoned SQL reservation.
+        // Held rows retain admission capacity until verified Host shutdown.
+        if(!row.held)active.delete(message.request_id);
+        settle(row,row.held===true);
+        if(row.succeeded)seal(row,'OK',row.result,null);
+        else seal(row,row.write?'UNKNOWN':'REJECTED',null,row.write?'WRITE_OUTCOME_UNKNOWN':'OPERATION_FAILED');
+      });
     return true;
   }
-  return Object.freeze({handleMessage,close,snapshot:()=>Object.freeze({instance_id:instanceId,host_pid:hostPid,inflight:active.size,closed,automatic_retry_allowed:false})});
+  return Object.freeze({handleMessage,close,snapshot:()=>Object.freeze({instance_id:instanceId,host_pid:hostPid,inflight:active.size,held:[...active.values()].filter(row=>row.held).length,completed:completed.size,closed,automatic_retry_allowed:false})});
 }

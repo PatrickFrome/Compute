@@ -1,3 +1,4 @@
+import {CODEX_CLI_JOB_PROTOCOL} from '../src/codex-cli-physical-settlement.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -21,7 +22,7 @@ function fixture(t, packaged = false) {
   const moduleUrl = pathToFileURL(path.join(appRoot, 'src', 'codex-cli-windows-process-controller.mjs')).href;
   const options = { moduleUrl, resourcesPath }, runtime = resolveCodexCliJobRuntime(options);
   const template = 'reviewed template bytes', helper = 'generated helper bytes';
-  const manifest = { schema: 'metaengine.codex-cli.job-runtime.v1', build_mode: 'PRECOMPILED_FRAMEWORK_CSHARP',
+  const manifest = { schema: 'metaengine.codex-cli.job-runtime.v1', build_mode: 'PRECOMPILED_FRAMEWORK_CSHARP',custody_protocol:CODEX_CLI_JOB_PROTOCOL,
     template_sha256: sha(template), csharp_sha256: '1'.repeat(64), assembly_sha256: '2'.repeat(64),
     helper_sha256: sha(helper), compiler_executable_sha256: '3'.repeat(64) };
   for (const file of [runtime.helperPath, runtime.manifestPath, runtime.templatePath].filter(Boolean)) fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -37,7 +38,7 @@ test('source runtime resolves prepared output separately from the reviewed build
   assert.match(resolveCodexCliJobHelper(f.options), /native-dist[\\/]codex-cli[\\/]codex-cli-job-runner\.ps1$/);
   assert.match(resolveCodexCliJobHelperSource(f.options), /scripts[\\/]codex-cli-job-runner\.ps1$/);
   assert.notEqual(f.runtime.helperPath, f.runtime.templatePath);
-  assert.deepEqual(verifyCodexCliJobHelper(f.options), { helperPath: f.runtime.helperPath, helperSha256: sha(f.helper) });
+  assert.deepEqual(verifyCodexCliJobHelper(f.options), { helperPath: f.runtime.helperPath, helperSha256: sha(f.helper),runtimeManifestSha256:sha(fs.readFileSync(f.runtime.manifestPath)) });
 });
 
 test('source preparation refuses a changed template, changed helper and absent manifest without fallback', t => {
@@ -55,7 +56,7 @@ test('source preparation refuses a changed template, changed helper and absent m
 
 test('runtime manifest requires its fixed build mode and every build-chain digest', t => {
   const f = fixture(t);
-  for (const change of [{ schema: 'unknown' }, { build_mode: 'COMPILE_ON_LAUNCH' },
+  for (const change of [{ schema: 'unknown' },{custody_protocol:'LEGACY'}, { build_mode: 'COMPILE_ON_LAUNCH' },
     ...['template_sha256', 'csharp_sha256', 'assembly_sha256', 'helper_sha256', 'compiler_executable_sha256'].map(key => ({ [key]: 'invalid' }))]) {
     f.writeManifest({ ...f.manifest, ...change });
     assert.throws(() => verifyCodexCliJobHelper(f.options), /runtime_manifest_invalid/);

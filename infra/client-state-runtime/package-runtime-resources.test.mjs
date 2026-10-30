@@ -391,16 +391,27 @@ test('selected runtime bundle includes the full real first-run source closure', 
   assert.ok(closure.npm.includes('npm:postgres@3.4.7'));
 });
 
+test('predescriptor Host setup service, strict contract and lifecycle SQL are in the verified installed source closure',async()=>{
+ const manifest=await receipt(repositoryRoot,{includeRuntimeHost:true});
+ const plan=reviewedBundlePlan(manifest,manifest.source_manifest_sha256,{includeRuntimeHost:true});
+ const serialized=JSON.stringify(plan);
+ for(const file of ['infra/client-state-runtime/native-coding-host-capacity.mjs','apps/metaengine-browser/src/native-coding-capacity-contract.mjs','infra/client-state-runtime/native-coding-host-setup-service.mjs','apps/metaengine-browser/src/native-coding-setup-contract.mjs',
+  'apps/metaengine-browser/src/agent-resource-admission.mjs','infra/client-state-runtime/native-coding-setup-operation-v1.sql'])assert.ok(serialized.includes(file),file);
+});
+
 test('native Host reviewed source catalog admits the exact ACL implementation and all bridge dependencies, not private data',async()=>{
   const manifest=await receipt(repositoryRoot,{includeRuntimeHost:true});
   const plan=reviewedBundlePlan(manifest,manifest.source_manifest_sha256,{includeRuntimeHost:true});
   assert(plan.some(row=>row.path==='infra/client-state-runtime/native-coding-workspace-preparation.mjs'));
   assert(plan.some(row=>row.path==='infra/client-state-runtime/native-coding-pending-owner-custody.mjs'));
+  for(const name of ['native-coding-pending-activation.mjs','native-coding-pending-activation-profile.mjs'])assert(plan.some(row=>row.path==='infra/client-state-runtime/'+name),name);
   assert(plan.some(row=>row.path==='infra/client-state-runtime/native-coding-preparation-transaction.mjs'));
-  for(const name of ['native-coding-pending-owner-phase.mjs','native-coding-workspace-preparation.mjs','windows-native-read-environment.mjs','private-windows-storage-acl.mjs','native-coding-task-context.mjs','native-coding-agent-host-contract.mjs',
+  for(const name of ['native-coding-callback-publication.mjs','native-coding-callback-prefix.mjs'])assert(plan.some(row=>row.path==='infra/client-state-runtime/'+name),name);
+  assert.equal(plan.some(row=>row.path==='infra/client-state-runtime/native-coding-callback-publication-v1.sql'),false,'unregistered SQL is not shipped');
+  for(const name of ['native-coding-windows-process-observer.mjs','codex-cli-physical-settlement.mjs','native-coding-host-settlement.mjs','native-coding-pending-owner-phase.mjs','native-coding-pending-activation-phase.mjs','native-coding-workspace-preparation.mjs','windows-native-read-environment.mjs','private-windows-storage-acl.mjs','native-coding-task-context.mjs','native-coding-run-callback-journal.mjs','native-coding-agent-host-contract.mjs',
     'native-coding-agent-mcp-broker.mjs','native-coding-agent-mcp-launch.mjs','native-coding-agent-mcp-entry.mjs','native-coding-agent-mcp-stdio.mjs'])
     assert(plan.some(row=>row.path==='apps/metaengine-browser/src/'+name),name);
-  for(const name of ['windows-native-read-environment-copy.mjs','windows-native-read-environment.js']){
+  for(const name of ['codex-cli-physical-settlement-copy.mjs','native-coding-windows-process-observer-copy.mjs','windows-native-read-environment-copy.mjs','windows-native-read-environment.js']){
     const forged=structuredClone(manifest);forged.source.files.push({id:'repository/apps/metaengine-browser/src/'+name,kind:'source',bytes:0,sha256:hash('')});
     const digest=refreshDigest(forged);assert.throws(()=>reviewedBundlePlan(forged,digest,{includeRuntimeHost:true}),/bundle_unexpected_source_record/);
   }

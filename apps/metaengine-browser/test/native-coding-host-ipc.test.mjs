@@ -1,14 +1,21 @@
+import {createNativeRunCallbackJournal,readNativeRunCallbackJournal} from '../src/native-coding-run-callback-journal.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fork } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { randomUUID,createHash } from 'node:crypto';
+import {inMemoryNativeBroker} from './fixtures/native-coding-in-memory-broker.mjs';
+import {nativeCodingAgentMcpIntentBodySha256} from '../src/native-coding-agent-mcp-broker.mjs';
+import {validateNativeCodingAgentHostRequest} from '../src/native-coding-agent-host-contract.mjs';
+import {nativeCodingCanonicalJson} from '../src/native-coding-task-context.mjs';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { createNativeCodingHostIpcClient } from '../src/native-coding-host-ipc-client.mjs';
 
+const transactionUrl=new URL('../../../infra/client-state-runtime/native-coding-preparation-transaction.mjs',import.meta.url).href;
 const serverUrl=new URL('../../../infra/client-state-runtime/native-coding-host-ipc.mjs',import.meta.url).href;
+const protectedReaderUrl=new URL('../src/native-coding-host-observers.mjs',import.meta.url).href;
 const id=()=>randomUUID();
 const scope=()=>({workspace_id:id(),task_id:id(),lease_generation:1,agent_id:'agent_native-test-1234',
   target_id:`codex-cli:${id()}`,agent_generation_epoch:1,host_incarnation:'pid:1234:created_100ns:134371917225776174',scope_sha256:'a'.repeat(64)});
@@ -19,15 +26,24 @@ const agentRequest=(operation='CHECK')=>({operation,args:operation==='agent_send
   binding:{run_id:id(),workspace_id:id(),project_id:id(),task_id:id(),lease_generation:1,agent_id:'agent_native-test-1234',agent_generation_epoch:1,provider_id:id(),role:'IMPLEMENTER'},
   job_binding:{job_id:id(),pid:1234,process_incarnation_id:'pid:1234:created_100ns:134371917225776174',executable_sha256:'a'.repeat(64)}});
 
-async function setup(t,mode='normal',{timeoutMs=1000,maxInflight=16,serverMaxInflight=16,serverTimeoutMs=1000}={}) {
+async function setup(t,mode='normal',{timeoutMs=1000,maxInflight=16,serverMaxInflight=16,serverTimeoutMs=1000,readShutdownSettlement=null}={}) {
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-private-ipc-'));
   const script=path.join(root,'child.mjs'),instanceId=id();
+  await fs.writeFile(path.join(root,'private-fixture.json'),'{"schema":"generated"}');
   await fs.writeFile(script,`
 import {createNativeCodingHostIpcServer} from ${JSON.stringify(serverUrl)};
+import {readNativeCodingProtectedJson} from ${JSON.stringify(protectedReaderUrl)};
+import {createNativePreparationTransactions} from ${JSON.stringify(transactionUrl)};
 const mode=process.env.METAENGINE_IPC_TEST_MODE;let calls=0,protocolErrors=[];
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const operations={
- READ_SCOPE:async (value,context)=>{const n=++calls;if(mode==='request-context')return {bindings:[],has_signal:context.signal instanceof AbortSignal,aborted:context.signal.aborted,deadline_at:context.deadlineAt,remaining_ms:context.deadlineAt-Date.now()};if(mode==='delayed-read')await delay(80);
+ READ_SCOPE:async (value,context)=>{const n=++calls;
+  if(mode==='acl-rejection-held')return readNativeCodingProtectedJson(${JSON.stringify(path.join(root,'private-fixture.json'))},{signal:context.signal,verifyStorage:(_target,{operation,signal})=>{
+   if(operation==='VERIFY_DIRECTORY')return Promise.reject(Error('generated_directory_denied'));
+   return new Promise(resolve=>{const release=m=>{if(m?.schema==='test.release-acl'){process.off('message',release);resolve({owner_dacl_verified:true});}};
+    process.on('message',release);signal.addEventListener('abort',()=>process.send({schema:'test.acl-aborted'}),{once:true});process.send({schema:'test.acl-started'});});
+  }});
+if(mode==='request-context')return {bindings:[],has_signal:context.signal instanceof AbortSignal,aborted:context.signal.aborted,deadline_at:context.deadlineAt,remaining_ms:context.deadlineAt-Date.now()};if(mode==='delayed-read')await delay(80);
   if(mode==='paged-scope'){
    const all=Array.from({length:160},(_,i)=>({permit_id:'00000000-0000-4000-8000-'+String(i+1).padStart(12,'0'),permit:{padding:'x'.repeat(3000)}}));
    const rows=all.filter(r=>!value.after_permit_id||r.permit_id>value.after_permit_id),page=rows.slice(0,32);
@@ -38,16 +54,33 @@ const operations={
  READ_LEASE:async value=>{++calls;if(mode==='out-of-order')await delay(value.lease_generation===1?80:5);return value;},
  REGISTER_PROVIDER:async value=>{++calls;if(mode==='throw-write')throw Error('postgresql://must-never-leak/private; raw SQL failure');return {registered:true,schema:value.descriptor.payload.schema};},
  READ_EXECUTION:async value=>({state:'RESERVED',scope:value.scope}),
- RESERVE_EXECUTION:async value=>{++calls;if(mode==='exit-write')process.exit(19);if(mode==='terminal-write'){process.send({schema:'compute.runtime-host-terminal.v1',invalid_payload:true});await delay(25);}if(mode==='slow-write')await delay(180);return {state:'RESERVED',scope:value.scope};},
+ RESERVE_EXECUTION:async value=>{++calls;if(mode==='exit-write')process.exit(19);if(mode==='terminal-write'){process.send({schema:'compute.runtime-host-terminal.v1',invalid_payload:true});await delay(25);}if(mode==='slow-write')await delay(180);
+  if(mode==='transaction-hold'||mode==='swallowed-transaction-hold'){
+   const monitor=createNativePreparationTransactions();const pool={reserve:async()=>({unsafe:async q=>{monitor.debug(1,q);if(q==='rollback')throw Error('fixture rollback failed');return [];},release(){throw Error('dirty reservation released');}})};
+   try{await monitor.transaction(pool,'isolation level serializable',async()=>{throw Error('fixture body rejected');});}catch(error){if(mode!=='swallowed-transaction-hold')throw error;}
+  }
+  if(mode==='held-physical')await new Promise(resolve=>{const release=m=>{if(m?.schema==='test.release-physical'){process.off('message',release);resolve();}};process.on('message',release);process.send({schema:'test.physical-started'});});return {state:'RESERVED',scope:value.scope};},
  ADVANCE_EXECUTION:async value=>{++calls;return {state:value.transition.to,has_job_proof:!!value.transition.job_proof,has_result_receipt:!!value.transition.result_receipt};},
  RECONCILE_PROJECT:async value=>{++calls;if(mode==='throw-write')throw Error('checkpoint_unknown');return {project_id:value.project_id,state:'CHECKPOINTED_PENDING_COMMIT'};},
  READ_PROJECT_REJECTION:async value=>({schema:'metaengine.native-coding.project-rejection-readback.v1',state:'VERIFIED_REJECTION',...value,repair_authorized:false,checkpoint_created:false,authority_effect:false}),
  READ_PROJECT_CHECKPOINT:async value=>({project_id:value.project_id,state:'CHECKPOINTED_PENDING_COMMIT'}),
- AGENT_OPERATION:async value=>{++calls;if(mode==='slow-agent')await delay(180);return {operation:value.operation,run_id:value.binding.run_id};},
+ AGENT_OPERATION:async value=>{++calls;if(mode==='slow-agent')await delay(180);
+  if(['held-agent','bridge-held'].includes(mode)&&value.operation!=='CHECK')await new Promise(resolve=>{const release=m=>{if(m?.schema==='test.release-agent'&&m.run_id===value.binding.run_id){process.off('message',release);resolve();}};process.on('message',release);process.send({schema:'test.agent-started',run_id:value.binding.run_id});});
+  if(mode==='agent-rollback-poison'){
+   const monitor=createNativePreparationTransactions(),pool={reserve:async()=>({unsafe:async q=>{monitor.debug(1,q);if(q==='rollback')throw Error('generated rollback failure');return [];},release(){}})};
+   try{await monitor.transaction(pool,'isolation level serializable',async()=>{throw Error('generated body failure');});}catch{}
+  }
+  if(mode==='bridge-held'&&value.operation==='CHECK')return {schema:'metaengine.native-coding.agent-authorized.v1',run_id:value.binding.run_id,authorized:true,authority_effect:false};
+  return {operation:value.operation,run_id:value.binding.run_id};},
  FINISH_CHECKPOINT:async value=>{++calls;return {...value,state:'COMMITTED_NO_SUCCESSOR'};},
  READ_FINISH_CHECKPOINT:async value=>({...value,state:'PENDING_COMMIT'}),
  close:()=>{},
 };
+if(mode==='capacity-minimal'){
+ for(const key of Object.keys(operations))if(key!=='close')delete operations[key];
+ for(const action of ['DISCOVER_NATIVE_SETUP_V1','BEGIN_NATIVE_SETUP_V1','READ_NATIVE_SETUP_V1','CANCEL_NATIVE_SETUP_V1','READ_NATIVE_SETUP_ROUTE_V1'])operations[action]=async()=>({fixture_transport_only:true});
+ operations.READ_NATIVE_CAPACITY_V1=async request=>{calls++;return {fixture_transport_only:true,input:request.body.input};};
+}
 if(['reconciliation-mounted','slow-reconciliation','held-reconciliation','exit-reconciliation'].includes(mode))operations.RECONCILE_FINISH_CHECKPOINT=async value=>{
  ++calls;if(mode==='exit-reconciliation')process.exit(19);if(mode==='slow-reconciliation')await delay(180);
  if(mode==='held-reconciliation')await new Promise(resolve=>{
@@ -56,23 +89,50 @@ if(['reconciliation-mounted','slow-reconciliation','held-reconciliation','exit-r
  });
  return {...value,state:'COMMITTED_NO_SUCCESSOR',automatic_retry_allowed:false};
 };
+if(mode==='service-v2-mounted')for(const action of ['SERVICE_HEARTBEAT_V2','READ_SERVICE_HEARTBEAT_V2'])operations[action]=async request=>{calls++;return {fixture_transport_only:true,operation:action,input:request.body.input};};
 if(mode==='seed-mounted'||mode==='slow-seed'||mode==='secret-preparation')for(const action of ['ADMIT_PREPARED_GOAL_V1','READ_PREPARED_GOAL_V1','PREPARE_WORKSPACE_V1','READ_WORKSPACE_PREPARATION_V1','SEED_GOAL','READ_SEED','LIST_SEEDS'])operations[action]=async request=>{
  if(action==='SEED_GOAL'||action==='PREPARE_WORKSPACE_V1'||action==='ADMIT_PREPARED_GOAL_V1'){calls++;if(mode==='slow-seed')await delay(180);}
  if(mode==='secret-preparation')throw Object.assign(Error('SENTINEL_PRIVATE_QUERY_PARAMETER'),{query:'SENTINEL_PRIVATE_QUERY_PARAMETER',parameters:['SENTINEL_PRIVATE_QUERY_PARAMETER'],args:['SENTINEL_PRIVATE_QUERY_PARAMETER']});
  return {fixture_transport_only:true,operation:action,input:request.body.input};
 };
-if(mode==='owner-mounted'||mode==='owner-timeout'||mode==='owner-lost-release')for(const action of ['ESTABLISH_PENDING_OWNER_V1','READ_PENDING_OWNER_V1'])operations[action]=async(request,context)=>{
+if(mode==='owner-mounted'||mode==='owner-timeout'||mode==='owner-lost-release'||mode==='owner-held-commit')for(const action of ['ESTABLISH_PENDING_OWNER_V1','READ_PENDING_OWNER_V1'])operations[action]=async(request,context)=>{
  const scope={device_id:request.headers['x-a2-device-id'],client_id:request.headers['x-a2-chat-bridge-client'],key_fingerprint_sha256:'c'.repeat(64),
   admin_grant_epoch:1,project_id:request.body.input.request_id,observed_at:new Date().toISOString()};
  const released=await context.pendingOwnerPhases.run(scope,{readScope:async()=>({...scope,observed_at:new Date().toISOString()}),prepareTransition:async()=>{calls++;},verifyTransition:async()=>{}});
- if(mode==='owner-lost-release'&&action==='ESTABLISH_PENDING_OWNER_V1')await delay(180);return released;
+ if(mode==='owner-lost-release'&&action==='ESTABLISH_PENDING_OWNER_V1')await delay(180);
+ if(mode==='owner-held-commit'){
+  const monitor=createNativePreparationTransactions();const pool={reserve:async()=>({unsafe:async q=>{monitor.debug(1,q);if(q==='commit')await new Promise(resolve=>{
+   const release=m=>{if(m?.schema==='test.release-physical'){process.off('message',release);resolve();}};process.on('message',release);process.send({schema:'test.commit-started'});
+  });return [];},release(){process.send({schema:'test.reservation-released'});}})};
+  await monitor.transaction(pool,'isolation level serializable',async()=>released);
+ }
+ return released;
 };
+if(mode==='activation-mounted'||mode==='activation-lost-ack'){
+ operations.ACTIVATE_PREPARED_GOAL_V1=async(request,context)=>{
+  const scope={schema:'metaengine.native-coding.pending-activation-scope.v1',input:request.body.input,
+   scope:{device_id:request.headers['x-a2-device-id'],client_id:request.headers['x-a2-chat-bridge-client'],key_fingerprint_sha256:'c'.repeat(64),admin_grant_epoch:1,project_id:request.body.input.request_id,observed_at:new Date().toISOString()},
+   artifact:{installed_exe_sha256:'1'.repeat(64),installed_asar_sha256:'2'.repeat(64),runtime_bundle_sha256:'3'.repeat(64),source_sha:'4'.repeat(40),cli_executable_sha256:'5'.repeat(64)}};
+  const proof=await context.pendingActivationPhases.authorize(scope,{readScope:async()=>scope,verifyTransition:async()=>{}});calls++;
+  if(mode==='activation-lost-ack')await delay(180);
+  return {fixture_transport_only:true,state:'ACTIVATED',sealed_sha256:proof.sealed_sha256};
+ };
+ operations.READ_PREPARED_GOAL_ACTIVATION_V1=async request=>({fixture_transport_only:true,input:request.body.input});
+}
 if(mode==='prior-readback'||mode==='slow-prior')operations.READ_PRIOR_EXECUTION=async ({selector})=>{
  ++calls;if(mode==='slow-prior')await delay(180);
  return {fixture_transport_only:true,state:'HOLD',selector,physical_effect_replayed:false,automatic_retry_allowed:false,authority_effect:false};
 };
 const send=(frame,callback)=>{
  const copy=structuredClone(frame);
+ if(frame.schema==='metaengine.native-coding.host-settlement.v1'){
+  if(mode==='settlement-after-result'){setTimeout(()=>process.send(copy,callback),60);return;}
+  if(mode==='duplicate-settlement'){process.send(copy);}
+  if(mode.startsWith('settlement-wrong-'))copy[mode.slice('settlement-wrong-'.length)]=mode.endsWith('host_pid')?process.pid+1:'f'.repeat(64);
+  if(mode==='settlement-missing')return;
+  if(mode==='settlement-send-failed'){callback(Error('fixture channel write failed'));return;}
+ }
+ if((mode==='late-ok'||mode==='late-agent-ok'&&frame.value?.operation==='agent_send_message')&&frame.schema==='metaengine.native-coding.host-ipc.response.v1'){setTimeout(()=>process.send({...copy,outcome:'OK',reason:null,value:{late:true}},callback),100);return;}
  if(mode==='wrong-action')copy.action='READ_LEASE';
  if(mode==='wrong-digest')copy.request_sha256='0'.repeat(64);
  if(mode==='wrong-instance')copy.instance_id='00000000-0000-4000-8000-000000000000';
@@ -83,6 +143,8 @@ const server=createNativeCodingHostIpcServer({instanceId:process.env.METAENGINE_
  maxInflight:Number(process.env.METAENGINE_IPC_TEST_SERVER_MAX),timeoutMs:Number(process.env.METAENGINE_IPC_TEST_SERVER_TIMEOUT),
  onProtocolError:reason=>protocolErrors.push(reason)});
 process.on('message',(message,handle)=>{
+ if(message?.schema==='test.close-server'){server.close();return;}
+ if(message?.schema==='test.release-acl')return;
  if(message?.schema==='test.native-coding.release-reconciliation')return;
  if(message?.schema==='test.native-coding.stats'){process.send({schema:'test.native-coding.stats',calls,protocolErrors,snapshot:server.snapshot()});return;}
  if(message?.schema==='test.native-coding.handle'){server.handleMessage(message.frame,{});return;}
@@ -97,7 +159,7 @@ process.send({schema:'test.native-coding.ready'});
   let client;
   t.after(async()=>{
     client?.close();
-    if(child.exitCode===null){const stopped=new Promise(resolve=>child.once('exit',resolve));child.kill();await stopped;}
+    if(child.exitCode===null&&child.signalCode===null){const stopped=new Promise(resolve=>child.once('exit',resolve));child.kill();await stopped;}
     const actual=await fs.realpath(root),parent=await fs.realpath(os.tmpdir());
     assert.ok(actual.startsWith(parent+path.sep)&&path.basename(actual).startsWith('metaengine-private-ipc-'));
     await fs.rm(actual,{recursive:true,force:true});
@@ -108,7 +170,7 @@ process.send({schema:'test.native-coding.ready'});
     child.on('message',listener);child.once('error',()=>{clearTimeout(timer);reject(Error('test_child_startup_failed'));});
     child.once('exit',()=>{clearTimeout(timer);reject(Error('test_child_exited_before_ready'));});
   });
-  client=createNativeCodingHostIpcClient({child,instanceId,hostPid:child.pid,timeoutMs,maxInflight});
+  client=createNativeCodingHostIpcClient({child,instanceId,hostPid:child.pid,timeoutMs,maxInflight,readShutdownSettlement});
   const stats=()=>new Promise(resolve=>{const listener=message=>{if(message?.schema==='test.native-coding.stats'){child.off('message',listener);resolve(message);}};
     child.on('message',listener);child.send({schema:'test.native-coding.stats'});});
   return {child,client,instanceId,stats};
@@ -527,4 +589,276 @@ test('owned pending-owner lost RELEASE acknowledgement is unknown and read-only 
   assert.equal(tx.prepareTransition,undefined);await tx.readScope();await tx.verifyTransition({sealed_sha256:'d'.repeat(64)});return true;
  }),true);
  assert.equal(seals,1);assert.equal((await stats()).calls,1);
+});
+
+function activationRequest(operation,instanceId,hostPid){
+ const request=seedRequest('ESTABLISH_PENDING_OWNER_V1',instanceId,hostPid);request.body.operation=operation;
+ Object.assign(request.body.input,{activation_id:id(),profile_id:id(),profile_sha256:'f'.repeat(64)});return request;
+}
+test('owned ChildProcess activation is READ_CUSTODY-only and returns outer committed result',async t=>{
+ const {client,child,instanceId,stats}=await setup(t,'activation-mounted');
+ const request=activationRequest('ACTIVATE_PREPARED_GOAL_V1',instanceId,child.pid);
+ const value=await client.withPendingActivationScope(request,async tx=>{
+  assert.equal(tx.prepareTransition,undefined);assert.equal(tx.unsafe,undefined);assert.deepEqual(tx.activation.input,request.body.input);
+  await tx.readScope();await tx.verifyTransition({sealed_sha256:'f'.repeat(64)});return {native:'PRIVATE'};
+ });
+ assert.deepEqual(value,{fixture_transport_only:true,state:'ACTIVATED',sealed_sha256:'f'.repeat(64)});assert.equal((await stats()).calls,1);
+});
+test('owned ChildProcess lost activation ACK is unknown; exact readback never activates again',async t=>{
+ const {client,child,instanceId,stats}=await setup(t,'activation-lost-ack',{timeoutMs:1000,serverTimeoutMs:80});
+ const request=activationRequest('ACTIVATE_PREPARED_GOAL_V1',instanceId,child.pid);
+ await assert.rejects(client.withPendingActivationScope(request,async tx=>{
+  await tx.readScope();await tx.verifyTransition({sealed_sha256:'f'.repeat(64)});return true;
+ }),e=>e.effect_outcome==='UNKNOWN'&&e.readback_required===true);
+ const read=structuredClone(request);read.body.operation='READ_PREPARED_GOAL_ACTIVATION_V1';
+ assert.deepEqual((await client.readPreparedGoalActivation(read)).input,request.body.input);assert.equal((await stats()).calls,1);
+});
+
+// Physical settlement evidence below is real owned ChildProcess IPC with inert
+// operation/SQL-driver fixtures. Not installed Windows or real SQL authority.
+const messageOnce=(child,schema)=>new Promise(resolve=>{const read=m=>{if(m?.schema===schema){child.off('message',read);resolve(m);}};child.on('message',read);});
+test('caller timeout retains physical admission until actual operation finishes; no resend',async t=>{
+ const f=await setup(t,'held-physical',{timeoutMs:1000,serverTimeoutMs:40,maxInflight:1});
+ const entered=messageOnce(f.child,'test.physical-started');let error;
+ const work=f.client.reserveExecution(scope()).catch(e=>{error=e;});await entered;await work;
+ assert.equal(error.effect_outcome,'UNKNOWN');assert.equal(f.client.snapshot().inflight,0);assert.equal(f.client.snapshot().physical_inflight,1);
+ assert.equal((await f.stats()).snapshot.inflight,1);await assert.rejects(f.client.readScope(),e=>e.reason==='INFLIGHT_LIMIT');
+ let drained=false;const drain=f.client.drainPhysical().then(()=>{drained=true;});assert.equal(f.client.drainPhysical() instanceof Promise,true);
+ await sleep(20);assert.equal(drained,false);f.child.send({schema:'test.release-physical'});await drain;
+ assert.equal(f.client.snapshot().physical_inflight,0);assert.equal(error.effect_outcome,'UNKNOWN');assert.equal((await f.stats()).calls,1);
+});
+test('timeout during COMMIT after RELEASE keeps Main drain until commit acknowledgement and reservation release',async t=>{
+ const f=await setup(t,'owner-held-commit',{timeoutMs:1000,serverTimeoutMs:50});
+ const entered=messageOnce(f.child,'test.commit-started'),released=messageOnce(f.child,'test.reservation-released');let seals=0;
+ const work=f.client.withPendingOwnerScope('ESTABLISH_PENDING_OWNER_V1',seedRequest('ESTABLISH_PENDING_OWNER_V1',f.instanceId,f.child.pid),async tx=>{
+  await tx.readScope();await tx.prepareTransition({previous_sha256:null,next_sha256:'d'.repeat(64)});for(let i=0;i<3;i++)await tx.readScope();seals++;return true;
+ });work.catch(()=>{});await entered;await assert.rejects(work,e=>e.effect_outcome==='UNKNOWN');let drained=false;
+ const drain=f.client.drainPhysical().then(()=>{drained=true;});await sleep(20);assert.equal(drained,false);assert.equal(f.client.snapshot().physical_inflight,1);
+ f.child.send({schema:'test.release-physical'});await released;await drain;assert.equal(seals,1);assert.equal((await f.stats()).calls,1);
+});
+for(const mode of ['normal','duplicate-settlement','settlement-after-result'])test(`physical ${mode} ordering drains exactly once, including client close`,async t=>{
+ const {client}=await setup(t,mode);await client.reserveExecution(scope());client.close();const proof=await client.drainPhysical();assert.equal(proof.cleanup_confirmed,true);assert.equal(client.snapshot().physical_inflight,0);assert.deepEqual(await client.drainPhysical(),proof);
+});
+for(const key of ['instance_id','host_pid','action','request_sha256'])test('forged settlement '+key+' cannot release exact original request',async t=>{
+ const {client}=await setup(t,'settlement-wrong-'+key);await assert.rejects(client.reserveExecution(scope()),e=>e.effect_outcome==='UNKNOWN');assert.equal(client.snapshot().physical_cleanup_state,'HOLD');
+ await assert.rejects(client.drainPhysical(),e=>e.reason==='PHYSICAL_CLEANUP_UNCONFIRMED');assert.equal(client.snapshot().physical_inflight,1);
+});
+test('poisoned rollback remains held on both peers and repeated drains do not free capacity',async t=>{
+ const f=await setup(t,'transaction-hold',{maxInflight:1});await assert.rejects(f.client.reserveExecution(scope()),e=>e.effect_outcome==='UNKNOWN');
+ for(let i=0;i<3;i++)await assert.rejects(f.client.drainPhysical(),e=>e.reason==='PHYSICAL_CLEANUP_UNCONFIRMED');
+ assert.equal(f.client.snapshot().physical_inflight,1);const stats=await f.stats();assert.equal(stats.snapshot.held,1);assert.equal(stats.snapshot.inflight,1);assert.equal(stats.calls,1);
+ await assert.rejects(f.client.readScope(),e=>e.reason==='INFLIGHT_LIMIT');
+});
+for(const mode of ['exit-write','terminal-write'])test('child '+mode+' without verified controller terminal+exit leaves cleanup HOLD',async t=>{
+ const {client}=await setup(t,mode);await assert.rejects(client.reserveExecution(scope()));await assert.rejects(client.drainPhysical(),e=>e.reason==='PHYSICAL_CLEANUP_UNCONFIRMED');assert.equal(client.snapshot().physical_inflight,1);
+});
+test('exact private controller shutdown witness alone may resolve disconnect HOLD, never effect outcome',async t=>{
+ let witness=null,reads=0;const f=await setup(t,'exit-write',{readShutdownSettlement:async()=>{reads++;return witness;}});let error;
+ await f.client.reserveExecution(scope()).catch(e=>{error=e;});
+ for(const value of [null,{schema:'metaengine.native-coding.host-shutdown-settlement.v1',instance_id:id(),host_pid:f.child.pid,cleanup_confirmed:true,authority_effect:false}]){witness=value;await assert.rejects(f.client.drainPhysical());}
+ witness={schema:'metaengine.native-coding.host-shutdown-settlement.v1',instance_id:f.instanceId,host_pid:f.child.pid,cleanup_confirmed:true,authority_effect:false};
+ assert.equal((await f.client.drainPhysical()).cleanup_confirmed,true);assert.equal(error.effect_outcome,'UNKNOWN');assert.equal(reads,3);
+});
+test('late OK cannot upgrade caller timeout even after independent physical settlement',async t=>{
+ const {client}=await setup(t,'late-ok',{timeoutMs:30,serverTimeoutMs:1000});let error;await client.reserveExecution(scope()).catch(e=>{error=e;});
+ assert.equal(error.effect_outcome,'UNKNOWN');await client.drainPhysical();await sleep(130);assert.equal(error.effect_outcome,'UNKNOWN');assert.equal(client.snapshot().physical_inflight,0);
+});
+test('completed response retention is bounded and physical rows do not accumulate on normal reads',async t=>{
+ const f=await setup(t);for(let i=0;i<300;i++)await f.client.readScope();await f.client.drainPhysical();const stats=await f.stats();assert.equal(stats.snapshot.completed,256);assert.equal(stats.snapshot.inflight,0);assert.equal(f.client.snapshot().physical_inflight,0);
+});
+
+test('activation timeout after RELEASE retains physical row after local callback drain',async t=>{
+ const f=await setup(t,'activation-lost-ack',{timeoutMs:1000,serverTimeoutMs:60});const request=activationRequest('ACTIVATE_PREPARED_GOAL_V1',f.instanceId,f.child.pid);
+ await assert.rejects(f.client.withPendingActivationScope(request,async tx=>{await tx.readScope();await tx.verifyTransition({sealed_sha256:'f'.repeat(64)});return true;}),e=>e.effect_outcome==='UNKNOWN');
+ assert.equal(f.client.snapshot().physical_inflight,1);await assert.rejects(f.client.drainPhysical({wait:false}),e=>e.reason==='PHYSICAL_CLEANUP_UNCONFIRMED');
+ assert.equal((await f.client.drainPhysical()).cleanup_confirmed,true);assert.equal((await f.stats()).calls,1);
+});
+
+test('Host cannot emit SETTLED when a domain recovery wrapper swallowed poisoned rollback',async t=>{
+ const f=await setup(t,'swallowed-transaction-hold');const result=await f.client.reserveExecution(scope());assert.equal(result.state,'RESERVED');
+ await assert.rejects(f.client.drainPhysical(),e=>e.reason==='PHYSICAL_CLEANUP_UNCONFIRMED');assert.equal(f.client.snapshot().physical_inflight,1);assert.equal((await f.stats()).snapshot.held,1);
+});
+
+for(const mode of ['settlement-missing','settlement-send-failed','settlement-wrong-request_id'])test(`missing exact settlement (${mode}) retains capacity despite caller OK and client close`,async t=>{
+ const f=await setup(t,mode,{maxInflight:1});await f.client.reserveExecution(scope());
+ assert.equal(f.client.snapshot().physical_inflight,1);await assert.rejects(f.client.readScope(),e=>e.reason==='INFLIGHT_LIMIT');
+ await assert.rejects(f.client.drainPhysical({wait:false}),e=>e.reason==='PHYSICAL_CLEANUP_UNCONFIRMED');f.client.close();
+ await assert.rejects(f.client.drainPhysical({wait:false}),e=>e.reason==='PHYSICAL_CLEANUP_UNCONFIRMED');assert.equal(f.client.snapshot().physical_inflight,1);
+ const stats=await f.stats();assert.equal(stats.calls,1);if(mode==='settlement-send-failed')assert.deepEqual(stats.protocolErrors,['SEND_FAILED']);
+});
+
+test('minimal actual IPC mounts only setup plus signed capacity READ and never execution actions',async t=>{
+ const {client,instanceId,child,stats}=await setup(t,'capacity-minimal');
+ const packet=seedRequest('READ_NATIVE_CAPACITY_V1',instanceId,child.pid);packet.body.input={owned_tasks:[]};
+ const result=await client.readNativeCapacity(packet);assert.deepEqual(result,{fixture_transport_only:true,input:{owned_tasks:[]}});
+ for(const extra of [{resolved:[]},{capacity_evidence:{}},{command:'start'}])await assert.rejects(client.readNativeCapacity({...packet,body:{...packet.body,input:{owned_tasks:[],...extra}}}),e=>e.reason==='INVALID_PAYLOAD');
+ await assert.rejects(client.readScope(),e=>e.reason==='UNSUPPORTED_ACTION'&&e.effect_outcome==='NONE');
+ await assert.rejects(client.reserveExecution(scope()),e=>e.reason==='UNSUPPORTED_ACTION'&&e.effect_outcome==='NONE');
+ assert.equal((await stats()).calls,1);
+});
+
+
+test('fixed v2 heartbeat and readback cross actual private IPC with no selector/evidence widening',async t=>{
+ const {client,instanceId,child,stats}=await setup(t,'service-v2-mounted');
+ for(const [action,method] of [['SERVICE_HEARTBEAT_V2','serviceHeartbeatV2'],['READ_SERVICE_HEARTBEAT_V2','readServiceHeartbeatV2']]){
+  const packet=seedRequest(action,instanceId,child.pid);packet.body.input=action.startsWith('READ_')?{workspace_id:id(),body_sha256:'b'.repeat(64)}:{schema:'generated-transport-fixture-only'};
+  const value=await client[method](packet);assert.equal(value.operation,action);assert.deepEqual(value.input,packet.body.input);
+  await assert.rejects(client[method]({...packet,path:'/arbitrary'}),e=>e.reason==='INVALID_PAYLOAD');
+  // Exact signed Host birth is verified by the mounted authenticated service,
+  // not this transport-only echo fixture (real-PG foreign-Host test).
+  await assert.rejects(client[method]({...packet,body:{...packet.body,host_instance_id:'malformed'}}),e=>e.reason==='INVALID_PAYLOAD');
+  if(action.startsWith('READ_'))await assert.rejects(client[method]({...packet,body:{...packet.body,input:{...packet.body.input,capacity_evidence:{}}}}),e=>e.reason==='INVALID_PAYLOAD');
+ }
+ assert.equal((await stats()).calls,2);assert.equal((await client.drainPhysical()).cleanup_confirmed,true);
+});
+test('mixed-version and predescriptor IPC cannot silently fall back from v2 heartbeat to v1 or setup execution',async t=>{
+ for(const mode of ['normal','capacity-minimal']){
+  const {client,instanceId,child,stats}=await setup(t,mode);
+  const packet=seedRequest('SERVICE_HEARTBEAT_V2',instanceId,child.pid);
+  await assert.rejects(client.serviceHeartbeatV2(packet),e=>e.reason==='UNSUPPORTED_ACTION'&&e.effect_outcome==='NONE'&&e.automatic_retry_allowed===false);
+  assert.equal((await stats()).calls,0);
+ }
+});
+
+async function runCustody(t,client,{open=true}={}){
+ const directory=await fs.mkdtemp(path.join(await fs.realpath(os.tmpdir()),'native-ipc-run-custody-'));
+ t.after(()=>fs.rm(directory,{recursive:true,force:true}));
+ const request=agentRequest(),binding={...request.binding,base_sha:'a'.repeat(40)};
+ const journal=await createNativeRunCallbackJournal({directory,runId:request.binding.run_id,binding});
+ const facet=open?await client.openAgentRunCustody({binding:request.binding,journal}):null;
+ return{directory,request,facet,journal,write:()=>({...request,operation:'agent_send_message',args:{request_id:id(),target_agent_id:'agent_native-peer123',message:'SECRET_BODY_NOT_JOURNALED'}})};
+}
+async function waitAgent(child,runId){return new Promise(resolve=>{const listener=row=>{if(row?.schema==='test.agent-started'&&row.run_id===runId){child.off('message',listener);resolve();}};child.on('message',listener);});}
+test('run facet includes initial CHECK, exact original job and validated settlement before response; no wire/body widening',async t=>{
+ const {client,stats}=await setup(t),f=await runCustody(t,client);
+ await assert.rejects(f.facet.agentOperation(f.write()),/INVALID_PAYLOAD/);assert.equal((await stats()).calls,0);
+ await f.facet.agentOperation(f.request);
+ await assert.rejects(f.facet.agentOperation({...f.request,job_binding:{...f.request.job_binding,job_id:id()}}),/INVALID_PAYLOAD/);
+ await assert.rejects(f.facet.agentOperation({...f.request,binding:{...f.request.binding,run_id:id()}}),/INVALID_PAYLOAD/);
+ await f.facet.agentOperation(f.write());const result=await f.facet.finish();
+ assert.equal(result.state,'SCOPED_REQUESTS_JOINED');assert.equal(result.requests,2);assert.equal(result.all_effects_cleanup,'UNCONFIRMED');assert.equal(result.lineage,'LINEAGE_UNBOUND');
+ assert.equal(client.snapshot().physical_inflight,0);assert.deepEqual(await readNativeRunCallbackJournal(f.directory),result);
+ const records=[];for(const file of await fs.readdir(path.join(f.directory,'host-callback-custody')))records.push(await fs.readFile(path.join(f.directory,'host-callback-custody',file),'utf8'));
+ assert.ok(records.every(text=>!text.includes('SECRET_BODY_NOT_JOURNALED')));assert.equal((await stats()).calls,2);
+ await assert.rejects(f.facet.agentOperation(f.request));assert.equal((await stats()).calls,2);
+});
+test('two run facets share the original physical budget and one finishes without stealing the other request custody',async t=>{
+ const {client,child,stats}=await setup(t,'held-agent',{maxInflight:2,timeoutMs:30,serverTimeoutMs:30}),a=await runCustody(t,client),b=await runCustody(t,client);
+ await a.facet.agentOperation(a.request);await b.facet.agentOperation(b.request);await client.drainPhysical();
+ const enteredA=waitAgent(child,a.request.binding.run_id),enteredB=waitAgent(child,b.request.binding.run_id);
+ const wa=a.facet.agentOperation(a.write()),wb=b.facet.agentOperation(b.write());wa.catch(()=>{});wb.catch(()=>{});await Promise.all([enteredA,enteredB]);
+ await assert.rejects(client.readLease(lease()),/INFLIGHT_LIMIT/);await assert.rejects(wa);await assert.rejects(wb);
+ assert.equal(client.snapshot().physical_inflight,2);const doneA=a.facet.finish(),doneB=b.facet.finish();let bDone=false;doneB.then(()=>{bDone=true;});
+ child.send({schema:'test.release-agent',run_id:a.request.binding.run_id});const result=await doneA;
+ assert.equal(result.caller_unknown,1);assert.equal(bDone,false);assert.equal(client.snapshot().physical_inflight,1);
+ child.send({schema:'test.release-agent',run_id:b.request.binding.run_id});assert.equal((await doneB).caller_unknown,1);assert.equal(client.snapshot().physical_inflight,0);assert.equal((await stats()).calls,4);
+});
+test('same-client reservation precedes durable fsync; a synchronous run fence proves UNSENT without replay',async t=>{
+ const {client,stats}=await setup(t, 'normal',{maxInflight:1}),f=await runCustody(t,client);
+ const target=path.join(f.directory,'host-callback-custody','0000000000000002.json'),gate=Promise.withResolvers(),entered=Promise.withResolvers(),original=fs.open;
+ fs.open=async(...args)=>{const handle=await original(...args);if(args[0]===target){const sync=handle.sync.bind(handle);handle.sync=async()=>{entered.resolve();await gate.promise;return sync();};}return handle;};
+ let pending;try{
+  pending=f.facet.agentOperation(f.request);pending.catch(()=>{});await entered.promise;
+  assert.equal(client.snapshot().physical_inflight,1);await assert.rejects(client.readLease(lease()),/INFLIGHT_LIMIT/);assert.equal((await stats()).calls,0);
+  const fenced=f.facet.fence();gate.resolve();await fenced;await assert.rejects(pending,error=>error.effect_outcome==='NONE');
+ }finally{gate.resolve();fs.open=original;await pending?.catch(()=>{});}
+ const result=await f.facet.finish();assert.equal(result.unsent,1);assert.equal(result.requests,1);assert.equal((await stats()).calls,0);assert.equal(client.snapshot().physical_inflight,0);
+});
+test('intent write failure prevents send and retains HOLD without a fabricated candidate',async t=>{
+ const {client,stats}=await setup(t),f=await runCustody(t,client);
+ await fs.writeFile(path.join(f.directory,'host-callback-custody','0000000000000002.json'),'interrupted append');
+ await assert.rejects(f.facet.agentOperation(f.request));assert.equal((await stats()).calls,0);assert.equal((await f.facet.finish()).state,'HOLD');
+ assert.equal((await readNativeRunCallbackJournal(f.directory)).state,'HOLD');assert.equal(client.snapshot().physical_inflight,0);
+});
+test('a late OK cannot upgrade the persisted UNKNOWN caller after genuine earlier physical SETTLED',async t=>{
+ const {client}=await setup(t,'late-agent-ok',{timeoutMs:30,serverTimeoutMs:1000}),f=await runCustody(t,client);
+ await f.facet.agentOperation(f.request);await client.drainPhysical();
+ await assert.rejects(f.facet.agentOperation(f.write()),error=>error.effect_outcome==='UNKNOWN');const result=await f.facet.finish();assert.equal(result.caller_unknown,1);
+ await sleep(130);assert.deepEqual(await readNativeRunCallbackJournal(f.directory),result);assert.equal(result.state,'SCOPED_REQUESTS_JOINED');
+});
+test('actual callback promise remains owned after a public request settled and run dispatch was fenced',async t=>{
+ const {client}=await setup(t),f=await runCustody(t,client),gate=Promise.withResolvers(),entered=Promise.withResolvers();
+ const callback=f.facet.trackCallback(async()=>{await f.facet.agentOperation(f.request);entered.resolve();await gate.promise;});await entered.promise;
+ let done=false;const closing=f.facet.finish().then(value=>{done=true;return value;});await sleep(10);assert.equal(done,false);assert.equal(f.facet.snapshot().callbacks,1);
+ gate.resolve();await callback;assert.equal((await closing).callbacks,1);await assert.rejects(f.facet.trackCallback(()=>{throw Error('must not execute');}),/CHANNEL_CLOSED/);
+});
+
+for(const mode of ['settlement-wrong-request_sha256','settlement-wrong-instance_id','settlement-wrong-host_pid',
+ 'settlement-wrong-request_id','settlement-missing','settlement-send-failed','agent-rollback-poison'])test(`run custody refuses durable release from ${mode}; existing shutdown can clean resources only`,async t=>{
+ let witness=null;const f=await setup(t,mode,{timeoutMs:100,readShutdownSettlement:async()=>witness}),run=await runCustody(t,f.client);
+ await run.facet.agentOperation(run.request).catch(()=>{});
+ await assert.rejects(f.client.drainPhysical({wait:false}),/PHYSICAL_CLEANUP_UNCONFIRMED/);
+ assert.equal(f.client.snapshot().physical_inflight,1);const finish=run.facet.finish();let done=false;finish.then(()=>{done=true;});await sleep(10);assert.equal(done,false);
+ assert.notEqual((await readNativeRunCallbackJournal(run.directory)).state,'SCOPED_REQUESTS_JOINED');
+ // Fixture's existing controller witness is intentionally cleanup-only. This
+ // is NOT an OS-birth/PG/control proof and must never mint a scoped candidate.
+ witness={schema:'metaengine.native-coding.host-shutdown-settlement.v1',instance_id:f.instanceId,host_pid:f.child.pid,cleanup_confirmed:true,authority_effect:false};
+ const exited=new Promise(resolve=>f.child.once('exit',resolve));f.child.kill();await exited;await f.client.drainPhysical();
+ const value=await finish;assert.equal(value.state,'HOLD');assert.equal(value.all_effects_cleanup,'UNCONFIRMED');assert.equal(value.lineage,'LINEAGE_UNBOUND');
+ assert.equal(f.client.snapshot().physical_inflight,0);assert.equal((await readNativeRunCallbackJournal(run.directory)).state,'HOLD');
+});
+test('duplicate valid terminals are idempotent and sequential run history never truncates to response-cache size',async t=>{
+ const f=await setup(t,'duplicate-settlement'),run=await runCustody(t,f.client);
+ for(let n=0;n<280;n++){await run.facet.agentOperation(run.request);await f.client.drainPhysical();assert.equal(run.facet.snapshot().requests,0);}
+ const value=await run.facet.finish();assert.equal(value.requests,280);assert.equal(value.records,845);assert.equal(value.state,'SCOPED_REQUESTS_JOINED');
+ assert.deepEqual(await readNativeRunCallbackJournal(run.directory),value);assert.equal((await f.stats()).snapshot.completed,256);
+});
+test('failed child send is unknown-send, never UNSENT; no automatic repeat or late frame can mint release',async t=>{
+ let witness=null;const f=await setup(t,'normal',{readShutdownSettlement:async()=>witness}),run=await runCustody(t,f.client),send=f.child.send;
+ f.child.send=function(frame,...args){if(frame?.schema==='metaengine.native-coding.host-ipc.request.v1'){const callback=args.at(-1);queueMicrotask(()=>callback(Error('PRIVATE_SEND_SECRET')));return false;}return send.call(this,frame,...args);};
+ await assert.rejects(run.facet.agentOperation(run.request),error=>error.reason==='SEND_FAILED'&&!error.message.includes('PRIVATE_SEND_SECRET'));
+ f.child.send=send;assert.equal((await f.stats()).calls,0);assert.equal(f.client.snapshot().physical_inflight,1);
+ const finish=run.facet.finish();witness={schema:'metaengine.native-coding.host-shutdown-settlement.v1',instance_id:f.instanceId,host_pid:f.child.pid,cleanup_confirmed:true,authority_effect:false};
+ await f.client.drainPhysical();const value=await finish;assert.equal(value.unsent,0);assert.equal(value.state,'HOLD');
+});
+for(const failure of ['fsync-intent','fsync-terminal','fsync-candidate'])test(`actual per-run ${failure} failure is sanitized HOLD and does not resend`,async t=>{
+ const f=await setup(t),run=await runCustody(t,f.client),original=fs.open;let failed=false;
+ fs.open=async(...args)=>{const handle=await original(...args);if(String(args[0]).startsWith(path.join(run.directory,'host-callback-custody'))&&args[1]==='wx'){
+  const write=handle.writeFile.bind(handle);let event;handle.writeFile=async bytes=>{event=JSON.parse(bytes).event;return write(bytes);};
+  const sync=handle.sync.bind(handle);handle.sync=async()=>{if(event.kind===({'fsync-intent':'INTENT','fsync-terminal':'TERMINAL','fsync-candidate':'CANDIDATE'}[failure])){failed=true;throw Error('PRIVATE_DISK_SENTINEL');}return sync();};
+ }return handle;};
+ try{
+  await run.facet.agentOperation(run.request).catch(error=>assert.ok(!error.message.includes('PRIVATE_DISK_SENTINEL')));
+  const value=await run.facet.finish();assert.equal(failed,true);assert.equal(value.state,'HOLD');assert.equal(value.all_effects_cleanup,'UNCONFIRMED');
+  assert.equal((await f.stats()).calls,failure==='fsync-intent'?0:1);assert.equal(f.client.snapshot().physical_inflight,0);
+  // A read is structural only: even fully written bytes after a failed fsync
+  // are NOT a final all-effects seal or evidence that a send did not occur.
+  const read=await readNativeRunCallbackJournal(run.directory);assert.equal(read.all_effects_cleanup,'UNCONFIRMED');assert.equal(read.authority_effect,false);
+ }finally{fs.open=original;}
+});
+
+test('underlying bridge counterfactual (publication unqualified) bindRun CHECK and broker callbacks join the same real IPC run facet after transport closes',async t=>{
+ const f=await setup(t,'bridge-held',{timeoutMs:75}),run=await runCustody(t,f.client,{open:false}),brokerModule=await inMemoryNativeBroker(t);
+ let registration,broker;
+ const source=await fs.readFile(new URL('../src/native-coding-agent-run-bridge.mjs',import.meta.url),'utf8');
+ const prepare=new Function('requireNativeRunCallbackPublication','createHash','createNativeCodingAgentMcpBroker','nativeCodingAgentMcpIntentBodySha256','createNativeCodingAgentMcpLaunch',
+  'validateNativeCodingAgentHostRequest','canonical',source.replace(/^import .*;\n/gm,'').replace('export async function','async function')+'\nreturn prepareNativeCodingAgentRunBridge;')
+  (()=>{},createHash,async options=>{broker=await brokerModule.createNativeCodingAgentMcpBroker({...options,endpoint:'/fixture/in-memory-only',timeoutMs:500});return broker;},
+   nativeCodingAgentMcpIntentBodySha256,async options=>{registration=options.registration;return{fixture_only:true};},validateNativeCodingAgentHostRequest,nativeCodingCanonicalJson);
+ const binding={...run.request.binding,base_sha:'a'.repeat(40)},expiry=new Date(Date.now()+60000).toISOString();
+ const authorization={...binding,authorized:true,trust_namespace:'LOCAL_OPERATOR_QA',permit_id:id(),owner_epoch:1,user_sid:'S-1-5-21-111-1001',worktree_path:'/fixture/worktree'};
+ const permit={...authorization,revoked:false,expires_at:expiry,worktree:{path:authorization.worktree_path,base_sha:binding.base_sha},artifact:{cli_executable_sha256:run.request.job_binding.executable_sha256}};
+ const bridge=await prepare({ownPostgres:f.client,runId:binding.run_id,binding,permit,authorization,deadlineAt:expiry,pins:{},callbackJournal:run.journal});
+ t.after(()=>bridge.close());
+ await bridge.bindRun({...run.request.job_binding,user_sid:permit.user_sid,tree_control_bound:true,started_suspended:true,job_bound_before_resume:true});
+ const tool=await brokerModule.connectNativeCodingAgentMcpBroker(registration);t.after(()=>tool.close());
+ const entered=waitAgent(f.child,binding.run_id),write=tool.invoke('agent_send_message',run.write().args);write.catch(()=>{});await entered;
+ assert.equal((await f.stats()).calls,3,'initial bind CHECK + invocation CHECK + actual operation');
+ await bridge.close();await assert.rejects(write);assert.equal(broker.snapshot().retained_callbacks,1);
+ const joined=bridge.drainCallbacks();assert.equal(bridge.drainCallbacks(),joined);let done=false;joined.then(()=>{done=true;});
+ await sleep(100);assert.equal(done,false);assert.equal(broker.snapshot().retained_callbacks,0,'public IPC timeout joined JS handler only');
+ assert.equal(f.client.snapshot().physical_inflight,1,'Host SQL still owned after broker callback returned');
+ f.child.send({schema:'test.release-agent',run_id:binding.run_id});const value=await joined;
+ assert.equal(value.state,'SCOPED_REQUESTS_JOINED');assert.equal(value.requests,3);assert.equal(value.caller_unknown,1);assert.equal(value.callbacks,2);
+ assert.equal(value.all_effects_cleanup,'UNCONFIRMED');assert.deepEqual(await readNativeRunCallbackJournal(run.directory),value);
+});
+
+test('actual Host close aborts protected ACL observation before joining it; no pre-stop callback cycle',async t=>{
+ const f=await setup(t,'acl-rejection-held',{timeoutMs:1000,serverTimeoutMs:1000});
+ const event=schema=>new Promise(resolve=>{const listener=m=>{if(m?.schema===schema){f.child.off('message',listener);resolve();}};f.child.on('message',listener);});
+ const started=event('test.acl-started'),aborted=event('test.acl-aborted'),read=f.client.readScope();read.catch(()=>{});await started;
+ assert.equal((await f.stats()).snapshot.inflight,1);let drained=false;const physical=f.client.drainPhysical().then(()=>{drained=true;});
+ f.child.send({schema:'test.close-server'});await aborted;await assert.rejects(read);assert.equal(drained,false);
+ assert.equal((await f.stats()).snapshot.inflight,1,'original native observation still owned after public close');
+ f.child.send({schema:'test.release-acl'});await physical;assert.equal((await f.stats()).snapshot.inflight,0);
 });

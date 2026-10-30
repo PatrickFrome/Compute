@@ -91,7 +91,12 @@ const REMOTE_SUPPORT_SOURCE_CLOSURE = new Set([
   'apps/metaengine-browser/src/runtime-recovery-policy.mjs',
 ]);
 const NATIVE_CODING_HOST_SOURCE_CLOSURE=new Set([
+  'apps/metaengine-browser/src/native-coding-capacity-contract.mjs',
+  'apps/metaengine-browser/src/native-coding-host-settlement.mjs',
+  'apps/metaengine-browser/src/native-coding-setup-contract.mjs',
+  'apps/metaengine-browser/src/agent-resource-admission.mjs',
   'apps/metaengine-browser/src/native-coding-pending-owner-phase.mjs',
+  'apps/metaengine-browser/src/native-coding-pending-activation-phase.mjs',
   'apps/metaengine-browser/src/native-coding-workspace-preparation.mjs',
   'apps/metaengine-browser/src/agent-context-token.mjs',
   'apps/metaengine-browser/src/guardian-client-kernel-birth-w67.mjs',
@@ -110,6 +115,9 @@ const NATIVE_CODING_HOST_SOURCE_CLOSURE=new Set([
   'apps/metaengine-browser/src/native-coding-agent-mcp-stdio.mjs',
   'apps/metaengine-browser/src/native-coding-agent-mcp-launch.mjs',
   'apps/metaengine-browser/src/native-coding-host-observers.mjs',
+  'apps/metaengine-browser/src/native-coding-windows-process-observer.mjs',
+  'apps/metaengine-browser/src/codex-cli-physical-settlement.mjs',
+  'apps/metaengine-browser/src/native-coding-run-callback-journal.mjs',
   'apps/metaengine-browser/src/native-coding-host-ipc-client.mjs',
   'apps/metaengine-browser/src/native-coding-device-request.mjs',
   'apps/metaengine-browser/src/native-coding-pg-ledger.mjs',

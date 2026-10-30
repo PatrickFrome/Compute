@@ -46,7 +46,7 @@ test('disposable PostgreSQL pinned migration groups and restricted direct API gr
   const suffix = process.platform === 'win32' ? '.exe' : '';
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'compute-migration-grants-')));
   const data = path.join(root, 'pgdata'), port = await freePort();
-  const owner = 'migration_fixture_owner', ownerPassword = randomBytes(32).toString('hex');
+  const owner = 'state_owner', ownerPassword = randomBytes(32).toString('hex');
   const passwordFile = path.join(root, 'initdb-password.txt');
   let owned;
   let api;
@@ -58,6 +58,7 @@ test('disposable PostgreSQL pinned migration groups and restricted direct API gr
     await api?.end({ timeout: 2 });
     await sql.end({ timeout: 2 });
     if (owned) assert.equal((await owned.stop()).cleanup_confirmed, true);
+    if (process.env.METAENGINE_MIGRATION_TEST_LOG) await fs.copyFile(path.join(root,'postgres.log'),process.env.METAENGINE_MIGRATION_TEST_LOG).catch(()=>{});
     if (cleanupUnconfirmed) return;
     const relative = path.relative(await fs.realpath(os.tmpdir()), await fs.realpath(root));
     assert(relative && !relative.startsWith('..') && !path.isAbsolute(relative));
@@ -66,6 +67,8 @@ test('disposable PostgreSQL pinned migration groups and restricted direct API gr
   await fs.writeFile(passwordFile, ownerPassword + '\n', { flag: 'wx', mode: 0o600 });
   await exec(path.join(bin, 'initdb' + suffix), ['-D', data, '--username=' + owner, '--auth=scram-sha-256', '--pwfile=' + passwordFile, '--no-locale', '-E', 'UTF8'], { windowsHide: true });
   await fs.unlink(passwordFile);
+  // Isolated loopback TCP fixture only; never write a system-owned socket path.
+  await fs.appendFile(path.join(data,'postgresql.conf'),"\nunix_socket_directories = ''\n");
   await initializeLocalVaultKey({ dataDirectory: data });
   if (process.platform === 'win32') {
     try { owned = await startOwnedWindowsPostgres({ pgBinDir: bin, pgDataDir: data, databasePort: port, startupTimeoutMs: 120000 }); }
@@ -74,6 +77,7 @@ test('disposable PostgreSQL pinned migration groups and restricted direct API gr
     await exec(path.join(bin, 'pg_ctl'), ['-D', data, '-l', path.join(root, 'postgres.log'), '-o', '-h 127.0.0.1 -p ' + port, 'start', '-w'], { windowsHide: true });
     owned = { stop: async () => { await exec(path.join(bin, 'pg_ctl'), ['-D', data, 'stop', '-m', 'fast', '-w']); return { cleanup_confirmed: true }; } };
   }
+  assert.deepEqual((await sql.unsafe('select current_user::text as current_user,session_user::text as session_user'))[0],{current_user:'state_owner',session_user:'state_owner'});
   await sql.unsafe('create role anon; create role authenticated; create role service_role nologin bypassrls; create schema destruktion_meta; create schema extensions; create extension pgcrypto with schema extensions;');
   const baseline = await source('20260929010000_client_v1_fresh_project_bootstrap_v1.sql');
   await sql.unsafe(baseline.slice(baseline.indexOf('create table if not exists destruktion_meta.devos_fleet_task_h205f22'), baseline.indexOf('create table if not exists public.compute_fabric_a2_supervisor_mesh_instance_h205f22')));

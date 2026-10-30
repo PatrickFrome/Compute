@@ -4,7 +4,7 @@ import {validateNativeCodingDeviceRequest} from '../../apps/metaengine-browser/s
 import {createNativeCodingHostSeedService} from './native-coding-host-seed-service.mjs';
 import {createNativeCodingDeviceRequestVerifier,createNativeCodingAuthenticatedRequestContext} from './native-coding-device-request.mjs';
 
-const PREPARATION_ACTIONS=['ESTABLISH_PENDING_OWNER_V1','READ_PENDING_OWNER_V1','PREPARE_WORKSPACE_V1','READ_WORKSPACE_PREPARATION_V1','ADMIT_PREPARED_GOAL_V1','READ_PREPARED_GOAL_V1'];
+const PREPARATION_ACTIONS=['ACTIVATE_PREPARED_GOAL_V1','READ_PREPARED_GOAL_ACTIVATION_V1','ESTABLISH_PENDING_OWNER_V1','READ_PENDING_OWNER_V1','PREPARE_WORKSPACE_V1','READ_WORKSPACE_PREPARATION_V1','ADMIT_PREPARED_GOAL_V1','READ_PREPARED_GOAL_V1'];
 const ACTIONS=['SEED_GOAL','READ_SEED','LIST_SEEDS'];
 const fail=reason=>{throw Error('native_coding_host_seed_binding_'+reason);};
 

@@ -625,7 +625,12 @@ export class DevOsNativeTaskCycle {
       // an independent read-back of its own bound tab. Failures are collected
       // per task; the first error is rethrown only when EVERY observation
       // failed, preserving the single-observation error surface.
-      const settled = await Promise.allSettled(batch.map((running) => this.#observeAnyLease(running, postState?.fleet)));
+      const settled = await Promise.allSettled(batch.map(async running=>{
+        // Explicit first dispatch lives only in this existing W30 tick. Generic
+        // observe/read/status never advances a retained never-attempted lease.
+        if(String(running?.target_id||'').startsWith('codex-cli:'))await this.#nativeCodingRuntime?.advanceUnattemptedLease?.(running);
+        return this.#observeAnyLease(running,postState?.fleet);
+      }));
       const observations = [];
       const failures = [];
       settled.forEach((outcome, index) => {

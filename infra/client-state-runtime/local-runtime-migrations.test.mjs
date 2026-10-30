@@ -85,7 +85,7 @@ test('migration plan pins deployed sources, unbounded defaults and the opt-in ow
   const extras = plan.migrations.slice(mandatorySources.length+nativeSources.length+3);
   // The W5 DAG guard is an optional source-only integration lane and must
   // never be admitted as an arbitrary migration or silently become installed.
-  assert.equal(extras.length, 9, 'every extra migration requires an explicit contract');
+  assert.equal(extras.length, 12, 'every extra migration requires an explicit contract');
   {
     const [guard] = extras;
     assert.equal(guard.source, 'fleet-coordination-claim-guard-v1.sql');
@@ -105,8 +105,17 @@ test('migration plan pins deployed sources, unbounded defaults and the opt-in ow
   assert(!repair.signatures.some(value=>value.includes('project_completion_ready_h205f22(')),
     'replaced canonical consumers are not new-install markers');
   const pending=extras[8];assert.equal(pending.source,'native-coding-pending-goal-v1.sql');
-  assert.equal(pending.signatures.length,2);assert.equal(pending.triggers.length,8);
-  assert.deepEqual(pending.relations,['destruktion_meta.native_coding_pending_goal_h205f22']);
+  assert.equal(pending.signatures.length,2);assert.equal(pending.triggers.length,9);
+  assert.deepEqual(pending.relations,['destruktion_meta.native_coding_pending_goal_h205f22','destruktion_meta.native_coding_pending_activation_h205f22']);
+  const activation=extras[9];assert.equal(activation.source,'native-coding-pending-activation-v1.sql');
+  assert.deepEqual(activation.signatures,['destruktion_meta.native_coding_activate_pending_goal_v1(jsonb,text,jsonb,text,text)']);
+  assert.equal(activation.relations.length,0);assert.equal(activation.triggers.length,0);
+  const setup=extras[10];assert.equal(setup.source,'native-coding-setup-operation-v1.sql');
+  assert.deepEqual(setup.signatures,['destruktion_meta.native_coding_setup_operation_v1(text,jsonb,jsonb,jsonb)']);
+  assert.deepEqual(setup.relations,['destruktion_meta.native_coding_setup_operation_h205f22']);assert.equal(setup.triggers.length,0);
+  const capacity=extras[11];assert.equal(capacity.source,'native-coding-capacity-v2.sql');
+  assert.equal(capacity.signatures.length,11);assert.equal(capacity.relations.length,0);
+  assert.deepEqual(capacity.triggers,[{relation:'destruktion_meta.devos_fleet_claim_h205f22',name:'aa_native_capacity_claim_guard_v2',signature:'destruktion_meta.native_coding_capacity_claim_gate_v2()'}]);
   const suspension=extras[1];
   assert.equal(suspension.source,'20261026020000_browser_parent_suspension_v1.sql');
   assert.equal(suspension.signatures.length,9);
@@ -162,10 +171,12 @@ test('migration catalog skip requires every required object and separately attes
   } };
   const receipt = await applyLocalRuntimeMigrations({ sql: { begin: run => run(tx) } });
   assert(receipt.migrations.every(row => row.status === 'ALREADY_PRESENT_NOT_MODIFIED'));
-  assert(receipt.migrations.every(row => row.existing_bodies_attested === (row.browser_dispatch_version === 3 || row.cognitive_acceptor_direct_api === true || row.source==='native-agent-count-unbounded-v2.sql' || row.running_agent_scope_separate_from_admission===true || row.chat_coordination_opt_in===true || row.native_review_observation_only===true || row.chat_message_recipient_scope===true || row.native_repair_lineage_preserved===true || row.native_pending_goal_nonrunnable===true)));
+  const capacitySource=await readFile(new URL('./native-coding-capacity-v2.sql',import.meta.url),'utf8');
+  assert.equal(statements.filter(query=>query===capacitySource).length,1,'capacity replay always executes exact attestation, not a presence skip');
+  assert(receipt.migrations.every(row => row.existing_bodies_attested === (row.browser_dispatch_version === 3 || row.cognitive_acceptor_direct_api === true || row.source==='native-agent-count-unbounded-v2.sql' || row.running_agent_scope_separate_from_admission===true || row.chat_coordination_opt_in===true || row.native_review_observation_only===true || row.chat_message_recipient_scope===true || row.native_repair_lineage_preserved===true || row.native_pending_goal_nonrunnable===true || row.same_root_activation_only===true || row.setup_only_no_execution_authority===true || row.native_capacity_v2_fail_closed===true)));
   assert.equal(receipt.existing_bodies_attested, false);
   assert(statements.some(query => query.includes('pg_advisory_xact_lock')));
-  assert(!statements.some(query => !query.startsWith('-- Reviewed local upgrade.') && !query.startsWith('-- Additive local upgrade: active CRITIC authorization') && !query.startsWith('-- Additive local upgrade: protected chat-led coordination') && !query.startsWith('-- Additive local upgrade: report bound native CRITIC') && !query.startsWith('-- Additive local upgrade: native messages') && !query.startsWith('-- Addressed chat-to-project messages') && !query.startsWith('-- Reviewed addressed-message acknowledgements.') && !query.startsWith('-- Reviewed message-driven parent wake,') && !query.startsWith('-- Reviewed rejected-result repair:') && !query.startsWith('-- Reviewed additive admission schema;') && /^create /im.test(query)));
+  assert(!statements.some(query => !query.startsWith('-- Reviewed local upgrade.') && !query.startsWith('-- Additive local upgrade: active CRITIC authorization') && !query.startsWith('-- Additive local upgrade: protected chat-led coordination') && !query.startsWith('-- Additive local upgrade: report bound native CRITIC') && !query.startsWith('-- Additive local upgrade: native messages') && !query.startsWith('-- Addressed chat-to-project messages') && !query.startsWith('-- Reviewed addressed-message acknowledgements.') && !query.startsWith('-- Reviewed message-driven parent wake,') && !query.startsWith('-- Reviewed rejected-result repair:') && !query.startsWith('-- Reviewed additive admission schema;') && !query.startsWith('-- Existing functions must be exact reviewed bodies, not presence-only markers.') && !query.startsWith('-- Additive-only source: never silently repair a partial, widened or unknown install.') && !query.startsWith('-- New additive source. Attest exact complete replay; never repair a partial or widened installation.') && /^create /im.test(query)));
 });
 
 async function dispatchFixture(version = 3) {

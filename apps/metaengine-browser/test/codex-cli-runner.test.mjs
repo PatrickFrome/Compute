@@ -1,3 +1,7 @@
+import {prepareUnqualifiedBridgeFixture} from './fixtures/native-coding-unqualified-bridge.mjs';
+import {generatedRunCustodyDouble} from './fixtures/native-coding-run-custody-double.mjs';
+import {createNativeCodingAgentMcpLaunch} from '../src/native-coding-agent-mcp-launch.mjs';
+import {joinedSettlementFixture} from './fixtures/codex-cli-joined-settlement-fixture.mjs';
 import test, {describe, before, after} from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
@@ -71,9 +75,8 @@ function controller({ mutate = true, invalidJson = false, hang = false, criticMu
   return { get spawns() { return spawns; }, get lastSpec() { return lastSpec; }, async spawn(spec) {
     spawns++; lastSpec = spec; const stdout = new PassThrough(); const stderr = new PassThrough(); let finish;
     const completion = new Promise(resolve => { finish = resolve; });
-    return { proof: { pid: 12345, process_incarnation_id: 'pid:12345:created_100ns:133333333333333333',
-      user_sid: sid, job_id: spec.runId, tree_control_bound: true, started_suspended: true,job_bound_before_resume:true,
-      executable_sha256: spec.expectedExecutableSha256 }, stdout, stderr, completion,
+    const generated=joinedSettlementFixture(spec);
+    return {proof:generated.proof,stdout,stderr,completion,
       async resume() {
         await onResume?.();
         if (hang) return;
@@ -86,9 +89,9 @@ function controller({ mutate = true, invalidJson = false, hang = false, criticMu
         }
         await fs.writeFile(spec.args[spec.args.indexOf('--output-last-message') + 1], JSON.stringify(response));
         stdout.write(invalidJson ? 'not JSON\n' : `${JSON.stringify({ type: 'thread.started', thread_id: id(spawns + 200) })}\n${JSON.stringify({ type: 'turn.completed' })}\n`);
-        finish({ exit_code: 0, reason: null, tree_cleanup_confirmed: true });
+        finish(generated.complete());
       },
-      async terminate(reason) { finish({ exit_code: 124, reason, tree_cleanup_confirmed: true }); },
+      async terminate(_reason) { finish(generated.complete({exit_code:124,reason:'CANCELLED'})); },
     };
   } };
 }
@@ -133,7 +136,7 @@ test('native permit rejection occurs before spawning or reserving the model job'
   assert.equal(processController.spawns, 0);
 });
 
-test('runner binds real private broker only after RUNNING authorization and before prompt resume, then revokes',{
+test('underlying unqualified bridge counterfactual binds private broker only after RUNNING authorization and before prompt resume, then revokes',{
   skip:process.platform!=='win32'?'Production per-run bridge requires a Windows named pipe':false,
 },async t=>{
   const f=await fixture(t),pins=await agentBridgePins(t),events=[];let running=false,bridge;
@@ -148,10 +151,10 @@ test('runner binds real private broker only after RUNNING authorization and befo
     const permit={...details.binding,permit_id:a.permit_id,owner_epoch:a.owner_epoch,user_sid:a.user_sid,workspace_id:a.workspace_id,project_id:a.project_id,
       trust_namespace:'LOCAL_OPERATOR_QA',revoked:false,expires_at:a.expires_at,provider_id:id(55),artifact:{cli_executable_sha256:f.expectedExecutableSha256},
       worktree:{path:a.worktree_path,base_sha:details.binding.base_sha}};
-    bridge=await prepareNativeCodingAgentRunBridge({...details,permit,pins,ownPostgres:{async agentOperation(value){
+    bridge=await prepareUnqualifiedBridgeFixture({...details,permit,pins,ownPostgres:generatedRunCustodyDouble(async value=>{
       events.push(value.operation);assert.equal(running,true);
       return value.operation==='CHECK'?{schema:'metaengine.native-coding.agent-authorized.v1',run_id:details.runId,authorized:true,authority_effect:false}:{rows:[]};
-    }}});return bridge;
+    })});return bridge;
   }});
   const receipt=await runner.run({lease:f.lease(1),role:'IMPLEMENTER',worktreePath:f.worktree,prompt:'Use managed project tools'});
   assert.equal(receipt.state,'RESULT_READY');assert(events.indexOf('prepare-bridge')<events.indexOf('BEFORE_RESUME'));
@@ -176,13 +179,13 @@ for(const mode of ['unverified','bind-refused','unsupported-platform'])test(
       if(mode==='unverified')return {launch:{argv:['--dangerously-bypass-approvals-and-sandbox']},bindRun:async()=>{},close:async()=>{closes++;}};
       const a=details.authorization,permit={...details.binding,...a,trust_namespace:'LOCAL_OPERATOR_QA',revoked:false,provider_id:id(55),
         artifact:{cli_executable_sha256:f.expectedExecutableSha256},worktree:{path:a.worktree_path,base_sha:details.binding.base_sha}};
-      return prepareNativeCodingAgentRunBridge({...details,permit,pins,ownPostgres:{agentOperation:async()=>{hostCalls++;throw Error('fixture_current_lease_rejected');}}});
+      return (mode==='bind-refused'?prepareUnqualifiedBridgeFixture:prepareNativeCodingAgentRunBridge)({...details,permit,pins,ownPostgres:generatedRunCustodyDouble(async()=>{hostCalls++;throw Error('fixture_current_lease_rejected');})});
     }});
     const receipt=await runner.run({lease:f.lease(1),role:'IMPLEMENTER',worktreePath:f.worktree,prompt:'Never resume'});
     assert.equal(receipt.state,'AMBIGUOUS');assert.equal(await fs.readFile(path.join(f.worktree,'feature.txt'),'utf8'),'before\n');
     assert.equal(processController.spawns,mode==='bind-refused'?1:0);if(mode==='unverified')assert.equal(closes,1);
     if(mode==='unsupported-platform'){
-      assert.equal(receipt.terminal_reason,'native_agent_bridge_composition');assert.equal(hostCalls,0);
+      assert.equal(receipt.terminal_reason,'native_run_callback_directory_durability_unqualified');assert.equal(hostCalls,0);
     }
 });
 
@@ -405,4 +408,82 @@ describe('Windows native suspended cleanup fault fixtures', {skip: process.platf
       });
     }
   });
+});
+
+test('failed spawn retains immutable pre-spawn request across runner restart and never resends',async t=>{
+ const f=await fixture(t);let spawns=0,spec;
+ const processController={async spawn(value){spawns++;spec=value;throw Error('fixture_failed_spawn');}};
+ const request={lease:f.lease(901),role:'IMPLEMENTER',worktreePath:f.worktree,prompt:'Retain this exact failed request'};
+ const receipt=await createCodexCliRunner({...f,processController}).run(request);
+ assert.equal(receipt.state,'AMBIGUOUS');assert.equal(receipt.physical_settlement,undefined);
+ const key=sha(JSON.stringify({task_id:request.lease.task_id,lease_generation:1,role:'IMPLEMENTER'}));
+ const launchPath=path.join(f.journalRoot,key,'launch.json'),before=await fs.readFile(launchPath);
+ assert.equal(JSON.parse(before).request_sha256,spec.launch.request_sha256);assert.equal(receipt.launch_identity.request_sha256,spec.launch.request_sha256);
+ const restarted=await createCodexCliRunner({...f,processController}).run(request);
+ assert.deepEqual(restarted,{...receipt,replayed:false,prior_attempt:true});assert.equal(spawns,1);assert.deepEqual(await fs.readFile(launchPath),before);
+});
+
+for(const failure of [false,true])test(`runner cancellation joins original held bridge close before immutable receipt (${failure?'failed':'fulfilled'})`,async t=>{
+ const f=await fixture(t),pins=await agentBridgePins(t),gate=Promise.withResolvers(),entered=Promise.withResolvers(),abort=new AbortController();let closes=0;
+ const processController=controller({hang:true,onResume:()=>{abort.abort();}}),request={lease:f.lease(failure?903:902),role:'IMPLEMENTER',worktreePath:f.worktree,prompt:'Fixture no model'};
+ const runner=createCodexCliRunner({...f,processController,async prepareAgentBridge(details){
+  const binding={run_id:details.runId,workspace_id:details.authorization.workspace_id,project_id:details.authorization.project_id,
+   task_id:details.binding.task_id,lease_generation:details.binding.lease_generation,agent_id:details.binding.agent_id,
+   agent_generation_epoch:details.binding.agent_generation_epoch,provider_id:id(55),role:details.binding.role};
+  // Pure pinned-launch producer + generated lifecycle closure; NO broker/socket.
+  const launch=await createNativeCodingAgentMcpLaunch({...pins,registration:{binding,endpoint:'fixture-only-no-socket',capability:'c'.repeat(64),allowedTools:['project_overview']}});
+  return {launch,bindRun:async()=>{},close(){closes++;entered.resolve();return closes===1?gate.promise:Promise.resolve();}};
+ }});
+ const pending=runner.run(request,{signal:abort.signal});await entered.promise;
+ const key=sha(JSON.stringify({task_id:request.lease.task_id,lease_generation:1,role:'IMPLEMENTER'})),file=path.join(f.journalRoot,key,'receipt.json');
+ await new Promise(resolve=>setImmediate(resolve));await assert.rejects(fs.stat(file),{code:'ENOENT'});assert.equal(closes,1);
+ if(failure)gate.reject(Error('fixture_bridge_transport_unconfirmed'));else gate.resolve();
+ const receipt=await pending;assert.equal(receipt.state,'AMBIGUOUS');assert.equal(closes,1);
+ if(failure){assert.equal(receipt.physical_settlement,undefined);assert.equal(receipt.terminal_reason,'AGENT_BRIDGE_REVOCATION_UNCONFIRMED');}
+ else {assert.equal(receipt.local_output_drain.scope,'HELPER_TREE_AND_LOCAL_OUTPUT');assert.equal(receipt.local_output_drain.host_scope_callbacks,'NOT_ATTESTED');}
+ assert.ok(!(await fs.readFile(path.join(f.journalRoot,key,'launch.json'),'utf8')).includes('c'.repeat(64)));
+});
+
+test('runner joins original output fsync/close before publishing scoped settlement',async t=>{
+ const f=await fixture(t),gate=Promise.withResolvers(),entered=Promise.withResolvers(),originalOpen=fs.open,closed=[];
+ t.mock.method(fs,'open',async(file,...args)=>{
+  const handle=await originalOpen(file,...args);if(!['events.jsonl','stderr.log'].includes(path.basename(file)))return handle;
+  return {write:handle.write.bind(handle),async sync(){entered.resolve();await gate.promise;await handle.sync();},async close(){await handle.close();closed.push(path.basename(file));}};
+ });
+ const request={lease:f.lease(904),role:'IMPLEMENTER',worktreePath:f.worktree,prompt:'Fixture local writes'};
+ const pending=createCodexCliRunner({...f,processController:controller()}).run(request);await entered.promise;
+ const key=sha(JSON.stringify({task_id:request.lease.task_id,lease_generation:1,role:'IMPLEMENTER'})),file=path.join(f.journalRoot,key,'receipt.json');
+ await assert.rejects(fs.stat(file),{code:'ENOENT'});assert.deepEqual(closed,[]);gate.resolve();const receipt=await pending;
+ assert.deepEqual(closed,['events.jsonl','stderr.log']);assert.equal(receipt.state,'RESULT_READY');assert.ok(receipt.physical_settlement);
+ assert.equal(JSON.parse(await fs.readFile(file,'utf8')).local_output_drain.all_effects_cleanup,'UNCONFIRMED');
+});
+
+test('default runner creates exclusive callback journal before bridge preparation and never reuses failed launch run',async t=>{
+ const f=await fixture(t),processController=controller();let preparations=0,journalDirectory;
+ const runner=createCodexCliRunner({...f,processController,prepareAgentBridge:async details=>{
+  preparations++;assert.equal(details.callbackJournal.snapshot().state,'INCOMPLETE');assert.equal(details.callbackJournal.snapshot().records,1);
+  journalDirectory=path.join(f.journalRoot,sha(JSON.stringify({task_id:details.binding.task_id,lease_generation:details.binding.lease_generation,role:details.binding.role})));
+  const rows=await fs.readdir(path.join(journalDirectory,'host-callback-custody'));assert.deepEqual(rows,['0000000000000000.json']);
+  const header=JSON.parse(await fs.readFile(path.join(journalDirectory,'host-callback-custody',rows[0])));assert.equal(header.event.run_id,details.runId);
+  assert.equal(JSON.stringify(header).includes('PRIVATE_PROMPT_SENTINEL'),false);throw Error('fixture_preparation_interrupted');
+ }});
+ const request={lease:f.lease(21),role:'IMPLEMENTER',worktreePath:f.worktree,prompt:'PRIVATE_PROMPT_SENTINEL'},first=await runner.run(request);
+ assert.equal(first.state,'AMBIGUOUS');assert.equal(first.terminal_reason,'fixture_preparation_interrupted');assert.equal(preparations,1);assert.equal(processController.spawns,0);
+ const retained=await fs.readFile(path.join(journalDirectory,'host-callback-custody','0000000000000000.json'));
+ assert.equal((await runner.run(request)).prior_attempt,true);assert.equal(preparations,1);assert.equal(processController.spawns,0);
+ assert.deepEqual(await fs.readFile(path.join(journalDirectory,'host-callback-custody','0000000000000000.json')),retained);
+});
+
+test('actual default runner/bridge directory-durability gate blocks before broker or native spawn on every platform',async t=>{
+ const f=await fixture(t),processController=controller();let custody=0;
+ const runner=createCodexCliRunner({...f,processController,prepareAgentBridge:async details=>{
+  assert.equal(details.callbackJournal.snapshot().directory_durability,'DIRECTORY_DURABILITY_UNQUALIFIED');
+  const a=details.authorization,permit={...details.binding,...a,trust_namespace:'LOCAL_OPERATOR_QA',revoked:false,provider_id:id(55),
+   artifact:{cli_executable_sha256:f.expectedExecutableSha256},worktree:{path:a.worktree_path,base_sha:details.binding.base_sha}};
+  return prepareNativeCodingAgentRunBridge({...details,permit,pins:{},ownPostgres:{openAgentRunCustody:async()=>{custody++;throw Error('not permitted');}}});
+ }});
+ const request={lease:f.lease(22),role:'IMPLEMENTER',worktreePath:f.worktree,prompt:'No unqualified publication'},receipt=await runner.run(request);
+ assert.equal(receipt.state,'AMBIGUOUS');assert.equal(receipt.terminal_reason,'native_run_callback_directory_durability_unqualified');
+ assert.equal(custody,0);assert.equal(processController.spawns,0);assert.equal((await runner.run(request)).prior_attempt,true);
+ assert.equal(custody,0);assert.equal(processController.spawns,0);
 });

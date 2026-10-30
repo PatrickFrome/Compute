@@ -90,3 +90,24 @@ test('typed pending Owner phase, real IPC and integration fixtures stay qualifie
  for(const file of ['apps/metaengine-browser/src/native-coding-pending-owner-phase.mjs','infra/client-state-runtime/native-coding-pending-owner-custody.mjs','infra/client-state-runtime/test/pending-owner-phase-fixture.mjs'])assert.ok(paths.some(pattern=>matches(file,pattern)),file);
  assert.ok(source.includes("'infra/client-state-runtime/native-coding-pending-goal.pg17.test.mjs',"));
 });
+
+test('reconstructed same-root activation suites are mandatory qualified source, not native execution claims',()=>{
+ for(const file of ['apps/metaengine-browser/test/client-prepared-goal-activation.test.mjs','apps/metaengine-browser/test/native-coding-pending-activation-phase.test.mjs','infra/client-state-runtime/native-coding-pending-activation-profile.test.mjs']){
+  assert.ok(source.includes("'"+file+"',"),file);assert.ok(paths.some(pattern=>matches(file,pattern)),file);
+ }
+ for(const file of ['apps/metaengine-browser/src/client-prepared-goal-activation.mjs','infra/client-state-runtime/native-coding-pending-activation-v1.sql'])assert.ok(paths.some(pattern=>matches(file,pattern)),file);
+});
+
+test('physical settlement, exact Host shutdown and retained Main custody remain mandatory component gates',()=>{
+ for(const file of ['apps/metaengine-browser/test/native-host-scope-cleanup.test.mjs','apps/metaengine-browser/test/local-runtime-host-controller.test.mjs',
+  'apps/metaengine-browser/test/local-runtime-host-terminal.test.mjs','apps/metaengine-browser/test/managed-runtime-drain.test.mjs',
+  'infra/client-state-runtime/native-host-startup-lifecycle.test.mjs','infra/client-state-runtime/native-coding-preparation-transaction.test.mjs']){
+  assert.ok(source.includes("'"+file+"',"),file);assert.ok(paths.some(pattern=>matches(file,pattern)),file);
+ }
+ const facts=source.slice(source.indexOf('          const sourcePaths='));
+ for(const file of ['apps/metaengine-browser/src/native-coding-host-settlement.mjs','apps/metaengine-browser/src/native-host-scope-cleanup.mjs',
+  'infra/client-state-runtime/native-coding-preparation-transaction.mjs','infra/client-state-runtime/runtime-host.mjs',
+  'infra/client-state-runtime/test/native-host-startup-lifecycle-loader.mjs']){
+  assert.ok(paths.some(pattern=>matches(file,pattern)),file);assert.ok(facts.includes("'"+file+"'"),file);
+ }
+});

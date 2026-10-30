@@ -1,3 +1,5 @@
+import {readNativeCallbackProtectedPrefix} from './native-coding-callback-prefix.mjs';
+import {validateCodexCliProtectedSettlement,validateCodexCliProtectedLaunch,codexCliHelperFileIdentitySha256} from '../../apps/metaengine-browser/src/codex-cli-physical-settlement.mjs';
 import fs from 'node:fs/promises';
 import {createReadStream} from 'node:fs';
 import {createHash} from 'node:crypto';
@@ -177,18 +179,56 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
       ||receipt.process?.started_suspended!==true||receipt.process?.tree_control_bound!==true
       ||receipt.process?.job_bound_before_resume!==true||receipt.process?.process_tree_control!=='WINDOWS_JOB_OBJECT'
       ||receipt.executable_sha256!==permit.artifact.cli_executable_sha256) fail('suspended_worker_unverified');
+    let observedHelper=null;
+    if(receipt.process?.launch){
+      const launch=(await readNativeCodingProtectedJson(journalPath(operator,scope,permit,'launch.json'))).value;
+      validateCodexCliProtectedLaunch(receipt,launch);
+      const helperPath=path.join(resources,'native-coding','codex-cli-job-runner.ps1');
+      const helperFileBefore=codexCliHelperFileIdentitySha256(await fs.lstat(helperPath,{bigint:true}));
+      const helper=await readNativeCodingWindowsProcess(receipt.process.helper_process?.pid);observedHelper=helper;
+      if(helper.process_incarnation_id!==receipt.process.helper_process?.process_incarnation_id||helper.user_sid!==worker.user_sid
+        ||!samePath(helper.exe_path,String.raw`C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`)
+        ||helperFileBefore!==receipt.process.helper_file_identity_sha256
+        ||await fileHash(helperPath)!==receipt.process.helper_sha256||codexCliHelperFileIdentitySha256(await fs.lstat(helperPath,{bigint:true}))!==helperFileBefore)fail('worker_helper_changed');
+    }
     const after=await readNativeCodingWindowsProcess(pid);
     if(after.process_incarnation_id!==worker.process_incarnation_id||after.user_sid!==worker.user_sid||!samePath(after.exe_path,worker.exe_path)) fail('worker_changed');
+    if(observedHelper){const helperAfter=await readNativeCodingWindowsProcess(observedHelper.pid);
+      if(helperAfter.process_incarnation_id!==observedHelper.process_incarnation_id||helperAfter.user_sid!==observedHelper.user_sid||!samePath(helperAfter.exe_path,observedHelper.exe_path))fail('worker_helper_changed');}
     return {...worker,job_id:receipt.process.job_id,run_id:receipt.run_id,prompt_sha256:receipt.prompt_sha256};
   }
   async function readProtectedReceipt({scope,permit}) {
     const operator=await readNativeCodingOperatorPaths(config.state_directory);
     const receipt=(await readNativeCodingProtectedJson(journalPath(operator,scope,permit,'receipt.json'))).value;
     const result=await readNativeCodingProtectedJson(journalPath(operator,scope,permit,'result.json'),{maximumBytes:128*1024});
+    if(receipt.process?.launch||receipt.physical_settlement){
+      const launch=(await readNativeCodingProtectedJson(journalPath(operator,scope,permit,'launch.json'))).value;
+      const processReceipt=(await readNativeCodingProtectedJson(journalPath(operator,scope,permit,'process.json'))).value;
+      // This validates the existing protected producer chain, not a historical
+      // release capability. The capacity producer deliberately still resolves none.
+      validateCodexCliProtectedSettlement(receipt,{launch,processReceipt});
+    }
     if(result.sha256!==receipt.result_sha256||nativeCodingCanonicalJson(result.value)!==nativeCodingCanonicalJson(receipt.result)) fail('result_bytes_mismatch');
     return receipt;
   }
   Object.defineProperty(readNativeScope,'prepare',{value:prepareNativeScopes});
   Object.defineProperty(readNativeScope,'batch',{value:readNativeScopeBatch});
-  return Object.freeze({readNativeScope,prepareNativeScopes,readNativeWorker,readProtectedReceipt,readCheckpointScope});
+  let publicationHost=null;
+  async function readPublicationHost(request){
+    assertNativeCodingHostRequestOpen(request);
+    const current=await readNativeCodingWindowsProcess(process.pid,{signal:request?.signal});
+    if(!samePath(current.exe_path,process.execPath))fail('publication_host_image_changed');
+    const proof=publicProcess(current);
+    if(publicationHost&&nativeCodingCanonicalJson(publicationHost)!==nativeCodingCanonicalJson(proof))fail('publication_host_birth_changed');
+    publicationHost??=proof;assertNativeCodingHostRequestOpen(request);return proof;
+  }
+  async function readCallbackPrefix({scope,permit,expected,request}){
+    const operator=await readNativeCodingOperatorPaths(config.state_directory,{signal:request?.signal});
+    const directory=journalPath(operator,scope,permit,'');
+    const prefix=await readNativeCallbackProtectedPrefix({directory,expected,request});
+    const after=await readNativeCodingOperatorPaths(config.state_directory,{signal:request?.signal});
+    if(nativeCodingCanonicalJson(operator)!==nativeCodingCanonicalJson(after))fail('publication_operator_changed');
+    assertNativeCodingHostRequestOpen(request);return prefix;
+  }
+  return Object.freeze({readNativeScope,prepareNativeScopes,readNativeWorker,readProtectedReceipt,readCheckpointScope,readPublicationHost,readCallbackPrefix});
 }

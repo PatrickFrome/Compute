@@ -1,3 +1,5 @@
+import {runPendingGoalActivation} from './native-coding-pending-activation.mjs';
+import {validatePendingActivationInput} from './native-coding-pending-activation-profile.mjs';
 import {runPendingOwnerCustody} from './native-coding-pending-owner-custody.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -35,7 +37,7 @@ export function createNativeWorkspacePreparation({transaction,stateDirectory,rea
   try{await handle.writeFile(json(value)+'\n');await handle.sync();}finally{await handle.close();}
   live(context);
  }
- async function run(input,write,context,goal=null,ownerMode=null){
+ async function run(input,write,context,goal=null,ownerMode=null,activation=null){
   live(context);
   if(!exact(input,['preparation_id','configuration_sha256'])||!/^[a-f0-9-]{36}$/.test(input.preparation_id||'')||!HASH.test(input.configuration_sha256||''))fail('selector_invalid');
   const staged=await readStage(stateDirectory,{verifyStorage,signal:context?.signal});live(context);
@@ -124,6 +126,15 @@ export function createNativeWorkspacePreparation({transaction,stateDirectory,rea
     const response=admission=>({schema:'metaengine.native-coding.pending-goal-result.v1',
      state:admission?'PENDING_ACTIVATION':prior?'READBACK_REQUIRED':'NOT_STARTED',admission,
      automatic_retry_allowed:false,authority_effect:false});
+    if(activation){
+     if(!prior)fail('activation_pending_goal_required');
+     const rows=await tx.unsafe('select input,configuration,preparation,receipt from destruktion_meta.native_coding_pending_goal_h205f22 where request_id=$1::uuid and preparation_id=$2::uuid and configuration_sha256=$3::text for share',
+      [goal.request_id,goal.preparation_id,goal.configuration_sha256]);
+     const row=rows[0];transactionOpen();
+     if(rows.length!==1||!same(row.input,goal)||!same(row.configuration,c)||!same(row.preparation,intent))fail('activation_pending_scope_changed');
+     return runPendingGoalActivation({tx,input:activation.input,write:activation.write,configuration:c,preparation:intent,admission:row.receipt,
+      device,context,revalidate,load,durable,assertTransaction:transactionOpen,stateDirectory,verifyStorage,readNativeScope});
+    }
     const stored=await query(false);
     if(stored&&!prior)fail('goal_intent_missing');
     if(ownerMode){
@@ -187,7 +198,12 @@ export function createNativeWorkspacePreparation({transaction,stateDirectory,rea
    ||[...input.objective].length>480||Buffer.byteLength(input.objective)>1920||/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(input.objective))fail('goal_input_invalid');
   return run({preparation_id:input.preparation_id,configuration_sha256:input.configuration_sha256},write,context,input,ownerMode);
  }
- return Object.freeze({ESTABLISH_PENDING_OWNER_V1:(input,context)=>goal(input,false,context,'WRITE_CUSTODY'),
+ function activate(input,write,context){
+  const checked=validatePendingActivationInput(input),pending={...checked};delete pending.activation_id;delete pending.profile_id;delete pending.profile_sha256;
+  return run({preparation_id:checked.preparation_id,configuration_sha256:checked.configuration_sha256},false,context,pending,null,{input:checked,write});
+ }
+ return Object.freeze({ACTIVATE_PREPARED_GOAL_V1:(input,context)=>activate(input,true,context),
+  READ_PREPARED_GOAL_ACTIVATION_V1:(input,context)=>activate(input,false,context),ESTABLISH_PENDING_OWNER_V1:(input,context)=>goal(input,false,context,'WRITE_CUSTODY'),
   READ_PENDING_OWNER_V1:(input,context)=>goal(input,false,context,'READ_CUSTODY'),ADMIT_PREPARED_GOAL_V1:(input,context)=>goal(input,true,context),
   READ_PREPARED_GOAL_V1:(input,context)=>goal(input,false,context),PREPARE_WORKSPACE_V1:(input,context)=>run(input,true,context),
   READ_WORKSPACE_PREPARATION_V1:(input,context)=>run(input,false,context),close(){closed=true;}});

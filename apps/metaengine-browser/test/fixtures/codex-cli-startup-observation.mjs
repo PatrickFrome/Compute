@@ -21,9 +21,9 @@ export function instrumentCodexCliHelperStartup(source) {
   const eol = source.includes('\r\n') ? '\r\n' : '\n';
   const insertions = [
     ["$ErrorActionPreference = 'Stop'", ps('PS_ENTER'), false],
-    ['  $request = [Console]::In.ReadLine() | ConvertFrom-Json', '  ' + ps('REQUEST_READ_BEGIN'), false],
-    ['  $request = [Console]::In.ReadLine() | ConvertFrom-Json', '\n  ' + ps('REQUEST_READ_END').trimEnd(), true],
-    ['  public static void Run(string exe,string[] args,string cwd,string runId,uint timeout,string expectedSha,string absoluteDeadlineMs) {', '\n' + cs('NATIVE_RUN_ENTER').trimEnd(), true],
+    ['  $line = [Console]::In.ReadLine()', '  ' + ps('REQUEST_READ_BEGIN'), false],
+    ["  $request = ([Text.UTF8Encoding]::new($false,$true)).GetString($bytes) | ConvertFrom-Json", '\n  ' + ps('REQUEST_READ_END').trimEnd(), true],
+    ['  public static void Run(string exe,string[] args,string cwd,string runId,uint timeout,string expectedSha,string absoluteDeadlineMs,string requestId,string requestSha,string bindingSha,string promptSha) {', '\n' + cs('NATIVE_RUN_ENTER').trimEnd(), true],
     ['      job=CreateJobObject(IntPtr.Zero,null);', cs('IMAGE_DIGEST_CHECKED'), false],
     ['bool inJob; Require(IsProcessInJob(process.process,job,out inJob)&&inJob,"membership_readback_failed");', '\n' + cs('CHILD_JOB_BOUND').trimEnd(), true],
     ['      string sid=System.Security.Principal.WindowsIdentity.GetCurrent().User.Value;', '\n' + cs('IDENTITY_READBACK_COMPLETE').trimEnd(), true],
@@ -55,22 +55,19 @@ export function instrumentCodexCliRuntimeStartup(source) {
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(bytes)) throw invalidSource();
   const moduleImport = String.raw`  Microsoft.PowerShell.Core\Import-Module -Name 'C:\Windows\System32\WindowsPowerShell\v1.0\Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1' -ErrorAction Stop`;
   if (source.split(moduleImport).length !== 2) throw invalidSource();
-  const request = '  $request = [Console]::In.ReadLine() | ConvertFrom-Json';
-  if (source.split(request).length !== 2 || source.includes('$metaengineStartupRequestLine')) throw invalidSource();
-  // Only the disposable prepared helper separates the same input and parser
-  // operations. No request bytes are logged and its compiled assembly is reused.
-  const observedRequest = [
-    '  $metaengineStartupRequestLine = [Console]::In.ReadLine()',
-    '  ' + ps('REQUEST_LINE_READ').trimEnd(),
-    '  ' + ps('REQUEST_JSON_BEGIN').trimEnd(),
-    '  $request = $metaengineStartupRequestLine | ConvertFrom-Json',
-    '  ' + ps('REQUEST_JSON_END').trimEnd(),
-  ].join(eol);
+  const lineRead='  $line = [Console]::In.ReadLine()', envelope='  $envelope = $line | ConvertFrom-Json';
+  const bodyParse='  $request = ([Text.UTF8Encoding]::new($false,$true)).GetString($bytes) | ConvertFrom-Json';
+  for(const marker of [lineRead,envelope,bodyParse])if(source.split(marker).length!==2)throw invalidSource();
+  if(source.includes(prefix+'REQUEST_LINE_READ')||!(source.indexOf(lineRead)<source.indexOf(envelope)&&source.indexOf(envelope)<source.indexOf(bodyParse)))throw invalidSource();
+  // V2 leaves the exact original bounded read, envelope validation, raw-byte
+  // digest and both JSON parses intact. Diagnostics contain no request bytes.
   return source.replace(loader, ps('ASSEMBLY_LOAD_BEGIN').replaceAll('\n', eol) + loader
     + eol + ps('ASSEMBLY_LOAD_END').trimEnd())
     .replace(moduleImport, '  ' + ps('MODULE_IMPORT_BEGIN').trimEnd() + eol + moduleImport
       + eol + '  ' + ps('MODULE_IMPORT_END').trimEnd())
-    .replace(request, observedRequest);
+    .replace(lineRead,lineRead+eol+'  '+ps('REQUEST_LINE_READ').trimEnd())
+    .replace(envelope,'  '+ps('REQUEST_JSON_BEGIN').trimEnd()+eol+envelope)
+    .replace(bodyParse,bodyParse+eol+'  '+ps('REQUEST_JSON_END').trimEnd());
 }
 
 export function createCodexCliStartupPhaseParser({now = () => performance.now(), startedAt = now()} = {}) {

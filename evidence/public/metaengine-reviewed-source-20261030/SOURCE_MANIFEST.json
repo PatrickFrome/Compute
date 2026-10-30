@@ -1,0 +1,1168 @@
+{
+  "schema": "metaengine.public-source-export.v1",
+  "public_parent": "b98444e672a70ee07f1bc80e7bfeb0ba97084f0f",
+  "reviewed_source_snapshot": "cecffbd13633fa13c2faa9242f1ea8ba3bdb1288",
+  "reviewed_source_tree": "d4e4c1ad265a5b170dec7b6ae7036629875ed768",
+  "status": "EXACT_SOURCE_BYTES_DIFFERENT_PUBLIC_EVIDENCE_TREE",
+  "exact_export_count": 162,
+  "exact_executable_test_config_script_count": 162,
+  "already_public_ui_document_count": 1,
+  "withheld_private_evidence_count": 210,
+  "source_files": [
+    {
+      "path": ".github/workflows/client-checkpoint-reconciliation-qualification.yml",
+      "sha256": "2a1598dae54e106238ebd57e7200e40236573f22401f5c6012e0d9406b692651",
+      "bytes": 40921,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": ".github/workflows/client-source-candidate-w73.yml",
+      "sha256": "18e097f9db832acdd109757349ce2b344ab60981e52f08efb140c4bb1e972ba3",
+      "bytes": 12276,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": ".github/workflows/metaengine-client-w29-primary-views.yml",
+      "sha256": "55fa55fea75be687a8b61dfcdd3ebb0efcc4100f4fa72e8f7c3205aa056a1faa",
+      "bytes": 2036,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/me2-ui/UI_DRAFT_SCOPE_REVIEW.md",
+      "sha256": "607ed1e4198a62510ccb8f6f8728851014abdc1bd0963cc87be770846d17a5b9",
+      "bytes": 11512,
+      "git_mode": "100644",
+      "treatment": "PUBLIC_DOCUMENT_REDACTION",
+      "reviewed_original_sha256": "61b891c0bd6e91fe03007de13cc15b3518cb6f4d7ac1e98c06edf465ceec15f2"
+    },
+    {
+      "path": "apps/me2-ui/scripts/ui-ci-fixtures.test.mjs",
+      "sha256": "2901c606b65b337f203f7fd779003bc4dd61c4b38dbcac8900f25e4c53cfdb06",
+      "bytes": 5273,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/me2-ui/src/app/page.tsx",
+      "sha256": "def5e3ce0b7ad8fba1ce22c3b030829d5a153060011708a427fe4a42e6dedb60",
+      "bytes": 326,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/me2-ui/src/components/me2/pages/operator-observatory.tsx",
+      "sha256": "5e2b008fc5365ba8ef7562b12ff666abcdb760f6fae6818930f7633f60d8d288",
+      "bytes": 19014,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/me2-ui/src/components/me2/shell/me2-shell.tsx",
+      "sha256": "d1d850dedafd62f9c712e9fb0e49011552efa0adb98fa95bb39e1d2225efc8cc",
+      "bytes": 55150,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/me2-ui/src/hooks/use-draft-scope.ts",
+      "sha256": "b1361fe4f31dc6bde0adc9b53165609304bead7c8ddd462825d8582466aee899",
+      "bytes": 933,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/me2-ui/src/hooks/use-goal-draft.ts",
+      "sha256": "b4500a277ba47bf459073273f79e05a1a07217ae18b943189c44969f986ac783",
+      "bytes": 1753,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/client-native-runtime-badge.ui.test.mjs",
+      "sha256": "dcc4d1a947323232eba16dfd94230080080fe55871d98a25d31582def704a0d6",
+      "bytes": 5328,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/draft-scope.d.mts",
+      "sha256": "78bb14ca75d77d890a4bea926455e9bd1ecdd7e09a4835802c65c5e08ae43904",
+      "bytes": 994,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/draft-scope.mjs",
+      "sha256": "f05e1155f246b640676fb7cc7922e9fe7840191e75301636fb863536bd4844d0",
+      "bytes": 6421,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/draft-scope.test.mjs",
+      "sha256": "04ff193ebf2f7868eef0ac2e048c5358ebd81e605ade657f6ea6bb267948643e",
+      "bytes": 9377,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/goal-draft.d.mts",
+      "sha256": "6cea317bd24e1404dff9db0bd2446901940b8767b829da0f0cbb3d17eac0c21d",
+      "bytes": 808,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/goal-draft.mjs",
+      "sha256": "77badb31a26b593c78a5945645bc6db52989f1dbe2c897a68d43ed20ce74d219",
+      "bytes": 3175,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/goal-draft.test.mjs",
+      "sha256": "d301807da63bb896504118bcf736c966b9cf4af7bc48de7c1728f08a86aeb2ea",
+      "bytes": 6130,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/goal-journal-readback.ui.test.mjs",
+      "sha256": "1226f71836024844941db7f1ef63283cf287edf58b9abc3344407beb1a1c2ef3",
+      "bytes": 25534,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/goal-submission-mode-observer.ui.test.mjs",
+      "sha256": "7819d8b0b8e6b2251630394203ce499708580643007c1e64bffab17dab6b431b",
+      "bytes": 6378,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/native-draft-namespace-integration.test.mjs",
+      "sha256": "8ad9915dbc64ca1440d92fef69afae6f01a8e6c3e73efa541d2f9c15a1cb1196",
+      "bytes": 7106,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/operator-primary-views.ui.test.mjs",
+      "sha256": "d9f099e1477cb72893405c2624682dcba54435d165741b88042bd5297a0fd825",
+      "bytes": 2349,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/ui-read-flight.d.mts",
+      "sha256": "9ccbbc73ab26617160693171defeade854b79e5d8bb893b03563dd8a9c99dc9b",
+      "bytes": 446,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/ui-read-flight.mjs",
+      "sha256": "f86fb08cb48326d8b1168035028f7151624c69540c671b804e5855fffdd09402",
+      "bytes": 1301,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/ui-reliability-harness.mjs",
+      "sha256": "c09adf78081034b6f4e11d214bcf3fee1165adc5802b0e9b5d2aa278ce4d87e9",
+      "bytes": 4380,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/ui-reliability.ui.test.mjs",
+      "sha256": "5079f3ff8a89455f2deae810253182c4c6296073b85007b8e817a522c0850eba",
+      "bytes": 34284,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/scripts/check-source.mjs",
+      "sha256": "5045904067e0c638351de210e53230fff805cca5b9436d7a31e3805a473be5f1",
+      "bytes": 13600,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/scripts/codex-cli-job-runner.ps1",
+      "sha256": "6a110c648e9e8e28f6a967a41ed212f0bb76ccec2df0a048b57e468292b50e47",
+      "bytes": 22668,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/scripts/prepare-codex-cli-job-runtime.mjs",
+      "sha256": "b6fcad64a1994d09456ab3b2d746614d568e1e01d0b372ffdb08234d919e754b",
+      "bytes": 21474,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/src/client-draft-scope.mjs",
+      "sha256": "d73b3fc6c4a249cb90c035caa3bf5e7724e3f5c3a7012c6456b1e0b1d0f417ce",
+      "bytes": 2734,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/src/client-goal-journal.mjs",
+      "sha256": "da7c42cdcb31910322adf2ac09bd5d0132e207dcc2147d404abf4c683a5fde47",
+      "bytes": 22933,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/src/client-native-coding-goal.mjs",
+      "sha256": "100f7a1ffdec47c060d792fc8e160f80d8d3144d704b625eb7f8c620a6f7e6d4",
+      "bytes": 15171,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/src/client-native-setup-route.mjs",
+      "sha256": "60b5bbc1ff42c36af5d8daf9138ae946b95d94d35db1d0f7425e510be0a385d7",
+      "bytes": 2669,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/src/client-prepared-goal-activation.mjs",
+      "sha256": "36603f270c25879f8885e97c947fda0bb663a4e84a5335714e826d19dabbeb3d",
+      "bytes": 4934,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/src/codex-cli-physical-settlement.mjs",
+      "sha256": "1e0e998a785c9815adc7caad1bd7f774d93d5d7689f4b35d72845b6abefb907c",
+      "bytes": 12447,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/src/codex-cli-runner.mjs",
+      "sha256": "83b7bb5fb1ed149a951edcbde9ef8f13a79b7cfbb53b2f29a61d9ea2a281a14c",
+      "bytes": 26951,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/src/codex-cli-windows-process-controller.mjs",
+      "sha256": "04971630bc6d37c6aa7b205b746d78d3da73f99140b00e08d09112a718e5d76f",
+      "bytes": 16680,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/src/devos-native-task-cycle-core.mjs",
+      "sha256": "932710ad70f4eee16b653dd859fb70eebe37227df89025b9fbb7b67d8ef77ad4",
+      "bytes": 101467,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/src/host-owner-genesis-custody-w74.mjs",
+      "sha256": "621cce6f57d71b49cf101250ca119903a57149836d188d506059733c66f1d4cc",
+      "bytes": 20750,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/src/installed-executable-provenance-w68.mjs",
+      "sha256": "5e7391ca9ef72be620bdd0d742d5f6a55589cbf063e00a403d09363d9847a9d2",
+      "bytes": 11494,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/src/local-runtime-host-controller.mjs",
+      "sha256": "1a49baa7c7fae0fed1d805c12f58126d17630c0118f94b66a367e7f0d1b9b7d2",
+      "bytes": 28370,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/src/main.mjs",
+      "sha256": "7ac04389649921c04becfa0088b6d4c1d92241b007b701b502ad783bb3e8dffe",
+      "bytes": 195703,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/src/managed-runtime-drain.mjs",
+      "sha256": "930bddb6cc6ead13102d69172a57e9d2486490f3140651e6566698e78c40f09d",
+      "bytes": 2171,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-agent-mcp-broker.mjs",
+      "sha256": "a73a286e97e4059dc33827dcdd9e96b485baa7000f97b5db1951e95a72a11ae9",
+      "bytes": 25677,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-agent-run-bridge.mjs",
+      "sha256": "174fe15156e3de5574f90d04457e40c14fc39b4846da27b694a1ce936a4bde40",
+      "bytes": 7861,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-capacity-contract.mjs",
+      "sha256": "d5677ed9e2c3b10036ce4180fee3b042b1f035645feed115298b1760daf2a95b",
+      "bytes": 6260,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-capacity-owner.mjs",
+      "sha256": "724f1bef4464259f445d48d4c059f7b6944940982dca33ec13a8238f9eda8954",
+      "bytes": 6280,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-device-request.mjs",
+      "sha256": "25a4f8fd0f772296fcd9332a07b224b7b761471ac9f19933557e3af0d569955f",
+      "bytes": 7869,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-execution-pool.mjs",
+      "sha256": "59ad1668e3bc2e89b2471fe7a354bb1105ca3db3b84cddc12319b8a3b729629a",
+      "bytes": 7903,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-host-ipc-client.mjs",
+      "sha256": "bce31ee046df5e11a25959ab4b6ab536f1c7e2d94c77e8046b8e14c1b46fff77",
+      "bytes": 28603,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-host-observers.mjs",
+      "sha256": "58ba6fdd3d8658109fb8423432dba6e9ddaff18f0c0ffc49a68fd53b69a60d4d",
+      "bytes": 28785,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-host-settlement.mjs",
+      "sha256": "c4901913c752ede6f592c38d771c717a055ffe8810c7383bb640d614f37efd17",
+      "bytes": 2200,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-pending-activation-phase.mjs",
+      "sha256": "5e78bc84bfd39bc2e7524cf7666086b2620cc49ce97763500d883fbd0679bdc3",
+      "bytes": 7982,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-run-callback-journal.mjs",
+      "sha256": "b94ce7b9372542c0054db9531f833a2f4aa980f3561580c2b6dfc0940c92e074",
+      "bytes": 10478,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-runtime.mjs",
+      "sha256": "c187daaa8284bfd42bfdef5ea62fee2ddc5cbbf8c5b7ad39960371ac6eea480b",
+      "bytes": 31359,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-service-heartbeat-publisher.mjs",
+      "sha256": "a0156d2e93161e17fab58679f7f7a2b6302d060a5aa541f5a6682018b33d430f",
+      "bytes": 10915,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-setup-contract.mjs",
+      "sha256": "2cff776e5df0ac6d20e9c408f90ddb5b72ce722a2a18f84ad49e00f810505bae",
+      "bytes": 2160,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-windows-process-observer.mjs",
+      "sha256": "bbf46806db17d15345ff13b2da6b37f9fe6af2bb8bec6d5090225ea9be1ffcd1",
+      "bytes": 3456,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-host-scope-cleanup.mjs",
+      "sha256": "e1e4e3dab24c8f201b3cd4f5bbd8df666359f0678128b3469e1df97792594af1",
+      "bytes": 2172,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/src/preload-shell.cjs",
+      "sha256": "eca934feff5847219fb20741ecbeeb6de5e89b8b2acb280081094de40f3ad1f6",
+      "bytes": 20455,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/src/supervisor-device-identity.mjs",
+      "sha256": "0f618c88a12b8606f1877f8811ae2a2f3368f729dc809779ee739e2178c021fc",
+      "bytes": 35552,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/devos-routes.mjs",
+      "sha256": "c6d9bb5a1310ecc431e6230a31ccfbb308d7c29fda2e2bf8b5c3b1546848d58b",
+      "bytes": 36181,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/client-draft-scope.test.mjs",
+      "sha256": "0a7eb56d7f3af74d04a425b466fea8c54df62dcb468032c8bf226cb94ce0ce24",
+      "bytes": 8724,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/client-native-coding-goal.test.mjs",
+      "sha256": "009669c6cc69dd4d5dbfec9bd96c40c5cc0ed3f88ef25b334a81c5f96aeb5b61",
+      "bytes": 54263,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/client-native-setup-route.test.mjs",
+      "sha256": "78f297017ad02507ad2e326aa9fa8996888c1ae5d5090a26972dcd5314f1e6b3",
+      "bytes": 3367,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/client-prepared-goal-activation.test.mjs",
+      "sha256": "8ee58a2ffc51756c99a1d59b440d3d4886738666a189514f4b9f28a65ffa80ef",
+      "bytes": 11320,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/client-prepared-goal.test.mjs",
+      "sha256": "8a36bf4f22fd10cadc992c4b6f41d0cf449650421d4ff1b24996d2e404b0e4d4",
+      "bytes": 23663,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-job-runtime.test.mjs",
+      "sha256": "5fd547fa70178da164afce1f16f8106165584f7e8f65c0eee8bf58abe198f127",
+      "bytes": 7113,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-native-drain-order.test.mjs",
+      "sha256": "56bf13ef7995a2cbc2c07483f117d78b58f86757b834f8fd6d24ff025af092c2",
+      "bytes": 3001,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-physical-settlement.test.mjs",
+      "sha256": "3d1292a800658cb9d805145eeba1d28f14c319154ae87927cbf02aaa1db3f290",
+      "bytes": 4905,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-runner.test.mjs",
+      "sha256": "95d93157dca7910be9438f09a6329aac79a1b66b8cc8e2d5ac33d912ee6a4815",
+      "bytes": 40149,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-startup-observation.test.mjs",
+      "sha256": "8999258f6f9d7287435898b6656d08bd1ea76576170ea4f332c4d568ba983034",
+      "bytes": 16605,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-windows-handle-list.test.mjs",
+      "sha256": "485e0d6fa3fe9c7bd14682570d9c6f9c577508fc1ff925734fc877e9822aa11d",
+      "bytes": 6398,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-windows-job-birth-physical.test.mjs",
+      "sha256": "4be0d9926552d836da753270f7fe6721571938bf2e86bea14be02cdff337e272",
+      "bytes": 33139,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-windows-job-birth.test.mjs",
+      "sha256": "22d3ff320d8f2e055ebd66d99281c1f5ebcefaa7f1a07396bb21b35a042a1421",
+      "bytes": 6999,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-windows-output-order.test.mjs",
+      "sha256": "99768e1204a7971a0e6c92db2f32aab4eb07078e30a9824b84e635469710e10f",
+      "bytes": 7593,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-windows-process-controller-failures.test.mjs",
+      "sha256": "4816711445458338d4d0b5e7c3c5a87a9f75ffb945db5ecc3ad0d4364eb04701",
+      "bytes": 25831,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/devos-native-coding-cycle.test.mjs",
+      "sha256": "33ce8f115cffa041de9b150602b34bc57d81839ef2e50b2c7a4c70575fe6db2b",
+      "bytes": 6276,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/fixtures/codex-cli-joined-settlement-fixture.mjs",
+      "sha256": "863d131787067ab1582293d92e0cc4bfee09e41b3124417bb95abc486614ed1c",
+      "bytes": 2838,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/fixtures/codex-cli-startup-observation.mjs",
+      "sha256": "f5c79ebe90785c213257488f6bef2a0b0b972fedf45cc212b61f4db6a41c3e82",
+      "bytes": 9995,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/fixtures/native-coding-in-memory-broker.mjs",
+      "sha256": "63a4783857262cb2b7322ac49c62c491c96899365260a77711bd2f4eb55db05e",
+      "bytes": 1563,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/fixtures/native-coding-run-custody-double.mjs",
+      "sha256": "a2a4f9fb28213f6b4bc6039dca6d4c85a4efee67212424a9384fc8d84e9d6eac",
+      "bytes": 864,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/fixtures/native-coding-unqualified-bridge.mjs",
+      "sha256": "731de2709723638ea4ccae252fa7ca5718d75c1e2d38abfe871830dfabd33de7",
+      "bytes": 1352,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/fixtures/native-published-scope-pg-child.mjs",
+      "sha256": "d55c9e22a100ea1851638b1f17eb2e79c8aa9b018050bff1b04a0ac406536f6e",
+      "bytes": 2547,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/installed-executable-provenance-w68.test.mjs",
+      "sha256": "7f89b79ab5d71a47084c89e78601a4033762f2d63d339c8cbb78adfe8b0c16f5",
+      "bytes": 13452,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/local-runtime-host-controller.test.mjs",
+      "sha256": "1fc369874f6d5d9cac60ff972ddd46253fec393c40cf52b95f92c6a02da8bc11",
+      "bytes": 27927,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/local-runtime-host-terminal.test.mjs",
+      "sha256": "cc22acfdb16cb2bbef953f4816572f5a8c2591cd17028ea6f51741348f15919a",
+      "bytes": 11032,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/managed-runtime-drain.test.mjs",
+      "sha256": "19ce58b3e5f3dfc8a40634764bb2ed819210919b3497cefef7c9fb3b764cf4bd",
+      "bytes": 4914,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/me2-r85-visual-evidence.mjs",
+      "sha256": "956e06a785b0a3bb353ca305a0a5280cf472df4b35bed8a489c04fa03178bb8b",
+      "bytes": 44541,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-agent-callback-custody.test.mjs",
+      "sha256": "5a82ab4161429528d3bab8c37b48508cdd537c1708000e4849c438df14e4f81d",
+      "bytes": 4814,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-agent-close-lifetime.test.mjs",
+      "sha256": "60c00d32303423d433c865d56dbf11676a0123fab591206fb7ed75ce1ef7eec2",
+      "bytes": 5426,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-agent-run-bridge.test.mjs",
+      "sha256": "48469fa9d38eead8f821e678a46ba094b528ea2948e9ed40c754a9d6a40d8d92",
+      "bytes": 9006,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-capacity-contract.test.mjs",
+      "sha256": "56ec42c78bbb7185415101e707aadbcfad776ea57b5630196aff2ff40b08b090",
+      "bytes": 4304,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-capacity-first-dispatch.test.mjs",
+      "sha256": "3404ad6d392c45c8c00f1c38e7f0307c1e77e7e7e34f2a5bfaac5378a8d7a1bd",
+      "bytes": 7297,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-capacity-owner.test.mjs",
+      "sha256": "fcc9e9540e73628a9dccb39a540f9189ceea5ae7e6704bd2615748053fe0a998",
+      "bytes": 7400,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-host-ipc.test.mjs",
+      "sha256": "ab053165d519712e616bfec2ccf863b4f1d595108486a50e84e9be62e0270964",
+      "bytes": 75283,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-host-observers.test.mjs",
+      "sha256": "9560d2a0a340de5c731e4ef09f297dbd8c8566a5057b30e741a332a0f2621237",
+      "bytes": 24896,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-pending-activation-phase.test.mjs",
+      "sha256": "0afc594dd07e64def057bcd43331d1f2587127483895bd7aa203afdfbdc95686",
+      "bytes": 4533,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-run-callback-journal.test.mjs",
+      "sha256": "979a94d7fa151cc4817e834b2a0ef914e80fd693446292f20e7571019800e893",
+      "bytes": 9654,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-runtime.test.mjs",
+      "sha256": "c467831bdb1ed248498f1ad3434c655fe6ea6ccada8368b1a4bfb707ac6c295c",
+      "bytes": 54941,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-server-admission.test.mjs",
+      "sha256": "cd69e807f93ba577dad89192d3758f72b09adcd1f2cf053c477711e176f84fe3",
+      "bytes": 7378,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-service-heartbeat-publisher.test.mjs",
+      "sha256": "5d80746e493f7b75d449978383d65783a2a020d6aec88753707cccec025f7549",
+      "bytes": 15451,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-setup-contract.test.mjs",
+      "sha256": "563b2b88a7e159a945afe5a1cb9e2cf9a7d2a2b0cbd3c4199d5febe9134b5d48",
+      "bytes": 1950,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-host-scope-cleanup.test.mjs",
+      "sha256": "376cc97916f8ef340b6b8b07327f858d55efd0bb6f3fbf5c53813934d74f0410",
+      "bytes": 23027,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-published-scope-drain.pg17.test.mjs",
+      "sha256": "424bacb9b80f980a582df270a056cdc949eb79f53ebdfd58bd8801e31dcee8ee",
+      "bytes": 11059,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-setup-loaded-signer.test.mjs",
+      "sha256": "2d622ef8b59a8573c49afe4c8ac24b7fe50891e53d2b82cb70fcfcd80669f6fd",
+      "bytes": 4056,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-supervisor-initialization-lifetime.test.mjs",
+      "sha256": "2972c5f47919f7b2157da6aad8b7faa6098abcba57d4552d5339295692130a8b",
+      "bytes": 30802,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "apps/metaengine-browser/test/source-check-runner.test.mjs",
+      "sha256": "5c7dbed8a0aa1ffa9039f71a3b61a40bd1388a37b948e3d3a7bca848b5817d4c",
+      "bytes": 2509,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "evidence/audits/metaengine-20261030-reconstruction/verify-callback-pg-publication.sh",
+      "sha256": "4170b7b09bafdb71794ea9ccca2812c161338a078af2dd0dfa3f5d390cbf70be",
+      "bytes": 6154,
+      "git_mode": "100755",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "evidence/audits/metaengine-20261030-reconstruction/verify-capacity-read-custody.sh",
+      "sha256": "4ec1c14eefb1932910ccc6c277664a39f4e10c6c1e863cd6748e7efd13a2b690",
+      "bytes": 2509,
+      "git_mode": "100755",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "evidence/audits/metaengine-20261030-reconstruction/verify-capacity-sql.sh",
+      "sha256": "33b5d7effca605b9a934539b054fb99f6e9cf58c2bfa08100e0abb93c8041ebb",
+      "bytes": 1941,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "evidence/audits/metaengine-20261030-reconstruction/verify-capacity-v2-default.sh",
+      "sha256": "70f156a4d2cfeaa255788c3f07f5467a7a8a3972edeedaa396ce170c7ebaa380",
+      "bytes": 3638,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "evidence/audits/metaengine-20261030-reconstruction/verify-draft-namespace.sh",
+      "sha256": "d2bbe650a34ec7b7e72b8f3c82a206dda1f87aada86ce94a9c30a9c51b303f89",
+      "bytes": 5614,
+      "git_mode": "100644",
+      "treatment": "COMMENT_ONLY_PUBLIC_REDACTION",
+      "reviewed_original_sha256": "1f21c7f03840fc596b227f4ff73364d8e652b7b1186b46735583a6cb887f5046"
+    },
+    {
+      "path": "evidence/audits/metaengine-20261030-reconstruction/verify-joined-settlement.sh",
+      "sha256": "da111e741d152fd227146101b7ba15feed1dd5a964d7250d638410743857a643",
+      "bytes": 4504,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "evidence/audits/metaengine-20261030-reconstruction/verify-native-ui-available.sh",
+      "sha256": "bda50679f9ba174f3fba3b6266dcf234d508f4cefea6e177856d9dd48b8a0724",
+      "bytes": 1459,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "evidence/audits/metaengine-20261030-reconstruction/verify-phase-1b.sh",
+      "sha256": "93d347691055070fd523fcb6bcf73b6dce5bb088b83da235054614519c21cc35",
+      "bytes": 4004,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "evidence/audits/metaengine-20261030-reconstruction/verify-phase-3a.sh",
+      "sha256": "959cfc1a8282acca6eeef1b23cd6443405a6a315591e65532642cc6308aed5c7",
+      "bytes": 4558,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "evidence/audits/metaengine-20261030-reconstruction/verify-published-scope-drain.sh",
+      "sha256": "fd6a91ab237922872df30ecae8f655cb799fd07f10c9eba2b4e4eaa765d78125",
+      "bytes": 5094,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "evidence/audits/metaengine-20261030-reconstruction/verify-run-callback-custody.sh",
+      "sha256": "cdb6a06bf2f759dfc32955366dacfeba061c3199755a28f52b1a1d61a6e3b358",
+      "bytes": 5505,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "evidence/audits/metaengine-20261030-reconstruction/verify-run-callback-publication-gate.sh",
+      "sha256": "e5713eaaaaa22f76f50ce403c824a06c9df0dacf4094051024c618dd9ba0c67b",
+      "bytes": 5585,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/fresh-schema-candidate-plan.json",
+      "sha256": "a08248445e4744f9041f473de3df86ab5e39c15c5263426980d9bf422c16d3a8",
+      "bytes": 17933,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/local-runtime-migrations.integration.test.mjs",
+      "sha256": "1bfff684e4d1e361b9d6d578351d41b2a7da0637891b5a29d51ddba9bad86d36",
+      "bytes": 35654,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/local-runtime-migrations.mjs",
+      "sha256": "0fcbe43daeb64672b90b9411cc641772f4fc843bb424a8a917c5c9968ec85142",
+      "bytes": 45384,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/local-runtime-migrations.test.mjs",
+      "sha256": "09c2596d70c43b011b460adb4bc52163e39e184559ed00d8fc1e2fcb44eba834",
+      "bytes": 21117,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-callback-prefix.mjs",
+      "sha256": "6da5a0b90392ae1ac6ddd2dfe6ddc3fb73a913c3af48ecaa6170c3cadd45d5c7",
+      "bytes": 3659,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-callback-prefix.test.mjs",
+      "sha256": "2094d109f46954215068d5bb4536bf01d08b060176753c43f39954575899a055",
+      "bytes": 8781,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-callback-publication-source.test.mjs",
+      "sha256": "cb7fd006172da9469805967f03f9cb2589acac10fea13936af7b53d92b6605c8",
+      "bytes": 2792,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-callback-publication-v1.sql",
+      "sha256": "a6fa6ca947ab186492a021239996d31679671b7f2fc1978a25983c7b76c16650",
+      "bytes": 31789,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-callback-publication.mjs",
+      "sha256": "e9ed458534c7563142217c95a3d1e336794033f88746b9fae46e2c574ab3e222",
+      "bytes": 14810,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-callback-publication.pg17.test.mjs",
+      "sha256": "b9b35b0d9294078749f8d243543f85c5550403a5b8871c9db945cd6fa1f227c2",
+      "bytes": 47294,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-capacity-source.test.mjs",
+      "sha256": "24e0efd44c2e51a0ef30a616c45d936c29024153c2ec3a4ca4c2a92b170bf453",
+      "bytes": 3620,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-capacity-v2.sql",
+      "sha256": "7892d0fd3594ebaa115080402ced50b99d6c54940f75533e71fe262ae14d914c",
+      "bytes": 49944,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-capacity.pg17.test.mjs",
+      "sha256": "9f912dc92280fce603db50cedd5dff94d73c0b7c304b5551e03ca1df6efac9c2",
+      "bytes": 86601,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-authority.integration.test.mjs",
+      "sha256": "242dc5420ead33d3dc93fe40cfbdeca2d9a302cd20b7dc902a6e7f14782a8d23",
+      "bytes": 27368,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-authority.mjs",
+      "sha256": "572ffffbc035ded8c5d6d74d1728857d2b1ce84ee560e6102db56149b5915807",
+      "bytes": 47983,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-authority.test.mjs",
+      "sha256": "1ec5cb3b7206ccaf57dd2eedf9552910f45b8b9c0e0d1185fd0f4f870ab9cf5f",
+      "bytes": 10616,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-capacity.mjs",
+      "sha256": "19cae5a84bca4cdfa015c875f5a644c1b6efdf3504bed63666f24fb875db399e",
+      "bytes": 12421,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-capacity.test.mjs",
+      "sha256": "e5f6d12a841314152d33ebbabaa3e1838c14b9ebcd823bed2f2b1c100f7f4c88",
+      "bytes": 1046,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-ipc.mjs",
+      "sha256": "f236b6c1a966398292467f46d79a76f9d3e58b16165c1828ffb76834241af728",
+      "bytes": 18398,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-os-scope.mjs",
+      "sha256": "db17b751c28e364e56c16c5c308f3c2773ae279ac14a2d02a2838272f0c89807",
+      "bytes": 18481,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-seed-binding.mjs",
+      "sha256": "5e7ae29ed1ffb37a21f4d6aa2d40781640a64abdb2b16e4d5d35c7387e533265",
+      "bytes": 5301,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-seed-binding.test.mjs",
+      "sha256": "2f1cab7eb5a8e000eb7b19cad25e22b179df62ec13ea0995c87f102db83648c6",
+      "bytes": 16440,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-service-heartbeat.mjs",
+      "sha256": "92e9cdc6d39d89174c05f04c77689ed75807ee931afc988148252cc9faf5c274",
+      "bytes": 11071,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-setup-service.mjs",
+      "sha256": "e47543de8fa15087148e8601c974b07dc7dc07abc6b9c818096e3dca5c019c9f",
+      "bytes": 17736,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-pending-activation-profile.mjs",
+      "sha256": "9eef7e9f6138754c3146da9d0daaf31893c24184ae82a9d21e584af44df48bb9",
+      "bytes": 5902,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-pending-activation-profile.test.mjs",
+      "sha256": "f4fb78a4d57a2880f81e6cba33343499c82ce2b28c117e202003b357bb4fd055",
+      "bytes": 4091,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-pending-activation-v1.sql",
+      "sha256": "477be2175c6d0220c4ce1e1942301eca1280d18f5e96da8849d3683b832e8784",
+      "bytes": 16143,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-pending-activation.mjs",
+      "sha256": "006584c141da84023e157b06c981ed16bbe44a6eb7efa6541d968ea90e694011",
+      "bytes": 8624,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-pending-goal-v1.sql",
+      "sha256": "e891a02a63b95ba72d7ab5b7b717c45cf5ccb10cad01d2d19b8bccb5a0572dd9",
+      "bytes": 40945,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-pending-goal.pg17.test.mjs",
+      "sha256": "e0a80576434de6f11e35de62ad313623638aa0dc90a9027752ea72049825945d",
+      "bytes": 40452,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-preparation-transaction.mjs",
+      "sha256": "6efd7bd65eb51519f9a9900ccaf0e4ca9ed333194fd6bc2333c81b9b60c9dced",
+      "bytes": 6619,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-preparation-transaction.test.mjs",
+      "sha256": "485999d2dfebab5d5fded5d27ec227c8637255578e4db8605152f2c9de54e660",
+      "bytes": 13380,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-protected-settlement.test.mjs",
+      "sha256": "6d2d9485ca36bbbaf885261ad0dc76bd5f9c96bc9c6cc5ae98f3c274d149a939",
+      "bytes": 6916,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-service-admission.integration.test.mjs",
+      "sha256": "bfaadb173336c18d7ce239770f4b4395e511bc86334ca0b9b7718d73821b2d3c",
+      "bytes": 31094,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-setup-operation-v1.sql",
+      "sha256": "18cf78ff5400706ba42749a468cffdc9405e3612c405eee94824873518c1bf5a",
+      "bytes": 11672,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-setup.pg17.test.mjs",
+      "sha256": "ca6b50b6e4480f29f2088655c40adfe2d16c758bf1094701f511b21179e8aca6",
+      "bytes": 37028,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-workspace-preparation.mjs",
+      "sha256": "dfb9565d916dc2585badc7c79d2e272d7f16305583e460221ae119d3616f0e2e",
+      "bytes": 16430,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/native-host-startup-lifecycle.test.mjs",
+      "sha256": "5225ed0bcc7f14d05212a5bbcceef14be4b513640a96f73baed297602e923a2d",
+      "bytes": 10825,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/package-runtime-resources.mjs",
+      "sha256": "815459e97746030244992192d284295bde446ff465032830c332997dc63c95d7",
+      "bytes": 22975,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/package-runtime-resources.test.mjs",
+      "sha256": "0c32d49035a2082c492ac0acf333cbbd34869be65f83b535a3354319b6f54ed5",
+      "bytes": 31385,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/package.json",
+      "sha256": "4417d259433afe98aa99336cf9da22e2e76ab85eb9a4247644011706b57dbf47",
+      "bytes": 5824,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/runtime-host.mjs",
+      "sha256": "5b5b80c41908d3e3478a26e5c6f7671cc1a96e53336d1f69e05a8774c353561a",
+      "bytes": 41962,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/test/native-host-startup-lifecycle-loader.mjs",
+      "sha256": "b4acf9ae2e9d762076a19f37f3c7125389f84b26ff59b1d610f6ec1d1c4a076e",
+      "bytes": 1847,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/test/pending-owner-phase-fixture.mjs",
+      "sha256": "77adc84ce0d65f99577413406be15244d7504a6ec2c318a39bcdfb0ac6eb469d",
+      "bytes": 5485,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    },
+    {
+      "path": "infra/client-state-runtime/windows-qualification-registration.test.mjs",
+      "sha256": "c8f9fc74f74255975b6a91ce86440974c316b48f3feb27e94558d0eafa3df6b4",
+      "bytes": 8948,
+      "git_mode": "100644",
+      "treatment": "EXACT_REVIEWED_BYTES"
+    }
+  ],
+  "unchanged_baseline": "All other pre-existing public baseline files remain unchanged. No private historical commit is an ancestor.",
+  "manifest_self_excluded": true,
+  "comment_only_script_redaction_count": 1,
+  "public_document_redaction_count": 1,
+  "source_file_count": 164
+}

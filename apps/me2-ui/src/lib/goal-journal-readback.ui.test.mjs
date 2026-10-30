@@ -68,6 +68,8 @@ function fixture(initial = entry()) {
     setRefreshing() {},
     setPending(value) { observations.pending.push(value); },
     setGoal(value) { context.goal = value; },
+    acknowledgeGoal() { context.goal = ''; },
+    isDraftCurrent: () => true,
   });
   context.loadLatest = callback('loadLatest', context);
   return { context, bridge, observations, load: context.loadLatest,
@@ -281,7 +283,7 @@ function renderElement(node,context){
 }
 test('actual prepared button says Save goal, HOLD disables it, Enter invokes the same callback',async()=>{
  let submissions=0;const submit=async()=>{submissions++;};
- const context={pending:false,refreshing:false,recoveryPending:false,modeRefreshing:false,goal:'My objective',journalEntry:null,
+ const context={pending:false,refreshing:false,recoveryPending:false,modeRefreshing:false,draftStorage:'SAVED',goal:'My objective',journalEntry:null,
   goalMode:{kind:'PREPARED_GOAL',state:'HOST_VERIFICATION_REQUIRED'},submit};
  const button=renderElement(jsxByTestId('client-goal-submit'),context);assert.equal(button.children[0],'Save goal');assert.equal(button.props.disabled,false);
  button.props.onClick();assert.equal(submissions,1);
@@ -306,4 +308,67 @@ for(const outcome of ['ACK','ERROR'])test(`newer observed request survives late 
  assert.equal(f.context.receipt,newer.receipt);assert.equal(f.context.journalEntry,newer);assert.equal(f.context.error,previousError);
  assert.equal(f.context.goal,'Next isolated goal');assert.equal(reads,1,'obsolete completion must not start a newer read');
  assert.equal(f.observations.submissions.length,1);assert.equal(f.context.operation.current,null);
+});
+
+
+test('explicit Activate saved goal alone calls activation; retained intent cannot replay',async()=>{
+ const f=fixture();f.context.journalEntry={...entry(),kind:'PREPARED_GOAL',state:'PENDING_ACTIVATION'};
+ let calls=0;f.bridge.activatePreparedGoal=async id=>{assert.equal(id,A);calls++;return f.context.journalEntry;};
+ const activate=callback('activatePrepared',f.context);await activate();assert.equal(calls,1);
+ f.context.journalEntry={...f.context.journalEntry,activation_input:{activation_id:B}};
+ await activate();assert.equal(calls,1);
+});
+
+for(const outcome of ['ACK','ERROR'])test(`late activation ${outcome} cannot replace a newer observed request`,async()=>{
+ const f=fixture(),gate=deferred();f.context.journalEntry={...entry(),kind:'PREPARED_GOAL',state:'PENDING_ACTIVATION'};
+ f.bridge.activatePreparedGoal=()=>gate.promise;
+ const running=callback('activatePrepared',f.context)();
+ const newer=entry(B);f.bridge.latestGoal=async()=>newer;await f.load();
+ if(outcome==='ACK')gate.resolve({state:'ACTIVATED'});else gate.reject(Error('old activation'));
+ await running;assert.equal(f.context.journalEntry,newer);assert.equal(f.context.error,null);
+});
+
+// Use the shipped journal/router to produce the actual normalised Main payload,
+// rather than inventing a UI-only envelope which could hide schema drift.
+for(const state of ['ACTIVATION_READBACK_REQUIRED','ACTIVATED'])test(`loadLatest accepts shipped ${state} journal envelope and preserves pending history`,async()=>{
+ const {ClientGoalJournal}=await import('../../../metaengine-browser/src/client-goal-journal.mjs');
+ const {createPreparedActivationRouter}=await import('../../../metaengine-browser/src/client-prepared-goal-activation.mjs');
+ const {randomUUID}=await import('node:crypto');let saved;
+ const journal=new ClientGoalJournal({loadState:async()=>saved,saveState:async v=>{saved=structuredClone(v);}});
+ const id=randomUUID(),selector={preparation_id:randomUUID(),configuration_sha256:'a'.repeat(64),workspace_id:randomUUID(),preparation_grant_epoch:1};
+ await journal.begin({request_id:id,goal:'Actual normalised goal',kind:'PREPARED_GOAL',prepared_selector:selector});
+ const pending={schema:'metaengine.native-coding.pending-goal-admission.v1',state:'PENDING_ACTIVATION',...selector,request_id:id,objective:'Actual normalised goal',project_id:randomUUID(),root_task_id:randomUUID(),task_spec_sha256:'b'.repeat(64),root_state:'BLOCKED',project_state:'PAUSED',owner_incarnation_verified:false,execution_ready:false,production_qualified:false,automatic_retry_allowed:false,authority_effect:false};
+ await journal.recordPreparedAdmission(pending);
+ const pin={profile_id:randomUUID(),profile_sha256:'c'.repeat(64)};
+ const router=createPreparedActivationRouter({journal,newId:randomUUID,readProfilePin:async()=>pin,request:async(_op,input)=>{
+  if(state==='ACTIVATION_READBACK_REQUIRED')throw Error('lost ACK');
+  return {schema:'metaengine.native-coding.pending-activation-result.v1',state:'ACTIVATED',activation:{schema:'metaengine.native-coding.pending-activation-receipt.v1',state:'ACTIVATED',input,...pin,workspace_id:selector.workspace_id,project_id:pending.project_id,root_task_id:pending.root_task_id,task_spec_sha256:'d'.repeat(64),root_state:'READY',project_state:'ACTIVE',permit_ids:[randomUUID()],loaded_runtime_code_attested:false,production_qualified:false,automatic_retry_allowed:false,authority_effect:false},automatic_retry_allowed:false,authority_effect:false};
+ }});
+ try{await router.activate(journal.latest());}catch{}
+ const reloaded=new ClientGoalJournal({loadState:async()=>saved,saveState:async()=>{}});await reloaded.load();
+ const payload=structuredClone(reloaded.latest()),f=fixture();f.bridge.latestGoal=async()=>payload;
+ assert.equal(await f.load(),true);assert.equal(f.context.journalEntry.state,state);assert.deepEqual(f.context.receipt,pending);assert.equal(f.context.error,null);assert.equal(f.observations.submissions.length,0);
+ const corrupted=structuredClone(payload);corrupted.activation_input.request_id=randomUUID();f.bridge.latestGoal=async()=>corrupted;
+ assert.equal(await f.load(),false);assert.equal(f.context.journalEntry,payload);
+});
+test('activation success does not clear failed subsequent journal readback',async()=>{
+ const f=fixture();f.context.journalEntry={...entry(),kind:'PREPARED_GOAL',state:'PENDING_ACTIVATION'};f.bridge.activatePreparedGoal=async()=>({state:'ACTIVATED'});
+ f.bridge.latestGoal=async()=>{throw Error('unavailable');};await callback('activatePrepared',f.context)();assert.match(f.context.error,/status unavailable/);
+});
+
+
+test('activation control is unavailable when the connected native bridge lacks the explicit action',()=>{
+ const base={pending:false,refreshing:false,activatePrepared(){}};
+ const missing=renderElement(jsxByTestId('client-activate-prepared-goal'),{...base,clientControlBridge:()=>({})});
+ assert.equal(missing.props.disabled,true);assert.match(missing.props.title,/unavailable/);
+ const available=renderElement(jsxByTestId('client-activate-prepared-goal'),{...base,clientControlBridge:()=>({activatePreparedGoal(){}})});
+ assert.equal(available.props.disabled,false);
+});
+
+for(const outcome of ['ACK','ERROR'])test(`late activation ${outcome} cannot clear a newer unsent draft`,async()=>{
+ const f=fixture(),gate=deferred();f.context.journalEntry={...entry(),kind:'PREPARED_GOAL',state:'PENDING_ACTIVATION'};
+ f.context.goal='Saved objective';f.bridge.activatePreparedGoal=()=>gate.promise;
+ const running=callback('activatePrepared',f.context)();f.context.goal='Newer unsent draft';
+ if(outcome==='ACK')gate.resolve({state:'ACTIVATED'});else gate.reject(Error('activation outcome unknown'));
+ await running;assert.equal(f.context.goal,'Newer unsent draft');assert.equal(f.observations.submissions.length,0);
 });

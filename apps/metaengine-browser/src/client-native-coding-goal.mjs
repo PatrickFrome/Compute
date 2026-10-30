@@ -32,7 +32,7 @@ function nativeProfileStatusReason(error){
   return 'NATIVE_PROFILE_STATUS_UNAVAILABLE';
 }
 
-export async function readClientGoalSubmissionMode({readSummary,lstat=fs.lstat,readNativeBusy,readPreparedGoal}={}){
+export async function readClientGoalSubmissionMode({readSummary,lstat=fs.lstat,readNativeBusy,readPreparedGoal,readNativeSetupRoute}={}){
   const base={schema:'metaengine.client.goal-submission-mode.v1',automatic_retry_allowed:false,authority_effect:false};
   const summary=readSummary?.();
   if(!summary?.status_file)return {...base,kind:'UNAVAILABLE',state:'HOLD',reason:'OWNED_RUNTIME_HOST_UNAVAILABLE'};
@@ -42,7 +42,14 @@ export async function readClientGoalSubmissionMode({readSummary,lstat=fs.lstat,r
       // An interrupted native setup must not switch the executor implicitly.
       try{await lstat(path.join(path.dirname(summary.status_file),'native-coding-operator-v1.json'));}
       catch(operatorError){
-        if(operatorError?.code==='ENOENT')return {...base,kind:'BROWSER',state:'HOST_VERIFICATION_REQUIRED',reason:null};
+        if(operatorError?.code==='ENOENT'){
+          try{
+            const route=await readNativeSetupRoute?.();
+            if(route?.authority_effect!==false||typeof route.retained_intent!=='boolean'||typeof route.scope_resolved!=='boolean')throw Error('setup_route_unverified');
+            if(route.retained_intent||!route.scope_resolved)return {...base,kind:'UNAVAILABLE',state:'HOLD',reason:'NATIVE_SETUP_READBACK_REQUIRED'};
+            return {...base,kind:'BROWSER',state:'HOST_VERIFICATION_REQUIRED',reason:null};
+          }catch{return {...base,kind:'UNAVAILABLE',state:'HOLD',reason:'NATIVE_SETUP_ROUTE_UNAVAILABLE'};}
+        }
         return {...base,kind:'UNAVAILABLE',state:'HOLD',reason:'NATIVE_PROFILE_PRESENCE_UNAVAILABLE'};
       }
       if(readPreparedGoal){

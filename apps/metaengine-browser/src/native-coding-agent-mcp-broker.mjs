@@ -118,7 +118,11 @@ export async function createNativeCodingAgentMcpBroker({endpoint,operations,asse
     ||!integer(maxConnections,1,64)||!integer(maxFrameBytes,1024,256*1024)
     ||readIntentReceipt!==null&&typeof readIntentReceipt!=='function')fail('composition');
   const handlers=Object.freeze(Object.fromEntries(NATIVE_AGENT_MCP_TOOLS.filter(name=>typeof operations?.[name]==='function').map(name=>[name,operations[name]])));
-  const registry=new Map(),byRun=new Map(),sockets=new Set();let closed=false,fatal=false,inflight=0;
+  const registry=new Map(),byRun=new Map(),sockets=new Set();let closed=false,fatal=false,inflight=0,closePromise=null;
+  const trackCallback=(record,operation)=>{
+    const work=Promise.resolve().then(operation);record.callbacks.add(work);
+    const done=()=>{record.callbacks.delete(work);record.completedCallbacks++;};work.then(done,done);return work;
+  };
   function live(record){return !closed&&!fatal&&!record.revoked&&record.jobBinding!==null&&clock()<record.expiresAt;}
   function revoke(record){if(record.revoked)return;record.revoked=true;record.capability=null;clearTimeout(record.expiryTimer);
     for(const session of record.sessions)session.wire.close();
@@ -189,7 +193,7 @@ export async function createNativeCodingAgentMcpBroker({endpoint,operations,asse
         arguments_sha256:bodySha,intent_body_sha256:semanticSha,signal:controller.signal});
       timer=setTimeout(()=>active.finish('HOST_OPERATION_TIMEOUT'),timeoutMs);
       if(ownsIntent)intent.physicalPending=true;
-      void(async()=>{
+      void trackCallback(record,async()=>{
         try{
           // Called for EVERY invocation, including reads, after resolving the private capability.
           await assertInvocationAuthorized(context);
@@ -204,7 +208,7 @@ export async function createNativeCodingAgentMcpBroker({endpoint,operations,asse
           complete({ok:true,value});
         }catch{active.finish('HOST_OPERATION_UNCONFIRMED');}
         finally{if(ownsIntent)intent.physicalPending=false;inflight--;}
-      })();
+      }).catch(()=>{});
     }});
   });
   // Reject startup errors without publishing any token or accepting a shadowed endpoint.
@@ -217,7 +221,7 @@ export async function createNativeCodingAgentMcpBroker({endpoint,operations,asse
       const expiry=typeof expiresAt==='number'?expiresAt:Date.parse(expiresAt);
       if(byRun.has(scope.run_id)||!Number.isFinite(expiry)||expiry<=clock()||expiry-clock()>1800000)fail('run_registration');
       const tools=toolsFor(allowedTools,handlers),capability=randomBytes(32).toString('hex');
-      const record={binding:scope,jobBinding:nativeJob,tools,capability,expiresAt:expiry,revoked:false,sessions:new Set(),active:new Set(),intents:new Map(),unknownBodies:new Map()};
+      const record={binding:scope,jobBinding:nativeJob,tools,capability,expiresAt:expiry,revoked:false,sessions:new Set(),active:new Set(),callbacks:new Set(),completedCallbacks:0,callbackDrain:null,intents:new Map(),unknownBodies:new Map()};
       record.expiryTimer=setTimeout(()=>revoke(record),Math.max(1,expiry-clock()));record.expiryTimer.unref();
       registry.set(secretDigest(capability),record);byRun.set(scope.run_id,record);
       const descriptor={endpoint,binding:scope,allowedTools:tools,expiresAt:new Date(expiry).toISOString()};
@@ -234,7 +238,7 @@ export async function createNativeCodingAgentMcpBroker({endpoint,operations,asse
       const active={finish:()=>{controller.abort();rejectStop(Error('native_agent_bridge_readback_revoked'));}};record.active.add(active);
       const context=Object.freeze({binding:record.binding,jobBinding:record.jobBinding,tool:intent.tool,request_id:requestId,
         arguments_sha256:intent.bodySha,intent_body_sha256:intent.semanticSha,readback_only:true,signal:controller.signal});
-      const work=(async()=>{
+      const work=trackCallback(record,async()=>{
         await assertInvocationAuthorized(context);if(!live(record)||controller.signal.aborted)fail('readback_denied');
         const receipt=await readIntentReceipt(context);
         if(!live(record)||controller.signal.aborted||!keys(receipt,['schema','run_id','tool','request_id','intent_body_sha256','state','result','authority_effect'])
@@ -245,16 +249,29 @@ export async function createNativeCodingAgentMcpBroker({endpoint,operations,asse
         intent.response={ok:true,value:freeze(structuredClone(receipt.result))};
         if(record.unknownBodies.get(intent.semanticSha)===intent)record.unknownBodies.delete(intent.semanticSha);
         return Object.freeze({state:receipt.state,run_id:runId,request_id:requestId,intent_body_sha256:intent.semanticSha,authority_effect:false});
-      })();
+      });
       work.catch(()=>{}).finally(()=>{inflight--;});
       try{return await Promise.race([work,stopped,new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(Error('native_agent_bridge_readback_unknown'));},timeoutMs);})]);}
       finally{record.active.delete(active);clearTimeout(timer);controller.abort();}
     },
     revokeRun(runId){const record=byRun.get(runId);if(record)revoke(record);return Boolean(record);},
-    snapshot:()=>({closed,fatal,runs:registry.size,connections:sockets.size,inflight,
+    drainCallbacks(runId){
+      const record=byRun.get(runId);if(!record||!record.revoked)fail('callback_join_requires_fence');
+      if(!record.callbackDrain)record.callbackDrain=(async()=>{
+        while(record.callbacks.size)await Promise.allSettled([...record.callbacks]);
+        return Object.freeze({schema:'metaengine.native-coding.agent-callback-drain.v1',run_id:runId,
+          callbacks:record.completedCallbacks,dispatch_fenced:true,authority_effect:false});
+      })();return record.callbackDrain;
+    },
+    snapshot:()=>({closed,fatal,runs:registry.size,connections:sockets.size,inflight,retained_callbacks:[...registry.values()].reduce((n,r)=>n+r.callbacks.size,0),
       active_runs:[...registry.values()].filter(live).length,authority_effect:false}),
-    async close(){if(closed)return;closed=true;for(const record of registry.values())revoke(record);
-      for(const socket of sockets)socket.destroy();await new Promise(resolve=>server.close(resolve));}
+    close(){
+      if(closePromise)return closePromise;closed=true;
+      let resolveClose,rejectClose;closePromise=new Promise((resolve,reject)=>{resolveClose=resolve;rejectClose=reject;});void closePromise.catch(()=>{});
+      try{for(const record of registry.values())revoke(record);for(const socket of sockets)socket.destroy();
+        server.close(error=>error?rejectClose(Error('native_agent_bridge_transport_close_unconfirmed')):resolveClose());}
+      catch{rejectClose(Error('native_agent_bridge_transport_close_unconfirmed'));}return closePromise;
+    }
   });
 }
 

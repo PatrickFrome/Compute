@@ -1,4 +1,6 @@
-import {createNativePreparationTransactions} from './native-coding-preparation-transaction.mjs';
+import {createNativeCodingHostCapacity} from './native-coding-host-capacity.mjs';
+import {createNativeCodingHostSetupService} from './native-coding-host-setup-service.mjs';
+import {createNativePreparationTransactions,bindNativeCodingTransactionPool} from './native-coding-preparation-transaction.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { lstat, mkdir, open, readFile, realpath, rename, unlink, writeFile } from 'node:fs/promises';
@@ -15,7 +17,7 @@ import { createNativeCodingHostAuthority } from './native-coding-host-authority.
 import {createNativeCodingHostCommitService} from './native-coding-host-commit-service.mjs';
 import {createNativeCodingHostSeedBinding} from './native-coding-host-seed-binding.mjs';
 import {createNativeCodingDeviceRequestVerifier,createNativeCodingAuthenticatedRequestContext} from './native-coding-device-request.mjs';
-import {createNativeCodingHostServiceHeartbeat} from './native-coding-host-service-heartbeat.mjs';
+import {createNativeCodingHostServiceHeartbeat,createNativeCodingHostServiceHeartbeatV2} from './native-coding-host-service-heartbeat.mjs';
 import { createNativeCodingHostOsScope,readNativeCodingOperatorPaths } from './native-coding-host-os-scope.mjs';
 import { requireRuntimeHostLaunchNonce, runtimeHostTerminalMessage, runtimeHostFailureMessage,
   sendRuntimeHostLifecycleMessage } from './runtime-host-lifecycle.mjs';
@@ -333,6 +335,8 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
   let guardianCleanupUnconfirmed = false;
   const guardianAbort = new AbortController();
   let nativeCodingAuthority = null;
+  let nativeCapacityService = null;
+  let nativeSetupService = null,setupCleanupUnconfirmed=false;
   let nativeCodingSql = null;
   let nativeCodingSeedBinding = null;
   let nativeCodingStartup = null;
@@ -381,7 +385,10 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
       // through terminalPromise, then join its cleanup before ending SQL or
       // releasing the Host lock. A failed preparation is not a live capability.
       await nativeCodingStartup?.catch(() => {});
-      nativeCodingAuthority?.close();
+      nativeCodingAuthority?.close();nativeSetupService?.close();nativeCapacityService?.close();
+      await nativeCapacityService?.drain();
+      try{await nativeSetupService?.drain();}catch{setupCleanupUnconfirmed=true;}
+      if(setupCleanupUnconfirmed)confirmed=false;
       nativeCodingSeedBinding?.close();
       await nativeCodingSeedBinding?.drain?.();
       if(nativeCodingSql) {await nativeCodingSql.end({timeout:5});nativeCodingSql=null;}
@@ -399,11 +406,17 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
     return terminalPromise;
   };
   const stop = (reason = 'requested') => {
-    guardianAbort.abort();
+    guardianAbort.abort();nativeSetupService?.close();nativeCapacityService?.close();
     const guardianDrain=guardianTicketConsumer?.close();
     void guardianDrain?.catch(()=>{});
     if (!stopPromise) stopPromise = (async () => {
       let outcome;
+      // The setup registry owns cold jobs independently of their short IPC ACK.
+      // Join them while own-PG is still available, before runtime child stop.
+      // Read-only census must not delay the existing PG shutdown that may be
+      // needed to settle its query. finalize joins its exact invocation before
+      // SQL disposal/ownership release, after runtime.stop has drained children.
+      try{await nativeSetupService?.drain();}catch{setupCleanupUnconfirmed=true;}
       let guardianClean=true;
       try{await drainGuardianLane();await guardianDrain;}catch{guardianClean=false;guardianCleanupUnconfirmed=true;}
       try { outcome = await runtime.stop(['requested', 'signal', 'parent_disconnect', 'startup_cancelled'].includes(reason) ? reason : 'requested'); }
@@ -464,19 +477,25 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
     // this exact attempt; it never restarts native preparation.
     nativeCodingStartup = Promise.resolve().then(async () => {
       if(abortRequested||runtime.stopped===true||terminalPromise)throw failure('runtime_host_child_ended_during_startup');
-      // An operator must first publish this private local-QA descriptor. Ordinary
-      // installed clients do not open another DB capability or enable a backend.
+      // Minimal signed ADMIN/repository discovery exists BEFORE operator/canary
+      // descriptors. Same private pool; no execution authority follows from it.
+      const {default:postgres}=await import('postgres');
+      if(abortRequested||runtime.stopped===true||terminalPromise)throw failure('runtime_host_child_ended_during_startup');
+      const preparationTransactions=createNativePreparationTransactions();
+      nativeCodingSql=bindNativeCodingTransactionPool(postgres(config.inspect_database_url,{max:2,connect_timeout:10,idle_timeout:30,prepare:false,
+        debug:preparationTransactions.debug,onclose:preparationTransactions.onclose}),preparationTransactions);
+      nativeSetupService=createNativeCodingHostSetupService({sql:nativeCodingSql,hostInstanceId:descriptor.instance_id,hostPid:process.pid,
+        pgDataDirectory:config.pg_data_directory,postgresIdentity:runtime.postgresIdentity,postgresContinuity,
+        readCapacityEvidence:input=>nativeCapacityService.readSetupAdmission(input)});
+      const native=createNativeCodingHostOsScope({config,sql:nativeCodingSql,parentPid:process.ppid});
+      nativeCapacityService=createNativeCodingHostCapacity({sql:nativeCodingSql,hostInstanceId:descriptor.instance_id,hostPid:process.pid,
+        postgresIdentity:runtime.postgresIdentity,readNativeScope:native.readNativeScope,readSetupCustody:()=>nativeSetupService.readCapacityCustody()});
+      nativeCodingAuthority=Object.freeze({...nativeSetupService.operations,...nativeCapacityService.operations,
+        close(){nativeSetupService.close();nativeCapacityService.close();}});
       const operatorFile=path.join(config.state_directory,'native-coding-operator-v1.json');
       if(await lstat(operatorFile).catch(error=>{if(error.code==='ENOENT')return null;throw error;})) {
         await readNativeCodingOperatorPaths(config.state_directory);
-        const {default:postgres}=await import('postgres');
-        // A terminal callback may have run while the private paths/import were
-        // awaited. Never create new owned resources after its cleanup snapshot.
         if(abortRequested||runtime.stopped===true||terminalPromise)throw failure('runtime_host_child_ended_during_startup');
-        const preparationTransactions=createNativePreparationTransactions();
-        nativeCodingSql=postgres(config.inspect_database_url,{max:2,connect_timeout:10,idle_timeout:30,prepare:false,
-          debug:preparationTransactions.debug,onclose:preparationTransactions.onclose});
-        const native=createNativeCodingHostOsScope({config,sql:nativeCodingSql,parentPid:process.ppid});
         let commitService=null,serviceHeartbeatOperations=null,transferred=false;
         try{
           // A missing/invalid separate commit capability fences commit only. It
@@ -501,17 +520,24 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
           try{
             const service=await createNativeCodingHostServiceHeartbeat({sql:nativeCodingSql,hostInstanceId:descriptor.instance_id,hostPid:process.pid,
               readNativeScope:native.readNativeScope,readCurrentDevice:serviceContext.readCurrentDevice});
-            serviceHeartbeatOperations={...Object.fromEntries(['SERVICE_HEARTBEAT','READ_SERVICE_HEARTBEAT'].map(action=>[action,
-              request=>serviceContext.run(action,request,(_input,checked)=>service[action](checked))])),
-              close(){service.close();serviceContext.close();serviceVerifier.close();}};
+            const serviceV2=createNativeCodingHostServiceHeartbeatV2({sql:nativeCodingSql,hostInstanceId:descriptor.instance_id,hostPid:process.pid,
+              readNativeScope:native.readNativeScope,readCurrentDevice:serviceContext.readCurrentDevice,
+              readCapacityEvidence:query=>nativeCapacityService.readPublicationEvidence(query)});
+            serviceHeartbeatOperations={...Object.fromEntries(['SERVICE_HEARTBEAT','READ_SERVICE_HEARTBEAT','SERVICE_HEARTBEAT_V2','READ_SERVICE_HEARTBEAT_V2'].map(action=>[action,
+              request=>serviceContext.run(action,request,(_input,checked)=>(action.endsWith('_V2')?serviceV2:service)[action](checked))])),
+              close(){service.close();serviceV2.close();serviceContext.close();serviceVerifier.close();}};
           }catch{serviceContext.close();serviceVerifier.close();}
           if(abortRequested||runtime.stopped===true||terminalPromise)throw failure('runtime_host_child_ended_during_startup');
-          const candidate=await createNativeCodingHostAuthority({sql:nativeCodingSql,...native,commitService,seedOperations,serviceHeartbeatOperations});
+          const candidate=await createNativeCodingHostAuthority({sql:nativeCodingSql,...native,commitService,seedOperations,serviceHeartbeatOperations,
+            callbackPublicationIdentity:{hostInstanceId:descriptor.instance_id,hostPid:process.pid,postgresIdentity:runtime.postgresIdentity},
+            // W74 sealed Owner custody currently lives in Main; no genuine
+            // readonly Host reader is composed. Publication remains HOLD.
+            readOwnerControl:null});
           transferred=true;
           if(abortRequested||runtime.stopped===true||terminalPromise){
             candidate.close();throw failure('runtime_host_child_ended_during_startup');
           }
-          nativeCodingAuthority=candidate;
+          nativeCodingAuthority=Object.freeze({...candidate,...nativeSetupService.operations,...nativeCapacityService.operations,close(){candidate.close();nativeSetupService.close();nativeCapacityService.close();}});
         }finally{
           // An ended Host may already have a cached finalize promise while an
           // optional service is still being created. Reclaim local capabilities

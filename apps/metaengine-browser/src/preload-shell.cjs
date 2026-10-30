@@ -256,6 +256,8 @@ const clientGoalStatus = (requestId) => ipcRenderer.invoke(
 );
 const clientConnectionStatus = () => ipcRenderer.invoke('metaengine:client:connection-status');
 const clientWorkReadiness = () => ipcRenderer.invoke('metaengine:client:work-readiness');
+const activatePreparedClientGoal=requestId=>ipcRenderer.invoke('metaengine:client:activate-prepared-goal',requestId);
+const clientDraftScope=(...args)=>{if(args.length)throw new Error('client_draft_scope_params_forbidden');return ipcRenderer.invoke('metaengine:client:draft-scope');};
 const clientGoalSubmissionMode=()=>ipcRenderer.invoke('metaengine:client:goal-submission-mode');
 const clientProjectStatus = () => ipcRenderer.invoke('metaengine:client:project-status');
 function clientProjectRequest(request) {
@@ -351,12 +353,14 @@ if (isPrimaryMe2PresentationDocument()) {
   }));
   contextBridge.exposeInMainWorld('metaengineClient', Object.freeze({
     submitGoal: submitClientGoal,
+    activatePreparedGoal:activatePreparedClientGoal,
     selectAgent: selectClientAgent,
     latestGoal: latestClientGoal,
     goalStatus: clientGoalStatus,
     connectionStatus: clientConnectionStatus,
     workReadiness: clientWorkReadiness,
     goalSubmissionMode:clientGoalSubmissionMode,
+    draftScope:clientDraftScope,
     projectStatus: clientProjectStatus,
     createProject: createClientProject,
     openProject: openClientProject,

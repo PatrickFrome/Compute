@@ -1,3 +1,6 @@
+import {createNativeCodingCapacityOwner} from '../src/native-coding-capacity-owner.mjs';
+import {createNativeHostScopeCleanup,drainNativeHostScopeCleanups,nativeHostScopeCleanupHeld,nativeHostScopeCleanupHold} from '../src/native-host-scope-cleanup.mjs';
+import {drainManagedRuntimeWorkers} from '../src/managed-runtime-drain.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
@@ -15,8 +18,9 @@ function deferred(){let resolve,reject;const promise=new Promise((yes,no)=>{reso
 function tracked(promise){const state={settled:false};state.result=promise.then(value=>{state.settled=true;return {value};},error=>{state.settled=true;return {error};});return state;}
 
 // Run the production startup, relay helper and close together. Only the native
-// dependencies are fixtures; these tests never open a socket, process or DB.
-async function mainFixture({pause=null,cleanupFailure=null}={}){
+// dependencies are fixtures; one existing RPC test uses loopback HTTP only.
+// No Windows process, production authority, installed runtime or DB is used.
+async function mainFixture({pause=null,cleanupFailure=null,realMount=false}={}){
   const main=await readFile(new URL('../src/main.mjs',import.meta.url),'utf8');
   const declarations=main.slice(main.indexOf('let nativeSupervisor = null;'),main.indexOf('const managedTaskProjectClientControl ='));
   const composition=main.slice(main.indexOf('async function initGithubChatRelay('),main.indexOf('function destroyWindowContents()'));
@@ -45,7 +49,7 @@ async function mainFixture({pause=null,cleanupFailure=null}={}){
     managedTaskProjectRequest:async()=>({}),setInterruptedSetupRecoveryFence(){events.push('supervisor.setRecoveryFence');},
     chatCommandSubmit:async()=>{counts.chatCommand++;return {};},clientGoalSubmit:async()=>{counts.goal++;return {};},
     archiveInterruptedBootstrapForNewEpoch:()=>{counts.recoveryApplySupervisor++;return {};}};
-  const scope={Promise,Set,Map,Error,console,globalThis:{},shutdownRequested:false,fixtureSupervisor:supervisor,
+  const scope={Promise,Set,Map,Error,console,createNativeCodingCapacityOwner,globalThis:{},shutdownRequested:false,fixtureSupervisor:supervisor,
     supervisorLoopbackRpc:null,githubChatRelay:null,githubChatRelayError:null,githubChatSetup:null,shellBrainPortConsumerId:'fixture',
     detachShellBrainPort:()=>{},fallbackConsole:null,downloads:null,userSessionConfigured:false,views:new Map(),shellView:null,
     rsiRuntime:null,rsiOutcomeRiver:null,rsiOperatorSteering:null,rsiVerifiedSkillDispatch:skillDispatch,developmentPlane:null,
@@ -69,8 +73,22 @@ async function mainFixture({pause=null,cleanupFailure=null}={}){
     ensureSupervisorIdentity:()=>({snapshot:()=>({client_id:'fixture-client'})}),explicitLocalSupervisorBase:()=>true,
     CHAT_COMMAND_ACTIONS:[],computerExecutor:{snapshot:()=>({})},
     attachShellBrainPort:()=>{},publishSnapshot:async()=>{},recordStartupSubsystemDegraded:(name,error)=>events.push(name+':'+error.message),
-    drainManagedRuntimeBindings};
+    drainManagedRuntimeBindings,drainManagedRuntimeWorkers,createNativeHostScopeCleanup,drainNativeHostScopeCleanups,nativeHostScopeCleanupHeld,nativeHostScopeCleanupHold};
   const context=vm.createContext(scope);vm.runInContext(declarations+composition+destroy+recoverySource+'\nnativeSupervisor=fixtureSupervisor;',context);
+  if(realMount){
+    const summary={instance_id:'11111111-1111-4111-8111-111111111111',pid:42,status_file:'/fixture/runtime/status.json'};
+    let capClosed=false;const capability={snapshot:()=>({instance_id:summary.instance_id,host_pid:42,closed:capClosed}),
+      readScope:async()=>{events.push('scope.read');await wait('mount-scope');throw Error('generated stopped Host');},
+      drainPhysical:async()=>({schema:'metaengine.native-coding.physical-drain.v1',cleanup_confirmed:true}),close:()=>{capClosed=true;events.push('capability.close');}};
+    Object.assign(scope,{readOwnedLocalRuntimeHostSummary:()=>summary,readOwnedLocalRuntimeHostRecoveryObservation:async()=>({
+      schema:'metaengine.browser.runtime-host-generation.v1',ever_ready:true,stopping:false,exited:false,transport_failed:false,terminal_rejected:false,
+      terminal:null,instance_id:summary.instance_id,host_pid:42,launch_nonce:'fixture-birth'}),
+      createOwnedNativeCodingHostCapability:()=>capability,prepareNativeWorkspaceFromStage:async()=>null,readNativeCodingOperatorPaths:async()=>({}),
+      stopOwnedLocalRuntimeHost:async()=>{events.push('HOST_STOP');gate.resolve();return{cleanup_confirmed:true};},
+      createNativeCodingRuntime:()=>{counts.mount++;throw Error('late runtime construction forbidden');}});
+    scope.path.dirname=()=>'/fixture/runtime';scope.fs.lstat=async()=>({});
+    vm.runInContext(main.slice(main.indexOf('function assertNativeCodingRuntimeMountOpen('),main.indexOf('function createNativeGoalRouter(')),context);
+  }
   const state=()=>vm.runInContext('({host:managedTaskProjectHost,project:autonomousProjectRuntime,rpc:supervisorLoopbackRpc,relay:githubChatRelay,recovery:interruptedSetupRecovery,closing:managedTaskProjectHostClosing,drain:managedTaskProjectHostDrainPending,pending:nativeRuntimeInitializations.size})',context);
   return {context,scope,gate,entered,events,counts,managed,project,rpc,relay,supervisor,state,recoveryConstructions,
     get rpcOptions(){return rpcOptions;},get relayOptions(){return relayOptions;},get recoveryOptions(){return recoveryConstructions.at(-1)?.options;},
@@ -336,4 +354,16 @@ test('failed old recovery initialization cannot change a replacement Supervisor 
   await assert.rejects(f.context.ensureInterruptedSetupRecovery(), /fixture_recovery_unreadable|supervisor_changed/);
   assert.deepEqual(fences, []);
   assert.equal(f.state().recovery, null);
+});
+
+for(const upgrade of [false,true])test(`actual Supervisor startup nested mount cannot hide Host dependency from quit upgrade=${upgrade}`,async()=>{
+ const f=await mainFixture({pause:'mount-scope',realMount:true}),initialization=f.init();await f.waitForPause(initialization);
+ assert.ok(f.events.includes('scope.read'));f.scope.shutdownRequested=!upgrade;const close=f.close();
+ try{
+  if(upgrade){await turn();assert.ok(!f.events.includes('HOST_STOP'));f.scope.shutdownRequested=true;assert.equal(f.context.closeManagedTaskProjectHost(),f.state().closing);}
+  await turn();await turn();assert.equal(f.events.filter(x=>x==='HOST_STOP').length,1,'outer startup must be classified only while waiting on exact mount');
+  assert.ok((await initialization.result).error);assert.equal((await close.result).value.cleanup_confirmed,true);
+ }finally{f.gate.resolve();await initialization.result;await close.result;}
+ assert.equal(f.counts.mount,0);assert.equal(f.counts.start,0);assert.equal(f.counts.rpc,0);assert.equal(f.counts.relay,0);
+ assert.equal(f.events.filter(x=>x==='capability.close').length,1);assert.equal(f.state().pending,0);
 });

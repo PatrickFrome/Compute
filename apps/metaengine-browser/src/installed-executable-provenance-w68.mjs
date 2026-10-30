@@ -141,6 +141,8 @@ async function verifyCore({ executable, version, trustRoot, nativeRead, io, stag
       source_sha: m.source_sha,
       package_version: version,
       installed_exe_sha256: m.exe_sha256,
+      // Derived from the fully verified canonical package tree, never a permit.
+      installed_asar_sha256: packageCode.manifest.entries.find(entry => entry.path === 'resources/app.asar').sha256,
       signer_thumbprint: m.signer_thumbprint,
       proof_identity: proofIdentity,
       release_root_signature_verified: true,

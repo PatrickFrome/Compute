@@ -6,10 +6,20 @@ on:
       - 'apps/metaengine-browser/src/codex-cli-sandbox-probe.mjs'
       - 'apps/metaengine-browser/test/codex-cli-sandbox-probe*.test.mjs'
       - 'apps/metaengine-browser/src/client-native-*.mjs'
-      - 'apps/metaengine-browser/src/client-prepared-goal.mjs'
-      - 'apps/metaengine-browser/test/client-prepared-goal.test.mjs'
+      - 'apps/metaengine-browser/src/client-prepared-goal*.mjs'
+      - 'apps/metaengine-browser/test/client-prepared-goal*.test.mjs'
       - 'apps/metaengine-browser/src/client-goal-journal.mjs'
       - 'apps/metaengine-browser/src/main.mjs'
+      - 'apps/metaengine-browser/src/native-host-scope-cleanup.mjs'
+      - 'infra/client-state-runtime/runtime-host.mjs'
+      - 'infra/client-state-runtime/native-host-startup-lifecycle.test.mjs'
+      - 'infra/client-state-runtime/test/native-host-startup-lifecycle-loader.mjs'
+      - 'apps/metaengine-browser/test/local-runtime-host-terminal.test.mjs'
+      - 'apps/metaengine-browser/src/local-runtime-host-controller.mjs'
+      - 'apps/metaengine-browser/src/managed-runtime-drain.mjs'
+      - 'apps/metaengine-browser/test/native-host-scope-cleanup.test.mjs'
+      - 'apps/metaengine-browser/test/local-runtime-host-controller.test.mjs'
+      - 'apps/metaengine-browser/test/managed-runtime-drain.test.mjs'
       - 'apps/metaengine-browser/src/supervisor-device-identity.mjs'
       - 'apps/metaengine-browser/src/host-owner-genesis-custody-w74.mjs'
       - 'infra/client-state-runtime/host-owner-preseal-w74.pg17.test.mjs'
@@ -192,6 +202,9 @@ jobs:
             'infra/client-state-runtime/native-coding-preparation-transaction.test.mjs',
             'apps/metaengine-browser/test/native-coding-workspace-preparation.test.mjs',
             'apps/metaengine-browser/test/client-prepared-goal.test.mjs',
+            'apps/metaengine-browser/test/client-prepared-goal-activation.test.mjs',
+            'apps/metaengine-browser/test/native-coding-pending-activation-phase.test.mjs',
+            'infra/client-state-runtime/native-coding-pending-activation-profile.test.mjs',
             'apps/metaengine-browser/test/supervisor-device-identity-concurrency.test.mjs',
             'apps/metaengine-browser/test/host-owner-protected-identity-w74.test.mjs',
             'apps/metaengine-browser/test/host-owner-genesis-custody-w74.test.mjs',
@@ -211,6 +224,11 @@ jobs:
             'infra/client-state-runtime/native-coding-host-authority.test.mjs',
             'apps/metaengine-browser/test/native-coding-runtime.test.mjs',
             'apps/metaengine-browser/test/native-coding-host-ipc.test.mjs',
+            'apps/metaengine-browser/test/native-host-scope-cleanup.test.mjs',
+            'apps/metaengine-browser/test/local-runtime-host-controller.test.mjs',
+            'apps/metaengine-browser/test/local-runtime-host-terminal.test.mjs',
+            'infra/client-state-runtime/native-host-startup-lifecycle.test.mjs',
+            'apps/metaengine-browser/test/managed-runtime-drain.test.mjs',
             'apps/metaengine-browser/test/native-coding-pending-owner-phase.test.mjs',
             'infra/client-state-runtime/native-coding-host-commit-service.test.mjs',
             'infra/client-state-runtime/native-coding-checkpoint-verifier.test.mjs',
@@ -417,6 +435,13 @@ jobs:
           await runSuite('native-pg17',native,nativeRequired,await createSuiteEnvironment('native-pg17',true),false);
           stage='SOURCE_READBACK';
           const sourcePaths=[...component,...native,
+            'apps/metaengine-browser/src/native-coding-host-settlement.mjs',
+            'apps/metaengine-browser/src/native-host-scope-cleanup.mjs',
+            'apps/metaengine-browser/src/local-runtime-host-controller.mjs',
+            'apps/metaengine-browser/src/managed-runtime-drain.mjs',
+            'infra/client-state-runtime/native-coding-preparation-transaction.mjs',
+            'infra/client-state-runtime/runtime-host.mjs',
+            'infra/client-state-runtime/test/native-host-startup-lifecycle-loader.mjs',
             'apps/metaengine-browser/src/native-coding-project-commits.mjs',
             'apps/metaengine-browser/src/native-coding-host-ipc-client.mjs',
             'apps/metaengine-browser/src/autonomous-project-journal.mjs',

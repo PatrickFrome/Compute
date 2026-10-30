@@ -114,7 +114,16 @@ export async function readOwnedLocalRuntimeHostRecoveryObservation({ verifyStora
 // descriptor identity select the channel; no renderer-selected PID/endpoint.
 export function createOwnedNativeCodingHostCapability(summary) {
   if(!ownedLocalRuntimeHostReady(summary)||!ownedHost.child?.connected) throw new Error('local_runtime_native_coding_host_unavailable');
-  return createNativeCodingHostIpcClient({child:ownedHost.child,instanceId:summary.instance_id,hostPid:ownedHost.child.pid});
+  const host=ownedHost;
+  return createNativeCodingHostIpcClient({child:host.child,instanceId:summary.instance_id,hostPid:host.child.pid,
+    readShutdownSettlement:async()=>{
+      // Join only already-stopping/disconnected exact custody. Ordinary timeout
+      // does not request Host shutdown and cannot disrupt unrelated tasks.
+      if(!host.exited&&(host.stopping||host.child.connected===false))await waitForExit(host,STOP_TIMEOUT_MS);
+      if(!cleanupConfirmed(host)||host.summary!==summary||!host.terminal||host.terminalRejected)return null;
+      return Object.freeze({schema:'metaengine.native-coding.host-shutdown-settlement.v1',instance_id:summary.instance_id,
+        host_pid:host.child.pid,cleanup_confirmed:true,authority_effect:false});
+    }});
 }
 export function readOwnedLocalRuntimeHostSummary() {
   return ownedHost?.summary && ownedLocalRuntimeHostReady(ownedHost.summary) ? ownedHost.summary : null;
@@ -261,7 +270,16 @@ function waitForExit(host, timeoutMs) {
   });
 }
 
-async function stopHost(host, timeoutMs) {
+function stopHost(host,timeoutMs){
+  if(!host)return Promise.resolve(true);
+  if(host.exited)return Promise.resolve(Boolean(cleanupConfirmed(host)));
+  if(host.shutdownWork)return host.shutdownWork;
+  host.stopping=true;
+  // Publish shared work before any generation observer can reenter shutdown.
+  const work=Promise.resolve().then(()=>stopHostOnce(host,timeoutMs));host.shutdownWork=work;
+  return work;
+}
+async function stopHostOnce(host, timeoutMs) {
   if (!host || host.exited) return Boolean(cleanupConfirmed(host));
   host.stopping = true;
   publishGeneration(host);

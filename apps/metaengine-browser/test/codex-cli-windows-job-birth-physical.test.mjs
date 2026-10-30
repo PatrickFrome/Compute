@@ -1,3 +1,4 @@
+import {createCodexCliLaunch,codexCliLaunchWire} from '../src/codex-cli-physical-settlement.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
@@ -397,9 +398,10 @@ for (const scenario of ['BOUND', 'UNASSIGNED_CONTROL']) test(scenario === 'BOUND
   assert.equal(path.dirname(helperPath), directory, 'prepared helper must stay beside its private birth channel');
   const powershellPath = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
   const expectedSha = sha(await fs.readFile(process.execPath));
-  const helperRequest = JSON.stringify({executable_path: process.execPath,
+  const helperRequest = JSON.stringify(codexCliLaunchWire(createCodexCliLaunch({executablePath: process.execPath,
     args: ['-e', `require('node:fs').writeFileSync(${JSON.stringify(canary)},'ran')`], cwd: directory,
-    run_id: crypto.randomUUID(), timeout_ms: 10000, expected_sha256: expectedSha, deadline_ms: ''});
+    runId: crypto.randomUUID(), timeoutMs: 10000, expectedExecutableSha256: expectedSha})));
+  assert.ok(Buffer.byteLength(helperRequest,'utf8')<=4096,'retain observer single-request bound');
   await withOwnedCodexCliProcess(observerController(powershellPath, directory), {}, async observer => {
     let stdout = '', stderr = '';
     observer.stdout.on('data', chunk => { stdout = (stdout + chunk.toString()).slice(0, 65536); });

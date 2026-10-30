@@ -202,7 +202,11 @@ function runningForAgents(snapshot,agents){
   }
   const out=[];
   for(const t of Array.isArray(snapshot?.active_tasks)?snapshot.active_tasks:[]){
-    if(String(t?.state||'').toUpperCase()!=='RUNNING')continue;
+    const state=String(t?.state||'').toUpperCase();
+    // A real issued native lease may await physical capacity without any
+    // executor entry. Only the existing W30 tick may advance that retained
+    // first dispatch; browser LEASED recovery keeps its prior semantics.
+    if(state!=='RUNNING'&&!(state==='LEASED'&&String(t?.lease_target_id||'').startsWith('codex-cli:')))continue;
     const agentId=String(t?.lease_agent_id||'').toLowerCase(); const agent=allowed.get(agentId); if(!agent)continue;
     const generation=Number(t?.lease_generation); const proof=proofByKey.get(`${String(t?.task_id||'').toLowerCase()}:${generation}`)||null;
     out.push({task_id:t.task_id,agent_id:agentId,role:String(t.role||'').toUpperCase(),base_sha:String(t.base_sha||'').toLowerCase(),lease_generation:generation,tab_id:String(t.lease_tab_id||''),target_id:String(t.lease_target_id||'').toLowerCase(),agent_generation_epoch:Number(t.lease_agent_generation_epoch),conversation_url_sha256:proof?.conversation_url_sha256||null,agent_surface_sha256:proof?.agent_surface_sha256||null,automatic_retry_allowed:false,authority_effect:false});
@@ -232,7 +236,7 @@ function ambiguityRpcResponse(error){
 }
 function transportAdmissionFence(error){
   const message=String(error?.message||error||'').toLowerCase();
-  if(message.includes('native_coding_'))return Object.freeze({reason:'NATIVE_CODING_ADMISSION_FENCED',fenced:true,automatic_retry_allowed:false,authority_effect:false});
+  if(message.includes('native_coding_')||message.includes('native_capacity_'))return Object.freeze({reason:'NATIVE_CODING_ADMISSION_FENCED',fenced:true,automatic_retry_allowed:false,authority_effect:false});
   const graphFence=message.match(/fleet_coordination_[a-z0-9_]+/);
   if(graphFence)return Object.freeze({reason:graphFence[0],fenced:true,automatic_retry_allowed:false,authority_effect:false});
   for(const reason of TRANSPORT_ADMISSION_FENCES){

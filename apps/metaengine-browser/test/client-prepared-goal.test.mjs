@@ -1,3 +1,4 @@
+import {createNativeHostScopeCleanup} from '../src/native-host-scope-cleanup.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
@@ -122,7 +123,7 @@ function mainFunction(name,next,context){
 }
 test('actual main routes user goal to pending only, latest and status are same-entry reads',async()=>{
  const f=fixture(),events=[],custody=[];
- const context={ensureClientGoalJournal:async()=>f.journal,readNativeGoalSubmissionMode:async()=>({kind:'PREPARED_GOAL',state:'HOST_VERIFICATION_REQUIRED'}),
+ const context={createNativeHostScopeCleanup,nativeInitializationCleanupCandidates:new Set(),cleanupPendingNativeHostScope:async record=>record.candidate.close(),ensureClientGoalJournal:async()=>f.journal,readNativeGoalSubmissionMode:async()=>({kind:'PREPARED_GOAL',state:'HOST_VERIFICATION_REQUIRED'}),
   normalizeClientGoalIntent:v=>({goal:v}),randomUUID:()=>f.input.request_id,createPreparedGoalRouter:()=>f.router,
   continuePreparedGoalOwnerCustody:async(entry,write)=>{custody.push({entry,write});return {owner:{private:'NEVER_PUBLIC'}};},
   createNativeGoalRouter:()=>{throw Error('native mount forbidden');},nativeSupervisor:null,structuredClone,
@@ -141,11 +142,11 @@ test('actual main signs only selected pending operation and closes ephemeral cap
  const f=fixture(),operations=[];let closed=false,closeCount=0;
  const summary={status_file:'/runtime/status.json'},capability={snapshot:()=>({}),admitPreparedGoal:async()=>f.result,
   readPreparedGoal:async()=>f.result,close:()=>closeCount++};
- const context={createClientPreparedGoalRouter,readPreparedGoalSelector:async()=>f.selector,readOwnedLocalRuntimeHostSummary:()=>summary,
+ const context={createNativeHostScopeCleanup,nativeInitializationCleanupCandidates:new Set(),cleanupPendingNativeHostScope:async record=>record.candidate.close(),createClientPreparedGoalRouter,readPreparedGoalSelector:async()=>f.selector,readOwnedLocalRuntimeHostSummary:()=>summary,
   assertNativeCodingRuntimeMountOpen:()=>{if(closed)throw Error('closing');},managedTaskProjectHostClosing:Promise.resolve(),
   createOwnedNativeCodingHostCapability:()=>capability,ensureSupervisorIdentity:()=>({snapshot:()=>({device_id:'device',client_id:'client',key_fingerprint_sha256:'key'})}),
   signNativeCodingDeviceRequest:async({operation,input})=>{operations.push({operation,input});return {operation,input};}};
- const factory=mainFunction('createPreparedGoalRouter','async function readNativeGoalSubmissionMode',context);
+ const factory=mainFunction('createPreparedGoalRouter','async function readNativeSetupRoute',context);
  await factory(f.journal).submit(f.input);assert.equal(closeCount,1);assert.equal(operations[0].operation,'ADMIT_PREPARED_GOAL_V1');
  capability.readPreparedGoal=async()=>{closed=true;return f.result;};
  await assert.rejects(factory(f.journal).refresh(f.journal.latest()),/closing/);assert.equal(closeCount,2);
@@ -165,14 +166,14 @@ for(const operation of ['ADMIT_PREPARED_GOAL_V1','READ_PREPARED_GOAL_V1'])for(co
   const f=fixture(),calls=[];let closes=0;
   if(operation==='READ_PREPARED_GOAL_V1')await f.router.submit(f.input);
   let device={device_id:'original-device',client_id:'original-client',key_fingerprint_sha256:'original-key'};
-  const capability={snapshot:()=>({}),close:()=>closes++,
+  const capability={drainPhysical:async()=>({schema:'metaengine.native-coding.physical-drain.v1',cleanup_confirmed:true}),snapshot:()=>({}),close:()=>closes++,
    admitPreparedGoal:async()=>{calls.push('ADMIT');device={...device,[key]:'rotated'};return f.result;},
    readPreparedGoal:async()=>{calls.push('READ');if(operation==='ADMIT_PREPARED_GOAL_V1')throw Error('OPERATION_FAILED');device={...device,[key]:'rotated'};return f.result;}};
   const summary={status_file:'/runtime/status.json'};
-  const context={createClientPreparedGoalRouter,readPreparedGoalSelector:async()=>f.selector,readOwnedLocalRuntimeHostSummary:()=>summary,
+  const context={createNativeHostScopeCleanup,nativeInitializationCleanupCandidates:new Set(),cleanupPendingNativeHostScope:async record=>record.candidate.close(),createClientPreparedGoalRouter,readPreparedGoalSelector:async()=>f.selector,readOwnedLocalRuntimeHostSummary:()=>summary,
    assertNativeCodingRuntimeMountOpen:()=>{},managedTaskProjectHostClosing:Promise.resolve(),createOwnedNativeCodingHostCapability:()=>capability,
    ensureSupervisorIdentity:()=>({snapshot:()=>({...device})}),signNativeCodingDeviceRequest:async({operation,input})=>({operation,input})};
-  const router=mainFunction('createPreparedGoalRouter','async function readNativeGoalSubmissionMode',context)(f.journal);
+  const router=mainFunction('createPreparedGoalRouter','async function readNativeSetupRoute',context)(f.journal);
   await assert.rejects(operation==='ADMIT_PREPARED_GOAL_V1'?router.submit(f.input):router.refresh(f.journal.latest()),/requires_reconciliation|identity_changed/);
   assert.equal(f.journal.latest().state,'RECONCILE_REQUIRED');
   assert.deepEqual(f.journal.latest().receipt,operation==='ADMIT_PREPARED_GOAL_V1'?null:f.receipt);
@@ -188,18 +189,18 @@ for(const write of [true,false])test(`actual main pending Owner ${write?'submiss
   establishHostOwnerW74:async()=>{calls.push('CREATE');await binding.readNativeKernel(123);await binding.readSourceProof();
    await binding.withOwnerScope('WRITE_CUSTODY',async()=>true);await binding.withOwnerScope('READ_CUSTODY',async()=>true);return{owner:true};},
   readTrustedHostOwnerIncarnationW74:async()=>{calls.push('RECOVER');await binding.withOwnerScope('READ_CUSTODY',async()=>true);return{owner:true};}};
- const capability={snapshot:()=>({instance_id:randomUUID(),host_pid:123,closed}),readPreparedGoal:async()=>f.result,
+ const capability={drainPhysical:async()=>({schema:'metaengine.native-coding.physical-drain.v1',cleanup_confirmed:true}),snapshot:()=>({instance_id:randomUUID(),host_pid:123,closed}),readPreparedGoal:async()=>f.result,
   withPendingOwnerScope:async(operation,signed,body)=>{assert.equal(signed.operation,operation);assert.deepEqual(signed.input,preparedGoalInput(f.journal.latest()));calls.push(operation);return body({});},
   close:()=>{assert.equal(unbound,true);closed=true;}};
  const app={isPackaged:true};const summary={instance_id:'fixed'};
- const context={managedTaskProjectHostClosing:Promise.resolve(),pendingOwnerInitializationsByBarrier:new Map(),
+ const context={createNativeHostScopeCleanup,nativeInitializationCleanupCandidates:new Set(),cleanupPendingNativeHostScope:async record=>record.candidate.close(),managedTaskProjectHostClosing:Promise.resolve(),pendingOwnerInitializationsByBarrier:new Map(),
   runNativeInitialization:(_closing,_map,body)=>body(),assertNativeSupervisorInitializationOpen:()=>{},assertNativeCodingRuntimeMountOpen:()=>{},
   preparedGoalInput,normalizePreparedGoalResult,readOwnedLocalRuntimeHostSummary:()=>summary,ensureSupervisorIdentity:()=>identity,
   createOwnedNativeCodingHostCapability:()=>capability,ensureGuardianBootstrapLauncher:()=>calls.push('GUARDIAN'),app,
   readWindowsKernelProcessW60:async pid=>{assert.equal(pid,123);calls.push('KERNEL');},
   readVerifiedInstalledExecutableW68:async actual=>{assert.equal(actual,app);calls.push('W68');},
   signNativeCodingDeviceRequest:async({operation,input})=>{calls.push('SIGN:'+operation);return{operation,input};}};
- const run=mainFunction('continuePreparedGoalOwnerCustody','async function readPreparedGoalSelector',context);
+ const run=mainFunction('continuePreparedGoalOwnerCustody','// An explicit renderer action',context);
  const result=await run(f.journal.latest(),write);
  assert.equal(result.state,'CUSTODY_VERIFIED');assert.equal(result.loaded_runtime_code_attested,false);
  assert.equal(result.execution_ready,false);assert.equal(result.production_qualified,false);assert.equal(closed,true);
@@ -229,7 +230,7 @@ test('actual main lost admission ACK, startup/latest and refresh never start a p
  const router=createClientPreparedGoalRouter({journal:f.journal,readSelector:async()=>f.selector,request:async operation=>{
   if(operation==='ADMIT_PREPARED_GOAL_V1')throw Error('TEST_ADMISSION_ACK_LOST');return f.result;
  }});
- const context={ensureClientGoalJournal:async()=>f.journal,readNativeGoalSubmissionMode:async()=>({kind:'PREPARED_GOAL',state:'READY'}),
+ const context={createNativeHostScopeCleanup,nativeInitializationCleanupCandidates:new Set(),cleanupPendingNativeHostScope:async record=>record.candidate.close(),ensureClientGoalJournal:async()=>f.journal,readNativeGoalSubmissionMode:async()=>({kind:'PREPARED_GOAL',state:'READY'}),
   normalizeClientGoalIntent:v=>({goal:v}),randomUUID:()=>f.input.request_id,createPreparedGoalRouter:()=>router,
   continuePreparedGoalOwnerCustody:async(_entry,write)=>{custody.push(write);return {state:'HOLD'};},
   nativeSupervisor:null,structuredClone,publishSnapshot:async()=>{},safeClientGoalEntry:entry=>entry,normalizeClientGoalRequestId:v=>v};

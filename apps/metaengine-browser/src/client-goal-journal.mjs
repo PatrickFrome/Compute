@@ -1,3 +1,4 @@
+import {normalizePreparedActivationInput,normalizePreparedActivationReceipt} from './client-prepared-goal-activation.mjs';
 import { clientGoalExecutionProofMatchesProgress } from './client-control-contract.mjs';
 import { clientUsefulWorkProofMatchesExecutionProof } from './client-useful-work-proof.mjs';
 import { normalizeClientProjectRegistration, normalizeNativeReviewRejection } from './client-project-continuity.mjs';
@@ -9,7 +10,7 @@ const SCHEMA = 'metaengine.client.goal-journal.v1';
 const ENTRY_SCHEMA = 'metaengine.client.goal-journal-entry.v1';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const STATES = new Set([
-  'SUBMITTING','ADMITTED','RECONCILE_REQUIRED','PENDING_ACTIVATION',
+  'SUBMITTING','ADMITTED','RECONCILE_REQUIRED','PENDING_ACTIVATION','ACTIVATION_READBACK_REQUIRED','ACTIVATED',
   'READY','LEASED','RUNNING','SUSPENDED','RESULT_READY','BLOCKED',
   'COMPLETED','FAILED','AMBIGUOUS','FENCED',
 ]);
@@ -41,7 +42,7 @@ function normalizeEntry(value) {
   const state = String(value.state || '').toUpperCase();
   const kind=value.kind??'BROWSER';
   if(!['BROWSER','NATIVE_CODING','PREPARED_GOAL'].includes(kind))throw new Error('client_goal_journal_kind_invalid');
-  if(state==='PENDING_ACTIVATION'&&kind!=='PREPARED_GOAL')throw new Error('client_goal_journal_pending_kind_invalid');
+  if(['PENDING_ACTIVATION','ACTIVATION_READBACK_REQUIRED','ACTIVATED'].includes(state)&&kind!=='PREPARED_GOAL')throw new Error('client_goal_journal_pending_kind_invalid');
   if (!STATES.has(state)) throw new Error('client_goal_journal_state_invalid');
   if (value.authority_effect !== false || value.automatic_retry_allowed !== false) {
     throw new Error('client_goal_journal_authority_invalid');
@@ -59,13 +60,17 @@ function normalizeEntry(value) {
   if(kind!=='PREPARED_GOAL'&&value.prepared_selector!=null)throw new Error('client_goal_journal_selector_kind_invalid');
   const receipt=kind==='PREPARED_GOAL'&&value.receipt!=null?normalizePreparedGoalAdmission(value.receipt,{request_id:id,goal,prepared_selector:preparedSelector}):kind==='NATIVE_CODING'&&value.receipt!=null
     ?normalizeNativeCodingGoalAdmission(value.receipt,{request_id:id,objective:goal}):value.receipt;
+  const activationInput=value.activation_input==null?null:normalizePreparedActivationInput(value.activation_input,{...value,prepared_selector:preparedSelector});
+  const activationReceipt=value.activation_receipt==null?null:normalizePreparedActivationReceipt(value.activation_receipt,{...value,receipt,prepared_selector:preparedSelector,activation_input:activationInput});
+  if((activationInput||activationReceipt)&&kind!=='PREPARED_GOAL'||activationInput&&!receipt||activationReceipt&&!activationInput)throw Error('client_goal_journal_activation_conflict');
   const nativeRejection=value.native_rejection==null?null:normalizeNativeCodingSeedRejection(value.native_rejection,{request_id:id,objective:goal});
   if(nativeRejection&&(kind!=='NATIVE_CODING'||state!=='FAILED'||receipt||progress||value.admitted_task_id||value.project))
     throw new Error('client_goal_journal_native_rejection_conflict');
   let project;
   if(kind==='PREPARED_GOAL'){
-    if(!['SUBMITTING','RECONCILE_REQUIRED','PENDING_ACTIVATION'].includes(state)||progress||value.execution_proof||value.useful_work_proof||value.project||value.admitted_task_id||nativeRejection
+    if(!['SUBMITTING','RECONCILE_REQUIRED','PENDING_ACTIVATION','ACTIVATION_READBACK_REQUIRED','ACTIVATED'].includes(state)||progress||value.execution_proof||value.useful_work_proof||value.project||value.admitted_task_id||nativeRejection
       ||(state==='PENDING_ACTIVATION'&&!receipt))throw new Error('client_goal_journal_pending_conflict');
+    if((state==='ACTIVATED')!==!!activationReceipt||state==='ACTIVATION_READBACK_REQUIRED'&&!activationInput||activationInput&&!['ACTIVATION_READBACK_REQUIRED','ACTIVATED'].includes(state))throw Error('client_goal_journal_activation_state_invalid');
     project=null;
   }else if(kind==='NATIVE_CODING'){
     project=receipt?nativeCodingGoalProject(receipt):null;
@@ -93,6 +98,7 @@ function normalizeEntry(value) {
     goal,
     state,
     ...(preparedSelector?{prepared_selector:preparedSelector}:{}),
+    ...(activationInput?{activation_input:activationInput,activation_receipt:activationReceipt}:{}),
     native_rejection:nativeRejection,
     receipt: receipt && typeof receipt === 'object' && !Array.isArray(receipt)
       ? Object.freeze(clone(receipt))
@@ -305,7 +311,30 @@ export class ClientGoalJournal {
       if(existing?.kind!=='PREPARED_GOAL')throw new Error('client_goal_journal_pending_request_missing');
       const verified=normalizePreparedGoalAdmission(receipt,existing);
       if(existing.receipt&&!isDeepStrictEqual(existing.receipt,verified))throw new Error('client_goal_journal_pending_admission_drift');
-      return {...existing,receipt:verified,state:'PENDING_ACTIVATION',last_error:null,project_error:null,updated_at:nowIso()};
+      return {...existing,receipt:verified,state:existing.activation_input?existing.state:'PENDING_ACTIVATION',last_error:null,project_error:null,updated_at:nowIso()};
+    });
+  }
+
+  async beginPreparedActivation(input){
+    return this.#replace(requestId(input?.request_id),existing=>{
+      if(existing?.kind!=='PREPARED_GOAL'||existing.state!=='PENDING_ACTIVATION'||existing.activation_input||!existing.receipt)throw Error('client_goal_journal_activation_already_attempted');
+      return {...existing,activation_input:normalizePreparedActivationInput(input,existing),activation_receipt:null,state:'ACTIVATION_READBACK_REQUIRED',updated_at:nowIso()};
+    });
+  }
+  async recordPreparedActivation(receipt){
+    return this.#replace(requestId(receipt?.input?.request_id),existing=>{
+      if(existing?.kind!=='PREPARED_GOAL'||!existing.activation_input)throw Error('client_goal_journal_activation_missing');
+      const verified=normalizePreparedActivationReceipt(receipt,existing);
+      if(existing.activation_receipt&&!isDeepStrictEqual(existing.activation_receipt,verified))throw Error('client_goal_journal_activation_receipt_drift');
+      return {...existing,activation_receipt:verified,state:'ACTIVATED',last_error:null,updated_at:nowIso()};
+    });
+  }
+
+  async recordPreparedActivationMountStatus(id,reason){
+    return this.#replace(requestId(id),existing=>{
+      if(!existing?.activation_receipt||existing.state!=='ACTIVATED'||![null,'ACTIVATION_RUNTIME_MOUNT_UNAVAILABLE'].includes(reason))throw Error('client_goal_journal_activation_mount_invalid');
+      if(existing.project_error===reason)return existing;
+      return {...existing,project_error:reason,updated_at:nowIso()};
     });
   }
 

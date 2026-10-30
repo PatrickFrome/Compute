@@ -100,6 +100,7 @@ test('real Ed25519 verification binds EXE digest, signer, source, version and tw
     assert.equal(proof?.source,'INSTALLED_EXE_NATIVE_VERIFIER');
     assert.equal(proof?.source_sha,SHA);
     assert.equal(proof?.installed_exe_sha256,f.m.exe_sha256);
+    assert.equal(proof?.installed_asar_sha256,digest(Buffer.from('staging-asar-bytes')));
     assert.equal(proof?.package_version,VERSION);
     assert.equal(proof?.fixture_classification,'STAGING');
     assert.equal(proof?.independent_slsa_crypto_verified_at_runtime,false);

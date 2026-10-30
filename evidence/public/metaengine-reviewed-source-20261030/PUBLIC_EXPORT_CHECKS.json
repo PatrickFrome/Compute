@@ -1,0 +1,233 @@
+{
+  "schema": "metaengine.public-export-checks.v1",
+  "source_snapshot": "cecffbd13633fa13c2faa9242f1ea8ba3bdb1288",
+  "public_parent": "b98444e672a70ee07f1bc80e7bfeb0ba97084f0f",
+  "status": "SOURCE_REPRODUCTION_PASS_OVERALL_QUALIFICATION_INCOMPLETE",
+  "recorded_at": "2026-10-30",
+  "fresh_public_tree_reproduction": {
+    "script": "evidence/audits/metaengine-20261030-reconstruction/verify-callback-pg-publication.sh",
+    "exit_code": 0,
+    "passed_executions": 1069,
+    "failed": 0,
+    "native_tests_skipped": 16,
+    "additional_windows_suites_skipped": 2,
+    "source_parser_pass": 273,
+    "lanes": [
+      {
+        "lane": "components",
+        "raw_log_sha256": "884d0161c9c05853ce74f723635eedb5e94a2cec8c17d59a53818bc1c7b82b03",
+        "summary": {
+          "tests": 322,
+          "suites": 0,
+          "pass": 322,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        }
+      },
+      {
+        "lane": "full-migration",
+        "raw_log_sha256": "08a61a9dc686e6d0f78e57dac9169df6497d25968f00e12a8d5d3d3faf5cdb16",
+        "summary": {
+          "tests": 1,
+          "suites": 0,
+          "pass": 1,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        }
+      },
+      {
+        "lane": "helper-reader",
+        "raw_log_sha256": "9e76a3759d74085478efd808477da61163c051778914cd2df8cb2a93d59969fe",
+        "summary": {
+          "tests": 323,
+          "suites": 2,
+          "pass": 310,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 13,
+          "todo": 0
+        }
+      },
+      {
+        "lane": "lifetime",
+        "raw_log_sha256": "ed3c0508a8619731cc525aa220335a585b07fd68b4df057dd8a4136137b9461e",
+        "summary": {
+          "tests": 262,
+          "suites": 0,
+          "pass": 259,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 3,
+          "todo": 0
+        }
+      },
+      {
+        "lane": "pg17",
+        "raw_log_sha256": "62246c20d2a021d39f06571a6a6cbb7836f6b7163368ba507df1ae225a040f20",
+        "summary": {
+          "tests": 103,
+          "suites": 0,
+          "pass": 103,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        }
+      },
+      {
+        "lane": "protected-receipt-pg17",
+        "raw_log_sha256": "2fa9c3ad6f245515edfd6b792a9c6f4ccdd6248645d6bbc536a741fda8b04764",
+        "summary": {
+          "tests": 12,
+          "suites": 0,
+          "pass": 12,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        }
+      },
+      {
+        "lane": "publication-pg17",
+        "raw_log_sha256": "54580c2970de6da175c8c545f4e42cfed280d18ced47cfceef5cbf014cd83659",
+        "summary": {
+          "tests": 43,
+          "suites": 0,
+          "pass": 43,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        }
+      },
+      {
+        "lane": "publication-source",
+        "raw_log_sha256": "f49b2e272861fe92e0bd9fca21bab076623e4c8ef6bd894a29bf7d4047ef891b",
+        "summary": {
+          "tests": 17,
+          "suites": 0,
+          "pass": 17,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        }
+      },
+      {
+        "lane": "published-scope-pg17",
+        "raw_log_sha256": "a3abef8872785bf2ca8de76e5049a027a6ce7f70e227b0c10d8e40dcf4da99ad",
+        "summary": {
+          "tests": 2,
+          "suites": 0,
+          "pass": 2,
+          "fail": 0,
+          "cancelled": 0,
+          "skipped": 0,
+          "todo": 0
+        }
+      }
+    ]
+  },
+  "initial_attempt": {
+    "status": "FAILED_BEFORE_DRIVER_FIXTURE_COPY",
+    "publication_source": {
+      "pass": 17,
+      "fail": 0
+    },
+    "publication_pg17": {
+      "pass": 0,
+      "fail": 1
+    },
+    "cause": "IGNORED_PINNED_DRIVER_FIXTURE_MISSING_IN_NEW_WORKTREE",
+    "raw_failure_sha256": "7d11ffeb662b4255403a1323794bf799b553bea747378a884e90c6c612505fad",
+    "resolution": "COPIED_EXISTING_PINNED_POSTGRES_FIXTURE_37_FILE_HASHES_VERIFIED_NO_INSTALL_OR_NETWORK"
+  },
+  "source_equality": {
+    "exact_files": 162,
+    "comment_only_script_redactions": 1,
+    "document_redactions": 1,
+    "behavioral_test_config_bytes_unchanged": true
+  },
+  "withheld_evidence_dependency_scan": {
+    "required_withheld_inputs": 0,
+    "output_name_references": [
+      {
+        "file": "evidence/audits/metaengine-20261030-reconstruction/verify-draft-namespace.sh",
+        "historical_artifact": "evidence/audits/metaengine-20261030-reconstruction/draft-namespace-components.tap",
+        "classification": "GENERATED_OUTPUT_OR_OWN_RUN_OUTPUT_READBACK_NOT_WITHHELD_INPUT"
+      },
+      {
+        "file": "evidence/audits/metaengine-20261030-reconstruction/verify-draft-namespace.sh",
+        "historical_artifact": "evidence/audits/metaengine-20261030-reconstruction/draft-namespace-pg17.tap",
+        "classification": "GENERATED_OUTPUT_OR_OWN_RUN_OUTPUT_READBACK_NOT_WITHHELD_INPUT"
+      },
+      {
+        "file": "evidence/audits/metaengine-20261030-reconstruction/verify-draft-namespace.sh",
+        "historical_artifact": "evidence/audits/metaengine-20261030-reconstruction/draft-namespace-source.log",
+        "classification": "GENERATED_OUTPUT_OR_OWN_RUN_OUTPUT_READBACK_NOT_WITHHELD_INPUT"
+      },
+      {
+        "file": "evidence/audits/metaengine-20261030-reconstruction/verify-draft-namespace.sh",
+        "historical_artifact": "evidence/audits/metaengine-20261030-reconstruction/draft-namespace-typescript.log",
+        "classification": "GENERATED_OUTPUT_OR_OWN_RUN_OUTPUT_READBACK_NOT_WITHHELD_INPUT"
+      },
+      {
+        "file": "evidence/audits/metaengine-20261030-reconstruction/verify-phase-1b.sh",
+        "historical_artifact": "evidence/audits/metaengine-20261030-reconstruction/phase-1b-components.tap",
+        "classification": "GENERATED_OUTPUT_OR_OWN_RUN_OUTPUT_READBACK_NOT_WITHHELD_INPUT"
+      },
+      {
+        "file": "evidence/audits/metaengine-20261030-reconstruction/verify-phase-1b.sh",
+        "historical_artifact": "evidence/audits/metaengine-20261030-reconstruction/phase-1b-pg17.tap",
+        "classification": "GENERATED_OUTPUT_OR_OWN_RUN_OUTPUT_READBACK_NOT_WITHHELD_INPUT"
+      },
+      {
+        "file": "evidence/audits/metaengine-20261030-reconstruction/verify-phase-1b.sh",
+        "historical_artifact": "evidence/audits/metaengine-20261030-reconstruction/phase-1b-source.log",
+        "classification": "GENERATED_OUTPUT_OR_OWN_RUN_OUTPUT_READBACK_NOT_WITHHELD_INPUT"
+      },
+      {
+        "file": "evidence/audits/metaengine-20261030-reconstruction/verify-phase-1b.sh",
+        "historical_artifact": "evidence/audits/metaengine-20261030-reconstruction/phase-1b-typescript.log",
+        "classification": "GENERATED_OUTPUT_OR_OWN_RUN_OUTPUT_READBACK_NOT_WITHHELD_INPUT"
+      },
+      {
+        "file": "evidence/audits/metaengine-20261030-reconstruction/verify-phase-3a.sh",
+        "historical_artifact": "evidence/audits/metaengine-20261030-reconstruction/phase-3a-components.tap",
+        "classification": "GENERATED_OUTPUT_OR_OWN_RUN_OUTPUT_READBACK_NOT_WITHHELD_INPUT"
+      },
+      {
+        "file": "evidence/audits/metaengine-20261030-reconstruction/verify-phase-3a.sh",
+        "historical_artifact": "evidence/audits/metaengine-20261030-reconstruction/phase-3a-pg17.tap",
+        "classification": "GENERATED_OUTPUT_OR_OWN_RUN_OUTPUT_READBACK_NOT_WITHHELD_INPUT"
+      },
+      {
+        "file": "evidence/audits/metaengine-20261030-reconstruction/verify-phase-3a.sh",
+        "historical_artifact": "evidence/audits/metaengine-20261030-reconstruction/phase-3a-source.log",
+        "classification": "GENERATED_OUTPUT_OR_OWN_RUN_OUTPUT_READBACK_NOT_WITHHELD_INPUT"
+      },
+      {
+        "file": "evidence/audits/metaengine-20261030-reconstruction/verify-phase-3a.sh",
+        "historical_artifact": "evidence/audits/metaengine-20261030-reconstruction/phase-3a-typescript.log",
+        "classification": "GENERATED_OUTPUT_OR_OWN_RUN_OUTPUT_READBACK_NOT_WITHHELD_INPUT"
+      }
+    ]
+  },
+  "limits": [
+    "SOURCE_ONLY",
+    "DEFAULT_PUBLICATION_GATE_CLOSED",
+    "SQL_PUBLICATION_EXTENSION_UNREGISTERED",
+    "OWNER_CUSTODY_UNBOUND",
+    "REQUIRED_SOCKET_BLOCKED",
+    "PRIOR_UI_DEPENDENCY_3FAIL_EXACT_TOOLCHAIN_BLOCKED",
+    "WINDOWS_NATIVE_INSTALLED_UNKNOWN",
+    "GLOBAL_CI_CURRENT_SEAL_INCOMPLETE",
+    "NO_POWER_LOSS_PROOF",
+    "HISTORICAL_CAPACITY_RELEASE_DISABLED",
+    "MATERIALIZER_UNBOUND"
+  ]
+}
