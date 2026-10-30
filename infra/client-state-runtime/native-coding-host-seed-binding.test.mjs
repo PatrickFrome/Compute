@@ -37,7 +37,7 @@ async function fixture(t,{createService}={}){
   const current=await options.readCurrentDevice();assert.equal(current.device_id,device.device_id);
   seen.calls.push({action,input:structuredClone(input)});return structuredClone(catalog);
  }])),close(){seen.serviceClosed++;}});
- const binding=createNativeCodingHostSeedBinding({sql,stateDirectory,readNativeScope:async()=>{},hostInstanceId:host.instance_id,hostPid:host.host_pid,
+ const binding=createNativeCodingHostSeedBinding({sql,stateDirectory,workspaceTransaction:(...args)=>sql.begin(...args),readNativeScope:async()=>{},hostInstanceId:host.instance_id,hostPid:host.host_pid,
   createService:async options=>{seen.created++;return createService?createService(options,fakeService):fakeService(options);},
   createVerifier:options=>{const verifier=createNativeCodingDeviceRequestVerifier({...options,now:()=>clock??Date.now()});
    return{verify:request=>verifier.verify(request),close(){seen.verifierClosed++;verifier.close();}};},
@@ -62,7 +62,7 @@ test('profile published after startup is discovered readonly without dispatching
  published=true;
  assert.deepEqual(await f.binding.operations.LIST_SEEDS(await f.request()),catalog);
  assert.equal(f.seen.created,2);assert.deepEqual(f.seen.calls.map(row=>row.action),['LIST_SEEDS']);
- assert.deepEqual(Object.keys(f.binding.operations).sort(),['LIST_SEEDS','READ_SEED','SEED_GOAL','close']);
+ assert.deepEqual(Object.keys(f.binding.operations).sort(),['LIST_SEEDS','PREPARE_WORKSPACE_V1','READ_SEED','READ_WORKSPACE_PREPARATION_V1','SEED_GOAL','close']);
 });
 
 test('concurrent readonly discovery shares one creation and authenticates each packet separately',async t=>{
@@ -195,4 +195,24 @@ test('deadline expiring during catalog read suppresses stale readiness',async t=
  const f=await fixture(t,{createService:(options,service)=>({...service(options),LIST_SEEDS:async()=>{entered.resolve();return ready.promise;}})});
  const context={deadlineAt:Date.now()+30000};const pending=f.binding.operations.LIST_SEEDS(await f.request(),context);
  await entered.promise;context.deadlineAt=Date.now()-1;ready.resolve(catalog);await assert.rejects(pending,/request_deadline_exceeded/);
+});
+
+
+test('binding drain waits for a started request after close and cannot publish a late result',async t=>{
+ const gate=deferred(),entered=deferred();
+ const f=await fixture(t,{createService:(options,service)=>({...service(options),LIST_SEEDS:async()=>{entered.resolve();await gate.promise;return catalog;}})});
+ const pending=f.binding.operations.LIST_SEEDS(await f.request());await entered.promise;f.binding.close();
+ let drained=false;const drain=f.binding.drain().then(()=>{drained=true;});await new Promise(r=>setImmediate(r));assert.equal(drained,false);
+ gate.resolve();await assert.rejects(pending,/closed/);await drain;assert.equal(drained,true);
+});
+
+
+test('new workspace actions authenticate real signed request before reading a missing stage, no seed catalog mutation',async t=>{
+ const f=await fixture(t),input={preparation_id:randomUUID(),configuration_sha256:'a'.repeat(64)};
+ for(const operation of ['READ_WORKSPACE_PREPARATION_V1','PREPARE_WORKSPACE_V1']){
+  const packet=await signNativeCodingDeviceRequest({identity:f.identity,binding:f.host,operation,input});
+  await assert.rejects(f.binding.operations[operation](packet),{code:'ENOENT'});
+  await assert.rejects(f.binding.operations[operation](packet),/nonce_reused/);
+ }
+ assert.equal(f.seen.created,0);assert.equal(f.seen.calls.length,0);assert.equal(f.seen.deviceQueries,4);
 });

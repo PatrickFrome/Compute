@@ -1,3 +1,4 @@
+import {prepareNativeWorkspaceFromStage} from './native-coding-workspace-preparation.mjs';
 import { RsiVerifiedSkillDispatch } from './rsi-verified-skill-dispatch.mjs';
 import { ensureElectronPreReady } from './electron-pre-ready-bootstrap.mjs';
 import { createBrowserParentSuspensionMutationGate } from './browser-parent-suspension-mutation-gate.mjs';
@@ -884,6 +885,9 @@ function ensureNativeCodingRuntimeMounted() {
     const operator=await readNativeCodingOperatorPaths(directory);assertOpen(summary);
     const capability=createOwnedNativeCodingHostCapability(summary);let candidate=null,bindingAttempted=false;
     try{
+      // Explicit signed preparation is distinct from readonly seed discovery.
+      // Missing stage is a no-op; unknown/revoked preparation blocks this mount.
+      await prepareNativeWorkspaceFromStage({stateDirectory:directory,identity:ensureSupervisorIdentity(),capability,assertOpen:()=>assertOpen(summary)});
       const scope=await capability.readScope();assertOpen(summary);
       const current=await readOwnedLocalRuntimeHostRecoveryObservation();assertOpen(summary);
       assertNativeCodingRuntimeMountGeneration(current,summary,generation);

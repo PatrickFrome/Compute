@@ -91,6 +91,7 @@ const REMOTE_SUPPORT_SOURCE_CLOSURE = new Set([
   'apps/metaengine-browser/src/runtime-recovery-policy.mjs',
 ]);
 const NATIVE_CODING_HOST_SOURCE_CLOSURE=new Set([
+  'apps/metaengine-browser/src/native-coding-workspace-preparation.mjs',
   'apps/metaengine-browser/src/agent-context-token.mjs',
   'apps/metaengine-browser/src/guardian-client-kernel-birth-w67.mjs',
   'apps/metaengine-browser/src/host-agent-ipc.mjs',

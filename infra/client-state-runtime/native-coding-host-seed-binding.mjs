@@ -1,8 +1,10 @@
+import {createNativeWorkspacePreparation} from './native-coding-workspace-preparation.mjs';
 import {assertNativeCodingHostRequestOpen} from './native-coding-host-request-lifetime.mjs';
 import {validateNativeCodingDeviceRequest} from '../../apps/metaengine-browser/src/native-coding-device-request.mjs';
 import {createNativeCodingHostSeedService} from './native-coding-host-seed-service.mjs';
 import {createNativeCodingDeviceRequestVerifier,createNativeCodingAuthenticatedRequestContext} from './native-coding-device-request.mjs';
 
+const PREPARATION_ACTIONS=['PREPARE_WORKSPACE_V1','READ_WORKSPACE_PREPARATION_V1'];
 const ACTIONS=['SEED_GOAL','READ_SEED','LIST_SEEDS'];
 const fail=reason=>{throw Error('native_coding_host_seed_binding_'+reason);};
 
@@ -10,7 +12,7 @@ const fail=reason=>{throw Error('native_coding_host_seed_binding_'+reason);};
 // directory. A profile published after Host startup may prepare this optional
 // service on readonly discovery. Preparation never dispatches a goal, changes
 // its protected pins, or grants the caller an authenticated invocation.
-export function createNativeCodingHostSeedBinding({sql,stateDirectory,readNativeScope,hostInstanceId,hostPid,
+export function createNativeCodingHostSeedBinding({sql,stateDirectory,readNativeScope,hostInstanceId,hostPid,workspaceTransaction=null,
  createService=createNativeCodingHostSeedService,createVerifier=createNativeCodingDeviceRequestVerifier,
  createContext=createNativeCodingAuthenticatedRequestContext}={}){
  if(![createService,createVerifier,createContext].every(value=>typeof value==='function'))fail('private_dependencies_required');
@@ -18,6 +20,10 @@ export function createNativeCodingHostSeedBinding({sql,stateDirectory,readNative
  let context;
  try{context=createContext({verifier});}catch(error){verifier.close();throw error;}
  let closed=false,service=null,pending=null;
+ const active=new Set();
+ let workspacePreparation;
+ try{workspacePreparation=workspaceTransaction?createNativeWorkspacePreparation({transaction:workspaceTransaction,stateDirectory,readNativeScope,readCurrentDevice:context.readCurrentDevice}):null;}
+ catch(error){try{context.close();}finally{verifier.close();}throw error;}
  const open=()=>{if(closed)fail('closed');};
  function prepare(){
   open();
@@ -44,6 +50,14 @@ export function createNativeCodingHostSeedBinding({sql,stateDirectory,readNative
  async function invoke(action,request,requestContext){
   open();assertNativeCodingHostRequestOpen(requestContext);
   const checked=validateNativeCodingDeviceRequest(request,action);
+  if(PREPARATION_ACTIONS.includes(action)){
+   if(!workspacePreparation)fail('preparation_transaction_required');
+   return context.run(action,checked,async input=>{
+    open();assertNativeCodingHostRequestOpen(requestContext);
+    const result=await workspacePreparation[action](input,requestContext);
+    open();assertNativeCodingHostRequestOpen(requestContext);return result;
+   });
+  }
   // A write never boots an unavailable service or waits for its cold setup.
   // The caller must first obtain an authenticated readonly catalog/readback.
   if(action==='SEED_GOAL'&&!service)fail('not_ready');
@@ -62,9 +76,13 @@ export function createNativeCodingHostSeedBinding({sql,stateDirectory,readNative
   if(closed)return;
   closed=true;
   const current=service;service=null;
-  try{current?.close();}finally{try{context.close();}finally{verifier.close();}}
+  try{workspacePreparation?.close();current?.close();}finally{try{context.close();}finally{verifier.close();}}
  }
- const operations=Object.freeze({...Object.fromEntries(ACTIONS.map(action=>[action,(request,requestContext)=>invoke(action,request,requestContext)])),close});
+ const operations=Object.freeze({...Object.fromEntries([...ACTIONS,...PREPARATION_ACTIONS].map(action=>[action,(request,requestContext)=>{
+  const attempt=Promise.resolve().then(()=>invoke(action,request,requestContext));active.add(attempt);
+  const settled=()=>active.delete(attempt);attempt.then(settled,settled);return attempt;
+ }])),close});
+ async function drain(){while(active.size||pending){await Promise.allSettled([...active,...(pending?[pending]:[])]);}}
  // prepare/close are native lifecycle methods, not additional IPC operations.
- return Object.freeze({operations,prepare,close});
+ return Object.freeze({operations,prepare,close,drain});
 }

@@ -213,6 +213,7 @@ async function mainMountFixture(){
     readOwnedLocalRuntimeHostSummary:()=>summary,readOwnedLocalRuntimeHostRecoveryObservation:async()=>({...generation}),
     createOwnedNativeCodingHostCapability:()=>{counts.capability++;capClosed=false;return capability;},
     ensureSupervisorIdentity:()=>({snapshot:()=>({device_id:'device',client_id:'client'})}),
+    prepareNativeWorkspaceFromStage:async()=>null,
     readNativeCodingOperatorPaths:async()=>({}),resolveNativeCodingSandboxPin:()=>({}),
     createNativeCodingRuntime:()=>{counts.construct++;return runtime;},
     readAgentResourceAdmission:()=>({physical_start_allowed:true}),
@@ -563,4 +564,15 @@ test('actual mount distinguishes absent Host from unavailable protected permits'
  await assert.rejects(missing.context.ensureNativeCodingRuntimeMounted(),/protected_permits_required/);
  assert.equal(missing.scope.nativeCodingRuntimeMountDiagnostic.reason,'PROTECTED_PERMITS_UNAVAILABLE');
  assert.equal(missing.counts.capabilityClosed,1);assert.equal(missing.counts.construct,0);
+});
+
+
+test('actual main consumes explicit preparation before permits; unknown blocks mount and releases capability',async()=>{
+ for(const failure of [null,'native_workspace_preparation_outcome_unknown','native_workspace_preparation_workspace_authorization_required']){
+  const f=await mainMountFixture();let calls=0;
+  f.scope.prepareNativeWorkspaceFromStage=async options=>{calls++;assert.equal(options.capability,f.capability);assert.equal(options.stateDirectory,'C:/private/runtime');options.assertOpen();if(failure)throw Error(failure);return {state:'PREPARED'};};
+  if(failure){await assert.rejects(f.onAdmitted(),new RegExp(failure));assert.equal(f.counts.construct,0);assert.equal(f.counts.capabilityClosed,1);}
+  else{await f.onAdmitted();assert.equal(f.counts.construct,1);}
+  assert.equal(calls,1);
+ }
 });

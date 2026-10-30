@@ -25,7 +25,7 @@ async function fixture(t,stage){
  const pending=gate(),entered=gate(),finished=gate(),events=[],terminals=[];
  const pause=async name=>{events.push(name);if(stage===name){entered.resolve();await pending.promise;}};
  setNativeStartupFixture({readOperator:()=>pause('operator'),sql:{unsafe:async()=>[],end:async()=>{events.push('sql-close');}},
-  binding:{prepare:()=>pause('seed'),operations:{},close:()=>events.push('binding-close')},
+  binding:{prepare:()=>pause('seed'),operations:{},close:()=>events.push('binding-close'),drain:()=>pause('drain')},
   createAuthority:async()=>{await pause('authority');return {close:()=>events.push('authority-close')};}});
  const runtime={endpoint:'http://127.0.0.1:25433/a2-browser-native-supervisor-v1',instanceId:randomUUID(),stopped:false,
   postgresIdentity:{pid:1234,version:170007,system_identifier:'7654321098765432100',started_at:new Date(1790000000000).toISOString(),data_directory:config.pg_data_directory,port:25434},
@@ -63,4 +63,14 @@ test('successful native startup remains mounted until ordinary Host shutdown',as
  await outcome.value.stop();await outcome.value.finished;
  assert.equal(f.terminals.length,1);assert.ok(f.events.indexOf('authority-close')<f.events.indexOf('sql-close'));
  assert.ok(f.events.indexOf('sql-close')<f.events.indexOf('terminal'));
+});
+
+
+test('Host shutdown after successful startup joins active native preparation drain before SQL and lock release',async t=>{
+ const f=await fixture(t,'drain'),started=await f.start;assert.equal(started.error,undefined);
+ const stopping=started.value.stop();await f.entered.promise;await new Promise(r=>setTimeout(r,30));
+ assert.equal(f.events.includes('sql-close'),false);assert.equal(f.terminals.length,0);
+ assert.ok(await fs.stat(path.join(f.config.state_directory,'runtime-host-lock.json')));
+ f.pending.resolve();await stopping;await started.value.finished;
+ assert.ok(f.events.indexOf('drain')<f.events.indexOf('sql-close'));assert.equal(f.terminals.length,1);
 });

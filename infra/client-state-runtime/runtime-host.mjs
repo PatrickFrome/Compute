@@ -1,3 +1,4 @@
+import {createNativePreparationTransactions} from './native-coding-preparation-transaction.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { lstat, mkdir, open, readFile, realpath, rename, unlink, writeFile } from 'node:fs/promises';
@@ -382,6 +383,7 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
       await nativeCodingStartup?.catch(() => {});
       nativeCodingAuthority?.close();
       nativeCodingSeedBinding?.close();
+      await nativeCodingSeedBinding?.drain?.();
       if(nativeCodingSql) {await nativeCodingSql.end({timeout:5});nativeCodingSql=null;}
       if (outcome.last_health_failure) {
         try { lastHealthFailure = normalizeRuntimeHealthFailure(outcome.last_health_failure); } catch { /* Never forward unvalidated diagnostics. */ }
@@ -471,7 +473,9 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
         // A terminal callback may have run while the private paths/import were
         // awaited. Never create new owned resources after its cleanup snapshot.
         if(abortRequested||runtime.stopped===true||terminalPromise)throw failure('runtime_host_child_ended_during_startup');
-        nativeCodingSql=postgres(config.inspect_database_url,{max:2,connect_timeout:10,idle_timeout:30,prepare:false});
+        const preparationTransactions=createNativePreparationTransactions();
+        nativeCodingSql=postgres(config.inspect_database_url,{max:2,connect_timeout:10,idle_timeout:30,prepare:false,
+          debug:preparationTransactions.debug,onclose:preparationTransactions.onclose});
         const native=createNativeCodingHostOsScope({config,sql:nativeCodingSql,parentPid:process.ppid});
         let commitService=null,serviceHeartbeatOperations=null,transferred=false;
         try{
@@ -484,7 +488,8 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
           }catch{/* Missing/unreadable/invalid commit capability remains COMMIT_CAPABILITY_HOLD only. */}
           if(abortRequested||runtime.stopped===true||terminalPromise)throw failure('runtime_host_child_ended_during_startup');
           nativeCodingSeedBinding=createNativeCodingHostSeedBinding({sql:nativeCodingSql,stateDirectory:config.state_directory,
-            readNativeScope:native.readNativeScope,hostInstanceId:descriptor.instance_id,hostPid:process.pid});
+            readNativeScope:native.readNativeScope,hostInstanceId:descriptor.instance_id,hostPid:process.pid,
+            workspaceTransaction:(mode,body)=>preparationTransactions.transaction(nativeCodingSql,mode,body)});
           try{await nativeCodingSeedBinding.prepare();}
           catch{/* Keep PG/API available; a later authenticated readonly discovery can inspect a newly published profile. */}
           const seedOperations=nativeCodingSeedBinding.operations;

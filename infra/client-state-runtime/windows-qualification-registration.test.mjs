@@ -44,3 +44,12 @@ test('sandbox probe lifetime and actual Windows boot observation remain in the c
  assert.ok(source.includes("'apps/metaengine-browser/src/codex-cli-sandbox-probe.mjs'"));
  assert.ok(source.includes("'apps/metaengine-browser/test/codex-cli-sandbox-probe*.test.mjs'"));
 });
+
+
+test('workspace preparation caller, native PG locking and generated scope fixtures are registered',()=>{
+ for(const file of ['infra/client-state-runtime/native-coding-workspace-preparation.pg17.test.mjs',
+  'infra/client-state-runtime/native-coding-workspace-preparation.test.mjs','apps/metaengine-browser/test/native-coding-workspace-preparation.test.mjs',
+  'infra/client-state-runtime/test/native-workspace-preparation-fixture.mjs'])assert(paths.some(pattern=>matches(file,pattern)),file);
+ for(const file of ['infra/client-state-runtime/native-coding-workspace-preparation.pg17.test.mjs',
+  'infra/client-state-runtime/native-coding-workspace-preparation.test.mjs','apps/metaengine-browser/test/native-coding-workspace-preparation.test.mjs'])assert.ok(source.includes("'"+file+"',"));
+});

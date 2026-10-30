@@ -31,6 +31,7 @@ on:
       - 'apps/metaengine-browser/test/fixtures/autonomous-project-*.mjs'
       - 'apps/metaengine-browser/test/fixtures/browser-parent-suspension-fixture.mjs'
       - 'infra/client-state-runtime/native-coding-*.mjs'
+      - 'infra/client-state-runtime/test/native-workspace-preparation-fixture.mjs'
       - 'infra/client-state-runtime/native-coding-*.sql'
       - 'infra/client-state-runtime/native-agent-count-unbounded-v2.sql'
       - 'infra/client-state-runtime/browser-parent-*.mjs'
@@ -178,6 +179,9 @@ jobs:
             'apps/metaengine-browser/test/client-native-trust-boundary.test.mjs',
             'infra/client-state-runtime/native-coding-selector-move.test.mjs',
             'infra/client-state-runtime/native-coding-host-seed-binding.test.mjs',
+            'infra/client-state-runtime/native-coding-workspace-preparation.test.mjs',
+            'infra/client-state-runtime/native-coding-preparation-transaction.test.mjs',
+            'apps/metaengine-browser/test/native-coding-workspace-preparation.test.mjs',
             'infra/client-state-runtime/native-coding-host-seed-service.test.mjs',
             'infra/client-state-runtime/native-coding-host-os-scope.test.mjs',
             'infra/client-state-runtime/native-coding-host-transaction-scope.test.mjs',
@@ -204,6 +208,7 @@ jobs:
             'apps/metaengine-browser/test/browser-parent-suspension-cycle.test.mjs',
           ];
           const native=[
+            'infra/client-state-runtime/native-coding-workspace-preparation.pg17.test.mjs',
             'infra/client-state-runtime/native-coding-checkpoint-reconciliation.integration.test.mjs',
             'infra/client-state-runtime/native-coding-host-commit.integration.test.mjs',
             'infra/client-state-runtime/native-coding-host-commit-profile.integration.test.mjs',
