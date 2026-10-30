@@ -282,6 +282,39 @@ test('actual shell retains an unbound draft across Settings/Tasks without touchi
   assert.equal(composer.props.draft.draftStorage, 'UNBOUND'); assert.equal(storageCalls, 0); ui.unmount();
 });
 
+test('production page fails closed without a confirmed scope, including after reload', async () => {
+  // This exercises the real caller. Positive reload restoration is still
+  // BLOCKED on a native scope contract; historical/status IDs cannot supply it.
+  let storageCalls = 0, submits = 0;
+  const saved = { schema: draft.GOAL_DRAFT_SCHEMA, principal_id: 'another-principal',
+    workspace_id: 'workspace', project_id: 'same-project', text: 'Private earlier draft' };
+  for (let reload = 0; reload < 2; reload++) {
+    const ui = harness(), time = clock();
+    const context = environment(ui, time, {
+      metaengineClient: { latestGoal: async () => ({ project: { project_id: saved.project_id } }),
+        connectionStatus: async () => ({ device_enrolled: true, admin_ready: true }),
+        submitGoal: async () => { submits++; } },
+      metaengineOperator: { readContext: async () => ({ owner_id: saved.principal_id }) },
+      localStorage: { getItem: () => { storageCalls++; return JSON.stringify(saved); },
+        setItem: () => { storageCalls++; } },
+    });
+    const state = { page: 'browser', init() {}, paletteOpen: false, recentPages: [], setPage() {} };
+    context.useMe2 = select => select(state);
+    const shell = loadUi('../components/me2/shell/me2-shell.tsx', ['Me2Shell', 'GoalComposer'], context);
+    const { Page } = loadUi('../app/page.tsx', ['Page'], { ...context, Me2Shell: shell.Me2Shell });
+    const page = Page();
+    ui.mount(page.tag, page.props); await flush();
+    const composer = () => ui.render().children.flat(Infinity).find(child => child?.tag === shell.GoalComposer);
+    assert.equal(composer().props.draft.goal, '');
+    assert.equal(composer().props.draft.draftStorage, 'UNBOUND');
+    composer().props.draft.setGoal('Unconfirmed text stays in this shell');
+    state.page = 'system'; ui.render(); state.page = 'browser';
+    assert.equal(composer().props.draft.goal, 'Unconfirmed text stays in this shell');
+    ui.unmount();
+  }
+  assert.equal(storageCalls, 0); assert.equal(submits, 0);
+});
+
 test('actual shell remounts the composer when its confirmed identity or project changes', () => {
   const ui = harness(), time = clock(), records = new Map();
   const state = { page: 'browser', init() {}, paletteOpen: false, recentPages: [], setPage() {} };
