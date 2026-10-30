@@ -56,8 +56,8 @@ if(['reconciliation-mounted','slow-reconciliation','held-reconciliation','exit-r
  });
  return {...value,state:'COMMITTED_NO_SUCCESSOR',automatic_retry_allowed:false};
 };
-if(mode==='seed-mounted'||mode==='slow-seed'||mode==='secret-preparation')for(const action of ['PREPARE_WORKSPACE_V1','READ_WORKSPACE_PREPARATION_V1','SEED_GOAL','READ_SEED','LIST_SEEDS'])operations[action]=async request=>{
- if(action==='SEED_GOAL'||action==='PREPARE_WORKSPACE_V1'){calls++;if(mode==='slow-seed')await delay(180);}
+if(mode==='seed-mounted'||mode==='slow-seed'||mode==='secret-preparation')for(const action of ['ADMIT_PREPARED_GOAL_V1','READ_PREPARED_GOAL_V1','PREPARE_WORKSPACE_V1','READ_WORKSPACE_PREPARATION_V1','SEED_GOAL','READ_SEED','LIST_SEEDS'])operations[action]=async request=>{
+ if(action==='SEED_GOAL'||action==='PREPARE_WORKSPACE_V1'||action==='ADMIT_PREPARED_GOAL_V1'){calls++;if(mode==='slow-seed')await delay(180);}
  if(mode==='secret-preparation')throw Object.assign(Error('SENTINEL_PRIVATE_QUERY_PARAMETER'),{query:'SENTINEL_PRIVATE_QUERY_PARAMETER',parameters:['SENTINEL_PRIVATE_QUERY_PARAMETER'],args:['SENTINEL_PRIVATE_QUERY_PARAMETER']});
  return {fixture_transport_only:true,operation:action,input:request.body.input};
 };
@@ -205,7 +205,7 @@ test('Host exit during reconciliation cannot become a safe retry or success',asy
 });
 
 function seedRequest(operation,instanceId,hostPid){
-  const body={host_instance_id:instanceId,host_pid:hostPid,operation,input:['PREPARE_WORKSPACE_V1','READ_WORKSPACE_PREPARATION_V1'].includes(operation)?{preparation_id:id(),configuration_sha256:'b'.repeat(64)}:operation==='LIST_SEEDS'?{after_seq:0,limit:16}:
+  const body={host_instance_id:instanceId,host_pid:hostPid,operation,input:['ADMIT_PREPARED_GOAL_V1','READ_PREPARED_GOAL_V1'].includes(operation)?{preparation_id:id(),configuration_sha256:'b'.repeat(64),request_id:id(),objective:'Actual generated user objective'}:['PREPARE_WORKSPACE_V1','READ_WORKSPACE_PREPARATION_V1'].includes(operation)?{preparation_id:id(),configuration_sha256:'b'.repeat(64)}:operation==='LIST_SEEDS'?{after_seq:0,limit:16}:
     {request_id:id(),objective:'One native task'}};
   return {body,headers:{'content-type':'application/json','x-a2-chat-bridge-client':id(),
     'x-a2-device-profile':'A2_DEVICE_HTTP_SIGNATURE_V1','x-a2-device-id':id(),'x-a2-device-timestamp':new Date().toISOString(),
@@ -214,18 +214,18 @@ function seedRequest(operation,instanceId,hostPid){
 
 test('real private IPC transports optional signed seed envelopes without exposing identity or SQL selectors',async t=>{
   const {client,instanceId,child,stats}=await setup(t,'seed-mounted');
-  for(const [action,method] of [['PREPARE_WORKSPACE_V1','prepareWorkspace'],['READ_WORKSPACE_PREPARATION_V1','readWorkspacePreparation'],['SEED_GOAL','seedGoal'],['READ_SEED','readSeed'],['LIST_SEEDS','listSeeds']]){
+  for(const [action,method] of [['ADMIT_PREPARED_GOAL_V1','admitPreparedGoal'],['READ_PREPARED_GOAL_V1','readPreparedGoal'],['PREPARE_WORKSPACE_V1','prepareWorkspace'],['READ_WORKSPACE_PREPARATION_V1','readWorkspacePreparation'],['SEED_GOAL','seedGoal'],['READ_SEED','readSeed'],['LIST_SEEDS','listSeeds']]){
     const request=seedRequest(action,instanceId,child.pid),reply=await client[method](request);
     assert.equal(reply.fixture_transport_only,true);assert.deepEqual(reply.input,request.body.input);
     await assert.rejects(client[method]({...request,path:'/arbitrary'}),e=>e.reason==='INVALID_PAYLOAD');
     await assert.rejects(client[method]({...request,body:{...request.body,device_id:id()}}),e=>e.reason==='INVALID_PAYLOAD');
   }
-  assert.equal((await stats()).calls,2);
+  assert.equal((await stats()).calls,3);
 });
 
 test('unmounted optional seed capability returns a correlated rejection without dispatch or write ambiguity',async t=>{
   const {client,instanceId,child,stats}=await setup(t);
-  for(const [action,method] of [['PREPARE_WORKSPACE_V1','prepareWorkspace'],['READ_WORKSPACE_PREPARATION_V1','readWorkspacePreparation'],['LIST_SEEDS','listSeeds'],['READ_SEED','readSeed'],['SEED_GOAL','seedGoal']]){
+  for(const [action,method] of [['ADMIT_PREPARED_GOAL_V1','admitPreparedGoal'],['READ_PREPARED_GOAL_V1','readPreparedGoal'],['PREPARE_WORKSPACE_V1','prepareWorkspace'],['READ_WORKSPACE_PREPARATION_V1','readWorkspacePreparation'],['LIST_SEEDS','listSeeds'],['READ_SEED','readSeed'],['SEED_GOAL','seedGoal']]){
     await assert.rejects(client[method](seedRequest(action,instanceId,child.pid)),error=>
       error.reason==='UNSUPPORTED_ACTION'&&error.action===action&&error.instance_id===instanceId
       &&error.effect_outcome==='NONE'&&error.readback_required===false&&error.automatic_retry_allowed===false);
@@ -462,6 +462,6 @@ test('real private IPC supplies a bounded server-owned deadline and cancellation
 
 test('workspace preparation IPC strips enumerable driver query errors and preserves unknown write outcome',async t=>{
  const {client,instanceId,child}=await setup(t,'secret-preparation');
- for(const [action,method,reason] of [['PREPARE_WORKSPACE_V1','prepareWorkspace','WRITE_OUTCOME_UNKNOWN'],['READ_WORKSPACE_PREPARATION_V1','readWorkspacePreparation','OPERATION_FAILED']])
+ for(const [action,method,reason] of [['ADMIT_PREPARED_GOAL_V1','admitPreparedGoal','WRITE_OUTCOME_UNKNOWN'],['READ_PREPARED_GOAL_V1','readPreparedGoal','OPERATION_FAILED'],['PREPARE_WORKSPACE_V1','prepareWorkspace','WRITE_OUTCOME_UNKNOWN'],['READ_WORKSPACE_PREPARATION_V1','readWorkspacePreparation','OPERATION_FAILED']])
   await assert.rejects(client[method](seedRequest(action,instanceId,child.pid)),error=>error.reason===reason&&!JSON.stringify(error).includes('SENTINEL')&&!String(error.stack).includes('SENTINEL'));
 });

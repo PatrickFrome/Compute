@@ -53,3 +53,9 @@ test('workspace preparation caller, native PG locking and generated scope fixtur
  for(const file of ['infra/client-state-runtime/native-coding-workspace-preparation.pg17.test.mjs',
   'infra/client-state-runtime/native-coding-workspace-preparation.test.mjs','apps/metaengine-browser/test/native-coding-workspace-preparation.test.mjs'])assert.ok(source.includes("'"+file+"',"));
 });
+
+
+test('pending goal actual caller and native PG anti-execution guards are mandatory',()=>{
+ for(const file of ['apps/metaengine-browser/src/client-prepared-goal.mjs','apps/metaengine-browser/test/client-prepared-goal.test.mjs','apps/metaengine-browser/src/client-goal-journal.mjs','infra/client-state-runtime/native-coding-pending-goal-v1.sql'])assert.ok(paths.some(pattern=>matches(file,pattern)),file);
+ for(const name of ['apps/metaengine-browser/test/client-prepared-goal.test.mjs','infra/client-state-runtime/native-coding-pending-goal.pg17.test.mjs'])assert.ok(source.includes("'"+name+"',"),name);
+});

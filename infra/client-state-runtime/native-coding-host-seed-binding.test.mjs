@@ -62,7 +62,7 @@ test('profile published after startup is discovered readonly without dispatching
  published=true;
  assert.deepEqual(await f.binding.operations.LIST_SEEDS(await f.request()),catalog);
  assert.equal(f.seen.created,2);assert.deepEqual(f.seen.calls.map(row=>row.action),['LIST_SEEDS']);
- assert.deepEqual(Object.keys(f.binding.operations).sort(),['LIST_SEEDS','PREPARE_WORKSPACE_V1','READ_SEED','READ_WORKSPACE_PREPARATION_V1','SEED_GOAL','close']);
+ assert.deepEqual(Object.keys(f.binding.operations).sort(),['ADMIT_PREPARED_GOAL_V1','LIST_SEEDS','PREPARE_WORKSPACE_V1','READ_PREPARED_GOAL_V1','READ_SEED','READ_WORKSPACE_PREPARATION_V1','SEED_GOAL','close']);
 });
 
 test('concurrent readonly discovery shares one creation and authenticates each packet separately',async t=>{
@@ -209,10 +209,11 @@ test('binding drain waits for a started request after close and cannot publish a
 
 test('new workspace actions authenticate real signed request before reading a missing stage, no seed catalog mutation',async t=>{
  const f=await fixture(t),input={preparation_id:randomUUID(),configuration_sha256:'a'.repeat(64)};
- for(const operation of ['READ_WORKSPACE_PREPARATION_V1','PREPARE_WORKSPACE_V1']){
-  const packet=await signNativeCodingDeviceRequest({identity:f.identity,binding:f.host,operation,input});
+ for(const operation of ['READ_WORKSPACE_PREPARATION_V1','PREPARE_WORKSPACE_V1','ADMIT_PREPARED_GOAL_V1','READ_PREPARED_GOAL_V1']){
+  const selected=operation.includes('PREPARED_GOAL')?{...input,request_id:randomUUID(),objective:'The actual generated user goal'}:input;
+  const packet=await signNativeCodingDeviceRequest({identity:f.identity,binding:f.host,operation,input:selected});
   await assert.rejects(f.binding.operations[operation](packet),{code:'ENOENT'});
   await assert.rejects(f.binding.operations[operation](packet),/nonce_reused/);
  }
- assert.equal(f.seen.created,0);assert.equal(f.seen.calls.length,0);assert.equal(f.seen.deviceQueries,4);
+ assert.equal(f.seen.created,0);assert.equal(f.seen.calls.length,0);assert.equal(f.seen.deviceQueries,8);
 });

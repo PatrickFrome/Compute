@@ -418,3 +418,11 @@ ACL and hardlink refusals are unchanged; no skip or timeout was added. Local
 stage tests 18/18 and actual PG17 3/3 pass. The new exact-head Windows aggregate
 must confirm this correction; its result is not inferred from local tests or the
 previous component lane.
+
+## Pending-goal follow-on implemented in source
+
+The next nonrunnable admission slice is now implemented and qualified in
+[PENDING_GOAL_ADMISSION.md](PENDING_GOAL_ADMISSION.md). It admits the actual
+user objective into a BLOCKED root and PAUSED project with no permits, using
+the existing signed workspace preparation. The later Owner custody and
+same-project/root activation steps above remain proposals, not enabled paths.

@@ -4,7 +4,7 @@ const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-
 function unavailable(previous) {
   return Object.freeze({
     schema: SCHEMA,
-    kind: previous?.kind === 'NATIVE_CODING' ? 'NATIVE_CODING' : 'UNAVAILABLE',
+    kind: ['NATIVE_CODING','PREPARED_GOAL'].includes(previous?.kind) ? previous.kind : 'UNAVAILABLE',
     state: 'HOLD',
     reason: 'GOAL_SUBMISSION_MODE_UNAVAILABLE',
     automatic_retry_allowed: false,
@@ -14,7 +14,7 @@ function unavailable(previous) {
 
 function normalize(value) {
   if (value?.schema !== SCHEMA
-    || !['NATIVE_CODING', 'BROWSER', 'UNAVAILABLE'].includes(value.kind)
+    || !['NATIVE_CODING', 'PREPARED_GOAL', 'BROWSER', 'UNAVAILABLE'].includes(value.kind)
     || !['HOST_VERIFICATION_REQUIRED', 'HOLD'].includes(value.state)
     || value.automatic_retry_allowed !== false || value.authority_effect !== false
     || (value.state === 'HOST_VERIFICATION_REQUIRED'
@@ -81,6 +81,8 @@ export function createGoalSubmissionModeObserver({ read, publish }) {
 }
 
 const HOLD_TEXT = Object.freeze({
+  PREPARED_GOAL_OWNER_ACTIVATION_REQUIRED: ['Project awaiting Owner activation', 'The root is BLOCKED and the project PAUSED. Zero execution permits were issued. This is not running or completed.'],
+  PREPARED_GOAL_READBACK_REQUIRED: ['Pending goal needs reconciliation', 'Only the saved request is read. A missing response never authorizes resubmission or execution.'],
   NATIVE_PROFILE_PREPARATION_REQUIRED: ['Native preparation is incomplete', 'Native configuration exists, but its verified goal profile has not been published. Complete native preparation before running this goal. No Browser fallback was selected.'],
   OWNED_RUNTIME_HOST_UNAVAILABLE: ['Local runtime unavailable', 'The owned local runtime is not ready. Check its status, then check admission again.'],
   NATIVE_PROFILE_PRESENCE_UNAVAILABLE: ['Native profile unavailable', 'The local runtime profile could not be inspected. Admission remains on hold.'],
@@ -115,6 +117,7 @@ export function goalSubmissionModeText(mode) {
       : ['Admission on hold', 'Admission has not been verified. Check admission again to read its current state.'];
     return { label, detail };
   }
+  if(mode.kind==='PREPARED_GOAL')return {label:'Save goal · await Owner activation',detail:'The verified preparation can record your goal as a paused project with a blocked root, zero permits and no execution. Owner activation remains required.'};
   if(mode.coordination_mode==='CHAT_LED')return {label:'Chat planner → Codex CLI → CRITIC',detail:'The protected profile starts a chat planner. Implementation proposals use native worker permits in the same project. Admission does not prove execution or review.'};
   return { label: 'Codex CLI · Host admission', detail: 'The Host verifies this task for native execution and independent review. Chat sessions have separate status. Admission does not prove execution.' };
 }

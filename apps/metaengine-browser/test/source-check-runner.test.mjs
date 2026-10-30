@@ -8,7 +8,7 @@ test('npm source check fits Windows cmd limits and checks the full catalog witho
   assert.equal(pkg.scripts.check,'node scripts/check-source.mjs');
   assert.ok(pkg.scripts.check.length<100);
   assert.equal(new Set(SOURCE_CHECK_FILES).size,SOURCE_CHECK_FILES.length);
-  for(const file of ['../../infra/client-state-runtime/native-coding-preparation-transaction.mjs','src/native-coding-workspace-preparation.mjs','../../infra/client-state-runtime/native-coding-workspace-preparation.mjs','src/client-native-runtime-observation.mjs','src/client-native-trust-boundary.mjs','../../infra/client-state-runtime/native-coding-seed-profile-preparation.mjs','../../infra/client-state-runtime/native-coding-seed-operator-publication.mjs','../../infra/client-state-runtime/native-coding-selector-move.mjs','src/main.mjs','src/preload-shell.cjs','src/github-chat-relay.mjs',
+  for(const file of ['src/client-prepared-goal.mjs','../../infra/client-state-runtime/native-coding-preparation-transaction.mjs','src/native-coding-workspace-preparation.mjs','../../infra/client-state-runtime/native-coding-workspace-preparation.mjs','src/client-native-runtime-observation.mjs','src/client-native-trust-boundary.mjs','../../infra/client-state-runtime/native-coding-seed-profile-preparation.mjs','../../infra/client-state-runtime/native-coding-seed-operator-publication.mjs','../../infra/client-state-runtime/native-coding-selector-move.mjs','src/main.mjs','src/preload-shell.cjs','src/github-chat-relay.mjs',
     'src/github-chat-egress-policy.mjs',
     'src/local-restored-pg17-auto-prepare.mjs',
     'src/private-windows-storage-acl.mjs',

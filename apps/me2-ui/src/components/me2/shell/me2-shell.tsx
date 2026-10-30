@@ -82,7 +82,13 @@ type NativeGoalAdmission={
   task_spec_sha256:string;permit_ids:string[];logical_policy:{max_depth:number|null;max_tasks:number|null;max_children:number|null};
   physical_execution_proven:false;global_actuation_granted:false;production_qualified:false;automatic_retry_allowed:false;authority_effect:false;
 };
-type GoalReceipt=ClientGoalSubmission|NativeGoalAdmission;
+type PendingGoalAdmission={
+  schema:"metaengine.native-coding.pending-goal-admission.v1";state:"PENDING_ACTIVATION";request_id:string;objective:string;
+  preparation_id:string;configuration_sha256:string;workspace_id:string;project_id:string;root_task_id:string;task_spec_sha256:string;
+  preparation_grant_epoch:number;root_state:"BLOCKED";project_state:"PAUSED";owner_incarnation_verified:false;execution_ready:false;
+  production_qualified:false;automatic_retry_allowed:false;authority_effect:false;
+};
+type GoalReceipt=ClientGoalSubmission|NativeGoalAdmission|PendingGoalAdmission;
 
 type ClientGoalProgress = {
   schema: "metaengine.client.goal-progress.v1"|"metaengine.client.native-coding-goal-progress.v1";
@@ -127,7 +133,7 @@ type ClientGoalExecutionProof = {
 type ClientGoalJournalEntry = {
   schema: "metaengine.client.goal-journal-entry.v1";
   request_id: string;
-  kind?:"BROWSER"|"NATIVE_CODING";
+  kind?:"BROWSER"|"NATIVE_CODING"|"PREPARED_GOAL";
   goal: string;
   state: string;
   receipt: GoalReceipt | null;
@@ -188,11 +194,15 @@ type ClientAdmissionRecoveryResult = {
   authority_effect: false;
 };
 
+type PendingGoalProgress = {
+  schema:"metaengine.client.pending-goal-progress.v1";request_id:string;state:string;
+  execution_ready:false;terminal:false;reconciliation_required:boolean;automatic_retry_allowed:false;authority_effect:false;
+};
 type ClientControlBridge = {
   submitGoal?: (goal: string) => Promise<GoalReceipt>;
   goalSubmissionMode?:()=>Promise<GoalSubmissionMode>;
   latestGoal?: () => Promise<ClientGoalJournalEntry | null>;
-  goalStatus?: (requestId: string) => Promise<ClientGoalProgress>;
+  goalStatus?: (requestId: string) => Promise<ClientGoalProgress|PendingGoalProgress>;
   selectAgent?: (agentId: string) => Promise<ClientAgentSelection>;
   workReadiness?: () => Promise<ClientWorkReadiness>;
   resumeAdmission?: () => Promise<ClientAdmissionRecoveryResult>;
@@ -307,7 +317,14 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
         || typeof latest.request_id !== "string" || !latest.request_id
         || latest.automatic_retry_allowed !== false || latest.authority_effect !== false
         || (latest.receipt !== null && (latest.receipt?.request_id !== latest.request_id
-          || !["metaengine.client.goal-submission.v1", "metaengine.native-coding.goal-admission.v1"].includes(latest.receipt?.schema)))
+          || !["metaengine.client.goal-submission.v1", "metaengine.native-coding.goal-admission.v1", "metaengine.native-coding.pending-goal-admission.v1"].includes(latest.receipt?.schema)))
+        || (latest.kind === "PREPARED_GOAL" && (latest.progress !== null || latest.execution_proof !== null
+          || !["SUBMITTING","RECONCILE_REQUIRED","PENDING_ACTIVATION"].includes(latest.state)
+          || (latest.state === "PENDING_ACTIVATION" && !latest.receipt)
+          || (latest.receipt !== null && (latest.receipt.schema !== "metaengine.native-coding.pending-goal-admission.v1"
+            || latest.receipt.state !== "PENDING_ACTIVATION" || latest.receipt.root_state !== "BLOCKED" || latest.receipt.project_state !== "PAUSED"
+            || latest.receipt.execution_ready !== false || latest.receipt.owner_incarnation_verified !== false
+            || latest.receipt.production_qualified !== false || latest.receipt.automatic_retry_allowed !== false || latest.receipt.authority_effect !== false))))
         || (latest.progress !== null && latest.progress?.request_id !== latest.request_id)
         || (latest.execution_proof !== null && latest.execution_proof?.request_id !== latest.request_id))) {
         throw new Error("goal_journal_readback_invalid");
@@ -315,7 +332,7 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
       // A new rejected request has no receipt; an empty journal has no current
       // task. Both replace the old presentation instead of inheriting its IDs.
       setJournalEntry(latest);
-      setReceipt(latest?.receipt ?? null);
+      setReceipt(latest?.kind === "PREPARED_GOAL" && latest.state !== "PENDING_ACTIVATION" ? null : latest?.receipt ?? null);
       return true;
     } catch {
       if (mounted.current && sequence === loadSequence.current) {
@@ -438,7 +455,7 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
       // valid submit. No submit occurs when the fresh read is unavailable.
       const mode = await modeObserver.refresh({ fresh: true });
       if(mode?.schema!=="metaengine.client.goal-submission-mode.v1"||mode.authority_effect!==false||mode.automatic_retry_allowed!==false
-        ||mode.state!=="HOST_VERIFICATION_REQUIRED"||!["BROWSER","NATIVE_CODING"].includes(mode.kind))throw new Error(mode?.reason||"Goal admission unavailable");
+        ||mode.state!=="HOST_VERIFICATION_REQUIRED"||!["BROWSER","NATIVE_CODING","PREPARED_GOAL"].includes(mode.kind))throw new Error(mode?.reason||"Goal admission unavailable");
       if(mode.kind==="BROWSER"){
         const freshReadiness = await loadReadiness();
         if (!freshReadiness?.execution_ready) {
@@ -450,7 +467,13 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
       // pending. A later mount must not revive that older submit operation.
       if (!mounted.current || submissionSequence !== loadSequence.current) return;
       const next = await bridge.submitGoal(value);
-      if (mode.kind==="NATIVE_CODING"?next?.schema!=="metaengine.native-coding.goal-admission.v1"||next.state!=="ADMITTED"
+      // The effect remains journaled in main even when a newer UI observation
+      // supersedes this ACK. Never overwrite that newer view or replay the goal.
+      if (!mounted.current || submissionSequence !== loadSequence.current) return;
+      if (mode.kind==="PREPARED_GOAL"?next?.schema!=="metaengine.native-coding.pending-goal-admission.v1"||next.state!=="PENDING_ACTIVATION"
+        ||next.root_state!=="BLOCKED"||next.project_state!=="PAUSED"||next.execution_ready!==false||next.owner_incarnation_verified!==false
+        ||next.production_qualified!==false||next.automatic_retry_allowed!==false||next.authority_effect!==false
+        :mode.kind==="NATIVE_CODING"?next?.schema!=="metaengine.native-coding.goal-admission.v1"||next.state!=="ADMITTED"
         ||next.physical_execution_proven!==false||next.production_qualified!==false||next.authority_effect!==false
         :next?.schema !== "metaengine.client.goal-submission.v1" || next.exact_activation_readback !== true) {
         throw new Error("goal_readback_invalid");
@@ -458,7 +481,8 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
       if (mounted.current) { setReceipt(next); setJournalEntry(null); setGoal(""); }
       await loadLatest();
     } catch (cause) {
-      if (mounted.current) setError(String((cause as Error)?.message || cause || "goal_submit_failed").slice(0, 180));
+      if (!mounted.current || submissionSequence !== loadSequence.current) return;
+      setError(String((cause as Error)?.message || cause || "goal_submit_failed").slice(0, 180));
       // A lost submit response is never retried as an effect. The Browser main
       // process has already attempted one read-only request_id reconciliation;
       // load that durable local correlation record instead.
@@ -471,8 +495,9 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
 
   const progress = journalEntry?.progress;
   const nativeReceipt=receipt?.schema==="metaengine.native-coding.goal-admission.v1"?receipt:null;
+  const pendingReceipt=receipt?.schema==="metaengine.native-coding.pending-goal-admission.v1"?receipt:null;
   const browserReceipt=receipt?.schema==="metaengine.client.goal-submission.v1"?receipt:null;
-  const isNative=journalEntry?.kind==="NATIVE_CODING"||Boolean(nativeReceipt)||goalMode?.kind==="NATIVE_CODING";
+  const isNative=journalEntry?.kind==="NATIVE_CODING"||journalEntry?.kind==="PREPARED_GOAL"||Boolean(nativeReceipt)||Boolean(pendingReceipt)||goalMode?.kind==="NATIVE_CODING"||goalMode?.kind==="PREPARED_GOAL";
   const modeText = goalSubmissionModeText(goalMode);
   const proof = journalEntry?.execution_proof;
   const labels: Record<string, string> = {
@@ -489,6 +514,7 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
     : isNative&&progress?.blocked_reason==="NATIVE_REVIEW_REJECTED"?"CRITIC rejected result · repair required"
     : isNative&&progress?.found&&progress.task_state==="COMPLETED"?`Root completed · project ${progress.project_state?.toLowerCase()||"unknown"}`
     : progress?.found ? labels[progress.task_state || ""] || "Awaiting status"
+    : receipt?.schema==="metaengine.native-coding.pending-goal-admission.v1"?"Project awaiting Owner activation · not running"
     : nativeReceipt?"Native goal admitted · execution pending"
     : receipt ? "Queued · accepted" : "";
 
@@ -523,7 +549,7 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
         data-testid="client-goal-submit"
         className="mc-soft-action h-8 shrink-0 rounded-lg px-4 text-[12px] font-medium disabled:opacity-40"
       >
-        {pending ? "Submitting…" : "Run"}
+        {pending ? "Submitting…" : goalMode?.kind==="PREPARED_GOAL" ? "Save goal" : "Run"}
       </button>
       <span className="min-w-0 max-w-[200px] truncate text-[12px] text-zinc-300" data-testid="client-goal-readback" role="status" aria-live="polite" title={status}>
         {status}
@@ -569,7 +595,7 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
         <DialogContent showCloseButton={false} className="mc-dark max-h-[85vh] overflow-y-auto border-zinc-700 bg-[#111114] text-zinc-100" data-testid="client-goal-status-dialog"
           onCloseAutoFocus={(event) => { event.preventDefault(); document.querySelector<HTMLButtonElement>('[data-testid="client-goal-details"]')?.focus(); }}>
           <DialogTitle>Task status</DialogTitle>
-          <DialogDescription className="text-zinc-400">{status || "No task submitted"}. {isNative?"Admission records a native project and task. Execution, independent review, checkpoint and continuation require separate runtime evidence.":"A queued task has been accepted for execution. A received result still requires independent verification before acceptance."}</DialogDescription>
+          <DialogDescription className="text-zinc-400">{status || "No task submitted"}. {pendingReceipt?"Project PAUSED; root BLOCKED. Zero execution permits. Owner activation is required; this is not running or completed.":isNative?"Admission records a native project and task. Execution, independent review, checkpoint and continuation require separate runtime evidence.":"A queued task has been accepted for execution. A received result still requires independent verification before acceptance."}</DialogDescription>
           {!isNative&&readiness ? <p className="text-[12px] text-zinc-400" data-testid="client-work-readiness-detail">
             Execution: {readiness.label}. {readiness.detail}
           </p> : null}
@@ -579,13 +605,13 @@ function GoalComposer({ detailOpen, onDetailOpenChange }: { detailOpen: boolean;
             {recoveryResult.prior_effect_replayed === false ? " No prior effect was replayed." : ""}
           </p> : null}
           <dl className="grid grid-cols-[90px_1fr] gap-2 text-[12px]">
-            <dt className="text-zinc-400">Task</dt><dd className="break-all font-mono">{progress?.task_id || nativeReceipt?.root_task_id || browserReceipt?.task_id || "Awaiting readback"}</dd>
+            <dt className="text-zinc-400">Task</dt><dd className="break-all font-mono">{progress?.task_id || pendingReceipt?.root_task_id || nativeReceipt?.root_task_id || browserReceipt?.task_id || "Awaiting readback"}</dd>
             <dt className="text-zinc-400">Request</dt><dd className="break-all font-mono">{journalEntry?.request_id || receipt?.request_id || "Unavailable"}</dd>
-            {isNative?<><dt className="text-zinc-400">Project</dt><dd className="break-all font-mono" data-testid="client-native-goal-project">{nativeReceipt?.project_id||"Awaiting admission"}</dd>
+            {isNative?<><dt className="text-zinc-400">Project</dt><dd className="break-all font-mono" data-testid="client-native-goal-project">{pendingReceipt?.project_id||nativeReceipt?.project_id||"Awaiting admission"}</dd>
               <dt className="text-zinc-400">Observed</dt><dd data-testid="client-native-goal-progress">{progress?.schema==="metaengine.client.native-coding-goal-progress.v1"?`${progress.project_state||"Unknown"} · ${progress.total_tasks??0} tasks · sequence ${progress.last_seq??0}`:"No project execution observation"}</dd>
               {progress?.observed_at?<><dt className="text-zinc-400">Read at</dt><dd>{progress.observed_at}</dd></>:null}
               {journalEntry?.project_error?<><dt className="text-amber-300">Observation</dt><dd className="text-amber-200">{journalEntry.project_error}; previous progress may be stale</dd></>:null}
-              <dt className="text-zinc-400">Admission</dt><dd>Execution proof is separate from admission</dd></>
+              <dt className="text-zinc-400">Admission</dt><dd>{pendingReceipt?"Pending Owner activation · zero permits · no execution":"Execution proof is separate from admission"}</dd></>
               :<><dt className="text-zinc-400">Agent origin</dt><dd>{proof?.user_goal_to_agent_readback ? "Verified ChatGPT Agent" : "Not yet verified"}</dd>
               <dt className="text-zinc-400">Result</dt><dd data-testid="client-goal-execution-proof">{proof?.user_goal_to_result_readback ? "Received · review pending" : "No result received"}</dd></>}
           </dl>

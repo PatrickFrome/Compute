@@ -84,6 +84,7 @@ import {
   normalizeClientGoalRequestId,
 } from './client-control-contract.mjs';
 import { createClientGoalJournalFileStore } from './client-goal-journal-file-store.mjs';
+import {createClientPreparedGoalRouter,readVerifiedPreparedGoalSelector} from './client-prepared-goal.mjs';
 import {createClientNativeCodingGoalRouter,readClientGoalSubmissionMode} from './client-native-coding-goal.mjs';
 import {signNativeCodingDeviceRequest} from './native-coding-device-request.mjs';
 import { ensureClientGoalProject } from './client-goal-project-link.mjs';
@@ -742,10 +743,14 @@ async function reconcileClientGoal(rawRequestId, expectedReceipt = null) {
 
 async function submitClientGoal(rawInput) {
   const journal = await ensureClientGoalJournal();
-  if(journal.snapshot().entries.some(entry=>entry.kind==='NATIVE_CODING'&&['SUBMITTING','RECONCILE_REQUIRED'].includes(entry.state)))
+  if(journal.snapshot().entries.some(entry=>entry.kind==='PREPARED_GOAL'||entry.kind==='NATIVE_CODING'&&['SUBMITTING','RECONCILE_REQUIRED'].includes(entry.state)))
     throw new Error('client_native_goal_previous_request_requires_readback');
   const mode=await readNativeGoalSubmissionMode();
   if(mode.state==='HOLD')throw new Error('client_goal_submission_hold:'+mode.reason);
+  if(mode.kind==='PREPARED_GOAL'){
+    const intent=normalizeClientGoalIntent(rawInput);
+    return createPreparedGoalRouter(journal).submit({request_id:randomUUID().toLowerCase(),goal:intent.goal});
+  }
   if(mode.kind==='NATIVE_CODING'){
     const intent=normalizeClientGoalIntent(rawInput);
     return createNativeGoalRouter(journal).submit({request_id:randomUUID().toLowerCase(),goal:intent.goal});
@@ -784,6 +789,10 @@ async function latestClientGoal() {
   const journal = await ensureClientGoalJournal();
   let latest = journal.latest();
   if (!latest) return null;
+  if(latest.kind==='PREPARED_GOAL'){
+    try{await createPreparedGoalRouter(journal).refresh(latest);}catch{}
+    return structuredClone(journal.get(latest.request_id));
+  }
   if(latest.kind==='NATIVE_CODING'){
     try{await createNativeGoalRouter(journal).refresh(latest);}catch{}
     return structuredClone(journal.get(latest.request_id));
@@ -808,6 +817,11 @@ async function refreshClientGoal(rawRequestId) {
   const journal = await ensureClientGoalJournal();
   const entry = journal.get(requestId);
   if (!entry) throw new Error('client_goal_request_unknown');
+  if(entry.kind==='PREPARED_GOAL'){
+    const observed=await createPreparedGoalRouter(journal).refresh(entry);
+    return {schema:'metaengine.client.pending-goal-progress.v1',request_id:requestId,state:observed.state,
+      execution_ready:false,terminal:false,reconciliation_required:observed.state!=='PENDING_ACTIVATION',automatic_retry_allowed:false,authority_effect:false};
+  }
   if(entry.kind==='NATIVE_CODING'){
     const observed=await createNativeGoalRouter(journal).refresh(entry);
     if(observed.state==='FAILED'&&observed.native_rejection)return {schema:'metaengine.client.native-coding-goal-progress.v1',request_id:requestId,found:false,
@@ -966,8 +980,40 @@ function createNativeGoalRouter(journal){
   });
 }
 
+async function readPreparedGoalSelector(){
+  const summary=readOwnedLocalRuntimeHostSummary();assertNativeCodingRuntimeMountOpen(summary);
+  if(!summary?.status_file)throw Error('client_prepared_goal_host_unavailable');
+  const closing=managedTaskProjectHostClosing;
+  const capability=createOwnedNativeCodingHostCapability(summary);
+  try{return await readVerifiedPreparedGoalSelector({stateDirectory:path.dirname(summary.status_file),identity:ensureSupervisorIdentity(),capability,
+    assertOpen:()=>{assertNativeCodingRuntimeMountOpen(summary);if(closing!==managedTaskProjectHostClosing)throw Error('client_prepared_goal_host_changed');}});}
+  finally{capability.close();}
+}
+function createPreparedGoalRouter(journal){
+  return createClientPreparedGoalRouter({journal,readSelector:readPreparedGoalSelector,request:async(operation,input)=>{
+    const summary=readOwnedLocalRuntimeHostSummary();assertNativeCodingRuntimeMountOpen(summary);
+    const closing=managedTaskProjectHostClosing;
+    const capability=createOwnedNativeCodingHostCapability(summary);
+    try{
+      const identity=ensureSupervisorIdentity(),before=identity.snapshot();
+      const assertIdentity=()=>{const after=ensureSupervisorIdentity().snapshot();
+        if(['device_id','client_id','key_fingerprint_sha256'].some(key=>before[key]!==after[key]))throw Error('client_prepared_goal_identity_changed');};
+      const signed=await signNativeCodingDeviceRequest({identity,binding:capability.snapshot(),operation,input});
+      assertIdentity();
+      assertNativeCodingRuntimeMountOpen(summary);if(closing!==managedTaskProjectHostClosing)throw Error('client_prepared_goal_host_changed');
+      const result=operation==='ADMIT_PREPARED_GOAL_V1'?await capability.admitPreparedGoal(signed):await capability.readPreparedGoal(signed);
+      assertIdentity();
+      assertNativeCodingRuntimeMountOpen(summary);if(closing!==managedTaskProjectHostClosing)throw Error('client_prepared_goal_host_changed');
+      return result;
+    }finally{capability.close();}
+  }});
+}
+
 async function readNativeGoalSubmissionMode(){
-  return readClientGoalSubmissionMode({readSummary:readOwnedLocalRuntimeHostSummary,readNativeBusy:async()=>{
+  const pending=(await ensureClientGoalJournal()).snapshot().entries.find(entry=>entry.kind==='PREPARED_GOAL');
+  if(pending)return {schema:'metaengine.client.goal-submission-mode.v1',kind:'PREPARED_GOAL',state:'HOLD',
+    reason:pending.state==='PENDING_ACTIVATION'?'PREPARED_GOAL_OWNER_ACTIVATION_REQUIRED':'PREPARED_GOAL_READBACK_REQUIRED',automatic_retry_allowed:false,authority_effect:false};
+  return readClientGoalSubmissionMode({readPreparedGoal:readPreparedGoalSelector,readSummary:readOwnedLocalRuntimeHostSummary,readNativeBusy:async()=>{
     const journal=await ensureClientGoalJournal();
     const active=[...journal.snapshot().entries].reverse().find(entry=>entry.kind==='NATIVE_CODING'&&entry.receipt
       &&(!entry.progress||entry.progress.project_state==='ACTIVE'));

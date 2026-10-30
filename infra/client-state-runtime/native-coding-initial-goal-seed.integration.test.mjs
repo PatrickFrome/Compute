@@ -85,6 +85,8 @@ test('private initial native goal admission is atomic and preserves the W30 auth
    '20261025080000_native_coding_worktree_lease_admission_v1.sql','20261025090000_native_coding_agent_project_tools_v1.sql','20261025100000_native_coding_checkpoint_commit_rotation_v1.sql',migration]){
    const bytes=await source(name);if(name===migration)migrationSha=hash(bytes);await sql.unsafe(bytes);
   }
+  // The pending-goal fences must preserve all existing v1/v2 seed and repair flows.
+  await sql.unsafe(await fs.readFile(new URL('./native-coding-pending-goal-v1.sql',import.meta.url),'utf8'));
   const invoke=async(f,input=f.input,observed=f.observation())=>sql.begin('isolation level serializable',async tx=>{
    await tx.unsafe('set local synchronous_commit=on');const text=canonical(observed);
    return(await tx.unsafe('select destruktion_meta.native_coding_seed_goal_v1($1,$2,$3,$4::text::jsonb,$4::text,$5) as value',

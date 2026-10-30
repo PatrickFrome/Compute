@@ -2,13 +2,14 @@ import { clientGoalExecutionProofMatchesProgress } from './client-control-contra
 import { clientUsefulWorkProofMatchesExecutionProof } from './client-useful-work-proof.mjs';
 import { normalizeClientProjectRegistration, normalizeNativeReviewRejection } from './client-project-continuity.mjs';
 import {normalizeNativeCodingGoalAdmission,nativeCodingGoalProject,normalizeNativeCodingSeedRejection} from './client-native-coding-goal.mjs';
+import {normalizePreparedGoalSelector,normalizePreparedGoalAdmission} from './client-prepared-goal.mjs';
 import {isDeepStrictEqual} from 'node:util';
 
 const SCHEMA = 'metaengine.client.goal-journal.v1';
 const ENTRY_SCHEMA = 'metaengine.client.goal-journal-entry.v1';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const STATES = new Set([
-  'SUBMITTING','ADMITTED','RECONCILE_REQUIRED',
+  'SUBMITTING','ADMITTED','RECONCILE_REQUIRED','PENDING_ACTIVATION',
   'READY','LEASED','RUNNING','SUSPENDED','RESULT_READY','BLOCKED',
   'COMPLETED','FAILED','AMBIGUOUS','FENCED',
 ]);
@@ -39,7 +40,8 @@ function normalizeEntry(value) {
   const goal = goalText(value.goal);
   const state = String(value.state || '').toUpperCase();
   const kind=value.kind??'BROWSER';
-  if(!['BROWSER','NATIVE_CODING'].includes(kind))throw new Error('client_goal_journal_kind_invalid');
+  if(!['BROWSER','NATIVE_CODING','PREPARED_GOAL'].includes(kind))throw new Error('client_goal_journal_kind_invalid');
+  if(state==='PENDING_ACTIVATION'&&kind!=='PREPARED_GOAL')throw new Error('client_goal_journal_pending_kind_invalid');
   if (!STATES.has(state)) throw new Error('client_goal_journal_state_invalid');
   if (value.authority_effect !== false || value.automatic_retry_allowed !== false) {
     throw new Error('client_goal_journal_authority_invalid');
@@ -53,13 +55,19 @@ function normalizeEntry(value) {
   const usefulWorkProof = executionProof && clientUsefulWorkProofMatchesExecutionProof(value.useful_work_proof, executionProof)
     ? clone(value.useful_work_proof)
     : null;
-  const receipt=kind==='NATIVE_CODING'&&value.receipt!=null
+  const preparedSelector=kind==='PREPARED_GOAL'?normalizePreparedGoalSelector(value.prepared_selector):null;
+  if(kind!=='PREPARED_GOAL'&&value.prepared_selector!=null)throw new Error('client_goal_journal_selector_kind_invalid');
+  const receipt=kind==='PREPARED_GOAL'&&value.receipt!=null?normalizePreparedGoalAdmission(value.receipt,{request_id:id,goal,prepared_selector:preparedSelector}):kind==='NATIVE_CODING'&&value.receipt!=null
     ?normalizeNativeCodingGoalAdmission(value.receipt,{request_id:id,objective:goal}):value.receipt;
   const nativeRejection=value.native_rejection==null?null:normalizeNativeCodingSeedRejection(value.native_rejection,{request_id:id,objective:goal});
   if(nativeRejection&&(kind!=='NATIVE_CODING'||state!=='FAILED'||receipt||progress||value.admitted_task_id||value.project))
     throw new Error('client_goal_journal_native_rejection_conflict');
   let project;
-  if(kind==='NATIVE_CODING'){
+  if(kind==='PREPARED_GOAL'){
+    if(!['SUBMITTING','RECONCILE_REQUIRED','PENDING_ACTIVATION'].includes(state)||progress||value.execution_proof||value.useful_work_proof||value.project||value.admitted_task_id||nativeRejection
+      ||(state==='PENDING_ACTIVATION'&&!receipt))throw new Error('client_goal_journal_pending_conflict');
+    project=null;
+  }else if(kind==='NATIVE_CODING'){
     project=receipt?nativeCodingGoalProject(receipt):null;
     if(value.project!=null&&!isDeepStrictEqual(value.project,project))throw new Error('client_goal_journal_native_project_drift');
     if(value.execution_proof!=null||value.useful_work_proof!=null)throw new Error('client_goal_journal_native_legacy_proof_invalid');
@@ -84,6 +92,7 @@ function normalizeEntry(value) {
     kind,
     goal,
     state,
+    ...(preparedSelector?{prepared_selector:preparedSelector}:{}),
     native_rejection:nativeRejection,
     receipt: receipt && typeof receipt === 'object' && !Array.isArray(receipt)
       ? Object.freeze(clone(receipt))
@@ -216,18 +225,19 @@ export class ClientGoalJournal {
     return write;
   }
 
-  async begin({ request_id, goal,kind='BROWSER' }) {
+  async begin({ request_id, goal,kind='BROWSER',prepared_selector=null }) {
     if (!this.#loaded) await this.load();
     const id = requestId(request_id);
     const text = goalText(goal);
     const observed = nowIso();
     return this.#replace(id, existing => {
-      if (existing && (existing.goal !== text||existing.kind!==kind)) throw new Error('client_goal_journal_request_collision');
+      if (existing && (existing.goal !== text||existing.kind!==kind||!isDeepStrictEqual(existing.prepared_selector??null,prepared_selector))) throw new Error('client_goal_journal_request_collision');
       if (existing) return existing;
       return {
         schema: ENTRY_SCHEMA,
         request_id: id,
         kind,
+        ...(prepared_selector?{prepared_selector}:{}),
         goal: text,
         state: 'SUBMITTING',
         receipt: null,
@@ -286,6 +296,16 @@ export class ClientGoalJournal {
         automatic_retry_allowed: false,
         authority_effect: false,
       };
+    });
+  }
+
+  async recordPreparedAdmission(receipt){
+    const id=requestId(receipt?.request_id);
+    return this.#replace(id,existing=>{
+      if(existing?.kind!=='PREPARED_GOAL')throw new Error('client_goal_journal_pending_request_missing');
+      const verified=normalizePreparedGoalAdmission(receipt,existing);
+      if(existing.receipt&&!isDeepStrictEqual(existing.receipt,verified))throw new Error('client_goal_journal_pending_admission_drift');
+      return {...existing,receipt:verified,state:'PENDING_ACTIVATION',last_error:null,project_error:null,updated_at:nowIso()};
     });
   }
 

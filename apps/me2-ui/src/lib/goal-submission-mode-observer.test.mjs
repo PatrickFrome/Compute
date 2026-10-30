@@ -206,3 +206,12 @@ test('chat-led profile explains the planned handoff without claiming execution',
   assert.match(text.detail,/does not prove execution or review/);
  }finally{stop();}
 });
+
+test('pending preparation mode explains zero permits and Owner activation, never execution readiness',()=>{
+ const mode={kind:'PREPARED_GOAL',state:'HOST_VERIFICATION_REQUIRED',reason:null};
+ assert.match(goalSubmissionModeText(mode).label,/Save goal/);
+ assert.match(goalSubmissionModeText(mode).detail,/zero permits and no execution/);
+ const waiting=goalSubmissionModeText({...mode,state:'HOLD',reason:'PREPARED_GOAL_OWNER_ACTIVATION_REQUIRED'});
+ assert.match(waiting.label,/Owner activation/);assert.match(waiting.detail,/BLOCKED.*PAUSED/);assert.match(waiting.detail,/not running or completed/);
+ const unknown=goalSubmissionModeText({...mode,state:'HOLD',reason:'PREPARED_GOAL_READBACK_REQUIRED'});assert.match(unknown.detail,/never authorizes resubmission/);
+});

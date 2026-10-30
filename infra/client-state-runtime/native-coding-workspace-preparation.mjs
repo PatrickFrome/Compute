@@ -14,8 +14,9 @@ const HASH=/^[a-f0-9]{64}$/;
 const INTENT='native-coding-workspace-preparation-intent-v1.json';
 const RECEIPT='native-coding-workspace-preparation-receipt-v1.json';
 // These are private constructor dependencies, not request-selected readers.
-// This stage writes only immutable local preparation records. It neither
-// registers a seed profile nor publishes any execution/operator permission.
+// Workspace preparation writes immutable local records. Explicit signed goal
+// admission additionally creates a BLOCKED/PAUSED own-PG binding, never a seed
+// profile, execution permit or Owner activation. Recovery never retries effects.
 export function createNativeWorkspacePreparation({transaction,stateDirectory,readCurrentDevice,readNativeScope,
  readStage=readNativeWorkspaceStage,readProtectedJson=readNativeCodingProtectedJson,
  verifyStorage=verifyOwnerOnlyWindowsStorage,readRootIdentity=readDirectoryIdentity,
@@ -33,7 +34,7 @@ export function createNativeWorkspacePreparation({transaction,stateDirectory,rea
   try{await handle.writeFile(json(value)+'\n');await handle.sync();}finally{await handle.close();}
   live(context);
  }
- async function run(input,write,context){
+ async function run(input,write,context,goal=null){
   live(context);
   if(!exact(input,['preparation_id','configuration_sha256'])||!/^[a-f0-9-]{36}$/.test(input.preparation_id||'')||!HASH.test(input.configuration_sha256||''))fail('selector_invalid');
   const staged=await readStage(stateDirectory,{verifyStorage,signal:context?.signal});live(context);
@@ -105,7 +106,43 @@ export function createNativeWorkspacePreparation({transaction,stateDirectory,rea
     }
     await revalidate(tx);return response(prior?'UNKNOWN':'NOT_STARTED');
    }
-   const before=await readback();if(!write||before.state!=='NOT_STARTED')return before;
+   const before=await readback();
+   if(goal){
+    if(before.state!=='PREPARED')fail('goal_preparation_required');
+    const goalFile='native-coding-pending-goal-intent-v1.json';
+    const goalIntent={schema:'metaengine.native-coding.pending-goal-intent.v1',input:goal,preparation:intent};
+    const prior=await load(goalFile,context);
+    if(prior&&!same(prior,goalIntent))fail('goal_intent_conflict');
+    const query=async mutate=>{
+     await revalidate(tx);
+     const rows=await tx.unsafe('select destruktion_meta.native_coding_pending_goal_v1($1::text::jsonb,$2::text::jsonb,$3::text::jsonb,$4::boolean) as receipt',
+      [json(goal),json(c),json(intent),mutate]);
+     if(rows.length!==1)fail('goal_readback_invalid');
+     return rows[0].receipt;
+    };
+    const response=admission=>({schema:'metaengine.native-coding.pending-goal-result.v1',
+     state:admission?'PENDING_ACTIVATION':prior?'READBACK_REQUIRED':'NOT_STARTED',admission,
+     automatic_retry_allowed:false,authority_effect:false});
+    const stored=await query(false);
+    if(stored&&!prior)fail('goal_intent_missing');
+    if(prior||!write)return response(stored);
+    // Irreversible no-overwrite dispatch fence BEFORE physical qualification or
+    // SQL mutation. Restart/unknown outcomes only re-read the same immutable ID.
+    await readNativeScope.prepare?.();await revalidate(tx);
+    try{await durable(goalFile,goalIntent,context,transactionOpen);}catch(error){
+     if(error.code==='EEXIST')return {schema:'metaengine.native-coding.pending-goal-result.v1',state:'READBACK_REQUIRED',admission:null,
+      automatic_retry_allowed:false,authority_effect:false};throw error;
+    }
+    if(!same(await load(goalFile,context),goalIntent))fail('goal_intent_conflict');
+    const scopeTransaction=Object.freeze({unsafe:(...args)=>{transactionOpen();return tx.unsafe(...args);}});
+    const transactionalScope=(permit,sandbox,_reader,request)=>readNativeScope(permit,sandbox,scopeTransaction,request);
+    if(typeof readNativeScope.batch==='function')transactionalScope.batch=(permits,sandbox,_reader,request)=>readNativeScope.batch(permits,sandbox,scopeTransaction,request);
+    await observe({profile:{...c,profile_id:c.preparation_id},profileSha256:input.configuration_sha256,
+     readNativeScope:transactionalScope,revalidate:()=>revalidate(tx),requestContext:context});
+    await revalidate(tx);
+    return response(await query(true));
+   }
+   if(!write||before.state!=='NOT_STARTED')return before;
    // Cold immutable image qualification precedes observation freshness and
    // Host intent; recovery/readback never invokes this preparatory reader.
    await readNativeScope.prepare?.();await revalidate(tx);
@@ -137,6 +174,14 @@ export function createNativeWorkspacePreparation({transaction,stateDirectory,rea
   }
   live(context);return result;
  }
- return Object.freeze({PREPARE_WORKSPACE_V1:(input,context)=>run(input,true,context),
+ function goal(input,write,context){
+  if(!exact(input,['preparation_id','configuration_sha256','request_id','objective'])
+   ||!/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(input.request_id||'')
+   ||typeof input.objective!=='string'||!input.objective||input.objective!==input.objective.trim()
+   ||[...input.objective].length>480||Buffer.byteLength(input.objective)>1920||/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(input.objective))fail('goal_input_invalid');
+  return run({preparation_id:input.preparation_id,configuration_sha256:input.configuration_sha256},write,context,input);
+ }
+ return Object.freeze({ADMIT_PREPARED_GOAL_V1:(input,context)=>goal(input,true,context),
+  READ_PREPARED_GOAL_V1:(input,context)=>goal(input,false,context),PREPARE_WORKSPACE_V1:(input,context)=>run(input,true,context),
   READ_WORKSPACE_PREPARATION_V1:(input,context)=>run(input,false,context),close(){closed=true;}});
 }

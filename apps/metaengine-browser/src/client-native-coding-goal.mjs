@@ -1,3 +1,4 @@
+import {normalizePreparedGoalSelector} from './client-prepared-goal.mjs';
 import {createHash} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
 import fs from 'node:fs/promises';
@@ -31,7 +32,7 @@ function nativeProfileStatusReason(error){
   return 'NATIVE_PROFILE_STATUS_UNAVAILABLE';
 }
 
-export async function readClientGoalSubmissionMode({readSummary,lstat=fs.lstat,readNativeBusy}={}){
+export async function readClientGoalSubmissionMode({readSummary,lstat=fs.lstat,readNativeBusy,readPreparedGoal}={}){
   const base={schema:'metaengine.client.goal-submission-mode.v1',automatic_retry_allowed:false,authority_effect:false};
   const summary=readSummary?.();
   if(!summary?.status_file)return {...base,kind:'UNAVAILABLE',state:'HOLD',reason:'OWNED_RUNTIME_HOST_UNAVAILABLE'};
@@ -43,6 +44,10 @@ export async function readClientGoalSubmissionMode({readSummary,lstat=fs.lstat,r
       catch(operatorError){
         if(operatorError?.code==='ENOENT')return {...base,kind:'BROWSER',state:'HOST_VERIFICATION_REQUIRED',reason:null};
         return {...base,kind:'UNAVAILABLE',state:'HOLD',reason:'NATIVE_PROFILE_PRESENCE_UNAVAILABLE'};
+      }
+      if(readPreparedGoal){
+        try{normalizePreparedGoalSelector(await readPreparedGoal());return {...base,kind:'PREPARED_GOAL',state:'HOST_VERIFICATION_REQUIRED',reason:null};}
+        catch{/* Unverified or revoked preparation is HOLD, never Browser fallback. */}
       }
       return {...base,kind:'NATIVE_CODING',state:'HOLD',reason:'NATIVE_PROFILE_PREPARATION_REQUIRED'};
     }

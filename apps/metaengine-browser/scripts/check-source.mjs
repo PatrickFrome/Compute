@@ -236,6 +236,7 @@ export const SOURCE_CHECK_FILES = Object.freeze([
   "src/autonomous-project-task-runtime.mjs",
   "src/client-project-continuity.mjs",
   "src/client-native-coding-goal.mjs",
+  "src/client-prepared-goal.mjs",
   "src/client-goal-project-link.mjs",
   "supabase/a2-browser-native-supervisor-v1/managed-project-routes.mjs",
   "supabase/a2-browser-native-supervisor-v1/project-continuity-routes.mjs",

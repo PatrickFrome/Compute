@@ -279,6 +279,10 @@
     {
       "path": "infra/client-state-runtime/native-coding-repair-v1.sql",
       "sha256": "0e3da30f34a70d45c8492e8e7ef96d41b878c1bb966cbc5d2e993cf4fb45107a"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-pending-goal-v1.sql",
+      "sha256": "e8457593dd5c8c12a372e594243b000e84b5eb0d3998cc8182b7fae4a0f89530"
     }
   ],
   "unresolved_dependencies": [

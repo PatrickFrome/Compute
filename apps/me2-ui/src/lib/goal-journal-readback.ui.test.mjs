@@ -219,3 +219,91 @@ test('goal status distinguishes suspended waiting from a rejected native review'
  assert.equal(actualStatus({journalEntry:{...entry(),project_error:'unavailable'},progress:{found:true,task_state:'SUSPENDED',blocked_reason:'NATIVE_REVIEW_REJECTED'}}),
   'Native observation unavailable','stale observations must remain labelled unavailable');
 });
+
+function pendingEntry(requestId=B){
+ return {...entry(requestId),kind:'PREPARED_GOAL',state:'PENDING_ACTIVATION',receipt:{
+  schema:'metaengine.native-coding.pending-goal-admission.v1',state:'PENDING_ACTIVATION',request_id:requestId,
+  root_task_id:ROOT,project_id:'11111111-2222-4333-8444-555555555555',root_state:'BLOCKED',project_state:'PAUSED',
+  owner_incarnation_verified:false,execution_ready:false,production_qualified:false,automatic_retry_allowed:false,authority_effect:false}};
+}
+test('actual pending readback renders Owner activation, never queued/running/completed, and refresh never submits',async()=>{
+ const f=fixture(),pending=pendingEntry();f.bridge.latestGoal=async()=>pending;
+ assert.equal(await f.load(),true);assert.equal(f.context.receipt,pending.receipt);
+ assert.equal(actualStatus({journalEntry:pending,receipt:pending.receipt,nativeReceipt:null,progress:null}),'Project awaiting Owner activation · not running');
+ await f.refresh();assert.deepEqual(f.observations.statusRequests,[B]);assert.deepEqual(f.observations.submissions,[]);
+});
+test('actual pending unknown readback removes previous positive receipt but retains request for readonly recovery',async()=>{
+ const f=fixture(pendingEntry()),unknown={...pendingEntry(),state:'RECONCILE_REQUIRED'};f.bridge.latestGoal=async()=>unknown;
+ await f.load();assert.equal(f.context.receipt,null);assert.equal(f.context.journalEntry.request_id,B);
+ await f.submit();assert.deepEqual(f.observations.submissions,[]);
+ await f.refresh();assert.deepEqual(f.observations.statusRequests,[B]);assert.equal(f.context.receipt,null);
+ assert.equal(actualStatus({journalEntry:unknown,receipt:null,nativeReceipt:null,progress:null}),'Needs reconciliation');
+});
+for(const mutate of [v=>v.receipt.execution_ready=true,v=>v.receipt.owner_incarnation_verified=true,v=>v.receipt.root_state='READY',
+ v=>v.receipt.project_state='ACTIVE',v=>v.receipt.schema='metaengine.native-coding.goal-admission.v1',v=>v.state='RUNNING'])
+ test('actual pending journal UI rejects a forged execution/active projection',async()=>{
+  const f=fixture(null),pending=pendingEntry();mutate(pending);f.bridge.latestGoal=async()=>pending;
+  assert.equal(await f.load(),false);assert.equal(f.context.receipt,null);assert.match(f.context.error,/unavailable/);
+ });
+test('actual prepared submit sends user text once, skips execution readiness, then reads pending receipt',async()=>{
+ const f=fixture(null),pending=pendingEntry();
+ f.context.modeObserver.refresh=async()=>({schema:'metaengine.client.goal-submission-mode.v1',kind:'PREPARED_GOAL',state:'HOST_VERIFICATION_REQUIRED',reason:null,automatic_retry_allowed:false,authority_effect:false});
+ f.context.loadReadiness=async()=>{throw Error('pending is not execution');};
+ f.bridge.submitGoal=async goal=>{f.observations.submissions.push(goal);return pending.receipt;};f.bridge.latestGoal=async()=>pending;
+ await f.submit();assert.deepEqual(f.observations.submissions,['Next isolated goal']);assert.equal(f.context.receipt.state,'PENDING_ACTIVATION');
+ await f.refresh();assert.equal(f.observations.submissions.length,1);
+});
+test('navigation during prepared mode read cancels before dispatch, without clearing an older pending journal',async()=>{
+ const pending=pendingEntry(),f=fixture(pending),read=deferred();f.context.modeObserver.refresh=()=>read.promise;
+ const submitted=f.submit();f.context.mounted.current=false;f.context.loadSequence.current++;
+ read.resolve({schema:'metaengine.client.goal-submission-mode.v1',kind:'PREPARED_GOAL',state:'HOST_VERIFICATION_REQUIRED',reason:null,automatic_retry_allowed:false,authority_effect:false});
+ await submitted;assert.deepEqual(f.observations.submissions,[]);assert.equal(f.context.journalEntry,pending);
+});
+test('navigation after dispatch never retries or clears pending intent on subsequent read',async()=>{
+ const f=fixture(null),ack=deferred(),pending=pendingEntry();let started;
+ const sent=new Promise(r=>started=r);
+ f.context.modeObserver.refresh=async()=>({schema:'metaengine.client.goal-submission-mode.v1',kind:'PREPARED_GOAL',state:'HOST_VERIFICATION_REQUIRED',reason:null,automatic_retry_allowed:false,authority_effect:false});
+ f.bridge.submitGoal=async goal=>{f.observations.submissions.push(goal);started();return ack.promise;};f.bridge.latestGoal=async()=>pending;
+ const submission=f.submit();await sent;f.context.mounted.current=false;f.context.loadSequence.current++;ack.resolve(pending.receipt);await submission;
+ assert.equal(f.observations.submissions.length,1);assert.equal(f.context.journalEntry,null);
+ f.context.mounted.current=true;await f.load();assert.equal(f.context.journalEntry,pending);await f.refresh();assert.equal(f.observations.submissions.length,1);
+});
+
+function jsxByTestId(id){
+ let found;function visit(node){
+  if(ts.isJsxElement(node)&&node.openingElement.attributes.properties.some(p=>ts.isJsxAttribute(p)&&p.name.getText(source)==='data-testid'&&p.initializer&&ts.isStringLiteral(p.initializer)&&p.initializer.text===id))found=node;
+  ts.forEachChild(node,visit);
+ }visit(composer);assert.ok(found,`shipped ${id} element`);return found;
+}
+function renderElement(node,context){
+ const executable=ts.transpileModule(`(${node.getText(source)})`,{compilerOptions:{target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText;
+ return vm.runInNewContext(executable,{React:{createElement:(tag,props,...children)=>({tag,props,children})},...context});
+}
+test('actual prepared button says Save goal, HOLD disables it, Enter invokes the same callback',async()=>{
+ let submissions=0;const submit=async()=>{submissions++;};
+ const context={pending:false,refreshing:false,recoveryPending:false,modeRefreshing:false,goal:'My objective',journalEntry:null,
+  goalMode:{kind:'PREPARED_GOAL',state:'HOST_VERIFICATION_REQUIRED'},submit};
+ const button=renderElement(jsxByTestId('client-goal-submit'),context);assert.equal(button.children[0],'Save goal');assert.equal(button.props.disabled,false);
+ button.props.onClick();assert.equal(submissions,1);
+ const held=renderElement(jsxByTestId('client-goal-submit'),{...context,goalMode:{kind:'PREPARED_GOAL',state:'HOLD'}});assert.equal(held.props.disabled,true);
+ let input;function visit(n){if(ts.isJsxSelfClosingElement(n)&&n.attributes.properties.some(p=>ts.isJsxAttribute(p)&&p.name.getText(source)==='data-testid'&&p.initializer?.text==='client-goal-input'))input=n;ts.forEachChild(n,visit);}visit(composer);
+ assert.ok(input);const rendered=renderElement(input,{...context,setGoal(){}});let prevented=false;
+ rendered.props.onKeyDown({key:'Enter',shiftKey:false,nativeEvent:{isComposing:false},preventDefault(){prevented=true;}});
+ assert.equal(prevented,true);assert.equal(submissions,2);
+ rendered.props.onKeyDown({key:'Enter',shiftKey:false,nativeEvent:{isComposing:true},preventDefault(){}});assert.equal(submissions,2);
+});
+
+for(const outcome of ['ACK','ERROR'])test(`newer observed request survives late prepared submit ${outcome}`,async()=>{
+ const f=fixture(null),ack=deferred(),older=pendingEntry(A),newer=pendingEntry(B);let started;
+ const sent=new Promise(r=>started=r);
+ f.context.modeObserver.refresh=async()=>({schema:'metaengine.client.goal-submission-mode.v1',kind:'PREPARED_GOAL',state:'HOST_VERIFICATION_REQUIRED',reason:null,automatic_retry_allowed:false,authority_effect:false});
+ f.bridge.submitGoal=async goal=>{f.observations.submissions.push(goal);started();return ack.promise;};
+ let reads=0;f.bridge.latestGoal=async()=>{reads++;return newer;};
+ const submission=f.submit();await sent;
+ await f.load();assert.equal(f.context.receipt,newer.receipt);const previousError=f.context.error;
+ if(outcome==='ACK')ack.resolve(older.receipt);else ack.reject(Error('late old error'));
+ await submission;
+ assert.equal(f.context.receipt,newer.receipt);assert.equal(f.context.journalEntry,newer);assert.equal(f.context.error,previousError);
+ assert.equal(f.context.goal,'Next isolated goal');assert.equal(reads,1,'obsolete completion must not start a newer read');
+ assert.equal(f.observations.submissions.length,1);assert.equal(f.context.operation.current,null);
+});

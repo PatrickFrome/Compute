@@ -6,6 +6,9 @@ on:
       - 'apps/metaengine-browser/src/codex-cli-sandbox-probe.mjs'
       - 'apps/metaengine-browser/test/codex-cli-sandbox-probe*.test.mjs'
       - 'apps/metaengine-browser/src/client-native-*.mjs'
+      - 'apps/metaengine-browser/src/client-prepared-goal.mjs'
+      - 'apps/metaengine-browser/test/client-prepared-goal.test.mjs'
+      - 'apps/metaengine-browser/src/client-goal-journal.mjs'
       - 'apps/metaengine-browser/src/main.mjs'
       - 'apps/metaengine-browser/test/client-native-*.test.mjs'
       - 'apps/metaengine-browser/src/client-native-coding-goal.mjs'
@@ -182,6 +185,7 @@ jobs:
             'infra/client-state-runtime/native-coding-workspace-preparation.test.mjs',
             'infra/client-state-runtime/native-coding-preparation-transaction.test.mjs',
             'apps/metaengine-browser/test/native-coding-workspace-preparation.test.mjs',
+            'apps/metaengine-browser/test/client-prepared-goal.test.mjs',
             'infra/client-state-runtime/native-coding-host-seed-service.test.mjs',
             'infra/client-state-runtime/native-coding-host-os-scope.test.mjs',
             'infra/client-state-runtime/native-coding-host-transaction-scope.test.mjs',
@@ -209,6 +213,7 @@ jobs:
           ];
           const native=[
             'infra/client-state-runtime/native-coding-workspace-preparation.pg17.test.mjs',
+            'infra/client-state-runtime/native-coding-pending-goal.pg17.test.mjs',
             'infra/client-state-runtime/native-coding-checkpoint-reconciliation.integration.test.mjs',
             'infra/client-state-runtime/native-coding-host-commit.integration.test.mjs',
             'infra/client-state-runtime/native-coding-host-commit-profile.integration.test.mjs',

@@ -1,6 +1,6 @@
 export type GoalSubmissionMode = {
   schema: "metaengine.client.goal-submission-mode.v1";
-  kind: "NATIVE_CODING" | "BROWSER" | "UNAVAILABLE";
+  kind: "NATIVE_CODING" | "PREPARED_GOAL" | "BROWSER" | "UNAVAILABLE";
   state: "HOST_VERIFICATION_REQUIRED" | "HOLD";
   reason: string | null;
   project_id?: string | null;

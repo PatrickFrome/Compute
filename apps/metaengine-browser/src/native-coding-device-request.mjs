@@ -1,6 +1,6 @@
 import {nativeCodingCanonicalJson as json} from './native-coding-task-context.mjs';
 
-export const NATIVE_CODING_DEVICE_PATHS=Object.freeze({PREPARE_WORKSPACE_V1:'/private/native-coding/prepare-workspace-v1',READ_WORKSPACE_PREPARATION_V1:'/private/native-coding/read-workspace-preparation-v1',SEED_GOAL:'/private/native-coding/seed-goal',
+export const NATIVE_CODING_DEVICE_PATHS=Object.freeze({ADMIT_PREPARED_GOAL_V1:'/private/native-coding/admit-prepared-goal-v1',READ_PREPARED_GOAL_V1:'/private/native-coding/read-prepared-goal-v1',PREPARE_WORKSPACE_V1:'/private/native-coding/prepare-workspace-v1',READ_WORKSPACE_PREPARATION_V1:'/private/native-coding/read-workspace-preparation-v1',SEED_GOAL:'/private/native-coding/seed-goal',
   READ_SEED:'/private/native-coding/read-seed',LIST_SEEDS:'/private/native-coding/list-seeds',
   SERVICE_HEARTBEAT:'/private/native-coding/service-heartbeat',READ_SERVICE_HEARTBEAT:'/private/native-coding/read-service-heartbeat'});
 export const NATIVE_CODING_DEVICE_HEADER_KEYS=Object.freeze(['content-type','x-a2-chat-bridge-client','x-a2-device-profile',
@@ -25,6 +25,12 @@ export function validateNativeCodingDeviceRequest(value,operation){
     if(!exact(input,['request_id','objective'])||!UUID.test(input.request_id||'')||typeof input.objective!=='string'
       ||!input.objective||input.objective!==input.objective.trim()||[...input.objective].length>480
       ||Buffer.byteLength(input.objective)>1920||/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(input.objective))fail('input_invalid');
+  }else if(['ADMIT_PREPARED_GOAL_V1','READ_PREPARED_GOAL_V1'].includes(operation)){
+    const input=body.input;
+    if(!exact(input,['preparation_id','configuration_sha256','request_id','objective'])||!UUID.test(input.request_id||'')
+      ||!UUID.test(input.preparation_id||'')||!/^[a-f0-9]{64}$/.test(input.configuration_sha256||'')
+      ||typeof input.objective!=='string'||!input.objective||input.objective!==input.objective.trim()
+      ||[...input.objective].length>480||Buffer.byteLength(input.objective)>1920||/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(input.objective))fail('input_invalid');
   }else if(['PREPARE_WORKSPACE_V1','READ_WORKSPACE_PREPARATION_V1'].includes(operation)){
     if(!exact(body.input,['preparation_id','configuration_sha256'])||!UUID.test(body.input.preparation_id||'')
       ||!/^[a-f0-9]{64}$/.test(body.input.configuration_sha256||''))fail('input_invalid');
