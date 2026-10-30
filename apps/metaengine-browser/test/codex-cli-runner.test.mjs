@@ -29,6 +29,18 @@ const id = n => `11111111-1111-4111-8111-${String(n).padStart(12, '0')}`;
 const agent = n => `agent_test-${String(n).padStart(8, '0')}`;
 const result = role => ({ schema: CODEX_CLI_RESULT_SCHEMA, role, outcome: 'DONE', summary: 'Useful change proposed', checks: [], followup_tasks: [] });
 
+test('Windows environment key aliases cannot shadow the explicit home or temporary directory',()=>{
+  const home=path.resolve('/fixture/home'),temporary=path.resolve('/fixture/temporary');
+  const env=codexCliEnvironment(home,{Path:'safe-path',temp:'ambient-temp',CoDeX_HoMe:'ambient-home',OPENAI_API_KEY:'secret'});
+  assert.equal(env.PATH,'safe-path');assert.equal(env.Path,undefined);assert.equal(env.CODEX_HOME,home);
+  const scoped=codexCliTemporaryEnvironment({...env,Temp:'other-temp',tmpdir:'other-directory'},temporary);
+  for(const key of Object.keys(scoped).filter(k=>['TEMP','TMP','TMPDIR'].includes(k.toUpperCase())))
+   assert.equal(scoped[key],temporary);
+  assert.equal(scoped.Temp,undefined);assert.equal(scoped.tmpdir,undefined);
+  assert.throws(()=>codexCliEnvironment(home,{PATH:'first',Path:'second'}),/environment_case_collision/);
+  assert.equal(codexCliEnvironment(home,{PATH:'same',Path:'same'}).PATH,'same');
+});
+
 test('packaged PowerShell helper resolves outside ASAR and is explicitly shipped as a resource', async () => {
   const resourcesPath = path.resolve(os.tmpdir(), 'packaged-resources');
   const moduleUrl = pathToFileURL(path.join(resourcesPath, 'app.asar', 'src', 'codex-cli-windows-process-controller.mjs')).href;

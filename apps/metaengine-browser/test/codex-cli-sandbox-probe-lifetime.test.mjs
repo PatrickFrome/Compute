@@ -26,8 +26,20 @@ function fixture({failOpen=0,failSpawn=false,failResume=false,failSync=false,fai
   readWindowsSandboxProcess:async()=>({}),readWindowsSandboxHostBoot:async()=>({}),
  });
  return {handles,events,finish,finishSync,run:extra=>run({cliPath:'/fixture/cli',workspaceRoot:'/fixture/work',receiptDirectory:'/fixture/receipts',
-  mode:'read-only',hostUserSid:'S-1-5-21-1',processController:{spawn:async()=>{events.push('spawn');if(failSpawn)throw Error('generated_spawn_failure');return handle;}},...extra})};
+  codexHome:'/fixture/auth',scratchRoot:'/fixture/scratch',mode:'read-only',hostUserSid:'S-1-5-21-1',processController:{spawn:async()=>{events.push('spawn');if(failSpawn)throw Error('generated_spawn_failure');return handle;}},...extra})};
 }
+test('probe refuses absent explicit home or scratch selection before creating files or spawning',async()=>{
+ for(const extra of [{codexHome:undefined},{scratchRoot:undefined},{codexHome:'relative'},{scratchRoot:'relative'}]){
+  const f=fixture();await assert.rejects(f.run(extra),/configuration_invalid/);
+  assert.equal(f.handles.length,0);assert.equal(f.events.includes('spawn'),false);
+ }
+});
+test('probe refuses authentication home overlapping worktree, receipts or scratch',async()=>{
+ for(const codexHome of ['/fixture/work','/fixture/work/auth','/fixture/receipts','/fixture/scratch','/fixture/scratch/auth']){
+  const f=fixture();await assert.rejects(f.run({codexHome}),/home_scope_invalid/);
+  assert.equal(f.handles.length,0);assert.equal(f.events.includes('spawn'),false);
+ }
+});
 test('partial log-open failure closes the log already owned without spawning a process',async()=>{
  const f=fixture({failOpen:2});await assert.rejects(f.run(),/generated_open_failure/);
  assert.equal(f.handles.length,1);assert.equal(f.handles[0].closed,true);assert.equal(f.events.includes('spawn'),false);

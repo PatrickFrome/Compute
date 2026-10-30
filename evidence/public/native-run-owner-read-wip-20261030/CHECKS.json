@@ -1,0 +1,20 @@
+{
+  "schema": "metaengine.incomplete-owner-read-checks.v1",
+  "status": "INCOMPLETE_UNMOUNTED_SOURCE_ONLY_NOT_QUALIFIED",
+  "fresh_overlay_tests": {
+    "pass": 62,
+    "fail": 0,
+    "skip": 0,
+    "raw_log_sha256": "7e65875c2756d059c3364872c4103ef411015ebeaff55860128056defd48919c"
+  },
+  "before_w68_repair": {
+    "pass": 0,
+    "fail": 2,
+    "original_compressed_log_sha256": "c89854fa1012217e52a8a845a1815a45b0ba3bd1a452a5292a02a66f72c4935c"
+  },
+  "source_provenance": "Ten source/test files exactly match the preserved incomplete snapshot; no new implementation in this overlay.",
+  "host_sql_ipc_main_mount": "NOT_IMPLEMENTED",
+  "native_qualification": "UNKNOWN",
+  "publication_gate": "CLOSED",
+  "publication_sql": "UNREGISTERED"
+}

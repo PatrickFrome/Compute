@@ -23,14 +23,23 @@ export function codexCliEnvironment(codexHome, source = process.env) {
   const allowed = new Set(['PATH', 'PATHEXT', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'USERPROFILE',
     'HOMEDRIVE', 'HOMEPATH', 'APPDATA', 'LOCALAPPDATA', 'PROGRAMFILES', 'PROGRAMFILES(X86)', 'COMSPEC',
     'LANG', 'LC_ALL', 'NUMBER_OF_PROCESSORS', 'PROCESSOR_ARCHITECTURE']);
-  const env = Object.fromEntries(Object.entries(source).filter(([key, value]) => allowed.has(key.toUpperCase()) && typeof value === 'string'));
+  const env = {};
+  // Windows treats environment names case-insensitively. Keep one canonical
+  // entry so inherited aliases cannot select a different path or temp root.
+  for (const [key,value] of Object.entries(source)) {
+    const name=key.toUpperCase();
+    if (!allowed.has(name)||typeof value!=='string') continue;
+    if (Object.hasOwn(env,name)&&env[name]!==value) throw fail('environment_case_collision');
+    env[name]=value;
+  }
   return { ...env, CODEX_HOME: codexHome, NO_COLOR: '1', GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1',
     GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null', GIT_PAGER: 'cat' };
 }
 
 export function codexCliTemporaryEnvironment(environment, temporaryPath) {
   if (!path.isAbsolute(temporaryPath || '')) throw fail('temporary_path_absolute_required');
-  return { ...environment, TEMP: temporaryPath, TMP: temporaryPath, TMPDIR: temporaryPath };
+  const clean=Object.fromEntries(Object.entries(environment).filter(([key])=>!['TEMP','TMP','TMPDIR'].includes(key.toUpperCase())));
+  return { ...clean, TEMP: temporaryPath, TMP: temporaryPath, TMPDIR: temporaryPath };
 }
 
 export function buildCodexCliArgv({ role, worktreePath, schemaPath, resultPath, model = null }) {

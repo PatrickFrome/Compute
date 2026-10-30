@@ -94,6 +94,24 @@ async function withFixture(fn) {
   const f=await makeFixture();try {await fn(f);} finally {f.remove();}
 }
 
+for(const finalRead of [false,true])test('W68 retains exact sibling after first sidecar rejection; final='+finalRead,async t=>{
+  await withFixture(async f=>{
+    let release,entered;const held=new Promise(r=>{release=r;}),started=new Promise(r=>{entered=r;});
+    const original=fs.promises.lstat.bind(fs.promises);
+    t.mock.method(fs.promises,'lstat',async(file,...args)=>{
+      if(finalRead?f.calls()>=2:true){
+        if(file===f.files.manifest)throw Error('generated first sidecar rejection');
+        if(file===f.files.bundle){entered();await held;throw Error('generated held sibling rejection');}
+      }
+      return original(file,...args);
+    });
+    let settled=false;const work=f.verify().then(value=>{settled=true;return value;});
+    await started;await new Promise(r=>setImmediate(r));const premature=settled;
+    release();assert.equal(await work,null);await new Promise(r=>setImmediate(r));
+    assert.equal(premature,false,'failure result is not physical join while original sibling is held');
+  });
+});
+
 test('real Ed25519 verification binds EXE digest, signer, source, version and two external proof byte digests; result remains STAGING', async () => {
   await withFixture(async f => {
     const proof=await f.verify();

@@ -1,0 +1,71 @@
+{
+  "schema": "metaengine.incomplete-owner-read-overlay.v1",
+  "public_parent": "3b6e31608c9a4d2fbf0ef37ace26e0eef1b17da0",
+  "original_incomplete_snapshot": "4bfb2a762a3097e7d7b944ae5010a8405d83c290",
+  "status": "INCOMPLETE_UNMOUNTED_NOT_QUALIFIED",
+  "exact_source_test_files": 10,
+  "private_ancestry_included": false,
+  "files": [
+    {
+      "path": "apps/metaengine-browser/src/browser-guardian-machine-bootstrap-launcher.mjs",
+      "bytes": 18484,
+      "sha256": "2947d5af38767b6346deebacf78ae31f8a6b4fdd3bbd5b5eb982919985f79dcc"
+    },
+    {
+      "path": "apps/metaengine-browser/src/browser-guardian-update-actuator-client.mjs",
+      "bytes": 15501,
+      "sha256": "aac1976ce99b5f8c58684c0fc94bd1d49147736928786e535a5918a2bf7e142e"
+    },
+    {
+      "path": "apps/metaengine-browser/src/host-owner-genesis-custody-w74.mjs",
+      "bytes": 22404,
+      "sha256": "e70478825549a076caec2ce3146279d6205f333f077beeb70e7d53687b82ad01"
+    },
+    {
+      "path": "apps/metaengine-browser/src/installed-executable-provenance-w68.mjs",
+      "bytes": 11934,
+      "sha256": "a61268033779bcd94954af820c9df9d22d4e5645b6aa9b2ed54c1fa210a6305a"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-run-owner-phase.mjs",
+      "bytes": 11877,
+      "sha256": "9c744eab32bbcb8c88bb02ee7f594a9f237424ed09e6812bbf1dbe141cade676"
+    },
+    {
+      "path": "apps/metaengine-browser/src/supervisor-device-identity.mjs",
+      "bytes": 38149,
+      "sha256": "428de5cdf92a73c17b7b33c8c1ba9786cc7039ef3669300289c97e922d1db3e8"
+    },
+    {
+      "path": "apps/metaengine-browser/test/fixtures/native-run-owner-read.mjs",
+      "bytes": 2764,
+      "sha256": "3a29d5f361ed36ac55248430b5a498ace89af94db69a7db2fbd8d8030eb45533"
+    },
+    {
+      "path": "apps/metaengine-browser/test/guardian-owner-loaded-read.test.mjs",
+      "bytes": 7883,
+      "sha256": "3c2fc0696f649b7d4c6d5f65f53bb93323b456549cb54f8351c310ed840db391"
+    },
+    {
+      "path": "apps/metaengine-browser/test/installed-executable-provenance-w68.test.mjs",
+      "bytes": 14478,
+      "sha256": "33568b8614a3766e06006bee4a8bd7b8a0974f0b9f53b58681e39be162f82369"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-run-owner-phase.test.mjs",
+      "bytes": 5104,
+      "sha256": "2e6d90d8325c7a42193a3c1b0196280cb97420f775c745a7a3e1d8e16b9bf96b"
+    },
+    {
+      "path": "evidence/public/native-run-owner-read-wip-20261030/HANDOFF.md",
+      "bytes": 4189,
+      "sha256": "bba7b7f76c3cf5c6e9e37b660ba451c5541d804f9f26b64b93b9276da98499e3"
+    },
+    {
+      "path": "evidence/public/native-run-owner-read-wip-20261030/CHECKS.json",
+      "bytes": 745,
+      "sha256": "ddf318f51fd8890e14d14bab9cd2b4ea88fa323fe98c3b95c389fddd6f340e0e"
+    }
+  ],
+  "manifest_self_excluded": true
+}

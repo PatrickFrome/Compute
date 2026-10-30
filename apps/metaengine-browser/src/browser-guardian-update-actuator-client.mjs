@@ -92,26 +92,53 @@ export function requestGuardianUpdatePipe(wireRequest, {
   pipeName = BROWSER_GUARDIAN_UPDATE_ACTUATOR_PIPE,
   timeoutMs = DEFAULT_TIMEOUT_MS,
 } = {}) {
+  return requestPipe(wireRequest,{pipeName,timeoutMs});
+}
+
+// Fixed READ-only purpose. Unlike the legacy update caller promise, this
+// promise owns the original socket until its actual close event. A deadline or
+// destroy() alone is never physical cleanup. No alternate pipe or effect wire.
+export function requestGuardianOwnerReadPipe(wireRequest,options={}) {
+  if(!options||Object.keys(options).some(key=>key!=='signal'))throw Error('guardian_owner_read_options_invalid');
+  const {signal}=options;
+  const fields=['wire_schema=metaengine\\.browser-guardian\\.owner-challenge-request\\.v1',
+    'command_id=[a-f0-9-]{36}','request_nonce=[A-Za-z0-9_-]{32,128}',
+    'public_jwk_x=[A-Za-z0-9_-]{43}','public_jwk_y=[A-Za-z0-9_-]{43}','signature=[A-Za-z0-9_-]{86}'];
+  if(typeof wireRequest!=='string'||!new RegExp('^'+fields.join('\\n')+'\\n$').test(wireRequest))
+    throw Error('guardian_owner_read_wire_invalid');
+  return requestPipe(wireRequest,{pipeName:BROWSER_GUARDIAN_UPDATE_ACTUATOR_PIPE,
+    timeoutMs:2000,signal,joinClose:true});
+}
+
+function requestPipe(wireRequest,{pipeName,timeoutMs,signal,joinClose=false}) {
   if (process.platform !== 'win32') throw new Error('guardian_update_actuator_windows_required');
   const request = String(wireRequest || '');
   if (!request.endsWith('\n') || Buffer.byteLength(request, 'utf8') > MAX_WIRE_BYTES) {
     throw new Error('guardian_update_actuator_wire_invalid');
   }
   return new Promise((resolve, reject) => {
+    if(signal?.aborted){reject(Error('guardian_owner_read_cancelled'));return;}
     const socket = net.createConnection(pipeName);
     const chunks = [];
     let total = 0;
     let settled = false;
     let connected = false;
     let deadlineTimer;
+    let closeObserved=false,terminal=null;
+    const complete=()=>{
+      if(!terminal||joinClose&&!closeObserved)return;
+      signal?.removeEventListener('abort',abort);
+      if(terminal.error)reject(terminal.error);else resolve(terminal.value);
+    };
     const finish = (error, value = null) => {
       if (settled) return;
       settled = true;
+      terminal={error,value};
       clearTimeout(deadlineTimer);
       try { socket.destroy(); } catch {}
-      if (error) reject(error);
-      else resolve(value);
+      complete();
     };
+    const abort=()=>finish(new Error('guardian_owner_read_cancelled'));
     const timeout = Math.max(1_000, Math.min(DEFAULT_TIMEOUT_MS, Number(timeoutMs) || DEFAULT_TIMEOUT_MS));
     // Inactivity timeout alone can be prolonged indefinitely by partial data.
     deadlineTimer = setTimeout(() => finish(new Error('guardian_update_actuator_pipe_timeout')), timeout);
@@ -142,8 +169,12 @@ export function requestGuardianUpdatePipe(wireRequest, {
       if (!settled) finish(new Error('guardian_update_actuator_pipe_ended_without_result'));
     });
     socket.once('close', () => {
+      closeObserved=true;
       if (!settled) finish(new Error('guardian_update_actuator_pipe_closed_without_result'));
+      else complete();
     });
+    signal?.addEventListener('abort',abort,{once:true});
+    if(signal?.aborted)abort();
   });
 }
 
@@ -165,10 +196,12 @@ export class BrowserGuardianUpdateActuatorClient {
     this.#transport = transport;
   }
 
-  async #ownerProbeRaw({ command_id, request_nonce } = {}) {
+  async #ownerProbeRaw({ command_id, request_nonce } = {},loaded=false,signal) {
     const commandId = exactUuid(command_id, 'guardian_command_id');
     const requestNonce = exactNonce(request_nonce);
-    const proof = await this.#identity.guardianOwnerChallenge({command_id:commandId,request_nonce:requestNonce});
+    const proof = loaded
+      ? this.#identity.guardianOwnerReadChallenge({command_id:commandId,request_nonce:requestNonce})
+      : await this.#identity.guardianOwnerChallenge({command_id:commandId,request_nonce:requestNonce});
     const jwk = exactJwk(proof.public_jwk);
     const request = wire([
       'wire_schema=metaengine.browser-guardian.owner-challenge-request.v1',
@@ -178,7 +211,7 @@ export class BrowserGuardianUpdateActuatorClient {
       `public_jwk_y=${jwk.y}`,
       `signature=${exactSignature(proof.signature)}`,
     ]);
-    const result = normalizeResult(await this.#transport(request,{timeoutMs:2_000}));
+    const result = normalizeResult(await (loaded?requestGuardianOwnerReadPipe(request,{signal}):this.#transport(request,{timeoutMs:2_000})));
     return {result,proof};
   }
 
@@ -201,6 +234,14 @@ export class BrowserGuardianUpdateActuatorClient {
     if (result.state === 'NO_EFFECT_PROVEN' && result.effect_absent_proven === true) return result;
     if (result.state === 'AMBIGUOUS') return result;
     throw new Error(`guardian_owner_observation_invalid:${result.state}:${result.reason}`);
+  }
+
+  async observeOwnerLoaded({command_id,request_nonce,signal}={}) {
+    if(typeof this.#identity.guardianOwnerReadChallenge!=='function')throw Error('guardian_owner_loaded_signer_required');
+    const {result,proof}=await this.#ownerProbeRaw({command_id,request_nonce},true,signal);
+    if(result.state==='OWNER_BOUND')return this.#assertOwnerBound(result,proof);
+    if(result.state==='NO_EFFECT_PROVEN'&&result.effect_absent_proven===true||result.state==='AMBIGUOUS')return result;
+    throw Error('guardian_owner_observation_unproven');
   }
 
   async probeOwner({ command_id, request_nonce } = {}) {
