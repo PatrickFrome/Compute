@@ -1,3 +1,6 @@
+import {createNativeCodingCapacityOwner} from '../src/native-coding-capacity-owner.mjs';
+import {createNativeHostScopeCleanup,drainNativeHostScopeCleanups,nativeHostScopeCleanupHeld,nativeHostScopeCleanupHold} from '../src/native-host-scope-cleanup.mjs';
+import {drainManagedRuntimeWorkers} from '../src/managed-runtime-drain.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash,randomUUID} from 'node:crypto';
@@ -201,28 +204,29 @@ async function mainMountFixture(){
   let capClosed=false,scopeWait=null,bound=null,failScope=false;
   const runtimeState={schema:'metaengine.native-coding.runtime.v1',closed:false,shutdown_state:'OPEN',host_unavailable_reason:null};
   const runtime={snapshot:()=>({...runtimeState}),close:async()=>{counts.runtimeClosed++;runtimeState.closed=true;runtimeState.shutdown_state='DRAINED';runtimeState.worker_cleanup_confirmed=true;return {...runtimeState};}};
-  const capability={snapshot:()=>({instance_id:summary.instance_id,host_pid:42,closed:capClosed}),
+  const capability={drainPhysical:async()=>({schema:'metaengine.native-coding.physical-drain.v1',cleanup_confirmed:true}),snapshot:()=>({instance_id:summary.instance_id,host_pid:42,closed:capClosed}),
     readScope:async()=>{if(scopeWait)await scopeWait;if(failScope){failScope=false;throw Error('transient scope read');}
       return {bindings:[{device_id:'device',client_id:'client',permit:{artifact:{cli_executable_sha256:'a'.repeat(64)}}}]};},
     close:()=>{counts.capabilityClosed++;capClosed=true;}};
-  const scope={nativeCodingRuntime:null,nativeCodingHostCapability:null,nativeCodingRuntimeMountPromise:null,nativeCodingRuntimeMountGeneration:null,nativeCodingRuntimeMountFailure:null,nativeCodingRuntimeMountDiagnostic:null,
+  const scope={nativeCodingCapacityOwner:createNativeCodingCapacityOwner(),nativeCodingRuntime:null,nativeCodingHostCapability:null,nativeCodingRuntimeMountPromise:null,nativeCodingRuntimeMountCustody:null,nativeSupervisorMountWaits:new Set(),nativeCodingRuntimeMountGeneration:null,nativeCodingRuntimeMountFailure:null,nativeCodingRuntimeMountDiagnostic:null,
     runtimeRecoveryGenerationLost:false,shutdownRequested:false,managedTaskProjectHostDrainPending:false,
     managedTaskProjectHostClosing:Promise.resolve(),nativeRuntimeInitializations:new Set(),nativeInitializationCleanupCandidates:new Set(),
     nativeSupervisor:{bindNativeCodingRuntime:value=>{counts.bind++;bound=value;},bindDevosProjectRuntime:()=>{},stop:()=>{},snapshot:()=>({})},autonomousProjectRuntime:null,
-    managedTaskProjectHost:null,supervisorLoopbackRpc:null,drainManagedRuntimeBindings,
+    managedTaskProjectHost:null,supervisorLoopbackRpc:null,drainManagedRuntimeBindings,drainManagedRuntimeWorkers,createNativeHostScopeCleanup,drainNativeHostScopeCleanups,nativeHostScopeCleanupHeld,nativeHostScopeCleanupHold,managedTaskProjectHostDrainHeld:false,nativeHostQuitShutdownPromise:null,pendingOwnerInitializationsByBarrier:new Map(),nativeSetupRouteInitializationsByBarrier:new Map(),nativeDraftScopeInitializationsByBarrier:new Map(),
     readOwnedLocalRuntimeHostSummary:()=>summary,readOwnedLocalRuntimeHostRecoveryObservation:async()=>({...generation}),
     createOwnedNativeCodingHostCapability:()=>{counts.capability++;capClosed=false;return capability;},
     ensureSupervisorIdentity:()=>({snapshot:()=>({device_id:'device',client_id:'client'})}),
     prepareNativeWorkspaceFromStage:async()=>null,
     readNativeCodingOperatorPaths:async()=>({}),resolveNativeCodingSandboxPin:()=>({}),
-    createNativeCodingRuntime:()=>{counts.construct++;return runtime;},
+    createNativeCodingRuntime:options=>{assert.equal(options.capacityOwner,scope.nativeCodingCapacityOwner);counts.construct++;return runtime;},
     readAgentResourceAdmission:()=>({physical_start_allowed:true}),
     fs:{lstat:async()=>({isFile:()=>true})},path:{dirname:()=> 'C:/private/runtime',join:(...parts)=>parts.join('/')},
     app:{},process:{resourcesPath:'C:/fixture/resources'},globalThis:{},
     initNativeSupervisor:async()=>{counts.init++;},recordStartupSubsystemDegraded:()=>{},
     createClientNativeCodingGoalRouter:options=>options,Error,Promise,Set};
   const closeSource=main.slice(main.indexOf('function closeManagedTaskProjectHost()'),main.indexOf('async function startInstalledRuntimeRecovery()'));
-  const context=vm.createContext(scope);vm.runInContext(source+closeSource,context);
+  const cleanupSource=main.slice(main.indexOf('async function cleanupNativeInitializationCandidate('),main.indexOf('function githubChatState()'));
+  const context=vm.createContext(scope);vm.runInContext(source+cleanupSource+closeSource,context);
   return {scope,context,summary,generation,runtimeState,counts,runtime,capability,get bound(){return bound;},failScopeOnce:()=>{failScope=true;},
     deferScope(){let release;scopeWait=new Promise(resolve=>{release=resolve;});return release;},
     onAdmitted:()=>context.createNativeGoalRouter({}).onAdmitted(),close:()=>context.closeManagedTaskProjectHost(),
@@ -427,7 +431,7 @@ test('projectSnapshot root/project/request drift is rejected as progress',async(
 test('native profile presence chooses native/HOLD; stopped Host and inaccessible presence never choose browser',async()=>{
   const summary={status_file:'C:/private/runtime/status.json'};const readSummary=()=>summary;
   assert.equal((await readClientGoalSubmissionMode({readSummary:()=>null})).kind,'UNAVAILABLE');
-  assert.equal((await readClientGoalSubmissionMode({readSummary,lstat:async()=>{throw Object.assign(Error(),{code:'ENOENT'});}})).kind,'BROWSER');
+  assert.equal((await readClientGoalSubmissionMode({readSummary,readNativeSetupRoute:async()=>({retained_intent:false,scope_resolved:true,authority_effect:false}),lstat:async()=>{throw Object.assign(Error(),{code:'ENOENT'});}})).kind,'BROWSER');
   const good=await readClientGoalSubmissionMode({readSummary,lstat:async()=>({isFile:()=>true,isSymbolicLink:()=>false,nlink:1})});
   assert.equal(good.kind,'NATIVE_CODING');assert.equal(good.state,'HOST_VERIFICATION_REQUIRED');
   const bad=await readClientGoalSubmissionMode({readSummary,lstat:async()=>({isFile:()=>true,isSymbolicLink:()=>true,nlink:1})});
@@ -575,4 +579,43 @@ test('actual main consumes explicit preparation before permits; unknown blocks m
   else{await f.onAdmitted();assert.equal(f.counts.construct,1);}
   assert.equal(calls,1);
  }
+});
+
+test('actual Main default owner exists before descriptors and a missing descriptor leaves zero capacity',async()=>{
+ const main=await readFile(new URL('../src/main.mjs',import.meta.url),'utf8');
+ assert.ok(main.indexOf('const nativeCodingCapacityOwner = createNativeCodingCapacityOwner();')<main.indexOf('function ensureNativeCodingRuntimeMounted()'));
+ const f=await mainMountFixture();f.scope.fs.lstat=async()=>null;
+ assert.equal(await f.context.ensureNativeCodingRuntimeMounted(),null);
+ assert.equal(f.scope.nativeCodingCapacityOwner.snapshot({configuredCeiling:4,resourceCeiling:4}).projection.free_slots,0);
+ assert.equal(f.counts.construct,0);
+});
+
+for(const stage of ['preparation','scope'])for(const upgrade of [false,true])test(`unpublished ${stage} scope is registered before dispatch and quit upgrade=${upgrade} fences late runtime creation`,async()=>{
+ const f=await mainMountFixture();let release,entered;const waiting=new Promise(r=>{release=r;}),started=new Promise(r=>{entered=r;});
+ const operation=async()=>{assert.equal(f.scope.nativeCodingRuntimeMountCustody?.capability,f.capability);entered();await waiting;throw Error('fixture Host terminal UNKNOWN');};
+ if(stage==='preparation')f.scope.prepareNativeWorkspaceFromStage=operation;else f.capability.readScope=operation;
+ let stops=0;f.scope.stopOwnedLocalRuntimeHost=async()=>{stops++;release();return{cleanup_confirmed:true};};
+ const mount=f.context.ensureNativeCodingRuntimeMounted();mount.catch(()=>{});await started;
+ assert.equal(f.scope.nativeCodingRuntime,null);assert.equal(f.counts.construct,0);
+ f.scope.shutdownRequested=!upgrade;const close=f.close();assert.equal(f.close(),close);
+ try{
+  if(upgrade){await new Promise(r=>setImmediate(r));assert.equal(stops,0);f.scope.shutdownRequested=true;assert.equal(f.close(),close);}
+  await new Promise(r=>setImmediate(r));await new Promise(r=>setImmediate(r));assert.equal(stops,1,'unpublished Host query must not strand explicit quit');
+  assert.equal((await close).cleanup_confirmed,true);await assert.rejects(mount,/fixture Host terminal UNKNOWN/);
+ }finally{release();await mount.catch(()=>{});await close.catch(()=>{});}
+ assert.equal(f.counts.construct,0);assert.equal(f.bound,null);assert.equal(f.counts.capabilityClosed,1);assert.equal(f.scope.nativeCodingRuntimeMountCustody,null);
+ await assert.rejects(f.onAdmitted(),/mount_closing/);assert.equal(f.counts.capability,1);
+});
+test('mount caller UNKNOWN cannot retire original capability before physical settlement; quit joins retained scope',async()=>{
+ const f=await mainMountFixture();let physical=false,stops=0;
+ f.capability.readScope=async()=>{throw Error('fixture caller UNKNOWN');};
+ f.capability.drainPhysical=async()=>{if(!physical)throw Error('fixture SQL pending');return{schema:'metaengine.native-coding.physical-drain.v1',cleanup_confirmed:true};};
+ await assert.rejects(f.onAdmitted(),/fixture caller UNKNOWN/);assert.equal(f.counts.capabilityClosed,0);
+ assert.equal(f.scope.nativeCodingRuntimeMountCustody.capability,f.capability);assert.equal(f.scope.nativeCodingRuntimeMountCustody.failed,true);
+ assert.equal(f.scope.nativeCodingHostCapability,f.capability);assert.equal(f.scope.nativeRuntimeInitializations.size,0);
+ await assert.rejects(f.onAdmitted(),/cleanup_unconfirmed/);assert.equal(f.counts.capability,1);
+ await assert.rejects(f.close(),nativeHostScopeCleanupHeld);assert.equal(stops,0);assert.equal(f.counts.capabilityClosed,0);
+ f.scope.shutdownRequested=true;f.scope.stopOwnedLocalRuntimeHost=async()=>{stops++;physical=true;return{cleanup_confirmed:true};};
+ assert.equal((await f.close()).cleanup_confirmed,true);assert.equal(stops,1);assert.equal(f.counts.capabilityClosed,1);
+ assert.equal(f.scope.nativeCodingRuntimeMountCustody,null);assert.equal(f.scope.nativeCodingHostCapability,null);
 });

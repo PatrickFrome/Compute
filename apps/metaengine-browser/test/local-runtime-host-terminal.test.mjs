@@ -53,11 +53,15 @@ for (const [name, plan, command] of [
     const f = await createLocalRuntimeRecoveryFixture(t);
     f.queueGeneration(plan);
     const first = await f.controller.startConfiguredLocalRuntimeHost(f.startOptions);
+    const capability=f.controller.createOwnedNativeCodingHostCapability(first);
+    const pending=capability.readScope();pending.catch(()=>{});capability.close();await assert.rejects(pending);
     await f.command(1, command);
     await f.children[0].ended;
     const stopped = await f.controller.stopOwnedLocalRuntimeHost({ timeoutMs: 2_000 });
     assert.equal(stopped.state, 'CLEANUP_UNCONFIRMED');
     assert.equal(stopped.cleanup_confirmed, false);
+    await assert.rejects(capability.drainPhysical(),error=>error.reason==='PHYSICAL_CLEANUP_UNCONFIRMED');
+    assert.equal(capability.snapshot().physical_inflight,1);
     assert.equal(f.controller.ownedLocalRuntimeHostReady(first), false);
     await assert.rejects(f.controller.startConfiguredLocalRuntimeHost(f.startOptions), /local_runtime_host_/);
     assert.equal(f.children.length, 1);

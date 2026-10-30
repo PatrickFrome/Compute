@@ -1,3 +1,5 @@
+import {readNativeCodingWindowsProcess} from './native-coding-windows-process-observer.mjs';
+import {CODEX_CLI_JOB_PROTOCOL,CODEX_CLI_JOINED_SETTLEMENT_SCHEMA,createCodexCliLaunch,validateCodexCliLaunch,codexCliLaunchWire,codexCliLaunchIdentity,codexCliPublicProcess,codexCliProcessIdentity,codexCliSettlementSha256,validateCodexCliNativeTerminal,validateCodexCliJoinedSettlement,codexCliHelperFileIdentitySha256} from './codex-cli-physical-settlement.mjs';
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
@@ -8,6 +10,11 @@ import { fileURLToPath } from 'node:url';
 const fail = reason => new Error(`codex_cli_process_${reason}`);
 const sha256 = value => createHash('sha256').update(value).digest('hex');
 const validDigest = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+function helperFileIdentity(file){
+  const s=fs.lstatSync(file,{bigint:true});
+  if(!s.isFile()||s.isSymbolicLink()||s.nlink!==1n||path.resolve(fs.realpathSync(file)).toLowerCase()!==path.resolve(file).toLowerCase())throw fail('helper_file_identity');
+  return codexCliHelperFileIdentitySha256(s);
+}
 
 export function resolveCodexCliJobRuntime({ moduleUrl = import.meta.url, resourcesPath = process.resourcesPath } = {}) {
   const modulePath = fileURLToPath(moduleUrl);
@@ -45,28 +52,29 @@ export function verifyCodexCliJobHelper({ helperPath, expectedHelperSha256, modu
     if (!path.isAbsolute(helperPath || '') || !validDigest(expectedHelperSha256)) throw fail('helper_pin_required');
     const bytes = readBoundedFile(helperPath, 4 * 1024 * 1024, 'helper_unreadable');
     if (sha256(bytes) !== expectedHelperSha256) throw fail('helper_digest_mismatch');
-    return Object.freeze({ helperPath, helperSha256: expectedHelperSha256 });
+    return Object.freeze({ helperPath, helperSha256: expectedHelperSha256, runtimeManifestSha256: null });
   }
   if (expectedHelperSha256 !== undefined) throw fail('helper_pin_requires_explicit_path');
   const runtime = resolveCodexCliJobRuntime({ moduleUrl, resourcesPath });
-  let manifest;
-  try { manifest = JSON.parse(readBoundedFile(runtime.manifestPath, 16384, 'runtime_unprepared').toString('utf8')); }
+  let manifest,manifestBytes;
+  try { manifestBytes=readBoundedFile(runtime.manifestPath,16384,'runtime_unprepared');manifest = JSON.parse(manifestBytes.toString('utf8')); }
   catch (error) { if (error.message === 'codex_cli_process_runtime_unprepared') throw error; throw fail('runtime_manifest_invalid'); }
-  if (manifest?.schema !== 'metaengine.codex-cli.job-runtime.v1' || manifest.build_mode !== 'PRECOMPILED_FRAMEWORK_CSHARP'
+  if (manifest?.schema !== 'metaengine.codex-cli.job-runtime.v1' || manifest.build_mode !== 'PRECOMPILED_FRAMEWORK_CSHARP' || manifest.custody_protocol!==CODEX_CLI_JOB_PROTOCOL
     || !['template_sha256', 'csharp_sha256', 'assembly_sha256', 'helper_sha256', 'compiler_executable_sha256'].every(key => validDigest(manifest[key])))
     throw fail('runtime_manifest_invalid');
   if (runtime.templatePath && sha256(readBoundedFile(runtime.templatePath, 1024 * 1024, 'runtime_template_unreadable')) !== manifest.template_sha256)
     throw fail('runtime_template_changed');
   const bytes = readBoundedFile(runtime.helperPath, 4 * 1024 * 1024, 'runtime_unprepared');
   if (sha256(bytes) !== manifest.helper_sha256) throw fail('helper_digest_mismatch');
-  return Object.freeze({ helperPath: runtime.helperPath, helperSha256: manifest.helper_sha256 });
+  return Object.freeze({ helperPath: runtime.helperPath, helperSha256: manifest.helper_sha256, runtimeManifestSha256:sha256(manifestBytes) });
 }
 
 /** A private process controller, not an OS sandbox or a lease issuer. */
 export function createCodexCliWindowsProcessController({ helperPath, expectedHelperSha256,
   powershellPath = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
-  startupTimeoutMs = 30000 } = {}) {
+  startupTimeoutMs = 30000, readProcess=readNativeCodingWindowsProcess } = {}) {
   if (process.platform !== 'win32') throw fail('windows_required');
+  if(typeof readProcess!=='function')throw fail('native_observer_required');
   if (!path.isAbsolute(helperPath ?? resolveCodexCliJobHelper()) || !path.isAbsolute(powershellPath)) throw fail('absolute_paths_required');
   if (helperPath !== undefined && !validDigest(expectedHelperSha256)) throw fail('helper_pin_required');
   if (helperPath === undefined && expectedHelperSha256 !== undefined) throw fail('helper_pin_requires_explicit_path');
@@ -80,13 +88,16 @@ export function createCodexCliWindowsProcessController({ helperPath, expectedHel
         || !Number.isSafeInteger(spec.timeoutMs) || spec.timeoutMs < 100 || spec.timeoutMs > 1800000) throw fail('spec_invalid');
       // Revalidate immediately before every launch. A missing/stale preparation
       // cannot trigger compilation, choose a cache or fall back to the template.
+      const launch=spec.launch??createCodexCliLaunch(spec);validateCodexCliLaunch(launch,spec);
+      const launchIdentity=codexCliLaunchIdentity(launch);
       const verified = verifyCodexCliJobHelper({ helperPath, expectedHelperSha256 });
+      const helperFile=helperFileIdentity(verified.helperPath);
       const helper = spawn(powershellPath, ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', verified.helperPath], {
         cwd: spec.cwd, env: spec.env, windowsHide: true, shell: false, stdio: ['pipe', 'pipe', 'pipe'],
       });
       const stdout = new PassThrough(); const stderr = new PassThrough();
       let proof = null, resumeIssued = false, resumed = false, terminationIssued = false, cancellation = null;
-      let finished = false, pending = '', terminal = null, helperErrorBytes = 0, failureReason = null;
+      let finished = false, pending = '', terminal = null, helperErrorBytes = 0, failureReason = null,helperValidated=false,killIssued=false;
       let resolveReady, rejectReady, resolveCompletion;
       const ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
       const completion = new Promise(resolve => { resolveCompletion = resolve; });
@@ -95,10 +106,21 @@ export function createCodexCliWindowsProcessController({ helperPath, expectedHel
         if (!proof) rejectReady(fail(failureReason || reason || 'not_started'));
         stdout.end(); stderr.end();
         if (terminal && pending.length) failureReason ||= 'CONTROLLER_PROTOCOL_INVALID';
-        resolveCompletion((terminal && !failureReason && exitCode === 0 && helperSignal === null && !pending.length) ? terminal : { exit_code: exitCode, signal: null, reason: failureReason || reason,
-          tree_cleanup_confirmed: false, process_tree_control: 'WINDOWS_JOB_OBJECT' });
+        if(terminal&&!failureReason&&helperValidated&&exitCode===0&&helperSignal===null&&!pending.length&&helperErrorBytes===0){
+          const joined={schema:CODEX_CLI_JOINED_SETTLEMENT_SCHEMA,scope:'WINDOWS_HELPER_TREE',launch:launchIdentity,helper_process:proof.helper_process,
+            helper_sha256:proof.helper_sha256,helper_file_identity_sha256:proof.helper_file_identity_sha256,runtime_manifest_sha256:proof.runtime_manifest_sha256,
+            worker_process:codexCliPublicProcess(proof),native_terminal:terminal,native_terminal_sha256:codexCliSettlementSha256(terminal),
+            parent_join:{event:'close',helper_pid:helper.pid,helper_process_incarnation_id:proof.helper_process.process_incarnation_id,
+              exit_code:exitCode,signal:helperSignal,transport:'STDIO_CLOSE_DRAINED'}};
+          try{validateCodexCliJoinedSettlement(joined,{proof,launch});
+            resolveCompletion({...terminal,signal:null,joined_settlement:joined});return;
+          }catch{failureReason='CONTROLLER_JOIN_INVALID';}
+        }
+        resolveCompletion({exit_code:exitCode,signal:null,reason:failureReason||reason||'CONTROLLER_EXIT_UNPROVEN',
+          tree_cleanup_confirmed:false,process_tree_control:'WINDOWS_JOB_OBJECT'});
       };
-      const stop = reason => { failureReason ||= reason; helper.kill(); };
+      const stop = reason => { failureReason ||= reason;if(killIssued||finished)return;killIssued=true;
+        try{helper.kill();}catch{/* An unconfirmed kill NEVER settles the owned close. */} };
       const protocolFailure = () => stop('CONTROLLER_PROTOCOL_INVALID');
       const startupTimer = setTimeout(() => stop('CONTROLLER_STARTUP_TIMEOUT'), startupTimeoutMs);
       const frame = value => {
@@ -113,33 +135,26 @@ export function createCodexCliWindowsProcessController({ helperPath, expectedHel
             || value.tree_control_bound !== true || value.started_suspended !== true
             || value.process_tree_control !== 'WINDOWS_JOB_OBJECT'
             || value.job_bound_before_resume !== true || value.job_id !== spec.runId || !/^S-1-/.test(value.user_sid || '')) return protocolFailure();
+          try{codexCliProcessIdentity(value.helper_process);codexCliProcessIdentity(codexCliPublicProcess(value));
+            if(!Number.isSafeInteger(helper.pid)||value.helper_process.pid!==helper.pid||value.pid===helper.pid
+              ||codexCliSettlementSha256(value.launch)!==codexCliSettlementSha256(launchIdentity))return protocolFailure();
+          }catch{return protocolFailure();}
           const {type,...nativeProof}=value;
-          proof = Object.freeze(nativeProof); clearTimeout(startupTimer); resolveReady(proof);
+          proof = Object.freeze({...nativeProof,launch:Object.freeze({...launchIdentity}),helper_process:Object.freeze({...value.helper_process}),
+            helper_sha256:verified.helperSha256,helper_file_identity_sha256:helperFile,
+            runtime_manifest_sha256:verified.runtimeManifestSha256}); clearTimeout(startupTimer); resolveReady(proof);
         } else if (value.type === 'resumed') {
-          if (!proof || !resumeIssued || cancellation || resumed) return protocolFailure(); resumed = true;
+          if (!proof || !resumeIssued || cancellation || resumed||value.request_id!==launchIdentity.request_id
+            ||value.request_sha256!==launchIdentity.request_sha256) return protocolFailure(); resumed = true;
         } else if (value.type === 'output') {
           if (!proof || !resumed || !['stdout', 'stderr'].includes(value.channel)
             || typeof value.data_b64 !== 'string' || value.data_b64.length > 8192
             || !/^[A-Za-z0-9+/]*={0,2}$/.test(value.data_b64)) return protocolFailure();
           (value.channel === 'stdout' ? stdout : stderr).write(Buffer.from(value.data_b64, 'base64'));
-        } else if (value.type === 'suspended_cancelled') {
-          const accounting = value.job_accounting;
-          if (!proof || !cancellation || resumeIssued || resumed
-            || value.cancellation_id !== cancellation.id || value.reason !== cancellation.reason
-            || value.run_id !== proof.job_id || value.job_id !== proof.job_id || value.pid !== proof.pid
-            || value.process_incarnation_id !== proof.process_incarnation_id
-            || value.exit_code !== 125 || value.process_exit_confirmed !== true || value.never_resumed !== true
-            || value.handles_closed !== true || value.tree_cleanup_confirmed !== true
-            || value.process_tree_control !== 'WINDOWS_JOB_OBJECT'
-            || !accounting || accounting.active_processes !== 0 || accounting.total_processes !== 1
-            || !Number.isSafeInteger(accounting.total_terminated_processes)
-            || accounting.total_terminated_processes < 0 || accounting.total_terminated_processes > accounting.total_processes) return protocolFailure();
-          const { type, ...receipt } = value;
-          terminal = { ...receipt, signal: null };
-        } else if (value.type === 'exit') {
-          if (!proof || !resumed || terminal || !Number.isSafeInteger(value.exit_code)) return protocolFailure();
-          terminal = { exit_code: value.exit_code, signal: null, reason: value.reason || null,
-            tree_cleanup_confirmed: value.tree_cleanup_confirmed === true, process_tree_control: 'WINDOWS_JOB_OBJECT' };
+        } else if (value.type === 'suspended_cancelled'||value.type==='exit') {
+          if(!helperValidated||(value.type==='suspended_cancelled'&&(resumeIssued||resumed)))return protocolFailure();
+          try{terminal=validateCodexCliNativeTerminal(value,{proof,launch:launchIdentity,cancellation,resumed});}
+          catch{return protocolFailure();}
         } else if (value.type === 'error') { failureReason = 'NATIVE_JOB_FAILED'; }
         else protocolFailure();
       };
@@ -162,20 +177,26 @@ export function createCodexCliWindowsProcessController({ helperPath, expectedHel
       // Only close proves that the helper released its job handle and cwd.
       // Resolving on an error frame can race native cleanup and leave a live tree.
       helper.once('close', (code, signal) => end(terminal ? terminal.reason : 'CONTROLLER_EXIT_UNPROVEN', code, signal ?? null));
-      helper.stdin.write(`${JSON.stringify({ executable_path: spec.executablePath, args: spec.args, cwd: spec.cwd,
-        run_id: spec.runId, timeout_ms: spec.timeoutMs, expected_sha256: spec.expectedExecutableSha256,
-        deadline_ms: spec.deadlineAt == null ? '' : String(Date.parse(spec.deadlineAt)) })}\n`);
+      helper.stdin.write(`${JSON.stringify(codexCliLaunchWire(launch))}\n`);
       await ready;
+      try{
+        const actual=await readProcess(helper.pid),afterHelper=verifyCodexCliJobHelper({helperPath,expectedHelperSha256});
+        if(finished||failureReason||actual.pid!==helper.pid||actual.process_incarnation_id!==proof.helper_process.process_incarnation_id
+          ||actual.user_sid!==proof.user_sid||path.resolve(actual.exe_path).toLowerCase()!==path.resolve(powershellPath).toLowerCase()
+          ||helperFileIdentity(verified.helperPath)!==helperFile||afterHelper.helperSha256!==verified.helperSha256||afterHelper.runtimeManifestSha256!==verified.runtimeManifestSha256)
+          throw fail('helper_native_binding_changed');
+        helperValidated=true;
+      }catch{stop('CONTROLLER_HELPER_UNVERIFIED');await completion;throw fail('helper_native_binding_changed');}
       return Object.freeze({ proof, stdout, stderr, completion,
         async resume(prompt = '', { deadlineAt = null } = {}) {
-          if (finished || failureReason || terminationIssued || resumeIssued || Buffer.byteLength(prompt, 'utf8') > 65536) throw fail('resume_invalid');
+          if (finished || failureReason || terminationIssued || resumeIssued || Buffer.byteLength(prompt, 'utf8') > 65536 ||sha256(prompt)!==launchIdentity.prompt_sha256) throw fail('resume_invalid');
           if (deadlineAt !== null && !Number.isFinite(Date.parse(deadlineAt))) throw fail('resume_deadline_invalid');
           const deadline = Math.min(Date.now() + spec.timeoutMs,
             spec.deadlineAt == null ? Infinity : Date.parse(spec.deadlineAt),
             deadlineAt == null ? Infinity : Date.parse(deadlineAt));
           if (deadline <= Date.now()) throw fail('deadline_expired_before_resume');
           resumeIssued = true;
-          helper.stdin.write(`RESUME ${deadline} ${Buffer.from(prompt, 'utf8').toString('base64')}\n`);
+          helper.stdin.write(`RESUME ${launchIdentity.request_id} ${launchIdentity.request_sha256} ${deadline} ${Buffer.from(prompt, 'utf8').toString('base64')}\n`);
         },
         async terminate(reason = 'CANCELLED') {
           if (finished) return;

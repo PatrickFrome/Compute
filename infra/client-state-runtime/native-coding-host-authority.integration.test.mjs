@@ -1,3 +1,5 @@
+import {joinedSettlementFixture} from '../../apps/metaengine-browser/test/fixtures/codex-cli-joined-settlement-fixture.mjs';
+import {codexCliLocalOutputDrain} from '../../apps/metaengine-browser/src/codex-cli-physical-settlement.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -41,6 +43,7 @@ test('private Host authority SQL qualifies on a disposable PG17 state_owner LOGI
   const authorities=[];
   try {
     await command('initdb',['-D',data,'--username=state_owner','--auth=trust','--no-locale','--encoding=UTF8','--no-sync']);
+    await fs.appendFile(path.join(data,'postgresql.conf'),"\nunix_socket_directories = ''\n");
     started=true;await command('pg_ctl',['-D',data,'-l',log,'-o',`-h 127.0.0.1 -p ${port}`,'-w','start']);
     const postgres=(await import(pathToFileURL(driver))).default;
     sql=postgres({host:'127.0.0.1',port,user:'state_owner',database:'postgres',max:2,onnotice:()=>{},
@@ -211,6 +214,33 @@ test('private Host authority SQL qualifies on a disposable PG17 state_owner LOGI
       assert.equal(result.result_sha256,receipt.result_sha256);assert.notEqual(result.result_sha256,stored.result_receipt_sha256);
       await assert.rejects(x.authority.ADVANCE_EXECUTION({scope:reserved.scope,transition:{to:'CHECKPOINTED'}}),/checkpoint_verifier_unbound/);
     });
+    function withJoinedFixture(receipt,permit){
+      const binding=Object.fromEntries(['task_id','agent_id','base_sha','lease_generation','agent_generation_epoch','role'].map(k=>[k,receipt[k]]));
+      const generated=joinedSettlementFixture({runId:receipt.run_id,binding,args:[],cwd:receipt.worktree_path,executablePath:'C:\\fixture\\codex.exe',
+        expectedExecutableSha256:permit.artifact.cli_executable_sha256,promptSha256:receipt.prompt_sha256,timeoutMs:1000},
+        {pid:receipt.pid,birth:receipt.process_incarnation_id.split(':')[3],sid:receipt.user_sid});
+      const result=generated.complete();Object.assign(receipt,{process:generated.proof,process_result:result,launch_identity:generated.proof.launch,
+        physical_settlement:result.joined_settlement,local_output_drain:codexCliLocalOutputDrain(result.joined_settlement)});
+    }
+    await subtest('new scoped helper/local-output transcript is retained byte-exact in real canonical RESULT_READY registration',async()=>{
+      const x=await fixture(),{scope,receipt}=await x.prepare(),reserved=await x.authority.RESERVE_EXECUTION({scope});
+      await x.authority.ADVANCE_EXECUTION({scope:reserved.scope,transition:x.attempted()});withJoinedFixture(receipt,x.f.permit);
+      const result=await x.authority.ADVANCE_EXECUTION({scope:reserved.scope,transition:x.ready()});assert.equal(result.state,'RESULT_READY');
+      const [row]=await sql.unsafe('select result_receipt,canonical_result_receipt,result_receipt_sha256 from destruktion_meta.native_coding_job_registration_h205f22 where task_id=$1',[scope.task_id]);
+      assert.deepEqual(row.result_receipt,receipt);assert.equal(row.canonical_result_receipt,canonical(receipt));assert.equal(row.result_receipt_sha256,sha(receipt));
+      assert.equal(row.result_receipt.local_output_drain.host_scope_callbacks,'NOT_ATTESTED');assert.equal(row.result_receipt.local_output_drain.all_effects_cleanup,'UNCONFIRMED');
+    });
+    await subtest('forged helper terminal or erased Host uncertainty cannot update receipt or execution state in real PG',async()=>{
+      for(const change of [r=>{r.physical_settlement.native_terminal.job_accounting.active_processes=1;},
+        r=>{r.physical_settlement.parent_join.helper_process_incarnation_id='pid:999:created_100ns:134000000000000000';},
+        r=>{r.local_output_drain.host_scope_callbacks='SETTLED';}]){
+        const x=await fixture(),{scope,receipt}=await x.prepare(),reserved=await x.authority.RESERVE_EXECUTION({scope});
+        await x.authority.ADVANCE_EXECUTION({scope:reserved.scope,transition:x.attempted()});withJoinedFixture(receipt,x.f.permit);change(receipt);
+        await assert.rejects(x.authority.ADVANCE_EXECUTION({scope:reserved.scope,transition:x.ready()}),unknown);
+        const [row]=await sql.unsafe('select result_receipt,result_receipt_sha256 from destruktion_meta.native_coding_job_registration_h205f22 where task_id=$1',[scope.task_id]);
+        assert.equal(row.result_receipt,null);assert.equal(row.result_receipt_sha256,null);assert.equal((await x.authority.READ_EXECUTION({scope})).state,'ATTEMPTED');
+      }
+    });
     await subtest('actual RESULT_READY CAS rejection rolls back the preceding protected receipt update',async()=>{
       const x=await fixture();const {scope}=await x.prepare();const reserved=await x.authority.RESERVE_EXECUTION({scope});
       await x.authority.ADVANCE_EXECUTION({scope:reserved.scope,transition:x.attempted()});
@@ -240,7 +270,7 @@ test('private Host authority SQL qualifies on a disposable PG17 state_owner LOGI
       await assert.rejects(x.authority.RESERVE_EXECUTION({scope}),unknown);
       assert.equal((await x.authority.READ_EXECUTION({scope})).automatic_retry_allowed,false);
     });
-    assert.equal(passed,9,'a PASS receipt requires every subtest to finish successfully');
+    assert.equal(passed,11,'a PASS receipt requires every subtest to finish successfully');
     await fs.writeFile(path.join(directory,'receipt.json'),JSON.stringify({schema:'metaengine.native-coding.host-authority.disposable-qa.v1',
       state:'PASS',postgres_version_num:identity.version,postgres_system_identifier:cluster,port,session_user:'state_owner',
       source_classification:'REAL_DISPOSABLE_PG_WITH_GENERATED_NATIVE_CALLBACK_FIXTURES',subtests:passed,

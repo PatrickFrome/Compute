@@ -1,3 +1,4 @@
+import {validateNativeCapacityCensus,validateNativeCapacityProjection} from './native-coding-capacity-contract.mjs';
 import {nativeCodingCanonicalJson as json,nativeCodingCanonicalSha256 as sha} from './native-coding-task-context.mjs';
 import {signNativeCodingDeviceRequest} from './native-coding-device-request.mjs';
 
@@ -9,10 +10,16 @@ const fail=reason=>{throw Error('native_coding_service_publisher_'+reason);};
 // This observes the existing W30 heartbeat. It owns neither a timer nor a
 // scheduler. A signed observation is not admission until the private own-PG
 // Host acknowledges it; uncertainty permits only exact readonly readback.
-export function createNativeCodingServiceHeartbeatPublisher({identity,ownPostgres,readControl,readRuntime,readProviders,now=Date.now}={}){
+export const createNativeCodingServiceHeartbeatPublisher=options=>createPublisher(options,1);
+export const createNativeCodingServiceHeartbeatPublisherV2=options=>createPublisher(options,2);
+function createPublisher({identity,ownPostgres,readControl,readRuntime,readProviders,readCapacity=null,now=Date.now}={},version){
+ const v2=version===2,writeMethod=v2?'serviceHeartbeatV2':'serviceHeartbeat',readMethod=v2?'readServiceHeartbeatV2':'readServiceHeartbeat';
+ const writeAction=v2?'SERVICE_HEARTBEAT_V2':'SERVICE_HEARTBEAT',readAction=v2?'READ_SERVICE_HEARTBEAT_V2':'READ_SERVICE_HEARTBEAT';
+ const ackSchema=`metaengine.native-coding.service-heartbeat-ack.v${version}`;
+ if(v2&&typeof readCapacity!=='function')fail('capacity_reader_required');
  if(typeof readControl!=='function'||typeof readRuntime!=='function'||typeof readProviders!=='function'||typeof now!=='function'
   ||typeof identity?.snapshot!=='function'||typeof identity.deviceHeaders!=='function'
-  ||!['snapshot','serviceHeartbeat','readServiceHeartbeat'].every(k=>typeof ownPostgres?.[k]==='function'))fail('private_dependencies_required');
+  ||!['snapshot',writeMethod,readMethod].every(k=>typeof ownPostgres?.[k]==='function'))fail('private_dependencies_required');
  let closed=false,inflight=null,pending=null,accepted=null,reason='WITNESS_NOT_PUBLISHED';
  let providerCursor=0,nextProviderCursor=0,providerWindowTruncated=false;
  function input(){
@@ -41,13 +48,22 @@ export function createNativeCodingServiceHeartbeatPublisher({identity,ownPostgre
    .sort((a,b)=>a.task_id.localeCompare(b.task_id)||a.lease_generation-b.lease_generation);
   if(jobs.some(j=>!UUID.test(j.task_id||'')||!Number.isSafeInteger(j.lease_generation)||j.lease_generation<1
    ||!['PREPARING','RUNNING','RESULT_READY','READBACK_REQUIRED','READBACK_ONLY','AMBIGUOUS','PHYSICAL_POOL_BUSY'].includes(j.state)))fail('held_job_invalid');
-  const value={schema:'metaengine.native-coding.service-heartbeat.v1',workspace_id:first.workspace_id,
+  const value={schema:`metaengine.native-coding.service-heartbeat.v${version}`,workspace_id:first.workspace_id,
    host_process:structuredClone(first.host_process),artifact:structuredClone(first.artifact),postgres:structuredClone(first.postgres),
    control:{supervisor_mode:control.supervisor_mode,armed:control.armed,interrupted_setup_recovery_fenced:control.interrupted_setup_recovery_fenced,
     runtime_control_generation:control.runtime_control_generation},
    runtime:{schema:'metaengine.native-coding.runtime.v1',physical_slot_budget:runtime.physical_slot_budget,occupied_slots:runtime.occupied_slots,
     closed:runtime.closed,shutdown_state:runtime.shutdown_state,host_unavailable_reason:runtime.host_unavailable_reason,jobs},
    providers:[],production_qualified:false,automatic_retry_allowed:false,authority_effect:false};
+  if(v2){
+   const capacity=readCapacity();
+   if(!capacity||Object.keys(capacity).sort().join()!=='census,projection')fail('capacity_unavailable');
+   const census=validateNativeCapacityCensus(capacity.census,{binding:ownPostgres.snapshot(),ownedTasks:jobs.map(({task_id,lease_generation})=>({task_id,lease_generation})),now:now()});
+   const projection=validateNativeCapacityProjection(capacity.projection);
+   if(projection.configured_ceiling!==runtime.physical_slot_budget||projection.generation!==census.generation||projection.census_sha256!==census.census_sha256
+    ||projection.state!==census.state)fail('capacity_changed');
+   value.capacity={census,projection};
+  }
   // The signed request has a byte budget, not a fleet-size quota. Rotate
   // admission windows so a large durable roster cannot fence the whole fleet.
   let bytes=Buffer.byteLength(json(value)),visited=0;
@@ -61,21 +77,26 @@ export function createNativeCodingServiceHeartbeatPublisher({identity,ownPostgre
   providerWindowTruncated=visited<providers.length;
   return value;
  }
+ const deviceTuple=()=>{const d=identity.snapshot();return d?{enrolled:d.enrolled,device_id:d.device_id,client_id:d.client_id,key_fingerprint_sha256:d.key_fingerprint_sha256}:null;};
+ const recordCurrent=record=>{const b=ownPostgres.snapshot();return b?.closed===false&&b.instance_id===record.binding.instance_id
+  &&b.host_pid===record.binding.host_pid&&same(deviceTuple(),record.device);};
  function exactAck(value,record,readback){
-  if(value?.schema!=='metaengine.native-coding.service-heartbeat-ack.v1'||value.accepted!==true||value.body_sha256!==record.body_sha256
+  if(v2&&!recordCurrent(record))fail('ack_scope_changed');
+  if(value?.schema!==ackSchema||value.accepted!==true||value.body_sha256!==record.body_sha256
    ||!HASH.test(value.witness_sha256||'')||!Number.isFinite(Date.parse(value.expires_at||''))||value.authority_effect!==false
    ||typeof value.readback_only!=='boolean'||(readback&&value.readback_only!==true))fail('ack_changed');
-  return {input:record.input,input_sha256:sha(record.input),body_sha256:record.body_sha256,witness_sha256:value.witness_sha256,
+  if(v2&&Date.parse(value.expires_at)>Date.parse(record.input.capacity.census.expires_at))fail('ack_expiry_changed');
+  return {...(v2?{binding:record.binding,device:record.device}:{}),input:record.input,input_sha256:sha(record.input),body_sha256:record.body_sha256,witness_sha256:value.witness_sha256,
    expires_at:value.expires_at};
  }
  async function reconcile(){
   const record=pending;
   if(!record||closed)return;
   try{
-   const packet=await signNativeCodingDeviceRequest({identity,binding:ownPostgres.snapshot(),operation:'READ_SERVICE_HEARTBEAT',
+   const packet=await signNativeCodingDeviceRequest({identity,binding:ownPostgres.snapshot(),operation:readAction,
     input:{workspace_id:record.input.workspace_id,body_sha256:record.body_sha256}});
    if(closed)return;
-   const value=await ownPostgres.readServiceHeartbeat(packet);
+   const value=await ownPostgres[readMethod](packet);
    if(closed)return;
    if(value===null){reason='WITNESS_OUTCOME_UNKNOWN';return;}
    accepted=exactAck(value,record,true);pending=null;reason=Date.parse(accepted.expires_at)>now()?'ACKNOWLEDGED':'WITNESS_EXPIRED';
@@ -83,15 +104,15 @@ export function createNativeCodingServiceHeartbeatPublisher({identity,ownPostgre
  }
  async function publish(value){
   let packet;
-  try{packet=await signNativeCodingDeviceRequest({identity,binding:ownPostgres.snapshot(),operation:'SERVICE_HEARTBEAT',input:value});}
+  try{packet=await signNativeCodingDeviceRequest({identity,binding:ownPostgres.snapshot(),operation:writeAction,input:value});}
   catch{accepted=null;reason='SIGNED_DEVICE_OBSERVATION_UNAVAILABLE';return;}
   if(closed)return;
-  const record={input:structuredClone(value),body_sha256:packet.headers['x-a2-device-body-sha256']};
+  const record={input:structuredClone(value),body_sha256:packet.headers['x-a2-device-body-sha256'],...(v2?{binding:{instance_id:packet.body.host_instance_id,host_pid:packet.body.host_pid},device:deviceTuple()}: {})};
   pending=record;reason='PUBLICATION_PENDING';
   try{
-   const response=await ownPostgres.serviceHeartbeat(packet);
+   const response=await ownPostgres[writeMethod](packet);
    if(closed)return;
-   if(response?.schema==='metaengine.native-coding.service-heartbeat-ack.v1'&&response.accepted===false
+   if(response?.schema===ackSchema&&response.accepted===false
     &&response.body_sha256===record.body_sha256&&response.write_effect==='ABSENT'&&response.automatic_retry_allowed===false
     &&response.authority_effect===false){pending=null;accepted=null;reason='ADMISSION_FENCED';return;}
    accepted=exactAck(response,record,false);pending=null;reason='ACKNOWLEDGED';
@@ -115,7 +136,7 @@ export function createNativeCodingServiceHeartbeatPublisher({identity,ownPostgre
   admittedProviders(){
    if(closed||pending||!accepted||Date.parse(accepted.expires_at)<=now())return [];
    try{
-    if(accepted.input_sha256!==sha(input()))return [];
+    if(v2&&!recordCurrent(accepted)||accepted.input_sha256!==sha(input()))return [];
     const admitted=new Set(accepted.input.providers.map(p=>p.permit_id));
     accepted.delivered=true;
     return structuredClone(readProviders().filter(p=>admitted.has(p.payload.permit_id)));

@@ -1,3 +1,4 @@
+import {CODEX_CLI_JOB_PROTOCOL} from '../src/codex-cli-physical-settlement.mjs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -164,7 +165,7 @@ try {
 if ((Get-Digest $compiler) -ne [string]$request.compiler_sha256 -or (Get-Digest ([string]$request.source_path)) -ne [string]$request.csharp_sha256) { throw 'codex_job_runtime_build_input_changed' }
 $assembly = [Reflection.Assembly]::Load([IO.File]::ReadAllBytes([string]$request.assembly_path))
 $type = $assembly.GetType('MetaengineCodexJob', $true, $false)
-$types = [Type[]]@([string], [string[]], [string], [string], [uint32], [string], [string])
+$types = [Type[]]@([string], [string[]], [string], [string], [uint32], [string], [string], [string], [string], [string], [string])
 $method = $type.GetMethod('Run', [Reflection.BindingFlags]'Public,Static', $null, $types, $null)
 if ($null -eq $method -or $method.ReturnType -ne [void]) { throw 'codex_job_runtime_entrypoint_invalid' }
 $proof = [ordered]@{
@@ -286,7 +287,7 @@ export async function prepareCodexCliJobRuntime({ helperSourcePath = defaultTemp
     }
     const { helperBytes } = renderCodexCliJobRuntimeHelper(templateBytes, assemblyBytes);
     const manifest = Object.freeze({
-      schema: CODEX_CLI_JOB_RUNTIME_SCHEMA, build_mode: CODEX_CLI_JOB_RUNTIME_BUILD_MODE,
+      schema: CODEX_CLI_JOB_RUNTIME_SCHEMA, build_mode: CODEX_CLI_JOB_RUNTIME_BUILD_MODE,custody_protocol:CODEX_CLI_JOB_PROTOCOL,
       template_sha256: template.templateSha256, csharp_sha256: template.csharpSha256,
       assembly_sha256: digest(assemblyBytes), helper_sha256: digest(helperBytes),
       compiler_executable_sha256: compilerSha256, powershell_executable_sha256: powershellSha256,

@@ -1,3 +1,6 @@
+import {NATIVE_CODING_DEVICE_PATHS} from './native-coding-device-request.mjs';
+import {validateNativeSetupInput} from './native-coding-setup-contract.mjs';
+import {nativeCodingCanonicalJson} from './native-coding-task-context.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -691,7 +694,22 @@ export class SupervisorDeviceIdentity {
 
   async deviceHeaders(method, requestPath, bodyText, { timestamp = new Date().toISOString(), nonce = this.randomNonce() } = {}) {
     await this.ensure();
-    if (!this.#state.device_id) throw new Error('supervisor_device_not_enrolled');
+    return this.#deviceHeadersLoaded(method,requestPath,bodyText,{timestamp,nonce});
+  }
+
+  // Fixed native read only. Never loads/creates/enrolls/persists credentials.
+  nativeSetupRouteReadHeaders(body,options={}) {
+    if(!this.snapshot()?.enrolled||!this.#privateKey)throw Error('supervisor_device_not_loaded');
+    if(!body||Object.keys(body).sort().join('|')!==['host_instance_id','host_pid','input','operation'].sort().join('|')
+      ||body.operation!=='READ_NATIVE_SETUP_ROUTE_V1'||exactUuid(body.host_instance_id,'native_setup_host')!==body.host_instance_id
+      ||!Number.isSafeInteger(body.host_pid)||body.host_pid<1)throw Error('supervisor_native_setup_read_invalid');
+    validateNativeSetupInput('READ_NATIVE_SETUP_ROUTE_V1',body.input);
+    return this.#deviceHeadersLoaded('POST',NATIVE_CODING_DEVICE_PATHS.READ_NATIVE_SETUP_ROUTE_V1,nativeCodingCanonicalJson(body),options);
+  }
+
+  // One canonical byte/header implementation for both existing and loaded-only rails.
+  #deviceHeadersLoaded(method,requestPath,bodyText,{timestamp=new Date().toISOString(),nonce=this.randomNonce()}={}) {
+    if(!this.snapshot()?.enrolled||!this.#privateKey)throw Error('supervisor_device_not_enrolled');
     const bodyHash = crypto.createHash('sha256').update(String(bodyText || '')).digest('hex');
     const material = [
       SUPERVISOR_DEVICE_PROFILE,

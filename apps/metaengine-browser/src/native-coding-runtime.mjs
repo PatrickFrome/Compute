@@ -1,3 +1,5 @@
+import {nativeCapacityPrincipal} from './native-coding-capacity-contract.mjs';
+import {signNativeCodingDeviceRequest} from './native-coding-device-request.mjs';
 import {createHash} from 'node:crypto';
 import {createCodexCliRunner} from './codex-cli-runner.mjs';
 import {createCodexCliWindowsProcessController} from './codex-cli-windows-process-controller.mjs';
@@ -11,7 +13,7 @@ import {buildNativeCodingExecutionScope} from './native-coding-task-context.mjs'
 import {createNativeCodingProjectCheckpointObserver,createNativeCodingProjectRejectionObserver} from './native-coding-project-checkpoints.mjs';
 import {createNativeCodingProjectCommitObserver} from './native-coding-project-commits.mjs';
 import {prepareNativeCodingAgentRunBridge} from './native-coding-agent-run-bridge.mjs';
-import {createNativeCodingServiceHeartbeatPublisher} from './native-coding-service-heartbeat-publisher.mjs';
+import {createNativeCodingServiceHeartbeatPublisher,createNativeCodingServiceHeartbeatPublisherV2} from './native-coding-service-heartbeat-publisher.mjs';
 
 import {defaultNativePhysicalSlotBudget} from './agent-resource-admission.mjs';
 
@@ -23,7 +25,7 @@ const fence=(state,extra={})=>Object.freeze({state,...extra,automatic_retry_allo
 
 /** Native private composition, driven exclusively by the existing W30 heartbeat. */
 export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,observerOptions={},runnerOptions,
-  resultIndexRoot,physicalSlotBudget=defaultNativePhysicalSlotBudget(),readResourceAdmission,processController=null,permitRegistry=null,resultStore=null,
+  resultIndexRoot,capacityOwner=null,capacityDevice=null,physicalSlotBudget=defaultNativePhysicalSlotBudget(),readResourceAdmission,processController=null,permitRegistry=null,resultStore=null,
   // Private dependency injection supports isolated adversarial tests; it is not
   // an IPC option, renderer configuration, or a way to label fixtures native.
   observers=null,issuer=null,workerRegistry=null,runnerFactory=createCodexCliRunner,
@@ -47,7 +49,12 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
   const nativeIssuer=issuer||createNativeCodingHostIssuer({identity,...source});
   const activeBridges=new Set();
   let closed=false,refresh=null,refreshCursor=0,refreshReason=null,closePromise=null,unsubscribeHost=null;
-  let unavailableReason=null,shutdownState='OPEN',workerCleanupConfirmed=null;
+  let unavailableReason=null,shutdownState='OPEN',workerCleanupConfirmed=null,workerDrainPromise=null,fullDrainPromise=null;
+  const localOperations=new Set();
+  const trackLocal=operation=>{
+    const pending=Promise.resolve().then(operation);localOperations.add(pending);
+    const settled=()=>localOperations.delete(pending);pending.then(settled,settled);return pending;
+  };
   const assertOpen=()=>{if(closed)fail('host_unavailable');};
   const descriptors=new Map(),providerFences=new Map(),scopes=new Map(),completionAttempts=new Map();
   const checkpoints=['reconcileProject','readProjectCheckpoint'].every(name=>typeof ownPostgres[name]==='function')
@@ -118,11 +125,24 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
           ||typeof source.readAgentMcpLaunchPins!=='function')fail('agent_bridge_scope_changed');
         const pins=await source.readAgentMcpLaunchPins();
         const bridge=await agentBridgeFactory({...details,ownPostgres,permit:structuredClone(permit),pins});
-        if(closed){await bridge.close();fail('closed');}
+        let bridgeClosePromise=null,bridgeCallbackPromise=null;
         const wrapper=Object.freeze({launch:bridge.launch,
           bindRun:proof=>{if(closed)fail('closed');return bridge.bindRun(proof);},
-          async close(){activeBridges.delete(wrapper);await bridge.close();}});
-        activeBridges.add(wrapper);return wrapper;
+          close(){
+            if(bridgeClosePromise)return bridgeClosePromise;
+            let resolveClose,rejectClose;bridgeClosePromise=new Promise((resolve,reject)=>{resolveClose=resolve;rejectClose=reject;});
+            void bridgeClosePromise.catch(()=>{});
+            // Pending AND failed drains stay registered for explicit quit.
+            void(async()=>{await bridge.close();})().then(()=>{resolveClose();void wrapper.drainCallbacks().catch(()=>{});},rejectClose);
+            return bridgeClosePromise;
+          },
+          drainCallbacks(){
+            if(bridgeCallbackPromise)return bridgeCallbackPromise;
+            let resolveJoin,rejectJoin;bridgeCallbackPromise=new Promise((resolve,reject)=>{resolveJoin=resolve;rejectJoin=reject;});void bridgeCallbackPromise.catch(()=>{});
+            void(async()=>{await wrapper.close();await bridge.drainCallbacks?.();activeBridges.delete(wrapper);})().then(resolveJoin,rejectJoin);
+            return bridgeCallbackPromise;
+          }});
+        activeBridges.add(wrapper);if(closed){await wrapper.close();fail('closed');}return wrapper;
       };
       return runnerFactory({...runnerOptions,authorizeLease,processController:processControl,prepareAgentBridge}).run(request,options);
     }}),
@@ -132,14 +152,32 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
       if(value.state!=='RUNNING')fail('w30_running_ack_invalid');
     },
   });
-  const pool=createNativeCodingExecutionPool({executor,physicalSlotBudget,readResourceAdmission,
+  const readExecutionBinding=lease=>{
+      const ctl=readServiceControl?.(),device=identity.snapshot(),host=ownPostgres.snapshot?.();
+      if(closed||ctl?.supervisor_mode!=='CONTROL'||ctl.armed!==true||ctl.interrupted_setup_recovery_fenced!==false
+        ||!Number.isSafeInteger(ctl.runtime_control_generation)||ctl.runtime_control_generation<0||host?.closed!==false
+        ||device?.enrolled!==true||!capacityDevice||device.device_id!==capacityDevice.device_id||device.client_id!==capacityDevice.client_id
+        ||device.key_fingerprint_sha256!==capacityDevice.key_fingerprint_sha256)fail('first_dispatch_scope_unavailable');
+      const provider=String(lease?.target_id||'').slice('codex-cli:'.length),p=descriptors.get(`${provider}:${lease.agent_id}`)?.payload;
+      if(!p||p.provider_id!==provider||p.agent_id!==lease.agent_id||p.agent_generation_epoch!==lease.agent_generation_epoch
+        ||!Number.isSafeInteger(p.owner_epoch)||p.owner_epoch<1||!UUID.test(p.permit_id||'')||!UUID.test(p.workspace_id||'')||!UUID.test(p.project_id||'')
+        ||!Number.isFinite(Date.parse(p.expires_at))||Date.parse(p.expires_at)<=Date.now())fail('first_dispatch_owner_unavailable');
+      return {host_instance_id:host.instance_id,host_pid:host.host_pid,principal_sha256:nativeCapacityPrincipal(capacityDevice),runtime_control_generation:ctl.runtime_control_generation,
+        owner_epoch:p.owner_epoch,permit_id:p.permit_id,workspace_id:p.workspace_id,project_id:p.project_id};
+  };
+  const pool=createNativeCodingExecutionPool({executor,physicalSlotBudget,readResourceAdmission,capacityOwner,readExecutionBinding,
     async prepareRequest(raw) {
       assertOpen();
       // Full installed-byte qualification precedes issuer timestamps. Only
       // physical stat guards and current OS readback run inside its window.
       await source.prepareInstalledImage?.();
       assertOpen();
-      const permit=await permitFor(raw),context=await taskContext(raw,permit),lease=context.value;
+      const permit=await permitFor(raw);
+      if(capacityOwner){
+        const held=readExecutionBinding(raw);
+        for(const name of ['owner_epoch','permit_id','workspace_id','project_id'])if(held[name]!==permit[name])fail('first_dispatch_owner_changed');
+      }
+      const context=await taskContext(raw,permit),lease=context.value;
       assertOpen();
       const subject=lease.role==='CRITIC'?await results.resolveRunnerSubject({workspace_id:permit.workspace_id,project_id:permit.project_id,
         verification_subject:lease.verification_subject}):null;
@@ -184,6 +222,26 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
       return result;
     },
   });
+  if(capacityOwner&&capacityDevice){
+    const pinned=structuredClone(capacityDevice),hostBinding=ownPostgres.snapshot();
+    capacityOwner.bind({capability:ownPostgres,...hostBinding,poolToken:pool.capacityPoolToken,
+      principal_sha256:nativeCapacityPrincipal(pinned),readBinding:()=>ownPostgres.snapshot(),readPrincipal:()=>{
+        const current=identity.snapshot();
+        if(current?.enrolled!==true||current.device_id!==pinned.device_id||current.client_id!==pinned.client_id
+          ||current.key_fingerprint_sha256!==pinned.key_fingerprint_sha256)return null;
+        return nativeCapacityPrincipal(pinned);
+      }});
+  }
+  const collectCapacity=()=>capacityOwner?.collect(async owned=>{
+    if(closed||typeof ownPostgres.readNativeCapacity!=='function')fail('capacity_reader_unavailable');
+    const request=await signNativeCodingDeviceRequest({identity,binding:ownPostgres.snapshot(),operation:'READ_NATIVE_CAPACITY_V1',input:{owned_tasks:owned}});
+    assertOpen();return ownPostgres.readNativeCapacity(request);
+  });
+  const capacityLimits=()=>{
+    const resources=readResourceAdmission?.(),value=resources?.physical_start_allowed===true?resources.physical_parallelism:0;
+    return {configuredCeiling:physicalSlotBudget,resourceCeiling:Number.isSafeInteger(value)&&value>=0?value:0};
+  };
+  const capacityObservation=()=>capacityOwner?.snapshot(capacityLimits())??null;
   async function complete(lease,row) {
     if(closed)return fence('STOPPED',{reason:unavailableReason});
     const id=key(lease),prior=completionAttempts.get(id);
@@ -231,8 +289,9 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
     [...descriptors.entries()].filter(([id,value])=>!providerFences.has(id)
       &&Date.parse(value.payload.expires_at)>Date.now()).map(([,value])=>structuredClone(value))});
   const serviceHeartbeat=typeof readServiceControl==='function'&&typeof identity.deviceHeaders==='function'
-    &&['snapshot','serviceHeartbeat','readServiceHeartbeat'].every(name=>typeof ownPostgres[name]==='function')
-    ?createNativeCodingServiceHeartbeatPublisher({identity,ownPostgres,readControl:readServiceControl,
+    &&(capacityOwner?['snapshot','serviceHeartbeatV2','readServiceHeartbeatV2']:['snapshot','serviceHeartbeat','readServiceHeartbeat']).every(name=>typeof ownPostgres[name]==='function')
+    ? (capacityOwner?createNativeCodingServiceHeartbeatPublisherV2:createNativeCodingServiceHeartbeatPublisher)({identity,ownPostgres,readControl:readServiceControl,
+      readCapacity:()=>capacityOwner?.readObservation(capacityLimits()),
       readRuntime:()=>({...pool.snapshot(),shutdown_state:shutdownState,host_unavailable_reason:unavailableReason}),
       readProviders:()=>registeredProviderSnapshot().providers}):null;
   const providerSnapshot=()=>({schema:'metaengine.native-coding.providers.v1',providers:closed?[]:serviceHeartbeat?.admittedProviders()??[]});
@@ -270,17 +329,21 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
     closePromise=new Promise(resolve=>{finishClose=resolve;});
     // Fence synchronously before any asynchronous drain. Keep the original
     // scopes, pending receipts, provider fences and checkpoint selectors.
-    closed=true;unavailableReason=reason;shutdownState='DRAINING';
+    closed=true;unavailableReason=reason;shutdownState='DRAINING';capacityOwner?.invalidate('RUNTIME_DRAINING');
     for(const entry of completionAttempts.values())if(entry.state==='COMPLETION_PENDING'){
       entry.state='READBACK_REQUIRED';entry.reason='HOST_UNAVAILABLE_DURING_COMPLETION';
     }
     checkpoints?.close();rejections?.close();commits?.close();serviceHeartbeat?.close();unsubscribeHost?.();unsubscribeHost=null;
-    const pending=[];
-    for(const operation of [()=>pool.stop(),()=>workers.close(),()=>nativeIssuer.close(),
-      ()=>Promise.all([...activeBridges].map(bridge=>bridge.close())),()=>checkpoints?.drain(),()=>rejections?.drain(),()=>commits?.drain(),()=>serviceHeartbeat?.drain()]){
-      try{pending.push(Promise.resolve(operation()));}catch(error){pending.push(Promise.reject(error));}
-    }
-    const drained=Promise.allSettled(pending).then(values=>{
+    const begin=operation=>{try{return Promise.resolve(operation());}catch(error){return Promise.reject(error);}};
+    // pool.stop fences admission synchronously; workers.close fences the SAME
+    // registry synchronously and joins every already-owned/pending spawn. A
+    // late authorization cannot create a child through that closed registry.
+    const poolDrain=begin(()=>pool.stop());workerDrainPromise=begin(()=>workers.close());
+    const pending=[poolDrain,workerDrainPromise,...[()=>nativeIssuer.close(),
+      ()=>Promise.all([...activeBridges].map(bridge=>bridge.drainCallbacks())),
+      ()=>poolDrain.then(()=>Promise.all([...activeBridges].map(bridge=>bridge.drainCallbacks()))),()=>refresh,()=>capacityOwner?.drain(),
+      ()=>Promise.allSettled([...localOperations]),()=>checkpoints?.drain(),()=>rejections?.drain(),()=>commits?.drain(),()=>serviceHeartbeat?.drain()].map(begin)];
+    fullDrainPromise=Promise.allSettled(pending).then(values=>{
       const workersResult=values[1];
       workerCleanupConfirmed=workersResult.status==='fulfilled'
         &&workersResult.value?.schema==='metaengine.native-coding.workers-close.v1'
@@ -289,7 +352,7 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
         :workerCleanupConfirmed?'DRAINED':'DRAIN_UNCONFIRMED';
     });
     let timer;
-    void Promise.race([drained,new Promise(resolve=>{
+    void Promise.race([fullDrainPromise,new Promise(resolve=>{
       timer=setTimeout(()=>{shutdownState='DRAIN_TIMEOUT';resolve();},closeTimeoutMs);
     })]).then(()=>{clearTimeout(timer);finishClose();});
     return closePromise;
@@ -303,10 +366,11 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
         refresh=Promise.resolve().then(refreshProviders).catch(()=>{refreshReason='PROVIDER_REFRESH_REQUIRES_READBACK';})
           .finally(()=>{refresh=null;});
       }
-      if(!closed)serviceHeartbeat?.observe();
+      if(!closed){void collectCapacity();serviceHeartbeat?.observe();}
       return providerSnapshot();
     },
     dispatchLease(lease){if(closed)return fence('STOPPED');return pool.dispatch(lease);},
+    advanceUnattemptedLease(lease){if(closed)return fence('STOPPED');return pool.advanceUnattemptedLease(lease);},
     observeProjectCheckpoints(candidates){
       if(closed)return fence('STOPPED',{reason:unavailableReason});
       if(!checkpoints){if(candidates?.length)fail('private_checkpoint_capability_required');return null;}
@@ -321,10 +385,11 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
       if(!commits){if(candidates?.length)fail('private_commit_capability_required');return null;}
       return commits.observe(candidates);
     },
-    async observeLease(lease){if(closed)return fence('STOPPED');const row=await pool.observe(lease);return row.state==='RESULT_READY'?complete(lease,row):row;},
-    async completeFromTrustedCommand(payload){if(closed)return fence('STOPPED',{reason:unavailableReason});const lease=payload?.lease||payload;if(!UUID.test(lease?.task_id||''))fail('completion_selector_invalid');return complete(lease,await pool.observe(lease));},
+    observeLease(lease){return trackLocal(async()=>{if(closed)return fence('STOPPED');const row=await pool.observe(lease);return row.state==='RESULT_READY'?complete(lease,row):row;});},
+    completeFromTrustedCommand(payload){return trackLocal(async()=>{if(closed)return fence('STOPPED',{reason:unavailableReason});const lease=payload?.lease||payload;if(!UUID.test(lease?.task_id||''))fail('completion_selector_invalid');return complete(lease,await pool.observe(lease));});},
     snapshot(){return {...pool.snapshot(),schema:'metaengine.native-coding.runtime.v1',provider_fences:providerFences.size,
       provider_refresh_running:refresh!==null,provider_refresh_reason:refreshReason,
+      capacity_observation:capacityObservation(),
       project_checkpoints:checkpoints?.snapshot()??null,
       project_rejections:rejections?.snapshot()??null,
       project_commits:commits?.snapshot()??null,
@@ -335,6 +400,15 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
       // that an ambiguous physical effect can be retried.
       execution_outcomes_reconciled:false,
       production_qualified:false,useful_work_verified:false};},
+    // Private staged lifecycle only. Never confuse native-tree settlement
+    // with the remote-dependent pool/callback/output work below.
+    async drainNativeWorkers(){
+      stop();const value=await workerDrainPromise;
+      if(value?.schema!=='metaengine.native-coding.workers-close.v1'||value.cleanup_confirmed!==true)fail('worker_cleanup_unconfirmed');
+      return Object.freeze({schema:'metaengine.native-coding.runtime-worker-drain.v1',admission_fenced:closed,
+        worker_cleanup_confirmed:true,authority_effect:false});
+    },
+    async drainClosedWork(){stop();await fullDrainPromise;return runtime.snapshot();},
     async close(){await stop();return runtime.snapshot();},
   });
   if(typeof ownPostgres.onUnavailable==='function'){

@@ -62,7 +62,7 @@ test('profile published after startup is discovered readonly without dispatching
  published=true;
  assert.deepEqual(await f.binding.operations.LIST_SEEDS(await f.request()),catalog);
  assert.equal(f.seen.created,2);assert.deepEqual(f.seen.calls.map(row=>row.action),['LIST_SEEDS']);
- assert.deepEqual(Object.keys(f.binding.operations).sort(),['ADMIT_PREPARED_GOAL_V1','ESTABLISH_PENDING_OWNER_V1','LIST_SEEDS','PREPARE_WORKSPACE_V1','READ_PENDING_OWNER_V1','READ_PREPARED_GOAL_V1','READ_SEED','READ_WORKSPACE_PREPARATION_V1','SEED_GOAL','close']);
+ assert.deepEqual(Object.keys(f.binding.operations).sort(),['ACTIVATE_PREPARED_GOAL_V1','ADMIT_PREPARED_GOAL_V1','ESTABLISH_PENDING_OWNER_V1','LIST_SEEDS','PREPARE_WORKSPACE_V1','READ_PENDING_OWNER_V1','READ_PREPARED_GOAL_ACTIVATION_V1','READ_PREPARED_GOAL_V1','READ_SEED','READ_WORKSPACE_PREPARATION_V1','SEED_GOAL','close']);
 });
 
 test('concurrent readonly discovery shares one creation and authenticates each packet separately',async t=>{

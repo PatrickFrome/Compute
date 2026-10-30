@@ -1,3 +1,6 @@
+import {createNativeCodingCallbackPublication} from './native-coding-callback-publication.mjs';
+import {validateCodexCliJoinedSettlement,validateCodexCliLocalOutputDrain} from '../../apps/metaengine-browser/src/codex-cli-physical-settlement.mjs';
+import {nativePhysicalSettlementUnconfirmed,markNativePhysicalSettlementUnconfirmed,runNativePhysicalSettlementScope} from '../../apps/metaengine-browser/src/native-coding-host-settlement.mjs';
 import {assertNativeCodingHostRequestOpen} from './native-coding-host-request-lifetime.mjs';
 import {createPublicKey} from 'node:crypto';
 import {NativeCodingPgLedger} from '../../apps/metaengine-browser/src/native-coding-pg-ledger.mjs';
@@ -9,6 +12,9 @@ import {createNativeCodingCheckpointVerifier} from './native-coding-checkpoint-v
 import {createNativeCodingAgentHostTools} from './native-coding-agent-host-tools.mjs';
 
 const fail=reason=>{throw new Error('native_coding_host_'+reason);};
+const callbackPublications=new WeakMap();
+// Private in-process reference only; not a property of the v1 IPC authority.
+export function nativeCodingCallbackPublicationFor(authority){const value=callbackPublications.get(authority);if(!value)fail('callback_publication_unbound');return value;}
 const same=(a,b)=>json(a)===json(b);
 // The native Job helper records started_at with Windows' seven fractional
 // digits; signed kernel identities use the same birth rounded down to ms.
@@ -22,7 +28,7 @@ const exact=(value,keys)=>value&&typeof value==='object'&&!Array.isArray(value)
 
 // Only runtime-host constructs this capability. The IPC protocol exposes
 // these fixed operations, never this connection or arbitrary SQL/functions.
-export async function createNativeCodingHostAuthority({sql,readNativeScope,readNativeWorker,readProtectedReceipt,readCheckpointScope,commitService=null,seedOperations=null,serviceHeartbeatOperations=null}={}) {
+export async function createNativeCodingHostAuthority({sql,readNativeScope,readNativeWorker,readProtectedReceipt,readCheckpointScope,commitService=null,seedOperations=null,serviceHeartbeatOperations=null,callbackPublicationIdentity=null,readCallbackPrefix,readPublicationHost,readOwnerControl=null}={}) {
   if(typeof sql?.unsafe!=='function'||typeof sql?.begin!=='function'
     ||![readNativeScope,readNativeWorker,readProtectedReceipt].every(x=>typeof x==='function')) fail('private_dependencies_required');
   async function owner(tx) {
@@ -34,6 +40,7 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
   const open=()=>{if(closed)fail('closed');};
   if(commitService!==null&&!['FINISH_CHECKPOINT','READ_FINISH_CHECKPOINT','close'].every(name=>typeof commitService?.[name]==='function'))fail('commit_service_invalid');
   if(seedOperations!==null&&!['SEED_GOAL','READ_SEED','LIST_SEEDS','close'].every(name=>typeof seedOperations?.[name]==='function'))fail('seed_service_invalid');
+  if(serviceHeartbeatOperations&&['SERVICE_HEARTBEAT_V2','READ_SERVICE_HEARTBEAT_V2'].some(x=>Object.hasOwn(serviceHeartbeatOperations,x))&&!['SERVICE_HEARTBEAT_V2','READ_SERVICE_HEARTBEAT_V2'].every(x=>typeof serviceHeartbeatOperations[x]==='function'))fail('service_heartbeat_v2_partial');
   if(serviceHeartbeatOperations!==null&&!['SERVICE_HEARTBEAT','READ_SERVICE_HEARTBEAT','close'].every(name=>typeof serviceHeartbeatOperations?.[name]==='function'))fail('service_heartbeat_invalid');
   const agentTools=createNativeCodingAgentHostTools({sql,readNativeScope,readNativeWorker});
   async function finishCheckpoint(action,query){
@@ -86,7 +93,7 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
         'admin_grant_epoch',p.admin_grant_epoch,'revoked_at',p.revoked_at) as permit_binding,
       jsonb_build_object('device_id',d.device_id,'client_id',d.client_id,'profile',d.profile,'public_jwk',d.public_jwk,
         'key_fingerprint_sha256',d.key_fingerprint_sha256,'admin_grant_epoch',d.admin_grant_epoch) as device,
-      to_jsonb(j) as registration,to_jsonb(e) as execution,to_jsonb(t) as task
+      to_jsonb(j) as registration,to_jsonb(e)-'callback_publication' as execution,to_jsonb(t) as task
       from destruktion_meta.native_coding_job_registration_h205f22 j
       join destruktion_meta.native_coding_operator_permit_h205f22 p using(permit_id)
       join destruktion_meta.native_coding_execution_h205f22 e using(task_id,lease_generation)
@@ -191,9 +198,11 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
       await owner(tx);await tx.unsafe('set local synchronous_commit=on');
       const result=await operation(tx);open();return result;
     });}
-    catch {throw Object.assign(new Error('native_coding_host_write_unknown_readback_required'),{effect_outcome:'UNKNOWN',automatic_retry_allowed:false});}
+    catch(error){const safe=Object.assign(new Error('native_coding_host_write_unknown_readback_required'),{effect_outcome:'UNKNOWN',automatic_retry_allowed:false});
+      throw nativePhysicalSettlementUnconfirmed(error)?markNativePhysicalSettlementUnconfirmed(safe):safe;}
   }
-  return Object.freeze({
+  const callbackPublication=createNativeCodingCallbackPublication({sql,scoped,owner,open,identity:callbackPublicationIdentity,readCallbackPrefix,readPublicationHost,readOwnerControl});
+  const operations={
     AGENT_OPERATION:request=>{open();return agentTools.invoke(request);},
     FINISH_CHECKPOINT:query=>finishCheckpoint('FINISH_CHECKPOINT',query),
     READ_FINISH_CHECKPOINT:query=>finishCheckpoint('READ_FINISH_CHECKPOINT',query),
@@ -242,7 +251,14 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
         return {registered:true,provider_id:c.permit.provider_id,envelope_sha256:digest};
       });
     },
-    async RESERVE_EXECUTION({scope}) {return write(async tx=>{await scoped(tx,scope);return ledger(tx).reserve(scope);});},
+    async RESERVE_EXECUTION({scope},request) {
+      const physical=runNativePhysicalSettlementScope(()=>write(async tx=>{await scoped(tx,scope);return ledger(tx).reserve(scope);}));
+      let value;try{value=await physical.promise;}catch(error){throw physical.unconfirmed()?markNativePhysicalSettlementUnconfirmed(error):error;}
+      if(physical.unconfirmed())throw markNativePhysicalSettlementUnconfirmed(Error('native_coding_host_reservation_physical_hold'));
+      // Actual inserted result, after COMMIT; clones/readback/late return do not
+      // mint private custody. This does NOT prove delivery or Phase1B settlement.
+      callbackPublication.retainReservation(value,request);return value;
+    },
     async READ_EXECUTION({scope}) {
       open();const c=await task(sql,{...scope,provider_id:String(scope.target_id).slice('codex-cli:'.length)},{requireLive:false});
       const row=await ledger(sql).read(scope);
@@ -262,7 +278,7 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
       return sql.begin('isolation level repeatable read read only',async tx=>{
         await owner(tx);const c=await task(tx,selector,{requireLive:false}),p=c.permit,t=c.task;
         if(selector.agent_generation_epoch!==p.agent_generation_epoch)fail('prior_selector_mismatch');
-        const rows=await tx.unsafe(`select to_jsonb(e) as execution,to_jsonb(j) as registration
+        const rows=await tx.unsafe(`select to_jsonb(e)-'callback_publication' as execution,to_jsonb(j) as registration
           from destruktion_meta.native_coding_execution_h205f22 e
           left join destruktion_meta.native_coding_job_registration_h205f22 j using(task_id,lease_generation)
           where e.workspace_id=$1::uuid and e.task_id=$2::uuid and e.lease_generation=$3::bigint`,
@@ -301,6 +317,8 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
         catch{open();return reply('HOLD','PROTECTED_RESULT_UNAVAILABLE');}
         open();
         if(!receipt)return reply('HOLD','PROTECTED_RESULT_UNAVAILABLE');
+        if(receipt.process?.launch||receipt.physical_settlement){try{validateCodexCliJoinedSettlement(receipt.physical_settlement,{proof:receipt.process});validateCodexCliLocalOutputDrain(receipt);}
+          catch{return reply('HOLD','PROTECTED_SETTLEMENT_UNVERIFIED');}}
         if(!same(receipt,j.result_receipt)||j.canonical_result_receipt!==json(receipt)||j.result_receipt_sha256!==sha(receipt)
           ||receipt?.schema!=='metaengine.codex-cli.run-receipt.v1'||receipt.state!=='RESULT_READY'
           ||receipt.trust_namespace!=='LOCAL_OPERATOR_QA'||receipt.provider!=='CODEX_CLI'
@@ -382,6 +400,7 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
             where task_id=$1::uuid and lease_generation=$2::bigint for update`,[scope.task_id,scope.lease_generation]);
           if(rows.length!==1)fail('job_unregistered');
           const job=rows[0].job_envelope,receipt=await readProtectedReceipt({scope,permit:c.permit,job});
+          if(receipt?.process?.launch||receipt?.physical_settlement){validateCodexCliJoinedSettlement(receipt.physical_settlement,{proof:receipt.process});validateCodexCliLocalOutputDrain(receipt);}
           if(!same(receipt,transition.result_receipt)||receipt.schema!=='metaengine.codex-cli.run-receipt.v1'
             ||receipt.provider!=='CODEX_CLI'||receipt.trust_namespace!=='LOCAL_OPERATOR_QA'
             ||receipt.state!=='RESULT_READY'||receipt.task_id!==scope.task_id
@@ -500,9 +519,11 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
       open();assertNativeCodingHostRequestOpen(context);
       const result=await seedOperations[action](request,context);open();return result;
     }])):{}),
-    ...(serviceHeartbeatOperations?Object.fromEntries(['SERVICE_HEARTBEAT','READ_SERVICE_HEARTBEAT'].map(action=>[action,async request=>{
+    ...(serviceHeartbeatOperations?Object.fromEntries(['SERVICE_HEARTBEAT','READ_SERVICE_HEARTBEAT',...['SERVICE_HEARTBEAT_V2','READ_SERVICE_HEARTBEAT_V2'].filter(x=>typeof serviceHeartbeatOperations[x]==='function')].map(action=>[action,async request=>{
       open();const result=await serviceHeartbeatOperations[action](request);open();return result;
     }])):{}),
-    close(){closed=true;agentTools.close();checkpointVerifier?.close();commitService?.close();seedOperations?.close();serviceHeartbeatOperations?.close();},
-  });
+    close(){closed=true;callbackPublication.close();agentTools.close();checkpointVerifier?.close();commitService?.close();seedOperations?.close();serviceHeartbeatOperations?.close();},
+  };
+  Object.freeze(operations);callbackPublications.set(operations,callbackPublication.api);
+  return operations;
 }

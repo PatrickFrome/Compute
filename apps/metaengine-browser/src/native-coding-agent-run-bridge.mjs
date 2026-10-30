@@ -1,3 +1,4 @@
+import {requireNativeRunCallbackPublication} from './native-coding-run-callback-journal.mjs';
 import {createHash} from 'node:crypto';
 import {createNativeCodingAgentMcpBroker,nativeCodingAgentMcpIntentBodySha256} from './native-coding-agent-mcp-broker.mjs';
 import {createNativeCodingAgentMcpLaunch} from './native-coding-agent-mcp-launch.mjs';
@@ -10,8 +11,8 @@ const SHA=/^[a-f0-9]{64}$/,UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 
 /** One private capability per actual leased run; no allocator or provider API. */
-export async function prepareNativeCodingAgentRunBridge({ownPostgres,runId,binding,permit,authorization,deadlineAt,pins}={}){
-  if(typeof ownPostgres?.agentOperation!=='function'||!UUID.test(runId||'')||!permit||!authorization
+export async function prepareNativeCodingAgentRunBridge({ownPostgres,runId,binding,permit,authorization,deadlineAt,pins,callbackJournal}={}){
+  if(typeof ownPostgres?.openAgentRunCustody!=='function'||!UUID.test(runId||'')||!permit||!authorization
     ||permit.permit_id!==authorization.permit_id||permit.owner_epoch!==authorization.owner_epoch
     ||permit.workspace_id!==authorization.workspace_id||permit.project_id!==authorization.project_id
     ||permit.user_sid!==authorization.user_sid||permit.revoked!==false||permit.trust_namespace!=='LOCAL_OPERATOR_QA'
@@ -21,14 +22,18 @@ export async function prepareNativeCodingAgentRunBridge({ownPostgres,runId,bindi
     ||permit.worktree?.base_sha!==binding.base_sha||permit.worktree?.path!==authorization.worktree_path
     ||!Number.isFinite(Date.parse(deadlineAt))||Date.parse(deadlineAt)<=Date.now()
     ||Date.parse(deadlineAt)>Date.parse(permit.expires_at))fail();
+  // Before custody claim, broker open, capability or CLI effects. No qualified
+  // directory/ancestor publication producer exists in this source checkpoint.
+  requireNativeRunCallbackPublication(callbackJournal);
   const scope=Object.freeze({run_id:runId,workspace_id:permit.workspace_id,project_id:permit.project_id,
     task_id:binding.task_id,lease_generation:binding.lease_generation,agent_id:binding.agent_id,
     agent_generation_epoch:binding.agent_generation_epoch,provider_id:permit.provider_id,role:binding.role});
-  let closed=false,job=null,broker=null;
+  let closed=false,job=null,broker=null,closePromise=null,callbackJoin=null;
+  const custody=await ownPostgres.openAgentRunCustody({binding:scope,journal:callbackJournal});
   const open=()=>{if(closed||Date.now()>=Date.parse(deadlineAt))fail();};
   const host=async(operation,args)=>{
     open();if(!job)fail();
-    const result=await ownPostgres.agentOperation(validateNativeCodingAgentHostRequest({binding:scope,job_binding:job,operation,args}));
+    const result=await custody.agentOperation(validateNativeCodingAgentHostRequest({binding:scope,job_binding:job,operation,args}));
     open();return result;
   };
   const checkContext=context=>{
@@ -61,8 +66,8 @@ export async function prepareNativeCodingAgentRunBridge({ownPostgres,runId,bindi
       }});
     const registration=broker.issueRun({binding:scope,jobBinding:null,expiresAt:deadlineAt,allowedTools:tools});
     const launch=await createNativeCodingAgentMcpLaunch({registration,...pins});
-    return Object.freeze({launch,
-      async bindRun(proof){
+    const bridge=Object.freeze({launch,
+      bindRun(proof){return custody.trackCallback(async()=>{
         open();if(job)fail();
         const candidate=Object.freeze({job_id:proof?.job_id,pid:proof?.pid,process_incarnation_id:proof?.process_incarnation_id,
           executable_sha256:proof?.executable_sha256});
@@ -71,13 +76,30 @@ export async function prepareNativeCodingAgentRunBridge({ownPostgres,runId,bindi
           ||proof.tree_control_bound!==true||proof.started_suspended!==true||proof.job_bound_before_resume!==true)fail();
         // W30 RUNNING and protected ATTEMPTED registration must already exist.
         // A failure here leaves the process suspended and the token unbound.
-        const value=await ownPostgres.agentOperation({binding:scope,job_binding:candidate,operation:'CHECK',args:{}});
+        const value=await custody.agentOperation({binding:scope,job_binding:candidate,operation:'CHECK',args:{}});
         open();if(value?.schema!=='metaengine.native-coding.agent-authorized.v1'||value.run_id!==runId
           ||value.authorized!==true||value.authority_effect!==false)fail();
         job=candidate;broker.bindRun(runId,job);
-      },
+      });},
       async reconcileIntent(requestId){open();return broker.reconcileIntent(runId,requestId);},
-      async close(){if(closed)return;closed=true;broker.revokeRun(runId);await broker.close();job=null;},
-    });
-  }catch(error){closed=true;await broker?.close();throw error;}
+      drainCallbacks(){
+        if(callbackJoin)return callbackJoin;
+        callbackJoin=(async()=>{
+          // Transport is fenced first; callback join is separate so explicit
+          // quit can stop the original Host before waiting remote SQL here.
+          await custody.trackCallback(async()=>{await bridge.close();await broker.drainCallbacks(runId);});
+          return custody.finish();
+        })();void callbackJoin.catch(()=>{});return callbackJoin;
+      },
+      close(){
+        if(closePromise)return closePromise;
+        closed=true;void custody.fence().catch(()=>{});let resolveClose,rejectClose;
+        closePromise=new Promise((resolve,reject)=>{resolveClose=resolve;rejectClose=reject;});
+        // Fence and own the original transport drain before any reentrant call.
+        void closePromise.catch(()=>{});
+        void(async()=>{broker.revokeRun(runId);await broker.close();job=null;})().then(resolveClose,rejectClose);
+        return closePromise;
+      },
+    });return bridge;
+  }catch(error){closed=true;await custody.fence().catch(()=>{});await broker?.close();await custody.finish();throw error;}
 }

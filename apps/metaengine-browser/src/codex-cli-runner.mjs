@@ -1,3 +1,5 @@
+import {durableNativeRunJson as durableJson,createNativeRunCallbackJournal} from './native-coding-run-callback-journal.mjs';
+import {createCodexCliLaunch,validateCodexCliJoinedSettlement,validateCodexCliProtectedSettlement,codexCliLaunchIdentity,codexCliSettlementSha256,codexCliLocalOutputDrain,validateCodexCliProtectedLaunch} from './codex-cli-physical-settlement.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
@@ -41,11 +43,6 @@ export function buildCodexCliArgv({ role, worktreePath, schemaPath, resultPath, 
     '--sandbox', role === 'CRITIC' ? 'read-only' : 'workspace-write', '--json', '--color', 'never',
     ...(model ? ['--model', model] : []), '--output-schema', schemaPath, '--output-last-message', resultPath,
     '-C', worktreePath, '-'];
-}
-
-async function durableJson(file, value, exclusive = false) {
-  const handle = await fs.open(file, exclusive ? 'wx' : 'w', 0o600);
-  try { await handle.writeFile(`${JSON.stringify(value)}\n`); await handle.sync(); } finally { await handle.close(); }
 }
 
 async function boundedRead(file, maxBytes) {
@@ -148,7 +145,13 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
   const keyOf = binding => hash(JSON.stringify({ task_id: binding.task_id, lease_generation: binding.lease_generation, role: binding.role }));
   const inspect = async binding => {
     const directory = path.join(journalRoot, keyOf(binding));
-    try { return JSON.parse((await boundedRead(path.join(directory, 'receipt.json'), 256 * 1024)).toString()); }
+    try { const receipt=JSON.parse((await boundedRead(path.join(directory,'receipt.json'),256*1024)).toString());
+      if(receipt.launch_identity||receipt.process?.launch||receipt.physical_settlement){
+        const launch=JSON.parse((await boundedRead(path.join(directory,'launch.json'),256*1024)).toString());
+        validateCodexCliProtectedLaunch(receipt,launch);
+        const processReceipt=receipt.process?JSON.parse((await boundedRead(path.join(directory,'process.json'),256*1024)).toString()):null;
+        validateCodexCliProtectedSettlement(receipt,{launch,processReceipt});
+      }return receipt; }
     catch (error) { if (error.code !== 'ENOENT') throw error; }
     try { const attempt = JSON.parse((await boundedRead(path.join(directory, 'attempt.json'), 65536)).toString());
       return { ...attempt, state: 'AMBIGUOUS', terminal_reason: 'PRIOR_ATTEMPT_REQUIRES_RECONCILIATION', automatic_retry_allowed: false };
@@ -206,13 +209,15 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
         useful_work_verified: false, model_claim_authority: false, authority_effect: false };
       await durableJson(path.join(directory, 'attempt.json'), receipt, true);
       let handle = null, agentBridge=null, abortReason = null, eventError = null, outputBytes = 0, eventCount = 0, threadId = null,
-        completedTurns = 0, failedTurns = 0, pending = '', timer = null, processResult = null;
+        completedTurns = 0, failedTurns = 0, pending = '', timer = null, processResult = null, launch=null, bridgeDrained=false,bridgeClose=null;
       const decoder = new StringDecoder('utf8'); const stdoutHash = crypto.createHash('sha256');
       const stderrHash = crypto.createHash('sha256');
       const stdoutFile = await fs.open(path.join(directory, 'events.jsonl'), 'wx', 0o600);
       const stderrFile = await fs.open(path.join(directory, 'stderr.log'), 'wx', 0o600);
       let writes = Promise.resolve();
-      const terminate = reason => { abortReason ||= reason; if(agentBridge)void agentBridge.close().catch(()=>{});if (handle) void handle.terminate(reason).catch(() => {}); };
+      const closeBridge=()=>{if(!bridgeClose){let resolveClose,rejectClose;bridgeClose=new Promise((resolve,reject)=>{resolveClose=resolve;rejectClose=reject;});
+        void bridgeClose.catch(()=>{});void(async()=>{await agentBridge?.close();})().then(resolveClose,rejectClose);}return bridgeClose;};
+      const terminate = reason => { abortReason ||= reason; if(agentBridge)void closeBridge().catch(()=>{});if (handle) void handle.terminate(reason).catch(() => {}); };
       const onAbort = () => terminate('CANCELLED');
       const parseLine = line => {
         if (!line.trim()) return;
@@ -261,7 +266,8 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
         const args = buildCodexCliArgv({ role, worktreePath: root, schemaPath, resultPath, model });
         let launchEnvironment=codexCliTemporaryEnvironment(env,temporaryPath);
         if(prepareAgentBridge){
-          agentBridge=await prepareAgentBridge({runId,binding,authorization:structuredClone(permit),deadlineAt});
+          const callbackJournal=await createNativeRunCallbackJournal({directory,runId,binding});
+          agentBridge=await prepareAgentBridge({runId,binding,authorization:structuredClone(permit),deadlineAt,callbackJournal});
           if(!agentBridge||!isNativeCodingAgentMcpLaunch(agentBridge.launch)||typeof agentBridge.bindRun!=='function'
             ||typeof agentBridge.close!=='function'||agentBridge.launch.metadata.run_id!==runId)throw fail('agent_bridge_unverified');
           args.unshift(...agentBridge.launch.argv);launchEnvironment=agentBridge.launch.createEnvironment(launchEnvironment);
@@ -269,12 +275,18 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
         timer = setTimeout(() => terminate('TIMEOUT'), timeoutMs + 30000);
         signal?.addEventListener('abort', onAbort, { once: true });
         if (signal?.aborted) throw fail('cancelled_before_spawn');
-        handle = await processController.spawn({ executablePath, expectedExecutableSha256, args, cwd: root,
-          env: launchEnvironment, timeoutMs, deadlineAt, runId, binding });
+        const spec={executablePath,expectedExecutableSha256,args,cwd:root,env:launchEnvironment,timeoutMs,deadlineAt,runId,binding,promptSha256:receipt.prompt_sha256};
+        launch=createCodexCliLaunch(spec);
+        // An interrupted/failed spawn retains this one request forever. The
+        // existing exclusive lease directory prevents a later launch/replay.
+        await durableJson(path.join(directory,'launch.json'),launch,true);
+        receipt.launch_identity=codexCliLaunchIdentity(launch);
+        handle = await processController.spawn({...spec,launch});
         handle.stdout.on('data', data => output('stdout', data)); handle.stderr.on('data', data => output('stderr', data));
         const proof = handle.proof;
         if (!proof || proof.tree_control_bound !== true || proof.started_suspended !== true || proof.user_sid !== permit.user_sid
           || proof.executable_sha256 !== expectedExecutableSha256 || !/^pid:[1-9][0-9]*:created_100ns:[1-9][0-9]{16,18}$/.test(proof.process_incarnation_id || '')) throw fail('native_process_proof_invalid');
+        if(codexCliSettlementSha256(proof.launch)!==codexCliSettlementSha256(codexCliLaunchIdentity(launch)))throw fail('launch_binding_invalid');
         receipt.process = structuredClone(proof); receipt.pid = proof.pid; receipt.process_incarnation_id = proof.process_incarnation_id;
         receipt.job_id = proof.job_id;
         await durableJson(path.join(directory, 'process.json'), receipt, true);
@@ -289,6 +301,7 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
         await durableJson(path.join(directory, 'execution-started.json'), receipt, true);
         await handle.resume(request.prompt, { deadlineAt: receipt.execution_deadline });
         processResult = await handle.completion;
+        validateCodexCliJoinedSettlement(processResult?.joined_settlement,{proof:receipt.process,launch});
         pending += decoder.end();
         try { if (pending.trim()) parseLine(pending); } catch { eventError ||= 'JSONL_INVALID'; }
         await writes;
@@ -312,10 +325,17 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
         try { receipt.git_after = await gitProof(root, env,gitExecutable); } catch { receipt.git_after = null; }
       } finally {
         clearTimeout(timer); signal?.removeEventListener('abort', onAbort);
-        try{await agentBridge?.close();}catch{
+        try{await closeBridge();bridgeDrained=true;}catch{
           receipt.state='AMBIGUOUS';receipt.terminal_reason='AGENT_BRIDGE_REVOCATION_UNCONFIRMED';
         }
         await writes; await stdoutFile.sync(); await stderrFile.sync(); await stdoutFile.close(); await stderrFile.close();
+      }
+      // Native cleanup alone is insufficient while a private bridge or journal
+      // writer is still owned. Publish only after their actual joined drains.
+      if(bridgeDrained&&processResult?.joined_settlement){
+        try{receipt.physical_settlement=validateCodexCliJoinedSettlement(processResult.joined_settlement,{proof:receipt.process,launch});
+          receipt.local_output_drain=codexCliLocalOutputDrain(receipt.physical_settlement);}
+        catch{receipt.state='AMBIGUOUS';receipt.terminal_reason='JOINED_SETTLEMENT_UNVERIFIED';}
       }
       receipt.jsonl_sha256 = stdoutHash.digest('hex'); receipt.stderr_sha256 = stderrHash.digest('hex');
       receipt.output_bytes = outputBytes; receipt.finished_at = new Date().toISOString();

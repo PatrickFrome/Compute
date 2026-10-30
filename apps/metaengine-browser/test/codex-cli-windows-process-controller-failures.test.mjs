@@ -1,3 +1,4 @@
+import {CODEX_CLI_NATIVE_TERMINAL_SCHEMA,codexCliLaunchIdentity,validateCodexCliJoinedSettlement} from '../src/codex-cli-physical-settlement.mjs';
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -13,7 +14,7 @@ import { withOwnedCodexCliProcess } from './fixtures/with-owned-codex-cli-proces
 
 // Generated protocol doubles only: no Windows process, PowerShell, Job Object,
 // executable hash or native cleanup is qualified by these tests.
-function fixture(t) {
+function fixture(t,{observe=null}={}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'metaengine-controller-protocol-'));
   const helperPath = path.join(directory, 'fixture-helper.ps1'), helperBytes = 'protocol double, never executed';
   fs.writeFileSync(helperPath, helperBytes);
@@ -27,7 +28,7 @@ function fixture(t) {
     Object.defineProperty(process, 'platform', platform);
   });
   t.mock.timers.enable({ apis: ['setTimeout'] });
-  const helper = new EventEmitter();
+  const helper = new EventEmitter();helper.pid=122;
   helper.stdin = new PassThrough(); helper.stdout = new PassThrough(); helper.stderr = new PassThrough();
   let input = ''; helper.stdin.on('data', chunk => { input += chunk.toString(); });
   let kills = 0;
@@ -37,16 +38,19 @@ function fixture(t) {
   syncBuiltinESMExports();
   const controller = createCodexCliWindowsProcessController({
     helperPath, expectedHelperSha256: createHash('sha256').update(helperBytes).digest('hex'), powershellPath: path.resolve('fixture-powershell.exe'),
+    readProcess:async pid=>{const value={...helperIdentity(),pid,exe_path:path.resolve('fixture-powershell.exe'),user_sid:'S-1-5-21-111-1001'};return observe?observe(value):value;},
   });
   const spec = { executablePath: path.resolve('fixture-worker.exe'), cwd: path.resolve('fixture-worktree'),
     expectedExecutableSha256: 'a'.repeat(64), args: [], env: {}, timeoutMs: 10000,
     runId: '11111111-1111-4111-8111-111111111111' };
   const frame = value => helper.stdout.write(JSON.stringify(value) + '\n');
-  return { helper, spec, calls, frame, get input() { return input; }, get kills() { return kills; }, spawn: () => controller.spawn(spec) };
+  return { helper, spec, calls, frame, get launch(){const wire=JSON.parse(input.split('\n')[0]);return {schema:wire.schema,canonical_body:Buffer.from(wire.body_b64,'base64').toString(),request_sha256:wire.request_sha256};}, get input() { return input; }, get kills() { return kills; }, spawn: () => controller.spawn(spec) };
 }
 
+const dateOf=birth=>new Date(Number((BigInt(birth)-116444736000000000n)/10000n)).toISOString();
+const helperIdentity=()=>({pid:122,created_at:dateOf('133333333333333332'),process_incarnation_id:'pid:122:created_100ns:133333333333333332'});
 function nativeReady(f) {
-  return { type: 'ready', pid: 123, process_incarnation_id: 'pid:123:created_100ns:133333333333333333',
+  return { type: 'ready',launch:codexCliLaunchIdentity(f.launch),helper_process:helperIdentity(),started_at:dateOf('133333333333333333'),pid: 123, process_incarnation_id: 'pid:123:created_100ns:133333333333333333',
     executable_sha256: f.spec.expectedExecutableSha256, executable_path: f.spec.executablePath,
     tree_control_bound: true, started_suspended: true, job_bound_before_resume: true,
     process_tree_control: 'WINDOWS_JOB_OBJECT', job_id: f.spec.runId, user_sid: 'S-1-5-21-111-1001' };
@@ -61,12 +65,18 @@ function cancellationReceipt(f) {
   assert.ok(command, 'the controller must issue its own suspended cancellation');
   const [, cancellationId, reason] = command.split(' ');
   assert.match(cancellationId, /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
-  return { type: 'suspended_cancelled', run_id: f.spec.runId, job_id: f.spec.runId,
+  return {schema:CODEX_CLI_NATIVE_TERMINAL_SCHEMA,launch:codexCliLaunchIdentity(f.launch),helper_process:helperIdentity(),pipes_drained:true,type: 'suspended_cancelled', run_id: f.spec.runId, job_id: f.spec.runId,
     pid: 123, process_incarnation_id: nativeReady(f).process_incarnation_id, cancellation_id: cancellationId, reason,
     exit_code: 125, never_resumed: true, process_exit_confirmed: true, handles_closed: true,
     tree_cleanup_confirmed: true, process_tree_control: 'WINDOWS_JOB_OBJECT',
     job_accounting: { active_processes: 0, total_processes: 1, total_terminated_processes: 0 } };
 }
+
+function normalExit(f,{exit_code=0,reason=null}={}){return {schema:CODEX_CLI_NATIVE_TERMINAL_SCHEMA,type:'exit',launch:codexCliLaunchIdentity(f.launch),
+ helper_process:helperIdentity(),run_id:f.spec.runId,job_id:f.spec.runId,pid:123,process_incarnation_id:nativeReady(f).process_incarnation_id,
+ exit_code,reason,never_resumed:false,cancellation_id:null,process_exit_confirmed:true,handles_closed:true,pipes_drained:true,
+ tree_cleanup_confirmed:true,process_tree_control:'WINDOWS_JOB_OBJECT',job_accounting:{active_processes:0,total_processes:2,total_terminated_processes:1}};}
+const resumed=f=>({type:'resumed',request_id:codexCliLaunchIdentity(f.launch).request_id,request_sha256:f.launch.request_sha256});
 
 for (const mode of ['proof assertion', 'expired original deadline']) {
   test(`owned physical fixture cleans up after ${mode} before RESUME without hiding its failure`, async t => {
@@ -78,7 +88,7 @@ for (const mode of ['proof assertion', 'expired original deadline']) {
     const owned = withOwnedCodexCliProcess({ async spawn() { return handle; } }, f.spec, async h => {
       try {
         if (mode === 'proof assertion') assert.fail('injected proof assertion before RESUME');
-        else await h.resume('private prompt');
+        else await h.resume('');
       } catch (error) { primaryError = error; throw error; }
     });
     owned.then(() => { settled = true; }, () => { settled = true; });
@@ -151,18 +161,15 @@ test('close without a proven startup cause retains the unproven-exit fallback', 
 
 test('a valid ready and exit protocol still waits for helper close before confirmed completion', async t => {
   const f = fixture(t), pending = f.spawn();
-  f.frame({ type: 'ready', pid: 123, process_incarnation_id: 'pid:123:created_100ns:133333333333333333',
-    executable_sha256: f.spec.expectedExecutableSha256, executable_path: f.spec.executablePath,
-    tree_control_bound: true, started_suspended: true, job_bound_before_resume: true,
-    process_tree_control: 'WINDOWS_JOB_OBJECT', job_id: f.spec.runId, user_sid: 'S-1-5-21-111-1001' });
+  f.frame(nativeReady(f));
   const handle = await pending;
   let completed = false; handle.completion.then(() => { completed = true; });
-  await handle.resume(''); f.frame({ type: 'resumed' });
-  f.frame({ type: 'exit', exit_code: 0, reason: null, tree_cleanup_confirmed: true });
+  await handle.resume(''); f.frame(resumed(f));
+  f.frame(normalExit(f));
   await Promise.resolve(); assert.equal(completed, false);
   f.helper.emit('close', 0);
-  assert.deepEqual(await handle.completion, { exit_code: 0, signal: null, reason: null,
-    tree_cleanup_confirmed: true, process_tree_control: 'WINDOWS_JOB_OBJECT' });
+  const result=await handle.completion;assert.equal(result.tree_cleanup_confirmed,true);assert.equal(result.exit_code,0);
+  assert.deepEqual(result.joined_settlement.native_terminal,normalExit(f));validateCodexCliJoinedSettlement(result.joined_settlement,{proof:handle.proof,launch:f.launch});
   t.mock.timers.tick(30000); assert.equal(f.kills, 0);
 });
 
@@ -176,15 +183,15 @@ test('requested suspended cancellation is identity-bound, fences resume immediat
   const receipt = cancellationReceipt(f); f.frame(receipt);
   await Promise.resolve(); assert.equal(completed, false); assert.equal(f.kills, 0);
   f.helper.emit('close', 0); await Promise.all([terminating, repeated]);
-  const { type, ...expected } = receipt;
-  assert.deepEqual(await handle.completion, { ...expected, signal: null });
+  const completedReceipt=await handle.completion;const {joined_settlement,...actual}=completedReceipt;
+  assert.deepEqual(actual,{...receipt,signal:null});assert.deepEqual(joined_settlement.native_terminal,receipt);
   t.mock.timers.tick(11000); assert.equal(f.kills, 0);
 });
 
 test('deadline refusal followed by concurrent cancel/resume cannot send RESUME or change the cancellation binding', async t => {
   const f = fixture(t); f.spec.deadlineAt = new Date(Date.now() - 1).toISOString();
   const handle = await readyHandle(f);
-  await assert.rejects(handle.resume('private prompt'), /deadline_expired_before_resume/);
+  await assert.rejects(handle.resume(''), /deadline_expired_before_resume/);
   const terminating = handle.terminate('EXPIRED');
   await assert.rejects(handle.resume('private prompt'), /resume_invalid/);
   f.frame(cancellationReceipt(f)); f.helper.emit('close', 0); await terminating;
@@ -194,10 +201,10 @@ test('deadline refusal followed by concurrent cancel/resume cannot send RESUME o
 
 test('post-RESUME cancellation retains the ordinary protocol and cannot confirm a suspended receipt', async t => {
   const f = fixture(t), handle = await readyHandle(f);
-  await handle.resume(''); f.frame({ type: 'resumed' });
+  await handle.resume(''); f.frame(resumed(f));
   const terminating = handle.terminate('CANCELLED');
   assert.ok(f.input.endsWith('CANCEL CANCELLED\n')); assert.ok(!f.input.includes('CANCEL_SUSPENDED '));
-  f.frame({ type: 'exit', exit_code: 124, reason: 'CANCELLED', tree_cleanup_confirmed: true });
+  f.frame(normalExit(f,{exit_code:124,reason:'CANCELLED'}));
   f.helper.emit('close', 0); await terminating;
   assert.equal((await handle.completion).tree_cleanup_confirmed, true);
 });
@@ -306,4 +313,72 @@ test('separate controller runs issue distinct cancellation IDs', async t => {
     f.frame(receipt); f.helper.emit('close', 0); await terminating;
   });
   assert.notEqual(ids[0], ids[1]);
+});
+
+for(const [name,mutate] of [
+ ['request UUID',r=>{r.launch.request_id='22222222-2222-4222-8222-222222222222';}],
+ ['request digest',r=>{r.launch.request_sha256='f'.repeat(64);}],
+ ['helper birth within same millisecond',r=>{r.helper_process.process_incarnation_id='pid:122:created_100ns:133333333333333331';}],
+ ['child birth within same millisecond',r=>{r.process_incarnation_id='pid:123:created_100ns:133333333333333334';}],
+ ['active descendant',r=>{r.job_accounting.active_processes=1;}],
+ ['unclosed handle',r=>{r.handles_closed=false;}],
+ ['undrained stdout/stdin',r=>{r.pipes_drained=false;}],
+ ['exit-only boolean',r=>{delete r.job_accounting;}],
+ ['foreign control field',r=>{r.verified=true;}],
+])test('normal terminal refuses '+name,async t=>{
+ const f=fixture(t),handle=await readyHandle(f);await handle.resume('');f.frame(resumed(f));
+ const receipt=normalExit(f);mutate(receipt);f.frame(receipt);f.helper.emit('close',0);
+ const result=await handle.completion;assert.equal(result.tree_cleanup_confirmed,false);assert.equal(result.joined_settlement,undefined);
+});
+for(const mode of ['no terminal','no resumed ACK','helper exit only','stderr bytes','extra terminal'])test('normal join refuses or holds '+mode,async t=>{
+ const f=fixture(t),handle=await readyHandle(f);await handle.resume('');
+ if(mode!=='no resumed ACK')f.frame(resumed(f));
+ if(mode!=='no terminal')f.frame(normalExit(f));
+ let settled=false;handle.completion.then(()=>{settled=true;});
+ if(mode==='helper exit only'){f.helper.emit('exit',0);await Promise.resolve();assert.equal(settled,false);}
+ if(mode==='stderr bytes')f.helper.stderr.write('unexpected helper output');
+ if(mode==='extra terminal')f.frame(normalExit(f));
+ f.helper.emit('close',0);const result=await handle.completion;
+ assert.equal(result.tree_cleanup_confirmed,mode==='helper exit only');
+});
+for(const field of ['process_incarnation_id','user_sid','exe_path'])test('helper native observation rejects changed '+field+' and joins original close',async t=>{
+ const changed={process_incarnation_id:'pid:122:created_100ns:133333333333333331',user_sid:'S-1-5-21-111-1002',exe_path:path.resolve('foreign-helper.exe')};
+ const f=fixture(t,{observe:v=>({...v,[field]:changed[field]})});const pending=f.spawn();let settled=false;
+ const refusal=assert.rejects(pending,/helper_native_binding_changed/);pending.catch(()=>{settled=true;});f.frame(nativeReady(f));
+ await new Promise(resolve=>setImmediate(resolve));assert.equal(f.kills,1);assert.equal(settled,false);
+ f.helper.emit('close',0);await refusal;assert.ok(!f.input.includes('RESUME '));
+});
+test('held helper birth observation cannot be upgraded by close or late observer reply',async t=>{
+ const gate=Promise.withResolvers();const f=fixture(t,{observe:async v=>{await gate.promise;return v;}}),pending=f.spawn();
+ const refusal=assert.rejects(pending,/helper_native_binding_changed/);let settled=false;pending.catch(()=>{settled=true;});
+ f.frame(nativeReady(f));await Promise.resolve();f.helper.emit('close',0);await Promise.resolve();assert.equal(settled,false);
+ gate.resolve();await refusal;assert.ok(!f.input.includes('RESUME '));
+});
+test('resume refuses changed prompt without sending its bytes or weakening cancellation',async t=>{
+ const f=fixture(t),handle=await readyHandle(f);await assert.rejects(handle.resume('foreign prompt'),/resume_invalid/);
+ assert.ok(!f.input.includes('RESUME '));const stopping=handle.terminate('CANCELLED');f.frame(cancellationReceipt(f));f.helper.emit('close',0);await stopping;
+ assert.equal((await handle.completion).tree_cleanup_confirmed,true);
+});
+
+
+test('throwing helper kill is issued once and cannot release pending original close',async t=>{
+ const f=fixture(t),handle=await readyHandle(f);let kills=0;
+ f.helper.kill=()=>{kills++;throw Error('generated unconfirmed kill');};
+ const first=handle.terminate('CANCELLED'),second=handle.terminate('CANCELLED');
+ let settled=false;handle.completion.then(()=>{settled=true;});
+ t.mock.timers.tick(11000);await Promise.resolve();assert.equal(kills,1);assert.equal(settled,false);
+ f.helper.stdin.emit('error',Error('late input failure'));assert.equal(kills,1);
+ f.frame(cancellationReceipt(f));f.helper.emit('exit',0);await Promise.resolve();assert.equal(settled,false);
+ f.helper.emit('close',0);await Promise.all([first,second]);
+ const result=await handle.completion;assert.equal(result.tree_cleanup_confirmed,false);
+ assert.equal(result.joined_settlement,undefined);assert.equal(result.reason,'CONTROLLER_TERMINATION_TIMEOUT');
+});
+
+
+test('returned ready proof cannot mutate the original privately observed request or helper incarnation',async t=>{
+ const f=fixture(t),handle=await readyHandle(f);
+ assert.throws(()=>{handle.proof.launch.request_sha256='f'.repeat(64);},TypeError);
+ assert.throws(()=>{handle.proof.helper_process.process_incarnation_id='pid:122:created_100ns:133333333333333331';},TypeError);
+ const closing=handle.terminate('CANCELLED');f.frame(cancellationReceipt(f));f.helper.emit('close',0);await closing;
+ assert.equal((await handle.completion).tree_cleanup_confirmed,true);
 });

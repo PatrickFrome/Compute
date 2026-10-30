@@ -1,4 +1,5 @@
-import {pendingOwnerScopeFixture,bindStagingPendingOwner} from './test/pending-owner-phase-fixture.mjs';
+import {prepareNativeCodingSeedProfile} from './native-coding-seed-profile-preparation.mjs';
+import {pendingOwnerScopeFixture,bindStagingPendingOwner,pendingActivationScopeFixture} from './test/pending-owner-phase-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -10,7 +11,7 @@ import {pathToFileURL} from 'node:url';
 import {randomUUID,createHash} from 'node:crypto';
 import {generatedStage} from './test/native-workspace-preparation-fixture.mjs';
 import {createNativeWorkspacePreparation} from './native-coding-workspace-preparation.mjs';
-import {createNativePreparationTransactions} from './native-coding-preparation-transaction.mjs';
+import {createNativePreparationTransactions,bindNativeCodingTransactionPool} from './native-coding-preparation-transaction.mjs';
 import {readNativeWorkspaceStage,NATIVE_WORKSPACE_STAGE} from '../../apps/metaengine-browser/src/native-coding-workspace-preparation.mjs';
 import {SupervisorDeviceIdentity} from '../../apps/metaengine-browser/src/supervisor-device-identity.mjs';
 import {signNativeCodingDeviceRequest} from '../../apps/metaengine-browser/src/native-coding-device-request.mjs';
@@ -65,8 +66,12 @@ test('native PG17 prepared goal remains durably nonrunnable through signed admis
   await sql.unsafe(suspended.slice(suspended.indexOf('alter table destruktion_meta.devos_fleet_task_h205f22 drop constraint'),suspended.indexOf('create function destruktion_meta.browser_parent_suspension_projection_v1')));
   const managed=await source('20261009194157_managed_project_admission_v1.sql');
   await sql.unsafe(managed.slice(0,managed.indexOf('create or replace function destruktion_meta.a2_managed_project_admission_read_h205f22')));
+  await sql.unsafe(await source('20261025120000_native_coding_service_heartbeat_admission_v1.sql'));
+  for(const name of ['native-agent-count-unbounded-v2.sql','native-coding-chat-coordination-v1.sql'])await sql.begin(async tx=>tx.unsafe(await fs.readFile(new URL('./'+name,import.meta.url),'utf8')));
   const pendingSql=await fs.readFile(new URL('./native-coding-pending-goal-v1.sql',import.meta.url),'utf8');
   await sql.begin(tx=>tx.unsafe(pendingSql));await sql.begin(tx=>tx.unsafe(pendingSql));
+  const activationSql=await fs.readFile(new URL('./native-coding-pending-activation-v1.sql',import.meta.url),'utf8');
+  await sql.begin(tx=>tx.unsafe(activationSql));await sql.begin(tx=>tx.unsafe(activationSql));
   async function fixture(){
    const root=await fs.realpath(await fs.mkdtemp(path.join(directory,'scope-'))),c=generatedStage();
    c.postgres.system_identifier=(await sql.unsafe('select system_identifier::text as value from pg_control_system()'))[0].value;
@@ -85,7 +90,7 @@ test('native PG17 prepared goal remains durably nonrunnable through signed admis
    const options={transaction:async(mode,body)=>{const value=await monitor.transaction(sql,mode,async tx=>{await transactionHook(tx);return body(tx);});if(loseCommit)throw Error('generated_commit_reply_lost');return value;},stateDirectory:root,readCurrentDevice:context.readCurrentDevice,readNativeScope,verifyStorage,
     readRootIdentity:async p=>p===c.repo_root?c.repo_root_identity_sha256:p===c.managed_root?c.managed_root_identity_sha256:'a'.repeat(64)};
    let service=createNativeWorkspacePreparation(options);
-   const call=async(action,input=goal,requestContext)=>context.run(action,await signNativeCodingDeviceRequest({identity,binding:host,operation:action,input}),v=>service[action](v,requestContext));
+   const call=async(action,input=goal,requestContext={instanceId:host.instance_id,hostPid:host.host_pid})=>context.run(action,await signNativeCodingDeviceRequest({identity,binding:host,operation:action,input}),v=>service[action](v,requestContext));
    const goal={...selector,request_id:randomUUID(),objective:'Implement the user requested reliable project restart without duplicate work'};
    disposables.push(()=>{service.close();context.close();verifier.close();});
    return{root,c,d,pair,selector,goal,call,identity,host,context,get service(){return service;},options,transactionControl:fn=>{transactionHook=fn;},observations:()=>observations,observeControl:fn=>{observeHook=fn;},fail:()=>{failObserve=true;},lose:v=>{loseCommit=v;},restart:()=>{service.close();service=createNativeWorkspacePreparation(options);}};
@@ -148,7 +153,7 @@ test('native PG17 prepared goal remains durably nonrunnable through signed admis
   });
   await t.test('guarded reapplication refuses changed functions, disabled triggers, partial installs and relation drift',async()=>{
    const cases=[
-    ['drop table destruktion_meta.native_coding_pending_goal_h205f22',/partial_install/],
+    ['drop table destruktion_meta.native_coding_pending_goal_h205f22 cascade',/partial_install/],
     ["create or replace function destruktion_meta.native_coding_pending_goal_fence_v1() returns trigger language plpgsql security definer set search_path=pg_catalog,destruktion_meta as $$begin return NEW;end$$",/function_requires_review/],
     ['alter table destruktion_meta.devos_fleet_claim_h205f22 disable trigger aa_native_pending_goal_fence_trg',/trigger_requires_review/],
     ['drop trigger aa_native_pending_goal_fence_trg on destruktion_meta.project_task_h205f22',/partial_install/],
@@ -161,6 +166,7 @@ test('native PG17 prepared goal remains durably nonrunnable through signed admis
     ['alter table destruktion_meta.native_coding_pending_goal_h205f22 drop constraint native_coding_pending_goal_h205f22_preparation_id_key',/constraints_require_review/],
    ];
    for(const [change,pattern] of cases)await assert.rejects(sql.begin(async tx=>{await tx.unsafe(change);await tx.unsafe(pendingSql);}),pattern);
+   assert.equal((await sql.unsafe("select to_regclass('destruktion_meta.native_coding_pending_goal_h205f22') is not null as retained"))[0].retained,true,'failed corruption transactions restore original relation');
    await sql.begin(tx=>tx.unsafe(pendingSql));
   });
   await t.test('lost commit acknowledgement reads same project without automatic mutation replay',async()=>{
@@ -263,6 +269,87 @@ test('native PG17 prepared goal remains durably nonrunnable through signed admis
     assert.equal(await g.identity.establishHostOwnerW74(),null);
     assert.equal(await fs.readFile(path.join(g.root,'identity.json'),'utf8'),before);
    }finally{g.lose(false);await release();}
+  });
+  // Everything below is newly authored reconstruction coverage. SQL and signed
+  // device requests are real; native Windows/ACL observations are STAGING only.
+  async function activationFixture(){
+   const g=await fixture();await g.call('PREPARE_WORKSPACE_V1',g.selector);const admission=(await g.call('ADMIT_PREPARED_GOAL_V1')).admission;
+   const sourceProof=()=>({source_sha:g.c.artifact.source_sha,installed_exe_sha256:g.c.artifact.installed_exe_sha256,installed_asar_sha256:g.c.artifact.installed_asar_sha256});
+   const release=bindStagingPendingOwner(g,{readSourceHook:async()=>sourceProof()});
+   try{assert.equal((await g.identity.establishHostOwnerW74())?.project_id,admission.project_id);}finally{await release();}
+   const profile={schema:'metaengine.native-coding.seed-profile.v2',coordination_mode:'CHAT_LED',trust_namespace:'LOCAL_OPERATOR_QA',profile_id:randomUUID(),
+    workspace_id:g.c.workspace_id,device_id:g.d.device_id,client_id:g.d.client_id,device_key_fingerprint_sha256:g.d.key_fingerprint_sha256,admin_grant_epoch:1,owner_epoch:1,
+    user_sid:g.c.user_sid,artifact:g.c.artifact,postgres:g.c.postgres,agents:g.c.agents,primary_provider_id:g.c.agents[0].provider_id,
+    physical_slot_budget:2,expires_at:g.c.expires_at,storage_evidence_sha256:'d'.repeat(64),branch_name:'work/reconstruction-fixture',policy:{max_depth:null,max_tasks:null,max_children:null},production_qualified:false,automatic_retry_allowed:false,authority_effect:false};
+   const supervisor={schema:'metaengine.native-browser-supervisor.state.v1',client_kind:'METAENGINE_BROWSER_ELECTRON_NATIVE',
+    transport_identity:{profile:g.d.profile,device_id:g.d.device_id,key_fingerprint_sha256:g.d.key_fingerprint_sha256},supervisor_lifecycle:{continuous_service:{enabled:true},actuation_enabled:true,keepalive:{state:'RECOVERING'}}};
+   await sql.unsafe('insert into public.compute_fabric_a2_browser_supervisor_state_h205f22(workspace_id,client_id,state)values($1,$2,$3::text::jsonb)',[g.c.workspace_id,g.d.client_id,JSON.stringify(supervisor)]);
+   const prepared=await prepareNativeCodingSeedProfile({sql,profile}),input={...g.goal,activation_id:randomUUID(),profile_id:profile.profile_id,profile_sha256:prepared.profile_sha256};
+   await fs.writeFile(path.join(g.root,'native-coding-seed-operator-v1.json'),JSON.stringify({schema:'metaengine.native-coding.seed-operator.v1',profile_id:profile.profile_id,profile_sha256:prepared.profile_sha256}));
+   const activate=async(options={})=>{
+    let result,failure;
+    const unbind=bindStagingPendingOwner(g,{readSourceHook:async()=>({...sourceProof(),...options.sourcePatch}),withScope:async(f,mode,body)=>{
+     assert.equal(mode,'READ_CUSTODY');let native;
+     try{result=await pendingActivationScopeFixture(f,input,async tx=>{native=await body(tx);return native;},options);return native;}
+     catch(error){failure=error;throw error;}
+    }});
+    try{const owner=await g.identity.readTrustedHostOwnerIncarnationW74();if(failure)throw failure;assert.ok(owner);return result;}finally{await unbind();}
+   };
+   return {...g,admission,profile,input,activate};
+  }
+  await t.test('activation uses exact saved project/root and preserves immutable pending receipt without a second seed goal',async()=>{
+   const g=await activationFixture(),before=await fs.readFile(path.join(g.root,'identity.json'),'utf8');
+   const value=await g.activate();assert.equal(value.state,'ACTIVATED');assert.equal(value.activation.root_task_id,g.admission.root_task_id);assert.equal(value.activation.project_id,g.admission.project_id);
+   assert.equal(value.activation.root_state,'READY');assert.equal(value.activation.project_state,'ACTIVE');assert.equal(value.activation.permit_ids.length,2);assert.equal(value.activation.production_qualified,false);
+   assert.equal(await fs.readFile(path.join(g.root,'identity.json'),'utf8'),before,'activation never reseals Owner');
+   const [counts]=await sql.unsafe(`select (select count(*)::int from destruktion_meta.project_run_h205f22 where workspace_id=$1) projects,
+    (select count(*)::int from destruktion_meta.native_coding_seed_h205f22 where request_id=$2) legacy_seeds,
+    (select count(*)::int from destruktion_meta.devos_fleet_claim_h205f22 where workspace_id=$1) claims`,[g.c.workspace_id,g.goal.request_id]);
+   assert.deepEqual(counts,{projects:1,legacy_seeds:1,claims:0});
+   const seed=(await sql.unsafe('select project_id,root_task_id from destruktion_meta.native_coding_seed_h205f22 where request_id=$1',[g.goal.request_id]))[0];assert.deepEqual(seed,{project_id:g.admission.project_id,root_task_id:g.admission.root_task_id});
+   const pending=(await sql.unsafe('select receipt from destruktion_meta.native_coding_pending_goal_h205f22 where request_id=$1',[g.goal.request_id]))[0].receipt;assert.deepEqual(pending,g.admission);
+   const observed=g.observations();assert.deepEqual((await g.call('READ_PREPARED_GOAL_ACTIVATION_V1',g.input)).activation,value.activation);assert.equal(g.observations(),observed);
+   assert.equal((await g.call('ACTIVATE_PREPARED_GOAL_V1',g.input)).state,'READBACK_REQUIRED');assert.equal(g.observations(),observed);
+   await assert.rejects(sql.unsafe('delete from destruktion_meta.native_coding_pending_activation_h205f22 where request_id=$1',[g.goal.request_id]),/immutable/);
+  });
+  await t.test('lost activation COMMIT acknowledgement reads exact same activation without new Owner seal or write',async()=>{
+   const g=await activationFixture(),before=await fs.readFile(path.join(g.root,'identity.json'),'utf8');g.lose(true);await assert.rejects(g.activate(),/commit_reply_lost/);g.lose(false);g.restart();
+   const n=g.observations(),read=await g.call('READ_PREPARED_GOAL_ACTIVATION_V1',g.input);assert.equal(read.state,'ACTIVATED');assert.equal(read.activation.root_task_id,g.admission.root_task_id);
+   assert.equal((await g.call('ACTIVATE_PREPARED_GOAL_V1',g.input)).state,'READBACK_REQUIRED');assert.equal(g.observations(),n);assert.equal(await fs.readFile(path.join(g.root,'identity.json'),'utf8'),before);
+  });
+  await t.test('abort after RELEASE before activation COMMIT retains intent, rolls back and forbids replay',async()=>{
+   const g=await activationFixture(),abort=new AbortController();await assert.rejects(g.activate({signal:abort.signal,onPhase:m=>{if(m.phase==='RELEASE')abort.abort();}}));
+   assert.equal((await g.call('READ_PREPARED_GOAL_ACTIVATION_V1',g.input)).state,'READBACK_REQUIRED');const n=g.observations();
+   assert.equal((await g.call('ACTIVATE_PREPARED_GOAL_V1',g.input)).state,'READBACK_REQUIRED');assert.equal(g.observations(),n);
+   const [row]=await sql.unsafe('select t.state,p.state as project_state from destruktion_meta.devos_fleet_task_h205f22 t join destruktion_meta.project_run_h205f22 p on p.root_task_id=t.task_id where t.task_id=$1',[g.admission.root_task_id]);assert.deepEqual(row,{state:'BLOCKED',project_state:'PAUSED'});
+  });
+  await t.test('changed Electron app.asar evidence cannot release activation despite matching source revision',async()=>{
+   const g=await activationFixture();await assert.rejects(g.activate({sourcePatch:{installed_asar_sha256:'0'.repeat(64)}}));
+   assert.equal((await g.call('READ_PREPARED_GOAL_ACTIVATION_V1',g.input)).state,'READBACK_REQUIRED');
+   assert.equal(Number((await sql.unsafe('select count(*) from destruktion_meta.native_coding_pending_activation_h205f22 where request_id=$1',[g.goal.request_id]))[0].count),0);
+  });
+  await t.test('activation profile revocation and exact selector mismatch never create execution permits',async()=>{
+   const g=await activationFixture();await sql.unsafe('update destruktion_meta.native_coding_seed_profile_h205f22 set revoked_at=clock_timestamp() where profile_id=$1',[g.profile.profile_id]);
+   await assert.rejects(g.activate());await assert.rejects(g.call('READ_PREPARED_GOAL_ACTIVATION_V1',{...g.input,objective:'another goal'}),/goal_intent_conflict/);
+   assert.equal(Number((await sql.unsafe('select count(*) from destruktion_meta.native_coding_operator_permit_h205f22 where workspace_id=$1',[g.c.workspace_id]))[0].count),0);
+  });
+  await t.test('activation migration refuses altered body or widened function grants rather than replacing them',async()=>{
+   for(const change of ["alter function destruktion_meta.native_coding_activate_pending_goal_v1(jsonb,text,jsonb,text,text) stable",'grant execute on function destruktion_meta.native_coding_activate_pending_goal_v1(jsonb,text,jsonb,text,text) to seed_api'])
+    await assert.rejects(sql.begin(async tx=>{await tx.unsafe(change);await tx.unsafe(activationSql);}),/function_requires_review/);
+   await sql.begin(tx=>tx.unsafe(activationSql));
+  });
+  await t.test('general Host reserved readonly transaction joins native callback after real PG backend death and refuses late SQL',async()=>{
+   const {nativePhysicalSettlementUnconfirmed,runNativePhysicalSettlementScope}=await import('../../apps/metaengine-browser/src/native-coding-host-settlement.mjs');
+   const bound=bindNativeCodingTransactionPool(sql,monitor);let backend,entered,release,late=false;
+   const ready=new Promise(r=>entered=r),gate=new Promise(r=>release=r);
+   const physical=runNativePhysicalSettlementScope(()=>bound.begin('isolation level repeatable read read only',async tx=>{
+    backend=(await tx.unsafe('select pg_backend_pid() as pid'))[0].pid;entered();await gate;
+    await tx.unsafe('select 1 as forbidden_late_query');late=true;
+   }));physical.promise.catch(()=>{});await ready;
+   assert.equal((await sql.unsafe('select pg_terminate_backend($1) as killed',[backend]))[0].killed,true);
+   let settled=false;physical.promise.catch(()=>{settled=true;});await new Promise(r=>setTimeout(r,30));assert.equal(settled,false);
+   release();await assert.rejects(physical.promise,nativePhysicalSettlementUnconfirmed);assert.equal(late,false);assert.equal(physical.unconfirmed(),true);
+   assert.equal(await bound.begin('isolation level serializable',async tx=>(await tx.unsafe('select 42 as value'))[0].value),42);
   });
   await t.test('revoked current pairing cannot read old receipt as authority',async()=>{
    await sql.unsafe('update public.compute_fabric_a2_chat_bridge_remote_pairing_h205f22 set active=false where token_hash=$1',[f.pair]);

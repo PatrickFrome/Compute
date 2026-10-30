@@ -44,6 +44,8 @@ public static class MetaengineCodexJob {
   [DllImport("kernel32.dll",SetLastError=true)] static extern bool TerminateProcess(IntPtr p,uint code);
   [DllImport("kernel32.dll",SetLastError=true)] static extern bool QueryInformationJobObject(IntPtr j,int c,out Accounting a,uint n,IntPtr returned);
   [DllImport("kernel32.dll",SetLastError=true)] static extern bool CloseHandle(IntPtr h);
+  [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+  [DllImport("kernel32.dll")] static extern uint GetCurrentProcessId();
   static readonly object outputLock = new object();
   static void Require(bool ok,string phase) { if(!ok) throw new InvalidOperationException("codex_job_"+phase+":"+Marshal.GetLastWin32Error()); }
   static void CloseChecked(ref IntPtr handle,string phase) {
@@ -59,14 +61,30 @@ public static class MetaengineCodexJob {
     b.Append('\\',slashes*2); b.Append('"'); return b.ToString();
   }
   static Task Pump(IntPtr handle,string channel) {
-    return Task.Run(()=> { using(var stream=new FileStream(new SafeFileHandle(handle,true),FileAccess.Read)) {
+    return Task.Run(()=> { try { using(var stream=new FileStream(new SafeFileHandle(handle,false),FileAccess.Read)) {
       var buffer=new byte[4096]; int n; while((n=stream.Read(buffer,0,buffer.Length))>0)
         Emit("{\"type\":\"output\",\"channel\":"+Escape(channel)+",\"data_b64\":"+Escape(Convert.ToBase64String(buffer,0,n))+"}");
-    }});
+    }} finally { CloseChecked(ref handle,"output_pipe_close_failed"); }});
   }
-  public static void Run(string exe,string[] args,string cwd,string runId,uint timeout,string expectedSha,string absoluteDeadlineMs) {
+  static Task WriteInput(IntPtr handle,byte[] prompt) {
+    return Task.Run(()=> { try { using(var input=new FileStream(new SafeFileHandle(handle,false),FileAccess.Write)) input.Write(prompt,0,prompt.Length); }
+      finally { CloseChecked(ref handle,"input_pipe_close_failed"); } });
+  }
+  static string Identity(uint pid,long birth) { return "{\"pid\":"+pid+",\"created_at\":"+Escape(DateTime.FromFileTimeUtc(birth).ToString("o"))+",\"process_incarnation_id\":"+Escape("pid:"+pid+":created_100ns:"+birth)+"}"; }
+  static string Terminal(string type,string launch,string helper,string runId,ProcessInfo process,long birth,uint code,string reason,bool neverResumed,string cancellationId,Accounting a) {
+    return "{\"schema\":\"metaengine.codex-cli.native-terminal.v2\",\"type\":"+Escape(type)+",\"launch\":"+launch+",\"helper_process\":"+helper+
+      ",\"run_id\":"+Escape(runId)+",\"job_id\":"+Escape(runId)+",\"pid\":"+process.pid+",\"process_incarnation_id\":"+Escape("pid:"+process.pid+":created_100ns:"+birth)+
+      ",\"exit_code\":"+code+",\"reason\":"+(reason==null?"null":Escape(reason))+",\"never_resumed\":"+(neverResumed?"true":"false")+
+      ",\"cancellation_id\":"+(cancellationId==null?"null":Escape(cancellationId))+",\"process_exit_confirmed\":true,\"handles_closed\":true,\"pipes_drained\":true,\"tree_cleanup_confirmed\":true,\"process_tree_control\":\"WINDOWS_JOB_OBJECT\""+
+      ",\"job_accounting\":{\"active_processes\":"+a.active+",\"total_processes\":"+a.total+",\"total_terminated_processes\":"+a.terminated+"}}";
+  }
+  public static void Run(string exe,string[] args,string cwd,string runId,uint timeout,string expectedSha,string absoluteDeadlineMs,string requestId,string requestSha,string bindingSha,string promptSha) {
     IntPtr job=IntPtr.Zero,stdinRead=IntPtr.Zero,stdinWrite=IntPtr.Zero,stdoutRead=IntPtr.Zero,stdoutWrite=IntPtr.Zero,stderrRead=IntPtr.Zero,stderrWrite=IntPtr.Zero;
     var process=new ProcessInfo(); bool assigned=false;
+    long helperBirth,helperExit,helperKernel,helperUser;
+    Require(GetProcessTimes(GetCurrentProcess(),out helperBirth,out helperExit,out helperKernel,out helperUser),"helper_birth_failed");
+    string helperIdentity=Identity(GetCurrentProcessId(),helperBirth);
+    string launch="{\"request_id\":"+Escape(requestId)+",\"request_sha256\":"+Escape(requestSha)+",\"run_id\":"+Escape(runId)+",\"binding_sha256\":"+Escape(bindingSha)+",\"prompt_sha256\":"+Escape(promptSha)+"}";
     try {
       using(var sha=System.Security.Cryptography.SHA256.Create()) using(var input=File.OpenRead(exe)) {
         string actual=BitConverter.ToString(sha.ComputeHash(input)).Replace("-","").ToLowerInvariant();
@@ -86,15 +104,20 @@ public static class MetaengineCodexJob {
       // Windows 10+/Server 2016+ JOB_LIST binds within CreateProcess, before the
       // initial thread can run. Unsupported attributes refuse before creation;
       // there is deliberately no create-then-assign or breakaway fallback.
-      IntPtr attributes=IntPtr.Zero,jobList=IntPtr.Zero; bool attributesInitialized=false;
+      IntPtr attributes=IntPtr.Zero,jobList=IntPtr.Zero,handleList=IntPtr.Zero; bool attributesInitialized=false;
       try {
         UIntPtr attributeBytes=UIntPtr.Zero;
-        bool sized=InitializeProcThreadAttributeList(IntPtr.Zero,1,0,ref attributeBytes); int sizeError=Marshal.GetLastWin32Error();
+        bool sized=InitializeProcThreadAttributeList(IntPtr.Zero,2,0,ref attributeBytes); int sizeError=Marshal.GetLastWin32Error();
         if(sized || sizeError!=122 || attributeBytes==UIntPtr.Zero) throw new InvalidOperationException("codex_job_attributes_size_invalid:"+sizeError);
         attributes=Marshal.AllocHGlobal(checked((int)attributeBytes.ToUInt64()));
-        Require(InitializeProcThreadAttributeList(attributes,1,0,ref attributeBytes),"attributes_initialize_failed"); attributesInitialized=true;
+        Require(InitializeProcThreadAttributeList(attributes,2,0,ref attributeBytes),"attributes_initialize_failed"); attributesInitialized=true;
         jobList=Marshal.AllocHGlobal(IntPtr.Size); Marshal.WriteIntPtr(jobList,job);
         Require(UpdateProcThreadAttribute(attributes,0,new UIntPtr(0x0002000d),jobList,new UIntPtr((uint)IntPtr.Size),IntPtr.Zero,IntPtr.Zero),"job_attribute_failed");
+        // Only these three child ends may be inherited. In particular neither
+        // helper control/event stdio nor unrelated inheritable handles is listed.
+        handleList=Marshal.AllocHGlobal(checked(IntPtr.Size*3));
+        Marshal.WriteIntPtr(handleList,0,stdinRead); Marshal.WriteIntPtr(handleList,IntPtr.Size,stdoutWrite); Marshal.WriteIntPtr(handleList,IntPtr.Size*2,stderrWrite);
+        Require(UpdateProcThreadAttribute(attributes,0,new UIntPtr(0x00020002),handleList,new UIntPtr((uint)(IntPtr.Size*3)),IntPtr.Zero,IntPtr.Zero),"handle_attribute_failed");
         var extended=new StartupEx(); extended.startup=startup; extended.startup.cb=Marshal.SizeOf(typeof(StartupEx)); extended.attributes=attributes;
         ProcessInfo createdProcess;
         bool created=CreateProcess(exe,command,IntPtr.Zero,IntPtr.Zero,true,0x08000004|0x00080000,IntPtr.Zero,cwd,ref extended,out createdProcess);
@@ -106,6 +129,7 @@ public static class MetaengineCodexJob {
         // Attribute values must stay alive until the initialized list is deleted.
         if(attributesInitialized) DeleteProcThreadAttributeList(attributes);
         if(jobList!=IntPtr.Zero) Marshal.FreeHGlobal(jobList);
+        if(handleList!=IntPtr.Zero) Marshal.FreeHGlobal(handleList);
         if(attributes!=IntPtr.Zero) Marshal.FreeHGlobal(attributes);
       }
       bool inJob; Require(IsProcessInJob(process.process,job,out inJob)&&inJob,"membership_readback_failed"); assigned=true;
@@ -114,7 +138,7 @@ public static class MetaengineCodexJob {
       if(!String.Equals(Path.GetFullPath(image.ToString()),Path.GetFullPath(exe),StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("codex_job_image_changed");
       CloseChecked(ref stdinRead,"stdin_child_close_failed"); CloseChecked(ref stdoutWrite,"stdout_child_close_failed"); CloseChecked(ref stderrWrite,"stderr_child_close_failed");
       string sid=System.Security.Principal.WindowsIdentity.GetCurrent().User.Value;
-      Emit("{\"type\":\"ready\",\"pid\":"+process.pid+",\"process_incarnation_id\":"+Escape("pid:"+process.pid+":created_100ns:"+birth)+
+      Emit("{\"type\":\"ready\",\"launch\":"+launch+",\"helper_process\":"+helperIdentity+",\"pid\":"+process.pid+",\"process_incarnation_id\":"+Escape("pid:"+process.pid+":created_100ns:"+birth)+
         ",\"started_at\":"+Escape(DateTime.FromFileTimeUtc(birth).ToString("o"))+",\"user_sid\":"+Escape(sid)+",\"job_id\":"+Escape(runId)+
         ",\"executable_path\":"+Escape(image.ToString())+",\"executable_sha256\":"+Escape(expectedSha)+",\"tree_control_bound\":true,\"started_suspended\":true,\"job_bound_before_resume\":true,\"process_tree_control\":\"WINDOWS_JOB_OBJECT\"}");
       // No model prompt or child execution before the native host's second authorization.
@@ -141,14 +165,13 @@ public static class MetaengineCodexJob {
         // its initial thread was never resumed, so it could not spawn children.
         Require(cancelledAccounting.active==0 && cancelledAccounting.total==1 && cancelledAccounting.terminated<=cancelledAccounting.total,"suspended_accounting_invalid");
         CloseChecked(ref job,"suspended_job_close_failed");
-        Emit("{\"type\":\"suspended_cancelled\",\"run_id\":"+Escape(runId)+",\"job_id\":"+Escape(runId)+",\"pid\":"+process.pid+
-          ",\"process_incarnation_id\":"+Escape("pid:"+process.pid+":created_100ns:"+birth)+",\"cancellation_id\":"+Escape(cancel[1])+",\"reason\":"+Escape(cancel[2])+
-          ",\"exit_code\":"+cancelledCode+",\"never_resumed\":true,\"process_exit_confirmed\":true,\"handles_closed\":true,\"tree_cleanup_confirmed\":true,\"process_tree_control\":\"WINDOWS_JOB_OBJECT\""+
-          ",\"job_accounting\":{\"active_processes\":"+cancelledAccounting.active+",\"total_processes\":"+cancelledAccounting.total+",\"total_terminated_processes\":"+cancelledAccounting.terminated+"}}");
+        Emit(Terminal("suspended_cancelled",launch,helperIdentity,runId,process,birth,cancelledCode,cancel[2],true,cancel[1],cancelledAccounting));
         return;
       }
       if(resume==null || !resume.StartsWith("RESUME ")) throw new InvalidOperationException("codex_job_resume_not_authorized");
-      string resumeBody=resume.Substring(7); int separator=resumeBody.IndexOf(' ');
+      string expectedResume="RESUME "+requestId+" "+requestSha+" ";
+      if(!resume.StartsWith(expectedResume,StringComparison.Ordinal)) throw new InvalidOperationException("codex_job_resume_request_changed");
+      string resumeBody=resume.Substring(expectedResume.Length); int separator=resumeBody.IndexOf(' ');
       if(separator<1) throw new InvalidOperationException("codex_job_resume_deadline_missing");
       DateTime deadline=DateTime.UtcNow.AddMilliseconds(timeout);
       DateTime resumeDeadline=DateTimeOffset.FromUnixTimeMilliseconds(long.Parse(resumeBody.Substring(0,separator),System.Globalization.CultureInfo.InvariantCulture)).UtcDateTime;
@@ -160,11 +183,13 @@ public static class MetaengineCodexJob {
       if(DateTime.UtcNow>=deadline) throw new InvalidOperationException("codex_job_deadline_expired_before_resume");
       byte[] prompt=Convert.FromBase64String(resumeBody.Substring(separator+1));
       if(prompt.Length>65536) throw new InvalidOperationException("codex_job_prompt_too_large");
+      using(var sha=System.Security.Cryptography.SHA256.Create()) {
+        if(BitConverter.ToString(sha.ComputeHash(prompt)).Replace("-","").ToLowerInvariant()!=promptSha) throw new InvalidOperationException("codex_job_prompt_changed");
+      }
       Require(ResumeThread(process.thread)!=0xffffffff,"resume_failed");
-      Emit("{\"type\":\"resumed\"}");
+      Emit("{\"type\":\"resumed\",\"request_id\":"+Escape(requestId)+",\"request_sha256\":"+Escape(requestSha)+"}");
       var outTask=Pump(stdoutRead,"stdout"); stdoutRead=IntPtr.Zero; var errTask=Pump(stderrRead,"stderr"); stderrRead=IntPtr.Zero;
-      IntPtr inputHandle=stdinWrite; stdinWrite=IntPtr.Zero;
-      var inputTask=Task.Run(()=> { using(var input=new FileStream(new SafeFileHandle(inputHandle,true),FileAccess.Write)) input.Write(prompt,0,prompt.Length); });
+      var inputTask=WriteInput(stdinWrite,prompt); stdinWrite=IntPtr.Zero;
       var control=Task.Run(()=>Console.In.ReadLine()); string reason=null;
       while(WaitForSingleObject(process.process,100)==0x102) {
         if(DateTime.UtcNow>=deadline) { reason="TIMEOUT"; break; }
@@ -180,9 +205,14 @@ public static class MetaengineCodexJob {
       do { Require(QueryInformationJobObject(job,1,out accounting,(uint)Marshal.SizeOf(typeof(Accounting)),IntPtr.Zero),"accounting_readback_failed");
         empty=accounting.active==0; if(!empty) System.Threading.Thread.Sleep(20);
       } while(!empty && DateTime.UtcNow<cleanupDeadline);
-      CloseHandle(job); job=IntPtr.Zero;
-      bool drained=Task.WaitAll(new[]{outTask,errTask,inputTask},5000);
-      Emit("{\"type\":\"exit\",\"exit_code\":"+code+",\"reason\":"+(reason==null?"null":Escape(reason))+",\"tree_cleanup_confirmed\":"+((drained&&empty)?"true":"false")+"}");
+      Require(empty && accounting.total>=1 && accounting.terminated<=accounting.total,"accounting_not_empty");
+      // Killing the exact job closes every child-owned pipe end BEFORE joining
+      // readers/writer. Never wait for stdin consumption before terminating it.
+      Require(Task.WaitAll(new[]{outTask,errTask,inputTask},5000),"pipe_drain_unconfirmed");
+      CloseChecked(ref process.thread,"thread_close_failed"); CloseChecked(ref process.process,"process_close_failed");
+      CloseChecked(ref job,"job_close_failed");
+      // Candidate only: the parent still has to join this original helper close.
+      Emit(Terminal("exit",launch,helperIdentity,runId,process,birth,code,reason,false,null,accounting));
     } finally {
       if(process.process!=IntPtr.Zero && !assigned) TerminateProcess(process.process,125);
       foreach(IntPtr h in new[]{job,stdinRead,stdinWrite,stdoutRead,stdoutWrite,stderrRead,stderrWrite,process.thread,process.process}) if(h!=IntPtr.Zero) CloseHandle(h);
@@ -193,11 +223,24 @@ public static class MetaengineCodexJob {
 try {
   $PSModuleAutoLoadingPreference = 'None'
   Microsoft.PowerShell.Core\Import-Module -Name 'C:\Windows\System32\WindowsPowerShell\v1.0\Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1' -ErrorAction Stop
-  $request = [Console]::In.ReadLine() | ConvertFrom-Json
-  if ($request.run_id -notmatch '^[a-f0-9-]{36}$' -or $request.expected_sha256 -notmatch '^[a-f0-9]{64}$') { throw 'codex_job_request_invalid' }
+  $line = [Console]::In.ReadLine()
+  if ($null -eq $line -or $line.Length -gt 180000) { throw 'codex_job_envelope_invalid' }
+  $envelope = $line | ConvertFrom-Json
+  if ($envelope.schema -cne 'metaengine.codex-cli.launch.v2' -or $envelope.request_sha256 -cnotmatch '^[a-f0-9]{64}$') { throw 'codex_job_envelope_invalid' }
+  $bytes = [Convert]::FromBase64String([string]$envelope.body_b64)
+  if ($bytes.Length -lt 1 -or $bytes.Length -gt 131072 -or [Convert]::ToBase64String($bytes) -cne $envelope.body_b64) { throw 'codex_job_body_invalid' }
+  $sha = [Security.Cryptography.SHA256]::Create()
+  try { $actual = [BitConverter]::ToString($sha.ComputeHash($bytes)).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() }
+  if ($actual -cne $envelope.request_sha256) { throw 'codex_job_body_changed' }
+  $request = ([Text.UTF8Encoding]::new($false,$true)).GetString($bytes) | ConvertFrom-Json
+  if ($request.schema -cne 'metaengine.codex-cli.launch.v2' -or $request.request_id -cnotmatch '^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$'
+    -or $request.run_id -cnotmatch '^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$'
+    -or $request.expected_sha256 -cnotmatch '^[a-f0-9]{64}$' -or $request.binding_sha256 -cnotmatch '^[a-f0-9]{64}$'
+    -or $request.prompt_sha256 -cnotmatch '^[a-f0-9]{64}$') { throw 'codex_job_request_invalid' }
   if ([int]$request.timeout_ms -lt 100 -or [int]$request.timeout_ms -gt 1800000) { throw 'codex_job_timeout_invalid' }
   [MetaengineCodexJob]::Run([string]$request.executable_path,[string[]]$request.args,[string]$request.cwd,
-    [string]$request.run_id,[uint32]$request.timeout_ms,[string]$request.expected_sha256,[string]$request.deadline_ms)
+    [string]$request.run_id,[uint32]$request.timeout_ms,[string]$request.expected_sha256,[string]$request.deadline_ms,
+    [string]$request.request_id,[string]$envelope.request_sha256,[string]$request.binding_sha256,[string]$request.prompt_sha256)
 } catch {
   # A controlled error is reported without command text, prompt, env or credential values.
   [Console]::Out.WriteLine('{"type":"error","reason":"NATIVE_JOB_FAILED"}')

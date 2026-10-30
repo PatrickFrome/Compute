@@ -174,6 +174,16 @@ export function createHostOwnerGenesisCustodyW74({
     if (!row || !evidenceMatch(record,x,row) || nativeCodingCanonicalJson(record.pending_custody)!==nativeCodingCanonicalJson(pendingEvidence(x))) return null;
     const after = await check(tx.readAuthenticatedAdmin);
     if (!sameEvidence(x,after)) return null;
+    // Activation expectations arrive only through the private READ-only phase.
+    // Compare fresh signed package evidence before Host can release/activate SQL.
+    if(tx.activation){
+      const artifact=tx.activation.artifact;
+      if(record.source_sha!==artifact.source_sha||x.source.source_sha!==artifact.source_sha
+        ||record.pending_custody.installed_exe_sha256!==artifact.installed_exe_sha256
+        ||x.source.installed_exe_sha256!==artifact.installed_exe_sha256
+        ||x.source.installed_asar_sha256!==artifact.installed_asar_sha256
+        ||after.source.installed_asar_sha256!==artifact.installed_asar_sha256)return null;
+    }
     await tx.verifyTransition({sealed_sha256:sealedOwnerDigestW74(record)});
     tx.assertOpen();open();
     return Object.freeze({...record,observed_at:new Date(now()).toISOString(),authority_effect:false});

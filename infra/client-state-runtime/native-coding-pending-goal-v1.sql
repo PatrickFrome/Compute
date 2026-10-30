@@ -21,7 +21,7 @@ begin
   return;
  end if;
  if f.proowner<>to_regrole('state_owner') or f.prorettype<>to_regtype('trigger') or f.prokind<>'f' or f.proisstrict or f.proleakproof or f.proparallel<>'u' or exists(select 1 from aclexplode(coalesce(f.proacl,acldefault('f',f.proowner))) acl where acl.grantee<>f.proowner) or f.prosecdef is distinct from true or f.provolatile<>'v' or f.lanname<>'plpgsql' or f.proconfig is distinct from ARRAY['search_path=pg_catalog, destruktion_meta']::text[]
-  or encode(extensions.digest(convert_to(replace(f.prosrc,E'\r\n',E'\n'),'UTF8'),'sha256'),'hex')<>'a15afc875e0480f839c200a2f4596e955b752ac6d151f1a7c7e8e5d468eb4073'
+  or encode(extensions.digest(convert_to(replace(f.prosrc,E'\r\n',E'\n'),'UTF8'),'sha256'),'hex')not in ('a15afc875e0480f839c200a2f4596e955b752ac6d151f1a7c7e8e5d468eb4073','26ed8104bfbb6e65bdf42661a441efd57e8af68f810e691f9f250b6780028568')
  then raise exception 'native_pending_goal_function_requires_review:destruktion_meta.native_coding_pending_goal_fence_v1()';end if;
 end $review$;
 do $review$
@@ -136,23 +136,127 @@ create table if not exists destruktion_meta.native_coding_pending_goal_h205f22 (
 alter table destruktion_meta.native_coding_pending_goal_h205f22 enable row level security;
 revoke all on destruktion_meta.native_coding_pending_goal_h205f22 from public,anon,authenticated,service_role;
 
+-- Activation history relies on this exact private immutable dependency, not
+-- merely its OID. A replaced legacy helper must never weaken the new ledger.
+do $immutable_review$
+declare f record;
+begin
+ select p.*,l.lanname into f from pg_proc p join pg_language l on l.oid=p.prolang where p.oid=to_regprocedure('destruktion_meta.native_coding_seed_immutable_v1()');
+ if not found or f.proowner<>to_regrole('state_owner') or f.prorettype<>to_regtype('trigger') or f.prokind<>'f' or f.proisstrict or f.proleakproof or f.proparallel<>'u'
+  or exists(select 1 from aclexplode(coalesce(f.proacl,acldefault('f',f.proowner))) acl where acl.grantee<>f.proowner)
+  or f.prosecdef is distinct from false or f.provolatile<>'v' or f.lanname<>'plpgsql'
+  or f.proconfig is distinct from ARRAY['search_path=pg_catalog']::text[]
+  or encode(extensions.digest(convert_to(replace(f.prosrc,E'\r\n',E'\n'),'UTF8'),'sha256'),'hex')<>'e9c5a42f1a88be78b22fedada84c76e514024e47b42859f2399046ba2d968081'
+ then raise exception 'native_pending_activation_immutable_function_requires_review';end if;
+end $immutable_review$;
+-- Same-root activation authorization is separate immutable history. Empty on
+-- upgrade; ordinary pending callers cannot insert through any public RPC.
+create temporary table pending_activation_reference (
+ activation_id uuid primary key, request_id uuid not null unique,
+ input jsonb not null, profile_id uuid not null,
+ profile_sha256 text not null check(profile_sha256 ~ '^[a-f0-9]{64}$'),
+ workspace_id uuid not null, project_id uuid not null unique,
+ root_task_id uuid not null unique,
+ initial_task_spec_sha256 text not null check(initial_task_spec_sha256 ~ '^[a-f0-9]{64}$'),
+ task_spec jsonb not null, task_spec_sha256 text not null,
+ branch_name text not null, policy jsonb not null,
+ sealed_owner_sha256 text not null check(sealed_owner_sha256 ~ '^[a-f0-9]{64}$'),
+ seed_receipt jsonb not null, receipt jsonb not null,
+ created_at timestamptz not null default clock_timestamp(),
+ check(task_spec_sha256=encode(extensions.digest(convert_to(task_spec::text,'UTF8'),'sha256'),'hex'))
+) on commit drop;
+
+do $activation_review$
+declare actual jsonb;expected jsonb;f text;t record;c record;
+begin
+ select encode(extensions.digest(convert_to(replace(prosrc,E'\r\n',E'\n'),'UTF8'),'sha256'),'hex') into f
+ from pg_proc where oid=to_regprocedure('destruktion_meta.native_coding_pending_goal_fence_v1()');
+ if to_regclass('destruktion_meta.native_coding_pending_activation_h205f22') is null then
+  if f='26ed8104bfbb6e65bdf42661a441efd57e8af68f810e691f9f250b6780028568'
+   or to_regprocedure('destruktion_meta.native_coding_activate_pending_goal_v1(jsonb,text,jsonb,text,text)') is not null
+  then raise exception 'native_pending_activation_partial_install';end if;
+  return;
+ end if;
+ if f is distinct from '26ed8104bfbb6e65bdf42661a441efd57e8af68f810e691f9f250b6780028568'
+ then raise exception 'native_pending_activation_partial_install';end if;
+ select * into c from pg_class where oid='destruktion_meta.native_coding_pending_activation_h205f22'::regclass;
+ if c.relkind<>'r' or c.relowner<>to_regrole('state_owner') or not c.relrowsecurity
+  or exists(select 1 from pg_policy where polrelid=c.oid)
+  or exists(select 1 from aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) x where x.grantee<>c.relowner)
+  or exists(select 1 from pg_attribute a,lateral aclexplode(a.attacl) x where a.attrelid=c.oid and x.grantee<>c.relowner)
+ then raise exception 'native_pending_activation_authority_requires_review';end if;
+ select jsonb_agg(jsonb_build_array(a.attname,format_type(a.atttypid,a.atttypmod),a.attnotnull,pg_get_expr(d.adbin,d.adrelid)) order by a.attnum)
+ into actual from pg_attribute a left join pg_attrdef d on d.adrelid=a.attrelid and d.adnum=a.attnum where a.attrelid=c.oid and a.attnum>0 and not a.attisdropped;
+ select jsonb_agg(jsonb_build_array(a.attname,format_type(a.atttypid,a.atttypmod),a.attnotnull,pg_get_expr(d.adbin,d.adrelid)) order by a.attnum)
+ into expected from pg_attribute a left join pg_attrdef d on d.adrelid=a.attrelid and d.adnum=a.attnum where a.attrelid='pg_temp.pending_activation_reference'::regclass and a.attnum>0 and not a.attisdropped;
+ if actual is distinct from expected then raise exception 'native_pending_activation_columns_require_review';end if;
+ select jsonb_agg(jsonb_build_array(contype,pg_get_constraintdef(oid),convalidated,condeferrable,condeferred) order by contype,pg_get_constraintdef(oid)) into actual from pg_constraint where conrelid=c.oid and contype<>'f';
+ select jsonb_agg(jsonb_build_array(contype,pg_get_constraintdef(oid),convalidated,condeferrable,condeferred) order by contype,pg_get_constraintdef(oid)) into expected from pg_constraint where conrelid='pg_temp.pending_activation_reference'::regclass;
+ if actual is distinct from expected then raise exception 'native_pending_activation_constraints_require_review';end if;
+ select jsonb_agg(pg_get_constraintdef(oid) order by pg_get_constraintdef(oid)) into actual from pg_constraint where conrelid=c.oid and contype='f' and convalidated and not condeferrable;
+ if actual is distinct from '["FOREIGN KEY (profile_id) REFERENCES destruktion_meta.native_coding_seed_profile_h205f22(profile_id)", "FOREIGN KEY (project_id) REFERENCES destruktion_meta.project_run_h205f22(project_id)", "FOREIGN KEY (request_id) REFERENCES destruktion_meta.native_coding_pending_goal_h205f22(request_id)", "FOREIGN KEY (root_task_id) REFERENCES destruktion_meta.devos_fleet_task_h205f22(task_id)"]'::jsonb or (select count(*) from pg_constraint where conrelid=c.oid and contype='f')<>4 then raise exception 'native_pending_activation_foreign_keys_require_review';end if;
+ if (select count(*) from pg_trigger where tgrelid=c.oid and not tgisinternal)<>1 then raise exception 'native_pending_activation_trigger_requires_review';end if;
+ select * into t from pg_trigger where tgrelid=c.oid and not tgisinternal;
+ if t.tgname<>'native_coding_pending_activation_immutable_trg' or t.tgfoid<>to_regprocedure('destruktion_meta.native_coding_seed_immutable_v1()')
+  or t.tgtype<>27 or t.tgenabled<>'O' or t.tgnargs<>0 or t.tgqual is not null or t.tgattr<>''::int2vector
+ then raise exception 'native_pending_activation_trigger_requires_review';end if;
+end $activation_review$;
+
+create table if not exists destruktion_meta.native_coding_pending_activation_h205f22 (
+ activation_id uuid primary key, request_id uuid not null unique references destruktion_meta.native_coding_pending_goal_h205f22(request_id),
+ input jsonb not null, profile_id uuid not null references destruktion_meta.native_coding_seed_profile_h205f22(profile_id),
+ profile_sha256 text not null check(profile_sha256 ~ '^[a-f0-9]{64}$'),
+ workspace_id uuid not null, project_id uuid not null unique references destruktion_meta.project_run_h205f22(project_id),
+ root_task_id uuid not null unique references destruktion_meta.devos_fleet_task_h205f22(task_id),
+ initial_task_spec_sha256 text not null check(initial_task_spec_sha256 ~ '^[a-f0-9]{64}$'),
+ task_spec jsonb not null, task_spec_sha256 text not null,
+ branch_name text not null, policy jsonb not null,
+ sealed_owner_sha256 text not null check(sealed_owner_sha256 ~ '^[a-f0-9]{64}$'),
+ seed_receipt jsonb not null, receipt jsonb not null,
+ created_at timestamptz not null default clock_timestamp(),
+ check(task_spec_sha256=encode(extensions.digest(convert_to(task_spec::text,'UTF8'),'sha256'),'hex'))
+);
+alter table destruktion_meta.native_coding_pending_activation_h205f22 enable row level security;
+revoke all on destruktion_meta.native_coding_pending_activation_h205f22 from public,anon,authenticated,service_role;
+create or replace trigger native_coding_pending_activation_immutable_trg before update or delete on destruktion_meta.native_coding_pending_activation_h205f22
+ for each row execute function destruktion_meta.native_coding_seed_immutable_v1();
+
 create or replace function destruktion_meta.native_coding_pending_goal_fence_v1()
 returns trigger language plpgsql security definer set search_path=pg_catalog,destruktion_meta as $fn$
-declare pending boolean:=false;
+declare pending boolean:=false;activation destruktion_meta.native_coding_pending_activation_h205f22%rowtype;
 begin
  if TG_TABLE_NAME='native_coding_pending_goal_h205f22' then
   raise exception 'native_pending_goal_binding_immutable' using errcode='55000';
  elsif TG_TABLE_NAME='devos_fleet_task_h205f22' then
   if TG_OP<>'INSERT' then
    pending:=OLD.task_spec ? 'native_pending_goal' or exists(select 1 from destruktion_meta.native_coding_pending_goal_h205f22 where root_task_id=OLD.task_id);
+   select * into activation from destruktion_meta.native_coding_pending_activation_h205f22 where root_task_id=OLD.task_id;
+   if pending and activation.activation_id is not null then
+    if TG_OP='DELETE' then raise exception 'native_pending_goal_binding_immutable' using errcode='55000';end if;
+    if NEW.task_spec is distinct from activation.task_spec or NEW.task_spec_sha256 is distinct from activation.task_spec_sha256
+     or NEW.branch_name is distinct from activation.branch_name or NEW.task_id<>OLD.task_id or NEW.workspace_id<>OLD.workspace_id
+     or NEW.role<>OLD.role or NEW.claim_class<>OLD.claim_class or NEW.base_sha is distinct from OLD.base_sha
+     or NEW.point_id is distinct from OLD.point_id or NEW.idempotency_key is distinct from OLD.idempotency_key
+    then raise exception 'native_pending_goal_activation_binding_changed' using errcode='55000';end if;
+    if OLD.task_spec ? 'native_pending_goal' and (OLD.state<>'BLOCKED' or OLD.lease_generation<>0
+     or OLD.task_spec_sha256<>activation.initial_task_spec_sha256 or NEW.task_spec<>activation.task_spec
+     or NEW.task_spec_sha256<>activation.task_spec_sha256 or NEW.state<>'READY'
+     or (to_jsonb(NEW)-'task_spec'-'task_spec_sha256'-'state'-'branch_name'-'updated_at') is distinct from
+        (to_jsonb(OLD)-'task_spec'-'task_spec_sha256'-'state'-'branch_name'-'updated_at')
+     or NEW.branch_name is distinct from activation.branch_name) then raise exception 'native_pending_goal_activation_binding_changed' using errcode='55000';end if;
+    pending:=false;
+   end if;
    if pending and (TG_OP='DELETE' or (to_jsonb(NEW)-'updated_at') is distinct from (to_jsonb(OLD)-'updated_at'))
    then raise exception 'native_pending_goal_activation_required' using errcode='55000';end if;
   end if;
   if TG_OP<>'DELETE' and exists(select 1 from destruktion_meta.native_coding_pending_goal_h205f22 g where g.root_task_id<>NEW.task_id
+    and not exists(select 1 from destruktion_meta.native_coding_pending_activation_h205f22 a where a.request_id=g.request_id)
     and (g.project_id::text=NEW.task_spec#>>'{project_continuity,project_id}' or g.project_id::text=NEW.task_spec#>>'{native_coding,project_id}'
       or g.project_id::text=NEW.task_spec#>>'{native_pending_goal,project_id}' or g.root_task_id::text=NEW.task_spec#>>'{project_continuity,parent_task_id}' or g.root_task_id::text=NEW.task_spec#>>'{project_continuity,root_task_id}' or g.request_id::text=NEW.task_spec#>>'{project_continuity,root_request_id}'))
    then raise exception 'native_pending_goal_child_forbidden' using errcode='55000';end if;
   if TG_OP<>'DELETE' and NEW.task_spec ? 'native_pending_goal' then
+   if exists(select 1 from destruktion_meta.native_coding_pending_activation_h205f22 where root_task_id=NEW.task_id)
+   then raise exception 'native_pending_goal_binding_immutable' using errcode='55000';end if;
    if NEW.state<>'BLOCKED' or NEW.lease_generation<>0 or NEW.lease_agent_id is not null or NEW.lease_target_id is not null
     or NEW.lease_tab_id is not null or NEW.lease_agent_generation_epoch is not null or NEW.lease_expires_at is not null
     or NEW.result_checkpoint_id is not null or NEW.result_summary is not null or NEW.result_sha256 is not null
@@ -162,30 +266,51 @@ begin
   if TG_OP<>'INSERT' then
    pending:=exists(select 1 from destruktion_meta.native_coding_pending_goal_h205f22 where project_id=OLD.project_id)
     or exists(select 1 from destruktion_meta.devos_fleet_task_h205f22 where task_id=OLD.root_task_id and task_spec ? 'native_pending_goal');
+   select * into activation from destruktion_meta.native_coding_pending_activation_h205f22 where project_id=OLD.project_id;
+   if pending and activation.activation_id is not null then
+    if TG_OP='DELETE' then raise exception 'native_pending_goal_binding_immutable' using errcode='55000';end if;
+    if NEW.project_id<>OLD.project_id or NEW.root_task_id<>OLD.root_task_id or NEW.workspace_id<>OLD.workspace_id
+     or NEW.request_id<>OLD.request_id or NEW.goal<>OLD.goal or NEW.device_id<>OLD.device_id or NEW.client_id<>OLD.client_id
+     or NEW.admin_grant_epoch<>OLD.admin_grant_epoch then raise exception 'native_pending_goal_activation_binding_changed' using errcode='55000';end if;
+    if exists(select 1 from destruktion_meta.devos_fleet_task_h205f22 where task_id=OLD.root_task_id and task_spec ? 'native_pending_goal')
+     and (OLD.state<>'PAUSED' or NEW.state<>'ACTIVE' or NEW.max_depth is distinct from (activation.policy->>'max_depth')::int
+      or NEW.max_tasks is distinct from (activation.policy->>'max_tasks')::bigint or NEW.max_children is distinct from (activation.policy->>'max_children')::bigint
+      or (to_jsonb(NEW)-'state'-'max_depth'-'max_tasks'-'max_children'-'last_seq'-'last_reconciled_at') is distinct from
+         (to_jsonb(OLD)-'state'-'max_depth'-'max_tasks'-'max_children'-'last_seq'-'last_reconciled_at'))
+    then raise exception 'native_pending_goal_activation_binding_changed' using errcode='55000';end if;
+    pending:=false;
+   end if;
    if pending and (TG_OP='DELETE' or (to_jsonb(NEW)-'last_seq'-'last_reconciled_at') is distinct from (to_jsonb(OLD)-'last_seq'-'last_reconciled_at'))
    then raise exception 'native_pending_goal_activation_required' using errcode='55000';end if;
   end if;
-  if TG_OP<>'DELETE' and NEW.state<>'PAUSED' and exists(select 1 from destruktion_meta.devos_fleet_task_h205f22 where task_id=NEW.root_task_id and task_spec ? 'native_pending_goal')
+  if TG_OP<>'DELETE' and NEW.state<>'PAUSED' and not exists(select 1 from destruktion_meta.native_coding_pending_activation_h205f22 where project_id=NEW.project_id) and exists(select 1 from destruktion_meta.devos_fleet_task_h205f22 where task_id=NEW.root_task_id and task_spec ? 'native_pending_goal')
   then raise exception 'native_pending_goal_paused_required' using errcode='55000';end if;
  elsif TG_TABLE_NAME='project_task_h205f22' then
-  if TG_OP<>'INSERT' and exists(select 1 from destruktion_meta.native_coding_pending_goal_h205f22 where project_id=OLD.project_id)
+  if TG_OP<>'INSERT' and exists(select 1 from destruktion_meta.native_coding_pending_goal_h205f22 where project_id=OLD.project_id and not exists(select 1 from destruktion_meta.native_coding_pending_activation_h205f22 where project_id=OLD.project_id))
    and (TG_OP='DELETE' or NEW is distinct from OLD) then raise exception 'native_pending_goal_activation_required' using errcode='55000';end if;
   if TG_OP<>'DELETE' and exists(select 1 from destruktion_meta.project_run_h205f22 p join destruktion_meta.devos_fleet_task_h205f22 t on t.task_id=p.root_task_id
-   where p.project_id=NEW.project_id and t.task_spec ? 'native_pending_goal' and (NEW.task_id<>p.root_task_id or NEW.root_task_id<>p.root_task_id or NEW.parent_task_id is not null or NEW.depth<>0 or NEW.task_seq<>1))
+   where p.project_id=NEW.project_id and not exists(select 1 from destruktion_meta.native_coding_pending_activation_h205f22 where project_id=NEW.project_id) and t.task_spec ? 'native_pending_goal' and (NEW.task_id<>p.root_task_id or NEW.root_task_id<>p.root_task_id or NEW.parent_task_id is not null or NEW.depth<>0 or NEW.task_seq<>1))
   then raise exception 'native_pending_goal_activation_required' using errcode='55000';end if;
   if TG_OP<>'DELETE' and exists(select 1 from destruktion_meta.native_coding_pending_goal_h205f22 g
    where (g.root_task_id=NEW.parent_task_id or g.root_task_id=NEW.root_task_id) and g.project_id<>NEW.project_id)
   then raise exception 'native_pending_goal_child_forbidden' using errcode='55000';end if;
  elsif TG_TABLE_NAME='project_child_proposal_h205f22' then
-  if exists(select 1 from destruktion_meta.native_coding_pending_goal_h205f22 g where g.project_id=NEW.project_id or g.root_task_id=NEW.parent_task_id or g.root_task_id=NEW.child_task_id)
+  if exists(select 1 from destruktion_meta.native_coding_pending_goal_h205f22 g where (g.project_id=NEW.project_id or g.root_task_id=NEW.parent_task_id or g.root_task_id=NEW.child_task_id)
+   and not exists(select 1 from destruktion_meta.native_coding_pending_activation_h205f22 a where a.request_id=g.request_id))
   then raise exception 'native_pending_goal_child_forbidden' using errcode='55000';end if;
  elsif TG_TABLE_NAME='devos_fleet_claim_h205f22' then
   if exists(select 1 from destruktion_meta.devos_fleet_task_h205f22 where task_id=NEW.task_id and task_spec ? 'native_pending_goal')
-   or exists(select 1 from destruktion_meta.native_coding_pending_goal_h205f22 where root_task_id=NEW.task_id)
+   or exists(select 1 from destruktion_meta.native_coding_pending_goal_h205f22 where root_task_id=NEW.task_id and not exists(select 1 from destruktion_meta.native_coding_pending_activation_h205f22 where root_task_id=NEW.task_id))
   then raise exception 'native_pending_goal_claim_forbidden' using errcode='55000';end if;
  else
   -- Shared UUID domain with Browser and legacy native goal admissions.
   perform pg_advisory_xact_lock(hashtextextended('client-v1-goal:'||NEW.request_id::text,0));
+  if TG_TABLE_NAME='native_coding_seed_h205f22' and TG_OP='INSERT' then
+   select * into activation from destruktion_meta.native_coding_pending_activation_h205f22 where request_id=NEW.request_id;
+   if activation.activation_id is not null and NEW.project_id=activation.project_id and NEW.root_task_id=activation.root_task_id
+    and NEW.workspace_id=activation.workspace_id and NEW.profile_id=activation.profile_id and NEW.profile_sha256=activation.profile_sha256
+    and NEW.task_spec_sha256=activation.task_spec_sha256 and NEW.receipt=activation.seed_receipt then return NEW;end if;
+  end if;
   if exists(select 1 from destruktion_meta.native_coding_pending_goal_h205f22 where request_id=NEW.request_id)
   then raise exception 'native_pending_goal_request_collision' using errcode='23505';end if;
  end if;

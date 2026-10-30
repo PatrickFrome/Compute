@@ -1,3 +1,5 @@
+import {prepareUnqualifiedBridgeFixture} from './fixtures/native-coding-unqualified-bridge.mjs';
+import {generatedRunCustodyDouble} from './fixtures/native-coding-run-custody-double.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID,createHash} from 'node:crypto';
@@ -16,16 +18,16 @@ async function fixture(t,{role='IMPLEMENTER',unknown=false,prepare=true}={}){
   const authorization={...binding,authorized:true,trust_namespace:'LOCAL_OPERATOR_QA',permit_id:permit.permit_id,owner_epoch:permit.owner_epoch,workspace_id:permit.workspace_id,
     project_id:permit.project_id,user_sid:permit.user_sid,worktree_path:permit.worktree.path};
   let current=true,stored=null,writes=0;
-  const ownPostgres={async agentOperation(value){
+  const ownPostgres=generatedRunCustodyDouble(async value=>{
     calls.push(structuredClone(value));if(!current&&value.operation!=='READ_INTENT')throw Error('fixture_lease_revoked');
     if(value.operation==='CHECK')return {schema:'metaengine.native-coding.agent-authorized.v1',run_id:runId,authorized:true,authority_effect:false};
     if(value.operation==='READ_INTENT')return stored;
     if(value.operation==='agent_send_message'){writes++;if(unknown)throw Error('fixture_ack_unknown');return {stored:true,authority_effect:false};}
     return {project_id:permit.project_id,rows:[],authority_effect:false};
-  }};
+  });
   const pins=await agentBridgePins(t),deadlineAt=new Date(Date.now()+60000).toISOString();
   if(!prepare)return {f,permit,runId,binding,authorization,calls,pins,ownPostgres,deadlineAt};
-  const bridge=await prepareNativeCodingAgentRunBridge({ownPostgres,runId,binding,permit,authorization,deadlineAt,pins});t.after(()=>bridge.close());
+  const bridge=await prepareUnqualifiedBridgeFixture({ownPostgres,runId,binding,permit,authorization,deadlineAt,pins});t.after(()=>bridge.close());
   const environment=bridge.launch.createEnvironment({TEMP:'private-temp',CODEX_HOME:'preserved-auth'});
   const registration={endpoint:environment[NATIVE_AGENT_MCP_ENV.endpoint],capability:environment[NATIVE_AGENT_MCP_ENV.capability]};
   const proof={...f.jobPayload.worker_process,user_sid:permit.user_sid,job_id:randomUUID(),
@@ -34,7 +36,7 @@ async function fixture(t,{role='IMPLEMENTER',unknown=false,prepare=true}={}){
   return {f,permit,runId,binding,authorization,calls,pins,bridge,proof,registration,environment,ownPostgres,deadlineAt,connect,
     revoke:()=>{current=false;},setStored:value=>{stored=value;},get writes(){return writes;}};
 }
-test('per-run production composition is unusable until Host confirms the actual suspended job, checks every cached call, and revokes',namedPipeOnly,async t=>{
+test('underlying unqualified bridge counterfactual is unusable until Host confirms the actual suspended job, checks every cached call, and revokes',namedPipeOnly,async t=>{
   const x=await fixture(t);await assert.rejects(x.connect(),/authentication_failed/);assert.equal(x.calls.length,0);
   await x.bridge.bindRun(x.proof);const client=await x.connect();
   await client.invoke('project_overview',{});
@@ -81,10 +83,21 @@ test('changed protected permit/role/task cannot prepare a private bridge',async 
       {message:'native_coding_agent_run_bridge_denied'});
   assert.equal(x.calls.length,0);
 });
-test('non-Windows production composition refuses without a caller-selected Unix transport or Host effects',{
+test('non-Windows default publication gate and underlying platform refusal leave no Host effects',{
   skip:process.platform==='win32'?'Non-Windows refusal contract':false,
 },async t=>{
   const x=await fixture(t,{prepare:false});
-  await assert.rejects(prepareNativeCodingAgentRunBridge(x),{message:'native_agent_bridge_composition'});
+  await assert.rejects(prepareNativeCodingAgentRunBridge(x),{message:'native_run_callback_directory_durability_unqualified'});
+  await assert.rejects(prepareUnqualifiedBridgeFixture(x),{message:'native_agent_bridge_composition'});
   assert.equal(x.calls.length,0);
+});
+
+test('actual default bridge refuses unqualified directory publication before custody/broker; caller proof flags cannot override',async t=>{
+ const x=await fixture(t,{prepare:false});let opened=0;
+ const ownPostgres={openAgentRunCustody:async()=>{opened++;throw Error('must not claim or open broker');}};
+ for(const callbackJournal of [undefined,{snapshot:()=>({directory_durability:'QUALIFIED',authority_effect:true})},
+  {directory_durability:true,fsync_completed:true,platform:'win32',proof:{verified:true}}]){
+  await assert.rejects(prepareNativeCodingAgentRunBridge({...x,ownPostgres,callbackJournal}),{message:'native_run_callback_directory_durability_unqualified'});
+ }
+ assert.equal(opened,0);assert.equal(x.calls.length,0);
 });

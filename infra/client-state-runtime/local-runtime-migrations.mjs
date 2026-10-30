@@ -219,9 +219,27 @@ export const LOCAL_RUNTIME_MIGRATIONS = Object.freeze([
     source_url:new URL('./native-coding-repair-v1.sql',import.meta.url),reviewed_native_repair_upgrade:true},
   {path:'native-coding-pending-goal-v1.sql',signature:'destruktion_meta.native_coding_pending_goal_v1(jsonb,jsonb,jsonb,boolean)',
     signatures:Object.freeze(['destruktion_meta.native_coding_pending_goal_v1(jsonb,jsonb,jsonb,boolean)','destruktion_meta.native_coding_pending_goal_fence_v1()']),
-    relations:Object.freeze(['destruktion_meta.native_coding_pending_goal_h205f22']),
-    triggers:Object.freeze([{relation:'destruktion_meta.native_coding_pending_goal_h205f22',name:'aa_native_pending_goal_fence_trg',signature:'destruktion_meta.native_coding_pending_goal_fence_v1()'},{relation:'destruktion_meta.devos_fleet_task_h205f22',name:'aa_native_pending_goal_fence_trg',signature:'destruktion_meta.native_coding_pending_goal_fence_v1()'},{relation:'destruktion_meta.project_run_h205f22',name:'aa_native_pending_goal_fence_trg',signature:'destruktion_meta.native_coding_pending_goal_fence_v1()'},{relation:'destruktion_meta.project_task_h205f22',name:'aa_native_pending_goal_fence_trg',signature:'destruktion_meta.native_coding_pending_goal_fence_v1()'},{relation:'destruktion_meta.devos_fleet_claim_h205f22',name:'aa_native_pending_goal_fence_trg',signature:'destruktion_meta.native_coding_pending_goal_fence_v1()'},{relation:'destruktion_meta.client_v1_goal_request_h205f22',name:'aa_native_pending_goal_fence_trg',signature:'destruktion_meta.native_coding_pending_goal_fence_v1()'},{relation:'destruktion_meta.native_coding_seed_h205f22',name:'aa_native_pending_goal_fence_trg',signature:'destruktion_meta.native_coding_pending_goal_fence_v1()'},{relation:'destruktion_meta.project_child_proposal_h205f22',name:'aa_native_pending_goal_fence_trg',signature:'destruktion_meta.native_coding_pending_goal_fence_v1()'} ]),
+    relations:Object.freeze(['destruktion_meta.native_coding_pending_goal_h205f22','destruktion_meta.native_coding_pending_activation_h205f22']),
+    triggers:Object.freeze([{relation:'destruktion_meta.native_coding_pending_activation_h205f22',name:'native_coding_pending_activation_immutable_trg',signature:'destruktion_meta.native_coding_seed_immutable_v1()'},{relation:'destruktion_meta.native_coding_pending_goal_h205f22',name:'aa_native_pending_goal_fence_trg',signature:'destruktion_meta.native_coding_pending_goal_fence_v1()'},{relation:'destruktion_meta.devos_fleet_task_h205f22',name:'aa_native_pending_goal_fence_trg',signature:'destruktion_meta.native_coding_pending_goal_fence_v1()'},{relation:'destruktion_meta.project_run_h205f22',name:'aa_native_pending_goal_fence_trg',signature:'destruktion_meta.native_coding_pending_goal_fence_v1()'},{relation:'destruktion_meta.project_task_h205f22',name:'aa_native_pending_goal_fence_trg',signature:'destruktion_meta.native_coding_pending_goal_fence_v1()'},{relation:'destruktion_meta.devos_fleet_claim_h205f22',name:'aa_native_pending_goal_fence_trg',signature:'destruktion_meta.native_coding_pending_goal_fence_v1()'},{relation:'destruktion_meta.client_v1_goal_request_h205f22',name:'aa_native_pending_goal_fence_trg',signature:'destruktion_meta.native_coding_pending_goal_fence_v1()'},{relation:'destruktion_meta.native_coding_seed_h205f22',name:'aa_native_pending_goal_fence_trg',signature:'destruktion_meta.native_coding_pending_goal_fence_v1()'},{relation:'destruktion_meta.project_child_proposal_h205f22',name:'aa_native_pending_goal_fence_trg',signature:'destruktion_meta.native_coding_pending_goal_fence_v1()'} ]),
     source_url:new URL('./native-coding-pending-goal-v1.sql',import.meta.url),reviewed_native_pending_goal_upgrade:true},
+  {path:'native-coding-pending-activation-v1.sql',signature:'destruktion_meta.native_coding_activate_pending_goal_v1(jsonb,text,jsonb,text,text)',
+    source_url:new URL('./native-coding-pending-activation-v1.sql',import.meta.url),reviewed_native_pending_activation_upgrade:true},
+  {path:'native-coding-setup-operation-v1.sql',signature:'destruktion_meta.native_coding_setup_operation_v1(text,jsonb,jsonb,jsonb)',
+    relations:Object.freeze(['destruktion_meta.native_coding_setup_operation_h205f22']),source_url:new URL('./native-coding-setup-operation-v1.sql',import.meta.url),reviewed_native_setup_upgrade:true},
+  {path:'native-coding-capacity-v2.sql',signature:'destruktion_meta.native_coding_service_heartbeat_v2(uuid,text,bigint,uuid,integer,jsonb,text,jsonb,jsonb)',
+    signatures:Object.freeze(['destruktion_meta.native_coding_capacity_lock_v1(uuid,text)',
+      'destruktion_meta.native_coding_capacity_effect_fence_v1(uuid,text)',
+      'destruktion_meta.native_coding_capacity_rows_v1(uuid,text)',
+      'destruktion_meta.native_coding_capacity_evidence_v1(uuid,text,bigint,jsonb)',
+      'destruktion_meta.native_coding_capacity_counts_v1(uuid,text,bigint,jsonb)',
+      'destruktion_meta.native_coding_capacity_census_v1(uuid,text,bigint,jsonb)',
+      'destruktion_meta.native_coding_setup_operation_v2(text,jsonb,jsonb,jsonb,jsonb,bigint)',
+      'destruktion_meta.native_coding_capacity_claim_gate_v2()',
+      'destruktion_meta.native_coding_capacity_snapshot_v1(uuid,text,bigint,uuid,integer,jsonb,jsonb)',
+      'destruktion_meta.native_coding_service_heartbeat_v2(uuid,text,bigint,uuid,integer,jsonb,text,jsonb,jsonb)',
+      'destruktion_meta.native_coding_service_heartbeat_read_v2(uuid,text,bigint,uuid,text)']),
+    triggers:Object.freeze([{relation:'destruktion_meta.devos_fleet_claim_h205f22',name:'aa_native_capacity_claim_guard_v2',signature:'destruktion_meta.native_coding_capacity_claim_gate_v2()'}]),
+    source_url:new URL('./native-coding-capacity-v2.sql',import.meta.url),reviewed_native_capacity_upgrade:true},
 ]);
 
 const REQUIRED_COLUMNS = {
@@ -423,6 +441,29 @@ export async function applyLocalRuntimeMigrations({ sql, expectedMigrationSource
         receipts.push({source:migration.path,source_sha256:migration.sha256,
           signature:migration.signature,signatures:migration.signatures,
           status:before.complete?'ALREADY_PRESENT_NOT_MODIFIED':'APPLIED_LOCAL_ONLY',existing_bodies_attested:true,chat_message_recipient_scope:true});
+        continue;
+      }
+      if(migration.reviewed_native_capacity_upgrade){
+        // Exact source attests all eleven bodies, private cache column/budget,
+        // ACL/RLS and claim trigger on EVERY replay. Presence is not proof.
+        await tx.unsafe(migration.source);
+        if(!(await inspectMigrationObjects(tx,migration)).complete)throw Error('local_runtime_native_capacity_readback_failed');
+        receipts.push({source:migration.path,source_sha256:migration.sha256,signature:migration.signature,signatures:migration.signatures,
+          status:before.complete?'ALREADY_PRESENT_NOT_MODIFIED':'APPLIED_LOCAL_ONLY',existing_bodies_attested:true,native_capacity_v2_fail_closed:true});
+        continue;
+      }
+      if(migration.reviewed_native_setup_upgrade){
+        await tx.unsafe(migration.source);
+        if(!(await inspectMigrationObjects(tx,migration)).complete)throw Error('local_runtime_native_setup_readback_failed');
+        receipts.push({source:migration.path,source_sha256:migration.sha256,signature:migration.signature,signatures:[migration.signature],
+          status:before.complete?'ALREADY_PRESENT_NOT_MODIFIED':'APPLIED_LOCAL_ONLY',existing_bodies_attested:true,setup_only_no_execution_authority:true});
+        continue;
+      }
+      if (migration.reviewed_native_pending_activation_upgrade) {
+        await tx.unsafe(migration.source);
+        if (!(await inspectMigrationObjects(tx,migration)).complete)throw Error('local_runtime_native_pending_activation_readback_failed');
+        receipts.push({source:migration.path,source_sha256:migration.sha256,signature:migration.signature,signatures:[migration.signature],
+          status:before.complete?'ALREADY_PRESENT_NOT_MODIFIED':'APPLIED_LOCAL_ONLY',existing_bodies_attested:true,same_root_activation_only:true});
         continue;
       }
       if (migration.reviewed_native_pending_goal_upgrade) {

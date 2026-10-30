@@ -5,7 +5,7 @@ import {createNativeCodingHostAuthority} from './native-coding-host-authority.mj
 import {admissionFixture} from '../../apps/metaengine-browser/test/fixtures/native-coding-admission-fixture.mjs';
 import {nativeCodingCanonicalSha256} from './native-coding-task-context.mjs';
 
-async function fixture({role='state_owner',nativeChange=null,seedOperations=null}={}) {
+async function fixture({role='state_owner',nativeChange=null,seedOperations=null,serviceHeartbeatOperations=null}={}) {
   const f=admissionFixture(),calls=[];
   const native={artifact:f.permit.artifact,postgres:f.permit.postgres,worktree:f.permit.worktree,
     host_process:f.provider.payload.host_process,user_sid:f.permit.user_sid,sandbox:f.provider.payload.sandbox};
@@ -20,7 +20,7 @@ async function fixture({role='state_owner',nativeChange=null,seedOperations=null
     if(text.startsWith('set local synchronous_commit')){calls.push({text});return[];}
     return sql.unsafe(text,values);
   }})};
-  const authority=await createNativeCodingHostAuthority({sql,seedOperations,readNativeScope:async()=>structuredClone(native),
+  const authority=await createNativeCodingHostAuthority({sql,seedOperations,serviceHeartbeatOperations,readNativeScope:async()=>structuredClone(native),
     readNativeWorker:async()=>{throw Error('worker_not_observed');},readProtectedReceipt:async()=>{throw Error('receipt_not_observed');}});
   return {f,calls,sql,authority};
 }
@@ -121,4 +121,25 @@ test('expired or cancelled private rejection requests perform no database or phy
  await assert.rejects(x.authority.READ_PROJECT_REJECTION(selector,{signal:controller.signal}),/request_cancelled/);
  await assert.rejects(x.authority.READ_PROJECT_REJECTION(selector,{deadlineAt:Date.now()-1}),/deadline_exceeded/);
  assert.equal(x.calls.length,before);x.authority.close();
+});
+
+test('authority sanitized write rejection preserves private cleanup HOLD without driver secrets',async()=>{
+ const {markNativePhysicalSettlementUnconfirmed,nativePhysicalSettlementUnconfirmed}=await import('../../apps/metaengine-browser/src/native-coding-host-settlement.mjs');
+ const {sql,authority,f}=await fixture();const secret='SENTINEL_DRIVER_SECRET';
+ sql.begin=async()=>{throw markNativePhysicalSettlementUnconfirmed(Object.assign(Error(secret),{query:secret,parameters:[secret]}));};
+ await assert.rejects(authority.REGISTER_PROVIDER({descriptor:f.provider}),error=>nativePhysicalSettlementUnconfirmed(error)
+  &&error.effect_outcome==='UNKNOWN'&&error.automatic_retry_allowed===false&&!String(error.stack).includes(secret)&&!JSON.stringify(error).includes(secret));authority.close();
+});
+
+
+test('authority mounts fixed v2 heartbeat pair only together and closes the same private service',async()=>{
+ const calls=[],operations={close:()=>calls.push('close')};
+ for(const action of ['SERVICE_HEARTBEAT','READ_SERVICE_HEARTBEAT','SERVICE_HEARTBEAT_V2','READ_SERVICE_HEARTBEAT_V2'])operations[action]=async request=>{calls.push(action);return request;};
+ for(const absent of ['SERVICE_HEARTBEAT_V2','READ_SERVICE_HEARTBEAT_V2']){
+  const partial={...operations};delete partial[absent];await assert.rejects(fixture({serviceHeartbeatOperations:partial}),/service_heartbeat_v2_partial/);
+ }
+ const f=await fixture({serviceHeartbeatOperations:operations}),request={generated_private_fixture:true};
+ assert.deepEqual(await f.authority.SERVICE_HEARTBEAT_V2(request),request);assert.deepEqual(await f.authority.READ_SERVICE_HEARTBEAT_V2(request),request);
+ assert.deepEqual(calls,['SERVICE_HEARTBEAT_V2','READ_SERVICE_HEARTBEAT_V2']);f.authority.close();assert.equal(calls.at(-1),'close');
+ await assert.rejects(f.authority.SERVICE_HEARTBEAT_V2(request),/closed/);
 });

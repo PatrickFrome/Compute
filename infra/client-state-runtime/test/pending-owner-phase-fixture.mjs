@@ -20,7 +20,8 @@ export async function pendingOwnerScopeFixture(f,mode,callback,{signal,contextPa
  }finally{host.close();client.close();await client.drain();}
 }
 export function bindStagingPendingOwner(f,{readSourceHook=async()=>{},guardianPatch=()=>({}),withScope=pendingOwnerScopeFixture}={}){
- const snap=f.identity.snapshot(),birth=new Date().toISOString(),pid=process.pid;
+ // Same disposable native incarnation across rebinding; never a production claim.
+ const snap=f.identity.snapshot(),birth=f.stagingNativeBirth||(f.stagingNativeBirth=new Date().toISOString()),pid=process.pid;
  const ticks=(BigInt(Date.parse(birth))*10000n+116444736000000000n).toString();
  const releaseGuardian=f.identity.bindGuardianOwnerEvidenceW67({status:async()=>({schema:'metaengine.browser-guardian.machine-bootstrap-launcher.v1',state:'READY',
   guardian_client_pid:pid,guardian_client_created_at:birth,guardian_client_process_incarnation_id:`pid:${pid}:created_100ns:${ticks}`,
@@ -34,4 +35,24 @@ export function bindStagingPendingOwner(f,{readSourceHook=async()=>{},guardianPa
    loaded_runtime_code_attested:false,observed_at:new Date().toISOString(),authority_effect:false,fixture_classification:'STAGING',...patch};},
  });
  return async()=>{await releaseOwner();releaseGuardian();};
+}
+
+// Reconstructed activation wire. Runs the real signed Host request and SQL
+// service while the only synthetic evidence is the explicitly STAGING native
+// producer above. Never installed Windows proof.
+export async function pendingActivationScopeFixture(f,input,callback,{signal,contextPatch={},onPhase=()=>{}}={}){
+ const {createPendingActivationHostPhases,createPendingActivationClientPhases}=await import('../../../apps/metaengine-browser/src/native-coding-pending-activation-phase.mjs');
+ const action='ACTIVATE_PREPARED_GOAL_V1',signed=await signNativeCodingDeviceRequest({identity:f.identity,binding:f.host,operation:action,input});
+ const binding={instance_id:f.host.instance_id,host_pid:f.host.host_pid,request_id:randomUUID(),action,
+  request_sha256:createHash('sha256').update(JSON.stringify(signed)).digest('hex'),body_sha256:signed.headers['x-a2-device-body-sha256']};
+ const abort=signal||new AbortController().signal;let client;
+ const host=createPendingActivationHostPhases({binding,signal:abort,send:message=>queueMicrotask(()=>client.receive(message))});
+ client=createPendingActivationClientPhases({binding,input,assertLifetime:()=>{if(abort.aborted)throw Error('test_scope_aborted');},callback,
+  send:message=>{onPhase(message);queueMicrotask(()=>host.receive(message));}});
+ try{
+  const value=await f.context.run(action,signed,checked=>f.service[action](checked,{signal:abort,deadlineAt:Date.now()+30000,
+   instanceId:f.host.instance_id,hostPid:f.host.host_pid,requestId:binding.request_id,action,
+   requestDigest:binding.request_sha256,bodyDigest:binding.body_sha256,pendingActivationPhases:host,...contextPatch}));
+  return await client.finish(value);
+ }finally{host.close();client.close();await client.drain();}
 }

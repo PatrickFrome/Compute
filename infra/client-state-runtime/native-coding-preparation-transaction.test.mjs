@@ -86,3 +86,67 @@ test('successful commit does not abort the failure-only connection signal; retai
  assert.equal(await f.run(async tx=>{scope=tx;return true;}),true);
  assert.equal(scope.signal.aborted,false);assert.throws(()=>scope.assertOpen(),/finished/);
 });
+
+
+
+test('synchronous commit lifetime guard fences callback-to-COMMIT microtask gap',async()=>{
+ const f=fixture();let live=true;
+ await assert.rejects(f.run(async tx=>{tx.addCommitGuard(()=>{if(!live)throw Error('native_lifetime_closed');});
+  await tx.unsafe('select effect');queueMicrotask(()=>{live=false;});return 'effect';}),/native_lifetime_closed/);
+ assert.equal(f.seen.queries.some(x=>x[1]==='commit'),false);assert.equal(f.seen.queries.at(-1)[1],'rollback');
+});
+test('commit guards are append-only synchronous functions and cannot survive finished transaction',async()=>{
+ const f=fixture();let held;const called=[];
+ await f.run(async tx=>{held=tx;tx.addCommitGuard(()=>{called.push(1);});tx.addCommitGuard(()=>{called.push(2);});});
+ assert.deepEqual(called,[1,2]);assert.throws(()=>held.addCommitGuard(()=>{}),/finished/);
+ for(const guard of [()=>true,async()=>{},async()=>{throw Error('consumed test rejection');}]){
+  const g=fixture();await assert.rejects(g.run(async tx=>{tx.addCommitGuard(guard);}),/commit_guard_invalid/);
+  assert.equal(g.seen.queries.some(x=>x[1]==='commit'),false);assert.equal(g.seen.queries.at(-1)[1],'rollback');
+ }
+});
+
+test('rollback poison and connection death carry private unconfirmed-settlement marker, not ordinary rollback',async()=>{
+ const {nativePhysicalSettlementUnconfirmed}=await import('../../apps/metaengine-browser/src/native-coding-host-settlement.mjs');
+ for(const failure of [{query:'rollback'},{query:'commit',close:true},{query:'rollback',close:true}]){
+  const f=fixture();f.fail(failure);await assert.rejects(f.run(async()=>{if(failure.query==='rollback')throw Error('body');return true;}),error=>nativePhysicalSettlementUnconfirmed(error));
+ }
+ const f=fixture();await assert.rejects(f.run(async()=>{throw Error('body');}),error=>!nativePhysicalSettlementUnconfirmed(error));
+ assert.equal(nativePhysicalSettlementUnconfirmed(Object.assign(Error('forged'),{physical_settlement_unconfirmed:true})),false);
+});
+
+test('general Host pool facade reuses reserved monitor and preserves approved readonly isolation without driver begin race',async()=>{
+ const {bindNativeCodingTransactionPool}=await import('./native-coding-preparation-transaction.mjs');
+ const f=fixture();f.pool.begin=()=>{throw Error('racing driver begin must not run');};f.pool.unsafe=async()=>[];
+ const bound=bindNativeCodingTransactionPool(f.pool,f.monitor);let retained;
+ assert.equal(await bound.begin('isolation level repeatable read read only',async tx=>{retained=tx;return(await tx.unsafe('select 1'))[0].value;}),1);
+ assert.match(f.seen.queries[0][1],/^begin isolation level repeatable read read only /);assert.deepEqual(f.seen.releases,[1]);assert.throws(()=>retained.unsafe('late'),/finished/);
+ for(const mode of ['read write','isolation level read uncommitted','isolation level serializable; select 1'])await assert.rejects(bound.begin(mode,async()=>true),/dependencies_required/);
+});
+test('general pool reserve failure never starts callback; closed native callback remains joined and late dispatch refused',async()=>{
+ const {bindNativeCodingTransactionPool}=await import('./native-coding-preparation-transaction.mjs');
+ const {nativePhysicalSettlementUnconfirmed}=await import('../../apps/metaengine-browser/src/native-coding-host-settlement.mjs');
+ const f=fixture();f.pool.unsafe=async()=>[];const bound=bindNativeCodingTransactionPool(f.pool,f.monitor);
+ const original=f.pool.reserve;let bodies=0;f.pool.reserve=async()=>{throw Object.assign(Error('PRIVATE_RESERVE_DETAIL'),{code:'CONNECTION_CLOSED'});};
+ await assert.rejects(bound.begin('isolation level serializable',async()=>{bodies++;}),error=>nativePhysicalSettlementUnconfirmed(error)&&!String(error.stack).includes('PRIVATE_RESERVE_DETAIL'));assert.equal(bodies,0);
+ f.pool.reserve=original;const gate=deferred(),entered=deferred();let settled=false;
+ const work=bound.begin('isolation level repeatable read read only',async tx=>{bodies++;entered.resolve();await gate.promise;return tx.unsafe('late query');});work.catch(()=>{settled=true;});await entered.promise;
+ f.monitor.onclose(1);await new Promise(r=>setImmediate(r));assert.equal(settled,false);gate.resolve();await assert.rejects(work,nativePhysicalSettlementUnconfirmed);
+ assert.equal(f.seen.queries.some(q=>q[1]==='late query'),false);assert.equal(bodies,1);
+});
+test('private physical HOLD survives sanitized or swallowed errors in the exact async operation only',async()=>{
+ const {bindNativeCodingTransactionPool}=await import('./native-coding-preparation-transaction.mjs');
+ const {runNativePhysicalSettlementScope,nativePhysicalSettlementUnconfirmed}=await import('../../apps/metaengine-browser/src/native-coding-host-settlement.mjs');
+ const monitor=createNativePreparationTransactions(),secret='SENTINEL_SQL_PARAMETERS';
+ const pool={reserve:async()=>{throw Error('unused');},unsafe:async()=>{throw Object.assign(Error(secret),{code:'ECONNRESET',query:secret,parameters:[secret]});}};
+ const bound=bindNativeCodingTransactionPool(pool,monitor);
+ const a=runNativePhysicalSettlementScope(async()=>{try{await bound.unsafe('select fixture');}catch(error){assert.equal(nativePhysicalSettlementUnconfirmed(error),true);assert.doesNotMatch(String(error.stack)+JSON.stringify(error),/SENTINEL/);}return {recovered:true};});
+ const b=runNativePhysicalSettlementScope(async()=>({unrelated:true}));assert.deepEqual(await a.promise,{recovered:true});await b.promise;assert.equal(a.unconfirmed(),true);assert.equal(b.unconfirmed(),false);
+});
+
+test('reservation release failure is sanitized mandatory HOLD even after COMMIT and poisons reuse',async()=>{
+ const {nativePhysicalSettlementUnconfirmed}=await import('../../apps/metaengine-browser/src/native-coding-host-settlement.mjs');
+ const f=fixture(),original=f.pool.reserve,secret='SENTINEL_RELEASE_SECRET';
+ f.pool.reserve=async()=>{const reserved=await original();reserved.release=()=>{throw Object.assign(Error(secret),{parameters:[secret]});};return reserved;};
+ await assert.rejects(f.run(async()=>42),error=>nativePhysicalSettlementUnconfirmed(error)&&error.message==='native_workspace_transaction_release_unconfirmed'&&!String(error.stack).includes(secret));
+ assert.equal(f.seen.queries.at(-1)[1],'commit');await assert.rejects(f.run(async()=>43),nativePhysicalSettlementUnconfirmed);assert.equal(f.seen.queries.length,2);
+});

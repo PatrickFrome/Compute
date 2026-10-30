@@ -63,3 +63,17 @@ test('running native leases beyond the browser-sized observation budget are not 
  for(let i=0;i<3;i++)assert.equal((await cycle.cycle()).result_ready_batch.observed,4);
  assert.equal(new Set(observed).size,9,'later running leases must eventually receive readback even when earlier workers stay running');
 });
+
+test('existing W30 tick explicitly advances retained first dispatch before observation, never through a generic read',async()=>{
+ const calls=[];let count=0;
+ const runtime={observeProviders:async()=>({schema:'metaengine.native-coding.providers.v1',providers:[]}),
+  dispatchLease:raw=>{assert.deepEqual(raw,lease);calls.push('retain');return {state:'PHYSICAL_POOL_BUSY'};},
+  advanceUnattemptedLease:async raw=>{assert.deepEqual(raw,lease);await Promise.resolve();calls.push('first-dispatch');},
+  observeLease:async()=>{calls.push('observe');return {state:'RUNNING'};},completeFromTrustedCommand:async()=>({})};
+ const cycle=new DevOsNativeTaskCycle({getState:async()=>({fleet}),executeCommand:async()=>assert.fail('browser effect'),
+  signedRequest:async()=>({status:200,ok:true,json:async()=>({schema:'metaengine.devos.browser-cycle.v1',leases:count++===0?[lease]:[],running:count===1?[]:[lease]})})});
+ cycle.bindNativeCodingRuntime(runtime);
+ await cycle.cycle();assert.deepEqual(calls,['retain']);
+ await runtime.observeLease(lease);assert.deepEqual(calls,['retain','observe']);
+ await cycle.cycle();assert.deepEqual(calls,['retain','observe','first-dispatch','observe']);
+});
