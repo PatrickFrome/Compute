@@ -1,3 +1,4 @@
+import {createNativeRunOwnerReader} from './native-coding-run-owner-read.mjs';
 import {createNativeCodingCallbackPublication} from './native-coding-callback-publication.mjs';
 import {validateCodexCliJoinedSettlement,validateCodexCliLocalOutputDrain} from '../../apps/metaengine-browser/src/codex-cli-physical-settlement.mjs';
 import {nativePhysicalSettlementUnconfirmed,markNativePhysicalSettlementUnconfirmed,runNativePhysicalSettlementScope} from '../../apps/metaengine-browser/src/native-coding-host-settlement.mjs';
@@ -28,7 +29,7 @@ const exact=(value,keys)=>value&&typeof value==='object'&&!Array.isArray(value)
 
 // Only runtime-host constructs this capability. The IPC protocol exposes
 // these fixed operations, never this connection or arbitrary SQL/functions.
-export async function createNativeCodingHostAuthority({sql,readNativeScope,readNativeWorker,readProtectedReceipt,readCheckpointScope,commitService=null,seedOperations=null,serviceHeartbeatOperations=null,callbackPublicationIdentity=null,readCallbackPrefix,readPublicationHost,readOwnerControl=null}={}) {
+export async function createNativeCodingHostAuthority({sql,readNativeScope,readNativeWorker,readProtectedReceipt,readCheckpointScope,commitService=null,seedOperations=null,serviceHeartbeatOperations=null,callbackPublicationIdentity=null,readCallbackPrefix,readPublicationHost,readOwnerControl=null,runOwnerReadOptions=null}={}) {
   if(typeof sql?.unsafe!=='function'||typeof sql?.begin!=='function'
     ||![readNativeScope,readNativeWorker,readProtectedReceipt].every(x=>typeof x==='function')) fail('private_dependencies_required');
   async function owner(tx) {
@@ -177,14 +178,14 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
   }
   const key=c=>createPublicKey({key:c.device.public_jwk,format:'jwk'});
   const ledger=tx=>new NativeCodingPgLedger({transaction:fn=>fn(tx)});
-  async function scoped(tx,scope,requireLive=true) {
+  async function scoped(tx,scope,requireLive=true,request) {
     const c=await task(tx,{...scope,provider_id:String(scope.target_id).slice('codex-cli:'.length)},{requireLive,lock:true});
     const historical=c.value??{task_id:c.task.task_id,workspace_id:c.task.workspace_id,project_id:c.permit.project_id,
       provider_id:c.permit.provider_id,agent_id:c.task.lease_agent_id,target_id:c.task.lease_target_id,
       agent_generation_epoch:Number(c.task.lease_agent_generation_epoch),lease_generation:Number(c.task.lease_generation),
       role:c.task.role,base_sha:c.task.base_sha};
     // PG identity must use the connection this transaction already owns.
-    const native=await readNativeScope(c.permit,true,tx),actual=buildNativeCodingExecutionScope(c.permit,historical,native.host_process);
+    const native=await readNativeScope(c.permit,true,tx,request),actual=buildNativeCodingExecutionScope(c.permit,historical,native.host_process);
     if(Date.parse(c.permit.expires_at)<=Date.now()||!matchScope(scope,actual)
       ||!same(native.postgres,c.permit.postgres)||!same(native.artifact,c.permit.artifact)
       ||native.user_sid!==c.permit.user_sid||native.worktree?.path!==c.permit.worktree.path
@@ -202,7 +203,9 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
       throw nativePhysicalSettlementUnconfirmed(error)?markNativePhysicalSettlementUnconfirmed(safe):safe;}
   }
   const callbackPublication=createNativeCodingCallbackPublication({sql,scoped,owner,open,identity:callbackPublicationIdentity,readCallbackPrefix,readPublicationHost,readOwnerControl});
+  const runOwnerReader=runOwnerReadOptions?createNativeRunOwnerReader({...runOwnerReadOptions,sql,scoped,owner,open}):null;
   const operations={
+    ...(runOwnerReader?{READ_RUN_OWNER_CUSTODY_V1:runOwnerReader.operation}:{}),
     AGENT_OPERATION:request=>{open();return agentTools.invoke(request);},
     FINISH_CHECKPOINT:query=>finishCheckpoint('FINISH_CHECKPOINT',query),
     READ_FINISH_CHECKPOINT:query=>finishCheckpoint('READ_FINISH_CHECKPOINT',query),
@@ -522,7 +525,7 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
     ...(serviceHeartbeatOperations?Object.fromEntries(['SERVICE_HEARTBEAT','READ_SERVICE_HEARTBEAT',...['SERVICE_HEARTBEAT_V2','READ_SERVICE_HEARTBEAT_V2'].filter(x=>typeof serviceHeartbeatOperations[x]==='function')].map(action=>[action,async request=>{
       open();const result=await serviceHeartbeatOperations[action](request);open();return result;
     }])):{}),
-    close(){closed=true;callbackPublication.close();agentTools.close();checkpointVerifier?.close();commitService?.close();seedOperations?.close();serviceHeartbeatOperations?.close();},
+    close(){closed=true;runOwnerReader?.close();callbackPublication.close();agentTools.close();checkpointVerifier?.close();commitService?.close();seedOperations?.close();serviceHeartbeatOperations?.close();},
   };
   Object.freeze(operations);callbackPublications.set(operations,callbackPublication.api);
   return operations;

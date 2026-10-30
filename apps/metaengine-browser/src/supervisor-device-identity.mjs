@@ -1,3 +1,4 @@
+import {RUN_OWNER_READ,validateRunOwnerReadInput} from './native-coding-run-owner-phase.mjs';
 import {NATIVE_CODING_DEVICE_PATHS} from './native-coding-device-request.mjs';
 import {validateNativeSetupInput} from './native-coding-setup-contract.mjs';
 import {nativeCodingCanonicalJson} from './native-coding-task-context.mjs';
@@ -746,6 +747,15 @@ export class SupervisorDeviceIdentity {
       ||!Number.isSafeInteger(body.host_pid)||body.host_pid<1)throw Error('supervisor_native_setup_read_invalid');
     validateNativeSetupInput('READ_NATIVE_SETUP_ROUTE_V1',body.input);
     return this.#deviceHeadersLoaded('POST',NATIVE_CODING_DEVICE_PATHS.READ_NATIVE_SETUP_ROUTE_V1,nativeCodingCanonicalJson(body),options);
+  }
+
+  runOwnerReadHeaders(body,options={}) {
+    if(!this.snapshot()?.enrolled||!this.#privateKey||this.#persistenceUncertain)throw Error('supervisor_device_not_loaded');
+    if(!body||Object.keys(body).sort().join('|')!==['host_instance_id','host_pid','input','operation'].sort().join('|')
+      ||body.operation!==RUN_OWNER_READ||exactUuid(body.host_instance_id,'native_owner_host')!==body.host_instance_id
+      ||!Number.isSafeInteger(body.host_pid)||body.host_pid<1)throw Error('supervisor_native_owner_read_invalid');
+    validateRunOwnerReadInput(body.input);
+    return this.#deviceHeadersLoaded('POST',NATIVE_CODING_DEVICE_PATHS[RUN_OWNER_READ],nativeCodingCanonicalJson(body),options);
   }
 
   // One canonical byte/header implementation for both existing and loaded-only rails.
