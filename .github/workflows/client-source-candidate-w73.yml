@@ -11,6 +11,8 @@ on:
       - '.github/workflows/client-source-candidate-w73.yml'
       - '.github/workflows/client-source-candidate-w59.yml'
       - '.github/client-ci-train-w82.test.mjs'
+      - 'scripts/current-source-seal.mjs'
+      - 'tests/current-source-seal.test.mjs'
       - 'apps/metaengine-browser/**'
       - 'apps/me2-ui/**'
       - 'infra/client-state-runtime/**'
@@ -126,6 +128,7 @@ jobs:
           EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
+          node --test tests/current-source-seal.test.mjs
           node --test --test-concurrency=1 \
             infra/client-state-runtime/client-source-candidate-w43.test.mjs \
             infra/client-state-runtime/client-source-candidate-w51.test.mjs \
