@@ -6,10 +6,10 @@ import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
 import {ClientGoalJournal} from '../src/client-goal-journal.mjs';
-import {createClientPreparedGoalRouter,normalizePreparedGoalAdmission,normalizePreparedGoalResult,readVerifiedPreparedGoalSelector} from '../src/client-prepared-goal.mjs';
+import {createClientPreparedGoalRouter,preparedGoalInput,normalizePreparedGoalAdmission,normalizePreparedGoalResult,readVerifiedPreparedGoalSelector} from '../src/client-prepared-goal.mjs';
 import {readClientGoalSubmissionMode} from '../src/client-native-coding-goal.mjs';
 import {SupervisorDeviceIdentity} from '../src/supervisor-device-identity.mjs';
-import {validateNativeCodingDeviceRequest} from '../src/native-coding-device-request.mjs';
+import {validateNativeCodingDeviceRequest,signNativeCodingDeviceRequest} from '../src/native-coding-device-request.mjs';
 function fixture(){
  const selector={preparation_id:randomUUID(),configuration_sha256:'a'.repeat(64),workspace_id:randomUUID(),preparation_grant_epoch:1};
  const input={request_id:randomUUID(),goal:'Implement the actual user objective'};
@@ -121,9 +121,10 @@ function mainFunction(name,next,context){
  return vm.runInNewContext(`(${main.slice(start,end).trim()})`,context);
 }
 test('actual main routes user goal to pending only, latest and status are same-entry reads',async()=>{
- const f=fixture(),events=[];
+ const f=fixture(),events=[],custody=[];
  const context={ensureClientGoalJournal:async()=>f.journal,readNativeGoalSubmissionMode:async()=>({kind:'PREPARED_GOAL',state:'HOST_VERIFICATION_REQUIRED'}),
   normalizeClientGoalIntent:v=>({goal:v}),randomUUID:()=>f.input.request_id,createPreparedGoalRouter:()=>f.router,
+  continuePreparedGoalOwnerCustody:async(entry,write)=>{custody.push({entry,write});return {owner:{private:'NEVER_PUBLIC'}};},
   createNativeGoalRouter:()=>{throw Error('native mount forbidden');},nativeSupervisor:null,structuredClone,
   normalizeClientGoalRequestId:v=>v};
  const submit=mainFunction('submitClientGoal','async function latestClientGoal',context);
@@ -133,6 +134,7 @@ test('actual main routes user goal to pending only, latest and status are same-e
  events.push(await latest(),await refresh(f.input.request_id));
  assert.deepEqual(f.calls.map(c=>c.op),['ADMIT_PREPARED_GOAL_V1','READ_PREPARED_GOAL_V1','READ_PREPARED_GOAL_V1']);
  assert.equal(events[0].state,'PENDING_ACTIVATION');assert.equal(events[1].execution_ready,false);
+ assert.deepEqual(custody.map(v=>v.write),[true,false]);assert.equal(JSON.stringify(events).includes('NEVER_PUBLIC'),false);
  await assert.rejects(submit('another goal'),/previous_request/);
 });
 test('actual main signs only selected pending operation and closes ephemeral capability; shutdown fences response',async()=>{
@@ -177,3 +179,65 @@ for(const operation of ['ADMIT_PREPARED_GOAL_V1','READ_PREPARED_GOAL_V1'])for(co
   assert.deepEqual(f.journal.latest().prepared_selector,f.selector);
   assert.deepEqual(calls,operation==='ADMIT_PREPARED_GOAL_V1'?['ADMIT','READ']:['READ']);assert.equal(closes,calls.length);
  });
+
+for(const write of [true,false])test(`actual main pending Owner ${write?'submission':'recovery'} binds native producers and exact signed selector`,async()=>{
+ const f=fixture();await f.router.submit(f.input);const calls=[];let binding,unbound=false,closed=false;
+ const device={device_id:randomUUID(),client_id:randomUUID(),key_fingerprint_sha256:'a'.repeat(64)};
+ const identity={ensure:async()=>{},snapshot:()=>({...device}),bindHostOwnerGenesisW74:options=>{
+  calls.push('BIND');binding=options;return async()=>{unbound=true;calls.push('UNBIND');};},
+  establishHostOwnerW74:async()=>{calls.push('CREATE');await binding.readNativeKernel(123);await binding.readSourceProof();
+   await binding.withOwnerScope('WRITE_CUSTODY',async()=>true);await binding.withOwnerScope('READ_CUSTODY',async()=>true);return{owner:true};},
+  readTrustedHostOwnerIncarnationW74:async()=>{calls.push('RECOVER');await binding.withOwnerScope('READ_CUSTODY',async()=>true);return{owner:true};}};
+ const capability={snapshot:()=>({instance_id:randomUUID(),host_pid:123,closed}),readPreparedGoal:async()=>f.result,
+  withPendingOwnerScope:async(operation,signed,body)=>{assert.equal(signed.operation,operation);assert.deepEqual(signed.input,preparedGoalInput(f.journal.latest()));calls.push(operation);return body({});},
+  close:()=>{assert.equal(unbound,true);closed=true;}};
+ const app={isPackaged:true};const summary={instance_id:'fixed'};
+ const context={managedTaskProjectHostClosing:Promise.resolve(),pendingOwnerInitializationsByBarrier:new Map(),
+  runNativeInitialization:(_closing,_map,body)=>body(),assertNativeSupervisorInitializationOpen:()=>{},assertNativeCodingRuntimeMountOpen:()=>{},
+  preparedGoalInput,normalizePreparedGoalResult,readOwnedLocalRuntimeHostSummary:()=>summary,ensureSupervisorIdentity:()=>identity,
+  createOwnedNativeCodingHostCapability:()=>capability,ensureGuardianBootstrapLauncher:()=>calls.push('GUARDIAN'),app,
+  readWindowsKernelProcessW60:async pid=>{assert.equal(pid,123);calls.push('KERNEL');},
+  readVerifiedInstalledExecutableW68:async actual=>{assert.equal(actual,app);calls.push('W68');},
+  signNativeCodingDeviceRequest:async({operation,input})=>{calls.push('SIGN:'+operation);return{operation,input};}};
+ const run=mainFunction('continuePreparedGoalOwnerCustody','async function readPreparedGoalSelector',context);
+ const result=await run(f.journal.latest(),write);
+ assert.equal(result.state,'CUSTODY_VERIFIED');assert.equal(result.loaded_runtime_code_attested,false);
+ assert.equal(result.execution_ready,false);assert.equal(result.production_qualified,false);assert.equal(closed,true);
+ assert.equal(calls.filter(x=>x==='ESTABLISH_PENDING_OWNER_V1').length,write?1:0);
+ assert.equal(calls.filter(x=>x==='READ_PENDING_OWNER_V1').length,1);
+ assert.equal(calls[0],'SIGN:READ_PREPARED_GOAL_V1');assert.equal(calls.at(-1),'UNBIND');
+ if(write){assert(calls.includes('KERNEL'));assert(calls.includes('W68'));}
+});
+
+test('pending Owner signed inputs reject renderer Owner/epoch/project/SQL/path extensions',async t=>{
+ const directory=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'pending-owner-input-')));t.after(()=>fs.rm(directory,{recursive:true,force:true}));
+ const identity=new SupervisorDeviceIdentity({statePath:path.join(directory,'identity.json'),secureStorage:{isEncryptionAvailable:()=>true,encryptString:v=>Buffer.from(v),decryptString:v=>v.toString()}});
+ await identity.ensure();await identity.bindDevice(randomUUID());const f=fixture();await f.router.submit(f.input);
+ const binding={instance_id:randomUUID(),host_pid:123},input=preparedGoalInput(f.journal.latest());
+ for(const operation of ['ESTABLISH_PENDING_OWNER_V1','READ_PENDING_OWNER_V1']){
+  const signed=await signNativeCodingDeviceRequest({identity,binding,operation,input});
+  assert.deepEqual(validateNativeCodingDeviceRequest(signed,operation).body.input,input);
+  for(const key of ['owner','owner_epoch','project_id','sql','path','host_generation']){
+   const forged=structuredClone(signed);forged.body.input[key]='renderer selected';
+   assert.throws(()=>validateNativeCodingDeviceRequest(forged,operation),/input_invalid/);
+  }
+ }
+});
+
+test('actual main lost admission ACK, startup/latest and refresh never start a pending Owner seal',async()=>{
+ const f=fixture(),custody=[];
+ const router=createClientPreparedGoalRouter({journal:f.journal,readSelector:async()=>f.selector,request:async operation=>{
+  if(operation==='ADMIT_PREPARED_GOAL_V1')throw Error('TEST_ADMISSION_ACK_LOST');return f.result;
+ }});
+ const context={ensureClientGoalJournal:async()=>f.journal,readNativeGoalSubmissionMode:async()=>({kind:'PREPARED_GOAL',state:'READY'}),
+  normalizeClientGoalIntent:v=>({goal:v}),randomUUID:()=>f.input.request_id,createPreparedGoalRouter:()=>router,
+  continuePreparedGoalOwnerCustody:async(_entry,write)=>{custody.push(write);return {state:'HOLD'};},
+  nativeSupervisor:null,structuredClone,publishSnapshot:async()=>{},safeClientGoalEntry:entry=>entry,normalizeClientGoalRequestId:v=>v};
+ const submit=mainFunction('submitClientGoal','async function latestClientGoal',context);
+ const latest=mainFunction('latestClientGoal','async function refreshClientGoal',context);
+ const refresh=mainFunction('refreshClientGoal','function assertNativeCodingRuntimeMountOpen',context);
+ await f.journal.load();await assert.rejects(submit(f.input.goal),/requires_reconciliation/);
+ assert.equal(f.journal.latest().state,'PENDING_ACTIVATION');assert.deepEqual(custody,[]);
+ await latest();assert.deepEqual(custody,[],'startup/latest does not manufacture a custody attempt');
+ await refresh(f.input.request_id);assert.deepEqual(custody,[false],'only READ-only recovery after unknown admission');
+});

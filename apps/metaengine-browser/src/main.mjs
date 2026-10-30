@@ -1,3 +1,5 @@
+import {readWindowsKernelProcessW60} from './host-native-owner-producers-w60.mjs';
+import {readVerifiedInstalledExecutableW68} from './installed-executable-provenance-w68.mjs';
 import {prepareNativeWorkspaceFromStage} from './native-coding-workspace-preparation.mjs';
 import { RsiVerifiedSkillDispatch } from './rsi-verified-skill-dispatch.mjs';
 import { ensureElectronPreReady } from './electron-pre-ready-bootstrap.mjs';
@@ -84,7 +86,7 @@ import {
   normalizeClientGoalRequestId,
 } from './client-control-contract.mjs';
 import { createClientGoalJournalFileStore } from './client-goal-journal-file-store.mjs';
-import {createClientPreparedGoalRouter,readVerifiedPreparedGoalSelector} from './client-prepared-goal.mjs';
+import {createClientPreparedGoalRouter,readVerifiedPreparedGoalSelector,preparedGoalInput,normalizePreparedGoalResult} from './client-prepared-goal.mjs';
 import {createClientNativeCodingGoalRouter,readClientGoalSubmissionMode} from './client-native-coding-goal.mjs';
 import {signNativeCodingDeviceRequest} from './native-coding-device-request.mjs';
 import { ensureClientGoalProject } from './client-goal-project-link.mjs';
@@ -131,6 +133,7 @@ let nativeSupervisor = null;
 const nativeSupervisorInitializationsByBarrier = new Map();
 const nativeRelayInitializationsByBarrier = new Map();
 const nativeRecoveryInitializationsByBarrier = new Map();
+const pendingOwnerInitializationsByBarrier = new Map();
 const nativeInitializationCleanupCandidates = new Set();
 let managedTaskProjectHost = null;
 let interruptedSetupRecovery = null;
@@ -749,7 +752,12 @@ async function submitClientGoal(rawInput) {
   if(mode.state==='HOLD')throw new Error('client_goal_submission_hold:'+mode.reason);
   if(mode.kind==='PREPARED_GOAL'){
     const intent=normalizeClientGoalIntent(rawInput);
-    return createPreparedGoalRouter(journal).submit({request_id:randomUUID().toLowerCase(),goal:intent.goal});
+    const request_id=randomUUID().toLowerCase();
+    const admitted=await createPreparedGoalRouter(journal).submit({request_id,goal:intent.goal});
+    // Only this explicit, durably admitted user goal may begin custody. Unknown
+    // outcomes never resubmit the goal or create another Owner transition.
+    try{await continuePreparedGoalOwnerCustody(journal.get(request_id),true);}catch{}
+    return admitted;
   }
   if(mode.kind==='NATIVE_CODING'){
     const intent=normalizeClientGoalIntent(rawInput);
@@ -819,6 +827,7 @@ async function refreshClientGoal(rawRequestId) {
   if (!entry) throw new Error('client_goal_request_unknown');
   if(entry.kind==='PREPARED_GOAL'){
     const observed=await createPreparedGoalRouter(journal).refresh(entry);
+    try{await continuePreparedGoalOwnerCustody(journal.get(entry.request_id),false);}catch{}
     return {schema:'metaengine.client.pending-goal-progress.v1',request_id:requestId,state:observed.state,
       execution_ready:false,terminal:false,reconciliation_required:observed.state!=='PENDING_ACTIVATION',automatic_retry_allowed:false,authority_effect:false};
   }
@@ -977,6 +986,55 @@ function createNativeGoalRouter(journal){
       try{const mounted=await ensureNativeCodingRuntimeMounted();if(!mounted)throw Error('native_coding_runtime_mount_unavailable');return mounted;}
       catch(error){recordStartupSubsystemDegraded('NATIVE_GOAL_RUNTIME_MOUNT',error);throw error;}
     },
+  });
+}
+
+// Actual native-main composition, never a renderer-selected callback/provider.
+// A fresh signed READ proves the immutable pending selector before this route.
+function continuePreparedGoalOwnerCustody(entry,write=false){
+  const closing=managedTaskProjectHostClosing;
+  return runNativeInitialization(closing,pendingOwnerInitializationsByBarrier,async()=>{
+    assertNativeSupervisorInitializationOpen(closing);
+    if(entry?.kind!=='PREPARED_GOAL'||entry.state!=='PENDING_ACTIVATION')throw Error('pending_owner_goal_required');
+    const input=preparedGoalInput(entry),summary=readOwnedLocalRuntimeHostSummary();
+    assertNativeCodingRuntimeMountOpen(summary);
+    const identity=ensureSupervisorIdentity();await identity.ensure();
+    const before=identity.snapshot(),capability=createOwnedNativeCodingHostCapability(summary);
+    let unbind=null;
+    const assertLifetime=()=>{
+      assertNativeSupervisorInitializationOpen(closing);assertNativeCodingRuntimeMountOpen(summary);
+      if(capability.snapshot().closed)throw Error('pending_owner_host_closed');
+      const current=identity.snapshot();
+      if(['device_id','client_id','key_fingerprint_sha256'].some(k=>current[k]!==before[k]))throw Error('pending_owner_identity_changed');
+    };
+    try{
+      const read=await signNativeCodingDeviceRequest({identity,binding:capability.snapshot(),operation:'READ_PREPARED_GOAL_V1',input});
+      assertLifetime();const admission=await capability.readPreparedGoal(read);assertLifetime();
+      if(!normalizePreparedGoalResult(admission,entry))throw Error('pending_owner_readback_required');
+      ensureGuardianBootstrapLauncher();
+      unbind=identity.bindHostOwnerGenesisW74({assertLifetime,
+        readNativeKernel:pid=>readWindowsKernelProcessW60(pid),
+        readSourceProof:()=>readVerifiedInstalledExecutableW68(app),
+        withOwnerScope:async(mode,body)=>{
+          assertLifetime();
+          const operation=mode==='WRITE_CUSTODY'?'ESTABLISH_PENDING_OWNER_V1':mode==='READ_CUSTODY'?'READ_PENDING_OWNER_V1':null;
+          if(!operation)throw Error('pending_owner_mode_invalid');
+          const signed=await signNativeCodingDeviceRequest({identity,binding:capability.snapshot(),operation,input});
+          assertLifetime();const result=await capability.withPendingOwnerScope(operation,signed,body);assertLifetime();return result;
+        },
+      });
+      let owner=write?await identity.establishHostOwnerW74():null;
+      // Recovery is same selector/Host and READ-only. No second seal, generation,
+      // project, task, permit or fallback seed operation is allowed here.
+      if(!owner)owner=await identity.readTrustedHostOwnerIncarnationW74();
+      assertLifetime();
+      return Object.freeze({state:owner?'CUSTODY_VERIFIED':'HOLD',execution_ready:false,
+        production_qualified:false,loaded_runtime_code_attested:false,authority_effect:false});
+    }finally{
+      // Keep the channel and current binding alive until started native checks
+      // and queued DPAPI persistence settle, even after an IPC timeout.
+      await unbind?.();capability.close();
+    }
   });
 }
 

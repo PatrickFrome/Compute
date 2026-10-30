@@ -70,3 +70,19 @@ test('rollback disconnect reclaims dead slot without poisoning distinct future t
  f.fail(null);assert.equal(await f.run(async()=>42),42);
  assert.deepEqual(f.seen.releases,[2]);assert.equal(effects,1);
 });
+
+test('exact reserved-connection close aborts its private phase signal but still joins body work',async()=>{
+ const f=fixture(),gate=deferred(),entered=deferred();let scope,aborted=false,settled=false;
+ const pending=f.run(async tx=>{scope=tx;tx.signal.addEventListener('abort',()=>{aborted=true;});entered.resolve();await gate.promise;tx.assertOpen();});
+ pending.catch(()=>{settled=true;});await entered.promise;
+ f.monitor.onclose(99);assert.equal(aborted,false);
+ f.monitor.onclose(1);assert.equal(aborted,true);assert.equal(scope.signal.aborted,true);
+ await new Promise(r=>setImmediate(r));assert.equal(settled,false);
+ gate.resolve();await assert.rejects(pending,/connection_closed/);assert.equal(f.seen.releases.length,0);
+});
+
+test('successful commit does not abort the failure-only connection signal; retained facade is still finished',async()=>{
+ const f=fixture();let scope;
+ assert.equal(await f.run(async tx=>{scope=tx;return true;}),true);
+ assert.equal(scope.signal.aborted,false);assert.throws(()=>scope.assertOpen(),/finished/);
+});

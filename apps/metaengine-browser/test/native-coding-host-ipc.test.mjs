@@ -61,6 +61,12 @@ if(mode==='seed-mounted'||mode==='slow-seed'||mode==='secret-preparation')for(co
  if(mode==='secret-preparation')throw Object.assign(Error('SENTINEL_PRIVATE_QUERY_PARAMETER'),{query:'SENTINEL_PRIVATE_QUERY_PARAMETER',parameters:['SENTINEL_PRIVATE_QUERY_PARAMETER'],args:['SENTINEL_PRIVATE_QUERY_PARAMETER']});
  return {fixture_transport_only:true,operation:action,input:request.body.input};
 };
+if(mode==='owner-mounted'||mode==='owner-timeout'||mode==='owner-lost-release')for(const action of ['ESTABLISH_PENDING_OWNER_V1','READ_PENDING_OWNER_V1'])operations[action]=async(request,context)=>{
+ const scope={device_id:request.headers['x-a2-device-id'],client_id:request.headers['x-a2-chat-bridge-client'],key_fingerprint_sha256:'c'.repeat(64),
+  admin_grant_epoch:1,project_id:request.body.input.request_id,observed_at:new Date().toISOString()};
+ const released=await context.pendingOwnerPhases.run(scope,{readScope:async()=>({...scope,observed_at:new Date().toISOString()}),prepareTransition:async()=>{calls++;},verifyTransition:async()=>{}});
+ if(mode==='owner-lost-release'&&action==='ESTABLISH_PENDING_OWNER_V1')await delay(180);return released;
+};
 if(mode==='prior-readback'||mode==='slow-prior')operations.READ_PRIOR_EXECUTION=async ({selector})=>{
  ++calls;if(mode==='slow-prior')await delay(180);
  return {fixture_transport_only:true,state:'HOLD',selector,physical_effect_replayed:false,automatic_retry_allowed:false,authority_effect:false};
@@ -205,7 +211,7 @@ test('Host exit during reconciliation cannot become a safe retry or success',asy
 });
 
 function seedRequest(operation,instanceId,hostPid){
-  const body={host_instance_id:instanceId,host_pid:hostPid,operation,input:['ADMIT_PREPARED_GOAL_V1','READ_PREPARED_GOAL_V1'].includes(operation)?{preparation_id:id(),configuration_sha256:'b'.repeat(64),request_id:id(),objective:'Actual generated user objective'}:['PREPARE_WORKSPACE_V1','READ_WORKSPACE_PREPARATION_V1'].includes(operation)?{preparation_id:id(),configuration_sha256:'b'.repeat(64)}:operation==='LIST_SEEDS'?{after_seq:0,limit:16}:
+  const body={host_instance_id:instanceId,host_pid:hostPid,operation,input:['ESTABLISH_PENDING_OWNER_V1','READ_PENDING_OWNER_V1','ADMIT_PREPARED_GOAL_V1','READ_PREPARED_GOAL_V1'].includes(operation)?{preparation_id:id(),configuration_sha256:'b'.repeat(64),request_id:id(),objective:'Actual generated user objective'}:['PREPARE_WORKSPACE_V1','READ_WORKSPACE_PREPARATION_V1'].includes(operation)?{preparation_id:id(),configuration_sha256:'b'.repeat(64)}:operation==='LIST_SEEDS'?{after_seq:0,limit:16}:
     {request_id:id(),objective:'One native task'}};
   return {body,headers:{'content-type':'application/json','x-a2-chat-bridge-client':id(),
     'x-a2-device-profile':'A2_DEVICE_HTTP_SIGNATURE_V1','x-a2-device-id':id(),'x-a2-device-timestamp':new Date().toISOString(),
@@ -464,4 +470,61 @@ test('workspace preparation IPC strips enumerable driver query errors and preser
  const {client,instanceId,child}=await setup(t,'secret-preparation');
  for(const [action,method,reason] of [['ADMIT_PREPARED_GOAL_V1','admitPreparedGoal','WRITE_OUTCOME_UNKNOWN'],['READ_PREPARED_GOAL_V1','readPreparedGoal','OPERATION_FAILED'],['PREPARE_WORKSPACE_V1','prepareWorkspace','WRITE_OUTCOME_UNKNOWN'],['READ_WORKSPACE_PREPARATION_V1','readWorkspacePreparation','OPERATION_FAILED']])
   await assert.rejects(client[method](seedRequest(action,instanceId,child.pid)),error=>error.reason===reason&&!JSON.stringify(error).includes('SENTINEL')&&!String(error.stack).includes('SENTINEL'));
+});
+
+// Real owned ChildProcess transport only. Signature/SQL authority is exercised
+// independently by native-coding-pending-goal.pg17.test.mjs, not these stubs.
+test('owned ChildProcess transports fixed pending-owner scopes without exposing callback results in frames',async t=>{
+ const {client,child,instanceId,stats}=await setup(t,'owner-mounted');
+ const frames=[],observe=message=>frames.push(message);child.on('message',observe);t.after(()=>child.off('message',observe));
+ const input=seedRequest('ESTABLISH_PENDING_OWNER_V1',instanceId,child.pid);
+ const value=await client.withPendingOwnerScope('ESTABLISH_PENDING_OWNER_V1',input,async tx=>{
+  assert.equal(tx.unsafe,undefined);assert.equal(tx.verifyTransition,undefined);
+  const scope=await tx.readScope();assert.equal(scope.project_id,input.body.input.request_id);
+  await tx.prepareTransition({previous_sha256:null,next_sha256:'d'.repeat(64)});
+  for(let i=0;i<3;i++)await tx.readScope();
+  return{privateCallbackValue:'NEVER_ON_WIRE'};
+ });
+ assert.deepEqual(value,{privateCallbackValue:'NEVER_ON_WIRE'});assert.equal((await stats()).calls,1);
+ assert.equal(JSON.stringify(frames).includes('NEVER_ON_WIRE'),false);
+ const read=seedRequest('READ_PENDING_OWNER_V1',instanceId,child.pid);read.body.input=input.body.input;
+ assert.equal(await client.withPendingOwnerScope('READ_PENDING_OWNER_V1',read,async tx=>{
+  assert.equal(tx.prepareTransition,undefined);await tx.readScope();await tx.verifyTransition({sealed_sha256:'d'.repeat(64)});return 'READ_ONLY';
+ }),'READ_ONLY');
+ assert.equal((await stats()).calls,1);
+});
+
+test('owned pending-owner timeout joins already-started native callback before reporting unknown',async t=>{
+ const {client,child,instanceId,stats}=await setup(t,'owner-timeout',{timeoutMs:1000,serverTimeoutMs:60});
+ let entered,release;const ready=new Promise(r=>entered=r),gate=new Promise(r=>release=r);let finished=false;
+ const pending=client.withPendingOwnerScope('ESTABLISH_PENDING_OWNER_V1',seedRequest('ESTABLISH_PENDING_OWNER_V1',instanceId,child.pid),async tx=>{
+  await tx.readScope();entered();await gate;finished=true;tx.assertOpen();return true;
+ });
+ pending.catch(()=>{});await ready;let settled=false;pending.catch(()=>{settled=true;});await sleep(120);
+ assert.equal(settled,false);release();await assert.rejects(pending,error=>error.effect_outcome==='UNKNOWN');
+ assert.equal(finished,true);assert.equal((await stats()).calls,0);
+});
+
+test('owned pending-owner disconnect joins the main native callback and never retries',async t=>{
+ const {client,child,instanceId}=await setup(t,'owner-mounted');
+ let entered,release;const ready=new Promise(r=>entered=r),gate=new Promise(r=>release=r);let callbacks=0;
+ const pending=client.withPendingOwnerScope('ESTABLISH_PENDING_OWNER_V1',seedRequest('ESTABLISH_PENDING_OWNER_V1',instanceId,child.pid),async tx=>{
+  callbacks++;await tx.readScope();entered();await gate;tx.assertOpen();return true;
+ });
+ pending.catch(()=>{});await ready;const exited=new Promise(r=>child.once('exit',r));child.disconnect();await exited;let settled=false;pending.catch(()=>{settled=true;});await sleep(40);
+ assert.equal(settled,false);release();await assert.rejects(pending,error=>error.effect_outcome==='UNKNOWN');assert.equal(callbacks,1);
+});
+
+test('owned pending-owner lost RELEASE acknowledgement is unknown and read-only followup never reseals',async t=>{
+ const {client,child,instanceId,stats}=await setup(t,'owner-lost-release',{timeoutMs:1000,serverTimeoutMs:80});let seals=0;
+ const request=seedRequest('ESTABLISH_PENDING_OWNER_V1',instanceId,child.pid);
+ await assert.rejects(client.withPendingOwnerScope('ESTABLISH_PENDING_OWNER_V1',request,async tx=>{
+  await tx.readScope();await tx.prepareTransition({previous_sha256:null,next_sha256:'d'.repeat(64)});
+  for(let i=0;i<3;i++)await tx.readScope();seals++;return true;
+ }),error=>error.effect_outcome==='UNKNOWN'&&error.readback_required===true);
+ const read=seedRequest('READ_PENDING_OWNER_V1',instanceId,child.pid);read.body.input=request.body.input;
+ assert.equal(await client.withPendingOwnerScope('READ_PENDING_OWNER_V1',read,async tx=>{
+  assert.equal(tx.prepareTransition,undefined);await tx.readScope();await tx.verifyTransition({sealed_sha256:'d'.repeat(64)});return true;
+ }),true);
+ assert.equal(seals,1);assert.equal((await stats()).calls,1);
 });

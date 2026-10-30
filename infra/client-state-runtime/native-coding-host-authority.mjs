@@ -496,7 +496,7 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
         return projectResult(id,'CHECKPOINTED_PENDING_COMMIT',k,verified.checkpoint_sha256);
       });
     },
-    ...(seedOperations?Object.fromEntries(['SEED_GOAL','READ_SEED','LIST_SEEDS',...['ADMIT_PREPARED_GOAL_V1','READ_PREPARED_GOAL_V1','PREPARE_WORKSPACE_V1','READ_WORKSPACE_PREPARATION_V1'].filter(action=>typeof seedOperations[action]==='function')].map(action=>[action,async (request,context)=>{
+    ...(seedOperations?Object.fromEntries(['SEED_GOAL','READ_SEED','LIST_SEEDS',...['ESTABLISH_PENDING_OWNER_V1','READ_PENDING_OWNER_V1','ADMIT_PREPARED_GOAL_V1','READ_PREPARED_GOAL_V1','PREPARE_WORKSPACE_V1','READ_WORKSPACE_PREPARATION_V1'].filter(action=>typeof seedOperations[action]==='function')].map(action=>[action,async (request,context)=>{
       open();assertNativeCodingHostRequestOpen(context);
       const result=await seedOperations[action](request,context);open();return result;
     }])):{}),

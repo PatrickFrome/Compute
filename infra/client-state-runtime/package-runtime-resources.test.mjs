@@ -395,8 +395,9 @@ test('native Host reviewed source catalog admits the exact ACL implementation an
   const manifest=await receipt(repositoryRoot,{includeRuntimeHost:true});
   const plan=reviewedBundlePlan(manifest,manifest.source_manifest_sha256,{includeRuntimeHost:true});
   assert(plan.some(row=>row.path==='infra/client-state-runtime/native-coding-workspace-preparation.mjs'));
+  assert(plan.some(row=>row.path==='infra/client-state-runtime/native-coding-pending-owner-custody.mjs'));
   assert(plan.some(row=>row.path==='infra/client-state-runtime/native-coding-preparation-transaction.mjs'));
-  for(const name of ['native-coding-workspace-preparation.mjs','windows-native-read-environment.mjs','private-windows-storage-acl.mjs','native-coding-task-context.mjs','native-coding-agent-host-contract.mjs',
+  for(const name of ['native-coding-pending-owner-phase.mjs','native-coding-workspace-preparation.mjs','windows-native-read-environment.mjs','private-windows-storage-acl.mjs','native-coding-task-context.mjs','native-coding-agent-host-contract.mjs',
     'native-coding-agent-mcp-broker.mjs','native-coding-agent-mcp-launch.mjs','native-coding-agent-mcp-entry.mjs','native-coding-agent-mcp-stdio.mjs'])
     assert(plan.some(row=>row.path==='apps/metaengine-browser/src/'+name),name);
   for(const name of ['windows-native-read-environment-copy.mjs','windows-native-read-environment.js']){

@@ -83,3 +83,10 @@ test('W74 pre-seal lifetime has real PostgreSQL coverage in Windows qualificatio
  assert.ok(source.includes("'"+file+"',"));assert.ok(paths.some(pattern=>matches(file,pattern)));
  assert.ok(paths.some(pattern=>matches('apps/metaengine-browser/src/host-owner-genesis-custody-w74.mjs',pattern)));
 });
+
+
+test('typed pending Owner phase, real IPC and integration fixtures stay qualified',()=>{
+ for(const file of ['apps/metaengine-browser/test/native-coding-pending-owner-phase.test.mjs','apps/metaengine-browser/test/native-coding-host-ipc.test.mjs'])assert.ok(source.includes("'"+file+"',"));
+ for(const file of ['apps/metaengine-browser/src/native-coding-pending-owner-phase.mjs','infra/client-state-runtime/native-coding-pending-owner-custody.mjs','infra/client-state-runtime/test/pending-owner-phase-fixture.mjs'])assert.ok(paths.some(pattern=>matches(file,pattern)),file);
+ assert.ok(source.includes("'infra/client-state-runtime/native-coding-pending-goal.pg17.test.mjs',"));
+});

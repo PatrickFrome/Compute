@@ -1,3 +1,4 @@
+import {pendingOwnerScopeFixture,bindStagingPendingOwner} from './test/pending-owner-phase-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -78,16 +79,16 @@ test('native PG17 prepared goal remains durably nonrunnable through signed admis
    await fs.writeFile(path.join(root,NATIVE_WORKSPACE_STAGE),JSON.stringify(c));const verifyStorage=async()=>({owner_dacl_verified:true});
    const selector=(await readNativeWorkspaceStage(root,{verifyStorage})).input,host={instance_id:randomUUID(),host_pid:process.pid};
    const verifier=createNativeCodingDeviceRequestVerifier({sql,hostInstanceId:host.instance_id,hostPid:host.host_pid}),context=createNativeCodingAuthenticatedRequestContext({verifier});
-   let observations=0,failObserve=false,loseCommit=false,observeHook=async()=>{};
+   let observations=0,failObserve=false,loseCommit=false,observeHook=async()=>{},transactionHook=async()=>{};
    const readNativeScope=async p=>{observations++;await observeHook();if(failObserve)throw Error('generated_observation_failed');
     return{artifact:c.artifact,postgres:c.postgres,user_sid:c.user_sid,worktree:p.worktree,sandbox:p.sandbox,host_process:c.postgres.postmaster};};
-   const options={transaction:async(mode,body)=>{const value=await monitor.transaction(sql,mode,body);if(loseCommit)throw Error('generated_commit_reply_lost');return value;},stateDirectory:root,readCurrentDevice:context.readCurrentDevice,readNativeScope,verifyStorage,
+   const options={transaction:async(mode,body)=>{const value=await monitor.transaction(sql,mode,async tx=>{await transactionHook(tx);return body(tx);});if(loseCommit)throw Error('generated_commit_reply_lost');return value;},stateDirectory:root,readCurrentDevice:context.readCurrentDevice,readNativeScope,verifyStorage,
     readRootIdentity:async p=>p===c.repo_root?c.repo_root_identity_sha256:p===c.managed_root?c.managed_root_identity_sha256:'a'.repeat(64)};
    let service=createNativeWorkspacePreparation(options);
    const call=async(action,input=goal,requestContext)=>context.run(action,await signNativeCodingDeviceRequest({identity,binding:host,operation:action,input}),v=>service[action](v,requestContext));
    const goal={...selector,request_id:randomUUID(),objective:'Implement the user requested reliable project restart without duplicate work'};
    disposables.push(()=>{service.close();context.close();verifier.close();});
-   return{root,c,d,pair,selector,goal,call,observations:()=>observations,observeControl:fn=>{observeHook=fn;},fail:()=>{failObserve=true;},lose:v=>{loseCommit=v;},restart:()=>{service.close();service=createNativeWorkspacePreparation(options);}};
+   return{root,c,d,pair,selector,goal,call,identity,host,context,get service(){return service;},options,transactionControl:fn=>{transactionHook=fn;},observations:()=>observations,observeControl:fn=>{observeHook=fn;},fail:()=>{failObserve=true;},lose:v=>{loseCommit=v;},restart:()=>{service.close();service=createNativeWorkspacePreparation(options);}};
   }
   const f=await fixture();
   await t.test('actual user objective requires signed PREPARED workspace, startup creates no project',async()=>{
@@ -189,6 +190,79 @@ test('native PG17 prepared goal remains durably nonrunnable through signed admis
    assert(results.some(r=>r.status==='fulfilled'&&r.value.state==='PENDING_ACTIVATION'));
    assert.equal(g.observations()-before,2);assert.equal((await g.call('READ_PREPARED_GOAL_V1')).state,'PENDING_ACTIVATION');
    assert.equal(Number((await sql.unsafe('select count(*) from destruktion_meta.project_run_h205f22 where workspace_id=$1',[g.c.workspace_id]))[0].count),1);
+  });
+  await t.test('typed W74 bridge uses exact pending ledger despite an unrelated same-device project; post-release read is separate',async()=>{
+   const g=await fixture();await g.call('PREPARE_WORKSPACE_V1',g.selector);
+   const admission=(await g.call('ADMIT_PREPARED_GOAL_V1')).admission;
+   const other=(await sql.unsafe('select public.devos_fleet_enqueue_v1($1,$2,$3,$4,$5::text::jsonb,$6) as result',
+    [g.c.workspace_id,'unrelated.owner','PLANNER','a'.repeat(40),JSON.stringify({objective:'Unrelated project'}),'generated:'+randomUUID()]))[0].result;
+   await sql.unsafe(`insert into destruktion_meta.project_run_h205f22(project_id,workspace_id,request_id,root_task_id,device_id,client_id,admin_grant_epoch,goal,state)
+    values($1,$2,$3,$4,$5,$6,1,'Unrelated project','PAUSED')`,[randomUUID(),g.c.workspace_id,randomUUID(),other.task_id,g.d.device_id,g.d.client_id]);
+   let transactions=0;g.transactionControl(async()=>{transactions++;});
+   let proofPatch={},guardianChange={};const release=bindStagingPendingOwner(g,{readSourceHook:async()=>proofPatch,guardianPatch:()=>guardianChange});
+   try{
+    const owner=await g.identity.establishHostOwnerW74();
+    assert.equal(owner?.project_id,admission.project_id);assert.equal(owner?.fixture_classification,'STAGING');assert.equal(owner?.generation,1);
+    assert.equal(transactions,2,'write release and freshly signed independent readonly transaction');
+    const intent=JSON.parse(await fs.readFile(path.join(g.root,'native-coding-pending-owner-intent-v1.json'),'utf8'));
+    assert.equal(intent.binding.input.request_id,g.goal.request_id);assert.match(intent.transition.next_sha256,/^[a-f0-9]{64}$/);
+    assert.equal(intent.transition.previous_sha256,null);assert.equal(intent.origin.action,'ESTABLISH_PENDING_OWNER_V1');
+    assert.equal((await g.identity.readTrustedHostOwnerIncarnationW74())?.generation,1);
+    for(const key of ['installed_exe_sha256','package_code_sha256','proof_identity']){
+     proofPatch={[key]:'e'.repeat(64)};
+     assert.equal(await g.identity.readTrustedHostOwnerIncarnationW74(),null,'same source SHA does not adopt a different '+key);
+    }
+    proofPatch={};guardianChange={guardian_enrollment_evidence_sha256:'e'.repeat(64)};
+    assert.equal(await g.identity.readTrustedHostOwnerIncarnationW74(),null,'changed Guardian enrollment evidence cannot adopt the prior seal');
+    guardianChange={};assert.equal((await g.identity.readTrustedHostOwnerIncarnationW74())?.generation,1);
+    assert.equal(await g.identity.establishHostOwnerW74(),null,'existing immutable intent cannot be replayed');
+    assert.equal((await g.identity.readTrustedHostOwnerIncarnationW74())?.generation,1);
+    await assert.rejects(pendingOwnerScopeFixture(g,'READ_CUSTODY',async()=>true,{contextPatch:{instanceId:randomUUID()}}),/scope_unavailable/);
+    assert.equal((await g.call('READ_PREPARED_GOAL_V1')).admission.root_state,'BLOCKED');
+    assert.equal((await g.call('READ_PREPARED_GOAL_V1')).admission.project_state,'PAUSED');
+    for(const table of ['native_coding_operator_permit_h205f22','devos_fleet_claim_h205f22'])
+     assert.equal(Number((await sql.unsafe('select count(*) from destruktion_meta.'+table))[0].count),0);
+   }finally{await release();}
+  });
+  await t.test('typed Owner bridge holds exact root/grant/pairing/repository locks and rejects killed connection before seal',async()=>{
+   const g=await fixture();await g.call('PREPARE_WORKSPACE_V1',g.selector);
+   const admission=(await g.call('ADMIT_PREPARED_GOAL_V1')).admission;
+   let backend,entered,continueNative;const ready=new Promise(r=>entered=r),gate=new Promise(r=>continueNative=r);
+   g.transactionControl(async tx=>{backend=(await tx.unsafe('select pg_backend_pid() as pid'))[0].pid;});
+   const release=bindStagingPendingOwner(g,{readSourceHook:async()=>{entered();await gate;}});
+   let pending;
+   try{
+    pending=g.identity.establishHostOwnerW74();await ready;
+    const contender=await sql.reserve();
+    try{
+     for(const [query,args] of [
+      ['select 1 from public.compute_fabric_a2_browser_device_h205f22 where device_id=$1 for update',[g.d.device_id]],
+      ['select 1 from public.compute_fabric_a2_chat_bridge_remote_pairing_h205f22 where token_hash=$1 for update',[g.pair]],
+      ['select 1 from public.compute_fabric_a2_managed_project_repository_h205f22 where coordination_workspace_id=$1 for update',[g.c.workspace_id]],
+      ['select 1 from destruktion_meta.native_coding_pending_goal_h205f22 where request_id=$1 for update',[g.goal.request_id]],
+      ['select 1 from destruktion_meta.project_run_h205f22 where project_id=$1 for update',[admission.project_id]],
+      ['select 1 from destruktion_meta.devos_fleet_task_h205f22 where task_id=$1 for update',[admission.root_task_id]],
+     ]){
+      await contender.unsafe('begin');await contender.unsafe("set local lock_timeout='50ms'");
+      await assert.rejects(contender.unsafe(query,args),e=>e.code==='55P03');await contender.unsafe('rollback');
+     }
+    }finally{contender.release();}
+    assert.equal((await sql.unsafe('select pg_terminate_backend($1) as killed',[backend]))[0].killed,true);
+    let settled=false;pending.then(()=>{settled=true;});await new Promise(r=>setTimeout(r,30));assert.equal(settled,false);
+    continueNative();assert.equal(await pending,null);
+    assert.equal(JSON.parse(await fs.readFile(path.join(g.root,'identity.json'),'utf8')).encrypted_host_owner_record_b64,'');
+   }finally{continueNative();await pending;await release();}
+  });
+  await t.test('typed Owner seal with lost SQL acknowledgement recovers same complete digest read-only without a second generation',async()=>{
+   const g=await fixture();await g.call('PREPARE_WORKSPACE_V1',g.selector);await g.call('ADMIT_PREPARED_GOAL_V1');
+   const release=bindStagingPendingOwner(g);
+   try{
+    g.lose(true);assert.equal(await g.identity.establishHostOwnerW74(),null);g.lose(false);
+    const before=await fs.readFile(path.join(g.root,'identity.json'),'utf8');
+    assert.equal((await g.identity.readTrustedHostOwnerIncarnationW74())?.generation,1);
+    assert.equal(await g.identity.establishHostOwnerW74(),null);
+    assert.equal(await fs.readFile(path.join(g.root,'identity.json'),'utf8'),before);
+   }finally{g.lose(false);await release();}
   });
   await t.test('revoked current pairing cannot read old receipt as authority',async()=>{
    await sql.unsafe('update public.compute_fabric_a2_chat_bridge_remote_pairing_h205f22 set active=false where token_hash=$1',[f.pair]);

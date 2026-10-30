@@ -401,7 +401,7 @@ export class SupervisorDeviceIdentity {
   // every read joins fresh own-PG project/epoch + signed native Guardian
   // incarnation + installed source proof before returning any Host Owner.
   // Only the authenticated private Host/bootstrap composition may bind this.
-  bindHostOwnerGenesisW74({ transaction, readAuthenticatedAdmin,
+  bindHostOwnerGenesisW74({ transaction, readAuthenticatedAdmin, withOwnerScope = null,
     readSourceProof, readNativeKernel, staging = false, assertLifetime = () => {} } = {}) {
     if (this.#w74OwnerCustody || !this.#w67GuardianObservation)
       throw new Error('w74_native_guardian_not_bound');
@@ -443,7 +443,7 @@ export class SupervisorDeviceIdentity {
       },assertReplaceOpen:assertOpen});
     };
     const bound = createHostOwnerGenesisCustodyW74({
-      identity:this,transaction,readAuthenticatedAdmin,
+      identity:this,transaction,readAuthenticatedAdmin,withOwnerScope,
       readGuardian:()=>this.readGuardianOwnerEvidenceW67(),
       readSourceProof,readNativeKernel,readSealed,writeSealed,staging,assertLifetime,
     });

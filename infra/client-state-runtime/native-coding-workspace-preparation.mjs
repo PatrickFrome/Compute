@@ -1,3 +1,4 @@
+import {runPendingOwnerCustody} from './native-coding-pending-owner-custody.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {readNativeWorkspaceStage} from '../../apps/metaengine-browser/src/native-coding-workspace-preparation.mjs';
@@ -34,7 +35,7 @@ export function createNativeWorkspacePreparation({transaction,stateDirectory,rea
   try{await handle.writeFile(json(value)+'\n');await handle.sync();}finally{await handle.close();}
   live(context);
  }
- async function run(input,write,context,goal=null){
+ async function run(input,write,context,goal=null,ownerMode=null){
   live(context);
   if(!exact(input,['preparation_id','configuration_sha256'])||!/^[a-f0-9-]{36}$/.test(input.preparation_id||'')||!HASH.test(input.configuration_sha256||''))fail('selector_invalid');
   const staged=await readStage(stateDirectory,{verifyStorage,signal:context?.signal});live(context);
@@ -125,6 +126,11 @@ export function createNativeWorkspacePreparation({transaction,stateDirectory,rea
      automatic_retry_allowed:false,authority_effect:false});
     const stored=await query(false);
     if(stored&&!prior)fail('goal_intent_missing');
+    if(ownerMode){
+     if(!stored||!prior)fail('owner_pending_goal_required');
+     return runPendingOwnerCustody({tx,input:goal,configuration:c,preparation:intent,admission:stored,device,context,
+      mode:ownerMode,revalidate,load,durable,assertTransaction:transactionOpen});
+    }
     if(prior||!write)return response(stored);
     // Irreversible no-overwrite dispatch fence BEFORE physical qualification or
     // SQL mutation. Restart/unknown outcomes only re-read the same immutable ID.
@@ -174,14 +180,15 @@ export function createNativeWorkspacePreparation({transaction,stateDirectory,rea
   }
   live(context);return result;
  }
- function goal(input,write,context){
+ function goal(input,write,context,ownerMode=null){
   if(!exact(input,['preparation_id','configuration_sha256','request_id','objective'])
    ||!/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(input.request_id||'')
    ||typeof input.objective!=='string'||!input.objective||input.objective!==input.objective.trim()
    ||[...input.objective].length>480||Buffer.byteLength(input.objective)>1920||/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(input.objective))fail('goal_input_invalid');
-  return run({preparation_id:input.preparation_id,configuration_sha256:input.configuration_sha256},write,context,input);
+  return run({preparation_id:input.preparation_id,configuration_sha256:input.configuration_sha256},write,context,input,ownerMode);
  }
- return Object.freeze({ADMIT_PREPARED_GOAL_V1:(input,context)=>goal(input,true,context),
+ return Object.freeze({ESTABLISH_PENDING_OWNER_V1:(input,context)=>goal(input,false,context,'WRITE_CUSTODY'),
+  READ_PENDING_OWNER_V1:(input,context)=>goal(input,false,context,'READ_CUSTODY'),ADMIT_PREPARED_GOAL_V1:(input,context)=>goal(input,true,context),
   READ_PREPARED_GOAL_V1:(input,context)=>goal(input,false,context),PREPARE_WORKSPACE_V1:(input,context)=>run(input,true,context),
   READ_WORKSPACE_PREPARATION_V1:(input,context)=>run(input,false,context),close(){closed=true;}});
 }

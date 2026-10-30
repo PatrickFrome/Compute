@@ -1,3 +1,4 @@
+import {PENDING_OWNER_PHASE,PENDING_OWNER_ACTIONS,createPendingOwnerHostPhases} from '../../apps/metaengine-browser/src/native-coding-pending-owner-phase.mjs';
 import { createHash } from 'node:crypto';
 import {validateNativeCodingAgentHostRequest,nativeCodingAgentHostOperationWrites} from '../../apps/metaengine-browser/src/native-coding-agent-host-contract.mjs';
 import {validateNativeCodingDeviceRequest} from '../../apps/metaengine-browser/src/native-coding-device-request.mjs';
@@ -5,8 +6,8 @@ import {validateNativeCodingDeviceRequest} from '../../apps/metaengine-browser/s
 export const NATIVE_CODING_HOST_IPC_REQUEST = 'metaengine.native-coding.host-ipc.request.v1';
 export const NATIVE_CODING_HOST_IPC_RESPONSE = 'metaengine.native-coding.host-ipc.response.v1';
 const ACTIONS = ['READ_SCOPE','READ_LEASE','REGISTER_PROVIDER','READ_EXECUTION','RESERVE_EXECUTION','ADVANCE_EXECUTION','RECONCILE_PROJECT','READ_PROJECT_CHECKPOINT','AGENT_OPERATION','FINISH_CHECKPOINT','READ_FINISH_CHECKPOINT'];
-const OPTIONAL_ACTIONS=['ADMIT_PREPARED_GOAL_V1','READ_PREPARED_GOAL_V1','PREPARE_WORKSPACE_V1','READ_WORKSPACE_PREPARATION_V1','READ_PROJECT_REJECTION','SEED_GOAL','READ_SEED','LIST_SEEDS','SERVICE_HEARTBEAT','READ_SERVICE_HEARTBEAT','READ_PRIOR_EXECUTION','RECONCILE_FINISH_CHECKPOINT'];
-const WRITES = new Set(['ADMIT_PREPARED_GOAL_V1','PREPARE_WORKSPACE_V1','REGISTER_PROVIDER','RESERVE_EXECUTION','ADVANCE_EXECUTION','RECONCILE_PROJECT','FINISH_CHECKPOINT','RECONCILE_FINISH_CHECKPOINT','SEED_GOAL','SERVICE_HEARTBEAT']);
+const OPTIONAL_ACTIONS=['ESTABLISH_PENDING_OWNER_V1','READ_PENDING_OWNER_V1','ADMIT_PREPARED_GOAL_V1','READ_PREPARED_GOAL_V1','PREPARE_WORKSPACE_V1','READ_WORKSPACE_PREPARATION_V1','READ_PROJECT_REJECTION','SEED_GOAL','READ_SEED','LIST_SEEDS','SERVICE_HEARTBEAT','READ_SERVICE_HEARTBEAT','READ_PRIOR_EXECUTION','RECONCILE_FINISH_CHECKPOINT'];
+const WRITES = new Set(['ESTABLISH_PENDING_OWNER_V1','ADMIT_PREPARED_GOAL_V1','PREPARE_WORKSPACE_V1','REGISTER_PROVIDER','RESERVE_EXECUTION','ADVANCE_EXECUTION','RECONCILE_PROJECT','FINISH_CHECKPOINT','RECONCILE_FINISH_CHECKPOINT','SEED_GOAL','SERVICE_HEARTBEAT']);
 const writes=(action,value)=>WRITES.has(action)||action==='AGENT_OPERATION'&&nativeCodingAgentHostOperationWrites(value);
 const REASONS = new Set(['INVALID_FRAME','INVALID_PAYLOAD','MESSAGE_TOO_LARGE','UNSUPPORTED_ACTION','INSTANCE_MISMATCH',
   'HOST_PID_MISMATCH','INFLIGHT_LIMIT','REQUEST_ID_REUSED','OPERATION_FAILED','WRITE_OUTCOME_UNKNOWN','RESPONSE_INVALID',
@@ -149,6 +150,9 @@ export function createNativeCodingHostIpcServer({instanceId,operations,send=proc
   }
   const onDisconnect=()=>close();process.on('disconnect',onDisconnect);
   function handleMessage(message,sendHandle) {
+    if(message?.schema===PENDING_OWNER_PHASE){
+      active.get(message.request_id)?.ownerPhases?.receive(message,sendHandle);return true;
+    }
     if(!plain(message)||message.schema!==NATIVE_CODING_HOST_IPC_REQUEST)return false;
     if(closed||process.connected!==true||process.pid!==hostPid||process.ppid!==parentPid){protocolError('CHANNEL_CLOSED');return true;}
     let requestDigest;
@@ -175,6 +179,11 @@ export function createNativeCodingHostIpcServer({instanceId,operations,send=proc
     }
     if(active.size>=maxInflight){emit(response(message,requestDigest,'REJECTED',null,'INFLIGHT_LIMIT'));return true;}
     const row={request:structuredClone(message),write:writes(message.action,message.payload),digest:requestDigest,abort:new AbortController(),deadlineAt:Date.now()+timeoutMs,timer:null,response:null};
+    if(PENDING_OWNER_ACTIONS.includes(message.action))row.ownerPhases=createPendingOwnerHostPhases({
+      binding:{instance_id:instanceId,host_pid:hostPid,request_id:message.request_id,action:message.action,
+        request_sha256:requestDigest,body_sha256:message.payload.headers['x-a2-device-body-sha256']},
+      signal:row.abort.signal,send:frame=>{json(frame);send(frame,error=>{if(error)row.abort.abort();});},
+    });
     active.set(message.request_id,row);
     row.timer=setTimeout(()=>{
       seal(row,row.write?'UNKNOWN':'REJECTED',null,'REQUEST_TIMEOUT');row.abort.abort();
@@ -182,10 +191,11 @@ export function createNativeCodingHostIpcServer({instanceId,operations,send=proc
       // must not create unbounded parallel work or authorize a second write.
     },timeoutMs);
     Promise.resolve().then(()=>operations[message.action](Object.freeze(structuredClone(message.payload)),
-      Object.freeze({signal:row.abort.signal,deadlineAt:row.deadlineAt,instanceId,hostPid,requestId:message.request_id,action:message.action})))
+      Object.freeze({signal:row.abort.signal,deadlineAt:row.deadlineAt,instanceId,hostPid,requestId:message.request_id,action:message.action,
+        ...(row.ownerPhases?{pendingOwnerPhases:row.ownerPhases,requestDigest,bodyDigest:message.payload.headers['x-a2-device-body-sha256']}: {})})))
       .then(value=>{if(!row.response){json(value);seal(row,'OK',structuredClone(value),null);}})
       .catch(()=>seal(row,row.write?'UNKNOWN':'REJECTED',null,row.write?'WRITE_OUTCOME_UNKNOWN':'OPERATION_FAILED'))
-      .finally(()=>{clearTimeout(row.timer);active.delete(message.request_id);});
+      .finally(()=>{row.ownerPhases?.close();clearTimeout(row.timer);active.delete(message.request_id);});
     return true;
   }
   return Object.freeze({handleMessage,close,snapshot:()=>Object.freeze({instance_id:instanceId,host_pid:hostPid,inflight:active.size,closed,automatic_retry_allowed:false})});

@@ -1,9 +1,14 @@
 // W74: Host Owner genesis inside the existing enrolled device + protected own-PG
 // authority. No new key, enrollment, service, public IPC or writable task route.
 // All suppliers are installed only by the private Host composition (W76).
+import {createHash} from 'node:crypto';
+import {nativeCodingCanonicalJson} from './native-coding-task-context.mjs';
 import { guardianClientKernelBirthW67 } from './guardian-client-kernel-birth-w67.mjs';
 
 export const HOST_OWNER_GENESIS_W74 = 'metaengine.host.owner-genesis-custody.w74.v1';
+
+export const sealedOwnerDigestW74 = record => createHash('sha256').update(
+  'METAENGINE_W74_COMPLETE_SEALED_RECORD_V1\0'+nativeCodingCanonicalJson(record)).digest('hex');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA = /^[0-9a-f]{40}$/i;
@@ -34,15 +39,17 @@ export const W74_SCOPE_LOCK_SQL = `SELECT pg_catalog.pg_advisory_xact_lock(
 // Authority inputs are _private provider closures_, not identity values. A
 // positive boolean returned by a page, test, or JSON field has no authority.
 export function createHostOwnerGenesisCustodyW74({
-  identity, transaction, readAuthenticatedAdmin, readGuardian,
+  identity, transaction, readAuthenticatedAdmin = () => null, readGuardian, withOwnerScope = null,
   readSourceProof, readNativeKernel, readSealed, writeSealed,
   now = Date.now, staging = false, assertLifetime = () => {},
 } = {}) {
   if (!identity || typeof identity.ensure !== 'function' ||
       typeof identity.snapshot !== 'function' ||
-      [transaction,readAuthenticatedAdmin,readGuardian,readSourceProof,
+      (withOwnerScope !== null && typeof withOwnerScope !== 'function') ||
+      [withOwnerScope || transaction,readAuthenticatedAdmin,readGuardian,readSourceProof,
         readNativeKernel,readSealed,writeSealed,now,assertLifetime].some(f=>typeof f !== 'function'))
     throw new Error('w74_private_authorities_required');
+  const transact = withOwnerScope ? (body, options) => withOwnerScope(options.readOnly?'READ_CUSTODY':'WRITE_CUSTODY',body) : transaction;
   let closed = false, pending = Promise.resolve(), invalidLifetimeWork = Promise.resolve();
   const serialized = action => {
     const p = pending.then(action,action);
@@ -62,13 +69,13 @@ export function createHostOwnerGenesisCustodyW74({
       throw new Error('w74_synchronous_lifetime_required');
     }
   };
-  const check = async () => {
+  const check = async (readAdmin = readAuthenticatedAdmin) => {
     open();
     await identity.ensure();open();
     const device = identity.snapshot();
     if (!UUID.test(device?.client_id || '') || !UUID.test(device?.device_id || '') ||
         !HEX.test(device?.key_fingerprint_sha256 || '') || device?.enrolled !== true) return null;
-    const admin = await readAuthenticatedAdmin();open();
+    const admin = await readAdmin();open();
     if (!admin || admin.device_id !== device.device_id ||
         admin.client_id !== device.client_id ||
         !Number.isSafeInteger(admin.admin_grant_epoch) || admin.admin_grant_epoch < 1 ||
@@ -113,8 +120,8 @@ export function createHostOwnerGenesisCustodyW74({
         !fresh(source.observed_at,now()) ||
         !HEX.test(source.installed_exe_sha256 || '') ||
         !HEX.test(source.proof_identity || '') ||
-        (!staging && mark(source))) return null;
-    const currentAdmin = await readAuthenticatedAdmin();open();
+        (!staging && mark(source)) || withOwnerScope && source.loaded_runtime_code_attested !== false) return null;
+    const currentAdmin = await readAdmin();open();
     const currentDevice = identity.snapshot();
     if (!same(device,currentDevice,['client_id','device_id','key_fingerprint_sha256','enrolled']) ||
         !same(admin,currentAdmin,['device_id','client_id','admin_grant_epoch','access_tier','admin_ready']) ||
@@ -122,7 +129,7 @@ export function createHostOwnerGenesisCustodyW74({
     return {device,admin,native,kernel,source};
   };
   const scope = async (tx, x, {lock = false} = {}) => {
-    const rows = await tx.unsafe(lock ? W74_OWNER_SCOPE_SQL : W74_OWNER_SCOPE_READ_SQL, [
+    const rows = withOwnerScope ? [await tx.readScope()] : await tx.unsafe(lock ? W74_OWNER_SCOPE_SQL : W74_OWNER_SCOPE_READ_SQL, [
       x.device.device_id,x.device.client_id,x.admin.admin_grant_epoch]);
     if (!Array.isArray(rows) || rows.length !== 1) return null;
     const row = rows[0];
@@ -151,8 +158,29 @@ export function createHostOwnerGenesisCustodyW74({
     same(before.native,after.native,['guardian_client_pid','guardian_client_process_incarnation_id',
       'guardian_enrollment_evidence_sha256']) &&
     same(before.source,after.source,['source_sha','installed_exe_sha256','proof_identity','package_code_sha256']);
+  const pendingEvidence = x => ({schema:'metaengine.host.pending-owner-native-custody.v1',
+    installed_exe_sha256:x.source.installed_exe_sha256,package_code_sha256:x.source.package_code_sha256,
+    proof_identity:x.source.proof_identity,guardian_enrollment_evidence_sha256:x.native.guardian_enrollment_evidence_sha256,
+    loaded_runtime_code_attested:false});
+  // A typed pending scope is supplied only by the actual private owned-Host
+  // client. READ has no prepareTransition capability and never seals anything.
+  const readTyped = async (candidate = null, before = null) => transact(async tx => {
+    tx.assertOpen();
+    const x = await check(tx.readAuthenticatedAdmin);
+    if (!x || before && !sameEvidence(before,x)) return null;
+    const record = await readSealed();
+    if (!record || (staging?record.fixture_classification!=='STAGING':mark(record)) || candidate && sealedOwnerDigestW74(candidate)!==sealedOwnerDigestW74(record)) return null;
+    const row = await scope(tx,x);
+    if (!row || !evidenceMatch(record,x,row) || nativeCodingCanonicalJson(record.pending_custody)!==nativeCodingCanonicalJson(pendingEvidence(x))) return null;
+    const after = await check(tx.readAuthenticatedAdmin);
+    if (!sameEvidence(x,after)) return null;
+    await tx.verifyTransition({sealed_sha256:sealedOwnerDigestW74(record)});
+    tx.assertOpen();open();
+    return Object.freeze({...record,observed_at:new Date(now()).toISOString(),authority_effect:false});
+  },{readOnly:true});
   const read = () => serialized(async () => {
     try {
+      if (withOwnerScope) return await readTyped();
       const x = await check();
       if (!x) return null;
       const record = await readSealed();
@@ -169,16 +197,21 @@ export function createHostOwnerGenesisCustodyW74({
   });
   const create = () => serialized(async () => {
     try {
-      const x = await check();
-      if (!x) return null;
+      let x = withOwnerScope ? null : await check();
+      if (!withOwnerScope && !x) return null;
       // PostgreSQL serializes generation transitions against another Host
       // opening the same protected device identity; the protected record is
       // never accepted unless the independently current DB epoch still agrees.
-      const candidate = await transaction(async tx => {
-        await tx.unsafe(W74_SCOPE_LOCK_SQL,[x.device.device_id+':'+x.device.client_id]);
+      const candidate = await transact(async tx => {
+        if (withOwnerScope) {tx.assertOpen();x=await check(tx.readAuthenticatedAdmin);if(!x)return null;}
+        else await tx.unsafe(W74_SCOPE_LOCK_SQL,[x.device.device_id+':'+x.device.client_id]);
         const row = await scope(tx,x,{lock:true});
         if (!row) return null;
         const previous = await readSealed();
+        // Existing custody without the exact immutable transition intent cannot
+        // be adopted, transferred or resealed through this fresh pending route.
+        // Recovery uses READ_CUSTODY only, never this generation constructor.
+        if (withOwnerScope && previous) return null;
         // A protected STAGING record is never silently upgraded to installed.
         // Reject malformed/cross-device custody even with a fresh signed
         // Guardian and own-PG scope: no untrusted cached generation takeover.
@@ -218,18 +251,22 @@ export function createHostOwnerGenesisCustodyW74({
           source_sha:x.source.source_sha.toLowerCase(),
           device_key_fingerprint_sha256:x.device.key_fingerprint_sha256,
           observed_at:new Date(now()).toISOString(),authority_effect:false,
+          ...(withOwnerScope?{pending_custody:pendingEvidence(x)}:{}),
           ...(staging?{fixture_classification:'STAGING'}:{}),
         });
         // Native/file/old-process observations above are asynchronous. Neither
         // a still-open closure nor the earlier project row proves this scope
         // is current now. Recheck native evidence, then the SAME locked SQL
         // transaction immediately before entering the protected write.
+        if (withOwnerScope) await tx.prepareTransition({previous_sha256:previous?sealedOwnerDigestW74(previous):null,
+          next_sha256:sealedOwnerDigestW74(next)});
+        const assertScopeOpen = () => {open();if(withOwnerScope)tx.assertOpen();};
         const assertCurrent = async () => {
-          open();
-          const current = await check();
+          assertScopeOpen();
+          const current = await check(withOwnerScope?tx.readAuthenticatedAdmin:readAuthenticatedAdmin);
           if (!sameEvidence(x,current)) throw new Error('w74_preseal_evidence_changed');
           const locked = await scope(tx,current,{lock:true});
-          open();
+          assertScopeOpen();
           if (!locked || locked.project_id !== row.project_id ||
               locked.admin_grant_epoch !== row.admin_grant_epoch)
             throw new Error('w74_preseal_scope_changed');
@@ -238,11 +275,14 @@ export function createHostOwnerGenesisCustodyW74({
         // The actual identity writer repeats this guard INSIDE its persistence
         // queue, not merely before queue admission. A queued write cannot outlive
         // a closed custody binding and begin a new seal with stale authority.
-        await writeSealed(next,previous,{assertCurrent,assertOpen:open});
+        await writeSealed(next,previous,{assertCurrent,assertOpen:assertScopeOpen});
         if (closed) return null;
         return next;
       },{readOnly:false,isolationLevel:'serializable'});
       if (!candidate) return null;
+      // This opens a NEW signed Host operation only after the write facade has
+      // observed actual transaction release. No cached-scope post-commit proof.
+      if (withOwnerScope) return await readTyped(candidate,x);
       const after = await check();
       if (!after || x.admin.admin_grant_epoch !== after.admin.admin_grant_epoch ||
           !same(x.device,after.device,['client_id','device_id','key_fingerprint_sha256']) ||

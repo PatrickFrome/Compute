@@ -40,6 +40,7 @@ on:
       - 'apps/metaengine-browser/test/fixtures/browser-parent-suspension-fixture.mjs'
       - 'infra/client-state-runtime/native-coding-*.mjs'
       - 'infra/client-state-runtime/test/native-workspace-preparation-fixture.mjs'
+      - 'infra/client-state-runtime/test/pending-owner-phase-fixture.mjs'
       - 'infra/client-state-runtime/native-coding-*.sql'
       - 'infra/client-state-runtime/native-agent-count-unbounded-v2.sql'
       - 'infra/client-state-runtime/browser-parent-*.mjs'
@@ -210,6 +211,7 @@ jobs:
             'infra/client-state-runtime/native-coding-host-authority.test.mjs',
             'apps/metaengine-browser/test/native-coding-runtime.test.mjs',
             'apps/metaengine-browser/test/native-coding-host-ipc.test.mjs',
+            'apps/metaengine-browser/test/native-coding-pending-owner-phase.test.mjs',
             'infra/client-state-runtime/native-coding-host-commit-service.test.mjs',
             'infra/client-state-runtime/native-coding-checkpoint-verifier.test.mjs',
             'infra/client-state-runtime/native-coding-checkpoint-authority.test.mjs',

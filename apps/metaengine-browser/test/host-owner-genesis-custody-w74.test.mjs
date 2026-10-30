@@ -286,3 +286,31 @@ for(const outcome of ['resolve','reject'])test(`W74 already-settled async lifeti
   const binding=createHostOwnerGenesisCustodyW74(f.opts);
   assert.equal(await binding.create(),null);await binding.close();assert.equal(f.writes,0);
 });
+
+test('typed pending custody seals exact source/Guardian evidence and never adopts missing legacy pins (STAGING)',async()=>{
+ const f=fixture(),readProof=f.opts.readSourceProof;let patch={},transition=null;const modes=[];
+ f.opts.readSourceProof=async()=>({...await readProof(),loaded_runtime_code_attested:false,...patch});
+ f.opts.withOwnerScope=async(mode,body)=>{
+  modes.push(mode);
+  const scope={assertOpen:()=>{},readAuthenticatedAdmin:f.opts.readAuthenticatedAdmin,
+   readScope:async()=>({project_id:project,device_id:device,client_id:client,admin_grant_epoch:7,observed_at:now()})};
+  if(mode==='WRITE_CUSTODY')scope.prepareTransition=async value=>{assert.equal(transition,null);transition=value;};
+  else scope.verifyTransition=async value=>{assert.equal(value.sealed_sha256,transition.next_sha256);};
+  return body(Object.freeze(scope));
+ };
+ const binding=createHostOwnerGenesisCustodyW74(f.opts),first=await binding.create();
+ assert.equal(first?.fixture_classification,'STAGING');assert.equal(first?.generation,1);
+ assert.deepEqual(modes,['WRITE_CUSTODY','READ_CUSTODY']);
+ const original=f.owner;assert.equal(original.pending_custody.loaded_runtime_code_attested,false);
+ for(const key of ['installed_exe_sha256','package_code_sha256','proof_identity']){
+  patch={[key]:'1'.repeat(64)};assert.equal(await binding.read(),null);
+ }
+ patch={};const native=await f.opts.readGuardian();
+ f.setGuardian(async()=>({...native,guardian_enrollment_evidence_sha256:'1'.repeat(64)}));
+ assert.equal(await binding.read(),null);f.setGuardian(async()=>native);
+ const {pending_custody:removed,...legacy}=original;f.replaceOwner(legacy);
+ assert.equal(await binding.read(),null,'missing pins cannot be silently upgraded');assert.equal(await binding.create(),null);
+ f.replaceOwner({...original,observed_at:new Date(Date.now()-1000).toISOString()});
+ assert.equal(await binding.read(),null,'complete canonical record digest includes observed_at, not only identity keys');
+ f.replaceOwner(original);assert.equal((await binding.read())?.generation,1);assert.equal(f.writes,1);await binding.close();
+});
