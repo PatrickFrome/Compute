@@ -85,6 +85,7 @@ jobs:
             'a legacy content-only snapshot cannot establish physical-root immutability',
             'the harness refuses an original root symlink or Windows junction before creating evidence or launching children',
             'W73 invoked package scripts execute all new UI acceptance regressions',
+            'renderer evidence finishes finite transitions and cannot escape its output directory',
           ];
           // Existing POSIX controls cannot establish Windows ACL/signal proof.
           // No junction, physical-root or registration case may be skipped.
@@ -101,8 +102,8 @@ jobs:
             'a nonzero failure after the owned SIGTERM request is rejected',
             'SIGKILL cleanup of an unresponsive owned child never qualifies as graceful acceptance',
           ]);
-          assert.equal(results.length, 32, 'both complete UI fixture files must execute');
-          assert.equal(new Set(results.map(row => row.name)).size, 32, 'duplicate test result');
+          assert.equal(results.length, 33, 'both complete UI fixture files must execute');
+          assert.equal(new Set(results.map(row => row.name)).size, 33, 'duplicate test result');
           assert.ok(results.every(row => row.status === 'ok' && row.directive !== 'TODO'), 'failed or TODO test');
           for (const name of requiredPass) {
             const rows = results.filter(row => row.name === name);
@@ -112,11 +113,11 @@ jobs:
           const skipped = results.filter(row => row.directive === 'SKIP');
           assert.equal(skipped.length, allowedSkips.size, 'unexpected Windows skip count');
           assert.ok(skipped.every(row => allowedSkips.has(row.name)), 'unexpected skipped Windows case');
-          for (const [key, expected] of Object.entries({tests:32, pass:21, fail:0, cancelled:0, skipped:11, todo:0})) {
+          for (const [key, expected] of Object.entries({tests:33, pass:22, fail:0, cancelled:0, skipped:11, todo:0})) {
             assert.deepEqual(lines.filter(line => line.startsWith('# ' + key + ' ')), ['# ' + key + ' ' + expected], 'TAP summary ' + key);
           }
-          assert.deepEqual(lines.filter(line => /^\d+\.\.\d+/.test(line)), ['1..32'], 'TAP plan');
-          console.log('W73 Windows UI: 21 PASS, 11 explicitly allowed POSIX skips; all 7 physical-root/harness/registration controls PASS.');
+          assert.deepEqual(lines.filter(line => /^\d+\.\.\d+/.test(line)), ['1..33'], 'TAP plan');
+          console.log('W73 Windows UI: 22 PASS, 11 explicitly allowed POSIX skips; all 8 physical-root/harness/registration/renderer controls PASS.');
           '@ | node --input-type=module - $tap
           if ($LASTEXITCODE -ne 0) { throw 'w73_ui_windows_required_evidence_failed' }
       - name: Immutable W43-W73 historical ledgers and current critical-closure source seal

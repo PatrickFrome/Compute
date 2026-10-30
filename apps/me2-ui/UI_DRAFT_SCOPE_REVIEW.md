@@ -139,6 +139,18 @@ dependencies. That test, package.json and
 the base (verified by an empty git diff). Fixing this CI setup requires the
 workflow owner's coordination; no checks were removed or weakened here.
 
+After that diagnosis, the parent authorized minimal UI dependency/registration
+fixes. W29 now uses the existing pinned setup-bun action and Bun 1.3.3 to install
+the unchanged lockfile with `--frozen-lockfile --ignore-scripts`, checks that the
+manifest/lockfile bytes stay unchanged, and runs the new CI negative tests.
+The Windows gate now requires 33 unique results, 22 passes and exactly the same
+11 allowed POSIX skips; renderer output confinement is an eighth mandatory
+passing case. The actual inline TAP validator is executed by tests which reject
+missing/duplicate cases, skipped required cases, failure, TODO and bailout.
+The complete local UI suite passed 217/217 and lint passed after these changes.
+This does not resolve or rewrite the global source seal. The stale seal and
+33-case fixture count were independently reproduced on clean base `b98444e6`.
+
 Draft PR creation was initially denied by automatic approval review because the
 reviewer required explicit user permission for a PR that may notify people and
 trigger CI. After the parent supplied the user's new explicit permission, one
