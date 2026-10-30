@@ -13,11 +13,14 @@ roots. Do not remove checks to manufacture autonomous progress.
    same state mapping. Preserve selection across suspend/resume. Unknown states
    remain refused. Evidence: all UI library tests 92/92, task-surface quarantine
    3/3, TypeScript noEmit passed. No visual installed UI claim.
-2. **Rejected-review repair — pending implementation.** Retain rejected evidence;
-   verify old writer/critic quiescence and actual dirty tree; create an explicit
-   repair lineage through existing custody/lease paths; new independent review
-   must bind the repaired subject. Test replay, unknown ACK, process alive,
-   changed bytes, foreign project, restart, repeated rejection and acceptance.
+2. **Rejected-review repair — source implemented; installed qualification pending.**
+   Immutable lineage delegates retained rejected pairs to an existing clean
+   independent pair at the same reviewed base. Old RESULT_READY/REJECT/HELD
+   evidence is unchanged. Canonical completion/snapshot/suspension/runtime
+   consumers agree on PENDING/RESOLVED obligations. Exact critic pinning, repeated
+   rejection, drift/forgery/control/failure/atomicity tests run on disposable PG17.
+   Real OS quiescence, physical commits, process death/restart and live parent
+   restoration still require installed qualification. See repair verification.
 3. **Bidirectional addressed messages — pending.** Existing authority only;
    durable delivery identity, recipient read/processed cursor, browser-to-native
    action, and wake through existing suspension reconciliation. Test duplicate,
@@ -59,7 +62,8 @@ and links to the writer/critic history only when that exact row is present on
 the confirmed page. Cross-page references remain visible without fake selection.
 Forged/malformed rejection responses degrade readback rather than enabling a
 retry. All UI library plus task-surface tests:98/98; TypeScript passed. The
-actual repair transition remains pending, not disguised as a Retry button.
+actual repair transition is now implemented in source (see the later repair
+verification); installed behavior is not implied by a Retry button.
 
 ### Resource admission defect repaired
 

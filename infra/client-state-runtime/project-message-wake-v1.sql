@@ -16,7 +16,7 @@ begin
  if p.prosrc is null then raise exception 'PROJECT_MESSAGE_WAKE_PREDECESSOR_MISSING';end if;
  if p.lanname<>'sql' or p.prosecdef is distinct from true or p.provolatile<>'v'
   or p.proconfig is distinct from ARRAY['search_path=pg_catalog, destruktion_meta, pg_temp']::text[]
-  or encode(extensions.digest(convert_to(replace(p.prosrc,E'\r\n',E'\n'),'UTF8'),'sha256'),'hex') not in ('2d38e3d3b8fdf3dc371d4bd37be4de8ecd9246aed6a77081cb2eb97e17f9d1c7','2b6b33193fb9f38e5227c376a71ae64e5e186fc8ae86b12b53540f3c932007bb')
+  or encode(extensions.digest(convert_to(replace(p.prosrc,E'\r\n',E'\n'),'UTF8'),'sha256'),'hex') not in ('2d38e3d3b8fdf3dc371d4bd37be4de8ecd9246aed6a77081cb2eb97e17f9d1c7','2b6b33193fb9f38e5227c376a71ae64e5e186fc8ae86b12b53540f3c932007bb','79990f7019da3cbf6639e567c87650a5d20bd69d9bd471a33a536843e4a6c1a9')
  then raise exception 'PROJECT_MESSAGE_WAKE_BODY_REQUIRES_REVIEW';end if;
 end $review$;
 do $review$
@@ -26,7 +26,7 @@ begin
  if p.prosrc is null then raise exception 'PROJECT_MESSAGE_WAKE_PREDECESSOR_MISSING';end if;
  if p.lanname<>'plpgsql' or p.prosecdef is distinct from true or p.provolatile<>'v'
   or p.proconfig is distinct from ARRAY['search_path=pg_catalog, public, destruktion_meta']::text[]
-  or encode(extensions.digest(convert_to(replace(p.prosrc,E'\r\n',E'\n'),'UTF8'),'sha256'),'hex') not in ('794ff6dc42a594888bf83bdad385692a6629be76c4d4bf0b098105b5393ef208','1066fabc38868ce5502f37f660d90e9273c55cbbaec58a799e5f9dabc5d55f37')
+  or encode(extensions.digest(convert_to(replace(p.prosrc,E'\r\n',E'\n'),'UTF8'),'sha256'),'hex') not in ('794ff6dc42a594888bf83bdad385692a6629be76c4d4bf0b098105b5393ef208','1066fabc38868ce5502f37f660d90e9273c55cbbaec58a799e5f9dabc5d55f37','3b19104d465f5a2c160b00b6458691608c9ba4c65db80525747ec53655d153f5')
  then raise exception 'PROJECT_MESSAGE_WAKE_BODY_REQUIRES_REVIEW';end if;
 end $review$;
 do $review$

@@ -164,3 +164,18 @@ test('exact Task Sheet binding uses selected_task even when it is beyond the fir
     assert.equal(first.getSnapshot().overview.selected_task.task_id, childId); assert.equal(snapshots, 1); assert.equal(latest, 0);
   } finally { delete globalThis.window; }
 });
+
+
+test('Browser snapshot preserves only valid historical repair obligations in every row projection',()=>{
+ for(const repair of ['PENDING','RESOLVED']){
+  const raw=overview();const row={...raw.tasks[0],state:'RESULT_READY',role:'IMPLEMENTER',repair_obligation:repair};
+  raw.tasks=[row];raw.selected_task=row;raw.immediate_children=[];
+  const value=normalizeClientProjectSnapshot(raw,{project_id:projectId});
+  assert.equal(value.tasks[0].repair_obligation,repair);assert.equal(value.selected_task.repair_obligation,repair);
+  assert.equal(value.tasks[0].state,'RESULT_READY');
+  for(const change of [{repair_obligation:'ACCEPTED'},{repair_obligation:{state:'RESOLVED'}},{state:'COMPLETED'},{role:'CODER'}])
+   assert.throws(()=>normalizeClientProjectSnapshot({...raw,tasks:[{...row,...change}]},{project_id:projectId}));
+  assert.throws(()=>normalizeClientProjectSnapshot(raw,{project_id:'44444444-4444-4444-8444-444444444444'}));
+ }
+ assert.equal(normalizeClientProjectSnapshot(overview(),{project_id:projectId}).tasks[0].repair_obligation,null);
+});

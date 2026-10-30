@@ -417,6 +417,29 @@ test('private initial native goal admission is atomic and preserves the W30 auth
   const wakeUpgrade=await fs.readFile(new URL('./project-message-wake-v1.sql',import.meta.url),'utf8');
   await sql.begin(tx=>tx.unsafe(wakeUpgrade));await sql.begin(tx=>tx.unsafe(wakeUpgrade));
   await sql.begin(async tx=>{await tx.unsafe(reviewUpgrade);await tx.unsafe(wakeUpgrade);});
+  const repairUpgrade=await fs.readFile(new URL('./native-coding-repair-v1.sql',import.meta.url),'utf8');
+  await sql.begin(tx=>tx.unsafe(repairUpgrade));await sql.begin(tx=>tx.unsafe(repairUpgrade));
+  async function chatParentFixture(pairs=2){
+   const f=await fixture({chatLed:true,pairs}),admitted=(await invoke(f)).receipt;
+   const agent='agent_chat-planner-001',tab='tab_'+randomUUID(),target='webcontents:42';
+   const heartbeat={schema:'metaengine.native-browser-supervisor.state.v1',client_kind:'METAENGINE_BROWSER_ELECTRON_NATIVE',
+    transport_identity:{profile:f.generated.identity.profile,device_id:f.profile.device_id,key_fingerprint_sha256:f.profile.device_key_fingerprint_sha256,
+     access_tier:'ADMIN',admin_grant_epoch:1,admin_ready:true},
+    supervisor_lifecycle:{continuous_service:{enabled:true},actuation_enabled:true,keepalive:{state:'WAITING'}},
+    fleet:{schema:'metaengine.browser.fleet-snapshot.v1',readiness_contract:'TRANSPORT_PROOF_REQUIRED',agents:[{
+     agent_id:agent,role:'PLANNER',tab_id:tab,target_id:target,generation_epoch:1,ownership:'FLEET_OWNED',lifecycle_state:'ACTIVE',
+     authority_effect:false,automatic_retry_allowed:false,transport_proof:{schema:'metaengine.browser.fleet-transport-proof.v1',
+      tab_id:tab,target_id:target,generation_epoch:1,conversation_url_sha256:'a'.repeat(64),proven_at:new Date().toISOString(),authority_effect:false},
+    }]}};
+   await sql.unsafe('update public.compute_fabric_a2_browser_supervisor_state_h205f22 set state=$1,last_seen_at=clock_timestamp() where workspace_id=$2',
+    [sql.json(heartbeat),f.profile.workspace_id]);
+   const [leaseRow]=await sql.unsafe('select public.devos_fleet_lease_v1($1,$2,$3,$4,$5,1,900) as value',
+    [f.profile.workspace_id,agent,'PLANNER',tab,target]);
+   const lease=leaseRow.value;assert.equal(lease.leased,true);assert.equal(lease.task_id,admitted.root_task_id);
+   const spawn=async(id,batch,claim=lease.claim_id)=>(await sql.unsafe('select public.h205f22_project_spawn_v1($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,1) as value',
+    [f.profile.workspace_id,admitted.project_id,lease.task_id,claim,lease.lease_generation,id,sql.json(batch),f.profile.device_id,f.profile.client_id]))[0].value;
+   return {f,admitted,agent,tab,target,heartbeat,lease,spawn};
+  }
   await t.test('protected chat-led profile admits a browser planner and native permits, never a CLI planner',async()=>{
    const f=await fixture({chatLed:true}),service=await createNativeCodingHostSeedService(f.options);
    try{
@@ -441,25 +464,8 @@ test('private initial native goal admission is atomic and preserves the W30 auth
    assert.equal(candidate.value,null);passed++;
   });
   await t.test('real browser-parent claim hands IMPLEMENTER children to protected native permits without fallback',async()=>{
-   const f=await fixture({chatLed:true}),admitted=(await invoke(f)).receipt;
-   const agent='agent_chat-planner-001',tab='tab_'+randomUUID(),target='webcontents:42';
-   const heartbeat={schema:'metaengine.native-browser-supervisor.state.v1',client_kind:'METAENGINE_BROWSER_ELECTRON_NATIVE',
-    transport_identity:{profile:f.generated.identity.profile,device_id:f.profile.device_id,key_fingerprint_sha256:f.profile.device_key_fingerprint_sha256,
-     access_tier:'ADMIN',admin_grant_epoch:1,admin_ready:true},
-    supervisor_lifecycle:{continuous_service:{enabled:true},actuation_enabled:true,keepalive:{state:'WAITING'}},
-    fleet:{schema:'metaengine.browser.fleet-snapshot.v1',readiness_contract:'TRANSPORT_PROOF_REQUIRED',agents:[{
-     agent_id:agent,role:'PLANNER',tab_id:tab,target_id:target,generation_epoch:1,ownership:'FLEET_OWNED',lifecycle_state:'ACTIVE',
-     authority_effect:false,automatic_retry_allowed:false,transport_proof:{schema:'metaengine.browser.fleet-transport-proof.v1',
-      tab_id:tab,target_id:target,generation_epoch:1,conversation_url_sha256:'a'.repeat(64),proven_at:new Date().toISOString(),authority_effect:false},
-    }]}};
-   await sql.unsafe('update public.compute_fabric_a2_browser_supervisor_state_h205f22 set state=$1,last_seen_at=clock_timestamp() where workspace_id=$2',
-    [sql.json(heartbeat),f.profile.workspace_id]);
-   const [leaseRow]=await sql.unsafe('select public.devos_fleet_lease_v1($1,$2,$3,$4,$5,1,900) as value',
-    [f.profile.workspace_id,agent,'PLANNER',tab,target]);
-   const lease=leaseRow.value;assert.equal(lease.leased,true);assert.equal(lease.task_id,admitted.root_task_id);
+   const {f,admitted,agent,tab,target,heartbeat,lease,spawn}=await chatParentFixture();
    const request=randomUUID(),children=[{role:'IMPLEMENTER',objective:'Implement first bounded patch'},{role:'CODER',objective:'Implement second independent patch'}];
-   const spawn=async(id,batch,claim=lease.claim_id)=>(await sql.unsafe('select public.h205f22_project_spawn_v1($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,1) as value',
-    [f.profile.workspace_id,admitted.project_id,lease.task_id,claim,lease.lease_generation,id,sql.json(batch),f.profile.device_id,f.profile.client_id]))[0].value;
    const result=await spawn(request,children);assert.equal(result.children.length,2);assert.ok(result.children.every(c=>c.status==='ADMITTED'));
    const tasks=await sql.unsafe('select task_spec,role from destruktion_meta.devos_fleet_task_h205f22 where task_id=any($1::uuid[])',[result.children.map(c=>c.task_id)]);
    assert.equal(tasks.length,2);assert.ok(tasks.every(t=>t.role==='IMPLEMENTER'&&t.task_spec.native_coding.project_id===admitted.project_id));
@@ -563,6 +569,141 @@ test('private initial native goal admission is atomic and preserves the W30 auth
    const [otherBranch]=await sql.unsafe('select destruktion_meta.native_coding_review_rejection_v1($1,$2) as value',[admitted.project_id,continued.children[0].task_id]);
    assert.equal(otherBranch.value,null);passed++;
   });
+  await t.test('rejected CHAT_LED attempt is repaired on distinct retained roots and resolves only after committed independent acceptance',async()=>{
+   const {f,admitted,spawn,lease,tab,target,agent}=await chatParentFixture(6);
+   const admittedChild=await spawn(randomUUID(),[{role:'IMPLEMENTER',objective:'Repairable bounded objective'}]);
+   const task=admittedChild.children[0].task_id;
+   const permitFor=async id=>(await sql.unsafe("select task_spec#>>'{native_coding,permit_id}' as id from destruktion_meta.devos_fleet_task_h205f22 where task_id=$1",[id]))[0].id;
+   const edges=()=>sql.unsafe('select * from destruktion_meta.native_coding_repair_h205f22 where project_id=$1 order by created_at',[admitted.project_id]);
+   const snapshot=async()=>(await sql.unsafe('select public.h205f22_project_snapshot_v1($1,$2,null,0,32,$3,$4,1) as value',
+    [f.profile.workspace_id,admitted.project_id,f.profile.device_id,f.profile.client_id]))[0].value;
+   const reconcile=()=>sql.unsafe('select public.h205f22_project_reconcile_v1($1,$2,$3,$4,1) as value',
+    [f.profile.workspace_id,admitted.project_id,f.profile.device_id,f.profile.client_id]);
+   const rejected=await completeChatNativePair({sql,fixture:f,writerPermitId:await permitFor(task),verdict:'REJECT',beforeRejectedReconcile:async()=>{
+    const beforeCount=await count(f);
+    await assert.rejects(sql.begin(async tx=>{
+     await tx.unsafe(`create function destruktion_meta.qa_repair_late_failure() returns trigger language plpgsql as $$begin
+      if new.event_type='NATIVE_REPAIR_TASK_ADMITTED' then raise exception 'qa_repair_late_failure';end if;return new;end $$;
+      create trigger qa_repair_late_failure before insert on destruktion_meta.project_event_h205f22 for each row execute function destruktion_meta.qa_repair_late_failure()`);
+     await tx.unsafe('select destruktion_meta.native_coding_project_repair_v1($1,$2)',[task,f.profile.client_id]);
+    }),/qa_repair_late_failure/);
+    assert.deepEqual(await count(f),beforeCount);assert.equal((await edges()).length,0);
+    const busyRollback=Error('rollback_generated_busy_critic');
+    await assert.rejects(sql.begin(async tx=>{
+     const [candidate]=await tx.unsafe(`select p.permit_id,c.agent_id from destruktion_meta.native_coding_operator_permit_h205f22 p
+      join destruktion_meta.native_coding_operator_permit_h205f22 c on c.permit->'worktree'=p.permit->'worktree' and c.permit->>'role'='CRITIC'
+      where p.permit->>'project_id'=$1 and p.permit->>'role'='IMPLEMENTER' and p.permit_id<>$2 order by p.permit_id limit 1`,[admitted.project_id,await permitFor(task)]);
+     await tx.unsafe('update destruktion_meta.devos_fleet_claim_h205f22 set agent_id=$1 where claim_id=$2',[candidate.agent_id,lease.claim_id]);
+     assert.equal((await tx.unsafe('select destruktion_meta.native_coding_project_repair_v1($1,$2) as value',[task,f.profile.client_id]))[0].value,1);
+     const [selected]=await tx.unsafe(`select t.task_spec#>>'{native_coding,permit_id}' as permit_id from destruktion_meta.native_coding_repair_h205f22 e
+      join destruktion_meta.devos_fleet_task_h205f22 t on t.task_id=e.replacement_task_id where e.writer_task_id=$1`,[task]);
+     assert.notEqual(selected.permit_id,candidate.permit_id);
+     throw busyRollback;
+    }),error=>error===busyRollback);
+    // Generated control/availability scenarios are rolled back; no protected
+    // permit body is rewritten and no rejection/dirty fence is released.
+    for(const change of [
+     ['update public.qa_native_environment set enabled=false where workspace_id=$1',f.profile.workspace_id],
+     ["update destruktion_meta.project_run_h205f22 set state='PAUSED' where project_id=$1",admitted.project_id],
+     ['update destruktion_meta.native_coding_seed_profile_h205f22 set revoked_at=clock_timestamp() where profile_id=$1',f.profile.profile_id],
+     ["update destruktion_meta.native_coding_operator_permit_h205f22 set revoked_at=clock_timestamp() where permit->>'project_id'=$1 and permit->>'role'='CRITIC'",admitted.project_id],
+    ]){
+     const rollback=Error('rollback_generated_repair_gate');
+     await assert.rejects(sql.begin(async tx=>{
+      await tx.unsafe(change[0],[change[1]]);
+      assert.equal((await tx.unsafe('select destruktion_meta.native_coding_project_repair_v1($1,$2) as value',[task,f.profile.client_id]))[0].value,0);
+      assert.equal((await tx.unsafe('select count(*)::int as n from destruktion_meta.native_coding_repair_h205f22 where project_id=$1',[admitted.project_id]))[0].n,0);
+      throw rollback;
+     }),error=>error===rollback);
+    }
+   }});
+   async function suspensionState(expected) {
+    const rollback=Error('rollback_generated_repair_suspension');
+    await assert.rejects(sql.begin(async tx=>{
+     const conversation='https://chatgpt.com/c/'+randomUUID();
+     const checkpoint={schema:'metaengine.browser.parent-checkpoint.v1',conversation_url:conversation,conversation_url_sha256:hash(conversation),
+      transcript_floor:0,transcript_total_chars:10,transcript_sha256:'b'.repeat(64),agent_surface_sha256:'c'.repeat(64),confirmed_turn_sha256:'d'.repeat(64),
+      delivered_tool_results:[],observed_at:new Date().toISOString(),tab_id:tab,target_id:target,agent_id:agent,agent_generation_epoch:1,control_generation:0,worktree_custody:null};
+     await tx.unsafe("update destruktion_meta.devos_fleet_task_h205f22 set state='SUSPENDED' where task_id=$1",[lease.task_id]);
+     await tx.unsafe("update destruktion_meta.devos_fleet_claim_h205f22 set state='CLOSED' where claim_id=$1",[lease.claim_id]);
+     const id=randomUUID();
+     await tx.unsafe(`insert into destruktion_meta.browser_parent_suspension_h205f22(suspension_id,project_id,workspace_id,task_id,old_claim_id,old_lease_generation,checkpoint,checkpoint_sha256,awaited_children)
+      values($1,$2,$3,$4,$5,$6,$7::text::jsonb,encode(extensions.digest(convert_to($7::text::jsonb::text,'UTF8'),'sha256'),'hex'),'[]')`,
+      [id,admitted.project_id,f.profile.workspace_id,lease.task_id,lease.claim_id,lease.lease_generation,canonical(checkpoint)]);
+     assert.equal((await tx.unsafe('select destruktion_meta.browser_parent_suspension_projection_v1($1) as value',[id]))[0].value.state,expected);
+     throw rollback;
+    }),error=>error===rollback);
+   }
+   let chain=await edges();assert.equal(chain.length,1);assert.equal(chain[0].writer_task_id,task);
+   const first=chain[0].replacement_task_id;assert.notEqual(first,task);
+   const specs=await sql.unsafe('select task_spec from destruktion_meta.devos_fleet_task_h205f22 where task_id=any($1::uuid[]) order by task_id',[[task,first]]);
+   for(const key of ['objective','constraints','deliverable'])assert.deepEqual(specs[0].task_spec[key],specs[1].task_spec[key]);
+   assert.equal((await snapshot()).native_review_rejection,null);
+   assert.equal((await snapshot()).state,'WAITING_CHILDREN');await suspensionState('WAITING_CHILDREN');
+   assert.equal((await snapshot()).tasks.find(row=>row.task_id===task).repair_obligation,'PENDING');
+   assert.equal((await sql.unsafe('select destruktion_meta.native_coding_project_completion_ready_v1($1) as value',[task]))[0].value,false);
+   await Promise.all([reconcile(),reconcile()]);assert.equal((await edges()).length,1);
+   const failedRollback=Error('rollback_generated_failed_replacement');
+   await assert.rejects(sql.begin(async tx=>{
+    await tx.unsafe("update destruktion_meta.devos_fleet_task_h205f22 set state='FAILED',error_code='QA_REPAIR_FAILURE' where task_id=$1",[first]);
+    assert.equal((await tx.unsafe('select destruktion_meta.native_coding_repair_obligation_v1($1) as value',[task]))[0].value,'PENDING');
+    const [blocked]=await tx.unsafe('select public.h205f22_project_snapshot_v1($1,$2,null,0,32,$3,$4,1) as value',
+     [f.profile.workspace_id,admitted.project_id,f.profile.device_id,f.profile.client_id]);
+    assert.equal(blocked.value.state,'BLOCKED');
+    throw failedRollback;
+   }),error=>error===failedRollback);
+   await assert.rejects(sql.unsafe('update destruktion_meta.native_coding_repair_h205f22 set writer_receipt_sha256=$1 where writer_task_id=$2',['f'.repeat(64),task]),/repair_immutable/);
+   await assert.rejects(sql.unsafe('delete from destruktion_meta.native_coding_repair_h205f22 where writer_task_id=$1',[task]),/repair_immutable/);
+   const foreign=await fixture({chatLed:true});const foreignProject=(await invoke(foreign)).receipt;
+   for(const patch of [{project_id:foreignProject.project_id},{writer_receipt_sha256:'f'.repeat(64)},
+    {replacement_task_id:foreignProject.root_task_id},{replacement_task_id:task},{critic_task_id:first},{writer_lease_generation:99}]){
+    await assert.rejects(sql.unsafe(`insert into destruktion_meta.native_coding_repair_h205f22
+     select (jsonb_populate_record(null::destruktion_meta.native_coding_repair_h205f22,to_jsonb(edge)||$2::jsonb)).*
+     from destruktion_meta.native_coding_repair_h205f22 edge where writer_task_id=$1`,[task,sql.json(patch)]),/repair_lineage_invalid/);
+   }
+   const [privileges]=await sql.unsafe(`select has_table_privilege('seed_api','destruktion_meta.native_coding_repair_h205f22','INSERT') as write,
+    has_function_privilege('seed_api','destruktion_meta.native_coding_project_repair_v1(uuid,text)','EXECUTE') as admit,
+    (select relrowsecurity from pg_class where oid='destruktion_meta.native_coding_repair_h205f22'::regclass) as rls`);
+   assert.deepEqual(privileges,{write:false,admit:false,rls:true});
+
+   const rejectedAgain=await completeChatNativePair({sql,fixture:f,writerPermitId:await permitFor(first),verdict:'REJECT'});
+   chain=await edges();assert.equal(chain.length,2);let last=chain.find(edge=>edge.writer_task_id===first).replacement_task_id;
+   const retained=[task,rejected.critic.scope.task_id,first,rejectedAgain.critic.scope.task_id];
+   for(let index=0;index<3;index++){
+    const again=await completeChatNativePair({sql,fixture:f,writerPermitId:await permitFor(last),verdict:'REJECT'});
+    retained.push(last,again.critic.scope.task_id);const rows=await edges();assert.equal(rows.length,index+3);last=rows.find(edge=>edge.writer_task_id===last).replacement_task_id;
+   }
+   assert.equal((await snapshot()).tasks.find(row=>row.task_id===task).repair_obligation,'PENDING');
+   const accepted=await completeChatNativePair({sql,fixture:f,writerPermitId:await permitFor(last)});
+   assert.equal(accepted.finalized.state,'COMMITTED_NO_SUCCESSOR');
+   const after=await snapshot();
+   for(const id of retained){
+    const row=after.tasks.find(row=>row.task_id===id);assert.equal(row.state,'RESULT_READY');assert.equal(row.repair_obligation,'RESOLVED');
+    assert.equal((await sql.unsafe('select destruktion_meta.native_coding_project_completion_ready_v1($1) as value',[id]))[0].value,false);
+   }
+   assert.equal(after.selected_task.open_children,0);assert.equal(after.state,'ACTIVE');await suspensionState('READY_TO_RESUME');
+   const old=await sql.unsafe('select writer_task_id,state from destruktion_meta.native_coding_worktree_fence_h205f22 where writer_task_id=any($1::uuid[])',[[task,first]]);
+   assert.equal(old.length,2);assert.ok(old.every(row=>row.state==='HELD'));
+   assert.equal((await sql.unsafe('select count(*)::int as n from destruktion_meta.native_coding_checkpoint_h205f22 where writer_task_id=any($1::uuid[])',[[task,first]]))[0].n,0);
+   await sql.begin(async tx=>{await tx.unsafe(reviewUpgrade);await tx.unsafe(wakeUpgrade);await tx.unsafe(repairUpgrade);});
+   assert.equal((await snapshot()).selected_task.open_children,0);assert.equal((await edges()).length,5);
+   const rollback=Error('rollback_generated_terminal_project');
+   await assert.rejects(sql.begin(async tx=>{
+    await tx.unsafe("update destruktion_meta.project_run_h205f22 set state='COMPLETED' where project_id=$1",[admitted.project_id]);
+    assert.equal((await tx.unsafe('select destruktion_meta.native_coding_repair_obligation_v1($1) as value',[task]))[0].value,'RESOLVED');
+    throw rollback;
+   }),error=>error===rollback);
+   for(const [change,reason] of [
+    ['alter table destruktion_meta.native_coding_repair_h205f22 disable row level security','relation_requires_review'],
+    ['alter table destruktion_meta.native_coding_repair_h205f22 add column injected boolean','columns_require_review'],
+    ['alter table destruktion_meta.native_coding_repair_h205f22 add constraint injected check(true)','constraints_require_review'],
+    ['alter table destruktion_meta.native_coding_repair_h205f22 disable trigger native_coding_repair_immutable_trg','trigger_requires_review'],
+    ['alter function destruktion_meta.native_coding_repair_edge_valid_v1(destruktion_meta.native_coding_repair_h205f22) volatile','helper_requires_review'],
+    ["create or replace function destruktion_meta.native_coding_repair_edge_valid_v1(edge destruktion_meta.native_coding_repair_h205f22) returns boolean language plpgsql stable security definer set search_path=pg_catalog,destruktion_meta as $$begin return false;end $$",'helper_requires_review'],
+    ['alter function destruktion_meta.native_coding_repair_immutable_v1() security definer','helper_requires_review'],
+   ])await assert.rejects(sql.begin(async tx=>{await tx.unsafe(change);await tx.unsafe(repairUpgrade);}),new RegExp(reason));
+   assert.equal((await edges()).length,5);passed++;
+  });
   await t.test('chat profile revocation cannot downgrade native handoff to a browser implementation',async()=>{
    const f=await fixture({chatLed:true}),g=await fixture({chatLed:true});
    const a=(await invoke(f)).receipt,b=(await invoke(g)).receipt;
@@ -588,7 +729,7 @@ test('private initial native goal admission is atomic and preserves the W30 auth
    const f=await fixture({chatLed:true}),receipt=(await invoke(f)).receipt;
    assert.equal((await sql.unsafe('select role from destruktion_meta.devos_fleet_task_h205f22 where task_id=$1',[receipt.root_task_id]))[0].role,'PLANNER');passed++;
   });
-  assert.equal(passed,26);
+  assert.equal(passed,27);
   await fs.writeFile(path.join(directory,'receipt.json'),JSON.stringify({schema:'metaengine.native-coding.initial-seed.disposable-qa.v1',state:'PASS',
    postgres_version_num:identity.version,postgres_system_identifier:cluster,port,subtests:passed,migration_sha256:migrationSha,
    source_classification:'REAL_DISPOSABLE_PG_AND_HOST_SERVICE_WITH_GENERATED_ENROLLED_DEVICE_INSTALLED_IMAGE_OS_CANARY_AND_ACL_FIXTURES',

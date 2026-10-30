@@ -46,3 +46,15 @@ test('historical reconstruction preserves expired terminal state and cannot gran
   assert.throws(()=>buildNativeCodingTaskContext(candidate,options),/lease_binding_invalid/);
   assert.throws(()=>buildNativeCodingHistoricalTaskContext({...candidate,state:'RUNNING'},options),/lease_binding_invalid/);
 });
+
+test('repair prompt preserves the complete original objective and binds only reviewed lineage fields',()=>{
+ const candidate=task();candidate.task_spec.objective='x'.repeat(3900)+'Keep the critical trailing requirement.';
+ candidate.task_spec.native_repair={schema:'metaengine.native-coding.repair-lineage.v1',writer_task_id:'22222222-2222-4222-8222-222222222222',writer_lease_generation:2,
+  critic_task_id:'33333333-3333-4333-8333-333333333333',critic_lease_generation:3,writer_receipt_sha256:'b'.repeat(64),critic_receipt_sha256:'c'.repeat(64),critic_permit_id:'44444444-4444-4444-8444-444444444444'};
+ const live=buildNativeCodingTaskContext(candidate,options);assert.ok(live.task_prompt.includes(candidate.task_spec.objective));
+ assert.ok(live.task_prompt.includes(nativeCodingCanonicalJson(candidate.task_spec.native_repair)));assert.match(live.task_prompt,/not permission/);
+ assert.equal(buildNativeCodingHistoricalTaskContext({...candidate,state:'RESULT_READY'},options).task_prompt,live.task_prompt);
+ for(const mutate of [r=>{r.authority_effect=true;},r=>{r.writer_task_id=id;},r=>{r.writer_lease_generation='2';},r=>{r.critic_receipt_sha256='wrong';},r=>{r.critic_task_id=r.writer_task_id;}]){
+  const bad=structuredClone(candidate);mutate(bad.task_spec.native_repair);assert.throws(()=>buildNativeCodingTaskContext(bad,options),/repair_lineage_invalid/);
+ }
+});

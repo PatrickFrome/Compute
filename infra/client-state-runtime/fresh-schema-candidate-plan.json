@@ -258,7 +258,7 @@
     },
     {
       "path": "infra/client-state-runtime/native-coding-review-observation-v1.sql",
-      "sha256": "0e320798f241cf259a147c14b6a53de7dbaf12d3c34b05329e84dad1f96204ad"
+      "sha256": "316e36ad441c6155db277b64749c8210d53ef3739a9db5d31f25e605fce7e87e"
     },
     {
       "path": "infra/client-state-runtime/native-coding-chat-messages-v1.sql",
@@ -274,7 +274,11 @@
     },
     {
       "path": "infra/client-state-runtime/project-message-wake-v1.sql",
-      "sha256": "aadbd6a39872c631c9894b7f8a1a5ce5e8e6e71c78f99cae8692dd3b9b13d6ae"
+      "sha256": "0ca0999aee85ffc238f0423bdd3feb1e2df20fa115b590ca82ede0cf0051d71e"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-repair-v1.sql",
+      "sha256": "0e3da30f34a70d45c8492e8e7ef96d41b878c1bb966cbc5d2e993cf4fb45107a"
     }
   ],
   "unresolved_dependencies": [

@@ -2,7 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import fs from 'node:fs/promises';
-import {createClientProjectTasksView,readNativeProjectTaskPage,PROJECT_TASK_GROUPS,projectTaskMatchesGroup} from './client-project-tasks.ts';
+import vm from 'node:vm';
+import ts from 'typescript';
+import {jsx,Fragment} from 'react/jsx-runtime';
+import {renderToStaticMarkup} from 'react-dom/server';
+import {createClientProjectTasksView,readNativeProjectTaskPage,PROJECT_TASK_GROUPS,projectTaskMatchesGroup,projectTaskRepairDescription} from './client-project-tasks.ts';
 
 function project(){const root=randomUUID(),id=randomUUID(),request=randomUUID();return {id,root,request,
   page(after=0,count=2,total=2){const rows=Array.from({length:count},(_,index)=>({task_seq:after+index+1,task_id:after+index===0?root:randomUUID(),root_task_id:root,
@@ -115,7 +119,7 @@ test('rejected pair panel only selects confirmed page rows and exposes no repair
   assert.match(text,/page\.native_review_rejection/);
   assert.match(text,/page\.tasks\.some\(task=>task\.task_id===id\)/);
   assert.match(text,/setFilter\('Все'\);setQuery\(''\);resource\.selectTask\(id\)/);
-  assert.match(text,/Автоматическое исправление пока недоступно/);
+  assert.match(text,/Завершённая замена ещё не подтверждена/);
   assert.doesNotMatch(text,/\.retry\(|\.repair\(|\.send\(|\.enqueue\(/);
 });
 
@@ -125,4 +129,57 @@ test('task presentation does not impose an extra logical depth ceiling',()=>{
  for(const depth of [-1,1.5,NaN,Infinity,Number.MAX_SAFE_INTEGER+1]){
   assert.throws(()=>readNativeProjectTaskPage({...page,tasks:page.tasks.map((row,index)=>index?{...row,depth}:row)}));
  }
+});
+
+
+test('historical repair obligations retain RESULT_READY without appearing as active or accepted tasks',()=>{
+ for(const role of ['IMPLEMENTER','CRITIC'])for(const repair of ['PENDING','RESOLVED']){
+  const raw=project().page();raw.tasks[1]={...raw.tasks[1],state:'RESULT_READY',role,repair_obligation:repair};
+  const task=readNativeProjectTaskPage(raw).tasks[1];assert.equal(task.state,'RESULT_READY');assert.equal(task.repair_obligation,repair);
+  assert.equal(projectTaskMatchesGroup(task.state,'История исправлений',repair),true);
+  assert.equal(projectTaskMatchesGroup(task.state,'В работе',repair),false);
+  assert.equal(projectTaskMatchesGroup(task.state,'Завершены',repair),false);
+  assert.match(projectTaskRepairDescription(repair),/Прежний/);
+ }
+ for(const change of [{repair_obligation:'ACCEPTED'},{repair_obligation:{state:'RESOLVED'}},{repair_obligation:true},{state:'COMPLETED'},{role:'BROWSER'}]){
+  const raw=project().page();raw.tasks[1]={...raw.tasks[1],state:'RESULT_READY',role:'IMPLEMENTER',repair_obligation:'RESOLVED',...change};
+  assert.throws(()=>readNativeProjectTaskPage(raw));
+ }
+ assert.equal(readNativeProjectTaskPage(project().page()).tasks[0].repair_obligation,null);
+});
+test('repair observations remain scoped to current project and do not promote stale failed refreshes',async t=>{
+ const p=project(),raw=p.page();raw.tasks[1]={...raw.tasks[1],state:'RESULT_READY',repair_obligation:'PENDING'};let response=raw;
+ const view=resource(t,{projectOverview:async()=>response,projectSnapshot:async()=>null});await view.refresh();
+ const previous=view.getSnapshot().page;response={...raw,tasks:raw.tasks.map(row=>({...row,repair_obligation:'FORGED'}))};
+ await view.refresh();assert.equal(view.getSnapshot().state,'DEGRADED');assert.equal(view.getSnapshot().page,previous);
+ assert.equal(previous.tasks[1].repair_obligation,'PENDING');
+ assert.throws(()=>readNativeProjectTaskPage(raw,{projectId:randomUUID()}));
+ response={...raw,tasks:raw.tasks.map((row,i)=>i?{...row,repair_obligation:'RESOLVED'}:row)};await view.refresh();
+ assert.equal(view.getSnapshot().state,'OBSERVED');assert.equal(view.getSnapshot().page.tasks[1].repair_obligation,'RESOLVED');
+});
+
+
+test('actual task screen renders repair history separately while retaining original state and stale warning',async()=>{
+ const source=await fs.readFile(new URL('../components/me2/pages/tasks.tsx',import.meta.url),'utf8');
+ const code=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText;
+ const p=project(),raw=p.page();raw.tasks[1]={...raw.tasks[1],state:'RESULT_READY',repair_obligation:'RESOLVED',objective:'<script>old rejected bytes</script>'};
+ const page=readNativeProjectTaskPage(raw);
+ function render(filter,state='OBSERVED'){
+  const exports={};let index=0;const noEffect=()=>{throw Error('render must not perform effects');};
+  const require=name=>{
+   if(name==='react')return {useState:initial=>[index++===0?filter:initial,noEffect]};
+   if(name==='react/jsx-runtime')return {jsx,jsxs:jsx,Fragment};
+   if(name==='@/hooks/use-client-project-tasks')return {useClientProjectTasks:()=>({resource:{refresh:noEffect,selectTask:noEffect},view:{page,state,busy:false,observedAt:null,selectedTaskId:null}})};
+   if(name==='@/components/me2/managed-project-history')return {ManagedProjectHistory:()=>null};
+   if(name==='@/components/me2/store')return {useMe2:select=>select({setPage:noEffect})};
+   if(name==='@/lib/client-project-tasks')return {PROJECT_TASK_GROUPS,projectTaskMatchesGroup,projectTaskRepairDescription};
+   throw Error('unexpected import '+name);
+  };
+  vm.runInNewContext(code,{exports,require});return renderToStaticMarkup(jsx(exports.TasksPage,{}));
+ }
+ const history=render('История исправлений');assert.match(history,/RESULT_READY/);assert.match(history,/Обязательство закрыто проверенной и сохранённой заменой/);
+ assert.match(history,/Прежний результат остаётся отклонённым/);assert.match(history,/&lt;script&gt;old rejected bytes&lt;\/script&gt;/);
+ assert.doesNotMatch(history,/<script[ >]|>COMPLETED</);
+ assert.doesNotMatch(render('В работе'),/data-testid="task-repair-obligation"/);
+ assert.match(render('История исправлений','DEGRADED'),/Сохранённая страница ниже может быть устаревшей/);
 });

@@ -46,7 +46,10 @@ export function normalizeClientProjectSnapshot(value, expected) {
   const readTask = row => {
     if (!object(row) || !id(row.task_id) || (row.parent_task_id !== null && !id(row.parent_task_id))
         || !count(row.depth) || !text(row.state, 64) || !text(row.role, 64)) fail('snapshot_task_invalid');
-    return Object.freeze({ task_id: row.task_id, parent_task_id: row.parent_task_id, depth: row.depth,
+    const repair = row.repair_obligation ?? null;
+    if (repair !== null && (!['PENDING', 'RESOLVED'].includes(repair) || row.state !== 'RESULT_READY'
+        || !['IMPLEMENTER', 'CRITIC'].includes(row.role))) fail('snapshot_repair_obligation_invalid');
+    return Object.freeze({ task_id: row.task_id, parent_task_id: row.parent_task_id, depth: row.depth, repair_obligation: repair,
       state: row.state, role: row.role, task_seq: count(row.task_seq) ? row.task_seq : null,
       open_children: count(row.open_children) ? row.open_children : null,
       blocking_children: count(row.blocking_children) ? row.blocking_children : null,

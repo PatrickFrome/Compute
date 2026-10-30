@@ -209,6 +209,14 @@ export const LOCAL_RUNTIME_MIGRATIONS = Object.freeze([
   {path:'project-message-wake-v1.sql',signature:'destruktion_meta.project_pending_message_seqs_v1(uuid,uuid,text)',
     signatures:Object.freeze(['destruktion_meta.project_pending_message_seqs_v1(uuid,uuid,text)']),
     source_url:new URL('./project-message-wake-v1.sql',import.meta.url),reviewed_chat_message_upgrade:true},
+  {path:'native-coding-repair-v1.sql',signature:'destruktion_meta.native_coding_project_repair_v1(uuid,text)',
+    signatures:Object.freeze(['destruktion_meta.native_coding_project_repair_v1(uuid,text)',
+      'destruktion_meta.native_coding_review_rejection_raw_v1(uuid,uuid)',
+      'destruktion_meta.native_coding_repair_edge_valid_v1(destruktion_meta.native_coding_repair_h205f22)',
+      'destruktion_meta.native_coding_repair_immutable_v1()','destruktion_meta.native_coding_repair_obligation_v1(uuid)']),
+    relations:Object.freeze(['destruktion_meta.native_coding_repair_h205f22']),
+    triggers:Object.freeze([{relation:'destruktion_meta.native_coding_repair_h205f22',name:'native_coding_repair_immutable_trg',signature:'destruktion_meta.native_coding_repair_immutable_v1()'}]),
+    source_url:new URL('./native-coding-repair-v1.sql',import.meta.url),reviewed_native_repair_upgrade:true},
 ]);
 
 const REQUIRED_COLUMNS = {
@@ -410,6 +418,16 @@ export async function applyLocalRuntimeMigrations({ sql, expectedMigrationSource
         receipts.push({source:migration.path,source_sha256:migration.sha256,
           signature:migration.signature,signatures:migration.signatures,
           status:before.complete?'ALREADY_PRESENT_NOT_MODIFIED':'APPLIED_LOCAL_ONLY',existing_bodies_attested:true,chat_message_recipient_scope:true});
+        continue;
+      }
+      if (migration.reviewed_native_repair_upgrade) {
+        await tx.unsafe(migration.source);
+        if (!(await inspectMigrationObjects(tx,migration)).complete)
+          throw Error('local_runtime_native_repair_readback_failed');
+        receipts.push({source:migration.path,source_sha256:migration.sha256,
+          signature:migration.signature,signatures:migration.signatures,
+          status:before.complete?'ALREADY_PRESENT_NOT_MODIFIED':'APPLIED_LOCAL_ONLY',
+          existing_bodies_attested:true,native_repair_lineage_preserved:true});
         continue;
       }
       if (before.complete) {

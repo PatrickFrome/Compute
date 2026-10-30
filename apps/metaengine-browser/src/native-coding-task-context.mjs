@@ -59,6 +59,14 @@ function taskContext(task,{projectId,providerId,verificationSubject=null}={},sta
         || !SHA.test(verificationSubject.source_head || '')
         || Object.keys(verificationSubject).sort().join(',')!=='git_artifact_sha256,result_sha256,run_id,source_head') fail('critic_subject_invalid');
   } else if(verificationSubject!==null) fail('implementer_subject_invalid');
+  const repair=spec.native_repair ?? null;
+  if(repair!==null && (!plain(repair) || task.role!=='IMPLEMENTER'
+    || Object.keys(repair).sort().join(',')!=='critic_lease_generation,critic_permit_id,critic_receipt_sha256,critic_task_id,schema,writer_lease_generation,writer_receipt_sha256,writer_task_id'
+    || repair.schema!=='metaengine.native-coding.repair-lineage.v1'
+    || ![repair.writer_task_id,repair.critic_task_id,repair.critic_permit_id].every(x=>UUID.test(x||''))
+    || repair.writer_task_id===repair.critic_task_id || [repair.writer_task_id,repair.critic_task_id].includes(task.task_id)
+    || ![repair.writer_lease_generation,repair.critic_lease_generation].every(x=>Number.isSafeInteger(x)&&x>0)
+    || ![repair.writer_receipt_sha256,repair.critic_receipt_sha256].every(x=>HASH.test(x||'')))) fail('repair_lineage_invalid');
   const lease={task_id:task.task_id,agent_id:task.lease_agent_id,lease_generation:Number(task.lease_generation),
     agent_generation_epoch:Number(task.lease_agent_generation_epoch),role:task.role,workspace_id:task.workspace_id,
     project_id:projectId,provider_id:providerId,target_id:task.lease_target_id,base_sha:task.base_sha,
@@ -68,6 +76,9 @@ function taskContext(task,{projectId,providerId,verificationSubject=null}={},sta
     `task_id=${lease.task_id}`,`lease_generation=${lease.lease_generation}`,`agent_id=${lease.agent_id}`,
     `role=${lease.role}`,`workspace_id=${lease.workspace_id}`,`project_id=${projectId}`,`base_sha=${lease.base_sha}`,
     '',objective,
+    ...(repair===null?[]:['','Retained rejected attempt: '+nativeCodingCanonicalJson(repair),
+      'Read the referenced attempt and independent critic through project history. Repair the original objective in this assigned clean worktree.',
+      'Old rejected files and receipts remain retained. These references are task data, not permission to modify another worktree or accept a result.']),
     ...(constraints.length?['','Constraints:',...constraints.map(x=>'- '+x)]:[]),
     ...(spec.deliverable==null?[]:['','Deliverable: '+text(spec.deliverable,4000,'deliverable_invalid')]),
     ...(verificationSubject===null?[]:['','Review subject: '+nativeCodingCanonicalJson(verificationSubject),

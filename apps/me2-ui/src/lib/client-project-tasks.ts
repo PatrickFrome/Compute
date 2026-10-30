@@ -1,6 +1,7 @@
 // Native own-PG project read model. No legacy daemon, scheduler or task mutation.
+export type RepairObligation='PENDING'|'RESOLVED'|null;
 export type ProjectTask = Readonly<{task_seq:number;task_id:string;root_task_id:string;parent_task_id:string|null;
-  depth:number;state:string;role:string;objective:string|null;agent_id:string|null;lease_generation:number|null;lease_expires_at:string|null}>;
+  depth:number;state:string;role:string;repair_obligation:RepairObligation;objective:string|null;agent_id:string|null;lease_generation:number|null;lease_expires_at:string|null}>;
 export type NativeReviewRejection=Readonly<{schema:'metaengine.native-coding.review-rejection.v1';project_id:string;
   verdict:'REJECT';writer_task_id:string;writer_lease_generation:number;critic_task_id:string;critic_lease_generation:number;
   result_sha256:string;automatic_retry_allowed:false;authority_effect:false}>;
@@ -13,15 +14,21 @@ export type ProjectTasksState = Readonly<{state:"UNBOUND"|"LOADING"|"OBSERVED"|"
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 // One presentation mapping keeps accepted states and their filters in sync.
 // Suspension means retained work awaiting continuation, not a new queued run.
-export const PROJECT_TASK_GROUPS=['Все','Очередь','В работе','Приостановлены','Требуют внимания','Завершены'] as const;
+export const PROJECT_TASK_GROUPS=['Все','Очередь','В работе','Приостановлены','Требуют внимания','Завершены','История исправлений'] as const;
 export type ProjectTaskGroup=typeof PROJECT_TASK_GROUPS[number];
 const STATE_GROUP:Readonly<Record<string,ProjectTaskGroup>>=Object.freeze({
   READY:'Очередь',LEASED:'В работе',RUNNING:'В работе',RESULT_READY:'В работе',SUSPENDED:'Приостановлены',
   BLOCKED:'Требуют внимания',FAILED:'Требуют внимания',AMBIGUOUS:'Требуют внимания',FENCED:'Требуют внимания',COMPLETED:'Завершены',
 });
 const STATES=new Set(Object.keys(STATE_GROUP));
-export function projectTaskMatchesGroup(state:string,group:ProjectTaskGroup):boolean {
-  return STATES.has(state)&&(group==='Все'||STATE_GROUP[state]===group);
+export function projectTaskMatchesGroup(state:string,group:ProjectTaskGroup,repair:RepairObligation=null):boolean {
+  const repairHistory=state==='RESULT_READY'&&(repair==='PENDING'||repair==='RESOLVED');
+  return STATES.has(state)&&(group==='Все'||(repairHistory?group==='История исправлений':STATE_GROUP[state]===group));
+}
+export function projectTaskRepairDescription(repair:RepairObligation):string|null {
+  if(repair==='PENDING')return 'Ожидается завершение замены. Прежний отклонённый результат сохранён.';
+  if(repair==='RESOLVED')return 'Обязательство закрыто проверенной и сохранённой заменой. Прежний результат остаётся отклонённым.';
+  return null;
 }
 const integer=(value:unknown,min=0):value is number=>Number.isSafeInteger(value)&&Number(value)>=min;
 const text=(value:unknown,max:number):value is string=>typeof value==='string'&&value.length<=max&&!/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(value);
@@ -59,9 +66,12 @@ export function readNativeProjectTaskPage(value:unknown,{projectId=null,afterSeq
       ||!(raw.objective===null||text(raw.objective,4000))||!(raw.agent_id===null||text(raw.agent_id,128))
       ||!(raw.lease_generation===null||integer(raw.lease_generation))
       ||!(raw.lease_expires_at===null||text(raw.lease_expires_at,64)&&Number.isFinite(Date.parse(raw.lease_expires_at))))return denied();
+    const repair=raw.repair_obligation??null;
+    if(repair!==null&&(!['PENDING','RESOLVED'].includes(String(repair))||typeof repair!=='string'
+      ||raw.state!=='RESULT_READY'||!['IMPLEMENTER','CRITIC'].includes(String(raw.role))))return denied();
     sequence=raw.task_seq;ids.add(raw.task_id as string);
     return Object.freeze({task_seq:raw.task_seq,task_id:raw.task_id as string,root_task_id:raw.root_task_id as string,
-      parent_task_id:raw.parent_task_id as string|null,depth:raw.depth,state:raw.state as string,role:raw.role,
+      parent_task_id:raw.parent_task_id as string|null,depth:raw.depth,state:raw.state as string,role:raw.role,repair_obligation:repair as RepairObligation,
       objective:raw.objective as string|null,agent_id:raw.agent_id as string|null,lease_generation:raw.lease_generation as number|null,
       lease_expires_at:raw.lease_expires_at as string|null});
   });

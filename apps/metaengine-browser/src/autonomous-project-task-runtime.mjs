@@ -35,6 +35,13 @@ function childrenProposal(value) {
   });
 }
 
+function repairObligationResolved(row) {
+  const status=row?.repair_obligation;
+  if(status==null)return false;
+  if(!['PENDING','RESOLVED'].includes(status)||row.state!=='RESULT_READY'||!['IMPLEMENTER','CRITIC'].includes(row.role))fail('repair_obligation_invalid');
+  return status==='RESOLVED';
+}
+
 function pendingMessageSeqs(task) {
   if(!Object.hasOwn(task,'pending_message_seqs'))return [];
   const rows=task.pending_message_seqs;
@@ -224,7 +231,7 @@ export class AutonomousProjectTaskRuntime {
     const descendants = Array.isArray(current.snapshot.immediate_children)
       ? current.snapshot.immediate_children : current.snapshot.tasks.filter(row => row.parent_task_id === lease.task_id);
     const proposals = (current.snapshot.proposals || []).filter(row => row.parent_task_id === lease.task_id && row.status !== 'ADMITTED');
-    const pending = descendants.filter(row => !['COMPLETED', 'FAILED', 'CANCELLED', 'AMBIGUOUS', 'FENCED'].includes(row.state));
+    const pending = descendants.filter(row => !repairObligationResolved(row) && !['COMPLETED', 'FAILED', 'CANCELLED', 'AMBIGUOUS', 'FENCED'].includes(row.state));
     const failed = descendants.filter(row => ['FAILED', 'BLOCKED', 'CANCELLED', 'AMBIGUOUS', 'FENCED'].includes(row.state));
     const reviewRejection=normalizeNativeReviewRejection(current.snapshot.native_review_rejection,initialProject);
     if(reviewRejection)this.#nativeCodingRuntime?.observeProjectRejection?.(reviewRejection);

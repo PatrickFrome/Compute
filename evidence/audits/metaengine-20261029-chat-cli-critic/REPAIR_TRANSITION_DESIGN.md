@@ -1,6 +1,8 @@
-# Rejected-result repair: proposed next source stage
+# Rejected-result repair: implemented source transition
 
-Status: DESIGN, not an implemented or enabled repair operation.
+Status: source implemented and registered in the reviewed local migration path;
+installed Windows/live provider qualification remains pending. No installed
+profiles, databases, worktrees or executables were modified by this stage.
 
 ## Why not replay or reuse the dirty tree
 
@@ -50,10 +52,48 @@ commit-before-ACK loss, restart, and capacity recovery. Old bytes/receipts must
 remain unchanged. Source SQL fixtures do not substitute for installed Windows
 process, filesystem and live model tests.
 
-## Open implementation decisions
+## Implemented canonical resolution
 
-The fleet task constraint, native transition guard, project completion guard,
-reconciliation, snapshots, suspension projection and UI state decoder must be
-updated together. Do not ship a new state recognized only by some of them.
-Current code still reports rejection as a blocker. This document grants no
-execution capability and must not be described as working automatic repair.
+No new fleet state was introduced. Rejected writer/critic rows remain
+RESULT_READY, receipts remain REJECT, and dirty worktree fences remain HELD.
+The immutable repair table and strictly bound task_spec.native_repair record
+connect the rejected pair to a sibling replacement at the same reviewed base.
+Original objective, constraints and deliverable are preserved in full. A
+specific independent critic permit is selected and pinned; actual critic
+admission must use that permit, not another merely eligible provider.
+
+The replacement uses existing W30 enqueue and project reconciliation. A separate
+repair_obligation projection is null, PENDING or RESOLVED; only a transitive
+accepted checkpoint plus committed replacement resolves the old obligation.
+Project snapshot, task projection, parent completion, suspension readiness and
+browser autonomous task accounting all consume this same resolution. The old
+native completion function still refuses the rejected original. Historical
+resolution remains valid when the project becomes terminal. Delegated old pairs
+are excluded from the bounded admission sweep, avoiding starvation after more
+than four rejected pairs.
+
+The new SQL migration runs after project-message-wake. Predecessor/current
+function definitions, metadata, table shape, foreign keys, RLS and immutable
+trigger are attested; unknown drift is refused. The previous review/wake sources
+recognize the exact repair definitions so normal installer reapplication can
+restore intermediate definitions and then reapply repair in one transaction.
+No API EXECUTE or table write authority is added.
+
+## Source verification and remaining boundaries
+
+Real disposable PostgreSQL 17 exercises five consecutive rejected pairs and a
+sixth accepted/committed replacement, duplicate/concurrent reconciliation,
+immutable and forged/foreign/cyclic edges, busy lowest critic selection,
+owner-stop/paused/revoked-profile/no-critic gates, failed replacement blocking,
+transaction rollback after enqueue, terminal-project history, suspension
+WAITING_CHILDREN -> READY_TO_RESUME, migration reapply and drift refusal.
+These are assertions inside one lifecycle subtest, not separate installed runs.
+The test suite also covers existing initial-goal authority and W30 boundaries.
+
+The fixture uses generated OS/job/Git receipt witnesses. It does not run Codex,
+perform a physical Git commit, launch a browser, verify Windows ACLs, restore a
+live suspended conversation or prove installed perpetual autonomy. Physical
+root preparation and fresh native preflight remain mandatory before execution.
+The source tests do not prove correctness under arbitrary filesystem/host death,
+or manufacture more eligible clean roots when the protected pool is exhausted.
+See REPAIR_TRANSITION_VERIFICATION.md for exact commands, counts and logs.

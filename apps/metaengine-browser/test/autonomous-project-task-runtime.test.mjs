@@ -739,3 +739,17 @@ test('browser acknowledgement is durable and cannot claim processing or another 
     await assert.rejects(f.runtime.waitForChildren(rootTask()),/pending_messages_invalid/);
   }
  });
+
+test('only explicit resolved repair obligations stop waiting on retained RESULT_READY children',async t=>{
+ const f=await fixture(t);await f.runtime.serveToolRequests({lease:rootTask(),requests:[spawnRequest()]});
+ f.provider.update(state=>{state.tasks[1].state='RESULT_READY';state.tasks[1].role='IMPLEMENTER';state.tasks[1].repair_obligation='PENDING';state.tasks[0].open_children=1;});
+ assert.equal((await f.runtime.waitForChildren(rootTask())).waiting,true);
+ f.provider.update(state=>{state.tasks[1].repair_obligation='RESOLVED';state.tasks[0].open_children=0;});
+ const resolved=await f.runtime.waitForChildren(rootTask());assert.equal(resolved.waiting,false);assert.equal(resolved.failed,false);
+ assert.equal(f.provider.read().tasks[1].state,'RESULT_READY');
+ for(const invalid of ['COMPLETED',true,{},'']){
+  f.provider.update(state=>{state.tasks[1].repair_obligation=invalid;});await assert.rejects(f.runtime.waitForChildren(rootTask()),/repair_obligation_invalid/);
+ }
+ f.provider.update(state=>{state.tasks[1].repair_obligation='RESOLVED';state.tasks[1].state='FAILED';});
+ await assert.rejects(f.runtime.waitForChildren(rootTask()),/repair_obligation_invalid/);
+});

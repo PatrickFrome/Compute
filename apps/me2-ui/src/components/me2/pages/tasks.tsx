@@ -4,12 +4,12 @@ import {useClientProjectTasks} from '@/hooks/use-client-project-tasks';
 import {ManagedProjectHistory} from '@/components/me2/managed-project-history';
 import {useMe2} from '@/components/me2/store';
 
-import {PROJECT_TASK_GROUPS as GROUPS,projectTaskMatchesGroup} from '@/lib/client-project-tasks';
+import {PROJECT_TASK_GROUPS as GROUPS,projectTaskMatchesGroup,projectTaskRepairDescription} from '@/lib/client-project-tasks';
 export function TasksPage(){
   const {resource,view}=useClientProjectTasks(),setPage=useMe2(state=>state.setPage);
   const [filter,setFilter]=useState<typeof GROUPS[number]>('Все'),[query,setQuery]=useState('');
   const page=view.page,search=query.trim().toLowerCase();
-  const tasks=(page?.tasks??[]).filter(task=>projectTaskMatchesGroup(task.state,filter)&&(!search||`${task.task_id} ${task.role} ${task.objective??''}`.toLowerCase().includes(search)));
+  const tasks=(page?.tasks??[]).filter(task=>projectTaskMatchesGroup(task.state,filter,task.repair_obligation)&&(!search||`${task.task_id} ${task.role} ${task.objective??''}`.toLowerCase().includes(search)));
   const selected=page?.tasks.find(task=>task.task_id===view.selectedTaskId);
   return <div className="mx-auto max-w-[1200px] space-y-4" data-testid="page-tasks" data-source="NATIVE_PROJECT_API">
     <header className="flex flex-wrap items-center justify-between gap-3"><div><h1 className="text-xl font-medium">Задачи проекта</h1>
@@ -24,7 +24,7 @@ export function TasksPage(){
         <p className="mt-1 text-xs text-zinc-400">На странице {page.tasks.length} задач; фильтры и очередь относятся только к этой странице.</p></section>
       {page.native_review_rejection?<section role="status" aria-label="Причина блокировки проекта" className="space-y-2 rounded-xl border border-amber-800 bg-amber-950/20 p-4">
         <h2 className="text-sm font-medium text-amber-200">CRITIC отклонил результат: требуется исправление</h2>
-        <p className="text-sm text-zinc-300">Изменения ещё не приняты. Рабочий каталог остаётся закреплён за прежним исполнением. Автоматическое исправление пока недоступно; повторный Run не является восстановлением.</p>
+        <p className="text-sm text-zinc-300">Изменения ещё не приняты. Рабочий каталог остаётся закреплён за прежним исполнением. Завершённая замена ещё не подтверждена; повторный Run не является восстановлением.</p>
         <p className="text-xs text-zinc-400">Откройте историю исполнителя и проверки. Сохранённый результат не означает, что задача завершена.</p>
         {([['Исполнитель',page.native_review_rejection.writer_task_id],['CRITIC',page.native_review_rejection.critic_task_id]] as const).map(([label,id])=><div key={id} className="flex flex-wrap items-center gap-2 text-xs">
           <span className="break-all">{label}: {id}</span>
@@ -40,6 +40,7 @@ export function TasksPage(){
           className={`w-full rounded-lg border p-3 text-left ${selected?.task_id===task.task_id?'border-cyan-700 bg-cyan-950/20':'border-zinc-800 bg-zinc-950/40'}`}>
           <span className="flex flex-wrap justify-between gap-2 text-xs"><span>{task.role} · #{task.task_seq}</span><span>{task.state}</span></span>
           <span className="mt-2 block break-words text-sm text-zinc-300">{task.objective||task.task_id}</span>
+          {task.repair_obligation?<span className="mt-2 block text-xs text-amber-200" data-testid="task-repair-obligation">{projectTaskRepairDescription(task.repair_obligation)}</span>:null}
           <span className="mt-2 block break-all font-mono text-[10px] text-zinc-500">{task.task_id} · родитель {task.parent_task_id??'корень'} · глубина {task.depth}</span>
           <span className="mt-1 block text-xs text-cyan-300">Открыть историю этой задачи</span></button>)}
         {!tasks.length?<p className="p-3 text-sm text-zinc-400">На этой странице задач по выбранному фильтру нет.</p>:null}
