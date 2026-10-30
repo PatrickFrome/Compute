@@ -172,7 +172,7 @@ export async function runCodexCliSandboxProbe({ cliPath, workspaceRoot, receiptD
     || !Number.isSafeInteger(timeoutMs) || timeoutMs < 15000 || timeoutMs > 300000) throw Error('codex_sandbox_probe_configuration_invalid');
   const workspace = await fs.realpath(workspaceRoot), receipts = await fs.realpath(receiptDirectory);
   const hostBoot = await readHostBoot();windowsSandboxBootIdentity(hostBoot);
-  if (receipts === workspace || isWithin(workspace, receipts)) throw Error('codex_sandbox_probe_outside_root_required');
+  if (path.relative(receipts,workspace)==='' || isWithin(workspace, receipts) || isWithin(receipts,workspace)) throw Error('codex_sandbox_probe_outside_root_required');
   const runId = randomUUID(), directory = path.join(workspace, `.metaengine-sandbox-probe-${runId}`);
   const receipt = path.join(receipts, `sandbox-probe-${mode}-${runId}.json`);
   // The authenticated preparation caller must select these roots explicitly.
@@ -183,7 +183,9 @@ export async function runCodexCliSandboxProbe({ cliPath, workspaceRoot, receiptD
     ||isWithin(receipts,home)||isWithin(home,receipts)||sameRoot(home,scratchParent)
     ||isWithin(home,scratchParent)||isWithin(scratchParent,home)) throw Error('codex_sandbox_probe_home_scope_invalid');
   await verifyOwnerOnlyWindowsStorage(home,{operation:'VERIFY_DIRECTORY'});
-  if (!path.isAbsolute(scratchParent) || isWithin(receipts, scratchParent) || isWithin(workspace, scratchParent)) throw Error('codex_sandbox_probe_scratch_root_invalid');
+  if (!path.isAbsolute(scratchParent) || sameRoot(receipts,scratchParent) || sameRoot(workspace,scratchParent)
+    || isWithin(receipts, scratchParent) || isWithin(workspace, scratchParent)
+    || isWithin(scratchParent,receipts) || isWithin(scratchParent,workspace)) throw Error('codex_sandbox_probe_scratch_root_invalid');
   let createdScratchParent = false;
   try { await fs.mkdir(scratchParent); createdScratchParent = true; } catch (error) { if (error.code !== 'EEXIST') throw error; }
   if (createdScratchParent) await protectOwnerOnlyWindowsDirectory(scratchParent);

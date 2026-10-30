@@ -14,7 +14,7 @@ function fixture({failOpen=0,failSpawn=false,failResume=false,failSync=false,fai
  const handle={proof:{fixture_only:true},stdout:new PassThrough(),stderr:new PassThrough(),completion,
   resume:async()=>{events.push('resume');if(emitReport)handle.stdout.write(JSON.stringify({schema:'metaengine.codex-cli.sandbox-canary.v1',pid:42})+'\n');if(failWrite)handle.stdout.write(Buffer.from('generated-output'));if(overflow){handle.stdout.write(Buffer.alloc(33000,120));handle.stderr.write(Buffer.alloc(33000,120));}if(failResume)throw Error('generated_resume_failure');},
   terminate:async()=>{events.push('terminate');if(failTerminate)throw Error('generated_termination_failure');}};
- const files={realpath:async p=>p,mkdir:async()=>{},writeFile:async()=>{},readFile:async()=>Buffer.from('fixture'),unlink:async()=>{},rmdir:async()=>{},
+ const files={realpath:async p=>p,mkdir:async()=>{events.push('mkdir');},writeFile:async()=>{events.push('write');},readFile:async()=>Buffer.from('fixture'),unlink:async()=>{},rmdir:async()=>{},
   open:async()=>{if(++opens===failOpen)throw Error('generated_open_failure');const h={closed:false,bytes:0,write:async()=>{throw Error('partial-write API must not be used');},writeFile:async bytes=>{if(failWrite&&handles.indexOf(h)<2)throw Error('generated_write_failure');h.bytes+=Buffer.byteLength(bytes);},sync:async()=>{if(holdSync&&handles.indexOf(h)===1)await syncGate;if(failSync)throw Error('generated_sync_failure');},close:async()=>{h.closed=true;events.push('close');}};handles.push(h);return h;}};
  const run=vm.runInNewContext(source.slice(start).replace('export async function','async function')+'\nrunCodexCliSandboxProbe',{
   fs:files,path:pathApi,Buffer,process:{platform:'win32',env:{LOCALAPPDATA:'/fixture/local',USERPROFILE:'/fixture/user'}},
@@ -120,4 +120,16 @@ for (const options of [{failSync:true},{failOpen:3}]) test(`post-completion fail
  assert.equal(settledBeforeRead,false,'probe must retain its started native observation even on later I/O failure');
  assert.match(error.message,options.failSync?/log_sync_failed/:/generated_open_failure/);
  assert.ok(f.handles.every(h=>h.closed));
+});
+
+for(const pathApi of [path.posix,path.win32])test('probe keeps all writable roots separate under '+(pathApi===path.win32?'Windows':'POSIX')+' semantics',{timeout:5000},async()=>{
+ for(const extra of [
+  {scratchRoot:'/fixture/work'},{scratchRoot:'/fixture/receipts'},
+  {scratchRoot:'/fixture/work/sub'},{scratchRoot:'/fixture/receipts/sub'},
+  {receiptDirectory:'/fixture',codexHome:'/auth',scratchRoot:'/scratch'},
+ ]){
+  const f=fixture({pathApi});
+  await assert.rejects(f.run(extra),/scratch_root_invalid|outside_root_required/);
+  assert.equal(f.events.includes('mkdir'),false);assert.equal(f.events.includes('write'),false);assert.equal(f.events.includes('spawn'),false);
+ }
 });
