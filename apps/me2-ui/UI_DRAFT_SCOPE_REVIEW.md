@@ -1,103 +1,127 @@
-# Production draft scope: blocked contract, 2026-10-30
+# Production draft scope consumer, 2026-10-30
 
-Status: **BLOCKED**. The ordinary production page does not restore a draft after
-reload. `src/app/page.tsx` renders `<Me2Shell />` without a confirmed scope.
-The shell retains unbound text through Settings/Tasks navigation, warns that it
-is memory-only, and never reads or writes persistent draft storage in that state.
-Only explicitly scoped test callers currently exercise persistent restoration.
+Status: **frontend implemented; integrated Main/preload verification pending**.
+The real `src/app/page.tsx` now consumes `metaengineClient.draftScope()` through
+`useDraftScope` and passes the confirmed namespace and generation guard to
+`Me2Shell`. Reload restoration has been verified through this actual caller in
+Chromium with an injected native bridge. The native implementation is owned by
+the parent/main thread and is absent from this UI branch. This is not installed
+end-to-end qualification. Missing native support remains UNKNOWN.
 
-This is a read-only source audit and integration proposal, not an implemented
-native contract or a claim of installed-client qualification. Main/preload/Host
-and credential code were not changed in this UI task.
+## Agreed native contract
 
-## Verified existing sources
+`draftScope()` accepts zero renderer arguments and returns exactly these fields:
 
-Paths below are relative to the repository root at base
-`b98444e672a70ee07f1bc80e7bfeb0ba97084f0f`.
+```ts
+{
+  schema: 'metaengine.client.draft-scope.v1',
+  state: 'READY' | 'UNKNOWN',
+  scope: null | {
+    principal_kind: 'ENROLLED_NATIVE_DEVICE',
+    principal_id: string, // 64 hex SHA-256; opaque native-device namespace
+    workspace_id: string, // verified coordination workspace UUID
+    project_id: null
+  },
+  observed_at: string, // canonical ISO timestamp at native dispatch start
+  expires_at: string | null, // READY: dispatch + 5000 ms; UNKNOWN: null
+  authority_effect: false,
+  automatic_retry_allowed: false
+}
+```
 
-| Source | Available evidence | Why it cannot currently supply the production draft scope |
-| --- | --- | --- |
-| `apps/metaengine-browser/src/client-native-trust-boundary.mjs`, `projectOwnPostgresClientConnection` | Redacted readiness, enrollment and grant-state flags | No principal ID or coordination workspace ID. A ready flag is not an identity. |
-| `apps/metaengine-browser/src/client-native-coding-goal.mjs`, `readClientGoalSubmissionMode` | Route/HOLD state; optional busy project ID and coordination mode | Discards the verified preparation selector; does not expose current identity/workspace. |
-| `apps/metaengine-browser/src/operator-native-context-bridge.mjs`, `projectContext` | Owner incarnation, run and source witness when cross-certified | Owner is the runtime owner, not the authenticated principal; workspace is absent. Plane projection strips raw details. |
-| `apps/metaengine-browser/src/main.mjs`, `project-overview` handler | Snapshot selected using the latest journal goal | A historical receipt is not proof of current identity or current project selection. |
-| `apps/metaengine-browser/src/managed-task-project-client-control.mjs`, `status` | Managed worktree reservations (`workspace_id`, task, agent, generation) | Does not project `coordination_workspace_id` or identity. Reservation workspace and coordination workspace are distinct fields in `managed-task-project-authority-resolver.mjs`. |
-| `apps/metaengine-browser/src/client-prepared-goal.mjs`, `readVerifiedPreparedGoalSelector` | Protected staged configuration, signed `READ_WORKSPACE_PREPARATION_V1`, exact selector match, `current_grant_valid`, identity equality before/after | Private Main helper returns preparation ID/digest, coordination workspace and grant epoch, but no renderer contract or freshness lease. |
+UNKNOWN requires null scope; it retains the dispatch observation timestamp.
+The parent agreed that Main uses an already loaded enrolled identity, a fixed
+read-only signer for `READ_NATIVE_SETUP_ROUTE_V1`, the current verified repository
+configuration and signed ADMIN/Host/PG observation. It does not enroll, ensure,
+load or create keys. This description is the integration contract, not evidence
+that those Main paths were executed by this UI branch. The earlier proposal to
+project `READ_WORKSPACE_PREPARATION_V1` is superseded by this agreement.
 
-The last source is suitable for a minimal **prepared-workspace-only** projection.
-Its Host service, `infra/client-state-runtime/native-coding-workspace-preparation.mjs`,
-checks the current device/client/key/grant and active pairing, then matches the
-managed repository's `coordination_workspace_id` to the staged configuration.
-Stage validation in `apps/metaengine-browser/src/native-coding-workspace-preparation.mjs`
-also checks protected storage and `expires_at`. The private identity snapshot
-comes from `supervisor-device-identity.mjs`; it describes an enrolled native
-device/client, not a human login. That principal meaning needs explicit agreement.
+`principal_id` is not a human login or an execution credential. Before creation
+of a goal the namespace is workspace-scoped: no project ID is fabricated. The
+consumer rejects non-null project IDs. Namespace confirmation does not grant
+submission authority, replace admission checks, or protect localStorage from
+arbitrary same-origin JavaScript. There is no journal/status/localStorage/URL/
+directory/random-ID fallback for identity or workspace.
 
-## Minimal proposal for the Main owner to approve
+## Implemented behavior
 
-1. Add a read-only projection helper next to `readVerifiedPreparedGoalSelector`
-   in `apps/metaengine-browser/src/client-prepared-goal.mjs`. Reuse the existing
-   signed read; do not call workspace preparation, activation or goal admission.
-   Require an already loaded/enrolled identity before signing; do not initialize
-   an identity as a side effect of opening the UI. Compare device ID, client ID,
-   key fingerprint and enrolled state before/after. Recheck the stage identity,
-   configuration, expiry and Host lifetime after the read. Unknown/changed data
-   yields no scope. Do not forward the stage, paths, credentials or raw errors.
-2. In `apps/metaengine-browser/src/main.mjs`, compose it using the existing owned
-   Host capability and mount/lifetime guards. Add a shell-sender-validated,
-   zero-argument `metaengine:client:draft-scope` read. No fallback to journal IDs,
-   localStorage, URL, directory name, a new UUID or the first row of a catalog.
-3. In `apps/metaengine-browser/src/preload-shell.cjs`, expose only
-   `metaengineClient.draftScope(): Promise<unknown>` in the existing primary UI
-   bridge. It accepts no renderer-supplied selector, principal or confirmation.
-4. Proposed exact response schema: `metaengine.client.draft-scope.v1`,
-   `state: UNKNOWN | READY`, `scope: null | {principal_kind, principal_id,
-   workspace_id, project_id}`, `observed_at`, `expires_at`,
-   `authority_effect:false`, `automatic_retry_allowed:false`.
-   `principal_kind` is explicitly `ENROLLED_NATIVE_DEVICE` if agreed; use a
-   Main-computed, domain-separated digest of the verified device/client/key tuple
-   for `principal_id`. It is a namespace, never an execution credential.
-   Use the verified coordination workspace and `project_id:null` before a goal
-   exists. Never infer a selected project from a historical receipt. Other routes
-   remain UNKNOWN until they have an independently verified selection contract.
-5. Freshness must start at read dispatch, not delayed response receipt. Cap its
-   deadline by the checked stage expiry and a short agreed TTL (proposal: 5 s).
-   A reply arriving after the deadline is UNKNOWN. Identity/Host invalidation
-   should hide the draft immediately when signaled; otherwise polling provides
-   bounded observation freshness only, not instant revocation knowledge. State
-   this limitation explicitly. Do not claim that a response cancels a native read.
+- The strict validator rejects extra/missing fields, wrong types, malformed hash
+  or UUID, noncanonical/future/pre-request timestamps, flags granting authority
+  or retries, non-null projects and inconsistent TTL. Effective expiry is capped
+  at renderer dispatch + 5000 ms as well as native expiry; receipt cannot renew it.
+- The controller exposes UNKNOWN, READY and a CHANGED transition. A separate
+  expiry timer hides old scope during a hung read. One physical native read is
+  retained through timeout and Page unmount/remount; no cancellation is claimed.
+  Late or replaced-bridge responses cannot populate a newer lifetime. Polling is
+  every 2 seconds while mounted. Freshness is bounded observation, not immediate
+  knowledge of revocation between observations or while JavaScript is suspended.
+- Scope loss/change increments generation and remounts the shell. A to UNKNOWN
+  to A and A to B to A therefore invalidate old submit callbacks even when the
+  draft key and revision are unchanged. Pure freshness guards also fence overdue
+  callbacks before expiry timers run. Admission reads and submit/ACK paths check
+  that generation without changing the existing admission protocol.
+- `useGoalDraft` checks the generation before storage subscription/read/write or
+  clearing a submitted revision. Unknown text remains memory-only and is never
+  migrated automatically into a confirmed namespace. Storage denial preserves
+  visible in-memory text with a keyboard-accessible warning.
+- Successful ACK clears only the submitted revision. Newer input survives;
+  an unknown submit outcome never automatically sends the goal again. Existing
+  roster freshness and Observatory physical-flight fixes remain in place.
 
-This proposal needs coordinated Main/preload ownership before implementation.
-It adds a presentation namespace only. It changes no Save/Activate/Run/Resume
-protocol, grant, key, enrollment, admission limit, retry rule or execution policy.
+## Verification and integration boundary
 
-## UI follow-up after contract agreement
+`draft-scope.test.mjs` covers exact parsing, conservative TTL, hung read expiry,
+continuous confirmation, scope transitions, bridge errors/replacement and
+unmount/remount without overlapping reads. `ui-reliability.ui.test.mjs` imports
+and executes the real Page/hook/shell rather than relying only on a test scope
+prop. It checks restart restoration after confirmation, navigation, unbound
+isolation, invalid/expired evidence, distinct principals/workspaces with null
+project, storage refusal, and older ACKs across scope transitions. The submit
+observer suite checks scope loss while admission readiness is pending.
 
-Wire the real `src/app/page.tsx` through a client controller into `Me2Shell`.
-The controller exposes UNKNOWN, READY and a CHANGED transition, validates the
-exact response, expires independently of a hung read, and keeps physical reads
-single-flight across remounts. UNKNOWN/CHANGED expose no prior scope or draft.
-Change the composer generation on loss/change of scope as well as on a new key,
-so even a later return to the same scope cannot accept an old pending callback.
-Discard late read results from older lifetimes. Do not migrate unbound text into
-a confirmed identity implicitly. Confirmation is not permission to submit.
+The cloud Chromium run uses the real Next Page, an injected synthetic bridge,
+a real browser reload and localStorage, and controlled time. It verifies
+Settings/return/reload, UNKNOWN/missing/malformed/expired evidence, principal and
+workspace changes, hung/late reads, old ACKs, storage refusal, lost response with
+one explicit send, keyboard Tab/Enter/Escape and a 390 px viewport (120 px input,
+no input/button overlap or horizontal overflow). No user client/profile/PG or
+real native signer was used. Screenshots remain local and are not published.
+An initial run failed its immediate Escape-focus assertion; an unchanged stable
+rerun passed. Both logs are retained, and this is not claimed as a product fix.
 
-Required negative tests in Main/preload: missing/unloaded/unenrolled identity;
-identity/key/client change during await; revoked or changed grant/pairing; wrong
-selector/workspace; stage expiry while waiting; changed/closed Host; malformed or
-late reply; untrusted sender and unexpected arguments. Assert zero prepare,
-activate, admission, enrollment and automatic retry calls.
+Commands from `apps/me2-ui`:
 
-Required UI/browser acceptance: actual production Page caller and real reload
-with restoration only after confirmation; unknown/missing/expired identity hides
-the former text; same project ID under different principals stays separate;
-workspace-only draft with null project; identity/workspace/project switches fence
-old submits including an A-to-B-to-A transition; newer input survives a late ACK;
-storage access failure preserves visible in-memory text with warning; unknown
-submit outcome never repeats; stale/hung reads and unmount/remount never overlap.
-Repeat the complete UI and Browser contract suites, TypeScript, lint, and real
-browser checks at 390 px with keyboard access. Positive production reload and
-identity-expiry cases remain unqualified until the native contract exists.
+The consumer checkpoint passed 233/233 UI tests, 40/40 Browser contract checks,
+TypeScript (also after removing dev-generated files), lint and the browser cases
+above. The final browser harness waits for dialog closure and restored focus
+instead of assuming both happen synchronously after Escape.
+
+```sh
+node --test src/lib/*.test.mjs scripts/*.test.mjs
+npm run typecheck
+npm run lint
+node --test ../metaengine-browser/test/client-runtime-resource.test.mjs ../metaengine-browser/test/client-v1-typed-goal-bridge.test.mjs ../metaengine-browser/test/r93-primary-ui-resilience.test.mjs ../metaengine-browser/test/r97-single-main-ui-contract.test.mjs ../metaengine-browser/test/r100-ui-authority-surface-prune.test.mjs ../metaengine-browser/test/browser-closed-loop-audit-fixes.test.mjs
+```
+
+W29 now registers the full UI suite after its frozen dependency install, including
+these production-caller and controller cases. Existing UI/native checks are
+retained. Historical global source seals, package/installed-client gates and
+Main/preload/Host code are unchanged by this consumer commit.
+
+Safe integration: review the UI delta independently; combine it with the parent's
+separately checked native contract; reconcile shell activation changes owned by
+the parent; rerun the complete UI/contracts and native negative tests; then test
+the actual integrated native dispatch to Page and real restart. Required native
+negatives include absent/changed identity, revoked/changed grant/pairing,
+configuration/workspace mismatch, Host lifetime changes, untrusted sender,
+unexpected arguments and late replies. Until that succeeds, ordinary apps on
+this UI-only branch correctly cannot persistently restore without a native
+`draftScope` implementation.
+
+## Historical checkpoints
+
+The following describes prior commits and results, not the newer consumer bytes.
 
 ## Publication and evidence
 

@@ -74,5 +74,5 @@ test('W29 installs frozen UI dependencies before invoking TypeScript-dependent r
   assert.ok(install >= 0 && install < source.indexOf('run: npm run test:operator-primary'));
   assert.match(source, /git diff --exit-code -- package\.json bun\.lock/);
   assert.match(source, /run: npm run test:operator-observatory/);
-  assert.match(source, /run: node --test scripts\/ui-ci-fixtures\.test\.mjs/);
+  assert.match(source, /run: node --test src\/lib\/\*\.test\.mjs scripts\/\*\.test\.mjs/);
 });

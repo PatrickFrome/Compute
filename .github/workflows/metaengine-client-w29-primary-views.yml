@@ -45,9 +45,9 @@ jobs:
       - name: W29 Now Missions Fleet hermetic contracts
         working-directory: apps/me2-ui
         run: npm run test:operator-primary
-      - name: UI CI registration negative tests
+      - name: Complete UI regressions including production draft scope caller
         working-directory: apps/me2-ui
-        run: node --test scripts/ui-ci-fixtures.test.mjs
+        run: node --test src/lib/*.test.mjs scripts/*.test.mjs
       - name: W6/W23 canonical resync regression contracts
         working-directory: apps/me2-ui
         run: npm run test:operator-observatory

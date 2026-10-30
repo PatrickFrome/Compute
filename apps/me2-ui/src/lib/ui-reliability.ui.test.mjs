@@ -7,6 +7,7 @@ import * as primary from './operator-primary-views.mjs';
 import * as mode from './goal-submission-mode-observer.mjs';
 import * as readFlight from './ui-read-flight.mjs';
 import * as draft from './goal-draft.mjs';
+import * as draftScope from './draft-scope.mjs';
 
 function environment(ui, time, extra = {}) {
   const listeners = new Map();
@@ -283,8 +284,7 @@ test('actual shell retains an unbound draft across Settings/Tasks without touchi
 });
 
 test('production page fails closed without a confirmed scope, including after reload', async () => {
-  // This exercises the real caller. Positive reload restoration is still
-  // BLOCKED on a native scope contract; historical/status IDs cannot supply it.
+  // Historical/status IDs cannot replace the dedicated native scope contract.
   let storageCalls = 0, submits = 0;
   const saved = { schema: draft.GOAL_DRAFT_SCHEMA, principal_id: 'another-principal',
     workspace_id: 'workspace', project_id: 'same-project', text: 'Private earlier draft' };
@@ -301,8 +301,13 @@ test('production page fails closed without a confirmed scope, including after re
     const state = { page: 'browser', init() {}, paletteOpen: false, recentPages: [], setPage() {} };
     context.useMe2 = select => select(state);
     const shell = loadUi('../components/me2/shell/me2-shell.tsx', ['Me2Shell', 'GoalComposer'], context);
-    const { Page } = loadUi('../app/page.tsx', ['Page'], { ...context, Me2Shell: shell.Me2Shell });
-    const page = Page();
+    const pageUi = harness();
+    const pageContext = { ...context, ...pageUi, createDraftScopeResource: options => draftScope.createDraftScopeResource({
+      ...options, now: time.now, schedule: time.setTimeout, cancel: time.clearTimeout,
+    }) };
+    const { useDraftScope } = loadUi('../hooks/use-draft-scope.ts', ['useDraftScope'], pageContext);
+    const { Page } = loadUi('../app/page.tsx', ['Page'], { ...pageContext, Me2Shell: shell.Me2Shell, useDraftScope });
+    const page = pageUi.mount(Page);
     ui.mount(page.tag, page.props); await flush();
     const composer = () => ui.render().children.flat(Infinity).find(child => child?.tag === shell.GoalComposer);
     assert.equal(composer().props.draft.goal, '');
@@ -310,9 +315,116 @@ test('production page fails closed without a confirmed scope, including after re
     composer().props.draft.setGoal('Unconfirmed text stays in this shell');
     state.page = 'system'; ui.render(); state.page = 'browser';
     assert.equal(composer().props.draft.goal, 'Unconfirmed text stays in this shell');
-    ui.unmount();
+    ui.unmount(); pageUi.unmount();
   }
   assert.equal(storageCalls, 0); assert.equal(submits, 0);
+});
+
+function scopedProductionPage({ records = new Map(), storageFails = false } = {}) {
+  const ui = harness(), pageUi = harness(), time = clock(), effects = [], reads = [];
+  const state = { page: 'browser', init() {}, paletteOpen: false, recentPages: [], setPage() {} };
+  let principal = 'a'.repeat(64), response = 'READY', pending = null, key;
+  let workspace = '12345678-1234-4234-8234-123456789abc';
+  const value = at => ({ schema: 'metaengine.client.draft-scope.v1', state: response,
+    scope: response === 'READY' ? { principal_kind: 'ENROLLED_NATIVE_DEVICE', principal_id: principal,
+      workspace_id: workspace, project_id: null } : null,
+    observed_at: new Date(at).toISOString(), expires_at: response === 'READY' ? new Date(at + 5000).toISOString() : null,
+    authority_effect: false, automatic_retry_allowed: false });
+  const bridge = { draftScope(...args) { assert.deepEqual(args, []); reads.push(time.now()); return pending?.promise ?? Promise.resolve(value(time.now())); },
+    submitGoal: async () => { effects.push('submit'); } };
+  const context = environment(ui, time, { metaengineClient: bridge,
+    localStorage: { getItem: k => { if (storageFails) throw Error('storage denied'); return records.get(k) ?? null; },
+      setItem: (k, v) => { if (storageFails) throw Error('storage denied'); records.set(k, v); } } });
+  context.useMe2 = select => select(state);
+  const shell = loadUi('../components/me2/shell/me2-shell.tsx', ['Me2Shell', 'GoalComposer'], context);
+  const pageContext = { ...context, ...pageUi, createDraftScopeResource: options => draftScope.createDraftScopeResource({
+    ...options, now: time.now, schedule: time.setTimeout, cancel: time.clearTimeout,
+  }) };
+  const { useDraftScope } = loadUi('../hooks/use-draft-scope.ts', ['useDraftScope'], pageContext);
+  const { Page } = loadUi('../app/page.tsx', ['Page'], { ...pageContext, useDraftScope, Me2Shell: shell.Me2Shell });
+  const render = () => {
+    const page = pageUi.render();
+    if (page.props.key !== key) { if (key !== undefined) ui.unmount(); key = page.props.key; ui.mount(page.tag, page.props); }
+    else ui.render(page.props);
+    return ui.render().children.flat(Infinity).find(child => child?.tag === shell.GoalComposer)?.props.draft;
+  };
+  pageUi.mount(Page);
+  return { time, records, reads, effects, bridge, render, state,
+    response: next => { response = next; }, principal: next => { principal = next; }, workspace: next => { workspace = next; },
+    scopeValue: () => value(time.now()),
+    hang: () => { pending = deferred(); return pending; },
+    unhang: () => { pending = null; },
+    unmount: () => { ui.unmount(); pageUi.unmount(); },
+  };
+}
+
+test('actual production Page restores only after native confirmation and a fresh Page lifetime', async () => {
+  const first = scopedProductionPage();
+  first.render().setGoal('Unbound text must not migrate');
+  await flush(); assert.equal(first.render().goal, '');
+  first.render().setGoal('Confirmed workspace draft');
+  for (const page of ['system', 'tasks']) { first.state.page = page; first.render(); }
+  first.state.page = 'browser'; assert.equal(first.render().goal, 'Confirmed workspace draft');
+  first.unmount();
+  const reload = scopedProductionPage({ records: first.records });
+  assert.equal(reload.render().goal, ''); await flush();
+  assert.equal(reload.render().goal, 'Confirmed workspace draft'); assert.deepEqual(reload.effects, []); reload.unmount();
+});
+
+test('production Page isolates principals and fences old ACKs on A UNKNOWN A and A B A', async () => {
+  const f = scopedProductionPage(); f.render(); await flush(); f.render().setGoal('Workspace A draft');
+  const oldAcknowledge = f.render().acknowledgeGoal;
+  f.response('UNKNOWN'); await f.time.advance(2000); assert.equal(f.render().goal, '');
+  f.response('READY'); await f.time.advance(2000); assert.equal(f.render().goal, 'Workspace A draft');
+  assert.equal(oldAcknowledge(), false); assert.equal(f.render().goal, 'Workspace A draft');
+  const anotherOldAcknowledge = f.render().acknowledgeGoal;
+  f.principal('b'.repeat(64)); await f.time.advance(2000); assert.equal(f.render().goal, '');
+  f.render().setGoal('Same workspace, different principal');
+  f.principal('a'.repeat(64)); await f.time.advance(2000); assert.equal(f.render().goal, 'Workspace A draft');
+  assert.equal(anotherOldAcknowledge(), false); assert.equal(f.render().goal, 'Workspace A draft');
+  assert.deepEqual(f.effects, []); f.unmount();
+});
+
+test('production Page expires a hung read without leaking the stored draft or overlapping reads', async () => {
+  const f = scopedProductionPage(); f.render(); await flush(); f.render().setGoal('Only while confirmed');
+  const late = f.hang(); await f.time.advance(8000);
+  assert.equal(f.render().goal, ''); assert.equal(f.render().draftStorage, 'UNBOUND'); assert.equal(f.reads.length, 2);
+  late.resolve({}); f.unhang(); await flush(); assert.equal(f.render().goal, '');
+  await f.time.advance(2000); assert.equal(f.render().goal, 'Only while confirmed');
+  assert.deepEqual(f.effects, []); f.unmount();
+});
+
+test('production Page keeps a confirmed draft in memory when storage is denied', async () => {
+  const f = scopedProductionPage({ storageFails: true }); f.render(); await flush();
+  assert.equal(f.render().draftStorage, 'UNAVAILABLE'); f.render().setGoal('Copy this draft');
+  assert.equal(f.render().goal, 'Copy this draft'); assert.equal(f.records.size, 0);
+  assert.deepEqual(f.effects, []); f.unmount();
+});
+
+test('production Page isolates coordination workspaces without inventing a project ID', async () => {
+  const f = scopedProductionPage(); f.render(); await flush(); f.render().setGoal('Workspace one');
+  f.workspace('87654321-4321-4321-8321-cba987654321'); await f.time.advance(2000);
+  assert.equal(f.render().goal, ''); f.render().setGoal('Workspace two');
+  f.workspace('12345678-1234-4234-8234-123456789abc'); await f.time.advance(2000);
+  assert.equal(f.render().goal, 'Workspace one');
+  assert.ok([...f.records.values()].every(value => JSON.parse(value).project_id === null));
+  assert.deepEqual(f.effects, []); f.unmount();
+});
+
+test('production Page hides persisted text for missing, malformed, expired and future native evidence', async () => {
+  for (const kind of ['missing', 'malformed', 'expired', 'future']) {
+    const f = scopedProductionPage(); f.render(); await flush(); f.render().setGoal('Private confirmed draft');
+    f.bridge.draftScope = kind === 'missing' ? undefined : async () => {
+      const value = f.scopeValue();
+      if (kind === 'malformed') return { ...value, scope: { ...value.scope, project_id: '12345678-1234-4234-8234-123456789abc' } };
+      const at = f.time.now() + (kind === 'expired' ? -6000 : 10000);
+      return { ...value, observed_at: new Date(at).toISOString(), expires_at: new Date(at + 5000).toISOString() };
+    };
+    await f.time.advance(2000); assert.equal(f.render().goal, '', kind);
+    assert.equal(f.render().draftStorage, 'UNBOUND');
+    assert.ok([...f.records.values()].some(value => JSON.parse(value).text === 'Private confirmed draft'));
+    assert.deepEqual(f.effects, []); f.unmount();
+  }
 });
 
 test('actual shell remounts the composer when its confirmed identity or project changes', () => {

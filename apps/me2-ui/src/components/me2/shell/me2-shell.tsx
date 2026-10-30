@@ -303,7 +303,7 @@ function usePrimaryChatRoster() {
 
 function GoalComposer({ detailOpen, onDetailOpenChange, draft }: { detailOpen: boolean; onDetailOpenChange: (open: boolean) => void; draft: ReturnType<typeof useGoalDraft> }) {
   const setPage = useMe2((s) => s.setPage);
-  const { goal, setGoal, acknowledgeGoal, draftStorage } = draft;
+  const { goal, setGoal, acknowledgeGoal, draftStorage, isCurrent: isDraftCurrent } = draft;
   const detailTrigger = useRef<HTMLButtonElement | null>(null);
   const [pending, setPending] = useState(false);
   const [receipt, setReceipt] = useState<GoalReceipt | null>(null);
@@ -460,7 +460,7 @@ function GoalComposer({ detailOpen, onDetailOpenChange, draft }: { detailOpen: b
 
   const submit = useCallback(async () => {
     const value = goal.trim();
-    if (!value || operation.current || journalEntry?.state === "RECONCILE_REQUIRED") return;
+    if (!value || !isDraftCurrent() || operation.current || journalEntry?.state === "RECONCILE_REQUIRED") return;
     const bridge = clientControlBridge();
     if (!bridge?.submitGoal || !bridge?.workReadiness || !bridge.goalSubmissionMode || bridge.typed_positive_api !== true || bridge.generic_command_exposed !== false) {
       setError("Typed Client control bridge unavailable");
@@ -476,10 +476,12 @@ function GoalComposer({ detailOpen, onDetailOpenChange, draft }: { detailOpen: b
       // authorize work and stale BLOCKED cannot indefinitely suppress a later
       // valid submit. No submit occurs when the fresh read is unavailable.
       const mode = await modeObserver.refresh({ fresh: true });
+      if (!isDraftCurrent()) return;
       if(mode?.schema!=="metaengine.client.goal-submission-mode.v1"||mode.authority_effect!==false||mode.automatic_retry_allowed!==false
         ||mode.state!=="HOST_VERIFICATION_REQUIRED"||!["BROWSER","NATIVE_CODING","PREPARED_GOAL"].includes(mode.kind))throw new Error(mode?.reason||"Goal admission unavailable");
       if(mode.kind==="BROWSER"){
         const freshReadiness = await loadReadiness();
+        if (!isDraftCurrent()) return;
         if (!freshReadiness?.execution_ready) {
           setError(freshReadiness?.detail || "Execution readiness unavailable");
           return;
@@ -487,11 +489,11 @@ function GoalComposer({ detailOpen, onDetailOpenChange, draft }: { detailOpen: b
       }
       // Navigation can unmount the composer while either admission read is
       // pending. A later mount must not revive that older submit operation.
-      if (!mounted.current || submissionSequence !== loadSequence.current) return;
+      if (!mounted.current || !isDraftCurrent() || submissionSequence !== loadSequence.current) return;
       const next = await bridge.submitGoal(value);
       // The effect remains journaled in main even when a newer UI observation
       // supersedes this ACK. Never overwrite that newer view or replay the goal.
-      if (!mounted.current || submissionSequence !== loadSequence.current) return;
+      if (!mounted.current || !isDraftCurrent() || submissionSequence !== loadSequence.current) return;
       if (mode.kind==="PREPARED_GOAL"?next?.schema!=="metaengine.native-coding.pending-goal-admission.v1"||next.state!=="PENDING_ACTIVATION"
         ||next.root_state!=="BLOCKED"||next.project_state!=="PAUSED"||next.execution_ready!==false||next.owner_incarnation_verified!==false
         ||next.production_qualified!==false||next.automatic_retry_allowed!==false||next.authority_effect!==false
@@ -503,7 +505,7 @@ function GoalComposer({ detailOpen, onDetailOpenChange, draft }: { detailOpen: b
       if (mounted.current) { setReceipt(next); setJournalEntry(null); acknowledgeGoal(); }
       await loadLatest();
     } catch (cause) {
-      if (!mounted.current || submissionSequence !== loadSequence.current) return;
+      if (!mounted.current || !isDraftCurrent() || submissionSequence !== loadSequence.current) return;
       setError(String((cause as Error)?.message || cause || "goal_submit_failed").slice(0, 180));
       // A lost submit response is never retried as an effect. The Browser main
       // process has already attempted one read-only request_id reconciliation;
@@ -513,7 +515,7 @@ function GoalComposer({ detailOpen, onDetailOpenChange, draft }: { detailOpen: b
       operation.current = null;
       if (mounted.current) setPending(false);
     }
-  }, [goal, acknowledgeGoal, journalEntry?.state, loadLatest, loadReadiness, modeObserver]);
+  }, [goal, acknowledgeGoal, isDraftCurrent, journalEntry?.state, loadLatest, loadReadiness, modeObserver]);
 
   const progress = journalEntry?.progress;
   const nativeReceipt=receipt?.schema==="metaengine.native-coding.goal-admission.v1"?receipt:null;
@@ -844,10 +846,10 @@ function PrimaryChatFleetWorkspace({ pickerOpen, onPickerOpenChange }: { pickerO
   );
 }
 
-export function Me2Shell({ draftScope = null }: { draftScope?: GoalDraftScope | null } = {}) {
-  // No authenticated scope is exposed by the current native UI contract.
-  // Keep unknown drafts in this shell only; never restore from a global key.
-  const goalDraft = useGoalDraft(draftScope);
+export function Me2Shell({ draftScope = null, draftIsCurrent }: { draftScope?: GoalDraftScope | null; draftIsCurrent?: () => boolean } = {}) {
+  // The production Page supplies the native observation and its UI generation.
+  // Unknown drafts stay in this shell; this binding is never execution authority.
+  const goalDraft = useGoalDraft(draftScope, draftIsCurrent);
   const goalDraftScopeKey = draftScope === null ? "unbound" : goalDraftStorageKey(draftScope);
   const page = useMe2((s) => s.page);
   const init = useMe2((s) => s.init);

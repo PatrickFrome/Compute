@@ -32,6 +32,7 @@ function fixture(t) {
   const readiness = deferred(), readinessStarted = deferred();
   const sent = [], errors = [], pending = [], receipts = [], goals = [];
   const mounted = { current: true }, loadSequence = { current: 0 }, operation = { current: null };
+  let draftCurrent = true;
   const bridge = {
     typed_positive_api: true,
     generic_command_exposed: false,
@@ -57,9 +58,11 @@ function fixture(t) {
     setError: value => errors.push(value), setPending: value => pending.push(value),
     setReceipt: value => receipts.push(value), setGoal: value => goals.push(value),
     acknowledgeGoal: () => goals.push(''), setJournalEntry() {},
+    isDraftCurrent: () => draftCurrent,
   });
   return {
     invoke, readiness, readinessStarted, sent, errors, pending, receipts, goals, operation,
+    invalidateDraft() { draftCurrent = false; },
     unmount() { mounted.current = false; loadSequence.current += 1; stop(); },
     remount() { mounted.current = true; stop = modeObserver.start(); },
   };
@@ -75,6 +78,15 @@ test('navigation during Browser readiness cannot submit after composer unmount',
   assert.deepEqual(state.sent, []);
   assert.deepEqual(state.receipts, []);
   assert.equal(state.operation.current, null);
+});
+
+test('scope generation loss during fresh readiness fences the earlier user intent', async t => {
+  const state = fixture(t), pending = state.invoke();
+  await state.readinessStarted.promise;
+  state.invalidateDraft();
+  state.readiness.resolve({ execution_ready: true });
+  await pending;
+  assert.deepEqual(state.sent, []); assert.deepEqual(state.goals, []); assert.deepEqual(state.errors, [null]);
 });
 
 test('a new mount cannot revive a submit waiting on an earlier readiness read', async t => {

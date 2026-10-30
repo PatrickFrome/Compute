@@ -69,6 +69,7 @@ function fixture(initial = entry()) {
     setPending(value) { observations.pending.push(value); },
     setGoal(value) { context.goal = value; },
     acknowledgeGoal() { context.goal = ''; },
+    isDraftCurrent: () => true,
   });
   context.loadLatest = callback('loadLatest', context);
   return { context, bridge, observations, load: context.loadLatest,
