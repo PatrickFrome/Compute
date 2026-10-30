@@ -13,7 +13,7 @@ export async function inMemoryNativeBroker(t){
    server.on('connection',handler);return server;},createConnection(){const client=new Endpoint(),remote=new Endpoint();client.peer=remote;remote.peer=client;
    connections.add(client);connections.add(remote);queueMicrotask(()=>server.emit('connection',remote));return client;}};
  const source=await fs.readFile(new URL('../../src/native-coding-agent-mcp-broker.mjs',import.meta.url),'utf8');
- const exports=new Function('net','createHash','createHmac','timingSafeEqual','randomBytes','randomUUID',source.replace(/^import .*;\n/gm,'').replace(/export /g,'')+
+ const exports=new Function('net','createHash','createHmac','timingSafeEqual','randomBytes','randomUUID',source.replace(/^import .*;\r?\n/gm,'').replace(/export /g,'')+
   '\nreturn {createNativeCodingAgentMcpBroker,connectNativeCodingAgentMcpBroker};')(net,createHash,createHmac,timingSafeEqual,randomBytes,randomUUID);
  t.after(()=>{for(const endpoint of connections)endpoint.destroy();});return exports;
 }
