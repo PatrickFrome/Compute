@@ -246,6 +246,24 @@ test('Windows preparation compiles the real class once, publishes pinned self-co
   assert.equal(hash(assembly), manifest.assembly_sha256);
   assert.deepEqual(renderCodexCliJobRuntimeHelper(template, assembly).helperBytes, helper);
   assert.deepEqual((await fs.readdir(outputDirectory)).sort(), ['codex-cli-job-runner.ps1', 'manifest.json']);
+  // C# remains valid when PowerShell continuation operators are moved to the
+  // next line. The real Desktop parser must reject this previously published
+  // envelope defect before replacing either accepted output, for LF and CRLF.
+  for (const ending of ['\n', '\r\n']) {
+    const invalid = template.toString().replace(/\r\n/g, '\n').replace(/ -or\n/g, '\n    -or ').replaceAll('\n', ending);
+    assert.notEqual(invalid, template.toString());
+    assert.equal(extractCodexCliJobRuntimeTemplate(Buffer.from(invalid)).csharpBytes.toString().replace(/\r\n/g, '\n'),
+      extractCodexCliJobRuntimeTemplate(template).csharpBytes.toString().replace(/\r\n/g, '\n'));
+    await fs.writeFile(helperSourcePath, invalid);
+    await assert.rejects(prepareCodexCliJobRuntime({ helperSourcePath, outputDirectory }), error => {
+      assert.equal(error.message, 'codex_job_runtime_build_failed');
+      assert.match(String(error.cause?.stderr ?? ''), /codex_job_runtime_powershell_syntax_invalid/);
+      return true;
+    });
+    assert.deepEqual(await fs.readFile(result.helperPath), helper, 'PowerShell parse failure must retain the accepted helper');
+    assert.deepEqual(await fs.readFile(result.manifestPath), manifestBytes, 'PowerShell parse failure must retain its manifest');
+    await assert.rejects(fs.access(path.join(outputDirectory, '.prepare.lock')), { code: 'ENOENT' });
+  }
   await fs.writeFile(helperSourcePath, template.toString().replace('public static void Run(', 'public static void WrongEntrypoint('));
   await assert.rejects(prepareCodexCliJobRuntime({ helperSourcePath, outputDirectory }), /codex_job_runtime_build_failed/);
   assert.deepEqual(await fs.readFile(result.helperPath), helper, 'failed build must not replace the accepted helper');
