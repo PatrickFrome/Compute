@@ -1,3 +1,4 @@
+import {RUN_OWNER_READ,RUN_OWNER_PHASE,createRunOwnerHostPhases} from '../../apps/metaengine-browser/src/native-coding-run-owner-phase.mjs';
 import {NATIVE_SETUP_ACTIONS} from '../../apps/metaengine-browser/src/native-coding-setup-contract.mjs';
 import {nativeCodingHostSettlement,nativePhysicalSettlementUnconfirmed,runNativePhysicalSettlementScope} from '../../apps/metaengine-browser/src/native-coding-host-settlement.mjs';
 import {PENDING_ACTIVATION_PHASE,createPendingActivationHostPhases} from '../../apps/metaengine-browser/src/native-coding-pending-activation-phase.mjs';
@@ -9,7 +10,7 @@ import {validateNativeCodingDeviceRequest} from '../../apps/metaengine-browser/s
 export const NATIVE_CODING_HOST_IPC_REQUEST = 'metaengine.native-coding.host-ipc.request.v1';
 export const NATIVE_CODING_HOST_IPC_RESPONSE = 'metaengine.native-coding.host-ipc.response.v1';
 const ACTIONS = ['READ_SCOPE','READ_LEASE','REGISTER_PROVIDER','READ_EXECUTION','RESERVE_EXECUTION','ADVANCE_EXECUTION','RECONCILE_PROJECT','READ_PROJECT_CHECKPOINT','AGENT_OPERATION','FINISH_CHECKPOINT','READ_FINISH_CHECKPOINT'];
-const OPTIONAL_ACTIONS=['SERVICE_HEARTBEAT_V2','READ_SERVICE_HEARTBEAT_V2','READ_NATIVE_CAPACITY_V1',...NATIVE_SETUP_ACTIONS,'ACTIVATE_PREPARED_GOAL_V1','READ_PREPARED_GOAL_ACTIVATION_V1','ESTABLISH_PENDING_OWNER_V1','READ_PENDING_OWNER_V1','ADMIT_PREPARED_GOAL_V1','READ_PREPARED_GOAL_V1','PREPARE_WORKSPACE_V1','READ_WORKSPACE_PREPARATION_V1','READ_PROJECT_REJECTION','SEED_GOAL','READ_SEED','LIST_SEEDS','SERVICE_HEARTBEAT','READ_SERVICE_HEARTBEAT','READ_PRIOR_EXECUTION','RECONCILE_FINISH_CHECKPOINT'];
+const OPTIONAL_ACTIONS=[RUN_OWNER_READ,'SERVICE_HEARTBEAT_V2','READ_SERVICE_HEARTBEAT_V2','READ_NATIVE_CAPACITY_V1',...NATIVE_SETUP_ACTIONS,'ACTIVATE_PREPARED_GOAL_V1','READ_PREPARED_GOAL_ACTIVATION_V1','ESTABLISH_PENDING_OWNER_V1','READ_PENDING_OWNER_V1','ADMIT_PREPARED_GOAL_V1','READ_PREPARED_GOAL_V1','PREPARE_WORKSPACE_V1','READ_WORKSPACE_PREPARATION_V1','READ_PROJECT_REJECTION','SEED_GOAL','READ_SEED','LIST_SEEDS','SERVICE_HEARTBEAT','READ_SERVICE_HEARTBEAT','READ_PRIOR_EXECUTION','RECONCILE_FINISH_CHECKPOINT'];
 const WRITES = new Set(['BEGIN_NATIVE_SETUP_V1','CANCEL_NATIVE_SETUP_V1','ACTIVATE_PREPARED_GOAL_V1','ESTABLISH_PENDING_OWNER_V1','ADMIT_PREPARED_GOAL_V1','PREPARE_WORKSPACE_V1','REGISTER_PROVIDER','RESERVE_EXECUTION','ADVANCE_EXECUTION','RECONCILE_PROJECT','FINISH_CHECKPOINT','RECONCILE_FINISH_CHECKPOINT','SEED_GOAL','SERVICE_HEARTBEAT','SERVICE_HEARTBEAT_V2']);
 const writes=(action,value)=>WRITES.has(action)||action==='AGENT_OPERATION'&&nativeCodingAgentHostOperationWrites(value);
 const REASONS = new Set(['INVALID_FRAME','INVALID_PAYLOAD','MESSAGE_TOO_LARGE','UNSUPPORTED_ACTION','INSTANCE_MISMATCH',
@@ -165,7 +166,7 @@ export function createNativeCodingHostIpcServer({instanceId,operations,send=proc
   }
   const onDisconnect=()=>close();process.on('disconnect',onDisconnect);
   function handleMessage(message,sendHandle) {
-    if((message?.schema===PENDING_OWNER_PHASE||message?.schema===PENDING_ACTIVATION_PHASE)){
+    if((message?.schema===RUN_OWNER_PHASE||message?.schema===PENDING_OWNER_PHASE||message?.schema===PENDING_ACTIVATION_PHASE)){
       active.get(message.request_id)?.ownerPhases?.receive(message,sendHandle);return true;
     }
     if(!plain(message)||message.schema!==NATIVE_CODING_HOST_IPC_REQUEST)return false;
@@ -193,7 +194,7 @@ export function createNativeCodingHostIpcServer({instanceId,operations,send=proc
     }
     if(active.size>=maxInflight){rejectUndispatched(structuredClone(message),requestDigest,'INFLIGHT_LIMIT');return true;}
     const row={request:structuredClone(message),write:writes(message.action,message.payload),digest:requestDigest,abort:new AbortController(),deadlineAt:Date.now()+timeoutMs,timer:null,response:null};
-    if(PENDING_OWNER_ACTIONS.includes(message.action)||message.action==='ACTIVATE_PREPARED_GOAL_V1')row.ownerPhases=(message.action==='ACTIVATE_PREPARED_GOAL_V1'?createPendingActivationHostPhases:createPendingOwnerHostPhases)({
+    if(message.action===RUN_OWNER_READ||PENDING_OWNER_ACTIONS.includes(message.action)||message.action==='ACTIVATE_PREPARED_GOAL_V1')row.ownerPhases=(message.action===RUN_OWNER_READ?createRunOwnerHostPhases:message.action==='ACTIVATE_PREPARED_GOAL_V1'?createPendingActivationHostPhases:createPendingOwnerHostPhases)({
       binding:{instance_id:instanceId,host_pid:hostPid,request_id:message.request_id,action:message.action,
         request_sha256:requestDigest,body_sha256:message.payload.headers['x-a2-device-body-sha256']},
       signal:row.abort.signal,send:frame=>{json(frame);send(frame,error=>{if(error)row.abort.abort();});},
@@ -206,7 +207,7 @@ export function createNativeCodingHostIpcServer({instanceId,operations,send=proc
     },timeoutMs);
     const physical=runNativePhysicalSettlementScope(()=>operations[message.action](Object.freeze(structuredClone(message.payload)),
       Object.freeze({signal:row.abort.signal,deadlineAt:row.deadlineAt,instanceId,hostPid,requestId:message.request_id,action:message.action,
-        ...(row.ownerPhases?{[message.action==='ACTIVATE_PREPARED_GOAL_V1'?'pendingActivationPhases':'pendingOwnerPhases']:row.ownerPhases,requestDigest,bodyDigest:message.payload.headers['x-a2-device-body-sha256']}: {})})));
+        ...(row.ownerPhases?{[message.action===RUN_OWNER_READ?'runOwnerPhases':message.action==='ACTIVATE_PREPARED_GOAL_V1'?'pendingActivationPhases':'pendingOwnerPhases']:row.ownerPhases,requestDigest,bodyDigest:message.payload.headers['x-a2-device-body-sha256']}: {})})));
     physical.promise
       .then(value=>{json(value);row.result=structuredClone(value);row.succeeded=true;})
       .catch(error=>{row.held=nativePhysicalSettlementUnconfirmed(error);})

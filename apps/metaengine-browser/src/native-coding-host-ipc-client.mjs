@@ -1,3 +1,4 @@
+import {RUN_OWNER_READ,RUN_OWNER_PHASE,createRunOwnerClientPhases} from './native-coding-run-owner-phase.mjs';
 import {claimNativeRunCallbackJournal} from './native-coding-run-callback-journal.mjs';
 import {validateNativeCodingAgentMcpBinding} from './native-coding-agent-mcp-broker.mjs';
 import {NATIVE_SETUP_ACTIONS} from './native-coding-setup-contract.mjs';
@@ -68,7 +69,7 @@ function payload(action,value) {
       ||!/^agent_[a-z0-9-]{8,64}$/.test(s.agent_id||'')
       ||!['lease_generation','agent_generation_epoch'].every(name=>Number.isSafeInteger(s[name])&&s[name]>0))invalid('INVALID_PAYLOAD');
   }
-  else if(['SERVICE_HEARTBEAT_V2','READ_SERVICE_HEARTBEAT_V2','READ_NATIVE_CAPACITY_V1',...NATIVE_SETUP_ACTIONS,'ACTIVATE_PREPARED_GOAL_V1','READ_PREPARED_GOAL_ACTIVATION_V1','ESTABLISH_PENDING_OWNER_V1','READ_PENDING_OWNER_V1','ADMIT_PREPARED_GOAL_V1','READ_PREPARED_GOAL_V1','PREPARE_WORKSPACE_V1','READ_WORKSPACE_PREPARATION_V1','SEED_GOAL','READ_SEED','LIST_SEEDS','SERVICE_HEARTBEAT','READ_SERVICE_HEARTBEAT'].includes(action)){try{validateNativeCodingDeviceRequest(value,action);}catch{invalid('INVALID_PAYLOAD');}}
+  else if([RUN_OWNER_READ,'SERVICE_HEARTBEAT_V2','READ_SERVICE_HEARTBEAT_V2','READ_NATIVE_CAPACITY_V1',...NATIVE_SETUP_ACTIONS,'ACTIVATE_PREPARED_GOAL_V1','READ_PREPARED_GOAL_ACTIVATION_V1','ESTABLISH_PENDING_OWNER_V1','READ_PENDING_OWNER_V1','ADMIT_PREPARED_GOAL_V1','READ_PREPARED_GOAL_V1','PREPARE_WORKSPACE_V1','READ_WORKSPACE_PREPARATION_V1','SEED_GOAL','READ_SEED','LIST_SEEDS','SERVICE_HEARTBEAT','READ_SERVICE_HEARTBEAT'].includes(action)){try{validateNativeCodingDeviceRequest(value,action);}catch{invalid('INVALID_PAYLOAD');}}
   else if(action==='AGENT_OPERATION'){try{validateNativeCodingAgentHostRequest(value);}catch{invalid('INVALID_PAYLOAD');}}
   else if(action==='READ_PROJECT_REJECTION'){
     keys(value,['project_id','writer_task_id','writer_lease_generation','critic_task_id','critic_lease_generation','result_sha256']);
@@ -181,7 +182,7 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
         release(row);change();
       }catch{stop('RESPONSE_INVALID');}return;
     }
-    if(message?.schema===PENDING_OWNER_PHASE||message?.schema===PENDING_ACTIVATION_PHASE){pending.get(message.request_id)?.ownerPhases?.receive(message,sendHandle);return;}
+    if(message?.schema===RUN_OWNER_PHASE||message?.schema===PENDING_OWNER_PHASE||message?.schema===PENDING_ACTIVATION_PHASE){pending.get(message.request_id)?.ownerPhases?.receive(message,sendHandle);return;}
     if(message?.schema==='compute.runtime-host-terminal.v1'){stop('HOST_TERMINATED');return;}
     if(!plain(message)||message.schema!==NATIVE_CODING_HOST_IPC_RESPONSE)return;
     const row=pending.get(message.request_id);if(!row)return; // A late OK never upgrades caller UNKNOWN.
@@ -238,8 +239,8 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
     return new Promise((resolve,rejectPromise)=>{
       const row={id:frame.request_id,action,write:writes(action,value),digest:requestDigest,resolve,reject:rejectPromise,timer:null,runScope,sendAttempted:false};
       if(ownerScopeCallback){
-        if(!(PENDING_OWNER_ACTIONS.includes(action)||action==='ACTIVATE_PREPARED_GOAL_V1')||typeof ownerScopeCallback!=='function'){rejectPromise(new NativeCodingHostIpcError('INVALID_PAYLOAD'));return;}
-        row.ownerPhases=(action==='ACTIVATE_PREPARED_GOAL_V1'?createPendingActivationClientPhases:createPendingOwnerClientPhases)({binding:{instance_id:instanceId,host_pid:hostPid,request_id:row.id,action,
+        if(!(action===RUN_OWNER_READ||PENDING_OWNER_ACTIONS.includes(action)||action==='ACTIVATE_PREPARED_GOAL_V1')||typeof ownerScopeCallback!=='function'){rejectPromise(new NativeCodingHostIpcError('INVALID_PAYLOAD'));return;}
+        row.ownerPhases=(action===RUN_OWNER_READ?createRunOwnerClientPhases:action==='ACTIVATE_PREPARED_GOAL_V1'?createPendingActivationClientPhases:createPendingOwnerClientPhases)({binding:{instance_id:instanceId,host_pid:hostPid,request_id:row.id,action,
           request_sha256:requestDigest,body_sha256:value.headers['x-a2-device-body-sha256']},callback:ownerScopeCallback,input:value.body.input,
           assertLifetime:()=>{if(closed||child.connected!==true||child.pid!==hostPid)throw new NativeCodingHostIpcError('CHANNEL_CLOSED');},
           send:phase=>{child.send(phase,error=>{if(error)stop('SEND_FAILED');});},
@@ -342,6 +343,7 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
     finishCheckpoint:value=>invoke('FINISH_CHECKPOINT',value),
     readFinishCheckpoint:value=>invoke('READ_FINISH_CHECKPOINT',value),
     reconcileFinishCheckpoint:value=>invoke('RECONCILE_FINISH_CHECKPOINT',value),
+    withRunOwnerScope:(value,callback)=>typeof callback==='function'?invoke(RUN_OWNER_READ,value,callback):Promise.reject(new NativeCodingHostIpcError('INVALID_PAYLOAD')),
     withPendingOwnerScope:(operation,value,callback)=>{
       if(!PENDING_OWNER_ACTIONS.includes(operation)||typeof callback!=='function')return Promise.reject(new NativeCodingHostIpcError('INVALID_PAYLOAD'));
       return invoke(operation,value,callback);

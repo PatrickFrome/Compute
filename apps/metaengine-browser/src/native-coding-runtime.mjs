@@ -29,7 +29,7 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
   // Private dependency injection supports isolated adversarial tests; it is not
   // an IPC option, renderer configuration, or a way to label fixtures native.
   observers=null,issuer=null,workerRegistry=null,runnerFactory=createCodexCliRunner,
-  agentBridgeFactory=prepareNativeCodingAgentRunBridge,readServiceControl=null,closeTimeoutMs=25000}={}) {
+  agentBridgeFactory=prepareNativeCodingAgentRunBridge,readServiceControl=null,readRunOwner=null,closeTimeoutMs=25000}={}) {
   if(typeof identity?.snapshot!=='function'||typeof signedRequest!=='function'||!runnerOptions
     ||typeof agentBridgeFactory!=='function'
     ||!['readScope','readLease','registerProvider','agentOperation'].every(name=>typeof ownPostgres?.[name]==='function'))fail('private_dependencies_required');
@@ -385,6 +385,7 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
       if(!commits){if(candidates?.length)fail('private_commit_capability_required');return null;}
       return commits.observe(candidates);
     },
+    readRunOwner(scope){return trackLocal(async()=>{assertOpen();if(typeof readRunOwner!=='function')fail('owner_reader_unbound');return readRunOwner(scope);});},
     observeLease(lease){return trackLocal(async()=>{if(closed)return fence('STOPPED');const row=await pool.observe(lease);return row.state==='RESULT_READY'?complete(lease,row):row;});},
     completeFromTrustedCommand(payload){return trackLocal(async()=>{if(closed)return fence('STOPPED',{reason:unavailableReason});const lease=payload?.lease||payload;if(!UUID.test(lease?.task_id||''))fail('completion_selector_invalid');return complete(lease,await pool.observe(lease));});},
     snapshot(){return {...pool.snapshot(),schema:'metaengine.native-coding.runtime.v1',provider_fences:providerFences.size,
