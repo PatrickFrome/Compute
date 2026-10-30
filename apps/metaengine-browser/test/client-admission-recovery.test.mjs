@@ -333,7 +333,7 @@ async function mainAdmissionFixture(stage = null) {
   };
   const scope = { nativeSupervisor: current, managedTaskProjectHostClosing: Promise.resolve(),
     runtimeRecoveryGenerationLost: false, shutdownRequested: false, managedTaskProjectHostDrainPending: false,
-    nativeInitializationCleanupCandidates: new Set(), globalThis: {},
+    nativeInitializationCleanupCandidates: new Set(), nativeCodingRuntimeMountCustody: null, globalThis: {},
     ensureClientAdmissionRecoveryJournal: async () => journal,
     readClientConnectionStatus: () => ({ admin_ready: true, access_tier: 'ADMIN' }),
     randomUUID: () => ATTEMPT, clientAdmissionRecoveryJournalLoadError: null };
@@ -343,17 +343,26 @@ async function mainAdmissionFixture(stage = null) {
     if (stage === 'before-effect') scope.nativeSupervisor = next;
     if (stage === 'closing') scope.managedTaskProjectHostClosing = Promise.resolve();
     if (stage === 'generation-lost') scope.runtimeRecoveryGenerationLost = true;
+    if (stage === 'mount-failed') scope.nativeCodingRuntimeMountCustody = { failed: true };
+    if (stage === 'cleanup-held') scope.nativeInitializationCleanupCandidates.add({});
   };
+  if (stage === 'initial-mount-failed') scope.nativeCodingRuntimeMountCustody = { failed: true };
+  if (stage === 'initial-cleanup-held') scope.nativeInitializationCleanupCandidates.add({});
   const run = vm.runInNewContext(guard + source + '\nresumeClientAdmissionOnce', scope);
   return { run, calls, journal };
 }
 
-for (const stage of ['during-read', 'before-effect', 'closing', 'generation-lost']) test(`main admission never redirects or sends after ${stage} lifetime drift`, async () => {
+for (const stage of ['during-read', 'before-effect', 'closing', 'generation-lost', 'mount-failed', 'cleanup-held']) test(`main admission never redirects or sends after ${stage} lifetime drift`, async () => {
   const f = await mainAdmissionFixture(stage);
   const outcome = await f.run().catch(error => ({ error }));
   assert.equal(f.calls.oldResume, 0);
   assert.equal(f.calls.newResume, 0);
   assert.notEqual(outcome.confirmed_open, true);
+  const expectedReason = ['during-read', 'before-effect'].includes(stage) ? 'client_admission_recovery_runtime_changed'
+    : stage === 'generation-lost' ? 'local_runtime_host_generation_lost_fresh_browser_required'
+    : stage === 'closing' ? 'native_supervisor_initialization_lifetime_changed'
+    : 'native_supervisor_initialization_cleanup_unconfirmed';
+  assert.equal(outcome.error?.message ?? outcome.reason, expectedReason, 'the intended lifetime fence, not an unrelated fixture error, must reject');
   if (stage !== 'during-read') assert.equal(f.journal.hasPending(), true, 'durable intent stays available for readback, not replay');
 });
 
@@ -372,5 +381,14 @@ test('main admission retains the normal single-effect independent-readback path'
   assert.equal((await f.run()).confirmed_open, true);
   assert.equal(f.calls.oldResume, 1);
   assert.equal(f.calls.newResume, 0);
+  assert.equal(f.journal.hasPending(), false);
+});
+
+for (const stage of ['initial-mount-failed', 'initial-cleanup-held']) test(`main admission refuses ${stage} before any durable send intent`, async () => {
+  const f = await mainAdmissionFixture(stage);
+  await assert.rejects(f.run(), { message: 'native_supervisor_initialization_cleanup_unconfirmed' });
+  assert.equal(f.calls.oldResume, 0);
+  assert.equal(f.calls.newResume, 0);
+  assert.equal(f.calls.newRead, 0);
   assert.equal(f.journal.hasPending(), false);
 });

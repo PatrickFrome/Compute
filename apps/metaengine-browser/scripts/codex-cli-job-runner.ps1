@@ -233,10 +233,10 @@ try {
   try { $actual = [BitConverter]::ToString($sha.ComputeHash($bytes)).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() }
   if ($actual -cne $envelope.request_sha256) { throw 'codex_job_body_changed' }
   $request = ([Text.UTF8Encoding]::new($false,$true)).GetString($bytes) | ConvertFrom-Json
-  if ($request.schema -cne 'metaengine.codex-cli.launch.v2' -or $request.request_id -cnotmatch '^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$'
-    -or $request.run_id -cnotmatch '^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$'
-    -or $request.expected_sha256 -cnotmatch '^[a-f0-9]{64}$' -or $request.binding_sha256 -cnotmatch '^[a-f0-9]{64}$'
-    -or $request.prompt_sha256 -cnotmatch '^[a-f0-9]{64}$') { throw 'codex_job_request_invalid' }
+  if ($request.schema -cne 'metaengine.codex-cli.launch.v2' -or $request.request_id -cnotmatch '^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$' -or
+    $request.run_id -cnotmatch '^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$' -or
+    $request.expected_sha256 -cnotmatch '^[a-f0-9]{64}$' -or $request.binding_sha256 -cnotmatch '^[a-f0-9]{64}$' -or
+    $request.prompt_sha256 -cnotmatch '^[a-f0-9]{64}$') { throw 'codex_job_request_invalid' }
   if ([int]$request.timeout_ms -lt 100 -or [int]$request.timeout_ms -gt 1800000) { throw 'codex_job_timeout_invalid' }
   [MetaengineCodexJob]::Run([string]$request.executable_path,[string[]]$request.args,[string]$request.cwd,
     [string]$request.run_id,[uint32]$request.timeout_ms,[string]$request.expected_sha256,[string]$request.deadline_ms,

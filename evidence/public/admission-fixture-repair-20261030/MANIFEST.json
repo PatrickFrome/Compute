@@ -1,0 +1,28 @@
+{
+  "schema": "metaengine.source-checkpoint.v1",
+  "base": "5d7ec74db1c72b15921a6e00a2826a09a72f4fb2",
+  "status": "SOURCE_FIXTURE_REPAIR_ONLY",
+  "files": [
+    {
+      "path": "apps/metaengine-browser/test/client-admission-recovery.test.mjs",
+      "bytes": 18150,
+      "sha256": "ab8469d69bcec28e25bcaa8c75dd0d96529522d727ff62ebe9775f81865090e3"
+    },
+    {
+      "path": "apps/metaengine-browser/test/r97-goal-submission-mode.test.mjs",
+      "bytes": 5498,
+      "sha256": "858c07f6c795dd42e2e1062518f461a8d331d94f603f4d78ac1b9fa1a82d427e"
+    },
+    {
+      "path": "evidence/public/admission-fixture-repair-20261030/REVIEW.md",
+      "bytes": 2614,
+      "sha256": "b7b09501a375274f55877fed49e44f46b7adda9c117b29538ad3f7db8c2d3a0a"
+    },
+    {
+      "path": "evidence/public/admission-fixture-repair-20261030/CHECKS.json",
+      "bytes": 2583,
+      "sha256": "676d06fe02b9e3e363f2893887c07edd9ae5b82c1a31e252a5a915aea0f53df0"
+    }
+  ],
+  "manifest_self_excluded": true
+}

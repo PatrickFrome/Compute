@@ -84,8 +84,9 @@ async function readStableFile(file, maxBytes) {
 }
 
 // The reviewed PowerShell build driver invokes only the fixed Framework csc,
-// checks its Microsoft signature and loads the result only to inspect Run's
-// signature. No worker request is read and no job is started during preparation.
+// checks its Microsoft signature, parses the complete PowerShell template and
+// loads the result only to inspect Run's signature. No worker request is read
+// and no job is started during preparation.
 const compilerScript = String.raw`param([Parameter(Mandatory=$true)][string]$RequestPath)
 $buildClock = [Diagnostics.Stopwatch]::StartNew()
 $ErrorActionPreference = 'Stop'
@@ -111,6 +112,10 @@ function Get-Digest([string]$File) {
   finally { $sha.Dispose(); $stream.Dispose() }
 }
 if ((Get-Digest $compiler) -ne [string]$request.compiler_sha256 -or (Get-Digest ([string]$request.source_path)) -ne [string]$request.csharp_sha256) { throw 'codex_job_runtime_build_input_changed' }
+if ((Get-Digest ([string]$request.template_path)) -ne [string]$request.template_sha256) { throw 'codex_job_runtime_build_input_changed' }
+$tokens = $null; $parseErrors = $null
+[void][System.Management.Automation.Language.Parser]::ParseFile([string]$request.template_path, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors.Count -ne 0) { throw 'codex_job_runtime_powershell_syntax_invalid' }
 $arguments = @('/nologo', '/noconfig', '/nostdlib+', '/target:library', '/platform:anycpu', '/optimize+', '/debug-', '/codepage:65001', '/utf8output')
 foreach ($name in @('mscorlib.dll', 'System.dll', 'System.Core.dll')) { $arguments += '/reference:' + (Join-Path $framework $name) }
 $arguments += '/out:' + [string]$request.assembly_path
@@ -259,13 +264,16 @@ export async function prepareCodexCliJobRuntime({ helperSourcePath = defaultTemp
     buildRoot = await fs.mkdtemp(path.join(await fs.realpath(os.tmpdir()), 'metaengine-codex-job-build-'));
     buildStat = await fs.lstat(buildRoot);
     const sourcePath = path.join(buildRoot, 'MetaengineCodexJob.cs');
+    const templatePath = path.join(buildRoot, 'template.ps1');
     const assemblyPath = path.join(buildRoot, 'metaengine-codex-job-runtime.dll');
     const proofPath = path.join(buildRoot, 'compiler-proof.json');
     const requestPath = path.join(buildRoot, 'request.json');
     const driverPath = path.join(buildRoot, 'compile.ps1');
     await fs.writeFile(sourcePath, template.csharpBytes, { flag: 'wx' });
+    await fs.writeFile(templatePath, templateBytes, { flag: 'wx' });
     await fs.writeFile(driverPath, compilerScript, { flag: 'wx' });
-    await fs.writeFile(requestPath, JSON.stringify({ source_path: sourcePath, assembly_path: assemblyPath, proof_path: proofPath,
+    await fs.writeFile(requestPath, JSON.stringify({ source_path: sourcePath, template_path: templatePath, template_sha256: template.templateSha256,
+      assembly_path: assemblyPath, proof_path: proofPath,
       compiler_path: compiler, compiler_sha256: compilerSha256, csharp_sha256: template.csharpSha256 }), { flag: 'wx' });
     try {
       const pending = run(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', driverPath, '-RequestPath', requestPath],

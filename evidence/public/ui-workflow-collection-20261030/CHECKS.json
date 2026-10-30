@@ -1,0 +1,38 @@
+{
+  "schema": "metaengine.ui-workflow-source-collection.v1",
+  "parent": "09b4d19bccd210881d8cf0fb5d01cb1ec8b6f293",
+  "patch_origin": "Exact source patch supplied by the Windows UI qualification workstream; no independently published child commit was provided.",
+  "patch_bytes": 795,
+  "patch_sha256": "784d36f3cf25e215043cc42c7ec446f01e052921fc64a8b077e197ef23a45821",
+  "workflow": ".github/workflows/metaengine-client-w23-me2-typecheck.yml",
+  "previous_blob": "c3a3ddfc0309cf8139182cc12cf8148501ef456f",
+  "current_blob": "bd1d1aadbf34ad62e61eba07b84d183325aba7c0",
+  "checks": [
+    "Exact patch SHA256 matched.",
+    "git apply --check succeeded; exact supplied patch applied without conflict.",
+    "git diff --check passed.",
+    "Application package.json and bun.lock unchanged."
+  ],
+  "prior_ui_result": {
+    "source": "5d7ec74db1c72b15921a6e00a2826a09a72f4fb2",
+    "reported_pass": 242,
+    "reported_platform_skips": 11,
+    "lock_entries": 610,
+    "synthetic_browser_cases": 16,
+    "dependencies_and_build": "PASS as reported by the Windows workstream"
+  },
+  "prior_safe_merge_checks": {
+    "source": "09b4d19bccd210881d8cf0fb5d01cb1ec8b6f293",
+    "pass": 49,
+    "fail": 0,
+    "skipped": 2
+  },
+  "qualification": "SOURCE_ONLY_NOT_INSTALL_QUALIFIED",
+  "limits": [
+    "No new tests or installation performed for this final workflow-only descendant.",
+    "Prior test counts refer to their exact earlier source, not a new full combined qualification.",
+    "Owner/ticket WIP and failures remain separate.",
+    "No source seal was regenerated."
+  ],
+  "historical_manifest_treatment": "Earlier checkpoint manifests remain unchanged. The critical review was updated only to record collected UI patch provenance; its current bytes are bound by this new manifest."
+}

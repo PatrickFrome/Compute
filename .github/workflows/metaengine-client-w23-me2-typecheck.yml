@@ -40,7 +40,9 @@ jobs:
         run: test "$(git rev-parse HEAD)" = "$ME2_BUILD_SHA"
       - name: Frozen ME2 UI dependencies
         working-directory: apps/me2-ui
-        run: bun install --frozen-lockfile
+        run: |
+          bun install --frozen-lockfile --ignore-scripts
+          git diff --exit-code -- package.json bun.lock
       - name: Exactly scoped Observatory seven-view falsification suite
         working-directory: apps/me2-ui
         run: bun run test:operator-observatory

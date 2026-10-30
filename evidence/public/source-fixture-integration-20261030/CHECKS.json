@@ -1,0 +1,29 @@
+{
+  "schema": "metaengine.source-fixture-integration-checks.v1",
+  "public_base": "5d7ec74db1c72b15921a6e00a2826a09a72f4fb2",
+  "merge_parents": [
+    "dd18fbe1c0ab2fec52fb3e71032193cc64e3a889",
+    "249d7fdb4c80c7eee1bb7a80f4bff388fbe1a481"
+  ],
+  "qualification": "SOURCE_ONLY_INCOMPLETE",
+  "command": "node --test --test-reporter=tap apps/metaengine-browser/test/client-admission-recovery.test.mjs apps/metaengine-browser/test/r97-goal-submission-mode.test.mjs infra/client-state-runtime/fresh-schema-plan.test.mjs",
+  "result": {
+    "exit_code": 0,
+    "tests": 37,
+    "pass": 36,
+    "fail": 0,
+    "skipped": 1,
+    "skip_reason": "Optional WASM fixture dependency unavailable."
+  },
+  "tap_sha256": "7caffdeb0c06fb299aaa62e10d4c56008c6f76b05ad11545ca6d5868fa44db22",
+  "prior_checks": [
+    "evidence/public/admission-fixture-repair-20261030/CHECKS.json",
+    "evidence/public/fresh-schema-inventory-repair-20261030/CHECKS.json"
+  ],
+  "limitations": [
+    "No new full CI or native Windows run for this combined tree.",
+    "No production implementation, authority gate, SQL migration registration or immutable historical seal changed.",
+    "Callback publication remains unregistered and its default admission remains blocked.",
+    "Independent workstream patches are not included."
+  ]
+}

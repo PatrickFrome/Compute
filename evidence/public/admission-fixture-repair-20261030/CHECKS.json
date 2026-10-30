@@ -1,0 +1,58 @@
+{
+  "schema": "metaengine.admission-fixture-repair-checks.v1",
+  "base": "5d7ec74db1c72b15921a6e00a2826a09a72f4fb2",
+  "status": "SOURCE_FIXTURE_REPAIR_ONLY_OVERALL_QUALIFICATION_INCOMPLETE",
+  "production_files_changed": false,
+  "records": [
+    {
+      "lane": "before.tap",
+      "raw_log_sha256": "9bcc7321045befab58a693abc451c2adb1f1fea7207fd6060a3742aa74aaac86",
+      "summary": {
+        "tests": 18,
+        "suites": 0,
+        "pass": 12,
+        "fail": 6,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      }
+    },
+    {
+      "lane": "after-focused.tap",
+      "raw_log_sha256": "98da0c6c4618f51b3e460b0f15918be60ada4c9639836693b8d072f84f82ffe3",
+      "summary": {
+        "tests": 27,
+        "suites": 0,
+        "pass": 27,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      }
+    },
+    {
+      "lane": "related.tap",
+      "raw_log_sha256": "d42216d352d9dbeaffa5b22966af67539c155b3aca483e1273d064bab8bd644d",
+      "summary": {
+        "tests": 280,
+        "suites": 0,
+        "pass": 280,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      }
+    }
+  ],
+  "source_parser": {
+    "pass": 273,
+    "raw_log_sha256": "ca93fa167b12e7f8fc6776bd17211ff27da9220238e444993975078114d2d641"
+  },
+  "focused_command": "node --test --test-reporter=tap apps/metaengine-browser/test/client-admission-recovery.test.mjs apps/metaengine-browser/test/r97-goal-submission-mode.test.mjs",
+  "related_command": "node --test --test-timeout=60000 --test-reporter=tap --test-concurrency=1 apps/metaengine-browser/test/client-admission-recovery.test.mjs apps/metaengine-browser/test/r97-goal-submission-mode.test.mjs apps/metaengine-browser/test/client-native-coding-goal.test.mjs apps/metaengine-browser/test/client-native-setup-route.test.mjs apps/metaengine-browser/test/client-prepared-goal-activation.test.mjs apps/metaengine-browser/test/native-supervisor-initialization-lifetime.test.mjs apps/metaengine-browser/test/native-host-scope-cleanup.test.mjs apps/metaengine-browser/test/managed-runtime-drain.test.mjs apps/metaengine-browser/test/runtime-recovery-main-mount.test.mjs apps/metaengine-browser/test/native-coding-host-ipc.test.mjs apps/metaengine-browser/test/r97-single-main-ui-contract.test.mjs apps/metaengine-browser/test/r97-primary-chat-fleet.test.mjs",
+  "source_command": "cd apps/metaengine-browser && node scripts/check-source.mjs",
+  "counts_overlap": true,
+  "native_proof": false,
+  "dependency_installation": false,
+  "historical_manifests_rewritten": false
+}

@@ -1,0 +1,71 @@
+{
+  "schema": "metaengine.source-fixture-integration-manifest.v1",
+  "public_base": "5d7ec74db1c72b15921a6e00a2826a09a72f4fb2",
+  "merge_parents": [
+    "dd18fbe1c0ab2fec52fb3e71032193cc64e3a889",
+    "249d7fdb4c80c7eee1bb7a80f4bff388fbe1a481"
+  ],
+  "scope": "All changed files relative to the published base, excluding this manifest itself. Historical manifests are retained unchanged and describe their original checkpoints.",
+  "files": [
+    {
+      "path": "apps/metaengine-browser/test/client-admission-recovery.test.mjs",
+      "bytes": 18150,
+      "sha256": "ab8469d69bcec28e25bcaa8c75dd0d96529522d727ff62ebe9775f81865090e3"
+    },
+    {
+      "path": "apps/metaengine-browser/test/r97-goal-submission-mode.test.mjs",
+      "bytes": 5498,
+      "sha256": "858c07f6c795dd42e2e1062518f461a8d331d94f603f4d78ac1b9fa1a82d427e"
+    },
+    {
+      "path": "evidence/public/admission-fixture-repair-20261030/CHECKS.json",
+      "bytes": 2583,
+      "sha256": "676d06fe02b9e3e363f2893887c07edd9ae5b82c1a31e252a5a915aea0f53df0"
+    },
+    {
+      "path": "evidence/public/admission-fixture-repair-20261030/MANIFEST.json",
+      "bytes": 983,
+      "sha256": "5951a73fb593234bb6a2327545c38364fa1e328a45f60efefc4e737aadbcfd4a"
+    },
+    {
+      "path": "evidence/public/admission-fixture-repair-20261030/REVIEW.md",
+      "bytes": 2614,
+      "sha256": "b7b09501a375274f55877fed49e44f46b7adda9c117b29538ad3f7db8c2d3a0a"
+    },
+    {
+      "path": "evidence/public/fresh-schema-inventory-repair-20261030/CHECKS.json",
+      "bytes": 3756,
+      "sha256": "63912da3395643ac71bddeef018de770f3e3cfd7b8bfe6f128b66a7183b9212e"
+    },
+    {
+      "path": "evidence/public/fresh-schema-inventory-repair-20261030/MANIFEST.json",
+      "bytes": 990,
+      "sha256": "f2d5b60b6bef1d8f81c10600dc6546fe9b4925ba3ad063f2f98846601001afb9"
+    },
+    {
+      "path": "evidence/public/fresh-schema-inventory-repair-20261030/REVIEW.md",
+      "bytes": 2791,
+      "sha256": "6d37f2aa1d1667c1e3ab68f74b88e9865fd83281858e9693a0c41d5f7c52967b"
+    },
+    {
+      "path": "evidence/public/source-fixture-integration-20261030/CHECKS.json",
+      "bytes": 1302,
+      "sha256": "b51475a853176843cc42894ffe12ba26cbd56ee5d32545f62b354ba2ba4ef745"
+    },
+    {
+      "path": "evidence/public/source-fixture-integration-20261030/REVIEW.md",
+      "bytes": 1400,
+      "sha256": "417704e89e9b92d843a9e2d24b4b1bd1edccfbac82d4bb43245c3d20d028fa9b"
+    },
+    {
+      "path": "infra/client-state-runtime/fresh-schema-candidate-plan.json",
+      "bytes": 18103,
+      "sha256": "a507dde5b1e7aa9316d830299fda4bf1cbbcae37d32a9fe8ebb423f3fe0cbea0"
+    },
+    {
+      "path": "infra/client-state-runtime/fresh-schema-plan.test.mjs",
+      "bytes": 9003,
+      "sha256": "f265f0c549a1ae133496fa2950bcfb7277194032dab17a5304938c1bd650c050"
+    }
+  ]
+}
