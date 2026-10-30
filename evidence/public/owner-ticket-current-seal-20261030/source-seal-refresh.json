@@ -1,0 +1,1512 @@
+{
+  "schema": "metaengine.reviewed-current-source-seal-refresh.v1",
+  "functional_source": "4b0926d1b01e8cea4160d6ea13086666fe56b548",
+  "previous_manifest_blob": "6aaeeb82df3ba63da416e3332a83e5b97591c894",
+  "current_manifest_sha256": "468200aedd00a821bf83f5842b470c1e1d6e53982c4eec368a5cae6a3811b753",
+  "updated_existing_paths": [
+    ".github/client-state-runtime-contract-budget.test.mjs",
+    ".github/workflows/client-checkpoint-reconciliation-qualification.yml",
+    ".github/workflows/client-source-candidate-w73.yml",
+    ".github/workflows/metaengine-client-w23-me2-typecheck.yml",
+    "apps/me2-ui/package.json",
+    "apps/me2-ui/scripts/ui-source-acceptance.mjs",
+    "apps/me2-ui/scripts/ui-source-acceptance.test.mjs",
+    "apps/me2-ui/src/components/me2/managed-project-history.tsx",
+    "apps/me2-ui/src/components/me2/pages/operator-observatory.tsx",
+    "apps/me2-ui/src/components/me2/pages/tasks.tsx",
+    "apps/me2-ui/src/components/me2/shell/me2-shell.tsx",
+    "apps/me2-ui/src/components/me2/shell/topbar.tsx",
+    "apps/me2-ui/src/hooks/use-client-runtime-status.ts",
+    "apps/me2-ui/src/lib/client-project-tasks.test.mjs",
+    "apps/me2-ui/src/lib/client-project-tasks.ts",
+    "apps/me2-ui/src/lib/client-runtime-resource.test.mjs",
+    "apps/me2-ui/src/lib/client-runtime-resource.ts",
+    "apps/me2-ui/src/lib/goal-journal-readback.ui.test.mjs",
+    "apps/me2-ui/src/lib/goal-submission-mode-observer.d.mts",
+    "apps/me2-ui/src/lib/goal-submission-mode-observer.mjs",
+    "apps/me2-ui/src/lib/goal-submission-mode-observer.test.mjs",
+    "apps/me2-ui/src/lib/goal-submission-mode-observer.ui.test.mjs",
+    "apps/me2-ui/src/lib/managed-project-history.ui.test.mjs",
+    "apps/me2-ui/src/lib/operator-primary-views.ui.test.mjs",
+    "apps/metaengine-browser/build/installer.nsh",
+    "apps/metaengine-browser/scripts/check-source.mjs",
+    "apps/metaengine-browser/scripts/codex-cli-job-runner.ps1",
+    "apps/metaengine-browser/scripts/prepare-codex-cli-job-runtime.mjs",
+    "apps/metaengine-browser/src/agent-resource-admission.mjs",
+    "apps/metaengine-browser/src/agent-tool-protocol.mjs",
+    "apps/metaengine-browser/src/agent-toolbelt-core.mjs",
+    "apps/metaengine-browser/src/autonomous-project-task-runtime.mjs",
+    "apps/metaengine-browser/src/browser-guardian-machine-bootstrap-launcher.mjs",
+    "apps/metaengine-browser/src/browser-guardian-update-actuator-client.mjs",
+    "apps/metaengine-browser/src/browser-parent-suspension-transport.mjs",
+    "apps/metaengine-browser/src/browser-parent-suspension.mjs",
+    "apps/metaengine-browser/src/client-goal-journal.mjs",
+    "apps/metaengine-browser/src/client-native-coding-goal.mjs",
+    "apps/metaengine-browser/src/codex-cli-runner.mjs",
+    "apps/metaengine-browser/src/codex-cli-sandbox-probe.mjs",
+    "apps/metaengine-browser/src/codex-cli-windows-process-controller.mjs",
+    "apps/metaengine-browser/src/devos-native-task-cycle-core.mjs",
+    "apps/metaengine-browser/src/host-owner-genesis-custody-w74.mjs",
+    "apps/metaengine-browser/src/installed-executable-provenance-w68.mjs",
+    "apps/metaengine-browser/src/local-runtime-host-controller.mjs",
+    "apps/metaengine-browser/src/main.mjs",
+    "apps/metaengine-browser/src/managed-runtime-drain.mjs",
+    "apps/metaengine-browser/src/native-coding-agent-host-contract.mjs",
+    "apps/metaengine-browser/src/native-coding-agent-mcp-broker.mjs",
+    "apps/metaengine-browser/src/native-coding-agent-mcp-stdio.mjs",
+    "apps/metaengine-browser/src/native-coding-agent-run-bridge.mjs",
+    "apps/metaengine-browser/src/native-coding-device-request.mjs",
+    "apps/metaengine-browser/src/native-coding-execution-pool.mjs",
+    "apps/metaengine-browser/src/native-coding-git-proof.mjs",
+    "apps/metaengine-browser/src/native-coding-host-ipc-client.mjs",
+    "apps/metaengine-browser/src/native-coding-host-observers.mjs",
+    "apps/metaengine-browser/src/native-coding-operator-paths.mjs",
+    "apps/metaengine-browser/src/native-coding-project-checkpoints.mjs",
+    "apps/metaengine-browser/src/native-coding-runtime.mjs",
+    "apps/metaengine-browser/src/native-coding-service-heartbeat-publisher.mjs",
+    "apps/metaengine-browser/src/native-coding-task-context.mjs",
+    "apps/metaengine-browser/src/native-supervisor-client-base.mjs",
+    "apps/metaengine-browser/src/preload-shell.cjs",
+    "apps/metaengine-browser/src/private-windows-storage-acl.mjs",
+    "apps/metaengine-browser/src/supervisor-device-identity.mjs",
+    "apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/devos-routes.mjs",
+    "apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/project-continuity-routes.mjs",
+    "apps/metaengine-browser/test/agent-count-unbounded.test.mjs",
+    "apps/metaengine-browser/test/agent-toolbelt.test.mjs",
+    "apps/metaengine-browser/test/autonomous-project-continuation-contract.test.mjs",
+    "apps/metaengine-browser/test/autonomous-project-task-runtime.test.mjs",
+    "apps/metaengine-browser/test/browser-closed-loop-audit-fixes.test.mjs",
+    "apps/metaengine-browser/test/browser-parent-suspension.test.mjs",
+    "apps/metaengine-browser/test/client-admission-recovery.test.mjs",
+    "apps/metaengine-browser/test/client-native-coding-goal.test.mjs",
+    "apps/metaengine-browser/test/codex-cli-job-runtime-build.test.mjs",
+    "apps/metaengine-browser/test/codex-cli-job-runtime.test.mjs",
+    "apps/metaengine-browser/test/codex-cli-runner.test.mjs",
+    "apps/metaengine-browser/test/codex-cli-sandbox-probe.test.mjs",
+    "apps/metaengine-browser/test/codex-cli-startup-observation.test.mjs",
+    "apps/metaengine-browser/test/codex-cli-windows-job-birth-physical.test.mjs",
+    "apps/metaengine-browser/test/codex-cli-windows-job-birth.test.mjs",
+    "apps/metaengine-browser/test/codex-cli-windows-output-order.test.mjs",
+    "apps/metaengine-browser/test/codex-cli-windows-process-controller-failures.test.mjs",
+    "apps/metaengine-browser/test/devos-native-coding-cycle.test.mjs",
+    "apps/metaengine-browser/test/devos-native-task-cycle.test.mjs",
+    "apps/metaengine-browser/test/fixtures/codex-cli-startup-observation.mjs",
+    "apps/metaengine-browser/test/fixtures/project-continuation-process.mjs",
+    "apps/metaengine-browser/test/host-owner-genesis-custody-w74.test.mjs",
+    "apps/metaengine-browser/test/host-owner-protected-identity-w74.test.mjs",
+    "apps/metaengine-browser/test/installed-executable-provenance-w68.test.mjs",
+    "apps/metaengine-browser/test/installer-bootstrap-contract.test.mjs",
+    "apps/metaengine-browser/test/local-runtime-host-controller.test.mjs",
+    "apps/metaengine-browser/test/local-runtime-host-terminal.test.mjs",
+    "apps/metaengine-browser/test/managed-runtime-drain.test.mjs",
+    "apps/metaengine-browser/test/me2-r85-visual-evidence.mjs",
+    "apps/metaengine-browser/test/native-coding-agent-mcp-stdio.test.mjs",
+    "apps/metaengine-browser/test/native-coding-agent-run-bridge.test.mjs",
+    "apps/metaengine-browser/test/native-coding-git-proof.test.mjs",
+    "apps/metaengine-browser/test/native-coding-host-ipc.test.mjs",
+    "apps/metaengine-browser/test/native-coding-host-observers.test.mjs",
+    "apps/metaengine-browser/test/native-coding-project-checkpoints.test.mjs",
+    "apps/metaengine-browser/test/native-coding-runtime.test.mjs",
+    "apps/metaengine-browser/test/native-coding-server-admission.test.mjs",
+    "apps/metaengine-browser/test/native-coding-service-heartbeat-publisher.test.mjs",
+    "apps/metaengine-browser/test/native-supervisor-initialization-lifetime.test.mjs",
+    "apps/metaengine-browser/test/private-windows-storage-acl.test.mjs",
+    "apps/metaengine-browser/test/project-continuity-routes.test.mjs",
+    "apps/metaengine-browser/test/r97-goal-submission-mode.test.mjs",
+    "apps/metaengine-browser/test/supervisor-device-identity-concurrency.test.mjs",
+    "infra/client-state-runtime/browser-parent-suspension.sql.test.mjs",
+    "infra/client-state-runtime/db-api-core.mjs",
+    "infra/client-state-runtime/fresh-schema-candidate-plan.json",
+    "infra/client-state-runtime/fresh-schema-plan.test.mjs",
+    "infra/client-state-runtime/local-runtime-migrations.integration.test.mjs",
+    "infra/client-state-runtime/local-runtime-migrations.mjs",
+    "infra/client-state-runtime/local-runtime-migrations.test.mjs",
+    "infra/client-state-runtime/native-agent-count-unbounded-v2.sql",
+    "infra/client-state-runtime/native-coding-agent-host-tools.mjs",
+    "infra/client-state-runtime/native-coding-agent-host-tools.test.mjs",
+    "infra/client-state-runtime/native-coding-agent-project-tools.integration.test.mjs",
+    "infra/client-state-runtime/native-coding-checkpoint-commit-rotation.integration.test.mjs",
+    "infra/client-state-runtime/native-coding-checkpoint-verifier.mjs",
+    "infra/client-state-runtime/native-coding-checkpoint-verifier.test.mjs",
+    "infra/client-state-runtime/native-coding-checkpoint.integration.test.mjs",
+    "infra/client-state-runtime/native-coding-host-authority.integration.test.mjs",
+    "infra/client-state-runtime/native-coding-host-authority.mjs",
+    "infra/client-state-runtime/native-coding-host-authority.test.mjs",
+    "infra/client-state-runtime/native-coding-host-commit-profile.integration.test.mjs",
+    "infra/client-state-runtime/native-coding-host-commit-service.mjs",
+    "infra/client-state-runtime/native-coding-host-commit.integration.test.mjs",
+    "infra/client-state-runtime/native-coding-host-ipc.mjs",
+    "infra/client-state-runtime/native-coding-host-os-scope.mjs",
+    "infra/client-state-runtime/native-coding-host-os-scope.test.mjs",
+    "infra/client-state-runtime/native-coding-host-seed-binding.mjs",
+    "infra/client-state-runtime/native-coding-host-seed-binding.test.mjs",
+    "infra/client-state-runtime/native-coding-host-seed-service.mjs",
+    "infra/client-state-runtime/native-coding-host-seed-service.test.mjs",
+    "infra/client-state-runtime/native-coding-host-service-heartbeat.mjs",
+    "infra/client-state-runtime/native-coding-initial-goal-seed.integration.test.mjs",
+    "infra/client-state-runtime/native-coding-project-continuation.integration.test.mjs",
+    "infra/client-state-runtime/native-coding-service-admission.integration.test.mjs",
+    "infra/client-state-runtime/native-coding-task-context.test.mjs",
+    "infra/client-state-runtime/package-runtime-resources.mjs",
+    "infra/client-state-runtime/package-runtime-resources.test.mjs",
+    "infra/client-state-runtime/package.json",
+    "infra/client-state-runtime/reviewed-empty-schema.test.mjs",
+    "infra/client-state-runtime/runtime-host.mjs",
+    "infra/client-state-runtime/test/fresh-schema-disposable.mjs",
+    "infra/client-state-runtime/test/native-coding-single-connection-fixture.mjs"
+  ],
+  "newly_sealed_paths": [
+    ".github/workflows/metaengine-client-w29-primary-views.yml",
+    "apps/me2-ui/UI_DRAFT_SCOPE_REVIEW.md",
+    "apps/me2-ui/scripts/ui-ci-fixtures.test.mjs",
+    "apps/me2-ui/src/app/page.tsx",
+    "apps/me2-ui/src/hooks/use-draft-scope.ts",
+    "apps/me2-ui/src/hooks/use-goal-draft.ts",
+    "apps/me2-ui/src/lib/client-native-runtime-badge.ui.test.mjs",
+    "apps/me2-ui/src/lib/draft-scope.d.mts",
+    "apps/me2-ui/src/lib/draft-scope.mjs",
+    "apps/me2-ui/src/lib/draft-scope.test.mjs",
+    "apps/me2-ui/src/lib/goal-draft.d.mts",
+    "apps/me2-ui/src/lib/goal-draft.mjs",
+    "apps/me2-ui/src/lib/goal-draft.test.mjs",
+    "apps/me2-ui/src/lib/native-draft-namespace-integration.test.mjs",
+    "apps/me2-ui/src/lib/ui-read-flight.d.mts",
+    "apps/me2-ui/src/lib/ui-read-flight.mjs",
+    "apps/me2-ui/src/lib/ui-reliability-harness.mjs",
+    "apps/me2-ui/src/lib/ui-reliability.ui.test.mjs",
+    "apps/metaengine-browser/src/client-draft-scope.mjs",
+    "apps/metaengine-browser/src/client-native-setup-route.mjs",
+    "apps/metaengine-browser/src/client-prepared-goal-activation.mjs",
+    "apps/metaengine-browser/src/codex-cli-physical-settlement.mjs",
+    "apps/metaengine-browser/src/native-coding-capacity-contract.mjs",
+    "apps/metaengine-browser/src/native-coding-capacity-owner.mjs",
+    "apps/metaengine-browser/src/native-coding-host-settlement.mjs",
+    "apps/metaengine-browser/src/native-coding-pending-activation-phase.mjs",
+    "apps/metaengine-browser/src/native-coding-publication-handoff-contract.mjs",
+    "apps/metaengine-browser/src/native-coding-run-callback-journal.mjs",
+    "apps/metaengine-browser/src/native-coding-run-owner-main.mjs",
+    "apps/metaengine-browser/src/native-coding-run-owner-phase.mjs",
+    "apps/metaengine-browser/src/native-coding-setup-contract.mjs",
+    "apps/metaengine-browser/src/native-coding-windows-process-observer.mjs",
+    "apps/metaengine-browser/src/native-host-scope-cleanup.mjs",
+    "apps/metaengine-browser/test/client-draft-scope.test.mjs",
+    "apps/metaengine-browser/test/client-native-setup-route.test.mjs",
+    "apps/metaengine-browser/test/client-prepared-goal-activation.test.mjs",
+    "apps/metaengine-browser/test/client-prepared-goal.test.mjs",
+    "apps/metaengine-browser/test/codex-cli-native-drain-order.test.mjs",
+    "apps/metaengine-browser/test/codex-cli-physical-settlement.test.mjs",
+    "apps/metaengine-browser/test/codex-cli-sandbox-probe-lifetime.test.mjs",
+    "apps/metaengine-browser/test/codex-cli-windows-handle-list.test.mjs",
+    "apps/metaengine-browser/test/codex-cli-windows-lifetime.test.mjs",
+    "apps/metaengine-browser/test/fixtures/codex-cli-joined-settlement-fixture.mjs",
+    "apps/metaengine-browser/test/fixtures/native-coding-in-memory-broker.mjs",
+    "apps/metaengine-browser/test/fixtures/native-coding-run-custody-double.mjs",
+    "apps/metaengine-browser/test/fixtures/native-coding-unqualified-bridge.mjs",
+    "apps/metaengine-browser/test/fixtures/native-published-scope-pg-child.mjs",
+    "apps/metaengine-browser/test/fixtures/native-run-owner-read.mjs",
+    "apps/metaengine-browser/test/guardian-owner-loaded-read.test.mjs",
+    "apps/metaengine-browser/test/native-coding-agent-callback-custody.test.mjs",
+    "apps/metaengine-browser/test/native-coding-agent-close-lifetime.test.mjs",
+    "apps/metaengine-browser/test/native-coding-capacity-contract.test.mjs",
+    "apps/metaengine-browser/test/native-coding-capacity-first-dispatch.test.mjs",
+    "apps/metaengine-browser/test/native-coding-capacity-owner.test.mjs",
+    "apps/metaengine-browser/test/native-coding-pending-activation-phase.test.mjs",
+    "apps/metaengine-browser/test/native-coding-publication-handoff.test.mjs",
+    "apps/metaengine-browser/test/native-coding-run-callback-journal.test.mjs",
+    "apps/metaengine-browser/test/native-coding-run-owner-ipc.test.mjs",
+    "apps/metaengine-browser/test/native-coding-run-owner-phase.test.mjs",
+    "apps/metaengine-browser/test/native-coding-setup-contract.test.mjs",
+    "apps/metaengine-browser/test/native-host-scope-cleanup.test.mjs",
+    "apps/metaengine-browser/test/native-published-scope-drain.pg17.test.mjs",
+    "apps/metaengine-browser/test/native-setup-loaded-signer.test.mjs",
+    "apps/metaengine-browser/test/source-check-runner.test.mjs",
+    "infra/client-state-runtime/native-coding-callback-prefix.mjs",
+    "infra/client-state-runtime/native-coding-callback-prefix.test.mjs",
+    "infra/client-state-runtime/native-coding-callback-publication-source.test.mjs",
+    "infra/client-state-runtime/native-coding-callback-publication-v1.sql",
+    "infra/client-state-runtime/native-coding-callback-publication.mjs",
+    "infra/client-state-runtime/native-coding-callback-publication.pg17.test.mjs",
+    "infra/client-state-runtime/native-coding-capacity-source.test.mjs",
+    "infra/client-state-runtime/native-coding-capacity-v2.sql",
+    "infra/client-state-runtime/native-coding-capacity.pg17.test.mjs",
+    "infra/client-state-runtime/native-coding-host-capacity.mjs",
+    "infra/client-state-runtime/native-coding-host-capacity.test.mjs",
+    "infra/client-state-runtime/native-coding-host-setup-service.mjs",
+    "infra/client-state-runtime/native-coding-pending-activation-profile.mjs",
+    "infra/client-state-runtime/native-coding-pending-activation-profile.test.mjs",
+    "infra/client-state-runtime/native-coding-pending-activation-v1.sql",
+    "infra/client-state-runtime/native-coding-pending-activation.mjs",
+    "infra/client-state-runtime/native-coding-pending-goal-v1.sql",
+    "infra/client-state-runtime/native-coding-pending-goal.pg17.test.mjs",
+    "infra/client-state-runtime/native-coding-preparation-transaction.mjs",
+    "infra/client-state-runtime/native-coding-preparation-transaction.test.mjs",
+    "infra/client-state-runtime/native-coding-protected-settlement.test.mjs",
+    "infra/client-state-runtime/native-coding-run-owner-control.pg17.test.mjs",
+    "infra/client-state-runtime/native-coding-run-owner-read.mjs",
+    "infra/client-state-runtime/native-coding-run-owner-read.test.mjs",
+    "infra/client-state-runtime/native-coding-setup-operation-v1.sql",
+    "infra/client-state-runtime/native-coding-setup.pg17.test.mjs",
+    "infra/client-state-runtime/native-coding-workspace-preparation.mjs",
+    "infra/client-state-runtime/native-host-startup-lifecycle.test.mjs",
+    "infra/client-state-runtime/test/active-run-owner-pg-fixture.mjs",
+    "infra/client-state-runtime/test/native-host-startup-lifecycle-loader.mjs",
+    "infra/client-state-runtime/test/pending-owner-phase-fixture.mjs",
+    "infra/client-state-runtime/windows-qualification-registration.test.mjs",
+    "scripts/CURRENT_SOURCE_SEAL.md",
+    "scripts/current-source-seal.mjs",
+    "tests/current-source-seal.test.mjs"
+  ],
+  "reviewed_changes": [
+    {
+      "path": ".github/client-state-runtime-contract-budget.test.mjs",
+      "previous_blob": "23426b9d511c5e581558dd442c7da8aa79374cd8",
+      "current_blob": "89ee8b62fd2757ab23d06655724b9712990f4e82"
+    },
+    {
+      "path": ".github/workflows/client-checkpoint-reconciliation-qualification.yml",
+      "previous_blob": "c90dc3ad7f4c7853cade45032330650e1e584634",
+      "current_blob": "4404c3779757aec2b1892c40b4606ad9448e80eb"
+    },
+    {
+      "path": ".github/workflows/client-source-candidate-w73.yml",
+      "previous_blob": "08eb0552f6a58ffd751c9e9b2419d1a39761ce5c",
+      "current_blob": "c0d9b024199b9f172c2d5a836e7bd9963483d902"
+    },
+    {
+      "path": ".github/workflows/metaengine-client-w23-me2-typecheck.yml",
+      "previous_blob": "8c5a5235888010bb2338a874887cbf92dbd54f4e",
+      "current_blob": "bd1d1aadbf34ad62e61eba07b84d183325aba7c0"
+    },
+    {
+      "path": ".github/workflows/metaengine-client-w29-primary-views.yml",
+      "previous_blob": null,
+      "current_blob": "cf0cf3b7efa68347895bbca3a845bdef225e951f"
+    },
+    {
+      "path": "apps/me2-ui/UI_DRAFT_SCOPE_REVIEW.md",
+      "previous_blob": null,
+      "current_blob": "3b347bc213b6ad07c0110ac790b5acd3c815c046"
+    },
+    {
+      "path": "apps/me2-ui/package.json",
+      "previous_blob": "fc9076e9b39ee47d812d3f7dba86e9a759219618",
+      "current_blob": "2b20634759a0b5fbd39d218133a3525eb111979b"
+    },
+    {
+      "path": "apps/me2-ui/scripts/ui-ci-fixtures.test.mjs",
+      "previous_blob": null,
+      "current_blob": "aae6a8bb427d881961529cbda91968dd1824230f"
+    },
+    {
+      "path": "apps/me2-ui/scripts/ui-source-acceptance.mjs",
+      "previous_blob": "f319e085bef3cb098c519c6d60c892f142ef8cb9",
+      "current_blob": "ca75b70e31374804e37ef69e10b32ea1436a5e00"
+    },
+    {
+      "path": "apps/me2-ui/scripts/ui-source-acceptance.test.mjs",
+      "previous_blob": "dc132c7dffaa8fa8b2269bdaee11dc885a27b31e",
+      "current_blob": "fde61184be697877717908f386859758dddb15db"
+    },
+    {
+      "path": "apps/me2-ui/src/app/page.tsx",
+      "previous_blob": null,
+      "current_blob": "c333bda7e5bc6ba79599763ec9a31f240bb5315d"
+    },
+    {
+      "path": "apps/me2-ui/src/components/me2/managed-project-history.tsx",
+      "previous_blob": "a621326cfe38e544d3ce4d7ec2d7bfe3df65e0ea",
+      "current_blob": "cf941856e387d358befa92b37f6b97aa67daf4b6"
+    },
+    {
+      "path": "apps/me2-ui/src/components/me2/pages/operator-observatory.tsx",
+      "previous_blob": "c5dd6a786d0ead915aad8b0ff8b10af4efa65b77",
+      "current_blob": "9c727856bf45aafbffc6b47535419adbc160e73a"
+    },
+    {
+      "path": "apps/me2-ui/src/components/me2/pages/tasks.tsx",
+      "previous_blob": "02f4c3f69d98cbe28561dfc995c9dee6c37dd97a",
+      "current_blob": "fb7c645e50063906ca20fc8f177f31ad061c731c"
+    },
+    {
+      "path": "apps/me2-ui/src/components/me2/shell/me2-shell.tsx",
+      "previous_blob": "4f862f1250027c9729ad0101332259b962e47a75",
+      "current_blob": "226888ab3eec530611f71d1042f44dd689b572c9"
+    },
+    {
+      "path": "apps/me2-ui/src/components/me2/shell/topbar.tsx",
+      "previous_blob": "031ab8eb95784fb8daad8ded807177e73b4b2cdb",
+      "current_blob": "2ee724d459f46bfad0016bc84c456edca9c0a19e"
+    },
+    {
+      "path": "apps/me2-ui/src/hooks/use-client-runtime-status.ts",
+      "previous_blob": "378e18a43c8c0567b531aa6a46a9cceacd5ccb49",
+      "current_blob": "37eee277325559daf727d2cc239ef6424caa66db"
+    },
+    {
+      "path": "apps/me2-ui/src/hooks/use-draft-scope.ts",
+      "previous_blob": null,
+      "current_blob": "d0fa230bd287c84d998eec1a12629d0b148defb6"
+    },
+    {
+      "path": "apps/me2-ui/src/hooks/use-goal-draft.ts",
+      "previous_blob": null,
+      "current_blob": "94dbadcb9073a06a8a613ffdea8adb94a42d5b96"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/client-native-runtime-badge.ui.test.mjs",
+      "previous_blob": null,
+      "current_blob": "8b99a88e538817031f9b6107951542bcac1eaa96"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/client-project-tasks.test.mjs",
+      "previous_blob": "ed019ff0fd121728a699b77b55d0519806235e56",
+      "current_blob": "63c983c5d147e93a45eacd5f89cc2d50184c712b"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/client-project-tasks.ts",
+      "previous_blob": "a360e8e5403779f0e49d67de809c71101a4acfc8",
+      "current_blob": "f435d8a191265485c1bcb4b6900307dab0eff2b0"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/client-runtime-resource.test.mjs",
+      "previous_blob": "79a3cb783595ed56b10f1ac6bd66038554b8cce7",
+      "current_blob": "5dee4baf59c4e1883cb5931da928568fcb2fabe3"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/client-runtime-resource.ts",
+      "previous_blob": "b8b5c8062c2e32dd8ea0cd6953394c2f29e2d054",
+      "current_blob": "ccadf7a778c21328a6c84f270fb13693e66994cc"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/draft-scope.d.mts",
+      "previous_blob": null,
+      "current_blob": "fdf2d6057e03fa4ad84d33002bd196699ecbff94"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/draft-scope.mjs",
+      "previous_blob": null,
+      "current_blob": "267adec419b3f4128910e3a916ccdb855d64ea4b"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/draft-scope.test.mjs",
+      "previous_blob": null,
+      "current_blob": "490417df9fb07150dcdbf8046bec09bce15db934"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/goal-draft.d.mts",
+      "previous_blob": null,
+      "current_blob": "df17ccffe6658e73f4f47c4d07c8dc00c25d423c"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/goal-draft.mjs",
+      "previous_blob": null,
+      "current_blob": "b7dacd14363b341fffbaf80f3e5a81294b64c430"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/goal-draft.test.mjs",
+      "previous_blob": null,
+      "current_blob": "b1ab377503ce8ff2867832e3cc9059be08b9ede3"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/goal-journal-readback.ui.test.mjs",
+      "previous_blob": "7540272fff3626fdca7de6d96370630ee14a611d",
+      "current_blob": "d86b36463c9b9f074a11e1ce44279a60635525eb"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/goal-submission-mode-observer.d.mts",
+      "previous_blob": "05ba3d9ae2db629874c2f4f7119208589888a0da",
+      "current_blob": "cd21a448a4bbac8ea097cbf350f81bfc9b03f45d"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/goal-submission-mode-observer.mjs",
+      "previous_blob": "c9bed6bbec79709e7303639753fcd6c2e468d324",
+      "current_blob": "04c2cfffaa18de8d371991431e67a59defa6198e"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/goal-submission-mode-observer.test.mjs",
+      "previous_blob": "f5554eb377a2b1fd0d291c305bf429c9257e6def",
+      "current_blob": "d4d82d2c00e3abf482e89f4d5daf8038c494cf1a"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/goal-submission-mode-observer.ui.test.mjs",
+      "previous_blob": "117db97dfd4392f311bb4f1573abd6ea79d7be42",
+      "current_blob": "a868f63a2c390300b1fce0098ea88d4e99c3d54b"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/managed-project-history.ui.test.mjs",
+      "previous_blob": "2dcbe9248337e1282611f1be11cfe263b0938b2f",
+      "current_blob": "20e0731cd0c355253f38fbc3a1e44dce9d37a3d4"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/native-draft-namespace-integration.test.mjs",
+      "previous_blob": null,
+      "current_blob": "042dc4d9b8c5677f22f3c66dc09774bdb70c662c"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/operator-primary-views.ui.test.mjs",
+      "previous_blob": "7f073f7e58e6c3c4abb8c08128a14d72abf51719",
+      "current_blob": "95cd4aba89178be2739a2e159c71e8b503b679b0"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/ui-read-flight.d.mts",
+      "previous_blob": null,
+      "current_blob": "5fba96e5ffbbb9b74ead86e3b1b66ce45cc2e8e8"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/ui-read-flight.mjs",
+      "previous_blob": null,
+      "current_blob": "52d3fa34487536a20a84a780ec7d5fa6ec3e91b1"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/ui-reliability-harness.mjs",
+      "previous_blob": null,
+      "current_blob": "cf1013b670f54bf40152f48247cd78c3c0e414bd"
+    },
+    {
+      "path": "apps/me2-ui/src/lib/ui-reliability.ui.test.mjs",
+      "previous_blob": null,
+      "current_blob": "980a537987f2e7a9fb2a81eda57523d77cd352d3"
+    },
+    {
+      "path": "apps/metaengine-browser/build/installer.nsh",
+      "previous_blob": "6947db3b8148921e459f0def8f7c1f54bac3c8e1",
+      "current_blob": "ef8939bc792b268847aa6102fbbd2e32fa29b630"
+    },
+    {
+      "path": "apps/metaengine-browser/scripts/check-source.mjs",
+      "previous_blob": "23020ed996d4f8be7ea9bde9f7654f882c814d90",
+      "current_blob": "f608b5d68fa944c845b2f7431db4a70c6423406a"
+    },
+    {
+      "path": "apps/metaengine-browser/scripts/codex-cli-job-runner.ps1",
+      "previous_blob": "0bdbc66d5cbe31bf61a0b8939185ef213d8a4b0e",
+      "current_blob": "1cb5be90a4a5975ede54383bb8e1ea24c55b75e6"
+    },
+    {
+      "path": "apps/metaengine-browser/scripts/prepare-codex-cli-job-runtime.mjs",
+      "previous_blob": "1a9575f7880820e2b721d34f88c43144f14dc5a7",
+      "current_blob": "15324c6ff1620ccad0c392905705783366242978"
+    },
+    {
+      "path": "apps/metaengine-browser/src/agent-resource-admission.mjs",
+      "previous_blob": "c8d8ea38ddda684cf17dc3c949130cfccf92a2b2",
+      "current_blob": "6638ecfc55059563707c1b317fef25e5196efdcb"
+    },
+    {
+      "path": "apps/metaengine-browser/src/agent-tool-protocol.mjs",
+      "previous_blob": "6c88ea958fa4d7291ac0c3309f4826af02f50966",
+      "current_blob": "ea6e79c9789a5a9eadc7bd91a4e8a6b749d55ae8"
+    },
+    {
+      "path": "apps/metaengine-browser/src/agent-toolbelt-core.mjs",
+      "previous_blob": "12799eccb16a61137856440977ce8a1d790a7814",
+      "current_blob": "6f0f7121b9e8c241cecc28bbe48621029d0a07b2"
+    },
+    {
+      "path": "apps/metaengine-browser/src/autonomous-project-task-runtime.mjs",
+      "previous_blob": "3f010a69fd923adac0e7747fcc0cf15e36a8f018",
+      "current_blob": "fa1645efcd6248bbe497e10674046b8e0c4ac16c"
+    },
+    {
+      "path": "apps/metaengine-browser/src/browser-guardian-machine-bootstrap-launcher.mjs",
+      "previous_blob": "f6d68450702cf5063c4a88a61ae72780088b4444",
+      "current_blob": "93444c45895558e2505bece48c7ecd3cc623feff"
+    },
+    {
+      "path": "apps/metaengine-browser/src/browser-guardian-update-actuator-client.mjs",
+      "previous_blob": "1445a1bd54adef2181f773e37f56d95c70952910",
+      "current_blob": "5148818482db6e1a5ee228713d57c1c25bdb352c"
+    },
+    {
+      "path": "apps/metaengine-browser/src/browser-parent-suspension-transport.mjs",
+      "previous_blob": "fd620fda92c523fc95919a32c1e97e82c111a56e",
+      "current_blob": "d5554dfde906b7fdd4eb922578d454d7f5be1d4a"
+    },
+    {
+      "path": "apps/metaengine-browser/src/browser-parent-suspension.mjs",
+      "previous_blob": "59ad127447a89e958e5c8f86d686aed2932c611d",
+      "current_blob": "c352d334cfd0467ea8309b9cb2ffaff1fe6559e1"
+    },
+    {
+      "path": "apps/metaengine-browser/src/client-draft-scope.mjs",
+      "previous_blob": null,
+      "current_blob": "4983ec842f5a751bd3ab409595831dcfe2ed807c"
+    },
+    {
+      "path": "apps/metaengine-browser/src/client-goal-journal.mjs",
+      "previous_blob": "c3b452aef2f72da54984c9e3ab93faf09f70b8de",
+      "current_blob": "38d12c44adddbccafb3e12ce8fdc4db75439d36b"
+    },
+    {
+      "path": "apps/metaengine-browser/src/client-native-coding-goal.mjs",
+      "previous_blob": "4e90f2d94ecebdc8911072651dee4ea1bd9f169b",
+      "current_blob": "70c883190b308e829e24cebf5ef62441419b7920"
+    },
+    {
+      "path": "apps/metaengine-browser/src/client-native-setup-route.mjs",
+      "previous_blob": null,
+      "current_blob": "5d56dd845970f291dc613dc179f65e224c745472"
+    },
+    {
+      "path": "apps/metaengine-browser/src/client-prepared-goal-activation.mjs",
+      "previous_blob": null,
+      "current_blob": "ef9f674259cde36af531899f55d4e734c80287c6"
+    },
+    {
+      "path": "apps/metaengine-browser/src/codex-cli-physical-settlement.mjs",
+      "previous_blob": null,
+      "current_blob": "cc28772fbe4da642719bde45bc4e1bcce0eaed85"
+    },
+    {
+      "path": "apps/metaengine-browser/src/codex-cli-runner.mjs",
+      "previous_blob": "ae058c39e34a204a3e00164930e20a86c101a705",
+      "current_blob": "6133f7428a8550990f4cb3bf9f3aea554bfc5c2c"
+    },
+    {
+      "path": "apps/metaengine-browser/src/codex-cli-sandbox-probe.mjs",
+      "previous_blob": "b2aa5c79ee9ee2fcd49fb76cd82e4be6aaabe8cf",
+      "current_blob": "2ecdbdc1da9ecc51178233b9c06070171d93f515"
+    },
+    {
+      "path": "apps/metaengine-browser/src/codex-cli-windows-process-controller.mjs",
+      "previous_blob": "2c99b0f2af33591810c1d6a82639cd1ad2ff10ea",
+      "current_blob": "d54ad8fcd4322ea60a1e092b089cb8682301bdf8"
+    },
+    {
+      "path": "apps/metaengine-browser/src/devos-native-task-cycle-core.mjs",
+      "previous_blob": "93b8c9b264a26674ae4966aa32038ff1dd57d112",
+      "current_blob": "ec63c72d6b31557555a215503786ef1caffe7501"
+    },
+    {
+      "path": "apps/metaengine-browser/src/host-owner-genesis-custody-w74.mjs",
+      "previous_blob": "c301dff21ae8d65946e8333349a467bcbcb293d6",
+      "current_blob": "a26815fb7c24d645d80979ccfcedb1134b5640a1"
+    },
+    {
+      "path": "apps/metaengine-browser/src/installed-executable-provenance-w68.mjs",
+      "previous_blob": "54969b1673c4f69b795a0ec93aca63aa7d481bf0",
+      "current_blob": "3aa398692b63da9fcd5ca20ef1790ec8a05cd339"
+    },
+    {
+      "path": "apps/metaengine-browser/src/local-runtime-host-controller.mjs",
+      "previous_blob": "29f37abcf63bcbff28f4a98d732f3266d09d3ab1",
+      "current_blob": "8e2496ddf2c3342ac9e643f967fbd6426c56fd9e"
+    },
+    {
+      "path": "apps/metaengine-browser/src/main.mjs",
+      "previous_blob": "43ad77191d7d94880821aba862f4856508cbd6aa",
+      "current_blob": "75526c37ff8fffa904088bc998d51a3f6b35b3f1"
+    },
+    {
+      "path": "apps/metaengine-browser/src/managed-runtime-drain.mjs",
+      "previous_blob": "1e2e7ca400486591cef708e25abf70a89b6faef0",
+      "current_blob": "390bd29d97905662676f5636c80f086b4cb13fae"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-agent-host-contract.mjs",
+      "previous_blob": "f1394fd59b32d01b8ecc6bd355594cbf400d83bf",
+      "current_blob": "e6ee904c37d1b29ccd75b567a43f66d0f3bed679"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-agent-mcp-broker.mjs",
+      "previous_blob": "a586ede2304bc068693c99e02ad23e87147f3d1e",
+      "current_blob": "a523e7b1d6773bf9713d5c68d3e41adb793aaebe"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-agent-mcp-stdio.mjs",
+      "previous_blob": "c2f12ca896a9a8e98eaf0e901058e2c5994f04dc",
+      "current_blob": "35472fbf6a847dcb1ae5de12d88ce35ba5a931a9"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-agent-run-bridge.mjs",
+      "previous_blob": "fcd064dbdae92e0514b9a5832dff70aec79855fb",
+      "current_blob": "20052e913f3668ed99579d14f610b64a80ed5417"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-capacity-contract.mjs",
+      "previous_blob": null,
+      "current_blob": "1e44d47a33fbabbea7f7fdf665f8576984b7d995"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-capacity-owner.mjs",
+      "previous_blob": null,
+      "current_blob": "bf2f0e772356e90627e8b98ed6e6b1dbbc46918d"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-device-request.mjs",
+      "previous_blob": "e089ea9fe0c07e299b3bd81a2274e50c84df0be4",
+      "current_blob": "a236c625a8317321f93580e75b60a9856a29e3c6"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-execution-pool.mjs",
+      "previous_blob": "940d00d6f70a8b6b0a9da92f4d536583b0a61362",
+      "current_blob": "abec66f8d8a6b6aff1c60b97ea975e94852eeaca"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-git-proof.mjs",
+      "previous_blob": "04125ef8f0e0a63a1fc0dcc935cb8176acc777cd",
+      "current_blob": "e2207ff3489c9aeceb9cb3c14cfec59697bd39a3"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-host-ipc-client.mjs",
+      "previous_blob": "34ab70460a9487be29566af8c31853b4d5906832",
+      "current_blob": "0f18fdc883dcaad28e38326bf02faab2a92fd481"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-host-observers.mjs",
+      "previous_blob": "bbd72ad579737136fddea9885eec3d6ecd011220",
+      "current_blob": "1b9cd61ff61065c22e957f1d908c32ff9d5d78ce"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-host-settlement.mjs",
+      "previous_blob": null,
+      "current_blob": "c190f27c6efe1468a67fc56f37d2e099398009de"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-operator-paths.mjs",
+      "previous_blob": "9f9829597de7315da9c36a6212751a5d705401d5",
+      "current_blob": "aafaff532527cae9dcc0a691fea9ef2e0eedb44a"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-pending-activation-phase.mjs",
+      "previous_blob": null,
+      "current_blob": "b0a3a8629bf74d3ea825415c2f5fd43825c047bc"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-project-checkpoints.mjs",
+      "previous_blob": "ad174a597dfac3df6fab6c4b3e773bd33f86ac25",
+      "current_blob": "cf1fac4d884733c6c14cb6f66dd3321734edddbd"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-publication-handoff-contract.mjs",
+      "previous_blob": null,
+      "current_blob": "043fbf16aeb5614d313d654019d9dad659a4aed7"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-run-callback-journal.mjs",
+      "previous_blob": null,
+      "current_blob": "d177bd5b3dbce712de3e2b2866cb2729a20c50d5"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-run-owner-main.mjs",
+      "previous_blob": null,
+      "current_blob": "2096aaff283fbdb2b76428e2f8970e2595bcb497"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-run-owner-phase.mjs",
+      "previous_blob": null,
+      "current_blob": "facaa3db6d2ca04ac6a02322ffde36e3f77beb15"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-runtime.mjs",
+      "previous_blob": "1b629f5e2d0dc3d33be8868887b7e742d166704b",
+      "current_blob": "b78f2cbd9bc8d743f17b34e47b1119a4fc3eb320"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-service-heartbeat-publisher.mjs",
+      "previous_blob": "ce226237ddc5c4e0713fe9033f8a52e990ddab2c",
+      "current_blob": "3b0f44f5942823b6c74113f19c53d91169e4b5a3"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-setup-contract.mjs",
+      "previous_blob": null,
+      "current_blob": "73c7fa96e46ae0199c97fefdf9a7c901d88075c0"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-task-context.mjs",
+      "previous_blob": "555cb0595024bc7e2432909d402b5ba0b4fe703c",
+      "current_blob": "a5712d51596ac4238a0b1d7644c1acb9f522074b"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-windows-process-observer.mjs",
+      "previous_blob": null,
+      "current_blob": "51e5e3a3556c376cfe165e905bc7e588c6845203"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-host-scope-cleanup.mjs",
+      "previous_blob": null,
+      "current_blob": "6179921a7f943bff41f293f96ceda0fb0f773cf5"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-supervisor-client-base.mjs",
+      "previous_blob": "94d80a2a33367bc61994a137593a8f0650272bb9",
+      "current_blob": "9ac7b79f2006ae874bc613ee9334431eca6f19f5"
+    },
+    {
+      "path": "apps/metaengine-browser/src/preload-shell.cjs",
+      "previous_blob": "7343e1b8889657251a68138c6575747bc0673538",
+      "current_blob": "c31df6a6d1aeade30d71827ec4e7a02ef9f8adc6"
+    },
+    {
+      "path": "apps/metaengine-browser/src/private-windows-storage-acl.mjs",
+      "previous_blob": "27e68adcdd9e2b5c0a6d6508d6bbfb544db6f3f0",
+      "current_blob": "9ad1ce3532c1d7d7df0acb94655ed8dd37e345b8"
+    },
+    {
+      "path": "apps/metaengine-browser/src/supervisor-device-identity.mjs",
+      "previous_blob": "0c7da08400ddcd2e63acdcd00689efa7be3fd55a",
+      "current_blob": "70f8f0a555512f810549bce1a9018bbfde95d8ea"
+    },
+    {
+      "path": "apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/devos-routes.mjs",
+      "previous_blob": "cdbe0168bcc1c81d6c90c62251c38f0a239facef",
+      "current_blob": "e8bac9d0a62e8296fe107cdaee81609a4b9ea817"
+    },
+    {
+      "path": "apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/project-continuity-routes.mjs",
+      "previous_blob": "26a636b45a3669d31bb1fb2f644273d85d5c2ad0",
+      "current_blob": "8686cdc3d9ff1c5ecbe156fff038fe98f291eb61"
+    },
+    {
+      "path": "apps/metaengine-browser/test/agent-count-unbounded.test.mjs",
+      "previous_blob": "c853765d5b0f7683d6642b11c506ef1b0f4b7b1d",
+      "current_blob": "0ccc37f8630a2ce155971f0dfe7a7f4d50bf9f34"
+    },
+    {
+      "path": "apps/metaengine-browser/test/agent-toolbelt.test.mjs",
+      "previous_blob": "b69deb0a5c8568439ccd0d754b35c5a7658a84a3",
+      "current_blob": "96a1972e0d41c2aeee8fc3b962467ff4fc1dee32"
+    },
+    {
+      "path": "apps/metaengine-browser/test/autonomous-project-continuation-contract.test.mjs",
+      "previous_blob": "b9cd66a4555aa9d7e6336dc4545b6720b0471fd9",
+      "current_blob": "d80ac41330f927278ce9bc108902a10d4c6c04c3"
+    },
+    {
+      "path": "apps/metaengine-browser/test/autonomous-project-task-runtime.test.mjs",
+      "previous_blob": "43fcd4efcdfb99fac620be47a540bc2a1e884b23",
+      "current_blob": "5d35bcfc523b848db3bf36d07f383fa9b8d6faf2"
+    },
+    {
+      "path": "apps/metaengine-browser/test/browser-closed-loop-audit-fixes.test.mjs",
+      "previous_blob": "03b777c9e6327108f7316c6b3040b2f91b77e3a3",
+      "current_blob": "70cf1ab15d51389d6b1f6183a4436fa099cea932"
+    },
+    {
+      "path": "apps/metaengine-browser/test/browser-parent-suspension.test.mjs",
+      "previous_blob": "342ac0ca3136e69b30f15d76284bd7902cd09541",
+      "current_blob": "e34f58b95126e180132f5d23185d49b7f62a86bf"
+    },
+    {
+      "path": "apps/metaengine-browser/test/client-admission-recovery.test.mjs",
+      "previous_blob": "461da119872ef973ee3ae8093123c13f8635b9b6",
+      "current_blob": "37b24143e844f5913f64d863271f972752386c41"
+    },
+    {
+      "path": "apps/metaengine-browser/test/client-draft-scope.test.mjs",
+      "previous_blob": null,
+      "current_blob": "43cff8f2266f89d200dc8bd1bb6cc65d84b14b56"
+    },
+    {
+      "path": "apps/metaengine-browser/test/client-native-coding-goal.test.mjs",
+      "previous_blob": "4130d1ccb84de9cc7dfbe60b81b7a4b58eec0ffe",
+      "current_blob": "919d4fc38d210e6d583cb438599031421cc6cef6"
+    },
+    {
+      "path": "apps/metaengine-browser/test/client-native-setup-route.test.mjs",
+      "previous_blob": null,
+      "current_blob": "513f98cb140d8b4fcd9bb57d4f30c9d1537c8396"
+    },
+    {
+      "path": "apps/metaengine-browser/test/client-prepared-goal-activation.test.mjs",
+      "previous_blob": null,
+      "current_blob": "622c41572d906a562e8b6cc435df1a6c0003ed33"
+    },
+    {
+      "path": "apps/metaengine-browser/test/client-prepared-goal.test.mjs",
+      "previous_blob": null,
+      "current_blob": "357af64fe4df92bd3bea224a5321235a04bca412"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-job-runtime-build.test.mjs",
+      "previous_blob": "6320f4b3e3c169dfdc55b905f2ac54c2a335383c",
+      "current_blob": "9c9a836fd74478c72a39ff5fbb88374a25b1b1f5"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-job-runtime.test.mjs",
+      "previous_blob": "460ee752d5e6e1225db61307ab4b3dad1504f69f",
+      "current_blob": "da54203dfd2d80fc8069d721187facaf051d15aa"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-native-drain-order.test.mjs",
+      "previous_blob": null,
+      "current_blob": "a0ef7afd761a9faf10038d82b3328a9bcb3c3f8c"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-physical-settlement.test.mjs",
+      "previous_blob": null,
+      "current_blob": "29ab8e21210e0e0a857c2f6068df89ea36df49dd"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-runner.test.mjs",
+      "previous_blob": "f8aec241ec62587b52613f5434a73289c54fdd92",
+      "current_blob": "0f75e6e200f015d30f7379d61a742834a09465c3"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-sandbox-probe-lifetime.test.mjs",
+      "previous_blob": null,
+      "current_blob": "20ab70f1e86036226f38924c4d4d209cf2f5216e"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-sandbox-probe.test.mjs",
+      "previous_blob": "98758e7f696a198e14649a79671ec87d73913b28",
+      "current_blob": "1ce04227e96adf5e00c34ec326d187ca75dc226b"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-startup-observation.test.mjs",
+      "previous_blob": "ffd3f10426f4e90c9e15f96af55c8bf39b1542c2",
+      "current_blob": "27118f54b9c6f7bc5c146fe9dcd49a1efb9d76dc"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-windows-handle-list.test.mjs",
+      "previous_blob": null,
+      "current_blob": "ce1b50b6c55cbe0ef1597253d3aa6f498983ce52"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-windows-job-birth-physical.test.mjs",
+      "previous_blob": "cc3ee613b1c2969428a6b2bc9d22ff8f83fef470",
+      "current_blob": "e29db1c36522bf3d484f5e2ac3da382e295acdc3"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-windows-job-birth.test.mjs",
+      "previous_blob": "28b1ab050e0b8ca7601f93e3fd74e768d8e2f287",
+      "current_blob": "7f6c07d1793b939b96211e21304a2d9649447668"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-windows-lifetime.test.mjs",
+      "previous_blob": null,
+      "current_blob": "7910bee03db052073c7252a80be26d0301efce0e"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-windows-output-order.test.mjs",
+      "previous_blob": "03cfcac8eaca8e4288584bc8710152dd7dff8654",
+      "current_blob": "066dba614ab5327c2ef9a796cbedc690db11fd0c"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-windows-process-controller-failures.test.mjs",
+      "previous_blob": "1f350c99b8401f1565706c25aa10562a430ea95d",
+      "current_blob": "9e3eb262655841b4cc9b4e6a47821f912b4329ea"
+    },
+    {
+      "path": "apps/metaengine-browser/test/devos-native-coding-cycle.test.mjs",
+      "previous_blob": "1f2750453cbb594b9ebd8e6f4142558eb296bd07",
+      "current_blob": "5717c2bdf806d60fa16d853cf946d076f1d1bced"
+    },
+    {
+      "path": "apps/metaengine-browser/test/devos-native-task-cycle.test.mjs",
+      "previous_blob": "8fed0fa8247de28b72cec423c4d2bcdc38d41542",
+      "current_blob": "d545e5b1539af7ed88e44eaa45167663f84eec8c"
+    },
+    {
+      "path": "apps/metaengine-browser/test/fixtures/codex-cli-joined-settlement-fixture.mjs",
+      "previous_blob": null,
+      "current_blob": "205364b8f544bd2531a5525b63cb7935d126c7ac"
+    },
+    {
+      "path": "apps/metaengine-browser/test/fixtures/codex-cli-startup-observation.mjs",
+      "previous_blob": "507f284de067147408218824f19a1ce955a1f040",
+      "current_blob": "f0ed8f7c1d8ad0cff2f3a839eb840fea3c8d17d7"
+    },
+    {
+      "path": "apps/metaengine-browser/test/fixtures/native-coding-in-memory-broker.mjs",
+      "previous_blob": null,
+      "current_blob": "4ff1c8cbf720c56b6c892259ac6fa4dbbe090345"
+    },
+    {
+      "path": "apps/metaengine-browser/test/fixtures/native-coding-run-custody-double.mjs",
+      "previous_blob": null,
+      "current_blob": "1cf864ace10644bb5e401b09a0b378ab12d5d920"
+    },
+    {
+      "path": "apps/metaengine-browser/test/fixtures/native-coding-unqualified-bridge.mjs",
+      "previous_blob": null,
+      "current_blob": "bdf90a991edd286653f48857b4bb66f795c571d1"
+    },
+    {
+      "path": "apps/metaengine-browser/test/fixtures/native-published-scope-pg-child.mjs",
+      "previous_blob": null,
+      "current_blob": "c446ac7b650042c1c4a973ee42e73b96e249f89d"
+    },
+    {
+      "path": "apps/metaengine-browser/test/fixtures/native-run-owner-read.mjs",
+      "previous_blob": null,
+      "current_blob": "3409a09a61ffbf005168687d5a405c1b84dc43eb"
+    },
+    {
+      "path": "apps/metaengine-browser/test/fixtures/project-continuation-process.mjs",
+      "previous_blob": "27fed66803f646f9313dd71e0b55d0370c29e2b2",
+      "current_blob": "c1cbc05ce1de0392840989d8c93ad1bc078112d3"
+    },
+    {
+      "path": "apps/metaengine-browser/test/guardian-owner-loaded-read.test.mjs",
+      "previous_blob": null,
+      "current_blob": "5cc0c12031e9fc5983e8587e771fcd981d13c6ef"
+    },
+    {
+      "path": "apps/metaengine-browser/test/host-owner-genesis-custody-w74.test.mjs",
+      "previous_blob": "da7804290066a9c67fc9e62b659480e0cc09a88d",
+      "current_blob": "49d9a7a0fb9310dcc152649a872c80670e5319a8"
+    },
+    {
+      "path": "apps/metaengine-browser/test/host-owner-protected-identity-w74.test.mjs",
+      "previous_blob": "4c67461a3bc3bbca754cb4a70381479c08f8b838",
+      "current_blob": "89981025a4c5f315626b904ae4508c44222b781d"
+    },
+    {
+      "path": "apps/metaengine-browser/test/installed-executable-provenance-w68.test.mjs",
+      "previous_blob": "2c941818734d1f5a80003f51ed64dec01cf188c9",
+      "current_blob": "ea6e7d704a6ddc8764cabcea640d40d46659045f"
+    },
+    {
+      "path": "apps/metaengine-browser/test/installer-bootstrap-contract.test.mjs",
+      "previous_blob": "97d670d37d1a8bd1c3ff5d91f9b79a08db786098",
+      "current_blob": "331c3755c306d1002d464df9b4fd389081f68382"
+    },
+    {
+      "path": "apps/metaengine-browser/test/local-runtime-host-controller.test.mjs",
+      "previous_blob": "02acb4b441e32d147365602ad7cb494ac8b90a1b",
+      "current_blob": "7d1f29316b5975d8dc301dcfa36f60dfd9eab659"
+    },
+    {
+      "path": "apps/metaengine-browser/test/local-runtime-host-terminal.test.mjs",
+      "previous_blob": "c664eb65f1831fbd91d2f71da4f75392485c417b",
+      "current_blob": "622bbcce97f167399c989bd1bd77703c43182dd6"
+    },
+    {
+      "path": "apps/metaengine-browser/test/managed-runtime-drain.test.mjs",
+      "previous_blob": "fb08ec2c262390d92ea4166190746e0669cee19d",
+      "current_blob": "d970aa14760340e24657b469b754a8f8956f2ea2"
+    },
+    {
+      "path": "apps/metaengine-browser/test/me2-r85-visual-evidence.mjs",
+      "previous_blob": "6352c7cee3a190277a1d04940bcb5495cc66e0a0",
+      "current_blob": "f7bba544fab9eb9920e163e1051d8da817ac97af"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-agent-callback-custody.test.mjs",
+      "previous_blob": null,
+      "current_blob": "b4e69662965c1e7813f4af85f7012b54b76e967d"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-agent-close-lifetime.test.mjs",
+      "previous_blob": null,
+      "current_blob": "19a27cd149bbff6018b7544b396cf6be4ad0af43"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-agent-mcp-stdio.test.mjs",
+      "previous_blob": "d11754df9acd1d240cafb5834afacef43d5da0cf",
+      "current_blob": "caeff0e0b7556107dad72bffb646a469f0aff6ce"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-agent-run-bridge.test.mjs",
+      "previous_blob": "c3f4f70c183c55727a1cde7b8c49a1c855b306e8",
+      "current_blob": "cb1e35b4b0aa8e7e552e1514c5ef30e87870beb8"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-capacity-contract.test.mjs",
+      "previous_blob": null,
+      "current_blob": "42f950e9c9d1fec3551f303ef70fb5c8ea48b7af"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-capacity-first-dispatch.test.mjs",
+      "previous_blob": null,
+      "current_blob": "ef4e36261e4e5632344dcaf9806b44ad0b6d7213"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-capacity-owner.test.mjs",
+      "previous_blob": null,
+      "current_blob": "8043b310588fa10d5e5e5cccee69de9debc52865"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-git-proof.test.mjs",
+      "previous_blob": "1753d1ff09470438d4c3d257e730a22c2e62bfad",
+      "current_blob": "8daef6a54e5ef63f6c229bbc5307256dd5d5c8dd"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-host-ipc.test.mjs",
+      "previous_blob": "bb29341553e49d04b697815fa8038005f570bb16",
+      "current_blob": "a83b3a92bbac2ac82ce6f5fc9fbfaeeb8620f66e"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-host-observers.test.mjs",
+      "previous_blob": "821fdb4d80457cdc7fdb5fc8fecbf9f4c170e8f0",
+      "current_blob": "0e01cb3f822f179f1af147bac6d0c098b7427f5e"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-pending-activation-phase.test.mjs",
+      "previous_blob": null,
+      "current_blob": "fe3fddccd8b696da7c2fef6c078be9f70fd79836"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-project-checkpoints.test.mjs",
+      "previous_blob": "93b6e117d17aa806fafb77d65a1aee8c715d224e",
+      "current_blob": "9f87c1f7f5c24592d43a305fdb4dc7804225707a"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-publication-handoff.test.mjs",
+      "previous_blob": null,
+      "current_blob": "7233b392ab54b8c65f6ca9263b977316573c49ab"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-run-callback-journal.test.mjs",
+      "previous_blob": null,
+      "current_blob": "41ed8e95d680b4f749d9e6749a47ffabe001fd0a"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-run-owner-ipc.test.mjs",
+      "previous_blob": null,
+      "current_blob": "4a828a77ea96d5945206d885ab299924d1cd72ea"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-run-owner-phase.test.mjs",
+      "previous_blob": null,
+      "current_blob": "6d2c5efafa8886ad0474fe79a6450636bb329fee"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-runtime.test.mjs",
+      "previous_blob": "9f05944fff68bc934221c1fe931dbc9b2e1c30dc",
+      "current_blob": "08bdae90249da7721fc6d85dfc0312565cc935c0"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-server-admission.test.mjs",
+      "previous_blob": "b48376907bb490585fe70feb55689bcf35be5654",
+      "current_blob": "0097708377aa689a7e037636200e69093334e0e4"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-service-heartbeat-publisher.test.mjs",
+      "previous_blob": "92544a02a9c4a19953f0b6201920bb50c5a2a133",
+      "current_blob": "72852b1a848dd9a4b5fe5194cea9fabb9e22f4b1"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-setup-contract.test.mjs",
+      "previous_blob": null,
+      "current_blob": "39de98748b5c43d02a56722838349c31fc6828d8"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-host-scope-cleanup.test.mjs",
+      "previous_blob": null,
+      "current_blob": "cae1f26a65a117d10cd7d165a0b73959196a99cb"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-published-scope-drain.pg17.test.mjs",
+      "previous_blob": null,
+      "current_blob": "57816318e8d4350069f13a28a8f3a7e4fb5af58e"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-setup-loaded-signer.test.mjs",
+      "previous_blob": null,
+      "current_blob": "f2763b2b47f522fe12bebdc9d594457c46ca6c7c"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-supervisor-initialization-lifetime.test.mjs",
+      "previous_blob": "53bc5eeecbc63e94f2fa4f3006a263357efa1645",
+      "current_blob": "4d9508e71d4833a4c6da0f00ea45467b49e59957"
+    },
+    {
+      "path": "apps/metaengine-browser/test/private-windows-storage-acl.test.mjs",
+      "previous_blob": "25d6101bba7bf3859fcc5141627806f9859289ef",
+      "current_blob": "5e35b8e640dd8aade38ed0c0e5aebe3abb62a712"
+    },
+    {
+      "path": "apps/metaengine-browser/test/project-continuity-routes.test.mjs",
+      "previous_blob": "866b3b82e1d55e4d8a47726360dab65e9abdde0a",
+      "current_blob": "299784b8742bd13e557c22063049f3e41299004d"
+    },
+    {
+      "path": "apps/metaengine-browser/test/r97-goal-submission-mode.test.mjs",
+      "previous_blob": "eeee8587ff5ffc7b3bfa9985cfa1cf32c1c5dca1",
+      "current_blob": "ccfdd43b208e1e7c212551365d14c2fbbbac8916"
+    },
+    {
+      "path": "apps/metaengine-browser/test/source-check-runner.test.mjs",
+      "previous_blob": null,
+      "current_blob": "f6f70d0d2b2c8f4f7c88b93bedc22f356102f709"
+    },
+    {
+      "path": "apps/metaengine-browser/test/supervisor-device-identity-concurrency.test.mjs",
+      "previous_blob": "73e0bc52a22c3418be27b23b0cfa7a0a45016086",
+      "current_blob": "77e71a4e6e2d2b8870b6d9c5d3885fe45161580a"
+    },
+    {
+      "path": "infra/client-state-runtime/browser-parent-suspension.sql.test.mjs",
+      "previous_blob": "3bb83b1c989c36282da9bb34402fa045f613a592",
+      "current_blob": "7765f5872feb3b750514fe869a3d784beaa76a64"
+    },
+    {
+      "path": "infra/client-state-runtime/db-api-core.mjs",
+      "previous_blob": "c15e251479f0d2cc874a340c7ead4a548f34a2b0",
+      "current_blob": "ca01daec9a86f7e43cfff2d1281c922158753c55"
+    },
+    {
+      "path": "infra/client-state-runtime/fresh-schema-candidate-plan.json",
+      "previous_blob": "9ac4b76ffc7966d4512c90b1e73ab183f265ba56",
+      "current_blob": "8d2aec94487a2631065725be0a32c25b761338ec"
+    },
+    {
+      "path": "infra/client-state-runtime/fresh-schema-plan.test.mjs",
+      "previous_blob": "5ff333755599947738ed43ccfc8503cd6373a463",
+      "current_blob": "e4926e4b6f38a9bac167b264daddfc018af5ab5c"
+    },
+    {
+      "path": "infra/client-state-runtime/local-runtime-migrations.integration.test.mjs",
+      "previous_blob": "f40f003c545d7a2bfbe92118d37d1babf94990b9",
+      "current_blob": "750fa95011883d2b1e25512b1ddc43d33dea39ea"
+    },
+    {
+      "path": "infra/client-state-runtime/local-runtime-migrations.mjs",
+      "previous_blob": "7cc51c94e4a449ce53b9e3ff349fdb22ee35d94d",
+      "current_blob": "d9378e7471e1a3edb099499c7cd84b42fd951c16"
+    },
+    {
+      "path": "infra/client-state-runtime/local-runtime-migrations.test.mjs",
+      "previous_blob": "e7a4f67a8fc5a6c14e469374f0d9decf835fb7e2",
+      "current_blob": "38de2de70987fadb332e56fa311e3ade1ed0ed9a"
+    },
+    {
+      "path": "infra/client-state-runtime/native-agent-count-unbounded-v2.sql",
+      "previous_blob": "9aba56c9138662e084e926f2e8200aad5340f23c",
+      "current_blob": "3cbf98da8167bfe8b20834f6e44f1dd2d3c69044"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-agent-host-tools.mjs",
+      "previous_blob": "07ff604101eddd5a4ac7a0e44ae3f6101baca5c0",
+      "current_blob": "18e09357b8b56f9fd1dcb479729e1a6e107487ed"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-agent-host-tools.test.mjs",
+      "previous_blob": "09ea1e8ef856b806c9695b839ef7724bcb17f7cc",
+      "current_blob": "f66ae1ac8d1987a4fbdb80b7c3a2f8e79cd98c9a"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-agent-project-tools.integration.test.mjs",
+      "previous_blob": "d40fbf72e58fe787afca5de0c216d24e56b8115a",
+      "current_blob": "cff8965d41c318ff154f2ccd840d565d2b3dd0a9"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-callback-prefix.mjs",
+      "previous_blob": null,
+      "current_blob": "2fb584858a32b836f6e2744c46ecde962af2c1f0"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-callback-prefix.test.mjs",
+      "previous_blob": null,
+      "current_blob": "014d259f77225fc1c65c4518eccdacda48236958"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-callback-publication-source.test.mjs",
+      "previous_blob": null,
+      "current_blob": "bdc2b9fcf638f21a4a31bc7e51f77b0b3e09627b"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-callback-publication-v1.sql",
+      "previous_blob": null,
+      "current_blob": "32a30e552087d5f6177e7f277fd4250acadd417b"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-callback-publication.mjs",
+      "previous_blob": null,
+      "current_blob": "ea68534db3687279ff527bd7ce0fc03132048e8c"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-callback-publication.pg17.test.mjs",
+      "previous_blob": null,
+      "current_blob": "27de8b10257459c56e910dc6405735ae9301ee6d"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-capacity-source.test.mjs",
+      "previous_blob": null,
+      "current_blob": "0a1b95bf2d097a96215cc77b6327677c5871e7fe"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-capacity-v2.sql",
+      "previous_blob": null,
+      "current_blob": "513b3ced987e9a4666fb3f580a132d6844828c33"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-capacity.pg17.test.mjs",
+      "previous_blob": null,
+      "current_blob": "e006681e9c9c886ab27dc1f130139f132eae5bdc"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-checkpoint-commit-rotation.integration.test.mjs",
+      "previous_blob": "dd794eaafeac3d078cd5025100df2db266ba61e1",
+      "current_blob": "201bdce0a85ab78f48f8311d9c88491c7c5427c4"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-checkpoint-verifier.mjs",
+      "previous_blob": "e5db1941dc5956ec6e21f34600c740cd98a0dc74",
+      "current_blob": "b662e2557a3bf23ea8a4da5a381be2149d93b761"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-checkpoint-verifier.test.mjs",
+      "previous_blob": "d28c1fc2119f86405d415a0eb313b0761004f19c",
+      "current_blob": "660837344c6c72ee994bb34f311621b11ccdadd9"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-checkpoint.integration.test.mjs",
+      "previous_blob": "99252d4c93d54bab16a0a8a5351d782ada18f324",
+      "current_blob": "384c4b7e7e02c129bdbcb5d7c9cab3d58b9b2fc0"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-authority.integration.test.mjs",
+      "previous_blob": "ef8322eb386b532debb7f139027a18b780f81823",
+      "current_blob": "3033d0587c460ed39d9ac6d6b98bacf67d67263f"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-authority.mjs",
+      "previous_blob": "4541c60edb27b3633cec317f1efce03410f8b96c",
+      "current_blob": "c59a1c49c7928bffe8285cb6c169847305831631"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-authority.test.mjs",
+      "previous_blob": "809e02de11261a168c50ec2852666b6bbd6236e3",
+      "current_blob": "4588a34708f3ffbbf057c867d8f650b4358f7324"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-capacity.mjs",
+      "previous_blob": null,
+      "current_blob": "d563c4bee0afb146802f24b29687457d8a1badee"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-capacity.test.mjs",
+      "previous_blob": null,
+      "current_blob": "1064291bc98b0c8a93dc2f1eaf61c2a688c898e1"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-commit-profile.integration.test.mjs",
+      "previous_blob": "69e49242d010834f32d857a9087dfe49a3ad16cd",
+      "current_blob": "934a736fd5f8b3f999e70a4d1d0adf7aa8af126b"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-commit-service.mjs",
+      "previous_blob": "38758a4e58f7e4e4b0e60b0e5d3dce774e80a58d",
+      "current_blob": "137778c34eee24ef4f2012f6376ce64f97325a16"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-commit.integration.test.mjs",
+      "previous_blob": "802d9291f65fd5f00beb036caff1f7bb934ca18c",
+      "current_blob": "ae1cdee86e23ce67bd028c32147ed85e96ff664b"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-ipc.mjs",
+      "previous_blob": "bb34e212118a24cb4f211ebf37fe7f25af822eae",
+      "current_blob": "248e8778bef5af6d2dd094e0d9ca767b32295cd8"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-os-scope.mjs",
+      "previous_blob": "9e29ab035f4915a33accee898e42c3e3c95dd0f4",
+      "current_blob": "52587c12f839ddc3c07d49d804f2eeceee35cd15"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-os-scope.test.mjs",
+      "previous_blob": "4fc9c12e97be4865984ade44cec16e8f4bba4e2c",
+      "current_blob": "a0f547d95ef9278b95ce5b1a9dcaf709220af8a0"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-seed-binding.mjs",
+      "previous_blob": "43b064cefb3c506531c31c1e386fe2e89454102e",
+      "current_blob": "9df8ca0f064a7bec764496e31ab3d748492e6bc5"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-seed-binding.test.mjs",
+      "previous_blob": "a22b583439e808374090508aec24def9301c5a9d",
+      "current_blob": "827207f5dc7b7381fc0c5e30499e190b6f1486a5"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-seed-service.mjs",
+      "previous_blob": "3d04fc3b9a557cb175127dd59237b0e53ffee4b5",
+      "current_blob": "04a040dd111726d061da603563bf95878856ff2b"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-seed-service.test.mjs",
+      "previous_blob": "b8d7951f0d98ccaa6538fd8a0c2da816dc1c93fd",
+      "current_blob": "9d6968fde3672475b6f94252c6d64637f16163b0"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-service-heartbeat.mjs",
+      "previous_blob": "f85d97528239b7f4a196116dfdaf4036a23765f4",
+      "current_blob": "e583e1567776c2e11ea013674cf88e01d6a58fa8"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-setup-service.mjs",
+      "previous_blob": null,
+      "current_blob": "a93d90b6182b560546d59f2dfc020cfcfd9ab32a"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-initial-goal-seed.integration.test.mjs",
+      "previous_blob": "96197d4eb721747138d474a4f43ee45710bd42a9",
+      "current_blob": "65f132ea0d6650590f226184ecbef6f0365064ed"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-pending-activation-profile.mjs",
+      "previous_blob": null,
+      "current_blob": "49992d5b8e795c0b4e8455b242c112a615a001e4"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-pending-activation-profile.test.mjs",
+      "previous_blob": null,
+      "current_blob": "7b07b99d6445dbbb9b302b0901924b40ce86bbb5"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-pending-activation-v1.sql",
+      "previous_blob": null,
+      "current_blob": "d193792eb418f6c37724db4d051c2002033e85c0"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-pending-activation.mjs",
+      "previous_blob": null,
+      "current_blob": "17ec6f4c932575a9fa5ef07d0b009e0e8d00257c"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-pending-goal-v1.sql",
+      "previous_blob": null,
+      "current_blob": "fd009f1f5d7bdd29762594f4886995ad706a2e99"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-pending-goal.pg17.test.mjs",
+      "previous_blob": null,
+      "current_blob": "4c7051cb3dcdcf1a7eb93fe73dd9fdb1048bff9b"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-preparation-transaction.mjs",
+      "previous_blob": null,
+      "current_blob": "47661fa5ba3f7666ab7722ae58d72d101f58e5a8"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-preparation-transaction.test.mjs",
+      "previous_blob": null,
+      "current_blob": "d20e946732cbebff97ca9dd969ffdc13651549ba"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-project-continuation.integration.test.mjs",
+      "previous_blob": "0537cf64990ab9927aa6577117895672ed08c67e",
+      "current_blob": "d6e1732a43a636af72906cfd9a298c60e3268507"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-protected-settlement.test.mjs",
+      "previous_blob": null,
+      "current_blob": "ab92a55c5bee96cf850c8b0c34576957bf3b47b6"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-run-owner-control.pg17.test.mjs",
+      "previous_blob": null,
+      "current_blob": "2a42b2408fd4e02c7514900270ded66511408541"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-run-owner-read.mjs",
+      "previous_blob": null,
+      "current_blob": "2cfcca61bccbe7e77de0b44df0e994832121b705"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-run-owner-read.test.mjs",
+      "previous_blob": null,
+      "current_blob": "815ade40a2429777673a664f30614e11c041184c"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-service-admission.integration.test.mjs",
+      "previous_blob": "a5a5cdc2c3a196b7380140e9105e7c24e01f663d",
+      "current_blob": "996f2648b5cbc98c6b6961e67dfb33f1a7e6767f"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-setup-operation-v1.sql",
+      "previous_blob": null,
+      "current_blob": "c1d6cca782c76abfc54e6b8fbd8b7c25a025e3dd"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-setup.pg17.test.mjs",
+      "previous_blob": null,
+      "current_blob": "b751faac04d16b3c901c0379fb83c96ca2439210"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-task-context.test.mjs",
+      "previous_blob": "27864c8469ccf5059ed377a92ccb1348292aebba",
+      "current_blob": "b127a05582f41eea425e4c1df7882ff20956907f"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-workspace-preparation.mjs",
+      "previous_blob": null,
+      "current_blob": "c874c57c31ef9c169caf05969e208df4269ed327"
+    },
+    {
+      "path": "infra/client-state-runtime/native-host-startup-lifecycle.test.mjs",
+      "previous_blob": null,
+      "current_blob": "49209bdda114f07f45454112d2c4538c909de990"
+    },
+    {
+      "path": "infra/client-state-runtime/package-runtime-resources.mjs",
+      "previous_blob": "453eab0bb9f05e338233c3cecc8510cfed3dff84",
+      "current_blob": "8cba926f37e76238cbe0679cb9ed78e32602ab99"
+    },
+    {
+      "path": "infra/client-state-runtime/package-runtime-resources.test.mjs",
+      "previous_blob": "2570f8b837e894a01177d30125944aaa19a3850b",
+      "current_blob": "ffbd6624c33e919c27431465c5f35e7af30ba720"
+    },
+    {
+      "path": "infra/client-state-runtime/package.json",
+      "previous_blob": "1e055aca6ae077f2a3d011d0e4d60d4130a4e4e6",
+      "current_blob": "e2c7616fcc7b42bd622545bd944bfc6e6e247b02"
+    },
+    {
+      "path": "infra/client-state-runtime/reviewed-empty-schema.test.mjs",
+      "previous_blob": "1c3eac429488b5fc733c98d9068e81bab35ccc95",
+      "current_blob": "4f222f72b8e5eeb3d0e87295abdcd2a4a0e0d3da"
+    },
+    {
+      "path": "infra/client-state-runtime/runtime-host.mjs",
+      "previous_blob": "3cf9d6e869384939d536974d3e88b1bfc8e7e577",
+      "current_blob": "82fce9457bd75e2e1fad37c840220b63833b014a"
+    },
+    {
+      "path": "infra/client-state-runtime/test/active-run-owner-pg-fixture.mjs",
+      "previous_blob": null,
+      "current_blob": "08dc4b8a2c3c4c905b562e4cae1d3bf10c13ab3e"
+    },
+    {
+      "path": "infra/client-state-runtime/test/fresh-schema-disposable.mjs",
+      "previous_blob": "a7480b8ffaced5c1a4c5c5b97c71043194aa196e",
+      "current_blob": "611a7c5d309995e74dfc6d9490d88ac22a8ea31f"
+    },
+    {
+      "path": "infra/client-state-runtime/test/native-coding-single-connection-fixture.mjs",
+      "previous_blob": "ac0155cbec9d5bfef7b7bd7699fe374d119d53ad",
+      "current_blob": "e60d91dbb36f5d5701bccb137e8a5789280ccc6c"
+    },
+    {
+      "path": "infra/client-state-runtime/test/native-host-startup-lifecycle-loader.mjs",
+      "previous_blob": null,
+      "current_blob": "6dc5f5863dc99c3af4e1cde0c5f49aeade9e7f23"
+    },
+    {
+      "path": "infra/client-state-runtime/test/pending-owner-phase-fixture.mjs",
+      "previous_blob": null,
+      "current_blob": "21f73e0a1d688d6adf2293f706af94d76ff9edf8"
+    },
+    {
+      "path": "infra/client-state-runtime/windows-qualification-registration.test.mjs",
+      "previous_blob": null,
+      "current_blob": "20a8e0dbcf3b699652bfe07f1f02602638877bf7"
+    },
+    {
+      "path": "scripts/CURRENT_SOURCE_SEAL.md",
+      "previous_blob": null,
+      "current_blob": "8fc9ac7069c42e1309bc2d1b95f3a9bdf5960022"
+    },
+    {
+      "path": "scripts/current-source-seal.mjs",
+      "previous_blob": null,
+      "current_blob": "2171213596bb5a77effff7b0ceaa35ce3ad8ec43"
+    },
+    {
+      "path": "tests/current-source-seal.test.mjs",
+      "previous_blob": null,
+      "current_blob": "1e9b9b7a1a1c9633b7e06f77ec7afb4ca4b4149c"
+    }
+  ],
+  "total_sealed_files": 1042,
+  "all_non_blob_manifest_fields_unchanged": true,
+  "package_version_changed": false,
+  "qualification_promoted": false,
+  "authority_effect": false,
+  "validation": "PENDING_FINAL_COMMIT_TESTS_AND_EXACT_HEAD_CI"
+}
