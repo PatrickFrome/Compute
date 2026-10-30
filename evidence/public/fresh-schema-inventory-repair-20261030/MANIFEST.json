@@ -1,0 +1,28 @@
+{
+  "schema": "metaengine.source-checkpoint.v1",
+  "base": "5d7ec74db1c72b15921a6e00a2826a09a72f4fb2",
+  "status": "CURRENT_INVENTORY_SOURCE_REPAIR_ONLY",
+  "files": [
+    {
+      "path": "infra/client-state-runtime/fresh-schema-candidate-plan.json",
+      "bytes": 18103,
+      "sha256": "a507dde5b1e7aa9316d830299fda4bf1cbbcae37d32a9fe8ebb423f3fe0cbea0"
+    },
+    {
+      "path": "infra/client-state-runtime/fresh-schema-plan.test.mjs",
+      "bytes": 9003,
+      "sha256": "f265f0c549a1ae133496fa2950bcfb7277194032dab17a5304938c1bd650c050"
+    },
+    {
+      "path": "evidence/public/fresh-schema-inventory-repair-20261030/REVIEW.md",
+      "bytes": 2791,
+      "sha256": "6d37f2aa1d1667c1e3ab68f74b88e9865fd83281858e9693a0c41d5f7c52967b"
+    },
+    {
+      "path": "evidence/public/fresh-schema-inventory-repair-20261030/CHECKS.json",
+      "bytes": 3756,
+      "sha256": "63912da3395643ac71bddeef018de770f3e3cfd7b8bfe6f128b66a7183b9212e"
+    }
+  ],
+  "manifest_self_excluded": true
+}

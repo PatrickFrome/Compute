@@ -40,10 +40,18 @@ const plain = value => JSON.parse(JSON.stringify(value));
 
 test('R97 actual preload can read the browser route without claiming readiness or submitting work', async () => {
   const { bridge, context } = await fixture();
+  let routeReads = 0;
   const expected = await readClientGoalSubmissionMode({
     readSummary: () => ({ status_file: '/disposable-fixture/status.json' }),
+    // Generated read-only fixture: absence of descriptor files alone is not
+    // proof that an interrupted native setup may safely fall back to Browser.
+    readNativeSetupRoute: async (...args) => {
+      assert.deepEqual(args, []); routeReads++;
+      return { retained_intent: false, scope_resolved: true, authority_effect: false };
+    },
     lstat: async () => { throw Object.assign(new Error('fixture profile absent'), { code: 'ENOENT' }); },
   });
+  assert.equal(routeReads, 1);
   for (let i = 0; i < 3; i++) {
     const mode = await bridge.goalSubmissionMode();
     assert.deepEqual(plain(mode), expected);
@@ -79,4 +87,22 @@ test('R97 route read leaves the existing isolated submit and queued progress fix
   assert.equal(progress.task_state, 'READY');
   assert.equal(progress.authority_effect, false);
   assert.equal(context.goalSubmitCount, 1);
+});
+
+for (const [name, readNativeSetupRoute, reason] of [
+  ['missing read', undefined, 'NATIVE_SETUP_ROUTE_UNAVAILABLE'],
+  ['retained setup', async () => ({ retained_intent: true, scope_resolved: true, authority_effect: false }), 'NATIVE_SETUP_READBACK_REQUIRED'],
+  ['unresolved scope', async () => ({ retained_intent: false, scope_resolved: false, authority_effect: false }), 'NATIVE_SETUP_READBACK_REQUIRED'],
+  ['failed authentication', async () => { throw Error('generated authentication refusal'); }, 'NATIVE_SETUP_ROUTE_UNAVAILABLE'],
+  ['effectful evidence', async () => ({ retained_intent: false, scope_resolved: true, authority_effect: true }), 'NATIVE_SETUP_ROUTE_UNAVAILABLE'],
+]) test(`R97 expected route remains HOLD with ${name}, never assumed Browser absence`, async () => {
+  const mode = await readClientGoalSubmissionMode({
+    readSummary: () => ({ status_file: '/disposable-fixture/status.json' }),
+    lstat: async () => { throw Object.assign(Error('generated missing descriptor'), { code: 'ENOENT' }); },
+    readNativeSetupRoute,
+  });
+  assert.deepEqual(mode, {
+    schema: 'metaengine.client.goal-submission-mode.v1', kind: 'UNAVAILABLE', state: 'HOLD', reason,
+    authority_effect: false, automatic_retry_allowed: false,
+  });
 });

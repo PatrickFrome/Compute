@@ -1,0 +1,28 @@
+{
+  "schema": "metaengine.preinstall-source-collection-checks.v1",
+  "public_base": "5d7ec74db1c72b15921a6e00a2826a09a72f4fb2",
+  "merge_parents": [
+    "614d13c2279c244eebfcb52f498adab54561a401",
+    "3e6bcb3fc769b3358e4b82d7aa033249c3ec377f",
+    "352ac6ae7fc08c40ac7b1cf78aeb4a464a000e2a"
+  ],
+  "status": "SOURCE_ONLY_NOT_INSTALL_QUALIFIED",
+  "merge": "Conflict-free; original commits preserved. No Owner/ticket WIP integration or seal regeneration.",
+  "command": "node --test --test-reporter=tap apps/metaengine-browser/test/client-admission-recovery.test.mjs apps/metaengine-browser/test/r97-goal-submission-mode.test.mjs infra/client-state-runtime/fresh-schema-plan.test.mjs apps/metaengine-browser/test/codex-cli-job-runtime-build.test.mjs tests/current-source-seal.test.mjs",
+  "result": {
+    "tests": 51,
+    "pass": 49,
+    "fail": 0,
+    "skipped": 2,
+    "exit_code": 0,
+    "duration_ms": 2437.022318
+  },
+  "tap_sha256": "b09612909c2ef02c252012b690c6c4796753df4bef185905dfdf7f64c8b38a0d",
+  "limits": [
+    "Only bounded existing source/fixture tests were rerun.",
+    "No integrated Windows/native/package/installed test performed.",
+    "Historical source seals and frozen manifests unchanged.",
+    "UI workflow patch pending materialization; not included.",
+    "Owner and publication-ticket branches retained separately with known failed/incomplete tests."
+  ]
+}

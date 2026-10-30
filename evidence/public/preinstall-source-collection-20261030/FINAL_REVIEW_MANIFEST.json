@@ -1,0 +1,150 @@
+{
+  "schema": "metaengine.preinstall-critical-review-addendum.v1",
+  "public_base": "5d7ec74db1c72b15921a6e00a2826a09a72f4fb2",
+  "parent_snapshot": "e50808e5cae2c25d7cda697f4bc80ca0b021b28a",
+  "change": "Documentation only: probable missing v2 service-proof reproduction and explicit pause-versus-cancel Stop acceptance. No diagnosis confirmed and no code/gate changed.",
+  "checks": "git diff --check; no tests rerun for documentation-only addition.",
+  "scope": "All changed files relative to public baseline, excluding this manifest. Earlier checkpoint manifests remain unchanged historical records.",
+  "files": [
+    {
+      "path": ".github/workflows/client-source-candidate-w73.yml",
+      "bytes": 12420,
+      "sha256": "2b24f744641d251da21b5418124991f0f8a801c27bc516d6bd474b216afc1ad9"
+    },
+    {
+      "path": ".github/workflows/metaengine-client-w23-me2-typecheck.yml",
+      "bytes": 4740,
+      "sha256": "87400f70adb701921ebfe8ca40f844f8747b8f70dd9f845fd1dfc0bcfd5e0798"
+    },
+    {
+      "path": "apps/metaengine-browser/scripts/codex-cli-job-runner.ps1",
+      "bytes": 22668,
+      "sha256": "d465fbb85dfb1438a8db17cbff2eed5977084754abacca6f0ba683ffefe84960"
+    },
+    {
+      "path": "apps/metaengine-browser/scripts/prepare-codex-cli-job-runtime.mjs",
+      "bytes": 22118,
+      "sha256": "469c19cf46f09cdcde4c886c6337fef79fc13baf8d881dd70c49b7adffb04b59"
+    },
+    {
+      "path": "apps/metaengine-browser/test/client-admission-recovery.test.mjs",
+      "bytes": 18150,
+      "sha256": "ab8469d69bcec28e25bcaa8c75dd0d96529522d727ff62ebe9775f81865090e3"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-job-runtime-build.test.mjs",
+      "bytes": 17701,
+      "sha256": "dbc6beb0e5dec3ac629a9a6e763b63597314c5cd7e1e04b9287814e4e9fc335b"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-windows-lifetime.test.mjs",
+      "bytes": 9007,
+      "sha256": "46dfbdb6d7ec99f49f962b5b229ac0ad5a137e37c18dfe174e70be4aefd66b70"
+    },
+    {
+      "path": "apps/metaengine-browser/test/fixtures/native-coding-unqualified-bridge.mjs",
+      "bytes": 1355,
+      "sha256": "79aa488c6f2f53b67f3bc4abf14cfd8ffe1d6038e624daa3681c8aae820f4b2d"
+    },
+    {
+      "path": "apps/metaengine-browser/test/r97-goal-submission-mode.test.mjs",
+      "bytes": 5498,
+      "sha256": "858c07f6c795dd42e2e1062518f461a8d331d94f603f4d78ac1b9fa1a82d427e"
+    },
+    {
+      "path": "evidence/public/admission-fixture-repair-20261030/CHECKS.json",
+      "bytes": 2583,
+      "sha256": "676d06fe02b9e3e363f2893887c07edd9ae5b82c1a31e252a5a915aea0f53df0"
+    },
+    {
+      "path": "evidence/public/admission-fixture-repair-20261030/MANIFEST.json",
+      "bytes": 983,
+      "sha256": "5951a73fb593234bb6a2327545c38364fa1e328a45f60efefc4e737aadbcfd4a"
+    },
+    {
+      "path": "evidence/public/admission-fixture-repair-20261030/REVIEW.md",
+      "bytes": 2614,
+      "sha256": "b7b09501a375274f55877fed49e44f46b7adda9c117b29538ad3f7db8c2d3a0a"
+    },
+    {
+      "path": "evidence/public/fresh-schema-inventory-repair-20261030/CHECKS.json",
+      "bytes": 3756,
+      "sha256": "63912da3395643ac71bddeef018de770f3e3cfd7b8bfe6f128b66a7183b9212e"
+    },
+    {
+      "path": "evidence/public/fresh-schema-inventory-repair-20261030/MANIFEST.json",
+      "bytes": 990,
+      "sha256": "f2d5b60b6bef1d8f81c10600dc6546fe9b4925ba3ad063f2f98846601001afb9"
+    },
+    {
+      "path": "evidence/public/fresh-schema-inventory-repair-20261030/REVIEW.md",
+      "bytes": 2791,
+      "sha256": "6d37f2aa1d1667c1e3ab68f74b88e9865fd83281858e9693a0c41d5f7c52967b"
+    },
+    {
+      "path": "evidence/public/preinstall-source-collection-20261030/CHECKS.json",
+      "bytes": 1386,
+      "sha256": "e2139910d14264854190e71fc175b3f8d2b4aa58a1902694b1d2ed1259bf3042"
+    },
+    {
+      "path": "evidence/public/preinstall-source-collection-20261030/MANIFEST.json",
+      "bytes": 5162,
+      "sha256": "bc357168cdda3b5e09080e960686df81c7e25d3d00b388d991cce954dbf07db8"
+    },
+    {
+      "path": "evidence/public/preinstall-source-collection-20261030/PREINSTALL_CRITICAL_REVIEW.md",
+      "bytes": 13950,
+      "sha256": "8345cb36d4d39cc927db6b32c9a09ec812ee8620ab112a7d2d0a835fa4d0c1c2"
+    },
+    {
+      "path": "evidence/public/source-fixture-integration-20261030/CHECKS.json",
+      "bytes": 1302,
+      "sha256": "b51475a853176843cc42894ffe12ba26cbd56ee5d32545f62b354ba2ba4ef745"
+    },
+    {
+      "path": "evidence/public/source-fixture-integration-20261030/MANIFEST.json",
+      "bytes": 2810,
+      "sha256": "8a26c4d6cf35efc54e7a8e294776865d855e537f6590db30b6180025551e5216"
+    },
+    {
+      "path": "evidence/public/source-fixture-integration-20261030/REVIEW.md",
+      "bytes": 1400,
+      "sha256": "417704e89e9b92d843a9e2d24b4b1bd1edccfbac82d4bb43245c3d20d028fa9b"
+    },
+    {
+      "path": "evidence/public/ui-workflow-collection-20261030/CHECKS.json",
+      "bytes": 1789,
+      "sha256": "f8c8f256d927f2874c4e69495e96e2decd40471a0f6da6c5e95465fe5b4d5bb1"
+    },
+    {
+      "path": "evidence/public/ui-workflow-collection-20261030/MANIFEST.json",
+      "bytes": 5652,
+      "sha256": "ac5bae45587b568e26cb82b636d245459405b186b0e873a881c89963ee45fd71"
+    },
+    {
+      "path": "infra/client-state-runtime/fresh-schema-candidate-plan.json",
+      "bytes": 18103,
+      "sha256": "a507dde5b1e7aa9316d830299fda4bf1cbbcae37d32a9fe8ebb423f3fe0cbea0"
+    },
+    {
+      "path": "infra/client-state-runtime/fresh-schema-plan.test.mjs",
+      "bytes": 9003,
+      "sha256": "f265f0c549a1ae133496fa2950bcfb7277194032dab17a5304938c1bd650c050"
+    },
+    {
+      "path": "scripts/CURRENT_SOURCE_SEAL.md",
+      "bytes": 4096,
+      "sha256": "360db77aa68ecfe7c205ff2f8fdad5f11ad862086d08ae78c07e128bc00d9510"
+    },
+    {
+      "path": "scripts/current-source-seal.mjs",
+      "bytes": 7739,
+      "sha256": "d6c50a1971cd858066a1a2d01dda64bb37b3ffa3d9c799313fd49d7c5bd22932"
+    },
+    {
+      "path": "tests/current-source-seal.test.mjs",
+      "bytes": 6328,
+      "sha256": "8fbc00f93e1a8a625257957157ba7d41c6feaa767631c419a027bc985591f980"
+    }
+  ]
+}

@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, mkdtemp, mkdir, copyFile, writeFile, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { createHash } from 'node:crypto';
+import { LOCAL_RUNTIME_MIGRATIONS, loadLocalRuntimeMigrationPlan } from './local-runtime-migrations.mjs';
 import { loadFreshSchemaCandidatePlan, inspectFreshSchemaCandidate, FRESH_SCHEMA_OCCUPANCY_QUERY } from './fresh-schema-plan.mjs';
 import { qualifyFreshSchemaWasm, assertDisposableIdentity, assertReservedBackend, assertEmptyApplicationSchema } from './test/fresh-schema-disposable.mjs';
 
@@ -70,4 +75,58 @@ test('reserved backend guard needs no control-data privilege under restricted ro
   }};
   await assertReservedBackend(restricted,42);
   await assert.rejects(assertReservedBackend(restricted,43),/backend_changed/);
+});
+
+
+test('fresh inventory includes every registered upgrade in order and excludes unregistered publication SQL', async () => {
+  const candidate = await loadFreshSchemaCandidatePlan();
+  const actual = (await loadLocalRuntimeMigrationPlan()).migrations.flatMap(row => [
+    { path: row.source, sha256: row.source_sha256 },
+    ...(row.upgrade_source ? [{ path: row.upgrade_source, sha256: row.upgrade_source_sha256 }] : []),
+  ]);
+  assert.deepEqual(candidate.upgrades.map(row => ({ path: path.basename(row.path), sha256: row.sha256 })), actual);
+  assert.equal(actual.at(-1).path, 'native-coding-capacity-v2.sql');
+  assert.equal(LOCAL_RUNTIME_MIGRATIONS.filter(row => row.path === 'native-coding-capacity-v2.sql').length, 1);
+  assert.equal(candidate.upgrades.some(row => row.path.endsWith('native-coding-callback-publication-v1.sql')), false);
+  assert.equal(LOCAL_RUNTIME_MIGRATIONS.some(row => row.path === 'native-coding-callback-publication-v1.sql'), false);
+});
+
+test('actual fresh loader rejects missing, duplicate, reordered, forged and unregistered inventory before SQL access', async () => {
+  // A disposable source-only copy exercises the real loader/catalog, without
+  // modifying repository files, SQL authority, a running database or its guards.
+  const root = await mkdtemp(path.join(os.tmpdir(), 'fresh-inventory-drift-'));
+  const runtime = path.join(root, 'infra/client-state-runtime');
+  const sourceRoot = new URL('../../', import.meta.url);
+  const original = JSON.parse(await readFile(new URL('./fresh-schema-candidate-plan.json', import.meta.url), 'utf8'));
+  const extraPath = 'infra/client-state-runtime/native-coding-callback-publication-v1.sql';
+  const resources = new Set([...original.baseline, ...original.upgrades].map(row => row.path));
+  resources.add(extraPath);
+  resources.add('infra/client-state-runtime/fresh-schema-plan.mjs');
+  resources.add('infra/client-state-runtime/local-runtime-migrations.mjs');
+  try {
+    for (const resource of resources) {
+      const target = path.join(root, resource);
+      await mkdir(path.dirname(target), { recursive: true });
+      await copyFile(new URL(resource, sourceRoot), target);
+    }
+    const file = path.join(runtime, 'fresh-schema-candidate-plan.json');
+    await writeFile(file, JSON.stringify(original));
+    const loader = await import(pathToFileURL(path.join(runtime, 'fresh-schema-plan.mjs')).href);
+    assert.equal((await loader.loadFreshSchemaCandidatePlan()).production_qualified, false);
+    const extra = { path: extraPath, sha256: createHash('sha256').update(await readFile(path.join(root, extraPath))).digest('hex') };
+    let connections = 0;
+    const sql = { begin() { connections++; throw Error('unexpected SQL acquisition'); } };
+    for (const mode of ['missing', 'duplicate', 'reordered', 'forged', 'unregistered']) {
+      const candidate = structuredClone(original);
+      if (mode === 'missing') candidate.upgrades.pop();
+      if (mode === 'duplicate') candidate.upgrades.push(candidate.upgrades.at(-1));
+      if (mode === 'reordered') [candidate.upgrades[candidate.upgrades.length - 1], candidate.upgrades[candidate.upgrades.length - 2]] = [candidate.upgrades.at(-2), candidate.upgrades.at(-1)];
+      if (mode === 'forged') candidate.upgrades.at(-1).sha256 = '0'.repeat(64);
+      if (mode === 'unregistered') candidate.upgrades.push(extra);
+      await writeFile(file, JSON.stringify(candidate));
+      await assert.rejects(loader.inspectFreshSchemaCandidate({ sql }), mode === 'forged'
+        ? /fresh_schema_source_pin_mismatch/ : /fresh_schema_upgrade_plan_changed/, mode);
+      assert.equal(connections, 0, mode + ': drift must fail before DB acquisition');
+    }
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

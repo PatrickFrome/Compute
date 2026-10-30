@@ -1,0 +1,91 @@
+{
+  "schema": "metaengine.fresh-schema-inventory-repair-checks.v1",
+  "base": "5d7ec74db1c72b15921a6e00a2826a09a72f4fb2",
+  "status": "SOURCE_INVENTORY_REPAIR_ONLY_OVERALL_QUALIFICATION_INCOMPLETE",
+  "records": [
+    {
+      "lane": "before.tap",
+      "raw_log_sha256": "f5c8f5e2158d8a9889f3d92dee7481b02fb9cac79cf62ae4b1e8854005da634a",
+      "summary": {
+        "tests": 11,
+        "suites": 0,
+        "pass": 4,
+        "fail": 4,
+        "cancelled": 0,
+        "skipped": 3,
+        "todo": 0
+      }
+    },
+    {
+      "lane": "after-source.tap",
+      "raw_log_sha256": "8efa9ce703a2ee9d3d549e2bff5dad60be56850acd21b766c838ad4ac4b3807f",
+      "summary": {
+        "tests": 13,
+        "suites": 0,
+        "pass": 10,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 3,
+        "todo": 0
+      }
+    },
+    {
+      "lane": "pg17.tap",
+      "raw_log_sha256": "d8a40aa190bdd16c7a9227e2ee9b0b11b6f12d587ec00f0ccafdcfe7481fd7ae",
+      "summary": {
+        "tests": 15,
+        "suites": 0,
+        "pass": 13,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 2,
+        "todo": 0
+      }
+    },
+    {
+      "lane": "related.tap",
+      "raw_log_sha256": "f441525ac1911fa5c14a5af67483b1d95c18cf9f2a980f621ae0da40051971b6",
+      "summary": {
+        "tests": 106,
+        "suites": 0,
+        "pass": 106,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      }
+    },
+    {
+      "lane": "message-wake-pg17.tap",
+      "raw_log_sha256": "8c980a8c242a4fb2ff8f2a151f0250f2c3062ed962a649378cae833b5203660f",
+      "summary": {
+        "tests": 1,
+        "suites": 0,
+        "pass": 1,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      }
+    }
+  ],
+  "sql_source_changed": false,
+  "migration_registration_changed": false,
+  "publication_sql_registered": false,
+  "historical_seal_changed": false,
+  "new_inventory_entry": {
+    "path": "infra/client-state-runtime/native-coding-capacity-v2.sql",
+    "sha256": "7892d0fd3594ebaa115080402ced50b99d6c54940f75533e71fe262ae14d914c"
+  },
+  "existing_driver_fixture_files_hash_verified": 37,
+  "dependencies_installed": false,
+  "commands": {
+    "focused": "node --test --test-reporter=tap infra/client-state-runtime/fresh-schema-plan.test.mjs infra/client-state-runtime/fresh-schema-application-plan.test.mjs",
+    "pg17": "With explicit disposable METAENGINE_PG_TEST_BIN, METAENGINE_PG_TEST_DRIVER, METAENGINE_PG_TEST_BASE and LOCAL_STATE_TEST_PROJECT_PG_BIN_DIR: node --test --test-timeout=240000 --test-concurrency=1 --test-reporter=tap infra/client-state-runtime/fresh-schema-plan.test.mjs infra/client-state-runtime/fresh-schema-application-plan.test.mjs infra/client-state-runtime/fresh-schema-pg17.integration.test.mjs infra/client-state-runtime/local-runtime-migrations.integration.test.mjs",
+    "message_wake": "With the same explicit disposable PG fixture: node --test --test-timeout=240000 --test-reporter=tap infra/client-state-runtime/browser-parent-message-wake.pg17.test.mjs",
+    "related": "node --test --test-timeout=60000 --test-concurrency=1 --test-reporter=tap infra/client-state-runtime/sql-checkout-byte-integrity.test.mjs infra/client-state-runtime/local-runtime-migrations.test.mjs infra/client-state-runtime/reviewed-empty-schema.test.mjs infra/client-state-runtime/package-runtime-resources.test.mjs infra/client-state-runtime/fresh-client-provider.test.mjs infra/client-state-runtime/fresh-provider-consent-denial.test.mjs"
+  },
+  "optional_skips": "WASM supplemental tests; the earlier environment-free source run additionally skipped native PG, which was then executed with the explicit actual PG17 fixture.",
+  "counts_overlap": true,
+  "native_windows_proof": false
+}

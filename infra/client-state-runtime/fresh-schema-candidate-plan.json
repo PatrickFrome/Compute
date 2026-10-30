@@ -291,6 +291,10 @@
     {
       "path": "infra/client-state-runtime/native-coding-setup-operation-v1.sql",
       "sha256": "18cf78ff5400706ba42749a468cffdc9405e3612c405eee94824873518c1bf5a"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-capacity-v2.sql",
+      "sha256": "7892d0fd3594ebaa115080402ced50b99d6c54940f75533e71fe262ae14d914c"
     }
   ],
   "unresolved_dependencies": [
