@@ -1,0 +1,32 @@
+UI source qualification handoff, 2026-10-30
+
+Base: 5d7ec74db1c72b15921a6e00a2826a09a72f4fb2
+Base UI tree: b24f813d617874ad10a31725890d1352d0e779e6
+
+Change: W23 frozen dependency installation now disables lifecycle scripts and
+rejects changes to package.json or bun.lock. Application code and lock are unchanged.
+
+Completed on the base application tree with this CI change:
+- Bun 1.3.3 baseline frozen install, lifecycle scripts disabled: exit 0.
+- 610 installed package records match the unchanged lock; no missing required deps.
+- UI source/scripts suite: 253 tests, 242 pass, 0 fail, 11 platform skips.
+- Browser runtime-resource contract: 10 pass, 0 fail, 0 skip.
+- TypeScript, ESLint, Next production build, postbuild and pack: exit 0.
+- Windows Chromium: 8 additional Page scenarios and 8 standard acceptance scenarios pass.
+  Extra cases include draft navigation/reload, namespace changes, late acknowledgements,
+  monotonic expiry, keyboard/composition events, 390px controls and explicit activation
+  success/error handling without replay. Bridges and authority responses are synthetic.
+- Standalone inventory: 1771 entries, unchanged before/during/after execution.
+  Owned servers exited after requested shutdown; the disposable profile was removed.
+
+Limits and unfinished work:
+- Real current Owner read, installed Main/Owner and installed-client readiness remain HOLD.
+- Windows skips: 3 POSIX mode, 3 symlink privilege and 5 POSIX signal-handler cases.
+- The blocked Linux Unix-socket check was not retried or replaced with a Windows result.
+- Native Windows IME was not qualified; composition-event guards were exercised.
+- At 390px composer/action controls fit, but topbar status text is clipped.
+- No process-wide network isolation, transient-write exclusion or ACL/ADS parity claim.
+- No new test run was performed after adding this text-only handoff.
+
+Raw logs, machine-specific paths, profiles and recovery archives are intentionally absent.
+This is a source-only checkpoint, not an installer, deployment or runtime qualification.
