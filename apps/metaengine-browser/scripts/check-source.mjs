@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 // Keep npm's Windows command line below cmd.exe's limit. Each Node invocation
 // checks one reviewed source file, without a shell or a combined argument list.
 export const SOURCE_CHECK_FILES = Object.freeze([
+  "src/native-coding-publication-handoff-contract.mjs",
   "src/native-coding-capacity-contract.mjs",
   "src/native-coding-capacity-owner.mjs",
   "../../infra/client-state-runtime/native-coding-host-capacity.mjs",

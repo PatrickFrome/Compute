@@ -832,8 +832,8 @@ test('underlying bridge counterfactual (publication unqualified) bindRun CHECK a
  let registration,broker;
  const source=await fs.readFile(new URL('../src/native-coding-agent-run-bridge.mjs',import.meta.url),'utf8');
  const prepare=new Function('requireNativeRunCallbackPublication','createHash','createNativeCodingAgentMcpBroker','nativeCodingAgentMcpIntentBodySha256','createNativeCodingAgentMcpLaunch',
-  'validateNativeCodingAgentHostRequest','canonical',source.replace(/^import .*;\n/gm,'').replace('export async function','async function')+'\nreturn prepareNativeCodingAgentRunBridge;')
-  (()=>{},createHash,async options=>{broker=await brokerModule.createNativeCodingAgentMcpBroker({...options,endpoint:'/fixture/in-memory-only',timeoutMs:500});return broker;},
+  'validateNativeCodingAgentHostRequest','canonical',source.replace(/^import .*;\r?\n/gm,'').replace('export async function','async function')+'\nreturn prepareNativeCodingAgentRunBridge;')
+  (()=>{},createHash,async options=>{broker=await brokerModule.createNativeCodingAgentMcpBroker({...options,endpoint:process.platform==='win32'?undefined:'/fixture/in-memory-only',timeoutMs:500});return broker;},
    nativeCodingAgentMcpIntentBodySha256,async options=>{registration=options.registration;return{fixture_only:true};},validateNativeCodingAgentHostRequest,nativeCodingCanonicalJson);
  const binding={...run.request.binding,base_sha:'a'.repeat(40)},expiry=new Date(Date.now()+60000).toISOString();
  const authorization={...binding,authorized:true,trust_namespace:'LOCAL_OPERATOR_QA',permit_id:id(),owner_epoch:1,user_sid:'S-1-5-21-111-1001',worktree_path:'/fixture/worktree'};
