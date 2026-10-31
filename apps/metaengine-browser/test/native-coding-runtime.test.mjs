@@ -1,3 +1,4 @@
+import {readAgentResourceAdmission} from '../src/agent-resource-admission.mjs';
 import {createNativeCodingWorkerRegistry} from '../src/native-coding-host-observers.mjs';
 import {joinedSettlementFixture} from './fixtures/codex-cli-joined-settlement-fixture.mjs';
 import {createNativeCodingCapacityOwner} from '../src/native-coding-capacity-owner.mjs';
@@ -105,6 +106,10 @@ function fixture(options={}){
     ownPostgres,signedRequest,observers,issuer,
     runnerOptions:{expectedExecutableSha256:permit.artifact.cli_executable_sha256},resultStore:store,workerRegistry:options.workerRegistry||workers,
     permitRegistry:{listProviderSelectors:async()=>[{provider_id:ids.provider,agent_id:agent}],readProvider:async()=>permit},runnerFactory:options.runnerFactory||runnerFactory,
+    // This generated executor fixture must not consume the real PC's transient
+    // memory headroom. Production admission remains independently exercised.
+    readResourceAdmission:options.readResourceAdmission||(()=>readAgentResourceAdmission({
+      freeMemory:2*1024*1024*1024,totalMemory:8*1024*1024*1024,parallelism:2})),
     physicalSlotBudget:options.physicalSlotBudget||1,...(options.closeTimeoutMs?{closeTimeoutMs:options.closeTimeoutMs}:{})};
   const runtime=createNativeCodingRuntime(args);
   return {runtime,args,calls,lease,permit,prompt,transitionEvents,
@@ -653,4 +658,11 @@ test('actual runtime default bridge remains blocked by directory publication bef
  assert.equal(reason,'native_run_callback_directory_durability_unqualified');assert.equal(custody,0);
  assert.equal(base.calls.includes('mark-running'),false);assert.equal(base.calls.includes('resume'),false);
  assert.equal((await runtime.close()).shutdown_state,'DRAINED');
+});
+
+test('generated runtime resource refusal still prevents a physical start',async t=>{
+ const f=fixture({readResourceAdmission:()=>readAgentResourceAdmission({freeMemory:0,totalMemory:8*1024*1024*1024,parallelism:2})});
+ t.after(()=>f.runtime.close());
+ assert.equal(f.runtime.dispatchLease(f.lease).state,'PHYSICAL_POOL_BUSY');
+ assert.equal(f.runCount,0);assert.equal(f.calls.includes('reserve'),false);
 });

@@ -1,3 +1,4 @@
+import {readAgentResourceAdmission} from '../src/agent-resource-admission.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createNativeCodingExecutionPool} from '../src/native-coding-execution-pool.mjs';
@@ -5,10 +6,11 @@ const lease={task_id:'11111111-1111-4111-8111-111111111111',lease_generation:1,
   agent_id:'agent_11111111-1111-4111-8111-111111111111',agent_generation_epoch:1};
 const other={...lease,task_id:'22222222-2222-4222-8222-222222222222'};
 const turn=()=>new Promise(resolve=>setImmediate(resolve));
-function fixture(budget=2) {
+const generatedResources=()=>readAgentResourceAdmission({freeMemory:2*1024*1024*1024,totalMemory:8*1024*1024*1024,parallelism:2});
+function fixture(budget=2,readResourceAdmission=generatedResources) {
   const calls=[];let finish;
   const pending=new Promise(resolve=>{finish=resolve;});
-  const pool=createNativeCodingExecutionPool({physicalSlotBudget:budget,
+  const pool=createNativeCodingExecutionPool({physicalSlotBudget:budget,readResourceAdmission,
     prepareRequest:async row=>({lease:row}),
     executor:{execute:async(_request,{signal})=>{
       calls.push('execute');
@@ -45,7 +47,7 @@ test('stop cancels jobs, retains unknown outcomes, and closes new dispatch',asyn
 });
 test('a private request builder cannot switch the assigned agent',async()=>{
   let called=false;
-  const pool=createNativeCodingExecutionPool({prepareRequest:async row=>({lease:{...row,agent_id:'agent_different'}}),
+  const pool=createNativeCodingExecutionPool({readResourceAdmission:generatedResources,prepareRequest:async row=>({lease:{...row,agent_id:'agent_different'}}),
     executor:{execute:async()=>{called=true;}},readPriorExecution:async()=>null});
   pool.dispatch(lease);await turn();
   assert.equal((await pool.observe(lease)).reason,'NATIVE_REQUEST_BINDING_CHANGED');assert.equal(called,false);
@@ -72,4 +74,10 @@ test('one native slot admits child work after exact parent result ACK, never fro
     await turn();
     assert.equal(f.calls.filter(call => call === 'execute').length, 2);
   } finally { await f.pool.stop(); }
+});
+
+test('resource refusal prevents generated pool start without weakening the physical budget',async()=>{
+ const f=fixture(2,()=>readAgentResourceAdmission({freeMemory:0,totalMemory:8*1024*1024*1024,parallelism:2}));
+ try{assert.equal(f.pool.dispatch(lease).state,'PHYSICAL_POOL_BUSY');assert.equal(f.pool.snapshot().occupied_slots,0);assert.equal(f.calls.length,0);}
+ finally{await f.pool.stop();}
 });

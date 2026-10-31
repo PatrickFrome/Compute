@@ -14,7 +14,7 @@ async function fixture({legacy=false}={}){
  const gate=Promise.withResolvers(),callbacks=Promise.withResolvers();let closes=0,revokes=0;
  const broker={issueRun:()=>({}),revokeRun:()=>{revokes++;},close:()=>{closes++;return gate.promise;},drainCallbacks:()=>callbacks.promise};
  const prepare=new Function('requireNativeRunCallbackPublication','createHash','createNativeCodingAgentMcpBroker','nativeCodingAgentMcpIntentBodySha256','createNativeCodingAgentMcpLaunch',
-  'validateNativeCodingAgentHostRequest','canonical',source.replace(/^import .*;\n/gm,'').replace('export async function','async function')+'\nreturn prepareNativeCodingAgentRunBridge;')
+  'validateNativeCodingAgentHostRequest','canonical',source.replace(/^import .*;\r?\n/gm,'').replace('export async function','async function')+'\nreturn prepareNativeCodingAgentRunBridge;')
   (()=>{},createHash,async()=>broker,()=>'',async()=>({fixture_only:true}),x=>x,nativeCodingCanonicalJson);
  const binding={task_id:randomUUID(),agent_id:'agent_fixture-12345678',lease_generation:1,agent_generation_epoch:1,role:'IMPLEMENTER',base_sha:'a'.repeat(40)};
  const authorization={...binding,permit_id:randomUUID(),owner_epoch:1,user_sid:'S-1-5-21-111-1001',workspace_id:randomUUID(),project_id:randomUUID(),

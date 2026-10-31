@@ -20,7 +20,7 @@ test('resource recovery allows more tabs without changing a fixed count ceiling'
 });
 
 test('tab role is validated at creation and immutable through updates', () => {
-  const r = new TabRegistry();
+  const r = new TabRegistry({readResources:()=>({physical_start_allowed:true,memory_headroom:8})});
   assert.throws(() => r.create({ url: 'https://example.com/', role: 'GUEST' }), /tab_role_invalid/);
   const tab = r.create({ url: 'https://chatgpt.com/', kind: 'CHATGPT', role: 'FLEET' });
   assert.equal(tab.role, 'FLEET');
@@ -34,7 +34,7 @@ test('tab role is validated at creation and immutable through updates', () => {
 });
 
 test('default role is USER so legacy create calls keep their capacity semantics', () => {
-  const r = new TabRegistry();
+  const r = new TabRegistry({readResources:()=>({physical_start_allowed:true,memory_headroom:8})});
   const a = r.create({ url: 'https://example.com/' });
   assert.equal(a.role, 'USER');
   assert.equal(r.census().by_kind.USER_WEB, 1);
