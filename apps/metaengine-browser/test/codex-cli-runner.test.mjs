@@ -1,3 +1,4 @@
+import {createNativeCodingLeaseExecutor} from '../src/native-coding-lease-executor.mjs';
 import {prepareUnqualifiedBridgeFixture} from './fixtures/native-coding-unqualified-bridge.mjs';
 import {generatedRunCustodyDouble} from './fixtures/native-coding-run-custody-double.mjs';
 import {createNativeCodingAgentMcpLaunch} from '../src/native-coding-agent-mcp-launch.mjs';
@@ -89,8 +90,8 @@ function controller({ mutate = true, invalidJson = false, hang = false, criticMu
     const completion = new Promise(resolve => { finish = resolve; });
     const generated=joinedSettlementFixture(spec);
     return {proof:generated.proof,stdout,stderr,completion,
-      async resume() {
-        await onResume?.();
+      async resume(prompt, options) {
+        await onResume?.(prompt, options);
         if (hang) return;
         const role = spec.args[spec.args.indexOf('--sandbox') + 1] === 'read-only' ? 'CRITIC' : 'IMPLEMENTER';
         if ((role === 'IMPLEMENTER' && mutate) || (role === 'CRITIC' && criticMutate)) await fs.writeFile(path.join(spec.cwd, 'feature.txt'), role === 'CRITIC' ? 'corrupted\n' : 'after\n');
@@ -498,4 +499,271 @@ test('actual default runner/bridge directory-durability gate blocks before broke
  assert.equal(receipt.state,'AMBIGUOUS');assert.equal(receipt.terminal_reason,'native_run_callback_directory_durability_unqualified');
  assert.equal(custody,0);assert.equal(processController.spawns,0);assert.equal((await runner.run(request)).prior_attempt,true);
  assert.equal(custody,0);assert.equal(processController.spawns,0);
+});
+
+const preparedRequest = f => ({lease:f.lease(310),role:'IMPLEMENTER',worktreePath:f.worktree,prompt:'Original private fixture prompt'});
+
+test('prepared runner creates only immutable local attempt and unclaimed callback HEADER without dispatch',async t=>{
+ const f=await fixture(t),processController=controller();let bridges=0;const phases=[];
+ const runner=createCodexCliRunner({...f,processController,authorizeLease:async value=>{phases.push(value.phase);return f.authorizeLease(value);},
+  prepareAgentBridge:async()=>{bridges++;throw Error('must not prepare a bridge');}});
+ const request=preparedRequest(f),handle=await runner.prepare(request),descriptor=runner.describePrepared(handle);
+ assert.equal(processController.spawns,0);assert.equal(bridges,0);assert.deepEqual(phases,['BEFORE_ATTEMPT']);
+ assert.equal(descriptor.state,'PREPARED');assert.equal(descriptor.sql_reservation,'NOT_ATTESTED');assert.equal(descriptor.authority_effect,false);
+ assert.equal(Object.isFrozen(descriptor),true);assert.equal(Object.isFrozen(descriptor.binding),true);
+ assert.equal(descriptor.callbackJournal,runner.describePrepared(handle).callbackJournal);
+ assert.equal(descriptor.callbackJournal.snapshot().records,1);assert.equal(descriptor.callbackJournal.snapshot().state,'INCOMPLETE');
+ assert.equal(descriptor.callbackJournal.snapshot().directory_durability,'DIRECTORY_DURABILITY_UNQUALIFIED');
+ assert.deepEqual((await fs.readdir(descriptor.directory)).sort(),['attempt.json','host-callback-custody']);
+ const bytes=await fs.readFile(descriptor.attemptPath),attempt=JSON.parse(bytes);
+ assert.equal(sha(bytes),descriptor.attemptSha256);assert.equal(attempt.run_id,descriptor.runId);
+ assert.equal(attempt.prompt_sha256,sha(request.prompt));assert.equal(bytes.includes(Buffer.from(request.prompt)),false);
+ const header=JSON.parse(await fs.readFile(path.join(descriptor.directory,'host-callback-custody','0000000000000000.json')));
+ assert.equal(header.event.kind,'HEADER');assert.equal(header.event.run_id,descriptor.runId);
+ await assert.rejects(fs.stat(f.workerTempRoot),{code:'ENOENT'});
+ assert.equal(runner.abandonPrepared(handle).physical_settlement,'NOT_ATTESTED');
+ assert.deepEqual(await fs.readFile(descriptor.attemptPath),bytes,'abandonment preserves immutable evidence');
+});
+
+test('prepared runner snapshots original request and never extends the first lease expiry',async t=>{
+ const f=await fixture(t),phases=[];let resumed,firstExpiry;const processController=controller({onResume:prompt=>{resumed=prompt;}});
+ const runner=createCodexCliRunner({...f,processController,authorizeLease:async value=>{
+  phases.push(value.phase);const permit=await f.authorizeLease(value);
+  if(value.phase==='BEFORE_ATTEMPT')firstExpiry=permit.expires_at;else permit.expires_at=new Date(Date.parse(firstExpiry)+600000).toISOString();return permit;
+ }});
+ const request=preparedRequest(f),original=structuredClone(request),preparing=runner.prepare(request);
+ request.prompt='MUTATED';request.role='CRITIC';request.worktreePath=f.directory;request.lease.task_id=id(999);request.lease.base_sha='0'.repeat(40);
+ const handle=await preparing,descriptor=runner.describePrepared(handle);
+ f.permits[0].owner_epoch=999;f.permits[0].expires_at=new Date(Date.parse(firstExpiry)+1200000).toISOString();
+ const receipt=await runner.runPrepared(handle);
+ assert.equal(receipt.state,'RESULT_READY');assert.equal(resumed,original.prompt);assert.equal(receipt.prompt_sha256,sha(original.prompt));
+ assert.equal(receipt.task_id,original.lease.task_id);assert.equal(receipt.role,original.role);assert.equal(receipt.worktree_path,original.worktreePath);
+ assert.equal(receipt.run_id,descriptor.runId);assert.equal(receipt.execution_deadline,firstExpiry);assert.equal(processController.lastSpec.deadlineAt,firstExpiry);
+ assert.deepEqual(phases,['BEFORE_ATTEMPT','BEFORE_PREPARED_RUN','BEFORE_RESUME','AFTER_EXECUTION']);
+});
+
+test('prepared handles cannot be forged, serialized, cloned or adopted by another runner',async t=>{
+ const f=await fixture(t),processController=controller(),runner=createCodexCliRunner({...f,processController});
+ const foreign=createCodexCliRunner({...f,processController:controller()}),handle=await runner.prepare(preparedRequest(f));
+ assert.throws(()=>JSON.stringify(handle),/prepared_handle_not_serializable/);assert.throws(()=>structuredClone(handle),{name:'DataCloneError'});
+ for(const forged of [{},null,JSON.parse(JSON.stringify(runner.describePrepared(handle))),Object.create(handle)])
+  await assert.rejects(runner.runPrepared(forged),/prepared_handle_invalid/);
+ await assert.rejects(foreign.runPrepared(handle),/prepared_handle_invalid/);assert.throws(()=>foreign.describePrepared(handle),/prepared_handle_invalid/);
+ assert.equal((await runner.runPrepared(handle)).state,'RESULT_READY');assert.equal(processController.spawns,1);
+});
+
+test('prepared handle consumption is synchronous and cannot duplicate or join a concurrent launch',async t=>{
+ const f=await fixture(t),processController=controller(),entered=Promise.withResolvers(),release=Promise.withResolvers();
+ t.after(()=>release.resolve());
+ const runner=createCodexCliRunner({...f,processController,authorizeLease:async value=>{
+  if(value.phase==='BEFORE_PREPARED_RUN'){entered.resolve();await release.promise;}return f.authorizeLease(value);
+ }}),handle=await runner.prepare(preparedRequest(f)),first=runner.runPrepared(handle);
+ await entered.promise;await assert.rejects(runner.runPrepared(handle),/prepared_handle_consumed/);assert.equal(processController.spawns,0);
+ release.resolve();assert.equal((await first).state,'RESULT_READY');await assert.rejects(runner.runPrepared(handle),/prepared_handle_consumed/);
+ assert.equal(processController.spawns,1);
+});
+
+for(const mode of ['cancel','abandon','during-recheck'])test(`prepared runner ${mode} fences before any process or bridge creation`,async t=>{
+ const f=await fixture(t),processController=controller(),abort=new AbortController(),entered=Promise.withResolvers(),release=Promise.withResolvers();
+ let bridges=0;t.after(()=>release.resolve());
+ const runner=createCodexCliRunner({...f,processController,authorizeLease:async value=>{
+  if(mode==='during-recheck'&&value.phase==='BEFORE_PREPARED_RUN'){entered.resolve();await release.promise;}return f.authorizeLease(value);
+ },prepareAgentBridge:async()=>{bridges++;throw Error('must not dispatch');}}),request=preparedRequest(f),handle=await runner.prepare(request,{signal:abort.signal});
+ const descriptor=runner.describePrepared(handle),before=await fs.readFile(descriptor.attemptPath);let running;
+ if(mode==='during-recheck'){running=runner.runPrepared(handle);await entered.promise;runner.abandonPrepared(handle);release.resolve();}
+ else {if(mode==='cancel')abort.abort();else runner.abandonPrepared(handle);running=runner.runPrepared(handle);}
+ await assert.rejects(running,/prepared_(run_cancelled|handle_consumed)/);
+ assert.equal(processController.spawns,0);assert.equal(bridges,0);assert.deepEqual(await fs.readFile(descriptor.attemptPath),before);
+ const prior=await runner.run(request);assert.equal(prior.prior_attempt,true);assert.equal(prior.state,'AMBIGUOUS');assert.equal(processController.spawns,0);
+});
+
+test('expired original preparation cannot acquire a fresh lease deadline',async t=>{
+ const f=await fixture(t),processController=controller(),runner=createCodexCliRunner({...f,processController}),handle=await runner.prepare(preparedRequest(f));
+ const expiry=Date.parse(runner.describePrepared(handle).expiresAt);t.mock.method(Date,'now',()=>expiry+1);
+ await assert.rejects(runner.runPrepared(handle),/prepared_lease_expired/);assert.equal(processController.spawns,0);
+});
+
+for(const field of ['revoked','permit_id','owner_epoch','workspace_id','project_id','user_sid'])test(`prepared runner refuses current permit drift: ${field}`,async t=>{
+ const f=await fixture(t),processController=controller(),runner=createCodexCliRunner({...f,processController,authorizeLease:async value=>{
+  const permit=await f.authorizeLease(value);if(value.phase!=='BEFORE_PREPARED_RUN')return permit;
+  if(field==='revoked')return null;return {...permit,[field]:field==='owner_epoch'?5:field==='user_sid'?'S-1-5-21-999-1001':id(333)};
+ }}),handle=await runner.prepare(preparedRequest(f));
+ await assert.rejects(runner.runPrepared(handle),/authorization_denied|prepared_lease_changed/);assert.equal(processController.spawns,0);
+});
+
+for(const mode of ['worktree-bytes','worktree-directory','attempt-bytes','attempt-replaced','run-directory','journal-ancestor','executable','worktree-pointer','worktree-lock','callback-header'])
+ test(`prepared physical identity refuses gap mutation: ${mode}`,async t=>{
+ const f=await fixture(t),processController=controller();let bridges=0;
+ const runner=createCodexCliRunner({...f,processController,prepareAgentBridge:async()=>{bridges++;throw Error('must not dispatch');}});
+ const handle=await runner.prepare(preparedRequest(f)),d=runner.describePrepared(handle);
+ const replaceFile=async file=>{const bytes=await fs.readFile(file);await fs.rename(file,file+'.original');await fs.writeFile(file,bytes);};
+ if(mode==='worktree-bytes')await fs.writeFile(path.join(f.worktree,'feature.txt'),'changed during preparation gap\n');
+ if(mode==='attempt-bytes')await fs.appendFile(d.attemptPath,' ');
+ if(mode==='attempt-replaced')await replaceFile(d.attemptPath);
+ if(mode==='executable')await replaceFile(f.executablePath);
+ if(mode==='worktree-pointer')await replaceFile(path.join(f.worktree,'.git'));
+ if(mode==='worktree-lock'){
+  const directory=(await exec('git',['rev-parse','--absolute-git-dir'],{cwd:f.worktree})).stdout.trim();await replaceFile(path.join(directory,'locked'));
+ }
+ if(mode==='worktree-directory'||mode==='run-directory'){
+  const directory=mode==='worktree-directory'?f.worktree:d.directory;await fs.rename(directory,directory+'.original');await fs.cp(directory+'.original',directory,{recursive:true});
+ }
+ if(mode==='journal-ancestor'){
+  await fs.rename(f.journalRoot,f.journalRoot+'.original');await fs.mkdir(f.journalRoot);await fs.rename(path.join(f.journalRoot+'.original',path.basename(d.directory)),d.directory);
+ }
+ if(mode==='callback-header')await replaceFile(path.join(d.directory,'host-callback-custody','0000000000000000.json'));
+ await assert.rejects(runner.runPrepared(handle),/prepared_(identity|worktree|attempt)_changed/);assert.equal(processController.spawns,0);assert.equal(bridges,0);
+});
+
+test('prepared EEXIST directory is readback/HOLD only and cannot create another attempt',async t=>{
+ const f=await fixture(t),processController=controller(),request=preparedRequest(f),runner=createCodexCliRunner({...f,processController});
+ const key=sha(JSON.stringify({task_id:request.lease.task_id,lease_generation:1,role:request.role}));
+ await fs.mkdir(path.join(f.journalRoot,key),{recursive:true});const handle=await runner.prepare(request);
+ assert.equal(runner.describePrepared(handle).state,'READBACK_ONLY');assert.equal(runner.describePrepared(handle).sql_reservation,'NOT_ATTESTED');
+ assert.equal((await runner.runPrepared(handle)).terminal_reason,'RESERVATION_EXISTS');assert.equal(processController.spawns,0);
+ assert.deepEqual(await fs.readdir(path.join(f.journalRoot,key)),[]);
+});
+
+test('failed callback HEADER creation leaves an original attempt for readback, never a send-ready preparation',async t=>{
+ const f=await fixture(t),processController=controller(),request=preparedRequest(f),original=fs.mkdir;
+ const runner=createCodexCliRunner({...f,processController,prepareAgentBridge:async()=>{throw Error('must not dispatch');}});
+ t.mock.method(fs,'mkdir',async(file,...args)=>{if(path.basename(file)==='host-callback-custody')throw Error('fixture_header_io_failure');return original(file,...args);});
+ await assert.rejects(runner.prepare(request),/native_run_callback_journal_hold/);
+ const prior=await runner.run(request);assert.equal(prior.state,'AMBIGUOUS');assert.equal(prior.prior_attempt,true);assert.equal(processController.spawns,0);
+});
+
+test('actual prepared default bridge gate stays closed after HEADER creation and before broker/native effects',async t=>{
+ const f=await fixture(t),processController=controller();let bridges=0,custody=0;
+ const runner=createCodexCliRunner({...f,processController,prepareAgentBridge:async details=>{
+  bridges++;const a=details.authorization,permit={...details.binding,...a,trust_namespace:'LOCAL_OPERATOR_QA',revoked:false,provider_id:id(55),
+   artifact:{cli_executable_sha256:f.expectedExecutableSha256},worktree:{path:a.worktree_path,base_sha:details.binding.base_sha}};
+  return prepareNativeCodingAgentRunBridge({...details,permit,pins:{},ownPostgres:{openAgentRunCustody:async()=>{custody++;throw Error('forbidden');}}});
+ }}),handle=await runner.prepare(preparedRequest(f));
+ assert.equal(bridges,0);assert.equal(runner.describePrepared(handle).callbackJournal.snapshot().records,1);
+ const receipt=await runner.runPrepared(handle);assert.equal(receipt.state,'AMBIGUOUS');assert.equal(receipt.terminal_reason,'native_run_callback_directory_durability_unqualified');
+ assert.equal(bridges,1);assert.equal(custody,0);assert.equal(processController.spawns,0);
+});
+
+test('prepared runner retains ATTEMPTED and W30 RUNNING acknowledgment before bindRun and prompt resume',async t=>{
+ const f=await fixture(t),pins=await agentBridgePins(t),events=[];let callbackJournal;
+ const processController=controller({onResume:()=>{events.push('resume');}});
+ const runner=createCodexCliRunner({...f,processController,authorizeLease:async value=>{
+  if(value.phase==='BEFORE_RESUME')events.push('ATTEMPTED','W30_RUNNING');return f.authorizeLease(value);
+ },prepareAgentBridge:async details=>{
+  assert.equal(details.callbackJournal,callbackJournal);events.push('bridge');
+  const binding={run_id:details.runId,workspace_id:details.authorization.workspace_id,project_id:details.authorization.project_id,
+   task_id:details.binding.task_id,lease_generation:details.binding.lease_generation,agent_id:details.binding.agent_id,
+   agent_generation_epoch:details.binding.agent_generation_epoch,provider_id:id(55),role:details.binding.role};
+  const launch=await createNativeCodingAgentMcpLaunch({...pins,registration:{binding,endpoint:'fixture-only-no-socket',capability:'c'.repeat(64),allowedTools:['project_overview']}});
+  // Generated lifecycle double only: no broker, model, real W30 write or native proof.
+  return {launch,bindRun:async()=>{events.push('bindRun');},close:async()=>{events.push('close');}};
+ }}),handle=await runner.prepare(preparedRequest(f));callbackJournal=runner.describePrepared(handle).callbackJournal;
+ assert.deepEqual(events,[]);assert.equal((await runner.runPrepared(handle)).state,'RESULT_READY');
+ assert.deepEqual(events,['bridge','ATTEMPTED','W30_RUNNING','bindRun','resume','close']);
+});
+
+test('prepared fence during immutable launch publication prevents a late native spawn',async t=>{
+ const f=await fixture(t),processController=controller(),runner=createCodexCliRunner({...f,processController});
+ const prepared=await runner.prepare(preparedRequest(f)),entered=Promise.withResolvers(),release=Promise.withResolvers(),original=fs.open;t.after(()=>release.resolve());
+ t.mock.method(fs,'open',async(file,...args)=>{
+  const handle=await original(file,...args);if(path.basename(file)!=='launch.json')return handle;
+  return {async writeFile(...values){entered.resolve();await release.promise;return handle.writeFile(...values);},sync:handle.sync.bind(handle),close:handle.close.bind(handle)};
+ });
+ const running=runner.runPrepared(prepared);await entered.promise;runner.abandonPrepared(prepared);release.resolve();
+ const receipt=await running;assert.equal(receipt.state,'AMBIGUOUS');assert.equal(processController.spawns,0);
+ assert.equal(receipt.physical_settlement,undefined);assert.equal(receipt.automatic_retry_allowed,false);
+});
+
+for(const mode of ['dirty','unlocked','executable-digest','project-config','cancelled'])test(`inert prepare retains original precondition: ${mode}`,async t=>{
+ const f=await fixture(t),processController=controller(),abort=new AbortController();let bridges=0;
+ if(mode==='dirty')await fs.writeFile(path.join(f.worktree,'feature.txt'),'unapproved bytes\n');
+ if(mode==='unlocked')await exec('git',['worktree','unlock',f.worktree],{cwd:path.join(f.directory,'repo')});
+ if(mode==='executable-digest')await fs.writeFile(f.executablePath,'changed executable');
+ if(mode==='project-config'){await fs.mkdir(path.join(f.worktree,'.codex'));await fs.writeFile(path.join(f.worktree,'.codex','config.toml'),'model="unapproved"\n');}
+ if(mode==='cancelled')abort.abort();
+ const runner=createCodexCliRunner({...f,processController,prepareAgentBridge:async()=>{bridges++;throw Error('forbidden');}});
+ await assert.rejects(runner.prepare(preparedRequest(f),{signal:abort.signal}));
+ assert.equal(processController.spawns,0);assert.equal(bridges,0);await assert.rejects(fs.stat(f.journalRoot),{code:'ENOENT'});
+});
+
+test('prepared critic revalidates the original independent writer receipt after the gap',async t=>{
+ const f=await fixture(t),processController=controller(),runner=createCodexCliRunner({...f,processController});
+ const writer=await runner.run({lease:f.lease(1),role:'IMPLEMENTER',worktreePath:f.worktree,prompt:'Generated writer fixture'});
+ const subject={task_id:writer.task_id,lease_generation:writer.lease_generation,run_id:writer.run_id,result_sha256:writer.result_sha256,
+  git_artifact_sha256:writer.git_after.artifact_sha256,source_head:writer.git_after.head};
+ const prepared=await runner.prepare({lease:f.lease(2),role:'CRITIC',subject,worktreePath:f.worktree,prompt:'Review original writer'});
+ const key=sha(JSON.stringify({task_id:writer.task_id,lease_generation:writer.lease_generation,role:'IMPLEMENTER'}));
+ const file=path.join(f.journalRoot,key,'receipt.json');const changed=JSON.parse(await fs.readFile(file));changed.result.summary='changed after critic preparation';await fs.writeFile(file,JSON.stringify(changed));
+ await assert.rejects(runner.runPrepared(prepared),/prepared_subject_changed/);assert.equal(processController.spawns,1,'only original fixture writer spawned');
+});
+
+test('cancellation while prepare awaits authorization creates no attempt or callback HEADER',async t=>{
+ const f=await fixture(t),processController=controller(),abort=new AbortController(),entered=Promise.withResolvers(),release=Promise.withResolvers();t.after(()=>release.resolve());
+ const runner=createCodexCliRunner({...f,processController,authorizeLease:async value=>{entered.resolve();await release.promise;return f.authorizeLease(value);},prepareAgentBridge:async()=>{throw Error('forbidden');}});
+ const preparing=runner.prepare(preparedRequest(f),{signal:abort.signal});await entered.promise;abort.abort();release.resolve();
+ await assert.rejects(preparing,/cancelled_before_attempt/);assert.equal(processController.spawns,0);await assert.rejects(fs.stat(f.journalRoot),{code:'ENOENT'});
+});
+
+test('current prepared permit may shorten but not refresh the original execution deadline',async t=>{
+ const f=await fixture(t),processController=controller();let initial,shortened;
+ const runner=createCodexCliRunner({...f,processController,authorizeLease:async value=>{
+  const permit=await f.authorizeLease(value);if(value.phase==='BEFORE_ATTEMPT')initial=permit.expires_at;
+  if(value.phase==='BEFORE_PREPARED_RUN')permit.expires_at=shortened=new Date(Date.parse(initial)-10000).toISOString();return permit;
+ }}),prepared=await runner.prepare(preparedRequest(f)),receipt=await runner.runPrepared(prepared);
+ assert.equal(receipt.state,'RESULT_READY');assert.equal(processController.lastSpec.deadlineAt,shortened);assert.equal(receipt.execution_deadline,shortened);
+});
+
+test('abandoning an executing prepared handle retains the original generated worker cleanup promise',async t=>{
+ const f=await fixture(t);let runner,prepared;const processController=controller({hang:true,onResume:()=>{assert.equal(runner.abandonPrepared(prepared).physical_settlement,'NOT_ATTESTED');}});
+ runner=createCodexCliRunner({...f,processController});prepared=await runner.prepare(preparedRequest(f));
+ const receipt=await runner.runPrepared(prepared);assert.equal(receipt.state,'AMBIGUOUS');assert.equal(receipt.terminal_reason,'CANCELLED');assert.equal(processController.spawns,1);
+ assert.equal(receipt.local_output_drain.scope,'HELPER_TREE_AND_LOCAL_OUTPUT');assert.equal(receipt.local_output_drain.host_scope_callbacks,'NOT_ATTESTED');
+ await assert.rejects(runner.runPrepared(prepared),/prepared_handle_consumed/);
+});
+
+for(const stop of ['cancel','expire'])for(const stage of ['worktree-pin','journal-root-mkdir','exclusive-directory-mkdir','run-directory-pin','attempt-write','attempt-pin'])
+ test(`preparation ${stop} during held ${stage} prevents every subsequent local write and SQL reservation`,async t=>{
+ const f=await fixture(t),request=preparedRequest(f),processController=controller(),abort=new AbortController();
+ const entered=Promise.withResolvers(),release=Promise.withResolvers();t.after(()=>release.resolve());
+ const expiry=new Date(Date.now()+60000).toISOString(),provider=id(55),writes=[];let held=false,reserves=0,bridges=0;
+ const key=sha(JSON.stringify({task_id:request.lease.task_id,lease_generation:request.lease.lease_generation,role:request.role}));
+ const directory=path.join(f.journalRoot,key),attempt=path.join(directory,'attempt.json');
+ const hold=async()=>{if(held)return;held=true;entered.resolve();await release.promise;};
+ const originalStat=fs.lstat,originalMkdir=fs.mkdir,originalOpen=fs.open;
+ t.mock.method(fs,'lstat',async(file,options)=>{
+  const result=await originalStat(file,options);
+  if(options?.bigint&&((stage==='worktree-pin'&&file===f.worktree)||(stage==='run-directory-pin'&&file===directory)||(stage==='attempt-pin'&&file===attempt)))await hold();
+  return result;
+ });
+ t.mock.method(fs,'mkdir',async(file,...args)=>{
+  writes.push(`mkdir:${path.relative(f.directory,file)}`);const result=await originalMkdir(file,...args);
+  if((stage==='journal-root-mkdir'&&file===f.journalRoot)||(stage==='exclusive-directory-mkdir'&&file===directory))await hold();return result;
+ });
+ t.mock.method(fs,'open',async(file,...args)=>{
+  if(args[0]==='wx')writes.push(`create:${path.relative(f.directory,file)}`);
+  const handle=await originalOpen(file,...args);if(stage!=='attempt-write'||file!==attempt||args[0]!=='wx')return handle;
+  return {async writeFile(...values){await handle.writeFile(...values);await hold();},sync:handle.sync.bind(handle),close:handle.close.bind(handle)};
+ });
+ const scope={workspace_id:id(88),task_id:request.lease.task_id,lease_generation:request.lease.lease_generation,agent_id:request.lease.agent_id,
+  target_id:`codex-cli:${provider}`,agent_generation_epoch:request.lease.agent_generation_epoch,
+  host_incarnation:'pid:123:created_100ns:134054310000000000',scope_sha256:'b'.repeat(64)};
+ const executor=createNativeCodingLeaseExecutor({
+  ledger:{reserve:async()=>{reserves++;throw Error('must not reserve');},advance:async()=>{throw Error('must not advance');},read:async()=>({state:'UNKNOWN',fixture_only:true})},
+  issuer:{issueJob:async()=>{throw Error('must not sign');}},
+  readBoundLease:async()=>({scope,provider_id:provider,lease_expires_at:expiry,
+   permit:await f.authorizeLease({binding:{...request.lease,role:request.role},worktreePath:f.worktree})}),
+  createRunner:({authorizeLease})=>createCodexCliRunner({...f,authorizeLease,processController,prepareAgentBridge:async()=>{bridges++;throw Error('must not dispatch');}}),
+ });
+ const pending=executor.execute(request,{signal:abort.signal});await entered.promise;const atStop=[...writes];
+ if(stop==='cancel')abort.abort();else t.mock.method(Date,'now',()=>Date.parse(expiry)+1);
+ release.resolve();await assert.rejects(pending,error=>error.automatic_retry_allowed===false);
+ assert.deepEqual(writes,atStop,'the owned pending operation may finish, but no subsequent write may start');
+ assert.equal(reserves,0);assert.equal(processController.spawns,0);assert.equal(bridges,0);
+ await assert.rejects(fs.stat(path.join(directory,'host-callback-custody')),{code:'ENOENT'});
+ if(['exclusive-directory-mkdir','run-directory-pin','attempt-write','attempt-pin'].includes(stage)){
+  assert.equal((await fs.stat(directory)).isDirectory(),true,'incomplete exclusive directory must not be deleted');
+  const readbackRunner=createCodexCliRunner({...f,processController});
+  const prior=await readbackRunner.run(request);assert.equal(prior.state,'AMBIGUOUS');assert.equal(processController.spawns,0);
+  assert.equal(prior.automatic_retry_allowed,false);assert.equal(prior.terminal_reason,stage==='attempt-write'||stage==='attempt-pin'?'PRIOR_ATTEMPT_REQUIRES_RECONCILIATION':'RESERVATION_EXISTS');
+ }
 });

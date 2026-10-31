@@ -202,8 +202,12 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
     catch(error){const safe=Object.assign(new Error('native_coding_host_write_unknown_readback_required'),{effect_outcome:'UNKNOWN',automatic_retry_allowed:false});
       throw nativePhysicalSettlementUnconfirmed(error)?markNativePhysicalSettlementUnconfirmed(safe):safe;}
   }
-  const callbackPublication=createNativeCodingCallbackPublication({sql,scoped,owner,open,identity:callbackPublicationIdentity,readCallbackPrefix,readPublicationHost,readOwnerControl});
   const runOwnerReader=runOwnerReadOptions?createNativeRunOwnerReader({...runOwnerReadOptions,sql,scoped,owner,open}):null;
+  // Reuse the actual transaction-bound Owner reader when composed. This does
+  // not mount a publisher or qualify its gate; absence of an original request
+  // facet still fails closed inside the reader rather than opening nested IPC.
+  const callbackPublication=createNativeCodingCallbackPublication({sql,scoped,owner,open,identity:callbackPublicationIdentity,
+    readCallbackPrefix,readPublicationHost,readOwnerControl:readOwnerControl??runOwnerReader?.readOwnerControl??null});
   const operations={
     ...(runOwnerReader?{READ_RUN_OWNER_CUSTODY_V1:runOwnerReader.operation}:{}),
     AGENT_OPERATION:request=>{open();return agentTools.invoke(request);},
@@ -255,7 +259,12 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
       });
     },
     async RESERVE_EXECUTION({scope},request) {
-      const physical=runNativePhysicalSettlementScope(()=>write(async tx=>{await scoped(tx,scope);return ledger(tx).reserve(scope);}));
+      assertNativeCodingHostRequestOpen(request);
+      const physical=runNativePhysicalSettlementScope(()=>write(async tx=>{
+        assertNativeCodingHostRequestOpen(request);
+        await scoped(tx,scope,true,request);assertNativeCodingHostRequestOpen(request);
+        return ledger(tx).reserve(scope);
+      }));
       let value;try{value=await physical.promise;}catch(error){throw physical.unconfirmed()?markNativePhysicalSettlementUnconfirmed(error):error;}
       if(physical.unconfirmed())throw markNativePhysicalSettlementUnconfirmed(Error('native_coding_host_reservation_physical_hold'));
       // Actual inserted result, after COMMIT; clones/readback/late return do not

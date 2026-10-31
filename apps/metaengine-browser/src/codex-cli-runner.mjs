@@ -136,6 +136,29 @@ function authorized(value, binding, root) {
   return value;
 }
 
+// Local physical pins protect the preparation/execution gap; they are not SQL
+// reservations, publication proofs or durable OS-birth attestations.
+async function physicalPin(file, kind) {
+  const stat = await fs.lstat(file, { bigint: true });
+  if (stat.isSymbolicLink() || (kind === 'directory' ? !stat.isDirectory() : !stat.isFile())
+    || kind === 'file' && stat.nlink !== 1n || !samePath(await fs.realpath(file), file)) throw fail('prepared_path_invalid');
+  return { file, kind, dev: stat.dev, ino: stat.ino, birth: stat.birthtimeNs,
+    ...(kind === 'file' ? { size: stat.size, mtime: stat.mtimeNs, ctime: stat.ctimeNs } : {}) };
+}
+async function pinParents(directory) {
+  const pins = [];
+  for (let current = directory;; current = path.dirname(current)) {
+    pins.push(await physicalPin(current, 'directory'));
+    if (path.dirname(current) === current) return pins;
+  }
+}
+async function verifyPins(pins) {
+  for (const pin of pins) {
+    const now = await physicalPin(pin.file, pin.kind);
+    if (Object.keys(pin).some(key => pin[key] !== now[key])) throw fail('prepared_identity_changed');
+  }
+}
+
 /**
  * One leased execution. No scheduler, task allocator, model retry, auth copying, or completion authority.
  * authorizeLease is private native composition; callers cannot supply a JSON approval.
@@ -166,24 +189,48 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
       return { ...attempt, state: 'AMBIGUOUS', terminal_reason: 'PRIOR_ATTEMPT_REQUIRES_RECONCILIATION', automatic_retry_allowed: false };
     } catch (error) { if (error.code !== 'ENOENT') throw error; return null; }
   };
-  return Object.freeze({ inspect,
-    async run(request, { signal } = {}) {
-      const role = request?.role; const binding = leaseBinding(request?.lease, role);
-      if (typeof request.prompt !== 'string' || !request.prompt.trim() || Buffer.byteLength(request.prompt) > 32000) throw fail('prompt_invalid');
-      const prior = await inspect(binding); if (prior) return { ...prior, replayed: false, prior_attempt: true };
-      if (signal?.aborted) throw fail('cancelled_before_attempt');
-      const root = await fs.realpath(request.worktreePath);
-      if (!samePath(root, request.worktreePath) || (await fs.lstat(root)).isSymbolicLink()) throw fail('worktree_path_invalid');
+  const preparations = new WeakMap();
+  const remember = row => {
+    // Both JSON and structured cloning fail; identity exists only in this
+    // instance's WeakMap. No serialized descriptor can re-adopt an attempt.
+    const handle = Object.freeze({ toJSON() { throw fail('prepared_handle_not_serializable'); } });
+    preparations.set(handle, row); return handle;
+  };
+  const owned = handle => {
+    const row = preparations.get(handle);
+    if (!row) throw fail('prepared_handle_invalid');
+    return row;
+  };
+  const readback = result => remember({ state: 'READBACK_ONLY', result: structuredClone(result), abort: new AbortController() });
+  const managedWorktree = async requested => {
+      const root = await fs.realpath(requested);
+      if (!samePath(root, requested) || (await fs.lstat(root)).isSymbolicLink()) throw fail('worktree_path_invalid');
       if (inside(root, path.resolve(journalRoot)) || samePath(root, journalRoot)) throw fail('journal_inside_workspace');
       if (overlap(root, workerTempRoot)) throw fail('temporary_root_overlaps_workspace');
       const gitTop = (await git(root, ['rev-parse', '--show-toplevel'], env,gitExecutable)).toString().trim();
       if (!samePath(gitTop, root) || !(await fs.lstat(path.join(root, '.git'))).isFile()) throw fail('managed_worktree_required');
       const gitDir = (await git(root, ['rev-parse', '--absolute-git-dir'], env,gitExecutable)).toString().trim();
       if (!(await fs.lstat(path.join(gitDir, 'locked'))).isFile()) throw fail('locked_worktree_required');
-      // A task cannot quietly enable project-local Codex configuration or hooks.
       try { await fs.lstat(path.join(root, '.codex', 'config.toml')); throw fail('project_config_not_permitted'); }
       catch (error) { if (error.code !== 'ENOENT') throw error; }
-      const permit = authorized(await authorizeLease({ phase: 'BEFORE_ATTEMPT', binding, worktreePath: root }), binding, root);
+      return { root, gitDir };
+  };
+  const checkOpen = row => {
+    if (row.fenced || row.signal?.aborted) throw fail('prepared_run_cancelled');
+    if (Math.min(Date.parse(row.permit.expires_at), row.effectiveExpiry ?? Infinity) <= Date.now()) throw fail('prepared_lease_expired');
+  };
+  const prepare = async (input, { signal } = {}) => {
+      const request = structuredClone(input);
+      const role = request?.role; const binding = leaseBinding(request?.lease, role);
+      if (typeof request.prompt !== 'string' || !request.prompt.trim() || Buffer.byteLength(request.prompt) > 32000) throw fail('prompt_invalid');
+      const prior = await inspect(binding); if (prior) return readback({ ...prior, replayed: false, prior_attempt: true });
+      if (signal?.aborted) throw fail('cancelled_before_attempt');
+      const { root, gitDir } = await managedWorktree(request.worktreePath);
+      const permit = structuredClone(authorized(await authorizeLease({ phase: 'BEFORE_ATTEMPT', binding, worktreePath: root }), binding, root));
+      const checkPreparationOpen = () => {
+        if (signal?.aborted) throw fail('cancelled_before_attempt');
+        if (Date.parse(permit.expires_at) <= Date.now()) throw fail('prepared_lease_expired');
+      };
       if (await executableDigest(executablePath) !== expectedExecutableSha256) throw fail('executable_digest_mismatch');
       const before = await gitProof(root, env,gitExecutable);
       if (before.head !== binding.base_sha) throw fail('base_head_mismatch');
@@ -199,12 +246,18 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
           || before.artifact_sha256 !== request.subject?.git_artifact_sha256
           || before.head !== request.subject?.source_head) throw fail('independent_critic_subject_invalid');
       }
+      checkPreparationOpen();
+      const worktreePins = [...await pinParents(root), await physicalPin(path.join(root, '.git'), 'file'),
+        ...await pinParents(gitDir), await physicalPin(path.join(gitDir, 'locked'), 'file'), await physicalPin(executablePath, 'file')];
+      checkPreparationOpen();
       await fs.mkdir(journalRoot, { recursive: true, mode: 0o700 });
+      checkPreparationOpen();
       const directory = path.join(journalRoot, keyOf(binding));
       try { await fs.mkdir(directory, { mode: 0o700 }); }
       catch (error) { if (error.code !== 'EEXIST') throw error;
-        return (await inspect(binding)) || { ...binding, state: 'AMBIGUOUS', terminal_reason: 'RESERVATION_EXISTS', automatic_retry_allowed: false };
+        return readback((await inspect(binding)) || { ...binding, state: 'AMBIGUOUS', terminal_reason: 'RESERVATION_EXISTS', automatic_retry_allowed: false });
       }
+      checkPreparationOpen();
       const runId = crypto.randomUUID(); const schemaPath = path.join(directory, 'result-schema.json');
       const resultPath = path.join(directory, 'result.json');
       const startedAt = new Date().toISOString();
@@ -212,11 +265,83 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
         ...binding, run_id: runId, prompt_sha256:hash(request.prompt), permit_id: permit.permit_id, owner_epoch: permit.owner_epoch, user_sid: permit.user_sid,
         workspace_id: permit.workspace_id, project_id: permit.project_id, worktree_path: root,
         executable_sha256: expectedExecutableSha256, sandbox_mode: role === 'CRITIC' ? 'read-only' : 'workspace-write',
+        // Legacy local attempt label only: no own-PG RESERVED acceptance is asserted.
         started_at: startedAt, state: 'RESERVED', git_before: before, subject_run_id: subject?.run_id || null,
         subject_result_sha256: subject?.result_sha256 || null, automatic_retry_allowed: false, production_qualified: false,
         subject_git_artifact_sha256: subject?.git_after?.artifact_sha256 || null, subject_source_head: subject?.git_after?.head || null,
         useful_work_verified: false, model_claim_authority: false, authority_effect: false };
-      await durableJson(path.join(directory, 'attempt.json'), receipt, true);
+      const directoryPins = await pinParents(directory);
+      const attemptPath = path.join(directory, 'attempt.json');
+      checkPreparationOpen();
+      await durableJson(attemptPath, receipt, true);
+      checkPreparationOpen();
+      const attemptSha256 = hash(`${JSON.stringify(receipt)}\n`);
+      if (hash(await boundedRead(attemptPath, 65536)) !== attemptSha256) throw fail('prepared_attempt_changed');
+      const pins = [...worktreePins, ...directoryPins, await physicalPin(attemptPath, 'file')];
+      checkPreparationOpen();
+      const callbackJournal = prepareAgentBridge ? await createNativeRunCallbackJournal({directory,runId,binding}) : null;
+      checkPreparationOpen();
+      if (callbackJournal) {
+        pins.push(await physicalPin(path.join(directory, 'host-callback-custody'), 'directory'),
+          await physicalPin(path.join(directory, 'host-callback-custody', '0000000000000000.json'), 'file'));
+      }
+      const abort = new AbortController();
+      const row = { state: 'PREPARED', request, binding, role, root, gitDir, permit, before, subject,
+        directory, schemaPath, resultPath, runId, receipt, callbackJournal, pins, attemptPath, attemptSha256,
+        abort, signal: signal ? AbortSignal.any([signal, abort.signal]) : abort.signal, fenced: false };
+      await verifyPins(pins); checkOpen(row);
+      return remember(row);
+  };
+  const describePrepared = handle => {
+    const row = owned(handle);
+    if (row.result) return Object.freeze({ state: row.state, runId: row.result.run_id || null,
+      sql_reservation: 'NOT_ATTESTED', authority_effect: false, automatic_retry_allowed: false });
+    return Object.freeze({ schema: 'metaengine.codex-cli.prepared-run.v1', state: row.fenced || row.signal?.aborted ? 'FENCED' : row.state,
+      runId: row.runId, binding: row.binding, worktreePath: row.root, directory: row.directory,
+      attemptPath: row.attemptPath, attemptSha256: row.attemptSha256, expiresAt: row.permit.expires_at,
+      callbackJournal: row.callbackJournal, sql_reservation: 'NOT_ATTESTED', authority_effect: false,
+      production_qualified: false, automatic_retry_allowed: false });
+  };
+  const abandonPrepared = handle => {
+    const row = owned(handle); row.fenced = true; row.abort.abort();
+    // Fence synchronously, never remove/rewrite evidence or imply a running
+    // worker/Host callback has drained. Its original execution still owns join.
+    if (['PREPARED', 'READBACK_ONLY'].includes(row.state)) row.state = 'ABANDONED';
+    return Object.freeze({ state: 'FENCED', physical_settlement: 'NOT_ATTESTED', authority_effect: false });
+  };
+  const verifyPrepared = async row => {
+    checkOpen(row); await verifyPins(row.pins);
+    if (hash(await boundedRead(row.attemptPath, 65536)) !== row.attemptSha256) throw fail('prepared_attempt_changed');
+    const current = await managedWorktree(row.root);
+    if (current.gitDir !== row.gitDir) throw fail('prepared_worktree_changed');
+    if (await executableDigest(executablePath) !== expectedExecutableSha256) throw fail('executable_digest_mismatch');
+    if ((await gitProof(row.root, env, gitExecutable)).artifact_sha256 !== row.before.artifact_sha256) throw fail('prepared_worktree_changed');
+    if (row.subject) {
+      const subject = await inspect({ ...row.request.subject, role: 'IMPLEMENTER' });
+      if (hash(JSON.stringify(subject)) !== hash(JSON.stringify(row.subject))) throw fail('prepared_subject_changed');
+    }
+    await verifyPins(row.pins); checkOpen(row);
+  };
+  const runPrepared = async prepared => {
+    const row = owned(prepared);
+    if (!['PREPARED', 'READBACK_ONLY'].includes(row.state)) throw fail('prepared_handle_consumed');
+    row.state = 'RUNNING'; // Consume before the first await: duplicates cannot join/replay a launch.
+    try {
+      if (row.result) return structuredClone(row.result);
+      await verifyPrepared(row);
+      const fresh = structuredClone(authorized(await authorizeLease({ phase: 'BEFORE_PREPARED_RUN',
+        binding: row.binding, worktreePath: row.root, run_id: row.runId }), row.binding, row.root));
+      if (['permit_id', 'owner_epoch', 'user_sid', 'workspace_id', 'project_id'].some(key => fresh[key] !== row.permit[key]))
+        throw fail('prepared_lease_changed');
+      fresh.expires_at = new Date(Math.min(Date.parse(row.permit.expires_at), Date.parse(fresh.expires_at))).toISOString();
+      row.effectiveExpiry = Date.parse(fresh.expires_at);
+      await verifyPrepared(row);
+      return await executePrepared(row, fresh);
+    } finally { row.state = 'CONSUMED'; }
+  };
+  const executePrepared = async (row, permit) => {
+      const { request, binding, role, root, before, subject, directory, schemaPath, resultPath,
+        runId, receipt, callbackJournal, signal } = row;
       let handle = null, agentBridge=null, abortReason = null, eventError = null, outputBytes = 0, eventCount = 0, threadId = null,
         completedTurns = 0, failedTurns = 0, pending = '', timer = null, processResult = null, launch=null, bridgeDrained=false,bridgeClose=null;
       const decoder = new StringDecoder('utf8'); const stdoutHash = crypto.createHash('sha256');
@@ -274,8 +399,8 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
         await durableJson(schemaPath, codexCliResultSchema(role, subject?.result_sha256));
         const args = buildCodexCliArgv({ role, worktreePath: root, schemaPath, resultPath, model });
         let launchEnvironment=codexCliTemporaryEnvironment(env,temporaryPath);
+        checkOpen(row); await verifyPins(row.pins);
         if(prepareAgentBridge){
-          const callbackJournal=await createNativeRunCallbackJournal({directory,runId,binding});
           agentBridge=await prepareAgentBridge({runId,binding,authorization:structuredClone(permit),deadlineAt,callbackJournal});
           if(!agentBridge||!isNativeCodingAgentMcpLaunch(agentBridge.launch)||typeof agentBridge.bindRun!=='function'
             ||typeof agentBridge.close!=='function'||agentBridge.launch.metadata.run_id!==runId)throw fail('agent_bridge_unverified');
@@ -285,11 +410,13 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
         signal?.addEventListener('abort', onAbort, { once: true });
         if (signal?.aborted) throw fail('cancelled_before_spawn');
         const spec={executablePath,expectedExecutableSha256,args,cwd:root,env:launchEnvironment,timeoutMs,deadlineAt,runId,binding,promptSha256:receipt.prompt_sha256};
+        checkOpen(row); await verifyPins(row.pins);
         launch=createCodexCliLaunch(spec);
         // An interrupted/failed spawn retains this one request forever. The
         // existing exclusive lease directory prevents a later launch/replay.
         await durableJson(path.join(directory,'launch.json'),launch,true);
         receipt.launch_identity=codexCliLaunchIdentity(launch);
+        await verifyPins(row.pins); checkOpen(row);
         handle = await processController.spawn({...spec,launch});
         handle.stdout.on('data', data => output('stdout', data)); handle.stderr.on('data', data => output('stderr', data));
         const proof = handle.proof;
@@ -299,6 +426,7 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
         receipt.process = structuredClone(proof); receipt.pid = proof.pid; receipt.process_incarnation_id = proof.process_incarnation_id;
         receipt.job_id = proof.job_id;
         await durableJson(path.join(directory, 'process.json'), receipt, true);
+        checkOpen(row);
         const recheck = authorized(await authorizeLease({ phase: 'BEFORE_RESUME', binding, worktreePath: root,
           process: structuredClone(proof), run_id: runId, temporary_path: temporaryPath,
           temporary_storage_evidence_sha256: receipt.temporary_storage_evidence_sha256 }), binding, root);
@@ -350,6 +478,8 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
       receipt.output_bytes = outputBytes; receipt.finished_at = new Date().toISOString();
       await durableJson(path.join(directory, 'receipt.json'), receipt, true);
       return structuredClone(receipt);
-    },
+  };
+  return Object.freeze({ inspect, prepare, describePrepared, runPrepared, abandonPrepared,
+    async run(request, options) { return runPrepared(await prepare(request, options)); },
   });
 }

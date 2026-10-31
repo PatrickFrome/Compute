@@ -68,25 +68,28 @@ export function runOwnerReadResult(evidence,rawScope){
     send_capability:false,automatic_retry_allowed:false,authority_effect:false});
 }
 const immutableScope=v=>({...v,observed_at:null});
-function binding(v){
-  if(!exact(v,BINDING)||v.action!==RUN_OWNER_READ||![v.instance_id,v.request_id].every(x=>UUID.test(x||''))
-    ||!integer(v.host_pid)||![v.request_sha256,v.body_sha256].every(x=>HASH.test(x||'')))fail();return clone(v);
+const STANDALONE=Object.freeze({schema:RUN_OWNER_PHASE,keys:BINDING,valid:v=>v.action===RUN_OWNER_READ});
+function binding(v,protocol=STANDALONE){
+  if(!exact(v,protocol.keys)||!protocol.valid(v)||![v.instance_id,v.request_id].every(x=>UUID.test(x||''))
+    ||!integer(v.host_pid)||!HASH.test(v.request_sha256||'')
+    ||protocol===STANDALONE&&!HASH.test(v.body_sha256||''))fail();return clone(v);
 }
-const frame=(b,sequence,phase,value)=>({schema:RUN_OWNER_PHASE,...b,sequence,phase,value});
-function validate(v,b){
-  if(!exact(v,['schema',...BINDING,'sequence','phase','value'])||v.schema!==RUN_OWNER_PHASE||BINDING.some(k=>v[k]!==b[k])
+const frame=(b,sequence,phase,value,protocol=STANDALONE)=>({schema:protocol.schema,...b,sequence,phase,value});
+function validate(v,b,protocol=STANDALONE){
+  if(!exact(v,['schema',...protocol.keys,'sequence','phase','value'])||v.schema!==protocol.schema||protocol.keys.some(k=>v[k]!==b[k])
     ||!Number.isSafeInteger(v.sequence)||v.sequence<0||v.sequence>4||Buffer.byteLength(json(v))>16384)fail();
 }
 const empty=v=>{if(!exact(v,[]))fail();};
 const deferred=()=>{let resolve,reject;const promise=new Promise((r,j)=>{resolve=r;reject=j;});promise.catch(()=>{});return{promise,resolve,reject};};
-export function createRunOwnerHostPhases({binding:raw,send,signal}={}){
-  const b=binding(raw);let closed=false,started=false,waiting=null,inProgress=false,sequence=0,reads=0,verified=null;
+export function createRunOwnerHostPhases(options={}){return createOwnerHostRound(options,STANDALONE);}
+function createOwnerHostRound({binding:raw,send,signal}={},protocol){
+  const b=binding(raw,protocol);let closed=false,started=false,waiting=null,inProgress=false,sequence=0,reads=0,verified=null;
   const open=()=>{if(closed||signal?.aborted)fail();};
   const close=()=>{closed=true;waiting?.reject(Error('native_run_owner_phase_closed'));waiting=null;};
   signal?.addEventListener('abort',close,{once:true});
   function receive(message,handle){
-    if(message?.schema!==RUN_OWNER_PHASE||message.request_id!==b.request_id)return false;
-    try{open();validate(message,b);if(handle||!started||inProgress||!waiting||message.sequence!==sequence+1)fail();
+    if(message?.schema!==protocol.schema||message.request_id!==b.request_id)return false;
+    try{open();validate(message,b,protocol);if(handle||!started||inProgress||!waiting||message.sequence!==sequence+1)fail();
       const gate=waiting;waiting=null;inProgress=true;gate.resolve(message);
     }catch{close();}return true;
   }
@@ -94,7 +97,7 @@ export function createRunOwnerHostPhases({binding:raw,send,signal}={}){
     open();if(started)fail();started=true;const fixed=runOwnerScope(initial);
     const check=async()=>{const current=runOwnerScope(await handlers.readScope());open();if(!same(immutableScope(fixed),immutableScope(current)))fail();return current;};
     try{
-      let next=deferred();waiting=next;send(frame(b,0,'LOCKED',fixed));
+      let next=deferred();waiting=next;send(frame(b,0,'LOCKED',fixed,protocol));
       for(;;){const m=await next.promise;open();sequence=m.sequence;let result={};
         if(m.phase==='ABORT'){empty(m.value);fail();}
         if(m.phase==='RECHECK_SCOPE'){empty(m.value);if(reads||verified)fail();result=await check();reads++;}
@@ -104,23 +107,24 @@ export function createRunOwnerHostPhases({binding:raw,send,signal}={}){
         }else if(m.phase==='RELEASE'){
           empty(m.value);if(reads!==1||!verified)fail();await check();return runOwnerReadResult(verified,fixed);
         }else fail();
-        open();next=deferred();waiting=next;inProgress=false;send(frame(b,sequence,'ACK',result));
+        open();next=deferred();waiting=next;inProgress=false;send(frame(b,sequence,'ACK',result,protocol));
       }
     }finally{close();signal?.removeEventListener('abort',close);}
   }
   return Object.freeze({receive,run,close});
 }
-export function createRunOwnerClientPhases({binding:raw,send,callback,assertLifetime,input}={}){
-  const b=binding(raw),expected=validateRunOwnerReadInput(input);if(typeof callback!=='function'||typeof assertLifetime!=='function')fail();
+export function createRunOwnerClientPhases(options={}){return createOwnerClientRound(options,STANDALONE);}
+function createOwnerClientRound({binding:raw,send,callback,assertLifetime,input,onFailure=null}={},protocol){
+  const b=binding(raw,protocol),expected=validateRunOwnerReadInput(input);if(typeof callback!=='function'||typeof assertLifetime!=='function')fail();
   let closed=false,started=false,sequence=0,waiting=null,waitingPhase=null,scope=null,work=Promise.resolve(),released=false,reads=0,verified=null;
   const abort=new AbortController();
   const open=()=>{if(closed)fail();assertLifetime();};
   function close(){closed=true;abort.abort();waiting?.reject(Error('native_run_owner_phase_closed'));waiting=null;}
   function transmit(phase,value){open();if(waiting||released)fail();sequence++;if(sequence>4)fail();const gate=deferred();waiting=gate;waitingPhase=phase;
-    try{send(frame(b,sequence,phase,value));}catch{close();}return gate.promise;}
+    try{send(frame(b,sequence,phase,value,protocol));}catch{onFailure?.();close();}return gate.promise;}
   function receive(message,handle){
-    if(message?.schema!==RUN_OWNER_PHASE||message.request_id!==b.request_id)return false;
-    try{open();validate(message,b);if(handle)fail();
+    if(message?.schema!==protocol.schema||message.request_id!==b.request_id)return false;
+    try{open();validate(message,b,protocol);if(handle)fail();
       if(message.phase==='LOCKED'){
         if(started||message.sequence!==0)fail();started=true;scope=runOwnerScope(message.value);if(!same(scope.execution,expected.scope))fail();const fixed=scope;
         const tx=Object.freeze({signal:abort.signal,assertOpen:open,runOwner:fixed,
@@ -133,18 +137,116 @@ export function createRunOwnerClientPhases({binding:raw,send,callback,assertLife
           verifyOwnerRecord:async value=>{if(reads!==1||verified)fail();const evidence=runOwnerEvidence(value,fixed);await transmit('VERIFY_OWNER',evidence);verified=evidence;},
         });
         work=Promise.resolve().then(()=>callback(tx)).then(value=>{
-          open();if(!value||waiting||reads!==1||!verified||!same(value,verified))fail();sequence++;released=true;send(frame(b,sequence,'RELEASE',{}));
-        }).catch(()=>{if(!closed&&!released){try{sequence++;send(frame(b,sequence,'ABORT',{}));}catch{}}close();});
+          open();if(!value||waiting||reads!==1||!verified||!same(value,verified))fail();sequence++;released=true;send(frame(b,sequence,'RELEASE',{},protocol));
+        }).catch(()=>{if(!closed&&!released){try{sequence++;send(frame(b,sequence,'ABORT',{},protocol));}catch{}}onFailure?.();close();});
       }else{
         if(!started||!waiting||message.phase!=='ACK'||message.sequence!==sequence)fail();
         if(waitingPhase==='RECHECK_SCOPE')runOwnerScope(message.value);else empty(message.value);
         const gate=waiting;waiting=null;waitingPhase=null;gate.resolve(message.value);
       }
-    }catch{close();}return true;
+    }catch{onFailure?.();close();}return true;
   }
   async function finish(value){
-    if(!released){close();await work;fail();}await work;open();
+    if(!released){onFailure?.();close();await work;fail();}await work;open();
     if(!verified||!same(value,runOwnerReadResult(verified,scope)))fail();close();return value;
   }
   return Object.freeze({receive,finish,close,drain:()=>work});
+}
+
+// Additive read-only cycles on an existing execution/publication ticket. These
+// frames bind the actual parent frame digest, not an invented signed body.
+// This is not mounted by default and grants no worker/publication authority.
+export const PUBLICATION_OWNER_PHASE='metaengine.native-coding.publication-owner-phase.v1';
+const PUBLICATION_BINDING=['instance_id','host_pid','request_id','action','request_sha256'];
+const OWNER_READ_BUDGET=Object.freeze({RESERVE_EXECUTION:6,PUBLISH_RUN_CALLBACK_V1:6,AGENT_OPERATION:3});
+const PUBLICATION_ROUND=Object.freeze({schema:PUBLICATION_OWNER_PHASE,keys:[...PUBLICATION_BINDING,'cycle'],
+  valid:v=>Object.hasOwn(OWNER_READ_BUDGET,v.action)&&integer(v.cycle)&&v.cycle<=OWNER_READ_BUDGET[v.action]});
+function publicationBinding(raw){
+  if(!exact(raw,PUBLICATION_BINDING))fail();
+  binding({...raw,cycle:1},PUBLICATION_ROUND);return clone(raw);
+}
+const cycleFrame=(b,cycle,phase,value={})=>frame({...b,cycle},4,phase,value,PUBLICATION_ROUND);
+function publicationFrame(message,b){
+  if(!integer(message?.cycle)||message.cycle>OWNER_READ_BUDGET[b.action])fail();
+  validate(message,{...b,cycle:message.cycle},PUBLICATION_ROUND);
+}
+export function createPublicationOwnerHostPhases({binding:raw,send,signal,assertLifetime}={}){
+  const b=publicationBinding(raw);if(typeof send!=='function'||typeof assertLifetime!=='function')fail();
+  let closed=false,cycle=0,active=null,release=null;
+  const open=()=>{if(closed||signal?.aborted)fail();assertLifetime();};
+  function close(){closed=true;active?.close();release?.reject(Error('native_publication_owner_closed'));release=null;signal?.removeEventListener('abort',close);}
+  function abortPeer(){if(!closed&&cycle){try{send(cycleFrame(b,cycle,'CYCLE_ABORT'));}catch{}}close();}
+  signal?.addEventListener('abort',close,{once:true});
+  function receive(message,handle){
+    if(message?.schema!==PUBLICATION_OWNER_PHASE||message.request_id!==b.request_id)return false;
+    try{open();publicationFrame(message,b);if(handle||!active||message.cycle!==cycle)fail();
+      if(message.phase==='CYCLE_ABORT'){if(message.sequence!==4)fail();empty(message.value);close();}
+      else if(message.phase==='CYCLE_RELEASED'){
+        if(!release||message.sequence!==4)fail();empty(message.value);
+        const gate=release;release=null;gate.resolve();
+      }else{if(release)fail();active.receive(message,handle);}
+    }catch{abortPeer();}return true;
+  }
+  async function run(initial,handlers){
+    open();if(active||cycle>=OWNER_READ_BUDGET[b.action])fail();cycle++;
+    const round=createOwnerHostRound({binding:{...b,cycle},send,signal},PUBLICATION_ROUND);active=round;
+    try{
+      const value=await round.run(initial,handlers);open();
+      const gate=deferred();release=gate;send(cycleFrame(b,cycle,'CYCLE_RESULT',value));
+      await gate.promise;open();return value;
+    }catch(error){abortPeer();throw error;}finally{round.close();active=null;}
+  }
+  function finish(){open();if(active||cycle!==OWNER_READ_BUDGET[b.action])fail();close();}
+  return Object.freeze({receive,run,finish,close,started:()=>cycle>0});
+}
+export function createPublicationOwnerClientPhases({binding:raw,send,callback,assertLifetime,scope:expected}={}){
+  const b=publicationBinding(raw);if(typeof send!=='function'||typeof callback!=='function'||typeof assertLifetime!=='function')fail();
+  // RESERVE has no reservation ID yet. Match every existing scope field, then
+  // bind the actual first reservation ID for every subsequent read cycle.
+  const expectedKeys=b.action==='RESERVE_EXECUTION'?EXECUTION.filter(k=>k!=='reservation_id'):EXECUTION;
+  if(!exact(expected,expectedKeys))fail();expected=structuredClone(expected);
+  let closed=false,cycle=0,active=null,execution=null,finishing=false;
+  const pending=new Set();
+  const open=()=>{if(closed)fail();assertLifetime();};
+  function close(){closed=true;active?.close();}
+  function abortPeer(failedCycle=cycle){if(!closed&&integer(failedCycle)&&failedCycle<=OWNER_READ_BUDGET[b.action]){try{send(cycleFrame(b,failedCycle,'CYCLE_ABORT'));}catch{}}close();}
+  function track(p){pending.add(p);p.finally(()=>pending.delete(p)).catch(()=>{});return p;}
+  function receive(message,handle){
+    if(message?.schema!==PUBLICATION_OWNER_PHASE||message.request_id!==b.request_id)return false;
+    try{open();publicationFrame(message,b);if(handle)fail();
+      if(message.phase==='CYCLE_ABORT'){if(message.cycle!==cycle||message.sequence!==4)fail();empty(message.value);close();}
+      else if(message.phase==='LOCKED'){
+        if(active||finishing||message.cycle!==cycle+1||message.sequence!==0)fail();
+        const scope=runOwnerScope(message.value);
+        if(expectedKeys.some(k=>scope.execution[k]!==expected[k])||execution&&!same(execution,scope.execution))fail();
+        execution=scope.execution;cycle=message.cycle;
+        active=createOwnerClientRound({binding:{...b,cycle},send,callback,assertLifetime:open,input:{scope:execution},onFailure:()=>abortPeer()},PUBLICATION_ROUND);
+        active.receive(message);track(active.drain());
+      }else if(message.phase==='CYCLE_RESULT'){
+        if(!active||finishing||message.cycle!==cycle||message.sequence!==4)fail();
+        finishing=true;const round=active,current=cycle;
+        track(round.finish(message.value).then(()=>{
+          open();active=null;finishing=false;send(cycleFrame(b,current,'CYCLE_RELEASED'));
+        }).catch(()=>{abortPeer();}));
+      }else{
+        if(!active||finishing||message.cycle!==cycle)fail();active.receive(message);
+      }
+    }catch{abortPeer(!active&&message.phase==='LOCKED'&&message.cycle===cycle+1?cycle+1:cycle);}return true;
+  }
+  async function drain(){while(pending.size)await Promise.allSettled([...pending]);}
+  async function finish(value){
+    await drain();open();
+    // An actual duplicate reserve legitimately performs zero fresh Owner reads.
+    // This projection remains historical readback, never a publication handle.
+    const e=value?.execution;
+    const readback=b.action==='RESERVE_EXECUTION'&&cycle===0&&!active&&!finishing
+      &&exact(value,['state','execution','automatic_retry_allowed','authority_effect'])
+      &&value.state==='READBACK_ONLY'&&value.automatic_retry_allowed===false&&value.authority_effect===false
+      &&(e===null||e&&typeof e==='object'&&!Array.isArray(e)
+        &&e.workspace_id===expected.workspace_id&&e.task_id===expected.task_id&&Number(e.lease_generation)===expected.lease_generation
+        &&e.automatic_retry_allowed===false&&e.authority_effect===false
+        &&['RESERVED','ATTEMPTED','RESULT_READY','FAILED','AMBIGUOUS','CHECKPOINTED'].includes(e.state));
+    if(!readback&&(active||finishing||cycle!==OWNER_READ_BUDGET[b.action]))fail();close();return value;
+  }
+  return Object.freeze({receive,finish,close,drain});
 }

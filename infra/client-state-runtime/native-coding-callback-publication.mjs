@@ -27,8 +27,9 @@ export function createNativeCodingCallbackPublication({sql,scoped,owner,open:aut
   if(!request||request.instanceId!==identity?.hostInstanceId||request.hostPid!==identity?.hostPid||!UUID.test(request.requestId||''))fail('request_scope_changed');};
  const fresh=value=>{const row=reservations.get(value);if(!row)fail('fresh_reservation_required');return row;};
  async function snapshot(tx,row,request){
-  open(request);await owner(tx);
-  const {c,native}=await scoped(tx,row.scope),p=c.permit,host=await readPublicationHost(request);open(request);
+  open(request);await owner(tx);open(request);
+  const {c,native}=await scoped(tx,row.scope,true,request);open(request);
+  const p=c.permit,host=await readPublicationHost(request);open(request);
   const [pg]=await tx.unsafe(`select (select system_identifier::text from pg_catalog.pg_control_system()) as system_identifier,
    to_char(pg_postmaster_start_time() at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as started_at,
    current_setting('fsync') as fsync,current_setting('full_page_writes') as full_page_writes`);

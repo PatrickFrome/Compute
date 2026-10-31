@@ -5,6 +5,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fork } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { randomUUID,createHash } from 'node:crypto';
 import {inMemoryNativeBroker} from './fixtures/native-coding-in-memory-broker.mjs';
 import {nativeCodingAgentMcpIntentBodySha256} from '../src/native-coding-agent-mcp-broker.mjs';
@@ -25,6 +26,41 @@ const transition=(from,to)=>({from,to,evidence_sha256:'b'.repeat(64),critic_proo
 const agentRequest=(operation='CHECK')=>({operation,args:operation==='agent_send_message'?{request_id:id(),target_agent_id:'agent_native-peer123',message:'One message'}:{},
   binding:{run_id:id(),workspace_id:id(),project_id:id(),task_id:id(),lease_generation:1,agent_id:'agent_native-test-1234',agent_generation_epoch:1,provider_id:id(),role:'IMPLEMENTER'},
   job_binding:{job_id:id(),pid:1234,process_incarnation_id:'pid:1234:created_100ns:134371917225776174',executable_sha256:'a'.repeat(64)}});
+
+// Test-fixture diagnostics only: never change production IPC deadlines or infer
+// physical settlement from this watchdog. Failure retains the fixture directory.
+function stopFixtureChild(child,root,{timeoutMs=5000}={}) {
+  if(child.exitCode!==null||child.signalCode!==null)return Promise.resolve();
+  return new Promise((resolve,reject)=>{
+    let timer,done=false;
+    const finish=error=>{if(done)return;done=true;clearTimeout(timer);child.off('exit',exited);child.off('error',failed);error?reject(error):resolve();};
+    const error=reason=>Error(`test_child_teardown_${reason}: pid=${child.pid}; fixture retained: ${root}`);
+    const exited=()=>finish(),failed=()=>finish(error('error'));
+    child.once('exit',exited);child.once('error',failed);
+    timer=setTimeout(()=>finish(error('timeout')),timeoutMs);
+    // Windows may already be exiting: kill(false) is neither exit proof nor
+    // a reason to discard the bounded exit observation already installed.
+    try{child.kill();}catch{finish(error('kill_failed'));}
+  });
+}
+function readFixtureStats(child,{timeoutMs=5000}={}) {
+  const requestId=id();
+  return new Promise((resolve,reject)=>{
+    let timer,done=false;
+    const finish=(error,value)=>{if(done)return;done=true;clearTimeout(timer);
+      child.off('message',message);child.off('exit',exited);child.off('error',failed);child.off('disconnect',disconnected);
+      error?reject(error):resolve(value);};
+    const error=reason=>Error(`test_child_stats_${reason}: pid=${child.pid}; request=${requestId}`);
+    const message=value=>{if(value?.schema==='test.native-coding.stats'&&value.request_id===requestId)finish(null,value);};
+    const exited=()=>finish(error('exited')),failed=()=>finish(error('error')),disconnected=()=>finish(error('disconnected'));
+    if(child.exitCode!==null||child.signalCode!==null){finish(error('exited'));return;}
+    if(!child.connected){finish(error('disconnected'));return;}
+    child.on('message',message);child.once('exit',exited);child.once('error',failed);child.once('disconnect',disconnected);
+    timer=setTimeout(()=>finish(error('timeout')),timeoutMs);
+    try{child.send({schema:'test.native-coding.stats',request_id:requestId},error=>{if(error)finish(Error(`test_child_stats_send_failed: pid=${child.pid}; request=${requestId}`));});}
+    catch{finish(error('send_failed'));}
+  });
+}
 
 async function setup(t,mode='normal',{timeoutMs=1000,maxInflight=16,serverMaxInflight=16,serverTimeoutMs=1000,readShutdownSettlement=null,lateAckMs=100}={}) {
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-private-ipc-'));
@@ -149,7 +185,12 @@ process.on('message',(message,handle)=>{
  if(message?.schema==='test.close-server'){server.close();return;}
  if(message?.schema==='test.release-acl'||message?.schema==='test.release-seed')return;
  if(message?.schema==='test.native-coding.release-reconciliation')return;
- if(message?.schema==='test.native-coding.stats'){process.send({schema:'test.native-coding.stats',calls,protocolErrors,snapshot:server.snapshot()});return;}
+ if(message?.schema==='test.native-coding.stats'){
+  if(mode==='no-stats-reply')return;
+  if(mode==='exit-before-stats')process.exit(23);
+  if(mode==='wrong-stats-reply')process.send({schema:'test.native-coding.stats',request_id:'wrong',calls:-1});
+  process.send({schema:'test.native-coding.stats',request_id:message.request_id,calls,protocolErrors,snapshot:server.snapshot()});return;
+ }
  if(message?.schema==='test.native-coding.handle'){server.handleMessage(message.frame,{});return;}
  server.handleMessage(message,handle);
 });
@@ -162,7 +203,8 @@ process.send({schema:'test.native-coding.ready'});
   let client;
   t.after(async()=>{
     client?.close();
-    if(child.exitCode===null&&child.signalCode===null){const stopped=new Promise(resolve=>child.once('exit',resolve));child.kill();await stopped;}
+    await stopFixtureChild(child,root);
+    assert.ok(child.exitCode!==null||child.signalCode!==null,'test_child_teardown_exit_unconfirmed; fixture retained: '+root);
     const actual=await fs.realpath(root),parent=await fs.realpath(os.tmpdir());
     assert.ok(actual.startsWith(parent+path.sep)&&path.basename(actual).startsWith('metaengine-private-ipc-'));
     await fs.rm(actual,{recursive:true,force:true});
@@ -174,10 +216,56 @@ process.send({schema:'test.native-coding.ready'});
     child.once('exit',()=>{clearTimeout(timer);reject(Error('test_child_exited_before_ready'));});
   });
   client=createNativeCodingHostIpcClient({child,instanceId,hostPid:child.pid,timeoutMs,maxInflight,readShutdownSettlement});
-  const stats=()=>new Promise(resolve=>{const listener=message=>{if(message?.schema==='test.native-coding.stats'){child.off('message',listener);resolve(message);}};
-    child.on('message',listener);child.send({schema:'test.native-coding.stats'});});
+  const stats=options=>readFixtureStats(child,options);
   return {child,client,instanceId,stats};
 }
+
+test('fixture teardown watchdog retains UNKNOWN custody and removes wait listeners',{timeout:3000},async()=>{
+ // A deliberately inert child double tests the watchdog, not native settlement.
+ const child=Object.assign(new EventEmitter(),{pid:123,exitCode:null,signalCode:null,kill:()=>true});
+ await assert.rejects(stopFixtureChild(child,'generated-retained-fixture',{timeoutMs:20}),
+   /test_child_teardown_timeout: pid=123; fixture retained: generated-retained-fixture/);
+ assert.equal(child.exitCode,null);assert.equal(child.signalCode,null);
+ assert.equal(child.listenerCount('exit'),0);assert.equal(child.listenerCount('error'),0);
+});
+test('fixture teardown bounds kill false without claiming an unobserved exit',{timeout:3000},async()=>{
+ const child=Object.assign(new EventEmitter(),{pid:123,exitCode:null,signalCode:null,kill:()=>false});
+ await assert.rejects(stopFixtureChild(child,'generated-retained-fixture',{timeoutMs:20}),/test_child_teardown_timeout/);
+ assert.equal(child.exitCode,null);assert.equal(child.signalCode,null);
+ assert.equal(child.listenerCount('exit'),0);assert.equal(child.listenerCount('error'),0);
+});
+test('fixture teardown waits for a later exit when Windows-style kill returns false',{timeout:3000},async()=>{
+ let killed=false;
+ const child=Object.assign(new EventEmitter(),{pid:123,exitCode:null,signalCode:null,kill:()=>{killed=true;return false;}});
+ let settled=false;const stopped=stopFixtureChild(child,'generated-retained-fixture');
+ stopped.then(()=>settled=true);await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(killed,true);assert.equal(settled,false);
+ child.exitCode=23;child.emit('exit',23,null);await stopped;
+ assert.equal(settled,true);assert.equal(child.listenerCount('exit'),0);assert.equal(child.listenerCount('error'),0);
+});
+test('fixture teardown error remains a failure even if kill returned false',{timeout:3000},async()=>{
+ const child=Object.assign(new EventEmitter(),{pid:123,exitCode:null,signalCode:null,kill:()=>false});
+ const stopped=stopFixtureChild(child,'generated-retained-fixture');
+ child.emit('error',Error('generated child failure'));
+ await assert.rejects(stopped,/test_child_teardown_error/);
+ assert.equal(child.listenerCount('exit'),0);assert.equal(child.listenerCount('error'),0);
+});
+test('fixture stats watchdog bounds a missing real child reply and removes its listeners',{timeout:10000},async t=>{
+ const {child,stats}=await setup(t,'no-stats-reply');
+ const events=['message','exit','error','disconnect'],before=events.map(e=>child.listenerCount(e));
+ await assert.rejects(stats({timeoutMs:50}),/test_child_stats_timeout: pid=.+; request=/);
+ assert.deepEqual(events.map(e=>child.listenerCount(e)),before);
+ assert.equal(child.exitCode,null);assert.equal(child.signalCode,null);
+});
+test('fixture stats rejects when the real child exits before its reply',{timeout:10000},async t=>{
+ const {stats}=await setup(t,'exit-before-stats');
+ await assert.rejects(stats(),/test_child_stats_(exited|disconnected)/);
+});
+test('fixture stats correlates concurrent requests and ignores a foreign reply',{timeout:10000},async t=>{
+ const {stats}=await setup(t,'wrong-stats-reply');
+ const [a,b]=await Promise.all([stats(),stats()]);
+ assert.notEqual(a.request_id,b.request_id);assert.equal(a.calls,0);assert.equal(b.calls,0);
+});
 
 test('paged private scope crosses the per-message byte budget without truncating a 160-agent roster',async t=>{
  const {client,stats}=await setup(t,'paged-scope');

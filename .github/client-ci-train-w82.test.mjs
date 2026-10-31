@@ -75,3 +75,16 @@ test('superseded source qualifications cancel within their own PR while immutabl
  assert.ok(packaging.includes('group: browser-windows-package-version-${{ needs.package_identity_preflight.outputs.package_version }}'));
  assert.match(packaging,/cancel-in-progress: false/);
 });
+
+test('complete Browser qualification names stalled tests without forcing successful exit or extending the job budget',()=>{
+ const text=workflow('client-source-candidate-w73');
+ assert.match(text,/timeout-minutes: 45/);
+ const commands=text.split(/\r?\n/).filter(line=>line.includes("'test/*.test.mjs'"));
+ assert.equal(commands.length,2,'Linux and Windows must both retain the complete test glob');
+ for(const command of commands){
+  assert.match(command,/--test-concurrency=4/);
+  assert.match(command,/--test-reporter=tap/);
+  assert.match(command,/--test-timeout=600000/);
+ }
+ assert.doesNotMatch(text,/--test-force-exit|continue-on-error:\s*true/);
+});

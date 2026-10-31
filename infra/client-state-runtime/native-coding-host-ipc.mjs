@@ -1,4 +1,4 @@
-import {RUN_OWNER_READ,RUN_OWNER_PHASE,createRunOwnerHostPhases} from '../../apps/metaengine-browser/src/native-coding-run-owner-phase.mjs';
+import {RUN_OWNER_READ,RUN_OWNER_PHASE,PUBLICATION_OWNER_PHASE,createPublicationOwnerHostPhases,createRunOwnerHostPhases} from '../../apps/metaengine-browser/src/native-coding-run-owner-phase.mjs';
 import {NATIVE_SETUP_ACTIONS} from '../../apps/metaengine-browser/src/native-coding-setup-contract.mjs';
 import {NATIVE_CALLBACK_PUBLICATION_ACTION,validateNativeCallbackPublicationIntent,nativeCallbackPublicationAck} from '../../apps/metaengine-browser/src/native-coding-publication-handoff-contract.mjs';
 import {nativeCodingHostSettlement,nativePhysicalSettlementUnconfirmed,runNativePhysicalSettlementScope} from '../../apps/metaengine-browser/src/native-coding-host-settlement.mjs';
@@ -176,7 +176,7 @@ export function createNativeCodingHostIpcServer({instanceId,operations,send=proc
   }
   const onDisconnect=()=>close();process.on('disconnect',onDisconnect);
   function handleMessage(message,sendHandle) {
-    if((message?.schema===RUN_OWNER_PHASE||message?.schema===PENDING_OWNER_PHASE||message?.schema===PENDING_ACTIVATION_PHASE)){
+    if((message?.schema===RUN_OWNER_PHASE||message?.schema===PUBLICATION_OWNER_PHASE||message?.schema===PENDING_OWNER_PHASE||message?.schema===PENDING_ACTIVATION_PHASE)){
       requests.get(message.request_id)?.ownerPhases?.receive(message,sendHandle);return true;
     }
     if(!plain(message)||message.schema!==NATIVE_CODING_HOST_IPC_REQUEST)return false;
@@ -225,6 +225,15 @@ export function createNativeCodingHostIpcServer({instanceId,operations,send=proc
         request_sha256:requestDigest,body_sha256:message.payload.headers['x-a2-device-body-sha256']},
       signal:row.abort.signal,send:frame=>{json(frame);send(frame,error=>{if(error)row.abort.abort();});},
     });
+    // RESERVE owns its original read-only Owner facet. Normal readback-only
+    // operations need no cycles; an actual publisher must consume all six.
+    // No extra request, signed-body fiction, or dispatch authority is created.
+    if(message.action==='RESERVE_EXECUTION')row.ownerPhases=createPublicationOwnerHostPhases({
+      binding:{instance_id:instanceId,host_pid:hostPid,request_id:message.request_id,action:message.action,request_sha256:requestDigest},
+      signal:row.abort.signal,
+      assertLifetime:()=>{if(closed||row.abort.signal.aborted||performance.now()>=row.expiresMono)invalid('SERVER_CLOSED');},
+      send:frame=>{json(frame);send(frame,error=>{if(error)row.abort.abort();});},
+    });
     // A continuation replaces the value under the SAME admission key.
     active.set(row.ticketKey,row);requests.set(message.request_id,row);
     if(publishing)pendingPublication.set(row.intent.request_id,row);
@@ -234,7 +243,7 @@ export function createNativeCodingHostIpcServer({instanceId,operations,send=proc
       // must not create unbounded parallel work or authorize a second write.
     },Math.max(1,row.expiresMono-performance.now()));
     const context=Object.freeze({signal:row.abort.signal,deadlineAt:row.deadlineAt,instanceId,hostPid,requestId:message.request_id,action:message.action,
-      requestDigest,...(row.ownerPhases?{[message.action===RUN_OWNER_READ?'runOwnerPhases':message.action==='ACTIVATE_PREPARED_GOAL_V1'?'pendingActivationPhases':'pendingOwnerPhases']:row.ownerPhases,bodyDigest:message.payload.headers['x-a2-device-body-sha256']}: {})});
+      requestDigest,...(row.ownerPhases?{[message.action===RUN_OWNER_READ||message.action==='RESERVE_EXECUTION'?'runOwnerPhases':message.action==='ACTIVATE_PREPARED_GOAL_V1'?'pendingActivationPhases':'pendingOwnerPhases']:row.ownerPhases,...(message.action==='RESERVE_EXECUTION'?{}:{bodyDigest:message.payload.headers['x-a2-device-body-sha256']})}: {})});
     const assertDispatch=()=>{if(closed||row.abort.signal.aborted||process.connected!==true||performance.now()>=row.expiresMono)invalid('SERVER_CLOSED');};
     const physical=runNativePhysicalSettlementScope(async()=>{
       assertDispatch();
@@ -244,7 +253,9 @@ export function createNativeCodingHostIpcServer({instanceId,operations,send=proc
         row.publicationCustody=custody;return nativeCallbackPublicationAck(row.intent);
       }
       if(handoff){await callbackPublication.recheck(handoff.publicationCustody,context);assertDispatch();}
-      return operations[message.action](Object.freeze(structuredClone(message.payload)),context);
+      const value=await operations[message.action](Object.freeze(structuredClone(message.payload)),context);
+      if(message.action==='RESERVE_EXECUTION'&&row.ownerPhases.started()){row.ownerPhases.finish();assertDispatch();}
+      return value;
     });
     physical.promise
       .then(value=>{json(value);row.result=structuredClone(value);row.succeeded=true;})

@@ -168,15 +168,17 @@ jobs:
         # Includes host-owner-custody-w67.test.mjs, every W74-W79 Browser
         # contract, source sync, native authenticated IPC and SelfUpdate units.
         # Quote the glob so Node expands it without Windows command-line overflow.
+        # A stalled fixture must fail with a named TAP result before the whole
+        # job expires. This is a test watchdog, never production settlement.
         run: |
           set -euo pipefail
           npm run check
           # The real Electron MAIN_PROCESS ASAR regression needs a display.
           # Keep the complete suite and its default main-process qualification.
           if [ "$RUNNER_OS" = Linux ]; then
-            xvfb-run -a node --test --test-concurrency=4 'test/*.test.mjs'
+            xvfb-run -a node --test --test-concurrency=4 --test-reporter=tap --test-timeout=600000 'test/*.test.mjs'
           else
-            node --test --test-concurrency=4 'test/*.test.mjs'
+            node --test --test-concurrency=4 --test-reporter=tap --test-timeout=600000 'test/*.test.mjs'
           fi
       - name: Additional disposable coding, backup, critic and CI-train contracts
         shell: bash

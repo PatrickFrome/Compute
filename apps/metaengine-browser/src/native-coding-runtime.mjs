@@ -112,7 +112,10 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
     if(value?.task_id!==payload.task_id)fail('w30_ack_binding_invalid');return value;
   }
   const executor=createNativeCodingLeaseExecutor({ledger,issuer:nativeIssuer,readBoundLease,physicalSlotBudget,
-    createRunner:({authorizeLease})=>({async run(request,options) {
+    createRunner:({authorizeLease})=>{
+      let runner=null,preparing=false;
+      return Object.freeze({async prepare(request,options={}) {
+      if(preparing)fail('runner_preparation_reused');preparing=true;
       assertOpen();
       const permit=await permitFor(request.lease);
       assertOpen();
@@ -144,8 +147,16 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
           }});
         activeBridges.add(wrapper);if(closed){await wrapper.close();fail('closed');}return wrapper;
       };
-      return runnerFactory({...runnerOptions,authorizeLease,processController:processControl,prepareAgentBridge}).run(request,options);
-    }}),
+      runner=runnerFactory({...runnerOptions,authorizeLease,processController:processControl,prepareAgentBridge});
+      if(!['prepare','describePrepared','runPrepared','abandonPrepared'].every(key=>typeof runner?.[key]==='function'))fail('prepared_runner_required');
+      const handle=await runner.prepare(request,options);
+      if(closed||options.signal?.aborted){runner.abandonPrepared(handle);fail('closed');}
+      return handle;
+    },
+    describePrepared(handle){if(!runner)fail('prepared_runner_unavailable');return runner.describePrepared(handle);},
+    runPrepared(handle){assertOpen();if(!runner)fail('prepared_runner_unavailable');return runner.runPrepared(handle);},
+    abandonPrepared(handle){if(!runner)fail('prepared_runner_unavailable');return runner.abandonPrepared(handle);},
+    });},
     async onJobAttempted({request,job_proof}) {
       const value=await post('/v1/devos/mark-running',{...binding(request.lease,job_proof.payload.provider_id),
         native_coding:{schema:'metaengine.native-coding.mark-running.v1',job_proof}});

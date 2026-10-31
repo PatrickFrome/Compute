@@ -22,7 +22,8 @@ export function createNativeCodingLeaseExecutor({ledger,createRunner,readBoundLe
   if (!Number.isSafeInteger(physicalSlotBudget) || physicalSlotBudget<1) fail('physical_slot_budget_invalid');
   const inflight = new Map();
   return Object.freeze({
-    async execute(request,{signal}={}) {
+    async execute(input,{signal}={}) {
+      const request = structuredClone(input);
       const lease = request?.lease;
       if (!UUID.test(lease?.task_id || '') || !Number.isSafeInteger(lease.lease_generation)
           || lease.lease_generation<1 || !['IMPLEMENTER','CRITIC'].includes(request.role)
@@ -35,32 +36,41 @@ export function createNativeCodingLeaseExecutor({ledger,createRunner,readBoundLe
       const operation = (async()=>{
         if (signal?.aborted) fail('cancelled_before_reservation');
         const bound = await readBoundLease({request,phase:'BEFORE_RESERVATION'});
+        if (signal?.aborted) fail('cancelled_before_preparation');
         if (!bound || !UUID.test(bound.provider_id || '') || !SHA.test(bound.scope?.scope_sha256 || '')
             || bound.scope.task_id!==lease.task_id || bound.scope.lease_generation!==lease.lease_generation
             || bound.scope.agent_id!==lease.agent_id
             || bound.scope.agent_generation_epoch!==lease.agent_generation_epoch
             || bound.scope.target_id!==`codex-cli:${bound.provider_id}`) fail('lease_binding_denied');
-        const reservation = await ledger.reserve(bound.scope);
-        if (reservation.state!=='RESERVED') return Object.freeze({
-          state:'READBACK_ONLY',execution:reservation.execution,
-          physical_effect_replayed:false,automatic_retry_allowed:false,authority_effect:false,
-        });
+        let reservation = null, runner = null, prepared = null, descriptor = null, fenced = false, fenceFailure = null;
         let attempted = false, jobEnvelope = null, jobDigest = null;
+        const initialExpiry = Math.min(Date.parse(bound.permit?.expires_at), Date.parse(bound.lease_expires_at));
+        const checkOpen = () => { if (signal?.aborted) fail('cancelled_before_execution'); };
+        const fence = () => {
+          if (prepared && !fenced) {
+            fenced = true;
+            try { runner.abandonPrepared(prepared); } catch (error) { fenceFailure = error; throw error; }
+          }
+        };
         const authorizeLease = async observation=>{
           const current = await readBoundLease({request,...observation});
+          checkOpen();
           if (!sameScope(current?.scope,bound.scope) || current.provider_id!==bound.provider_id) fail('native_scope_changed');
           if (observation.phase==='BEFORE_RESUME') {
+            if (reservation?.state!=='RESERVED' || !sameScope(reservation.scope,bound.scope)
+                || descriptor?.state!=='PREPARED' || observation.run_id!==descriptor.runId) fail('prepared_reservation_binding_denied');
             if (attempted) fail('second_resume_denied');
             // The issuer independently reads the actual suspended worker from
             // its private native registry; it must not trust this observation.
             jobEnvelope = await issuer.issueJob({provider_id:bound.provider_id,agent_id:lease.agent_id,
               task_id:lease.task_id,lease_generation:lease.lease_generation,
               run_id:observation.run_id,prompt_sha256:digest(request.prompt)});
+            checkOpen();
             const proof=jobEnvelope?.payload;
             if (!jobEnvelope?.signature || proof?.schema!=='metaengine.codex-cli.job-proof.v1'
                 || proof.trust_namespace!=='LOCAL_OPERATOR_QA' || proof.production_qualified!==false
                 || proof.task_id!==lease.task_id || proof.lease_generation!==lease.lease_generation
-                || proof.run_id!==observation.run_id || proof.provider_id!==bound.provider_id
+                || proof.run_id!==observation.run_id || proof.run_id!==descriptor.runId || proof.provider_id!==bound.provider_id
                 || proof.target_id!==bound.scope.target_id || proof.agent_id!==lease.agent_id
                 || proof.agent_generation_epoch!==lease.agent_generation_epoch || proof.role!==request.role
                 || proof.workspace_id!==bound.scope.workspace_id || proof.project_id!==current.permit?.project_id
@@ -73,18 +83,21 @@ export function createNativeCodingLeaseExecutor({ledger,createRunner,readBoundLe
                 || proof.worktree?.path!==current.permit?.worktree_path
                 || !Number.isFinite(Date.parse(proof.expires_at)) || Date.parse(proof.expires_at)<=Date.now()
                 || !Number.isFinite(Date.parse(current.lease_expires_at))
-                || Date.parse(proof.expires_at)>Date.parse(current.lease_expires_at)) fail('job_proof_denied');
+                || Date.parse(proof.expires_at)>Date.parse(current.lease_expires_at)
+                || !Number.isFinite(initialExpiry) || Date.parse(proof.expires_at)>initialExpiry) fail('job_proof_denied');
             jobDigest = nativeCodingEnvelopeSha256(jobEnvelope);
             // The process is still suspended. No prompt/command execution is
             // permitted until the own-PG synchronous commit is acknowledged.
             await ledger.advance(reservation.scope,{from:'RESERVED',to:'ATTEMPTED',evidence_sha256:jobDigest,job_proof:jobEnvelope});
             attempted = true;
+            checkOpen();
             // W30 acknowledges the protected job only after the durable Host
             // transaction and before this callback can permit native resume.
             if(onJobAttempted) await onJobAttempted({request,job_proof:jobEnvelope,
               job_proof_sha256:jobDigest,execution_scope:reservation.scope});
           }
-          const expiry=Math.min(Date.parse(current.permit?.expires_at),Date.parse(current.lease_expires_at),
+          checkOpen();
+          const expiry=Math.min(initialExpiry,Date.parse(current.permit?.expires_at),Date.parse(current.lease_expires_at),
             jobEnvelope ? Date.parse(jobEnvelope.payload.expires_at) : Infinity);
           if(!Number.isFinite(expiry) || expiry<=Date.now()) fail('lease_deadline_expired');
           // This is the native watchdog deadline, not merely an AFTER_EXECUTION
@@ -92,9 +105,39 @@ export function createNativeCodingLeaseExecutor({ledger,createRunner,readBoundLe
           return {...current.permit,expires_at:new Date(expiry).toISOString()};
         };
         try {
-          const runner = createRunner({authorizeLease});
-          if (typeof runner?.run!=='function') fail('runner_invalid');
-          const result = await runner.run(request,{signal});
+          if (!Number.isFinite(initialExpiry) || initialExpiry<=Date.now()) fail('lease_deadline_expired');
+          runner = createRunner({authorizeLease});
+          if (!['prepare','describePrepared','runPrepared','abandonPrepared'].every(key=>typeof runner?.[key]==='function')) fail('runner_invalid');
+          prepared = await runner.prepare(request,{signal});
+          checkOpen();
+          descriptor = runner.describePrepared(prepared);
+          if (descriptor?.state==='READBACK_ONLY') {
+            // Local evidence is only a reconciliation fence, never SQL authority.
+            fence();
+            const execution = await ledger.read(bound.scope);
+            return Object.freeze({state:'READBACK_ONLY',execution,local_preparation_state:'READBACK_ONLY',
+              physical_effect_replayed:false,automatic_retry_allowed:false,authority_effect:false});
+          }
+          if (!descriptor || !Object.isFrozen(descriptor) || descriptor.schema!=='metaengine.codex-cli.prepared-run.v1'
+              || descriptor.state!=='PREPARED' || !Object.isFrozen(descriptor.binding) || !UUID.test(descriptor.runId || '')
+              || descriptor.sql_reservation!=='NOT_ATTESTED' || descriptor.authority_effect!==false
+              || descriptor.automatic_retry_allowed!==false || descriptor.production_qualified!==false
+              || ['task_id','agent_id','lease_generation','agent_generation_epoch','base_sha'].some(key=>descriptor.binding?.[key]!==lease[key])
+              || descriptor.binding?.role!==request.role
+              || !Number.isFinite(Date.parse(descriptor.expiresAt)) || Date.parse(descriptor.expiresAt)<=Date.now()) fail('prepared_descriptor_invalid');
+          checkOpen();
+          // Original private descriptor/journal identity is passed directly,
+          // never serialized into caller JSON or treated as a reservation ACK.
+          reservation = await ledger.reserve(bound.scope,{prepared:descriptor});
+          checkOpen();
+          if (reservation?.state!=='RESERVED') {
+            fence();
+            return Object.freeze({state:'READBACK_ONLY',execution:reservation?.execution,
+              physical_effect_replayed:false,automatic_retry_allowed:false,authority_effect:false});
+          }
+          if (!sameScope(reservation.scope,bound.scope) || !UUID.test(reservation.scope?.reservation_id || '')) fail('reservation_binding_denied');
+          checkOpen();
+          const result = await runner.runPrepared(prepared);
           if (!attempted) fail('result_without_durable_attempt');
           const completed = result?.state==='RESULT_READY' && SHA.test(result.result_sha256 || '')
             && result.task_id===lease.task_id && result.lease_generation===lease.lease_generation
@@ -109,12 +152,14 @@ export function createNativeCodingLeaseExecutor({ledger,createRunner,readBoundLe
             useful_work_verified:false,production_qualified:false,physical_effect_replayed:false,
             automatic_retry_allowed:false,authority_effect:false});
         } catch (cause) {
+          try { fence(); } catch {}
           // A failed or unknown barrier write can itself have committed. Never
           // guess its prior state or issue another transition/re-execution.
           let execution = null;
           try { execution = await ledger.read(bound.scope); } catch {}
           const error = new Error('native_coding_executor_execution_requires_readback',{cause});
           error.execution = execution;
+          if (fenceFailure) error.preparation_cleanup_unconfirmed = true;
           error.automatic_retry_allowed = false;
           error.physical_effect_replayed = false;
           throw error;

@@ -1,3 +1,4 @@
+import {preparedRunnerTestAdapter} from './fixtures/prepared-runner-test-adapter.mjs';
 import {readAgentResourceAdmission} from '../src/agent-resource-admission.mjs';
 import {createNativeCodingWorkerRegistry} from '../src/native-coding-host-observers.mjs';
 import {joinedSettlementFixture} from './fixtures/codex-cli-joined-settlement-fixture.mjs';
@@ -85,7 +86,7 @@ function fixture(options={}){
       result_sha256:options.wrongAck?'0'.repeat(64):receipt.result_sha256}};
     return {ok:true,json:async()=>response};
   };
-  const runnerFactory=({authorizeLease})=>({async run(request,{signal}={}){
+  const runnerFactory=({authorizeLease})=>preparedRunnerTestAdapter({async run(request,{signal}={}){
     runCount++;calls.push('runner');assert.equal(request.prompt,prompt);
     if(role==='CRITIC')assert.deepEqual(request.subject,{task_id:ids.provider,lease_generation:7,...subject});
     else assert.equal(request.subject,undefined);
@@ -97,7 +98,7 @@ function fixture(options={}){
     receipt={schema:'metaengine.codex-cli.run-receipt.v1',provider:'CODEX_CLI',trust_namespace:'LOCAL_OPERATOR_QA',state:'RESULT_READY',
       task_id:ids.task,lease_generation:options.wrongResult?2:1,agent_id:agent,run_id:ids.run,role,result_sha256:'b'.repeat(64),
       result:{outcome:'DONE'},git_after:{artifact_sha256:'c'.repeat(64),head:'a'.repeat(40)}};return receipt;
-  }});
+  }},{runId:ids.run});
   const args={identity:{snapshot:()=>({enrolled:true,device_id:ids.task,client_id:ids.workspace,key_fingerprint_sha256:'a'.repeat(64)}),
       deviceHeaders:async(_method,_path,text)=>({'content-type':'application/json','x-a2-chat-bridge-client':ids.workspace,
         'x-a2-device-profile':'A2_DEVICE_HTTP_SIGNATURE_V1','x-a2-device-id':ids.task,'x-a2-device-timestamp':new Date().toISOString(),
@@ -305,14 +306,14 @@ test('runtime prepares the bridge with its full protected permit and binds it af
       return {launch:{fixture_only:true},async bindRun(proof){
         assert.deepEqual(proof,processProof);assert(f.calls.includes('ledger:ATTEMPTED'));assert(f.calls.includes('mark-running'));bound++;
       },async close(){closed++;}};
-    },runnerFactory:({authorizeLease,prepareAgentBridge})=>({async run(request){
+    },runnerFactory:({authorizeLease,prepareAgentBridge})=>preparedRunnerTestAdapter({async run(request){
       const authorization=await authorizeLease({phase:'BEFORE_ATTEMPT',binding:request.lease});
       const bridge=await prepareAgentBridge({runId:ids.run,binding:request.lease,authorization,deadlineAt:authorization.expires_at});
       try{
         await authorizeLease({phase:'BEFORE_RESUME',binding:request.lease,run_id:ids.run,process:processProof});
         await bridge.bindRun(processProof);throw Error('fixture_stops_before_any_model');
       }finally{await bridge.close();}
-    }})});t.after(()=>runtime.close());
+    }},{runId:ids.run})});t.after(()=>runtime.close());
   runtime.dispatchLease(f.lease);
   for(let i=0;i<100&&['PREPARING','RUNNING'].includes(runtime.snapshot().jobs[0]?.state);i++)await new Promise(resolve=>setImmediate(resolve));
   assert.equal(prepared,1);assert.equal(bound,1);assert.equal(closed,1);assert.equal(runtime.snapshot().jobs[0].state,'READBACK_REQUIRED');
@@ -454,12 +455,12 @@ test('Host loss revokes a prepared MCP bridge before joining a still-pending run
   const runtime=createNativeCodingRuntime({...f.args,
     observers:{...f.args.observers,readAgentMcpLaunchPins:async()=>({fixture_pins:true})},
     agentBridgeFactory:async()=>({launch:{fixture_only:true},bindRun:async()=>{},close:async()=>{bridgeClosed++;}}),
-    runnerFactory:({authorizeLease,prepareAgentBridge})=>({async run(request){
+    runnerFactory:({authorizeLease,prepareAgentBridge})=>preparedRunnerTestAdapter({async run(request){
       const authorization=await authorizeLease({phase:'BEFORE_ATTEMPT',binding:request.lease});
       bridge=await prepareAgentBridge({runId:ids.run,binding:request.lease,authorization,deadlineAt:authorization.expires_at});
       preparedResolve();await new Promise(resolve=>{releaseRun=resolve;});
       throw Error('fixture_no_model');
-    }})});t.after(()=>runtime.close());
+    }},{runId:ids.run})});t.after(()=>runtime.close());
   runtime.dispatchLease(f.lease);await prepared;f.loseHost();
   assert.equal(bridgeClosed,1);assert.equal(runtime.snapshot().shutdown_state,'DRAINING');
   assert.throws(()=>bridge.bindRun(processProof),/closed/);
@@ -551,12 +552,12 @@ for(const failed of [false,true])test(`concurrent runtime quit joins a runner-st
  const runtime=createNativeCodingRuntime({...f.args,
   observers:{...f.args.observers,readAgentMcpLaunchPins:async()=>({fixture_pins:true})},
   agentBridgeFactory:async()=>({launch:{fixture_only:true},bindRun:async()=>{},close:()=>{closes++;return gate.promise;}}),
-  runnerFactory:({authorizeLease,prepareAgentBridge})=>({async run(request){
+  runnerFactory:({authorizeLease,prepareAgentBridge})=>preparedRunnerTestAdapter({async run(request){
    const authorization=await authorizeLease({phase:'BEFORE_ATTEMPT',binding:request.lease});
    bridge=await prepareAgentBridge({runId:ids.run,binding:request.lease,authorization,deadlineAt:authorization.expires_at});
    const first=bridge.close();void first.catch(()=>{});entered.resolve();
    try{await bridge.close();}finally{throw Error('fixture_no_model');}
-  }})});t.after(()=>runtime.close());runtime.dispatchLease(f.lease);await entered.promise;
+  }},{runId:ids.run})});t.after(()=>runtime.close());runtime.dispatchLease(f.lease);await entered.promise;
  let finished=false;const closing=runtime.close().then(value=>{finished=true;return value;});
  await new Promise(resolve=>setImmediate(resolve));assert.equal(finished,false);assert.equal(closes,1);assert.ok(f.calls.includes('workers-close'));
  if(failed)gate.reject(Error('fixture_transport_close_failed'));else gate.resolve();
@@ -585,9 +586,9 @@ test('staged drain fences real registry before pending authorization returns; em
 test('staged runtime worker drain owns pending native spawn and waits both late handle and checked cleanup',async()=>{
  const spawn=lifetimeGate(),entered=lifetimeGate(),completion=lifetimeGate(),terminated=lifetimeGate();let nativeSpawns=0,resumes=0,generated;
  const workers=createNativeCodingWorkerRegistry({readProcess:async()=>{},processController:{spawn:async spec=>{nativeSpawns++;generated=joinedSettlementFixture(spec);entered.resolve();return spawn.promise;}}});
- const f=fixture({workerRegistry:workers,closeTimeoutMs:10,runnerFactory:({processController})=>({async run(request){
+ const f=fixture({workerRegistry:workers,closeTimeoutMs:10,runnerFactory:({processController})=>preparedRunnerTestAdapter({async run(request){
    const handle=await processController.spawn({runId:ids.run,binding:request.lease});await handle.resume(request.prompt);return null;
- }})});
+ }},{runId:ids.run})});
  f.runtime.dispatchLease(f.lease);await entered.promise;
  let drained=false;const drain=f.runtime.drainNativeWorkers().then(value=>{drained=true;return value;});
  await lifetimeTurn();assert.equal(drained,false);assert.equal((await f.runtime.close()).shutdown_state,'DRAIN_TIMEOUT');
@@ -628,10 +629,10 @@ for(const failed of [false,true])test(`late bridge factory after runtime fence r
   observers:{...base.args.observers,readAgentMcpLaunchPins:async()=>({fixture_pins:true})},
   agentBridgeFactory:async()=>{entered.resolve();await factory.promise;return {launch:{fixture_only:true},bindRun:async()=>{binds++;},
    close:async()=>{closes++;},drainCallbacks:()=>{joins++;return callbacks.promise;}};},
-  runnerFactory:({authorizeLease,prepareAgentBridge})=>({async run(request){
+  runnerFactory:({authorizeLease,prepareAgentBridge})=>preparedRunnerTestAdapter({async run(request){
    const authorization=await authorizeLease({phase:'BEFORE_ATTEMPT',binding:request.lease});
    await prepareAgentBridge({runId:ids.run,binding:request.lease,authorization,deadlineAt:authorization.expires_at});throw Error('no late run allowed');
-  }})});
+  }},{runId:ids.run})});
  runtime.dispatchLease(base.lease);await entered.promise;
  assert.equal((await runtime.drainNativeWorkers()).worker_cleanup_confirmed,true,'closed admission does not await Host-dependent bridge preparation');
  let done=false;const full=runtime.drainClosedWork().then(value=>{done=true;return value;});
@@ -648,12 +649,12 @@ test('actual runtime default bridge remains blocked by directory publication bef
   ownPostgres:{...base.args.ownPostgres,openAgentRunCustody:async()=>{custody++;throw Error('must not claim');}},
   observers:{...base.args.observers,readAgentMcpLaunchPins:async()=>({})},
   // No agentBridgeFactory override: execute the actual default producer path.
-  runnerFactory:({authorizeLease,prepareAgentBridge})=>({async run(request){
+  runnerFactory:({authorizeLease,prepareAgentBridge})=>preparedRunnerTestAdapter({async run(request){
    const authorization=await authorizeLease({phase:'BEFORE_ATTEMPT',binding:request.lease});
    try{await prepareAgentBridge({runId:ids.run,binding:request.lease,authorization,deadlineAt:authorization.expires_at});}
    catch(error){reason=error.message;throw error;}
    throw Error('unqualified bridge must never be returned');
-  }})});
+  }},{runId:ids.run})});
  runtime.dispatchLease(base.lease);await settled({runtime});
  assert.equal(reason,'native_run_callback_directory_durability_unqualified');assert.equal(custody,0);
  assert.equal(base.calls.includes('mark-running'),false);assert.equal(base.calls.includes('resume'),false);
@@ -665,4 +666,21 @@ test('generated runtime resource refusal still prevents a physical start',async 
  t.after(()=>f.runtime.close());
  assert.equal(f.runtime.dispatchLease(f.lease).state,'PHYSICAL_POOL_BUSY');
  assert.equal(f.runCount,0);assert.equal(f.calls.includes('reserve'),false);
+});
+
+test('default runtime wrapper exposes inert preparation before reserve and fences a late prepared handle during quit',async()=>{
+ const entered=Promise.withResolvers(),release=Promise.withResolvers();let fences=0,runs=0;
+ const f=fixture({runnerFactory:()=>preparedRunnerTestAdapter({run:async()=>{runs++;throw Error('must not execute');}},
+  {runId:ids.run,onPrepare:async()=>{entered.resolve();await release.promise;},onFence:()=>{fences++;}})});
+ f.runtime.dispatchLease(f.lease);await entered.promise;assert.equal(f.calls.includes('reserve'),false);
+ const workers=await f.runtime.drainNativeWorkers();assert.equal(workers.worker_cleanup_confirmed,true);
+ release.resolve();const closed=await f.runtime.drainClosedWork();assert.equal(closed.shutdown_state,'DRAINED');
+ assert.equal(fences,1);assert.equal(runs,0);assert.equal(f.calls.includes('reserve'),false);assert.equal(f.calls.includes('mark-running'),false);
+ await f.runtime.close();
+});
+
+test('default runtime wrapper refuses a run-only test factory instead of silently restoring legacy execution',async()=>{
+ let legacyRuns=0;const f=fixture({runnerFactory:()=>({run:async()=>{legacyRuns++;}})});
+ f.runtime.dispatchLease(f.lease);assert.equal(await settled(f),'READBACK_REQUIRED');
+ assert.equal(legacyRuns,0);assert.equal(f.calls.includes('reserve'),false);assert.equal(f.calls.includes('mark-running'),false);await f.runtime.close();
 });

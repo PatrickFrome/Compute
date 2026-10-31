@@ -531,8 +531,9 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
           const candidate=await createNativeCodingHostAuthority({sql:nativeCodingSql,...native,commitService,seedOperations,serviceHeartbeatOperations,
             callbackPublicationIdentity:{hostInstanceId:descriptor.instance_id,hostPid:process.pid,postgresIdentity:runtime.postgresIdentity},
             runOwnerReadOptions:{identity:{hostInstanceId:descriptor.instance_id,hostPid:process.pid},stateDirectory:config.state_directory},
-            // W74 sealed Owner custody currently lives in Main; no genuine
-            // readonly Host reader is composed. Publication remains HOLD.
+            // W74 sealed custody remains in Main. Authority reuses its actual
+            // transaction-bound runOwnerReader; no fixture override is supplied.
+            // Publication is still unmounted until full original-ticket wiring.
             readOwnerControl:null});
           transferred=true;
           if(abortRequested||runtime.stopped===true||terminalPromise){

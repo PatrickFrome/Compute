@@ -122,7 +122,7 @@ test('unregistered callback publication on actual disposable PG17; native/Owner 
         transactionReadbacks.push(settings);return result;
       });if(controls.afterCommit)await controls.afterCommit();return result;}};
       const authority=await createNativeCodingHostAuthority({sql:privateSql,
-        readNativeScope:async()=>structuredClone(native),readNativeWorker:async()=>structuredClone(controls.worker),
+        readNativeScope:async(_permit,requireLive,tx,request)=>{if(controls.nativeRead)await controls.nativeRead({requireLive,tx,request});return structuredClone(native);},readNativeWorker:async()=>structuredClone(controls.worker),
         readProtectedReceipt:async()=>structuredClone(controls.receipt),callbackPublicationIdentity:identityOverride??hostIdentity,
         readCallbackPrefix:readPrefix,readPublicationHost:async()=>({...hostNative,...(controls.hostChanged?{process_incarnation_id:`pid:${process.pid}:created_100ns:134000000000000003`}:{})}),
         readOwnerControl:ownerReader?async({tx})=>({owner:{schema:'metaengine.host.owner-incarnation.v1',source:'LOCAL_HOST_OWNER',authority_effect:false,
@@ -216,6 +216,46 @@ test('unregistered callback publication on actual disposable PG17; native/Owner 
       const x=await fixture(),r=await x.reserve();await x.journal();
       x.controls.prefixRead=()=>{x.controls.controlRevision=1;};
       await assert.rejects(x.publish(r),unknown);
+    });
+    for(const reason of ['cancelled','deadline'])await subtest('already '+reason+' reservation opens no new transaction or native read',async()=>{
+      const x=await fixture(),prepared=await x.prepare(),before=x.transactionReadbacks.length;let reads=0;
+      x.controls.nativeRead=()=>{reads++;};
+      if(reason==='cancelled')x.abort.abort();else x.request.deadlineAt=Date.now()-1;
+      await assert.rejects(x.authority.RESERVE_EXECUTION({scope:prepared.scope},x.request),reason==='cancelled'?/request_cancelled/:/deadline_exceeded/);
+      assert.equal(reads,0);assert.equal(x.transactionReadbacks.length,before);
+      const rows=await sql.unsafe('select task_id from destruktion_meta.native_coding_execution_h205f22 where task_id=$1',[prepared.scope.task_id]);
+      assert.equal(rows.length,0);
+    });
+    await subtest('original reservation passes its actual request to native scope observation',async()=>{
+      const x=await fixture(),prepared=await x.prepare(),reads=[];
+      x.controls.nativeRead=observation=>{reads.push(observation);};
+      const r=await x.authority.RESERVE_EXECUTION({scope:prepared.scope},x.request);
+      assert.equal(r.state,'RESERVED');assert.equal(reads.length,1);
+      assert.equal(reads[0].request,x.request);assert.equal(reads[0].requireLive,true);
+    });
+    await subtest('cancellation during reservation observation creates no execution row',async()=>{
+      const x=await fixture(),prepared=await x.prepare();let observed;
+      x.controls.nativeRead=observation=>{observed=observation;x.abort.abort();};
+      await assert.rejects(x.authority.RESERVE_EXECUTION({scope:prepared.scope},x.request),unknown);
+      assert.equal(observed.request,x.request);
+      const rows=await sql.unsafe('select task_id from destruktion_meta.native_coding_execution_h205f22 where task_id=$1',[prepared.scope.task_id]);
+      assert.equal(rows.length,0);
+    });
+    await subtest('all publication native reads retain the original request and their actual PG transaction',async()=>{
+      const x=await fixture(),r=await x.reserve();await x.journal();const reads=[];
+      x.controls.nativeRead=observation=>{reads.push(observation);};
+      await x.publish(r);assert.equal(reads.length,6);
+      for(const observation of reads){assert.equal(observation.request,x.request);assert.equal(observation.requireLive,true);}
+      assert.equal(new Set(reads.slice(0,3).map(row=>row.tx)).size,1);
+      assert.equal(new Set(reads.slice(3).map(row=>row.tx)).size,1);
+      assert.notEqual(reads[0].tx,reads[3].tx,'committed readback owns a separate transaction, not an extra nested read');
+    });
+    await subtest('cancellation in native publication observation rolls back before any anchor write',async()=>{
+      const x=await fixture(),r=await x.reserve();await x.journal();let reads=0;
+      x.controls.nativeRead=({request})=>{assert.equal(request,x.request);reads++;x.abort.abort();};
+      await assert.rejects(x.publish(r),unknown);assert.equal(reads,1);
+      const [row]=await sql.unsafe('select state,callback_publication from destruktion_meta.native_coding_execution_h205f22 where task_id=$1',[r.scope.task_id]);
+      assert.equal(row.state,'RESERVED');assert.equal(row.callback_publication,null);
     });
     await subtest('genuine fresh reservation, independently protected prefix, synchronous COMMIT and exact postcommit readback',async()=>{
       const x=await fixture(),reserved=await x.reserve();await x.journal();const answer=await x.publish(reserved);
@@ -514,7 +554,7 @@ test('unregistered callback publication on actual disposable PG17; native/Owner 
       await q.x.append({kind:'CALLER',request_id:a.request_id,request_sha256:a.request_sha256,outcome:'UNKNOWN'});
       await assert.rejects(q.handoff.recheck(cap,q.context(a)),/handoff_hold/);
     });
-    await crashRestart();assert.equal(passed,60);
+    await crashRestart();assert.equal(passed,66);
     await fs.writeFile(path.join(directory,'receipt.json'),JSON.stringify({schema:'metaengine.native-callback-publication.disposable-qa.v1',state:'PASS',
      postgres_system_identifier:cluster,postgres_version_num:identity.version,subtests:passed,
      native_and_owner_classification:'GENERATED_FIXTURES',publication_gate:'CLOSED',send_capability:false,authority_effect:false}));
