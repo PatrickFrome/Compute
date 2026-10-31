@@ -46,3 +46,7 @@ No installer was built, signed or installed by this source checkpoint. No main m
 ## Release capability readback
 
 The actual W77 capability probe on the final functional source returns BLOCKED with `EXISTING_PROTECTED_RELEASE_ROOT_SIGNING_CAPABILITY_NOT_WIRED`, `EXTERNAL_SIDECAR_INSTALLED_PLACEMENT_UNPROVEN` and `IMMUTABLE_VERIFIED_GH_ARTIFACT_BYTES_HANDOFF_NOT_WIRED`. Scoped repository/history review did not find a callable existing signer or authenticated placement contract. GitHub/SLSA attestation is a separate layer and cannot replace the pinned Ed25519 root signature. No private key material was read or created.
+
+## Preflight correction before branch publication
+
+Unpublished candidate ced9c20419aaacd3d773a34d7bff7f0d216f865a passed the source seal checks but failed an existing positional workflow assertion: the new TAP/watchdog options interrupted the expected adjacency of concurrency and the complete glob. The workflow options were reordered to preserve that existing assertion without weakening it or changing test semantics. Fresh final preflight is required; the failed candidate was not moved onto the PR branch.
