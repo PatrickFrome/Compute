@@ -32,6 +32,8 @@ function variant(source,control){
 test('handle-list counterfactual changes only the explicit inheritance restriction, retaining pre-birth Job containment',async()=>{
  const source=await fs.readFile(resolveCodexCliJobHelperSource(),'utf8'),bound=variant(source,false),control=variant(source,true);
  assert.ok(bound.includes(attribute));assert.ok(!control.includes(attribute));
+ assert.ok(bound.includes('Require(WaitForSingleObject(fixtureEvent,0)==0x102,\"fixture_inheritance_counterfactual\")'));
+ assert.ok(control.includes('Require(WaitForSingleObject(fixtureEvent,0)==0,\"fixture_inheritance_counterfactual\")'));
  for(const text of [bound,control]){assert.ok(text.includes(jobAttribute));assert.match(text,/fixture_event_close/);assert.match(text,/new\[\]\{fixtureEvent,job,/);}
  assert.equal(bound.replace(attribute,'Require(true,"fixture_handle_list_omitted");').replace('fixtureEvent,0)==0x102','fixtureEvent,0)==0'),control);
 });
@@ -65,7 +67,16 @@ describe('actual Windows inheritance counterfactual (UNKNOWN unless executed on 
     cwd:directory,env,timeoutMs:60000,runId:randomUUID()},async handle=>{
      let output='';handle.stdout.on('data',value=>{output+=value.toString();});handle.stderr.resume();await handle.resume('');
      const terminal=await handle.completion;assert.equal(terminal.exit_code,0);assert.equal(terminal.tree_cleanup_confirmed,true);
-     assert.equal(terminal.joined_settlement.scope,'WINDOWS_HELPER_TREE');assert.equal(JSON.parse(output.trim()).set_event,control);
+     assert.equal(terminal.joined_settlement.scope,'WINDOWS_HELPER_TREE');assert.equal(terminal.reason,null);
+     const childResult=JSON.parse(output.trim());assert.deepEqual(Object.keys(childResult),['set_event']);
+     assert.equal(typeof childResult.set_event,'boolean');
+     // Handles are process-specific table values. Without inheritance this
+     // integer can name a DIFFERENT event allocated by the child runtime.
+     // Only the helper's mandatory WaitForSingleObject on its original owned
+     // event proves inheritance; that Require executes before terminal emit.
+     // https://learn.microsoft.com/windows/win32/sysinfo/kernel-objects
+     // The control must also prove its child really performed SetEvent.
+     if(control)assert.equal(childResult.set_event,true);
    });
   }
  });

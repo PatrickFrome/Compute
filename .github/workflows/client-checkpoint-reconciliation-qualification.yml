@@ -82,7 +82,7 @@ permissions:
 
 concurrency:
   group: checkpoint-reconciliation-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   windows-source-and-native-pg17:
@@ -222,6 +222,8 @@ jobs:
             'apps/metaengine-browser/test/native-coding-project-checkpoints.test.mjs',
             'apps/metaengine-browser/test/native-coding-git-proof.test.mjs',
             'infra/client-state-runtime/native-coding-host-authority.test.mjs',
+            'infra/client-state-runtime/native-coding-callback-publication-source.test.mjs',
+            'infra/client-state-runtime/native-coding-callback-publication-lifetime.test.mjs',
             'apps/metaengine-browser/test/native-coding-runtime.test.mjs',
             'apps/metaengine-browser/test/native-coding-host-ipc.test.mjs',
             'apps/metaengine-browser/test/native-host-scope-cleanup.test.mjs',
@@ -243,6 +245,7 @@ jobs:
             'infra/client-state-runtime/native-coding-workspace-preparation.pg17.test.mjs',
             'infra/client-state-runtime/native-coding-pending-goal.pg17.test.mjs',
             'infra/client-state-runtime/host-owner-preseal-w74.pg17.test.mjs',
+            'infra/client-state-runtime/native-coding-callback-publication.pg17.test.mjs',
             'infra/client-state-runtime/native-coding-checkpoint-reconciliation.integration.test.mjs',
             'infra/client-state-runtime/native-coding-host-commit.integration.test.mjs',
             'infra/client-state-runtime/native-coding-host-commit-profile.integration.test.mjs',
@@ -251,6 +254,10 @@ jobs:
             'infra/client-state-runtime/browser-parent-message-wake.pg17.test.mjs',
           ];
           const componentRequired=[
+            'publication native scope receives the original request, live fence and transaction',
+            'publication cancellation reaches a started native read and still joins its original completion',
+            'cancellation during Owner role validation starts no later native scope read',
+            'cancellation during native scope observation starts no later Host observation',
             'Windows native selector move publishes one-link bytes and preserves existing bytes after lost acknowledgement',
             'cancellation after a seed effect suppresses the late response without replay',
             'deadline expiring during catalog read suppresses stale readiness',
@@ -280,6 +287,13 @@ jobs:
             'existing cycle suspends parent and child with one slot, then exact completion and restored receipts unwind without Send replay',
           ];
           const nativeRequired=[
+            'unregistered callback publication on actual disposable PG17; native/Owner evidence GENERATED',
+            'already cancelled reservation opens no new transaction or native read',
+            'already deadline reservation opens no new transaction or native read',
+            'original reservation passes its actual request to native scope observation',
+            'cancellation during reservation observation creates no execution row',
+            'all publication native reads retain the original request and their actual PG transaction',
+            'cancellation in native publication observation rolls back before any anchor write',
             'lost selector publication reply recovers by protected reads without repeating native preparation',
             'profile preparation is atomic, immutable and never publishes execution authority',
             'profile preparation cancellation rolls back before commit and preserves committed identity after lost response',

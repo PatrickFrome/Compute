@@ -1,4 +1,6 @@
+import {RUN_OWNER_READ,RUN_OWNER_PHASE,PUBLICATION_OWNER_PHASE,createPublicationOwnerClientPhases,createRunOwnerClientPhases} from './native-coding-run-owner-phase.mjs';
 import {claimNativeRunCallbackJournal} from './native-coding-run-callback-journal.mjs';
+import {NATIVE_CALLBACK_PUBLICATION_ACTION,validateNativeCallbackPublicationIntent,validateNativeCallbackPublicationAck} from './native-coding-publication-handoff-contract.mjs';
 import {validateNativeCodingAgentMcpBinding} from './native-coding-agent-mcp-broker.mjs';
 import {NATIVE_SETUP_ACTIONS} from './native-coding-setup-contract.mjs';
 import {NATIVE_CODING_HOST_SETTLEMENT,validateNativeCodingHostSettlement} from './native-coding-host-settlement.mjs';
@@ -57,7 +59,8 @@ function scope(value,reservation=false) {
 }
 function payload(action,value) {
   json(value);
-  if(action==='READ_SCOPE'){
+  if(action===NATIVE_CALLBACK_PUBLICATION_ACTION){try{validateNativeCallbackPublicationIntent(value);}catch{invalid('INVALID_PAYLOAD');}}
+  else if(action==='READ_SCOPE'){
     keys(value,Object.hasOwn(value,'after_permit_id')?['after_permit_id']:[]);
     if(Object.hasOwn(value,'after_permit_id')&&!UUID.test(value.after_permit_id))invalid('INVALID_PAYLOAD');
   }
@@ -68,7 +71,7 @@ function payload(action,value) {
       ||!/^agent_[a-z0-9-]{8,64}$/.test(s.agent_id||'')
       ||!['lease_generation','agent_generation_epoch'].every(name=>Number.isSafeInteger(s[name])&&s[name]>0))invalid('INVALID_PAYLOAD');
   }
-  else if(['SERVICE_HEARTBEAT_V2','READ_SERVICE_HEARTBEAT_V2','READ_NATIVE_CAPACITY_V1',...NATIVE_SETUP_ACTIONS,'ACTIVATE_PREPARED_GOAL_V1','READ_PREPARED_GOAL_ACTIVATION_V1','ESTABLISH_PENDING_OWNER_V1','READ_PENDING_OWNER_V1','ADMIT_PREPARED_GOAL_V1','READ_PREPARED_GOAL_V1','PREPARE_WORKSPACE_V1','READ_WORKSPACE_PREPARATION_V1','SEED_GOAL','READ_SEED','LIST_SEEDS','SERVICE_HEARTBEAT','READ_SERVICE_HEARTBEAT'].includes(action)){try{validateNativeCodingDeviceRequest(value,action);}catch{invalid('INVALID_PAYLOAD');}}
+  else if([RUN_OWNER_READ,'SERVICE_HEARTBEAT_V2','READ_SERVICE_HEARTBEAT_V2','READ_NATIVE_CAPACITY_V1',...NATIVE_SETUP_ACTIONS,'ACTIVATE_PREPARED_GOAL_V1','READ_PREPARED_GOAL_ACTIVATION_V1','ESTABLISH_PENDING_OWNER_V1','READ_PENDING_OWNER_V1','ADMIT_PREPARED_GOAL_V1','READ_PREPARED_GOAL_V1','PREPARE_WORKSPACE_V1','READ_WORKSPACE_PREPARATION_V1','SEED_GOAL','READ_SEED','LIST_SEEDS','SERVICE_HEARTBEAT','READ_SERVICE_HEARTBEAT'].includes(action)){try{validateNativeCodingDeviceRequest(value,action);}catch{invalid('INVALID_PAYLOAD');}}
   else if(action==='AGENT_OPERATION'){try{validateNativeCodingAgentHostRequest(value);}catch{invalid('INVALID_PAYLOAD');}}
   else if(action==='READ_PROJECT_REJECTION'){
     keys(value,['project_id','writer_task_id','writer_lease_generation','critic_task_id','critic_lease_generation','result_sha256']);
@@ -129,13 +132,20 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
     ||!UUID.test(instanceId||'')||!Number.isSafeInteger(hostPid)||hostPid<1||child.pid!==hostPid
     ||!Number.isSafeInteger(timeoutMs)||timeoutMs<1||timeoutMs>30000||!Number.isSafeInteger(maxInflight)||maxInflight<1||maxInflight>16)
     throw new NativeCodingHostIpcError('CHANNEL_CLOSED');
-  const pending=new Map(),physical=new Map(),unavailableListeners=new Set(),runs=new Map(),waiters=new Set();
+  const pending=new Map(),physical=new Map(),stages=new Map(),unavailableListeners=new Set(),runs=new Map(),waiters=new Set();
   let closed=false,unavailable=null,transportLost=false;
   const change=()=>{for(const done of waiters)done();waiters.clear();};
   const waitChange=()=>new Promise(resolve=>waiters.add(resolve));
   const detach=()=>{if(!closed||physical.size)return;child.off('message',onMessage);child.off('exit',onExit);child.off('disconnect',onDisconnect);child.off('error',onError);};
   const release=row=>{
-    if(row.remoteSettled&&row.localDone&&!row.auditPending){physical.delete(row.id);row.runScope?.rows.delete(row);change();detach();}
+    if(row.ticket){
+      if(row.remoteSettled&&row.localDone)stages.delete(row.id);
+      release(row.ticket);change();return;
+    }
+    if(row.remoteSettled&&row.localDone&&!row.auditPending
+      &&(!row.publication||row.publication.remoteSettled&&row.publication.localDone)){
+      physical.delete(row.id);stages.delete(row.id);row.runScope?.rows.delete(row);change();detach();
+    }
   };
   const audit=(row,event)=>{
     if(!row.runScope)return Promise.resolve();row.auditPending=(row.auditPending||0)+1;
@@ -169,19 +179,19 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
   function onMessage(message,sendHandle) {
     if(message?.schema===NATIVE_CODING_HOST_SETTLEMENT){
       if(transportLost)return; // Protocol/channel loss requires independent Host shutdown, not late frames.
-      const row=physical.get(message.request_id);if(!row)return; // Other private capabilities share the channel.
+      const row=stages.get(message.request_id);if(!row)return; // Other private capabilities share the channel.
       try{
         json(message);if(sendHandle)invalid('RESPONSE_INVALID');
         const state=validateNativeCodingHostSettlement(message,{instance_id:instanceId,host_pid:hostPid,
           request_id:row.id,action:row.action,request_sha256:row.digest});
         if(row.held&&state!=='HOLD'||row.remoteSettled&&state!=='SETTLED')invalid('RESPONSE_INVALID');
         if(state==='HOLD'?!row.held:!row.remoteSettled)void audit(row,{kind:'TERMINAL',...requestEvidence(row),state,terminal_sha256:digest(message)}).catch(()=>{});
-        if(state==='HOLD'){row.held=true;if(row.runScope)row.runScope.evidenceHold=true;}
+        if(state==='HOLD'){row.held=true;const ticket=row.ticket||row;ticket.held=true;if(ticket.runScope)ticket.runScope.evidenceHold=true;}
         else{row.remoteSettled=true;row.protocolSettled=true;}
         release(row);change();
       }catch{stop('RESPONSE_INVALID');}return;
     }
-    if(message?.schema===PENDING_OWNER_PHASE||message?.schema===PENDING_ACTIVATION_PHASE){pending.get(message.request_id)?.ownerPhases?.receive(message,sendHandle);return;}
+    if(message?.schema===RUN_OWNER_PHASE||message?.schema===PUBLICATION_OWNER_PHASE||message?.schema===PENDING_OWNER_PHASE||message?.schema===PENDING_ACTIVATION_PHASE){pending.get(message.request_id)?.ownerPhases?.receive(message,sendHandle);return;}
     if(message?.schema==='compute.runtime-host-terminal.v1'){stop('HOST_TERMINATED');return;}
     if(!plain(message)||message.schema!==NATIVE_CODING_HOST_IPC_RESPONSE)return;
     const row=pending.get(message.request_id);if(!row)return; // A late OK never upgrades caller UNKNOWN.
@@ -190,6 +200,8 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
       if(sendHandle||message.instance_id!==instanceId||message.host_pid!==hostPid||message.request_id!==row.id
         ||message.action!==row.action||message.request_sha256!==row.digest||!['OK','REJECTED','UNKNOWN'].includes(message.outcome)
         ||(message.outcome==='OK'?(message.reason!==null):(!REASONS.has(message.reason)||message.value!==null)))invalid('RESPONSE_INVALID');
+      if(!row.sendAttempted)invalid('RESPONSE_INVALID');
+      if(row.ticket&&message.outcome==='OK')validateNativeCallbackPublicationAck(message.value,row.intent);
     }catch{stop('RESPONSE_INVALID');return;}
     take(row.id);
     if(message.outcome==='OK'){
@@ -212,8 +224,10 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
             ||witness.instance_id!==instanceId||witness.host_pid!==hostPid||witness.cleanup_confirmed!==true
             ||witness.authority_effect!==false)throw new NativeCodingHostIpcError('PHYSICAL_CLEANUP_UNCONFIRMED');
           for(const row of physical.values()){
+            if(row.publication&&!row.publication.remoteSettled&&row.runScope)row.runScope.evidenceHold=true;
             if(!row.remoteSettled){if(row.runScope)row.runScope.evidenceHold=true;
               void audit(row,{kind:'CLEANUP_ONLY',...requestEvidence(row)}).catch(()=>{});}
+            if(row.publication){row.publication.remoteSettled=true;row.publication.held=false;stages.delete(row.publication.id);}
             row.remoteSettled=true;row.held=false;release(row);
           }
           if(!physical.size)break;
@@ -231,40 +245,66 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
     if(child.connected!==true)stop('CHANNEL_CLOSED');
     if(closed||runScope?.fenced||runScope?.failed)return Promise.reject(new NativeCodingHostIpcError('CHANNEL_CLOSED'));
     if(physical.size>=maxInflight)return Promise.reject(new NativeCodingHostIpcError('INFLIGHT_LIMIT'));
+    // Reserve the SAME existing physical ticket before UUID/digest/local intent.
+    // Its entry survives both publication and original request stages.
+    const ticketKey={},expiresMono=performance.now()+timeoutMs;
+    physical.set(ticketKey,null);
     let frame;
     try{payload(action,value);frame={schema:NATIVE_CODING_HOST_IPC_REQUEST,instance_id:instanceId,host_pid:hostPid,request_id:randomUUID(),action,payload:structuredClone(value)};json(frame);}
-    catch(error){return Promise.reject(new NativeCodingHostIpcError(REASONS.has(error.reason)?error.reason:'INVALID_PAYLOAD'));}
+    catch(error){physical.delete(ticketKey);return Promise.reject(new NativeCodingHostIpcError(REASONS.has(error.reason)?error.reason:'INVALID_PAYLOAD'));}
     const requestDigest=digest(frame);
     return new Promise((resolve,rejectPromise)=>{
-      const row={id:frame.request_id,action,write:writes(action,value),digest:requestDigest,resolve,reject:rejectPromise,timer:null,runScope,sendAttempted:false};
+      const row={id:frame.request_id,action,write:runScope?.published===true||writes(action,value),digest:requestDigest,resolve,reject:rejectPromise,timer:null,runScope,sendAttempted:false,expiresMono};
       if(ownerScopeCallback){
-        if(!(PENDING_OWNER_ACTIONS.includes(action)||action==='ACTIVATE_PREPARED_GOAL_V1')||typeof ownerScopeCallback!=='function'){rejectPromise(new NativeCodingHostIpcError('INVALID_PAYLOAD'));return;}
-        row.ownerPhases=(action==='ACTIVATE_PREPARED_GOAL_V1'?createPendingActivationClientPhases:createPendingOwnerClientPhases)({binding:{instance_id:instanceId,host_pid:hostPid,request_id:row.id,action,
-          request_sha256:requestDigest,body_sha256:value.headers['x-a2-device-body-sha256']},callback:ownerScopeCallback,input:value.body.input,
-          assertLifetime:()=>{if(closed||child.connected!==true||child.pid!==hostPid)throw new NativeCodingHostIpcError('CHANNEL_CLOSED');},
+        if(!(action==='RESERVE_EXECUTION'||action===RUN_OWNER_READ||PENDING_OWNER_ACTIONS.includes(action)||action==='ACTIVATE_PREPARED_GOAL_V1')||typeof ownerScopeCallback!=='function'){physical.delete(ticketKey);rejectPromise(new NativeCodingHostIpcError('INVALID_PAYLOAD'));return;}
+        row.ownerPhases=(action==='RESERVE_EXECUTION'?createPublicationOwnerClientPhases:action===RUN_OWNER_READ?createRunOwnerClientPhases:action==='ACTIVATE_PREPARED_GOAL_V1'?createPendingActivationClientPhases:createPendingOwnerClientPhases)({binding:{instance_id:instanceId,host_pid:hostPid,request_id:row.id,action,
+          request_sha256:requestDigest,...(action==='RESERVE_EXECUTION'?{}:{body_sha256:value.headers['x-a2-device-body-sha256']})},callback:ownerScopeCallback,...(action==='RESERVE_EXECUTION'?{scope:value.scope}:{input:value.body.input}),
+          assertLifetime:()=>{if(closed||child.connected!==true||child.pid!==hostPid||performance.now()>=row.expiresMono)throw new NativeCodingHostIpcError('CHANNEL_CLOSED');},
           send:phase=>{child.send(phase,error=>{if(error)stop('SEND_FAILED');});},
         });
       }
       row.timer=setTimeout(()=>{const current=take(row.id);if(current)reject(current,'REQUEST_TIMEOUT');},timeoutMs);
-      pending.set(row.id,row);physical.set(row.id,row);runScope?.rows.add(row);
+      physical.delete(ticketKey);pending.set(row.id,row);physical.set(row.id,row);stages.set(row.id,row);runScope?.rows.add(row);
       const unsent=()=>{
         if(row.sendAttempted)return;
         void audit(row,{kind:'UNSENT',...requestEvidence(row)}).catch(()=>{});row.remoteSettled=true;
-        const current=take(row.id);if(current)reject(current,'CHANNEL_CLOSED',false);release(row);change();
+        const current=take(row.id);if(current)reject(current,row.publication?.error?.reason||'CHANNEL_CLOSED',row.publication?.error?.effect_outcome==='UNKNOWN');release(row);change();
       };
       const send=()=>{
-        if(runScope&&(closed||runScope.fenced||runScope.failed||child.connected!==true||!pending.has(row.id))){unsent();return;}
-        row.sendAttempted=true;
+        if(closed||runScope?.fenced||runScope?.failed||child.connected!==true||!pending.has(row.id)){unsent();return;}
+        row.write=writes(action,value);row.sendAttempted=true;
         try{child.send(frame,error=>{if(error)stop('SEND_FAILED');});}catch{stop('SEND_FAILED');}
       };
-      if(runScope)void audit(row,{kind:'INTENT',...requestEvidence(row),operation:value.operation,job_binding_sha256:digest(value.job_binding)}).then(send,unsent);
+      const publishThenSend=async()=>{
+        if(!runScope?.published){send();return;}
+        if(closed||runScope.fenced||runScope.failed||!pending.has(row.id)){unsent();return;}
+        const intent={binding:structuredClone(value.binding),request_id:row.id,request_sha256:row.digest,
+          operation:value.operation,job_binding_sha256:digest(value.job_binding)};
+        const publicationFrame={schema:NATIVE_CODING_HOST_IPC_REQUEST,instance_id:instanceId,host_pid:hostPid,
+          request_id:randomUUID(),action:NATIVE_CALLBACK_PUBLICATION_ACTION,payload:intent};
+        payload(publicationFrame.action,intent);json(publicationFrame);
+        const publication={id:publicationFrame.request_id,action:publicationFrame.action,digest:digest(publicationFrame),
+          write:true,ticket:row,intent,sendAttempted:false,resolve:value=>{publication.value=value;change();},
+          reject:error=>{publication.error=error;change();}};
+        row.publication=publication;pending.set(publication.id,publication);stages.set(publication.id,publication);
+        publication.timer=setTimeout(()=>{const current=take(publication.id);if(current)reject(current,'REQUEST_TIMEOUT');},Math.max(1,row.expiresMono-performance.now()));
+        publication.sendAttempted=true;
+        try{child.send(publicationFrame,error=>{if(error)stop('SEND_FAILED');});}catch{stop('SEND_FAILED');}
+        while(!publication.localDone||!publication.remoteSettled){
+          if(closed||runScope.fenced||runScope.failed||publication.error||publication.held||!pending.has(row.id)){unsent();return;}
+          await waitChange();
+        }
+        if(publication.error||publication.held||!publication.value){unsent();return;}
+        send();
+      };
+      if(runScope)void audit(row,{kind:'INTENT',...requestEvidence(row),operation:value.operation,job_binding_sha256:digest(value.job_binding)}).then(publishThenSend,unsent).catch(unsent);
       else send();
     });
   }
-  async function openAgentRunCustody({binding,journal}={}){
+  async function openAgentRunCustody({binding,journal}={},published=false){
     const pinned=structuredClone(validateNativeCodingAgentMcpBinding(binding));
     if(closed||runs.has(pinned.run_id))throw new NativeCodingHostIpcError('CHANNEL_CLOSED');
-    const run={binding:pinned,writer:null,rows:new Set(),callbacks:new Set(),completedCallbacks:0,job:null,fenced:false,failed:false,evidenceHold:false,fenceWork:null,finishWork:null};
+    const run={binding:pinned,published,writer:null,rows:new Set(),callbacks:new Set(),completedCallbacks:0,job:null,fenced:false,failed:false,evidenceHold:false,fenceWork:null,finishWork:null};
     runs.set(pinned.run_id,run);
     try{run.writer=await claimNativeRunCallbackJournal(journal,{binding:pinned,instanceId,hostPid});}
     catch{runs.delete(pinned.run_id);throw new NativeCodingHostIpcError('PHYSICAL_CLEANUP_UNCONFIRMED');}
@@ -314,7 +354,10 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
     });
   }
   return Object.freeze({
-    openAgentRunCustody,
+    openAgentRunCustody:options=>openAgentRunCustody(options),
+    // Source handoff path only. The default bridge gate remains closed and the
+    // production Host does not mount a publisher until genuine custody exists.
+    openPublishedAgentRunCustody:options=>openAgentRunCustody(options,true),
     async readScope(){
       let after=null,current=null;const bindings=[],seen=new Set();
       do{
@@ -334,6 +377,7 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
     registerProvider:descriptor=>invoke('REGISTER_PROVIDER',{descriptor}),
     readExecution:scope=>invoke('READ_EXECUTION',{scope}),readPriorExecution:selector=>invoke('READ_PRIOR_EXECUTION',{selector}),
     reserveExecution:scope=>invoke('RESERVE_EXECUTION',{scope}),
+    reserveExecutionWithOwner:(scope,callback)=>typeof callback==='function'?invoke('RESERVE_EXECUTION',{scope},callback):Promise.reject(new NativeCodingHostIpcError('INVALID_PAYLOAD')),
     advanceExecution:(scope,transition)=>invoke('ADVANCE_EXECUTION',{scope,transition}),
     reconcileProject:project_id=>invoke('RECONCILE_PROJECT',{project_id}),
     readProjectCheckpoint:project_id=>invoke('READ_PROJECT_CHECKPOINT',{project_id}),
@@ -342,6 +386,7 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
     finishCheckpoint:value=>invoke('FINISH_CHECKPOINT',value),
     readFinishCheckpoint:value=>invoke('READ_FINISH_CHECKPOINT',value),
     reconcileFinishCheckpoint:value=>invoke('RECONCILE_FINISH_CHECKPOINT',value),
+    withRunOwnerScope:(value,callback)=>typeof callback==='function'?invoke(RUN_OWNER_READ,value,callback):Promise.reject(new NativeCodingHostIpcError('INVALID_PAYLOAD')),
     withPendingOwnerScope:(operation,value,callback)=>{
       if(!PENDING_OWNER_ACTIONS.includes(operation)||typeof callback!=='function')return Promise.reject(new NativeCodingHostIpcError('INVALID_PAYLOAD'));
       return invoke(operation,value,callback);

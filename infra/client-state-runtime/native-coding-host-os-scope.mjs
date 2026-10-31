@@ -222,10 +222,10 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
     if(publicationHost&&nativeCodingCanonicalJson(publicationHost)!==nativeCodingCanonicalJson(proof))fail('publication_host_birth_changed');
     publicationHost??=proof;assertNativeCodingHostRequestOpen(request);return proof;
   }
-  async function readCallbackPrefix({scope,permit,expected,request}){
+  async function readCallbackPrefix({scope,permit,expected,intent=null,publicationCursor=null,request}){
     const operator=await readNativeCodingOperatorPaths(config.state_directory,{signal:request?.signal});
     const directory=journalPath(operator,scope,permit,'');
-    const prefix=await readNativeCallbackProtectedPrefix({directory,expected,request});
+    const prefix=await readNativeCallbackProtectedPrefix({directory,expected,intent,publicationCursor,request});
     const after=await readNativeCodingOperatorPaths(config.state_directory,{signal:request?.signal});
     if(nativeCodingCanonicalJson(operator)!==nativeCodingCanonicalJson(after))fail('publication_operator_changed');
     assertNativeCodingHostRequestOpen(request);return prefix;

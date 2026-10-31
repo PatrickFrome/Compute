@@ -1,0 +1,29 @@
+{
+  "schema": "metaengine.reviewed-current-source-seal-refresh.v1",
+  "functional_source": "5f8c6c54ed79238940eb54f370372513c0d19750",
+  "previous_manifest_blob": "873baf66bac30dbfe7835efaa05f40dfbdc864c2",
+  "current_manifest_sha256": "a9aa129f0922273318ed5617ccfc26cd3e565bec13604d95e0046ebd4487d2e7",
+  "updated_existing_paths": [
+    ".github/windows-native-read-observation.mjs",
+    "apps/metaengine-browser/test/windows-native-read-observation.test.mjs"
+  ],
+  "newly_sealed_paths": [],
+  "reviewed_changes": [
+    {
+      "path": ".github/windows-native-read-observation.mjs",
+      "previous_blob": "69f28764cb97f632bf3a37ba2363a9b6189699de",
+      "current_blob": "10549d12ccdacbde9c6be67f142ef71dbdef6244"
+    },
+    {
+      "path": "apps/metaengine-browser/test/windows-native-read-observation.test.mjs",
+      "previous_blob": "a9ace0ec98cccdba2eede3ac5943e954edac83d5",
+      "current_blob": "3db176e3939d182f0270158ab5738499f6b4c012"
+    }
+  ],
+  "total_sealed_files": 1042,
+  "all_non_blob_manifest_fields_unchanged": true,
+  "package_version_changed": false,
+  "qualification_promoted": false,
+  "authority_effect": false,
+  "validation": "PENDING_FINAL_COMMIT_TESTS_AND_EXACT_HEAD_CI"
+}

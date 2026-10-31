@@ -194,6 +194,13 @@ export async function readNativeCodingSandboxEvidence({pin,cliPath,worktreePath,
     ||!same(value.workspace_path||'',worktreePath)||value.cli_sha256!==cliSha
     ||!same(value.cli_path||'',cliPath)||value.model_called!==false||value.authority_effect!==false
     ||!value.host_boot?.system_process)fail('sandbox_receipt_scope_mismatch');
+  // Re-evaluating the canary cannot recover producer-only failures such as
+  // overflow or failed log writes. A valid pin binds those failures too.
+  // Require the producer's complete successful outcome AND independently
+  // verify its native observations below; neither substitutes for the other.
+  if(value.state!=='OBSERVED'||value.reason!==null||value.boundary_observed!==true
+    ||value.sandbox_backend!=='CODEX_WINDOWS_ELEVATED'||value.execution_authorized!==false)
+    fail('sandbox_producer_outcome_invalid');
   try{if(windowsSandboxBootIdentity(value.host_boot)!==windowsSandboxBootIdentity(boot))fail('sandbox_receipt_scope_mismatch');}
   catch{fail('sandbox_receipt_scope_mismatch');}
   const evaluation=evaluateCodexSandboxProbe({mode,report:value.canary,nativeProcess:value.sandbox_process,hostReadback:value.host_readback,

@@ -4,7 +4,29 @@ Status: ACCEPTED ROADMAP / SOURCE PARTIALLY IMPLEMENTED / INSTALLED CONTINUITY U
 Date: 2026-10-18 (binding closure plan; historical checkpoints retained below)
 Scope: PatrickFrome/Compute / METAENGINE Client + own PostgreSQL + Windows Host
 
-## Latest evidence readback — 2026-10-26 (no installed acceptance)
+## Latest evidence readback — 2026-10-31 (source repair, no installed acceptance)
+
+Current public source is Draft PR #1392 at
+`c434cb3cad724abded54f2ff4569d5382440d823`. The following older checkpoints are
+historical; their pending-publication statements do not describe this revision.
+Original-request cancellation repairs passed actual Windows/disposable PG17 checks.
+The subsequent prepared runner/executor and original RESERVE Owner read transport
+passed 325 affected Windows tests (one platform skip) and 318 affected Linux tests
+(seven platform skips). These new repairs are not yet published at this readback.
+The current GitHub Windows source job was cancelled; Ubuntu and ME2 succeeded.
+No installed readiness or release gate is promoted by these results.
+
+The partially implemented closure is recorded in the subordinate
+[prepared-run/publication closure plan](../../docs/architecture/NATIVE_PREPARED_RUN_PUBLICATION_20261031.md).
+The existing runtime now prepares before reserving, and RESERVE can retain its
+original physical Owner read custody. Actual initial publication, PUBLISH/AGENT
+wiring and genuine durable own-PG pre-effect fences remain required. Lost local evidence
+remains HOLD, not permission to replay. The default execution gate stays closed.
+Existing signer/sidecar placement, unique packaging, first-run materialization
+and complete installed continuity remain blockers. Accepted stage order below
+is unchanged.
+
+## Historical evidence readback — 2026-10-26 (no installed acceptance)
 
 This evidence update does not replace the accepted stage order or grant authority.
 The published reference is Draft PR #1350 at

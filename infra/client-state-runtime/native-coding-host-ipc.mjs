@@ -1,4 +1,6 @@
+import {RUN_OWNER_READ,RUN_OWNER_PHASE,PUBLICATION_OWNER_PHASE,createPublicationOwnerHostPhases,createRunOwnerHostPhases} from '../../apps/metaengine-browser/src/native-coding-run-owner-phase.mjs';
 import {NATIVE_SETUP_ACTIONS} from '../../apps/metaengine-browser/src/native-coding-setup-contract.mjs';
+import {NATIVE_CALLBACK_PUBLICATION_ACTION,validateNativeCallbackPublicationIntent,nativeCallbackPublicationAck} from '../../apps/metaengine-browser/src/native-coding-publication-handoff-contract.mjs';
 import {nativeCodingHostSettlement,nativePhysicalSettlementUnconfirmed,runNativePhysicalSettlementScope} from '../../apps/metaengine-browser/src/native-coding-host-settlement.mjs';
 import {PENDING_ACTIVATION_PHASE,createPendingActivationHostPhases} from '../../apps/metaengine-browser/src/native-coding-pending-activation-phase.mjs';
 import {PENDING_OWNER_PHASE,PENDING_OWNER_ACTIONS,createPendingOwnerHostPhases} from '../../apps/metaengine-browser/src/native-coding-pending-owner-phase.mjs';
@@ -9,7 +11,7 @@ import {validateNativeCodingDeviceRequest} from '../../apps/metaengine-browser/s
 export const NATIVE_CODING_HOST_IPC_REQUEST = 'metaengine.native-coding.host-ipc.request.v1';
 export const NATIVE_CODING_HOST_IPC_RESPONSE = 'metaengine.native-coding.host-ipc.response.v1';
 const ACTIONS = ['READ_SCOPE','READ_LEASE','REGISTER_PROVIDER','READ_EXECUTION','RESERVE_EXECUTION','ADVANCE_EXECUTION','RECONCILE_PROJECT','READ_PROJECT_CHECKPOINT','AGENT_OPERATION','FINISH_CHECKPOINT','READ_FINISH_CHECKPOINT'];
-const OPTIONAL_ACTIONS=['SERVICE_HEARTBEAT_V2','READ_SERVICE_HEARTBEAT_V2','READ_NATIVE_CAPACITY_V1',...NATIVE_SETUP_ACTIONS,'ACTIVATE_PREPARED_GOAL_V1','READ_PREPARED_GOAL_ACTIVATION_V1','ESTABLISH_PENDING_OWNER_V1','READ_PENDING_OWNER_V1','ADMIT_PREPARED_GOAL_V1','READ_PREPARED_GOAL_V1','PREPARE_WORKSPACE_V1','READ_WORKSPACE_PREPARATION_V1','READ_PROJECT_REJECTION','SEED_GOAL','READ_SEED','LIST_SEEDS','SERVICE_HEARTBEAT','READ_SERVICE_HEARTBEAT','READ_PRIOR_EXECUTION','RECONCILE_FINISH_CHECKPOINT'];
+const OPTIONAL_ACTIONS=[RUN_OWNER_READ,'SERVICE_HEARTBEAT_V2','READ_SERVICE_HEARTBEAT_V2','READ_NATIVE_CAPACITY_V1',...NATIVE_SETUP_ACTIONS,'ACTIVATE_PREPARED_GOAL_V1','READ_PREPARED_GOAL_ACTIVATION_V1','ESTABLISH_PENDING_OWNER_V1','READ_PENDING_OWNER_V1','ADMIT_PREPARED_GOAL_V1','READ_PREPARED_GOAL_V1','PREPARE_WORKSPACE_V1','READ_WORKSPACE_PREPARATION_V1','READ_PROJECT_REJECTION','SEED_GOAL','READ_SEED','LIST_SEEDS','SERVICE_HEARTBEAT','READ_SERVICE_HEARTBEAT','READ_PRIOR_EXECUTION','RECONCILE_FINISH_CHECKPOINT'];
 const WRITES = new Set(['BEGIN_NATIVE_SETUP_V1','CANCEL_NATIVE_SETUP_V1','ACTIVATE_PREPARED_GOAL_V1','ESTABLISH_PENDING_OWNER_V1','ADMIT_PREPARED_GOAL_V1','PREPARE_WORKSPACE_V1','REGISTER_PROVIDER','RESERVE_EXECUTION','ADVANCE_EXECUTION','RECONCILE_PROJECT','FINISH_CHECKPOINT','RECONCILE_FINISH_CHECKPOINT','SEED_GOAL','SERVICE_HEARTBEAT','SERVICE_HEARTBEAT_V2']);
 const writes=(action,value)=>WRITES.has(action)||action==='AGENT_OPERATION'&&nativeCodingAgentHostOperationWrites(value);
 const REASONS = new Set(['INVALID_FRAME','INVALID_PAYLOAD','MESSAGE_TOO_LARGE','UNSUPPORTED_ACTION','INSTANCE_MISMATCH',
@@ -56,7 +58,8 @@ function scope(value,reservation=false) {
 }
 function payload(action,value) {
   json(value);
-  if(action==='READ_SCOPE'){
+  if(action===NATIVE_CALLBACK_PUBLICATION_ACTION){try{validateNativeCallbackPublicationIntent(value);}catch{invalid('INVALID_PAYLOAD');}}
+  else if(action==='READ_SCOPE'){
     keys(value,Object.hasOwn(value,'after_permit_id')?['after_permit_id']:[]);
     if(Object.hasOwn(value,'after_permit_id')&&!UUID.test(value.after_permit_id))invalid('INVALID_PAYLOAD');
   }
@@ -112,7 +115,7 @@ const digest=value=>createHash('sha256').update(canonical(value)).digest('hex');
 // This module has no SQL connection, DSN, network endpoint or lease poller.
 // Root binds handleMessage directly to the existing private process IPC event.
 export function createNativeCodingHostIpcServer({instanceId,operations,send=process.send?.bind(process),hostPid=process.pid,
-  parentPid=process.ppid,maxInflight=16,timeoutMs=30000,onProtocolError=()=>{}}={}) {
+  parentPid=process.ppid,maxInflight=16,timeoutMs=30000,onProtocolError=()=>{},callbackPublication=null}={}) {
   if(!UUID.test(instanceId||'')||hostPid!==process.pid||parentPid!==process.ppid||process.connected!==true
     ||typeof process.send!=='function'||typeof send!=='function'||typeof onProtocolError!=='function'
     ||!Number.isSafeInteger(maxInflight)||maxInflight<1||maxInflight>16
@@ -125,7 +128,14 @@ export function createNativeCodingHostIpcServer({instanceId,operations,send=proc
   keys(operations,[...mountedActions,...(Object.hasOwn(operations||{},'close')?['close']:[])]);
   for(const action of mountedActions)if(typeof operations[action]!=='function')invalid('INVALID_PAYLOAD');
   if(Object.hasOwn(operations,'close')&&typeof operations.close!=='function')invalid('INVALID_PAYLOAD');
-  let closed=false;const active=new Map(),completed=new Map();
+  // Private composition only. Default runtime-host supplies no publisher. This
+  // protocol cannot turn a caller proof/flag or a publication ACK into authority.
+  if(callbackPublication!==null){
+    if(!full)invalid('INVALID_PAYLOAD');keys(callbackPublication,['publish','recheck']);
+    if(typeof callbackPublication.publish!=='function'||typeof callbackPublication.recheck!=='function')invalid('INVALID_PAYLOAD');
+    mountedActions.push(NATIVE_CALLBACK_PUBLICATION_ACTION);
+  }
+  let closed=false;const active=new Map(),requests=new Map(),pendingPublication=new Map(),completed=new Map();
   const protocolError=reason=>{try{onProtocolError(REASONS.has(reason)?reason:'INVALID_FRAME');}catch{}};
   function emit(frame) {
     if(process.connected!==true)return;
@@ -160,13 +170,14 @@ export function createNativeCodingHostIpcServer({instanceId,operations,send=proc
     for(const row of active.values()){
       seal(row,row.write?'UNKNOWN':'REJECTED',null,'SERVER_CLOSED');
       row.abort.abort();
+      if(row.waiting){clearTimeout(row.handoffTimer);pendingPublication.delete(row.intent.request_id);active.delete(row.ticketKey);}
     }
     process.off('disconnect',onDisconnect);
   }
   const onDisconnect=()=>close();process.on('disconnect',onDisconnect);
   function handleMessage(message,sendHandle) {
-    if((message?.schema===PENDING_OWNER_PHASE||message?.schema===PENDING_ACTIVATION_PHASE)){
-      active.get(message.request_id)?.ownerPhases?.receive(message,sendHandle);return true;
+    if((message?.schema===RUN_OWNER_PHASE||message?.schema===PUBLICATION_OWNER_PHASE||message?.schema===PENDING_OWNER_PHASE||message?.schema===PENDING_ACTIVATION_PHASE)){
+      requests.get(message.request_id)?.ownerPhases?.receive(message,sendHandle);return true;
     }
     if(!plain(message)||message.schema!==NATIVE_CODING_HOST_IPC_REQUEST)return false;
     if(closed||process.connected!==true||process.pid!==hostPid||process.ppid!==parentPid){protocolError('CHANNEL_CLOSED');return true;}
@@ -177,12 +188,19 @@ export function createNativeCodingHostIpcServer({instanceId,operations,send=proc
       if(message.instance_id!==instanceId)invalid('INSTANCE_MISMATCH');
       if(message.host_pid!==hostPid)invalid('HOST_PID_MISMATCH');
       if(!UUID.test(message.request_id||''))invalid('INVALID_FRAME');
-      if(!ACTIONS.includes(message.action)&&!OPTIONAL_ACTIONS.includes(message.action))invalid('UNSUPPORTED_ACTION');
+      if(message.action!==NATIVE_CALLBACK_PUBLICATION_ACTION&&!ACTIONS.includes(message.action)&&!OPTIONAL_ACTIONS.includes(message.action))invalid('UNSUPPORTED_ACTION');
       payload(message.action,message.payload);requestDigest=digest(message);
     }catch(error){protocolError(REASONS.has(error.reason)?error.reason:'INVALID_FRAME');return true;}
-    const old=completed.get(message.request_id),running=active.get(message.request_id);
+    const old=completed.get(message.request_id),running=requests.get(message.request_id)||pendingPublication.get(message.request_id);
     if(old){if(old.digest===requestDigest){if(old.settlement)emit(old.settlement);emit(old.frame);}else emit(response(message,requestDigest,'UNKNOWN',null,'REQUEST_ID_REUSED'));return true;}
-    if(running){emit(response(message,requestDigest,running.write||writes(message.action,message.payload)?'UNKNOWN':'REJECTED',null,'REQUEST_ID_REUSED'));return true;}
+    let handoff=null;
+    if(running?.waiting){
+      clearTimeout(running.handoffTimer);
+      if(message.action!=='AGENT_OPERATION'||running.intent.request_sha256!==requestDigest||running.abort.signal.aborted||performance.now()>=running.expiresMono){
+        pendingPublication.delete(message.request_id);active.delete(running.ticketKey);running.abort.abort();rejectUndispatched(structuredClone(message),requestDigest,'REQUEST_ID_REUSED');return true;
+      }
+      handoff=running;handoff.waiting=false;pendingPublication.delete(message.request_id); // Consume BEFORE recheck or any await.
+    }else if(running){emit(response(message,requestDigest,running.write||writes(message.action,message.payload)?'UNKNOWN':'REJECTED',null,'REQUEST_ID_REUSED'));return true;}
     if(!mountedActions.includes(message.action)){
       // A fully validated request for a known optional capability was never
       // dispatched. Reply on this exact private channel instead of silently
@@ -191,22 +209,54 @@ export function createNativeCodingHostIpcServer({instanceId,operations,send=proc
       rejectUndispatched(structuredClone(message),requestDigest,'UNSUPPORTED_ACTION');
       return true;
     }
-    if(active.size>=maxInflight){rejectUndispatched(structuredClone(message),requestDigest,'INFLIGHT_LIMIT');return true;}
-    const row={request:structuredClone(message),write:writes(message.action,message.payload),digest:requestDigest,abort:new AbortController(),deadlineAt:Date.now()+timeoutMs,timer:null,response:null};
-    if(PENDING_OWNER_ACTIONS.includes(message.action)||message.action==='ACTIVATE_PREPARED_GOAL_V1')row.ownerPhases=(message.action==='ACTIVATE_PREPARED_GOAL_V1'?createPendingActivationHostPhases:createPendingOwnerHostPhases)({
+    if(callbackPublication&&message.action==='AGENT_OPERATION'&&!handoff){rejectUndispatched(structuredClone(message),requestDigest,'OPERATION_FAILED');return true;}
+    if(!handoff&&active.size>=maxInflight){rejectUndispatched(structuredClone(message),requestDigest,'INFLIGHT_LIMIT');return true;}
+    const publishing=message.action===NATIVE_CALLBACK_PUBLICATION_ACTION;
+    if(publishing&&(message.payload.request_id===message.request_id||requests.has(message.payload.request_id)||pendingPublication.has(message.payload.request_id)||completed.has(message.payload.request_id))){
+      rejectUndispatched(structuredClone(message),requestDigest,'REQUEST_ID_REUSED');return true;
+    }
+    const row={request:structuredClone(message),write:publishing||writes(message.action,message.payload),digest:requestDigest,
+      ticketKey:handoff?.ticketKey??message.request_id,
+      abort:handoff?.abort||new AbortController(),deadlineAt:handoff?.deadlineAt??Date.now()+timeoutMs,
+      expiresMono:handoff?.expiresMono??performance.now()+timeoutMs,timer:null,response:null,
+      ...(publishing?{intent:structuredClone(message.payload)}:{})};
+    if(message.action===RUN_OWNER_READ||PENDING_OWNER_ACTIONS.includes(message.action)||message.action==='ACTIVATE_PREPARED_GOAL_V1')row.ownerPhases=(message.action===RUN_OWNER_READ?createRunOwnerHostPhases:message.action==='ACTIVATE_PREPARED_GOAL_V1'?createPendingActivationHostPhases:createPendingOwnerHostPhases)({
       binding:{instance_id:instanceId,host_pid:hostPid,request_id:message.request_id,action:message.action,
         request_sha256:requestDigest,body_sha256:message.payload.headers['x-a2-device-body-sha256']},
       signal:row.abort.signal,send:frame=>{json(frame);send(frame,error=>{if(error)row.abort.abort();});},
     });
-    active.set(message.request_id,row);
+    // RESERVE owns its original read-only Owner facet. Normal readback-only
+    // operations need no cycles; an actual publisher must consume all six.
+    // No extra request, signed-body fiction, or dispatch authority is created.
+    if(message.action==='RESERVE_EXECUTION')row.ownerPhases=createPublicationOwnerHostPhases({
+      binding:{instance_id:instanceId,host_pid:hostPid,request_id:message.request_id,action:message.action,request_sha256:requestDigest},
+      signal:row.abort.signal,
+      assertLifetime:()=>{if(closed||row.abort.signal.aborted||performance.now()>=row.expiresMono)invalid('SERVER_CLOSED');},
+      send:frame=>{json(frame);send(frame,error=>{if(error)row.abort.abort();});},
+    });
+    // A continuation replaces the value under the SAME admission key.
+    active.set(row.ticketKey,row);requests.set(message.request_id,row);
+    if(publishing)pendingPublication.set(row.intent.request_id,row);
     row.timer=setTimeout(()=>{
       seal(row,row.write?'UNKNOWN':'REJECTED',null,'REQUEST_TIMEOUT');row.abort.abort();
       // Keep the physical operation counted until it really settles. A timeout
       // must not create unbounded parallel work or authorize a second write.
-    },timeoutMs);
-    const physical=runNativePhysicalSettlementScope(()=>operations[message.action](Object.freeze(structuredClone(message.payload)),
-      Object.freeze({signal:row.abort.signal,deadlineAt:row.deadlineAt,instanceId,hostPid,requestId:message.request_id,action:message.action,
-        ...(row.ownerPhases?{[message.action==='ACTIVATE_PREPARED_GOAL_V1'?'pendingActivationPhases':'pendingOwnerPhases']:row.ownerPhases,requestDigest,bodyDigest:message.payload.headers['x-a2-device-body-sha256']}: {})})));
+    },Math.max(1,row.expiresMono-performance.now()));
+    const context=Object.freeze({signal:row.abort.signal,deadlineAt:row.deadlineAt,instanceId,hostPid,requestId:message.request_id,action:message.action,
+      requestDigest,...(row.ownerPhases?{[message.action===RUN_OWNER_READ||message.action==='RESERVE_EXECUTION'?'runOwnerPhases':message.action==='ACTIVATE_PREPARED_GOAL_V1'?'pendingActivationPhases':'pendingOwnerPhases']:row.ownerPhases,...(message.action==='RESERVE_EXECUTION'?{}:{bodyDigest:message.payload.headers['x-a2-device-body-sha256']})}: {})});
+    const assertDispatch=()=>{if(closed||row.abort.signal.aborted||process.connected!==true||performance.now()>=row.expiresMono)invalid('SERVER_CLOSED');};
+    const physical=runNativePhysicalSettlementScope(async()=>{
+      assertDispatch();
+      if(publishing){
+        const custody=await callbackPublication.publish(Object.freeze(structuredClone(message.payload)),context);
+        assertDispatch();if(!custody||typeof custody!=='object')invalid('OPERATION_FAILED');
+        row.publicationCustody=custody;return nativeCallbackPublicationAck(row.intent);
+      }
+      if(handoff){await callbackPublication.recheck(handoff.publicationCustody,context);assertDispatch();}
+      const value=await operations[message.action](Object.freeze(structuredClone(message.payload)),context);
+      if(message.action==='RESERVE_EXECUTION'&&row.ownerPhases.started()){row.ownerPhases.finish();assertDispatch();}
+      return value;
+    });
     physical.promise
       .then(value=>{json(value);row.result=structuredClone(value);row.succeeded=true;})
       .catch(error=>{row.held=nativePhysicalSettlementUnconfirmed(error);})
@@ -215,12 +265,21 @@ export function createNativeCodingHostIpcServer({instanceId,operations,send=proc
         row.ownerPhases?.close();clearTimeout(row.timer);
         // A finished JS promise cannot release a poisoned SQL reservation.
         // Held rows retain admission capacity until verified Host shutdown.
-        if(!row.held)active.delete(message.request_id);
+        if(!row.held){
+          requests.delete(message.request_id);
+          if(publishing&&row.succeeded&&!row.response&&!closed&&!row.abort.signal.aborted&&performance.now()<row.expiresMono){
+            // Transfer the existing entry into bounded pending custody in the
+            // SAME inflight domain. No release/reacquire or second scheduler.
+            row.waiting=true;
+            row.handoffTimer=setTimeout(()=>{if(row.waiting){row.waiting=false;row.abort.abort();pendingPublication.delete(row.intent.request_id);active.delete(row.ticketKey);}},
+              Math.max(1,row.expiresMono-performance.now()));
+          }else{if(publishing)pendingPublication.delete(row.intent.request_id);active.delete(row.ticketKey);}
+        }
         settle(row,row.held===true);
         if(row.succeeded)seal(row,'OK',row.result,null);
         else seal(row,row.write?'UNKNOWN':'REJECTED',null,row.write?'WRITE_OUTCOME_UNKNOWN':'OPERATION_FAILED');
       });
     return true;
   }
-  return Object.freeze({handleMessage,close,snapshot:()=>Object.freeze({instance_id:instanceId,host_pid:hostPid,inflight:active.size,held:[...active.values()].filter(row=>row.held).length,completed:completed.size,closed,automatic_retry_allowed:false})});
+  return Object.freeze({handleMessage,close,snapshot:()=>Object.freeze({instance_id:instanceId,host_pid:hostPid,inflight:active.size,held:[...active.values()].filter(row=>row.held).length,pending_publication:pendingPublication.size,completed:completed.size,closed,automatic_retry_allowed:false})});
 }

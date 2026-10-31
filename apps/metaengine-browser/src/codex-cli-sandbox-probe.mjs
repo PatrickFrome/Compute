@@ -112,10 +112,10 @@ function Read-KernelBootId {
  } finally {[Runtime.InteropServices.Marshal]::FreeHGlobal($buffer)}
 }
 $boot=Read-KernelBootId
-$system=Get-CimInstance Win32_Process -Filter 'ProcessId=4'
+$system=Get-CimInstance Win32_Process -Filter 'ProcessId=4' -Property Name,CreationDate
 if(-not $system -or $system.Name -ne 'System' -or -not $system.CreationDate){throw 'system_process_absent'}
-$birth=$system.CreationDate.ToUniversalTime();$os=Get-CimInstance Win32_OperatingSystem
-$again=Get-CimInstance Win32_Process -Filter 'ProcessId=4'
+$birth=$system.CreationDate.ToUniversalTime();$os=Get-CimInstance Win32_OperatingSystem -Property LastBootUpTime,Version
+$again=Get-CimInstance Win32_Process -Filter 'ProcessId=4' -Property Name,CreationDate
 if(-not $again -or $again.CreationDate.ToUniversalTime().ToFileTimeUtc() -ne $birth.ToFileTimeUtc() -or (Read-KernelBootId) -ne $boot){throw 'kernel_boot_changed'}
 @{schema='metaengine.windows.kernel-boot.v1';kernel_boot_id=$boot;
 system_process=@{pid=4;created_at=$birth.ToString('o');created_100ns=$birth.ToFileTimeUtc().ToString()};
@@ -162,21 +162,30 @@ export function evaluateCodexSandboxProbe({ mode, report, nativeProcess, hostRea
 // No model, provider, credential or configuration-file operation occurs here.
 // processController must enforce suspended -> Job binding -> resume and prove
 // termination of the entire CLI tree. It is a lifetime control, not a sandbox.
-export async function runCodexCliSandboxProbe({ cliPath, workspaceRoot, receiptDirectory, mode, processController,
+export async function runCodexCliSandboxProbe({ cliPath, workspaceRoot, receiptDirectory, codexHome, scratchRoot, mode, processController,
   hostUserSid, readNativeProcess = readWindowsSandboxProcess, readHostBoot = readWindowsSandboxHostBoot,
   timeoutMs = 120000, powershellPath = POWERSHELL, onProcessStarted = null } = {}) {
   if (process.platform !== 'win32') throw Error('codex_sandbox_probe_windows_required');
-  if (!modeValid(mode) || ![cliPath, workspaceRoot, receiptDirectory, powershellPath].every(value => typeof value === 'string' && path.isAbsolute(value))
+  if (!modeValid(mode) || ![cliPath, workspaceRoot, receiptDirectory, codexHome, scratchRoot, powershellPath].every(value => typeof value === 'string' && path.isAbsolute(value))
     || typeof processController?.spawn !== 'function' || typeof readNativeProcess !== 'function' || typeof readHostBoot !== 'function' || !/^S-1-5-/.test(String(hostUserSid))
     || (onProcessStarted !== null && typeof onProcessStarted !== 'function')
     || !Number.isSafeInteger(timeoutMs) || timeoutMs < 15000 || timeoutMs > 300000) throw Error('codex_sandbox_probe_configuration_invalid');
   const workspace = await fs.realpath(workspaceRoot), receipts = await fs.realpath(receiptDirectory);
   const hostBoot = await readHostBoot();windowsSandboxBootIdentity(hostBoot);
-  if (receipts === workspace || isWithin(workspace, receipts)) throw Error('codex_sandbox_probe_outside_root_required');
+  if (path.relative(receipts,workspace)==='' || isWithin(workspace, receipts) || isWithin(receipts,workspace)) throw Error('codex_sandbox_probe_outside_root_required');
   const runId = randomUUID(), directory = path.join(workspace, `.metaengine-sandbox-probe-${runId}`);
   const receipt = path.join(receipts, `sandbox-probe-${mode}-${runId}.json`);
-  const scratchParent = path.join(process.env.LOCALAPPDATA || '', 'METAENGINE', 'operator-qa-scratch');
-  if (!path.isAbsolute(scratchParent) || isWithin(receipts, scratchParent) || isWithin(workspace, scratchParent)) throw Error('codex_sandbox_probe_scratch_root_invalid');
+  // The authenticated preparation caller must select these roots explicitly.
+  // Ambient profile/home variables are never a substitute for that choice.
+  const home=await fs.realpath(codexHome),scratchParent=path.resolve(scratchRoot);
+  const sameRoot=(a,b)=>path.relative(a,b)==='';
+  if (sameRoot(home,workspace)||sameRoot(home,receipts)||isWithin(workspace,home)||isWithin(home,workspace)
+    ||isWithin(receipts,home)||isWithin(home,receipts)||sameRoot(home,scratchParent)
+    ||isWithin(home,scratchParent)||isWithin(scratchParent,home)) throw Error('codex_sandbox_probe_home_scope_invalid');
+  await verifyOwnerOnlyWindowsStorage(home,{operation:'VERIFY_DIRECTORY'});
+  if (!path.isAbsolute(scratchParent) || sameRoot(receipts,scratchParent) || sameRoot(workspace,scratchParent)
+    || isWithin(receipts, scratchParent) || isWithin(workspace, scratchParent)
+    || isWithin(scratchParent,receipts) || isWithin(scratchParent,workspace)) throw Error('codex_sandbox_probe_scratch_root_invalid');
   let createdScratchParent = false;
   try { await fs.mkdir(scratchParent); createdScratchParent = true; } catch (error) { if (error.code !== 'EEXIST') throw error; }
   if (createdScratchParent) await protectOwnerOnlyWindowsDirectory(scratchParent);
@@ -196,8 +205,7 @@ export async function runCodexCliSandboxProbe({ cliPath, workspaceRoot, receiptD
   const args = buildCodexSandboxProbeArgs({ mode, workspaceRoot: workspace, scriptPath, powershellPath });
   // Avoid recursively provisioning the user's accumulated global Temp tree.
   // This is per-child environment only, outside source, journals and receipts.
-  const codexHome = process.env.CODEX_HOME || path.join(process.env.USERPROFILE || '', '.codex');
-  const env = codexCliTemporaryEnvironment(codexCliEnvironment(codexHome), temporaryPath);
+  const env = codexCliTemporaryEnvironment(codexCliEnvironment(home), temporaryPath);
   const stdoutPath = path.join(receipts, `${runId}.stdout.log`), stderrPath = path.join(receipts, `${runId}.stderr.log`), exitPath = path.join(receipts, `${runId}.exit.json`);
   let stdoutFile = null, stderrFile = null;
   const closeLogs = async () => {
@@ -289,6 +297,7 @@ export async function runCodexCliSandboxProbe({ cliPath, workspaceRoot, receiptD
   if (logWriteFailed) observation = Object.freeze({ state: 'BLOCKED', reason: 'SANDBOX_PROBE_LOG_WRITE_FAILED', boundary_observed: false, execution_authorized: false, authority_effect: false });
   const evidence = { schema: CODEX_SANDBOX_PROBE_SCHEMA, run_id: runId, observed_at: new Date().toISOString(), ...observation,
     cli_path: await fs.realpath(cliPath), cli_sha256: cliSha, workspace_path: workspace, host_user_sid: hostUserSid,
+    codex_home_path:home,temporary_root:scratchParent,
     temporary_path: temporaryPath, temporary_owner_dacl_verified_before_sandbox_setup: scratchAcl.owner_dacl_verified === true,
     host_boot: hostBoot, execution_deadline: deadlineAt,
     logs: { stdout_path: stdoutPath, stdout_sha256: digest(await fs.readFile(stdoutPath)), stderr_path: stderrPath,

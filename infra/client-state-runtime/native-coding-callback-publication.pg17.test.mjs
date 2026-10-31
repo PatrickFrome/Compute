@@ -107,9 +107,9 @@ test('unregistered callback publication on actual disposable PG17; native/Owner 
       const runDirectory=await fs.mkdtemp(path.join(await fs.realpath(process.env.METAENGINE_CALLBACK_JOURNAL_TEST_BASE||os.tmpdir()),'native-callback-prefix-'));
       const abort=new AbortController(),request={instanceId:hostIdentity.hostInstanceId,hostPid:hostIdentity.hostPid,
        requestId:randomUUID(),action:'RESERVE_EXECUTION',deadlineAt:Date.now()+120000,signal:abort.signal};
-      const readPrefix=async ({expected,request})=>{
+      const readPrefix=async ({expected,intent,publicationCursor,request})=>{
        if(controls.prefixRead)await controls.prefixRead();
-       return readNativeCallbackProtectedPrefix({directory:runDirectory,expected,request,
+       return readNativeCallbackProtectedPrefix({directory:runDirectory,expected,intent,publicationCursor,request,
         readProtectedJson:(file,options)=>readNativeCodingProtectedJson(file,{...options,verifyStorage:async()=>({owner_dacl_verified:true})})});
       };
       // Query instrumentation delegates EVERY statement to the actual PG
@@ -122,13 +122,13 @@ test('unregistered callback publication on actual disposable PG17; native/Owner 
         transactionReadbacks.push(settings);return result;
       });if(controls.afterCommit)await controls.afterCommit();return result;}};
       const authority=await createNativeCodingHostAuthority({sql:privateSql,
-        readNativeScope:async()=>structuredClone(native),readNativeWorker:async()=>structuredClone(controls.worker),
+        readNativeScope:async(_permit,requireLive,tx,request)=>{if(controls.nativeRead)await controls.nativeRead({requireLive,tx,request});return structuredClone(native);},readNativeWorker:async()=>structuredClone(controls.worker),
         readProtectedReceipt:async()=>structuredClone(controls.receipt),callbackPublicationIdentity:identityOverride??hostIdentity,
         readCallbackPrefix:readPrefix,readPublicationHost:async()=>({...hostNative,...(controls.hostChanged?{process_incarnation_id:`pid:${process.pid}:created_100ns:134000000000000003`}:{})}),
         readOwnerControl:ownerReader?async({tx})=>({owner:{schema:'metaengine.host.owner-incarnation.v1',source:'LOCAL_HOST_OWNER',authority_effect:false,
          owner_id:f.clientId,device_id:f.permit.device_id,project_id:f.permit.project_id,...native.host_process,epoch:f.permit.owner_epoch,
          ...(controls.ownerMarker?{fixture_classification:'STAGING'}:{}),generation:controls.ownerChanged?2:1,source_sha:f.permit.artifact.source_sha,device_key_fingerprint_sha256:f.identity.key_fingerprint_sha256,
-         observed_at:new Date().toISOString()},control:(await tx.unsafe('select public.devos_environment_state_v1($1::uuid) as value',[f.workspaceId]))[0].value}):null});
+         observed_at:controls.sealedObservedAt??new Date().toISOString()},observed_at:controls.readObservedAt??new Date().toISOString(),control:{...(await tx.unsafe('select public.devos_environment_state_v1($1::uuid) as value',[f.workspaceId]))[0].value,revision:controls.controlRevision??0}}):null});
       authorities.push(authority);
       await sql.unsafe(`insert into public.compute_fabric_a2_browser_device_h205f22(device_id,client_id,profile,public_jwk,key_fingerprint_sha256)
         values($1::uuid,$2::text,$3::text,$4::jsonb,$5::text)`,[f.permit.device_id,f.clientId,f.identity.profile,sql.json(f.jwk),f.identity.key_fingerprint_sha256]);
@@ -198,10 +198,65 @@ test('unregistered callback publication on actual disposable PG17; native/Owner 
       }
       return {f,native,controls,authority,query,register,prepare,attempted,ready,transactionReadbacks,request,abort,runDirectory,reserve,journal,
        publish:value=>nativeCodingCallbackPublicationFor(authority).publish(value,request),read:value=>nativeCodingCallbackPublicationFor(authority).read(value,request),
-       append:()=>writer.append({kind:'INTENT',request_id:randomUUID(),request_sha256:'a'.repeat(64),operation:'CHECK',job_binding_sha256:'b'.repeat(64)})};
+       append:event=>writer.append(event??{kind:'INTENT',request_id:randomUUID(),request_sha256:'a'.repeat(64),operation:'CHECK',job_binding_sha256:'b'.repeat(64)})};
     }
     async function subtest(name,callback){await t.test(name,async child=>{await callback(child);passed++;});}
 
+    await subtest('old immutable Owner seal accepts a separate fresh current observation',async()=>{
+      const x=await fixture(),r=await x.reserve();await x.journal();
+      x.controls.sealedObservedAt=new Date(Date.now()-86400000).toISOString();
+      assert.equal((await x.publish(r)).state,'ANCHORED_SOURCE_CANDIDATE');
+    });
+    for(const observedAt of ['', 'invalid',new Date(Date.now()-60000).toISOString(),new Date(Date.now()+60000).toISOString()])
+     await subtest('fresh-looking seal cannot replace invalid current observation: '+observedAt,async()=>{
+      const x=await fixture(),r=await x.reserve();await x.journal();x.controls.readObservedAt=observedAt;
+      await assert.rejects(x.publish(r),unknown);
+    });
+    await subtest('control generation change during prefix observation is rejected even with both admission flags true',async()=>{
+      const x=await fixture(),r=await x.reserve();await x.journal();
+      x.controls.prefixRead=()=>{x.controls.controlRevision=1;};
+      await assert.rejects(x.publish(r),unknown);
+    });
+    for(const reason of ['cancelled','deadline'])await subtest('already '+reason+' reservation opens no new transaction or native read',async()=>{
+      const x=await fixture(),prepared=await x.prepare(),before=x.transactionReadbacks.length;let reads=0;
+      x.controls.nativeRead=()=>{reads++;};
+      if(reason==='cancelled')x.abort.abort();else x.request.deadlineAt=Date.now()-1;
+      await assert.rejects(x.authority.RESERVE_EXECUTION({scope:prepared.scope},x.request),reason==='cancelled'?/request_cancelled/:/deadline_exceeded/);
+      assert.equal(reads,0);assert.equal(x.transactionReadbacks.length,before);
+      const rows=await sql.unsafe('select task_id from destruktion_meta.native_coding_execution_h205f22 where task_id=$1',[prepared.scope.task_id]);
+      assert.equal(rows.length,0);
+    });
+    await subtest('original reservation passes its actual request to native scope observation',async()=>{
+      const x=await fixture(),prepared=await x.prepare(),reads=[];
+      x.controls.nativeRead=observation=>{reads.push(observation);};
+      const r=await x.authority.RESERVE_EXECUTION({scope:prepared.scope},x.request);
+      assert.equal(r.state,'RESERVED');assert.equal(reads.length,1);
+      assert.equal(reads[0].request,x.request);assert.equal(reads[0].requireLive,true);
+    });
+    await subtest('cancellation during reservation observation creates no execution row',async()=>{
+      const x=await fixture(),prepared=await x.prepare();let observed;
+      x.controls.nativeRead=observation=>{observed=observation;x.abort.abort();};
+      await assert.rejects(x.authority.RESERVE_EXECUTION({scope:prepared.scope},x.request),unknown);
+      assert.equal(observed.request,x.request);
+      const rows=await sql.unsafe('select task_id from destruktion_meta.native_coding_execution_h205f22 where task_id=$1',[prepared.scope.task_id]);
+      assert.equal(rows.length,0);
+    });
+    await subtest('all publication native reads retain the original request and their actual PG transaction',async()=>{
+      const x=await fixture(),r=await x.reserve();await x.journal();const reads=[];
+      x.controls.nativeRead=observation=>{reads.push(observation);};
+      await x.publish(r);assert.equal(reads.length,6);
+      for(const observation of reads){assert.equal(observation.request,x.request);assert.equal(observation.requireLive,true);}
+      assert.equal(new Set(reads.slice(0,3).map(row=>row.tx)).size,1);
+      assert.equal(new Set(reads.slice(3).map(row=>row.tx)).size,1);
+      assert.notEqual(reads[0].tx,reads[3].tx,'committed readback owns a separate transaction, not an extra nested read');
+    });
+    await subtest('cancellation in native publication observation rolls back before any anchor write',async()=>{
+      const x=await fixture(),r=await x.reserve();await x.journal();let reads=0;
+      x.controls.nativeRead=({request})=>{assert.equal(request,x.request);reads++;x.abort.abort();};
+      await assert.rejects(x.publish(r),unknown);assert.equal(reads,1);
+      const [row]=await sql.unsafe('select state,callback_publication from destruktion_meta.native_coding_execution_h205f22 where task_id=$1',[r.scope.task_id]);
+      assert.equal(row.state,'RESERVED');assert.equal(row.callback_publication,null);
+    });
     await subtest('genuine fresh reservation, independently protected prefix, synchronous COMMIT and exact postcommit readback',async()=>{
       const x=await fixture(),reserved=await x.reserve();await x.journal();const answer=await x.publish(reserved);
       assert.equal(answer.state,'ANCHORED_SOURCE_CANDIDATE');assert.equal(answer.send_capability,false);assert.equal(answer.phase1b_settlement,'UNBOUND');
@@ -430,7 +485,7 @@ test('unregistered callback publication on actual disposable PG17; native/Owner 
       release();assert.deepEqual((await reading).publication,prior);x.controls.prefixRead=null;
       assert.deepEqual((await x.read(r)).publication,prior);
     });
-    await subtest('crash restart retains WAL anchor but old Host/PG lineage cannot readopt or advance it',async()=>{
+    const crashRestart=()=>subtest('crash restart retains WAL anchor but old Host/PG lineage cannot readopt or advance it',async()=>{
       const x=await fixture(),r=await x.reserve();await x.journal();const value=(await x.publish(r)).publication;
       await command('pg_ctl',['-D',data,'-m','immediate','-w','stop']);
       await command('pg_ctl',['-D',data,'-l',log,'-o',`-h 127.0.0.1 -p ${port}`,'-w','start']);
@@ -438,7 +493,68 @@ test('unregistered callback publication on actual disposable PG17; native/Owner 
       await assert.rejects(x.read(r),/readback_hold/);await x.append();await assert.rejects(x.publish(r),/custody_hold/);
       const again=await x.authority.RESERVE_EXECUTION({scope:r.scope},x.request);assert.equal(again.state,'READBACK_ONLY');await assert.rejects(x.publish(again),/fresh_reservation_required/);
     });
-    assert.equal(passed,42);
+    async function handoffFixture(){
+      const x=await fixture(),reservation=await x.reserve();await x.journal();await x.publish(reservation);
+      await x.authority.ADVANCE_EXECUTION({scope:reservation.scope,transition:x.attempted()});
+      const api=nativeCodingCallbackPublicationFor(x.authority),handoff=api.handoff(reservation),p=x.attempted().job_proof.payload;
+      const intent=()=>({binding:Object.fromEntries(['run_id','workspace_id','project_id','task_id','lease_generation','agent_id','agent_generation_epoch','provider_id','role'].map(k=>[k,p[k]])),
+        request_id:randomUUID(),request_sha256:'a'.repeat(64),operation:'CHECK',
+        job_binding_sha256:sha({job_id:p.job_id,pid:p.worker_process.pid,process_incarnation_id:p.worker_process.process_incarnation_id,executable_sha256:p.artifact.cli_executable_sha256})});
+      const publish=async i=>{const {binding,...record}=i;await x.append({kind:'INTENT',...record});
+        return handoff.publish(i,{...x.request,action:'PUBLISH_RUN_CALLBACK_V1',requestId:randomUUID(),requestDigest:'c'.repeat(64)});};
+      const context=i=>({...x.request,action:'AGENT_OPERATION',requestId:i.request_id,requestDigest:i.request_sha256});
+      return {x,reservation,api,handoff,intent,publish,context};
+    }
+    await subtest('real PG handoff is exact private custody; clones and a second consume cannot authorize',async()=>{
+      const q=await handoffFixture(),intent=q.intent(),capability=await q.publish(intent);
+      assert.throws(()=>q.api.handoff(structuredClone(q.reservation)),/fresh_reservation_required/);
+      await assert.rejects(q.handoff.recheck(structuredClone(capability),q.context(intent)),/handoff_unbound/);
+      await q.handoff.recheck(capability,q.context(intent));
+      await assert.rejects(q.handoff.recheck(capability,q.context(intent)),/handoff_unbound/);
+      assert.equal(q.api.status().send_capability,false,'default/serialized status remains no capability');
+    });
+    await subtest('two published original intents survive a later SQL head without substituting the latest cursor',async()=>{
+      const q=await handoffFixture(),a=q.intent(),first=await q.publish(a),b=q.intent(),second=await q.publish(b);
+      await q.handoff.recheck(first,q.context(a));await q.handoff.recheck(second,q.context(b));
+    });
+    await subtest('a local later intent is accepted only as extension of both exact anchored prefixes',async()=>{
+      const q=await handoffFixture(),a=q.intent(),first=await q.publish(a),b=q.intent();const {binding,...record}=b;
+      await q.x.append({kind:'INTENT',...record});await q.handoff.recheck(first,q.context(a));
+    });
+    await subtest('a wrong original digest consumes private custody without ever upgrading by retry',async()=>{
+      const q=await handoffFixture(),a=q.intent(),cap=await q.publish(a);
+      await assert.rejects(q.handoff.recheck(cap,{...q.context(a),requestDigest:'f'.repeat(64)}),/handoff_hold/);
+      await assert.rejects(q.handoff.recheck(cap,q.context(a)),/handoff_unbound/);
+    });
+    await subtest('handoff intent requires the unchanged actual ATTEMPTED signed job',async()=>{
+      const q=await handoffFixture(),a={...q.intent(),job_binding_sha256:'0'.repeat(64)};
+      await assert.rejects(q.publish(a),unknown);
+    });
+    await subtest('lost handoff COMMIT ACK cannot be converted from exact readback into private custody',async()=>{
+      const q=await handoffFixture(),a=q.intent();q.x.controls.afterCommit=async()=>{throw Error('generated lost handoff ACK');};
+      await assert.rejects(q.publish(a),unknown);q.x.controls.afterCommit=null;
+      const read=await q.api.read(q.reservation,q.x.request);assert.equal(read.prior_outcome,'UNKNOWN');
+      await assert.rejects(q.handoff.recheck(read,q.context(a)),/handoff_unbound/);
+    });
+    for(const [label,change] of [
+      ['Owner generation',q=>{q.x.controls.ownerChanged=true;}],
+      ['Host incarnation',q=>{q.x.controls.hostChanged=true;}],
+      ['PG directory',q=>{q.x.native.postgres.data_directory_identity_sha256='f'.repeat(64);}],
+      ['current control',q=>sql.unsafe('update public.qa_native_environment set enabled=false where workspace_id=$1',[q.x.f.workspaceId])],
+    ])await subtest('published handoff rechecks '+label+' before the original operation',async()=>{
+      const q=await handoffFixture(),a=q.intent(),cap=await q.publish(a);await change(q);
+      await assert.rejects(q.handoff.recheck(cap,q.context(a)),/handoff_hold/);
+    });
+    await subtest('a fenced local prefix cannot use an older committed publication to send',async()=>{
+      const q=await handoffFixture(),a=q.intent(),cap=await q.publish(a);await q.x.append({kind:'FENCE'});
+      await assert.rejects(q.handoff.recheck(cap,q.context(a)),/handoff_hold/);
+    });
+    await subtest('an intent with an existing caller outcome cannot be replayed through publication custody',async()=>{
+      const q=await handoffFixture(),a=q.intent(),cap=await q.publish(a);
+      await q.x.append({kind:'CALLER',request_id:a.request_id,request_sha256:a.request_sha256,outcome:'UNKNOWN'});
+      await assert.rejects(q.handoff.recheck(cap,q.context(a)),/handoff_hold/);
+    });
+    await crashRestart();assert.equal(passed,66);
     await fs.writeFile(path.join(directory,'receipt.json'),JSON.stringify({schema:'metaengine.native-callback-publication.disposable-qa.v1',state:'PASS',
      postgres_system_identifier:cluster,postgres_version_num:identity.version,subtests:passed,
      native_and_owner_classification:'GENERATED_FIXTURES',publication_gate:'CLOSED',send_capability:false,authority_effect:false}));

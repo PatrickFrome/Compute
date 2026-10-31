@@ -55,7 +55,7 @@ test('a hostile job proof or Host refusal cannot bind the token; critic cannot c
   await assert.rejects(x.bridge.bindRun({...x.proof,pid:x.proof.pid+1}));assert.equal(x.calls.length,0);
   x.revoke();await assert.rejects(x.bridge.bindRun(x.proof));await assert.rejects(x.connect(),/authentication_failed/);
   const y=await fixture(t,{role:'CRITIC'});await y.bridge.bindRun(y.proof);const client=await y.connect();
-  assert.deepEqual(y.bridge.launch.metadata.allowed_tools,['project_overview','project_history_page','agent_send_message']);
+  assert.deepEqual(y.bridge.launch.metadata.allowed_tools,['project_overview','project_history_page','agent_send_message','agent_ack_message']);
   await assert.rejects(client.invoke('project_propose_children',{request_id:randomUUID(),children:[{role:'IMPLEMENTER',objective:'No'}]}),/tool_denied/);
   await assert.rejects(client.invoke('client_control_intent',{request_id:randomUUID(),action:'CLIENT_STATUS'}),/tool_denied/);
 });

@@ -111,3 +111,22 @@ test('physical settlement, exact Host shutdown and retained Main custody remain 
   assert.ok(paths.some(pattern=>matches(file,pattern)),file);assert.ok(facts.includes("'"+file+"'"),file);
  }
 });
+
+test('reservation and publication cancellation retain mandatory source and real PG17 qualification',async()=>{
+ const pkg=JSON.parse(await readFile(new URL('./package.json',import.meta.url),'utf8'));
+ for(const name of ['native-coding-callback-publication-source.test.mjs','native-coding-callback-publication-lifetime.test.mjs']){
+  assert.ok(pkg.scripts.test.split(/\s+/).includes(name));
+  assert.ok(source.includes("'infra/client-state-runtime/"+name+"',"));
+ }
+ assert.ok(source.includes("'infra/client-state-runtime/native-coding-callback-publication.pg17.test.mjs',"));
+ for(const name of ['publication cancellation reaches a started native read and still joins its original completion',
+  'cancellation during Owner role validation starts no later native scope read',
+  'already cancelled reservation opens no new transaction or native read',
+  'already deadline reservation opens no new transaction or native read',
+  'cancellation during reservation observation creates no execution row',
+  'all publication native reads retain the original request and their actual PG transaction'])
+  assert.ok(source.includes("'"+name+"',"),name);
+ for(const file of ['infra/client-state-runtime/native-coding-callback-publication-lifetime.test.mjs',
+  'infra/client-state-runtime/native-coding-callback-publication.pg17.test.mjs'])
+  assert(paths.some(pattern=>matches(file,pattern)),file+' must trigger the same Windows qualification');
+});

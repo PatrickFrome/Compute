@@ -97,6 +97,8 @@ const NATIVE_CODING_HOST_SOURCE_CLOSURE=new Set([
   'apps/metaengine-browser/src/agent-resource-admission.mjs',
   'apps/metaengine-browser/src/native-coding-pending-owner-phase.mjs',
   'apps/metaengine-browser/src/native-coding-pending-activation-phase.mjs',
+  'apps/metaengine-browser/src/native-coding-run-owner-phase.mjs',
+  'apps/metaengine-browser/src/native-coding-publication-handoff-contract.mjs',
   'apps/metaengine-browser/src/native-coding-workspace-preparation.mjs',
   'apps/metaengine-browser/src/agent-context-token.mjs',
   'apps/metaengine-browser/src/guardian-client-kernel-birth-w67.mjs',

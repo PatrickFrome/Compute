@@ -69,7 +69,7 @@ test('prepared-helper instrumentation reuses the assembly and separates explicit
   const request='  $line = [Console]::In.ReadLine()';
   const envelope='  $envelope = $line | ConvertFrom-Json';
   const bodyParse='  $request = ([Text.UTF8Encoding]::new($false,$true)).GetString($bytes) | ConvertFrom-Json';
-  const original=(await fs.readFile(resolveCodexCliJobHelperSource(),'utf8')).split("\n'@\n")[1];
+  const original=(await fs.readFile(resolveCodexCliJobHelperSource(),'utf8')).replace(/\r\n/g,'\n').split("\n'@\n")[1];
   assert.ok(original);
   for (const eol of ['\n', '\r\n']) {
     const source = ['# generated assembly bytes; actual original v2 transport statements', loader, original].join('\n').replaceAll('\n',eol);
