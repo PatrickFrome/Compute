@@ -1,6 +1,9 @@
 import importlib.util
 import io
 import json
+import os
+import shutil
+import subprocess
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 import tempfile
@@ -28,6 +31,56 @@ def certificate_listing(primary=PRIMARY, subkey=SUBKEY, sub_validity='-'):
         f'sub:{sub_validity}:4096:1:64ED7B1DCCE71CB2:1:0:::::s:',
         f'fpr:::::::::{subkey}:',
     ])
+
+
+class GitWindowsGpgTransportTests(unittest.TestCase):
+    def test_msys_gpg_uses_posix_drive_paths_for_home_and_signature_inputs(self):
+        binary = r'C:\Program Files\Git\usr\bin\gpg.exe'
+        with mock.patch.object(source, '_gpg_uses_msys_paths', return_value=True):
+            command = source.gpg_command(
+                r'C:\Users\CI Runner\AppData\Local\Temp\guardian-key-home',
+                '--status-fd', '1', '--verify', r'D:\authenticated\release.asc',
+                r'E:\cached source\openssl.tar.gz', gpg_binary=binary)
+        self.assertEqual(command[0], binary)
+        self.assertEqual(command[3], '/c/Users/CI Runner/AppData/Local/Temp/guardian-key-home')
+        self.assertEqual(command[-2:], ['/d/authenticated/release.asc', '/e/cached source/openssl.tar.gz'])
+        self.assertIn('--no-auto-key-retrieve', command)
+        self.assertIn('--no-options', command)
+
+    def test_native_gpg_keeps_windows_paths_and_posix_gpg_keeps_posix_paths(self):
+        binary = r'C:\Program Files\GnuPG\bin\gpg.exe'
+        with mock.patch.object(source, '_gpg_uses_msys_paths', return_value=False):
+            command = source.gpg_command(r'C:\source\keys', '--verify',
+                                         r'C:\source\release.asc', gpg_binary=binary)
+        self.assertEqual(command[3], r'C:\source\keys')
+        self.assertEqual(command[-1], r'C:\source\release.asc')
+        self.assertEqual(source._msys_gpg_argument('/c/unchanged.asc'), '/c/unchanged.asc')
+
+    def test_msys_gpg_refuses_unc_or_drive_relative_home(self):
+        with mock.patch.object(source, '_gpg_uses_msys_paths', return_value=True):
+            for bad in (r'\\host\share\gnupg', r'\relative-to-current-drive'):
+                with self.subTest(path=bad), self.assertRaisesRegex(
+                        source.AcquisitionError, 'msys_gpg_unanchored_or_unc_path_unsupported'):
+                    source.gpg_command(bad, '--list-keys')
+
+    @unittest.skipUnless(os.name == 'nt', 'Real Git for Windows GPG smoke runs on Windows CI only')
+    def test_real_git_for_windows_gpg_accepts_normalized_home(self):
+        git = shutil.which('git.exe')
+        if not git:
+            self.skipTest('Git for Windows unavailable')
+        git_dir = Path(git).resolve().parent
+        candidates = [git_dir / '..' / 'usr' / 'bin' / 'gpg.exe',
+                      git_dir / '..' / '..' / 'usr' / 'bin' / 'gpg.exe']
+        gpg = next((item.resolve() for item in candidates if item.is_file()), None)
+        if gpg is None or not source._gpg_uses_msys_paths(str(gpg)):
+            self.skipTest('Git MSYS GPG runtime unavailable')
+        with tempfile.TemporaryDirectory(prefix='guardian-gpg-win-') as directory:
+            homedir = Path(directory) / 'independent-key-home'
+            homedir.mkdir()
+            result = subprocess.run(
+                source.gpg_command(homedir, '--with-colons', '--list-keys', gpg_binary=str(gpg)),
+                capture_output=True, text=True, timeout=30, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
 
 
 class SignatureIdentityTests(unittest.TestCase):
@@ -66,9 +119,10 @@ class SignatureIdentityTests(unittest.TestCase):
     def test_private_key_input_cannot_be_retained_as_public_certificate(self):
         imported = mock.Mock(returncode=0, stdout='', stderr='')
         private = mock.Mock(returncode=0, stdout='sec:-:4096:1:64ED7B1DCCE71CB2:1:0::::::::\n', stderr='')
-        with mock.patch.object(source.subprocess, 'run', side_effect=[imported, private]):
-            with self.assertRaisesRegex(source.AcquisitionError, 'public_keys_only'):
-                source.import_certificate(Path('/unused-home'), Path('/unused-input'), PRIMARY, SUBKEY)
+        with tempfile.TemporaryDirectory() as temp:
+            with mock.patch.object(source.subprocess, 'run', side_effect=[imported, private]):
+                with self.assertRaisesRegex(source.AcquisitionError, 'public_keys_only'):
+                    source.import_certificate(Path(temp) / 'home', Path(temp) / 'certificate.asc', PRIMARY, SUBKEY)
 
 
 class DownloadIntegrityTests(unittest.TestCase):

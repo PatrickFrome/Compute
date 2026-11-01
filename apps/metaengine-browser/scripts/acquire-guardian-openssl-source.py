@@ -91,10 +91,36 @@ def download_file(spec, destination):
         temporary.unlink(missing_ok=True)
 
 
+def _gpg_uses_msys_paths(gpg_binary):
+    """Git for Windows ships an MSYS GPG; native Windows Python does not convert its argv."""
+    if os.name != 'nt':
+        return False
+    executable = shutil.which(os.fspath(gpg_binary))
+    return bool(executable and (Path(executable).resolve().parent / 'msys-2.0.dll').is_file())
+
+
+def _msys_gpg_argument(value):
+    """Give MSYS GPG POSIX drive paths; never let it treat C:\foo as relative."""
+    raw = os.fspath(value)
+    matched = re.fullmatch(r'([A-Za-z]):[\\/](.*)', raw, flags=re.DOTALL)
+    if matched:
+        return '/' + matched.group(1).lower() + '/' + matched.group(2).replace('\\', '/')
+    if raw.startswith(('\\', '//')):
+        raise AcquisitionError('msys_gpg_unanchored_or_unc_path_unsupported')
+    return raw
+
+
 def gpg_command(home, *arguments, gpg_binary='gpg'):
+    binary = os.fspath(gpg_binary)
+    if _gpg_uses_msys_paths(binary):
+        home_path = _msys_gpg_argument(home)
+        parameters = [_msys_gpg_argument(value) for value in arguments]
+    else:
+        home_path = os.fspath(home)
+        parameters = [os.fspath(value) for value in arguments]
     return [
-        str(gpg_binary), '--no-options', '--homedir', str(home), '--batch', '--no-tty',
-        '--no-autostart', '--no-auto-key-retrieve', '--auto-key-locate', 'clear', *arguments,
+        binary, '--no-options', '--homedir', home_path, '--batch', '--no-tty',
+        '--no-autostart', '--no-auto-key-retrieve', '--auto-key-locate', 'clear', *parameters,
     ]
 
 

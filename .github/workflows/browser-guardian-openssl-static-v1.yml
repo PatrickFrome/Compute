@@ -145,7 +145,7 @@ jobs:
           if ((git status --porcelain --untracked-files=all | Out-String).Trim()) { throw 'guardian_openssl_source_checkout_modified' }
 
   acquire-source:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.GUARDIAN_OPENSSL_SIGNING_CERTIFICATE_B64 != '')
     needs: [source-contract, windows-script-contract]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -166,7 +166,7 @@ jobs:
       - name: Decode supplied public release certificate outside source checkout
         shell: bash
         env:
-          OPENSSL_SIGNING_CERTIFICATE_B64: ${{ inputs.openssl_signing_certificate_b64 }}
+          OPENSSL_SIGNING_CERTIFICATE_B64: ${{ inputs.openssl_signing_certificate_b64 || vars.GUARDIAN_OPENSSL_SIGNING_CERTIFICATE_B64 }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -208,7 +208,7 @@ jobs:
           retention-days: 7
 
   windows-static-build:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.GUARDIAN_OPENSSL_SIGNING_CERTIFICATE_B64 != '')
     needs: acquire-source
     runs-on: windows-2025
     timeout-minutes: 90
