@@ -62,8 +62,9 @@ function readFixtureStats(child,{timeoutMs=5000}={}) {
   });
 }
 
-async function setup(t,mode='normal',{timeoutMs=1000,maxInflight=16,serverMaxInflight=16,serverTimeoutMs=1000,readShutdownSettlement=null,lateAckMs=100}={}) {
-  const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-private-ipc-'));
+async function setup(t,mode='normal',{timeoutMs=1000,maxInflight=16,serverMaxInflight=16,serverTimeoutMs=1000,readShutdownSettlement=null,lateAckMs=100,temporaryDirectory=os.tmpdir()}={}) {
+  const temporary=await fs.realpath(temporaryDirectory);
+  const root=await fs.realpath(await fs.mkdtemp(path.join(temporary,'metaengine-private-ipc-')));
   const script=path.join(root,'child.mjs'),instanceId=id();
   await fs.writeFile(path.join(root,'private-fixture.json'),'{"schema":"generated"}');
   await fs.writeFile(script,`
@@ -209,8 +210,9 @@ process.send({schema:'test.native-coding.ready'});
     client?.close();
     await stopFixtureChild(child,root);
     assert.ok(child.exitCode!==null||child.signalCode!==null,'test_child_teardown_exit_unconfirmed; fixture retained: '+root);
-    const actual=await fs.realpath(root),parent=await fs.realpath(os.tmpdir());
-    assert.ok(actual.startsWith(parent+path.sep)&&path.basename(actual).startsWith('metaengine-private-ipc-'));
+    const actual=await fs.realpath(root);
+    assert.equal(actual,root);assert.equal(path.dirname(actual),temporary);
+    assert.ok(path.basename(actual).startsWith('metaengine-private-ipc-'));
     await fs.rm(actual,{recursive:true,force:true});
   });
   await new Promise((resolve,reject)=>{
@@ -990,10 +992,7 @@ function protectedAclReadFixture(f){
  )]);ready.catch(()=>{});
  return {read,ready,aborted,began,get readSettled(){return readSettled;},get abortObserved(){return abortObserved;},get startObserved(){return startObserved;}};
 }
-for(const delayed of [false,true])test('actual Host close aborts protected ACL observation before joining it; no pre-stop callback cycle'+(delayed?' (observer delayed past former 1s request boundary)':''),{timeout:15000},async t=>{
- // Generous FIXTURE-ONLY deadlines ensure explicit close, not a competing
- // request timer, is the abort cause. Production deadlines remain unchanged.
- const f=await setup(t,delayed?'acl-rejection-held-delayed':'acl-rejection-held',{timeoutMs:30000,serverTimeoutMs:30000});
+async function proveHostCloseJoinsProtectedAclRead(f,{delayed=false}={}){
  const observed=protectedAclReadFixture(f),started=await observed.ready;
  if(delayed)assert.ok(performance.now()-observed.began>=1000,'delayed observer must cross the old request deadline before starting');
  assert.equal(started.signal_aborted,false,'observer must start with a live request');
@@ -1007,6 +1006,41 @@ for(const delayed of [false,true])test('actual Host close aborts protected ACL o
  assert.equal((await f.stats()).snapshot.inflight,1,'original native observation still owned after public close');
  f.child.send({schema:'test.release-acl'});assert.equal((await physical).cleanup_confirmed,true);assert.equal((await f.stats()).snapshot.inflight,0);
  assert.equal(f.client.snapshot().physical_inflight,0);
+}
+for(const delayed of [false,true])test('actual Host close aborts protected ACL observation before joining it; no pre-stop callback cycle'+(delayed?' (observer delayed past former 1s request boundary)':''),{timeout:15000},async t=>{
+ // Generous FIXTURE-ONLY deadlines ensure explicit close, not a competing
+ // request timer, is the abort cause. Production deadlines remain unchanged.
+ const f=await setup(t,delayed?'acl-rejection-held-delayed':'acl-rejection-held',{timeoutMs:30000,serverTimeoutMs:30000});
+ await proveHostCloseJoinsProtectedAclRead(f,{delayed});
+});
+
+test('generated ACL IPC fixture canonicalizes a temporary directory alias before observing and joining Host close',{timeout:20000},async t=>{
+ const temporary=await fs.realpath(os.tmpdir());
+ const root=await fs.realpath(await fs.mkdtemp(path.join(temporary,'metaengine-ipc-alias-')));
+ const physical=path.join(root,'physical'),alias=path.join(root,'alias');
+ t.after(async()=>{
+  try{await fs.unlink(alias);}catch(error){if(error.code!=='ENOENT')throw error;}
+  assert.equal(await fs.realpath(root),root);assert.equal(path.dirname(root),temporary);
+  assert.ok(path.basename(root).startsWith('metaengine-ipc-alias-'));
+  try{await fs.unlink(path.join(physical,'alias-negative.json'));}catch(error){if(error.code!=='ENOENT')throw error;}
+  // A child whose bounded teardown failed retains its original directory.
+  // Refuse outer cleanup while any such child fixture remains inside it.
+  await fs.rmdir(physical);await fs.rmdir(root);
+ });
+ await fs.mkdir(physical);
+ await fs.symlink(physical,alias,process.platform==='win32'?'junction':'dir');
+ // Canonicalize only generated fixture roots; the production reader still
+ // refuses an actual alias before any ACL observer can start.
+ await fs.writeFile(path.join(physical,'alias-negative.json'),'{"schema":"generated"}');
+ const {readNativeCodingProtectedJson}=await import(protectedReaderUrl);
+ await assert.rejects(readNativeCodingProtectedJson(path.join(alias,'alias-negative.json'),{
+  verifyStorage:()=>assert.fail('an alias must be refused before ACL observation'),
+ }),/native_coding_observer_path_alias/);
+ for(const delayed of [false,true])await t.test(delayed?'observer delayed past former request boundary':'observer starts without delay',async child=>{
+  const f=await setup(child,delayed?'acl-rejection-held-delayed':'acl-rejection-held',{
+   temporaryDirectory:alias,timeoutMs:30000,serverTimeoutMs:30000});
+  await proveHostCloseJoinsProtectedAclRead(f,{delayed});
+ });
 });
 
 test('ACL close fixture reports an actual early canonical failure instead of waiting for observer start',{timeout:15000},async t=>{
