@@ -30,6 +30,8 @@ private:
 #ifdef METAENGINE_GUARDIAN_INSTALL_ORIGIN_TEST
     friend struct GuardianInstallOriginLinkTest;
     std::wstring routingIdForTest() const;
+    // Read-only observation of a completed native availability wait slice.
+    bool waitForInitialAvailabilityForTest(DWORD timeout_ms) const noexcept;
     unsigned pendingOperationForTest() const noexcept;
     void wakePendingEventEarlyForTest() noexcept;
 #endif

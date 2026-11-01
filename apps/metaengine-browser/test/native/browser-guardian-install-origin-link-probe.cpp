@@ -25,6 +25,7 @@ namespace metaengine::guardian {
 struct GuardianInstallOriginLinkTest {
     static std::wstring route(const GuardianInstallOriginLink& link) { return link.routingIdForTest(); }
     static bool connect(GuardianInstallOriginLink& link, HANDLE original) { return link.connectOriginalBootstrap(original); }
+    static bool waitInitialAvailability(const GuardianInstallOriginLink& link, DWORD timeout) { return link.waitForInitialAvailabilityForTest(timeout); }
     static unsigned pending(const GuardianInstallOriginLink& link) { return link.pendingOperationForTest(); }
     static void wakeEarly(GuardianInstallOriginLink& link) { link.wakePendingEventEarlyForTest(); }
 };
@@ -211,6 +212,37 @@ public:
     }
 };
 
+class CoordinatorFixture {
+public:
+    std::unique_ptr<GuardianInstallOriginLink> link;
+    Handle done{CreateEventW(nullptr, TRUE, FALSE, nullptr)};
+    std::thread worker;
+    bool result = false;
+    std::exception_ptr failure;
+    explicit CoordinatorFixture(std::unique_ptr<GuardianInstallOriginLink> coordinator) : link(std::move(coordinator)) {}
+    ~CoordinatorFixture() { link->requestCancel(); if (worker.joinable()) worker.join(); link->close(); }
+    void start() {
+        require(done.valid(), "coordinator_done_event_failed");
+        worker = std::thread([this] {
+            try { result = GuardianInstallOriginLinkTest::connect(*link, GetCurrentProcess()); }
+            catch (...) { failure = std::current_exception(); }
+            SetEvent(done.value);
+        });
+    }
+    void waitInitialAvailability() {
+        require(GuardianInstallOriginLinkTest::waitInitialAvailability(*link, 5'000), "initial_availability_wait_not_observed");
+        require(WaitForSingleObject(done.value, 0) == WAIT_TIMEOUT, "coordinator_finished_before_initial_availability_wait");
+    }
+    void join(DWORD timeout = 5'000) {
+        const DWORD wait = WaitForSingleObject(done.value, timeout);
+        if (wait != WAIT_OBJECT_0) link->requestCancel();
+        if (worker.joinable()) worker.join();
+        require(wait == WAIT_OBJECT_0, "coordinator_completion_timeout");
+        if (failure) std::rethrow_exception(failure);
+        require(GuardianInstallOriginLinkTest::pending(*link) == 0, "coordinator_pending_io_storage_not_joined");
+    }
+};
+
 std::unique_ptr<GuardianInstallOriginLink> eligibleCoordinator() {
     const bool actual_eligible = actualUnelevatedInteractiveUser();
     auto out = GuardianInstallOriginLink::captureCoordinatorBeforeElevation();
@@ -284,6 +316,10 @@ void rejectReply(const std::function<void(std::vector<std::uint8_t>&)>& mutate) 
         field(json, "reason") == (oversized ? "INSTALL_ORIGIN_IO_UNCONFIRMED" : "INSTALL_ORIGIN_REPLY_INVALID"), "invalid_reply_retained_binding");
     require(number(json, "win32_error") == (oversized ? ERROR_MORE_DATA : ERROR_INVALID_DATA), "reply_rejection_lost_exact_kernel_or_frame_error");
     require(!GuardianInstallOriginLinkTest::connect(*coordinator, GetCurrentProcess()), "failed_coordinator_reconnected");
+    const auto refused = coordinator->snapshotJson(); noAuthority(refused);
+    require(field(refused, "reason") == "ORIGINAL_COORDINATOR_SCOPE_UNAVAILABLE" &&
+        !GuardianInstallOriginLinkTest::waitInitialAvailability(*coordinator, 0),
+        "opened_or_failed_peer_resumed_initial_availability");
 }
 
 unsigned passed = 0, failed = 0, skipped = 0;
@@ -359,6 +395,59 @@ int wmain(int argc, wchar_t**) {
         auto coordinator = GuardianInstallOriginLink::captureCoordinatorBeforeElevation();
         require(!coordinator->requestElevation(), "source_only_requested_uac"); noAuthority(coordinator->snapshotJson());
         require(!coordinator->requestElevation(), "release_refusal_retried_uac"); noAuthority(coordinator->snapshotJson());
+    });
+    run("initial_availability_wait_precedes_real_observer_creation", [] {
+        CoordinatorFixture coordinator(eligibleCoordinator());
+        const auto id = GuardianInstallOriginLinkTest::route(*coordinator.link);
+        coordinator.start(); coordinator.waitInitialAvailability();
+        // No observer pipe exists until AFTER a real client availability wait.
+        ObserverFixture observer; observer.start(id, true);
+        coordinator.join(); observer.waitBound(); observer.waitPending(2);
+        require(coordinator.result, "delayed_observer_kernel_binding_failed");
+        const auto client_json = coordinator.link->snapshotJson();
+        const auto server_json = observer.bound_snapshot;
+        noAuthority(client_json); noAuthority(server_json);
+        require(field(client_json, "kernel_binding") == "EXACT" && field(server_json, "kernel_binding") == "EXACT" &&
+            field(client_json, "identity_binding") == "RETAINED" && field(server_json, "identity_binding") == "RETAINED" &&
+            number(client_json, "original_pid") == GetCurrentProcessId() && number(server_json, "original_pid") == GetCurrentProcessId(),
+            "delayed_observer_lost_exact_original_binding");
+        coordinator.link->close(); observer.join();
+        require(observer.result && observer.terminal_close, "delayed_observer_original_close_not_joined");
+        noAuthority(coordinator.link->snapshotJson()); noAuthority(observer.link->snapshotJson());
+    });
+    run("initial_availability_cancel_consumes_attempt_and_joins_close", [] {
+        CoordinatorFixture coordinator(eligibleCoordinator());
+        coordinator.start(); coordinator.waitInitialAvailability();
+        const auto before = GetTickCount64(); coordinator.link->requestCancel();
+        coordinator.join(2'000);
+        require(GetTickCount64() - before < 2'000, "initial_availability_cancel_not_prompt");
+        require(!coordinator.result, "cancelled_initial_wait_became_binding");
+        const auto json = coordinator.link->snapshotJson(); noAuthority(json);
+        require(field(json, "reason") == "INSTALL_ORIGIN_CANCELLED" && field(json, "kernel_binding") == "UNPROVEN" &&
+            number(json, "win32_error") == ERROR_OPERATION_ABORTED, "initial_wait_cancel_lost_terminal_error");
+        require(!GuardianInstallOriginLinkTest::connect(*coordinator.link, GetCurrentProcess()), "cancelled_initial_attempt_rearmed");
+        noAuthority(coordinator.link->snapshotJson());
+        coordinator.link->close(); coordinator.link->close();
+        const auto closed = coordinator.link->snapshotJson(); noAuthority(closed);
+        require(field(closed, "reason") == "INSTALL_ORIGIN_CLOSED" && GuardianInstallOriginLinkTest::pending(*coordinator.link) == 0,
+            "cancelled_initial_wait_close_not_joined_or_idempotent");
+    });
+    run("initial_availability_real_timeout_cannot_rearm", [] {
+        CoordinatorFixture coordinator(eligibleCoordinator());
+        const auto before = GetTickCount64();
+        coordinator.start(); coordinator.waitInitialAvailability(); coordinator.join(20'000);
+        const auto elapsed = GetTickCount64() - before;
+        require(!coordinator.result && elapsed >= 15'000 && elapsed < 25'000, "initial_availability_deadline_not_real_or_bounded");
+        const auto json = coordinator.link->snapshotJson(); noAuthority(json);
+        require(field(json, "reason") == "ORIGINAL_BOOTSTRAP_PIPE_AVAILABILITY_TIMEOUT" &&
+            field(json, "kernel_binding") == "UNPROVEN" && number(json, "win32_error") == ERROR_TIMEOUT,
+            "initial_availability_timeout_diagnostic_untruthful");
+        const auto retry_before = GetTickCount64();
+        require(!GuardianInstallOriginLinkTest::connect(*coordinator.link, GetCurrentProcess()), "timed_out_initial_attempt_rearmed");
+        require(GetTickCount64() - retry_before < 2'000 &&
+            field(coordinator.link->snapshotJson(), "reason") == "ORIGINAL_COORDINATOR_SCOPE_UNAVAILABLE",
+            "timed_out_initial_attempt_resumed_polling");
+        noAuthority(coordinator.link->snapshotJson()); coordinator.link->close(); coordinator.link->close();
     });
     run("actual_kernel_binding_retains_original_user_but_never_execution_proof", [] {
         auto coordinator = eligibleCoordinator(); const auto id = GuardianInstallOriginLinkTest::route(*coordinator);

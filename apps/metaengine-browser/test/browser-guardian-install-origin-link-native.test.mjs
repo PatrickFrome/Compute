@@ -18,6 +18,8 @@ const cases = [
   'wrong_role_hello_refused_before_identity', 'wrong_nonce_hello_refused_before_identity',
   'oversized_hello_refused_before_identity', 'forged_identity_json_refused_before_identity',
   'failed_observer_cannot_rearm_or_substitute_route', 'observer_and_source_only_coordinator_cannot_authorize_uac',
+  'initial_availability_wait_precedes_real_observer_creation',
+  'initial_availability_cancel_consumes_attempt_and_joins_close', 'initial_availability_real_timeout_cannot_rearm',
   'actual_kernel_binding_retains_original_user_but_never_execution_proof',
   'bound_original_pending_close_read_cancel_still_joins',
   'wrong_role_reply_cannot_authenticate_bootstrap', 'wrong_nonce_reply_cannot_authenticate_bootstrap',
@@ -57,7 +59,7 @@ function compilerEnvironment() {
 
 test('actual Windows original-origin pipe transcript refuses forged frames and joins cancellation', {
   skip: process.platform !== 'win32' ? 'requires actual Windows pipe/token/process APIs; crossbuild is separate evidence' : false,
-  timeout:180_000,
+  timeout:240_000,
 }, () => {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'guardian-install-origin-link-'));
   try {
@@ -68,7 +70,7 @@ test('actual Windows original-origin pipe transcript refuses forged frames and j
       path.join(directory, 'browser-guardian-original-install-user.cpp'),
       path.join(directory, 'browser-guardian-owner-enrollment-observer.cpp'), `/Fe:${binary}`, '/link', 'advapi32.lib', 'bcrypt.lib'],
     {cwd:temporary, env:compilerEnvironment(), encoding:'utf8', timeout:120_000});
-    const result = spawnSync(binary, [], {encoding:'utf8', timeout:45_000});
+    const result = spawnSync(binary, [], {encoding:'utf8', timeout:90_000});
     assert.ifError(result.error);
     const rows = result.stdout.trim().split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line));
     assert.equal(result.status, 0, JSON.stringify(rows.filter(row => row.state === 'FAIL')) + result.stderr);
@@ -82,6 +84,8 @@ test('actual Windows original-origin pipe transcript refuses forged frames and j
     assert.equal(summary.release_binding, 'UNQUALIFIED');
     for (const name of ['uac_exercised','scm_exercised','main_launch_exercised','authority_effect']) assert.equal(summary[name], false);
     const conditional = new Set([
+      'initial_availability_wait_precedes_real_observer_creation',
+      'initial_availability_cancel_consumes_attempt_and_joins_close', 'initial_availability_real_timeout_cannot_rearm',
       'actual_kernel_binding_retains_original_user_but_never_execution_proof',
       'bound_original_pending_close_read_cancel_still_joins',
       'wrong_role_reply_cannot_authenticate_bootstrap', 'wrong_nonce_reply_cannot_authenticate_bootstrap',
