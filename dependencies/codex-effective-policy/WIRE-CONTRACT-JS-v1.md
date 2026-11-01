@@ -284,12 +284,16 @@ have their own earlier receipts; do not attribute the digest gate to those image
 The original supplement remains unchanged at
 `.codex-effective-policy-build/evidence-7dbeed76/WIRE-CONTRACT-JS-v1.md`.
 
-Actual native v3 joint validation is pending: checkpoint
-`46cea51a3060588525ac9cc98dd751c081e2ef97` is unavailable as an object/ref here;
-its exact fetch reported `upload-pack: not our ref`. The baseline Windows
-`resume(prompt)` reviewed here writes task and closes stdin; the transport owner
-must supply bootstrap -> policy -> one ACK -> original task -> EOF in the
-existing owned job, preserving original digest/nonce/deadline. Do not pass
-ACK+task to the old helper or alter `launchIdentity.prompt_sha256`.
-Windows build, custody, release provenance/signing, installation and publication
-remain separate pending work. Linux fixtures do not establish that joint result.
+At the first published producer checkpoint, fetching transport object
+`46cea51a3060588525ac9cc98dd751c081e2ef97` reported `upload-pack: not our ref`.
+Its published source is now reviewed at
+`6145546e00ab81139e4a7698c8d45863e580efba`. The actual JS controller and patched
+root have a passing Linux protocol join; the test helper is explicitly synthetic
+and emits no native terminal or joined settlement. See
+[JOIN-CONTRACT.md](JOIN-CONTRACT.md) and current [VERIFICATION.json](VERIFICATION.json).
+Production consumer admission/bootstrap wiring, native Windows custody,
+release provenance/signing and installation remain pending. Do not pass ACK+task
+to the old helper or alter `launchIdentity.prompt_sha256`. The staged owner must
+preserve the original digest/nonce/deadline and reconcile possible effects when
+an in-flight prompt EOF races cancellation. Linux protocol evidence cannot
+qualify the actual Windows helper or private consumer admission.

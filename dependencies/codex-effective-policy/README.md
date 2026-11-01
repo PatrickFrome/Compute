@@ -8,6 +8,8 @@ The patched build is not an unchanged vendor-signed CLI. Read
 wire lifecycle; [WIRE-CONTRACT-JS-v1.md](WIRE-CONTRACT-JS-v1.md) specifies every
 closed field allowlist and inherited value shape for JS consumers. This patch
 is not submitted to OpenAI and does not change any installed Codex executable.
+See [JOIN-CONTRACT.md](JOIN-CONTRACT.md) for the pinned producer/transport/
+consumer handoff, caller obligations and remaining native qualification gaps.
 
 The existing App Server `config/read`/`configRequirements/read` APIs reload
 configuration independently and cannot attest a fresh exec thread's resolved
@@ -133,16 +135,21 @@ bootstrap, ACK and task/EOF waits; it must not restart after admission.
 prompt digest. Qualified `.env`/PATH bootstrap and environment/home custody
 remain native-owner responsibilities. Do not weaken genuine model, sandbox,
 approval or rule requirements to make a probe pass. The baseline Windows
-`resume(prompt)` helper reviewed here writes task data and closes stdin; the
-separate transport owner must supply the staged handshake inside the existing
-owned job.
+`resume(prompt)` path writes task data and closes stdin. Published transport
+`6145546e00ab81139e4a7698c8d45863e580efba` now supplies a separate staged API
+inside the existing owned job; the actual consumer still needs to use it.
 Do not change `launchIdentity.prompt_sha256` to cover framing.
 
-The actual v3 consumer/native join remains pending. At this verification point,
-the parent-designated v3 checkpoint
-`46cea51a3060588525ac9cc98dd751c081e2ef97` is unavailable as an object/ref in this
-checkout; its exact fetch reported `upload-pack: not our ref`. The Linux fixtures
-do not complete that integration.
+The source-availability failure recorded at producer checkpoint
+`74f0568ec6c3e7e6e6d005413157386986dcdccc` is historical: fetching the earlier
+`46cea51a3060588525ac9cc98dd751c081e2ef97` object reported `upload-pack: not our
+ref`, but published transport `6145546e00ab81139e4a7698c8d45863e580efba` and
+consumer `22841fced59dbd9439477eb68a258d6e65c50502` are now available and reviewed.
+The consumer still uses legacy `resume()` and reports configuration attestation
+unavailable. Full private consumer admission and native Windows end-to-end
+qualification remain pending. [JOIN-CONTRACT.md](JOIN-CONTRACT.md) records exact
+pins and interface gaps; current [VERIFICATION.json](VERIFICATION.json) records
+any joint Linux controller/root protocol receipt and its limited scope.
 The original `7dbeed76` verification, patch and contract are retained under
 `evidence/7dbeed76`.
 

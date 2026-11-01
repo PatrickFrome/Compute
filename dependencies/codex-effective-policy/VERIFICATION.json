@@ -1,7 +1,7 @@
 {
   "schema": "metaengine.codex.producer-local-verification.v1",
-  "verification_revision": "ROOT_CLI_WITH_ORIGINAL_PROMPT_DIGEST_GATE",
-  "recorded_at": "2026-11-01T02:38:27.409130+00:00",
+  "verification_revision": "ROOT_CLI_DIGEST_GATE_WITH_PUBLISHED_TRANSPORT_PROTOCOL_FIXTURE",
+  "recorded_at": "2026-11-01T02:50:50.945951+00:00",
   "base": {
     "commit": "0e43a569ad52134bee65dea3182ee9a4c4bbc56f",
     "tree": "897948a6e65c980f560f97b71abaca96c91e4069"
@@ -138,6 +138,35 @@
       "post_ack_loopback_mock_model_requests": 1,
       "real_model_calls": 0,
       "new_binary_duplicate_ack_result": "refused before thread/model request"
+    },
+    {
+      "name": "published transport checkpoint policy component tests",
+      "result": "PASS",
+      "passed": 70,
+      "skipped": 4,
+      "skip_scope": "Windows physical tests on Linux",
+      "failed": 0,
+      "test_files": 4,
+      "transport_commit": "6145546e00ab81139e4a7698c8d45863e580efba",
+      "log": ".codex-effective-policy-build/joint-transport-component-tests.log"
+    },
+    {
+      "name": "actual published JS controller plus real Linux root protocol through TEST_ONLY helper bridge",
+      "result": "PASS",
+      "passed": 10,
+      "failed": 0,
+      "scope": "TEST_ONLY_PUBLISHED_JS_CONTROLLER_PLUS_REAL_LINUX_ROOT_PROTOCOL",
+      "summary": ".codex-effective-policy-build/joint-root-policy-transport-2DNmXm/summary.json",
+      "pre_ack_tcp": 0,
+      "pre_ack_http_or_websocket": 0,
+      "before_prompt_eof_tcp": 0,
+      "premature_thread_or_turn": 0,
+      "loopback_mock_model_posts": 1,
+      "real_model_calls": 0,
+      "orphan_fixture_traffic": 0,
+      "native_terminal_frames_emitted": 0,
+      "joined_settlement_emitted": false,
+      "native_cleanup_confirmed": false
     }
   ],
   "physical_fixture_evidence": [
@@ -193,6 +222,26 @@
       "cases": [
         "legacy_duplicate_ack_contaminates_prompt"
       ]
+    },
+    {
+      "suite": "strengthened published-controller and real-root Linux protocol fixture",
+      "summary": ".codex-effective-policy-build/joint-root-policy-transport-2DNmXm/summary.json",
+      "directory": ".codex-effective-policy-build/joint-root-policy-transport-2DNmXm",
+      "harness": "dependencies/codex-effective-policy/test/joint-root-policy-transport-probe.mjs",
+      "harness_sha256": "c9d3d1ec523fa55babc927654313a25cf437f2265eb9519db8cda32636c257e2",
+      "original_prompt_sha256": "f079834f0a7e3686a3b2b0aeca3585e792604dda3bc86f3021d6804dda296751",
+      "cases": [
+        "exact_original_task",
+        "no_ack_cancel",
+        "controller_wrong_original_prompt_rejected",
+        "controller_second_ack_record_rejected",
+        "root_wrong_immutable_digest_rejected",
+        "root_duplicate_ack_injected_by_double_rejected",
+        "forged_ack_written_context_rejected",
+        "cancel_after_physical_ack_before_notification",
+        "fixed_deadline_before_ack",
+        "fixed_deadline_after_physical_ack"
+      ]
     }
   ],
   "current_local_evidence_sha256": {
@@ -213,13 +262,18 @@
     ".codex-effective-policy-build/root-bootstrap-recheck-summary.json": "8daaf8906805f2b591ddcaaee107bcb024c8f47937a905894d71ab26bba1981a",
     ".codex-effective-policy-build/root-transport-hardened-3xiE1S/summary.json": "f042ba7636902aef592056a06969d58e15e027559d29fc40b6ccd953cb61b690",
     ".codex-effective-policy-build/root-transport-legacy-red-BB4kk7/summary.json": "b99d5d50750f0dd7e3d0407546d45d564f83f5767c39a4dc9baaf199af4dfeff",
-    ".codex-effective-policy-build/root-cli-7d-no-model-summary.json": "8b96f3c9ccfe68c16e40fae6f4640d73586afa51c609a4592da41a3395334141"
+    ".codex-effective-policy-build/root-cli-7d-no-model-summary.json": "8b96f3c9ccfe68c16e40fae6f4640d73586afa51c609a4592da41a3395334141",
+    ".codex-effective-policy-build/joint-transport-component-tests.log": "32b9eac821b7c034fb36f439fe3aeca1866d9f1a7ee85f3eb6a25876a169c81e",
+    ".codex-effective-policy-build/joint-root-policy-transport-2DNmXm/summary.json": "3b6e7ae1ab20416bf3fe9a031e4d3a7eeecd814c286085b734f4f8f659092aa0",
+    ".codex-effective-policy-build/joint-root-policy-transport-2DNmXm/source-readback.json": "181996b2994f650518f0dc164fccd294cec3bb6b035540c5fcde3312560bf99f",
+    ".codex-effective-policy-build/joint-root-policy-transport-2DNmXm/network-observations.json": "76b44c04fd2f7073d4f6295fe6d72c48bdf7b08023c0487790d8a379923698fc"
   },
   "verification_tools_sha256": {
     "dependencies/codex-effective-policy/test/no-model-probe.mjs": "a2ba65fbc3b09c7aadd0c5e452728089c36a1529bf668743142792701fde845c",
     "dependencies/codex-effective-policy/test/root-bootstrap-probe.mjs": "86b31f41c7f91f2effb679b34c997a8bb0134b37d6e7b6d646e49f99c4f0c159",
     "dependencies/codex-effective-policy/test/root-prompt-transport-probe.mjs": "9a63bf65741bc8af1021e51f0e2786f91a5964a89374df04d2dd4ee000073731",
-    "dependencies/codex-effective-policy/test/prepare.test.mjs": "9e20f0a252f77e58032fcc062970a731a225563fa8ec0fb1c62374e31783f58c"
+    "dependencies/codex-effective-policy/test/prepare.test.mjs": "9e20f0a252f77e58032fcc062970a731a225563fa8ec0fb1c62374e31783f58c",
+    "dependencies/codex-effective-policy/test/joint-root-policy-transport-probe.mjs": "c9d3d1ec523fa55babc927654313a25cf437f2265eb9519db8cda32636c257e2"
   },
   "historical_evidence": {
     "preserved_original_record": {
@@ -248,7 +302,36 @@
         "current_digest_gate_qualified": false
       }
     ],
-    "attribution_rule": "Old5bb standalone and f098 root receipts do not qualify the current be8 root; original7d source and receipts remain preserved."
+    "attribution_rule": "Old 5bb standalone and f098 root receipts do not qualify the current be8 root; original 7d source and receipts remain preserved.",
+    "published_74f_record": {
+      "commit": "74f0568ec6c3e7e6e6d005413157386986dcdccc",
+      "tree": "299ac4c71c6e31495bf974e138aded4ea277ff16",
+      "verification": {
+        "path": "dependencies/codex-effective-policy/evidence/74f0568e/VERIFICATION.json",
+        "sha256": "9ceb3884123cebee9b78597eafd9c4fe3ca5f54e7002f23bee60aa617ee7eee5"
+      },
+      "preservation": "Byte-exact git show from published checkpoint; historical source-unavailable and publication-time statements remain unchanged."
+    },
+    "superseded_joint_fixture_runs": [
+      {
+        "summary": {
+          "path": ".codex-effective-policy-build/joint-root-policy-transport-ap7IcU/summary.json",
+          "sha256": "01e08c54ca0cb1badbe7515f49baaf231d715a99ee7ced3a77faa40d066e0ee7"
+        },
+        "reported_cases": 9,
+        "status": "HISTORICAL_SUPERSEDED_NOT_CURRENT_QUALIFICATION",
+        "reason": "Superseded after review found arrival-versus-queued and thread-timing assertion weaknesses."
+      },
+      {
+        "summary": {
+          "path": ".codex-effective-policy-build/joint-root-policy-transport-KuBBjx/summary.json",
+          "sha256": "7ce3c6e98fbf9c31c4027fc1d6be0a73e85ff15f7ee4f1f873202b558ff7030e"
+        },
+        "reported_cases": 10,
+        "status": "HISTORICAL_SUPERSEDED_NOT_CURRENT_QUALIFICATION",
+        "reason": "Superseded by frozen final run with physical deadline-close <= original+1500ms assertion and exact harness digest."
+      }
+    ]
   },
   "observed_bootstrap_boundary": {
     "dotenv_read_before_exec_flag_parsing": true,
@@ -269,13 +352,23 @@
     "thread_and_prewarm_barrier": "Both ACK and complete correctly hashed task must qualify before thread creation or prewarm.",
     "eof_rule": "EOF after valid ACK and complete correctly hashed task activates normal execution. EOF is not a cancellation primitive.",
     "cancellation_rule": "Terminate/fence the owned process tree before closing pipes; preserve original deadline, settlement and uncertain-delivery reconciliation. Do not retransmit ACK, change original prompt hash or automatically retry.",
-    "deadline_fixture_scope": "Disposable Node controller uses private process-group termination before pipe close. No native Windows watchdog qualification is inferred."
+    "deadline_fixture_scope": "Disposable Node controller uses private process-group termination before pipe close. No native Windows watchdog qualification is inferred.",
+    "native_implementation_cancellation_limit": "The normative kill-before-pipe-close contract is not proven for every actual Windows inflight-writer race; possible effects remain UNKNOWN and require reconciliation as recorded in native_source_risks."
   },
   "network_evidence_scope": {
     "real_model_or_external_api_calls_in_physical_fixtures": 0,
     "post_ack_destinations": "authorized configured loopback mocks only",
     "pre_ack_observation": "zero configured-provider HTTP, WebSocket and transport-probe TCP connections",
-    "general_os_egress_attestation": false
+    "general_os_egress_attestation": false,
+    "joint_protocol_observations": {
+      "pre_ack_tcp": 0,
+      "pre_ack_http_or_websocket": 0,
+      "before_original_task_eof_tcp": 0,
+      "premature_thread_or_turn": 0,
+      "post_ack_after_validated_task_loopback_mock_posts": 1,
+      "real_model_calls": 0,
+      "general_os_egress_attestation": false
+    }
   },
   "scope": {
     "runtime_consumer_changed": false,
@@ -284,35 +377,45 @@
     "windows_binary_qualified": false,
     "root_cli_binary_built": true,
     "installed": false,
-    "published": false
+    "published": false,
+    "published_field_scope": "This local successor verification record only; the earlier 74f checkpoint was published as recorded below.",
+    "actual_published_js_controller_protocol_exercised_on_linux": true,
+    "full_private_consumer_native_end_to_end_qualified": false
   },
   "limitations": [
     "Linux root CLI source/build and disposable fixtures only; no installed-client, Windows binary, OS sandbox, native process/environment custody or signed release qualification.",
     "Fresh enabled local exec only; no resume/fork/review/OSS/worktree/images/positional-task or remote/disabled execution modes.",
     "Managed model-conditional AutoReview requirements are refused before emission; later model/account/routing policy remains an independent gate.",
     "Requirement sources are normalized constraint provenance; layer origins exclude harness overrides. Ignored user metadata fingerprints an empty placeholder, not ignored file bytes.",
-    "Node mock transport fixtures are not the actual protected native transport/consumer and cannot substitute for its physical Windows integration.",
-    "Full workspace core/protocol/TUI suites and cross-platform qualification are not inferred from the scoped suites recorded here."
+    "Full workspace core/protocol/TUI suites and cross-platform qualification are not inferred from the scoped suites recorded here.",
+    "The actual published JS controller is exercised through a TEST_ONLY Linux helper bridge against the real pinned root. Windows helper/kernel proofs and the production private policy consumer remain unqualified; no native terminal or joined settlement is fabricated.",
+    "Source availability is resolved, but actual 22841 consumer still uses legacy argv/launch.v2/resume and reports configuration_attestation:UNAVAILABLE.",
+    "This 604,210,216-byte debug root exceeds the unchanged 536,870,912-byte production capture cap. Existing actual runner and producer task budgets remain 32,000 bytes.",
+    "The actual native helper has no running deadline watchdog during its initial suspended control read, and an inflight prompt writer may deliver activating EOF before CANCEL kill; possible effects remain UNKNOWN pending reconciliation."
   ],
   "remaining_blockers": [
     {
-      "action": "Obtain actual transport checkpoint source and run joint producer/consumer/native staged-pipe integration",
-      "target_commit": "46cea51a3060588525ac9cc98dd751c081e2ef97",
-      "status": "PENDING_EXTERNAL_SOURCE",
-      "lookup_outcome": "UNAVAILABLE_NOT_DENIED",
-      "coordinator_reported_evidence": [
-        "git cat-file: object absent",
-        "git fetch origin 46cea51a3060588525ac9cc98dd751c081e2ef97: fatal remote upload-pack: not our ref",
-        "Library title/recent-list lookup: no archive found"
-      ],
-      "pending_input": "Library source ID, source bundle or fetchable repository ref",
-      "completed": "Pinned producer patch, Linux root build and disposable bootstrap/transport/no-model checks",
-      "integration_executed": false
+      "action": "Implement and qualify production private effective-policy consumer plus exact producer argv and staged transport wiring",
+      "target_commit": "22841fced59dbd9439477eb68a258d6e65c50502",
+      "status": "PENDING_IMPLEMENTATION_AND_FULL_INTEGRATION",
+      "evidence": "Actual source is available/clean; current runner lacks event validator, uses legacy launch.v2/one-shot resume and reports configuration_attestation:UNAVAILABLE.",
+      "completed": "Actual published controller component tests and TEST_ONLY Linux controller/root protocol fixture",
+      "full_private_consumer_native_end_to_end_executed": false
     },
     {
-      "action": "Qualify Windows root binary, source/release provenance and actual native process/environment custody with the existing owners",
-      "status": "PENDING_INDEPENDENT_QUALIFICATION",
-      "completed": "Linux source and image binding only"
+      "action": "Qualify Windows Job Object/process/environment custody, watchdog phases, bootstrap dotenv/helper PATH and inflight-writer cancellation/reconciliation",
+      "target_transport_commit": "6145546e00ab81139e4a7698c8d45863e580efba",
+      "status": "PENDING_NATIVE_WINDOWS_QUALIFICATION",
+      "known_limits": "Initial suspended wait lacks a running native watchdog. Inflight prompt/EOF can race CANCEL kill; effects must remain UNKNOWN until reconciliation.",
+      "completed": "Read-only source review and Linux protocol fixture only"
+    },
+    {
+      "action": "Produce and qualify a supported artifact within existing capture limits and complete source/release provenance",
+      "status": "PENDING_ARTIFACT_QUALIFICATION",
+      "existing_capture_cap_bytes": 536870912,
+      "debug_fixture_bytes": 604210216,
+      "cap_widened": false,
+      "windows_binary_qualified": false
     }
   ],
   "resolved_historical_test_isolation_note": {
@@ -323,9 +426,23 @@
     "correction": "subsequent checks used a project-owned disposable child HOME/CODEX_HOME; platform settings unchanged"
   },
   "publication": {
-    "state": "AUTHORIZED_PENDING_PUBLICATION",
-    "action": "Publish the completed reviewed source checkpoint to a new separate PatrickFrome/Compute branch and Draft PR targeting work/owner-ticket-closure-20261030",
-    "attempted_at_verification_recording": false,
+    "state_at_recording": "LOCAL_SUCCESSOR_CHECKPOINT_PENDING_PUBLICATION",
+    "record_scope": "This current source/tests/docs verification successor has not been committed or published by this agent. Prior checkpoint publication is separate history.",
+    "published_checkpoint": {
+      "commit": "74f0568ec6c3e7e6e6d005413157386986dcdccc",
+      "tree": "299ac4c71c6e31495bf974e138aded4ea277ff16",
+      "draft_pull_request": "https://github.com/PatrickFrome/Compute/pull/1407",
+      "publication_completed": true,
+      "library_archive_v1": "COMPLETED_COORDINATOR_REPORTED",
+      "historical_verification": {
+        "path": "dependencies/codex-effective-policy/evidence/74f0568e/VERIFICATION.json",
+        "sha256": "9ceb3884123cebee9b78597eafd9c4fe3ca5f54e7002f23bee60aa617ee7eee5"
+      }
+    },
+    "successor_publication": {
+      "state": "PENDING_COORDINATOR",
+      "attempted_by_this_agent": false
+    },
     "authorization": "Parent relayed explicit user permission: разрешаю всем потокам публиковать изменения",
     "excluded_actions": [
       "push to main or shared integration branches",
@@ -337,6 +454,147 @@
     "meaning": "Hashes identify the current worktree verification tools; they do not alone establish exact executed harness byte identity.",
     "root_prompt_transport_post_suite_change": "After the Linux suite, only the Windows termination metadata label was edited; Linux branch/runtime unchanged, coordinator reported. Current script syntax check passed.",
     "current_root_prompt_transport_sha256": "9a63bf65741bc8af1021e51f0e2786f91a5964a89374df04d2dd4ee000073731",
-    "independent_clean_reproducibility_claim": false
+    "independent_clean_reproducibility_claim": false,
+    "joint_root_policy_transport": "Frozen script SHA c9d3d1ec523fa55babc927654313a25cf437f2265eb9519db8cda32636c257e2 matched before/after the final 10-case physical run; syntax check passed. This exact execution-source binding is distinct from previously noted metadata-only edits to the older harness."
+  },
+  "available_integration_sources": {
+    "status": "SOURCE_UNAVAILABILITY_RESOLVED_AFTER_PUBLISHED_74F",
+    "transport_original_checkpoint": "46cea51a3060588525ac9cc98dd751c081e2ef97",
+    "available_transport_commit": "6145546e00ab81139e4a7698c8d45863e580efba",
+    "mapping_evidence": "6145546e commit message explicitly identifies the source checkpoint matching 46cea51a3060588525ac9cc98dd751c081e2ef97.",
+    "consumer_commit": "22841fced59dbd9439477eb68a258d6e65c50502",
+    "source_readbacks": [
+      {
+        "role": "published transport",
+        "private_checkout": "/workspace/Compute-policy-transport-join",
+        "commit": "6145546e00ab81139e4a7698c8d45863e580efba",
+        "tree": "8e81f6ae5925b273232ef792b4739c73aa56433b",
+        "checked_at": "2026-11-01T02:50:50.945951+00:00",
+        "working_tree_clean": true,
+        "status_porcelain_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "files_sha256": {
+          "apps/metaengine-browser/src/codex-cli-windows-process-controller.mjs": "46a2063d6167bdf3632aa349ec4d9a40ee40d271451e4060cb019c622e192a01",
+          "apps/metaengine-browser/src/codex-cli-physical-settlement.mjs": "9cefac202ebb4734cd29fa873f31084969f58d8838f7fe8b851a0e7a384d2a8f",
+          "apps/metaengine-browser/scripts/codex-cli-job-runner.ps1": "34442f17ce160f2d9273cc7a91687949dc2c7fd2b300f3a986e47b53a4e7cf3a"
+        }
+      },
+      {
+        "role": "published consumer checkpoint",
+        "private_checkout": "/workspace/Compute-policy-consumer-join",
+        "commit": "22841fced59dbd9439477eb68a258d6e65c50502",
+        "tree": "8a33a2455148d055ab74c54929d35c5280127100",
+        "checked_at": "2026-11-01T02:50:50.945951+00:00",
+        "working_tree_clean": true,
+        "status_porcelain_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "files_sha256": {
+          "apps/metaengine-browser/src/codex-cli-runner.mjs": "7c6f2dfcdbedaf724599dd529afe9d8e90097fe9aa6e3fa72196d6750ce99d50",
+          "apps/metaengine-browser/src/codex-cli-execution-policy.mjs": "15ce8a1a35481fc27c76685c6869fb3cdc0895d55229ba415d797d3908d07d7d"
+        }
+      }
+    ],
+    "scope": "Available source resolves the former artifact-lookup blocker; it does not complete private-consumer or native integration."
+  },
+  "joint_protocol_qualification": {
+    "scope": "TEST_ONLY_PUBLISHED_JS_CONTROLLER_PLUS_REAL_LINUX_ROOT_PROTOCOL",
+    "transport": {
+      "commit": "6145546e00ab81139e4a7698c8d45863e580efba",
+      "tree": "8e81f6ae5925b273232ef792b4739c73aa56433b",
+      "files": [
+        {
+          "file": "apps/metaengine-browser/src/codex-cli-windows-process-controller.mjs",
+          "sha256": "46a2063d6167bdf3632aa349ec4d9a40ee40d271451e4060cb019c622e192a01"
+        },
+        {
+          "file": "apps/metaengine-browser/src/codex-cli-physical-settlement.mjs",
+          "sha256": "9cefac202ebb4734cd29fa873f31084969f58d8838f7fe8b851a0e7a384d2a8f"
+        },
+        {
+          "file": "apps/metaengine-browser/src/native-coding-task-context.mjs",
+          "sha256": "ed6b39a2c6211ee7fb244148efeb3ece5d3ddf92b04c3c4a19428d35da853885"
+        },
+        {
+          "file": "apps/metaengine-browser/src/native-coding-windows-process-observer.mjs",
+          "sha256": "bbf46806db17d15345ff13b2da6b37f9fe6af2bb8bec6d5090225ea9be1ffcd1"
+        },
+        {
+          "file": "apps/metaengine-browser/src/windows-native-read-environment.mjs",
+          "sha256": "84a27e5a43b6357fbdc264bf4307c394fbb6416771b88f12447665bdaf6c6875"
+        }
+      ]
+    },
+    "harness_sha256": "c9d3d1ec523fa55babc927654313a25cf437f2265eb9519db8cda32636c257e2",
+    "root_binary_sha256": "be8e0db3ad73bd0ff96150959565eb527f236564e77376997a928d433c9bd8e4",
+    "root_binary_bytes": 604210216,
+    "pre_ack_tcp": 0,
+    "pre_ack_http_or_websocket": 0,
+    "pre_prompt_eof_tcp": 0,
+    "premature_thread_or_turn": 0,
+    "mock_model_posts": 1,
+    "orphan_fixture_traffic": 0,
+    "real_model_calls": 0,
+    "network_capture_scope": "configured loopback provider only; no general OS egress attestation",
+    "fixture_policy_checks": "test-scoped closed projection checks; production private consumer policy admission NOT exercised",
+    "deadline_owner": "TEST_ONLY Node bridge private Linux process-group SIGKILL before closing root stdin; same original absolute deadline",
+    "helper_ready_frames": "SYNTHETIC TEST ONLY; required to exercise published controller parser; not Windows/native proof",
+    "native_terminal_frames_emitted": 0,
+    "joined_settlement_emitted": false,
+    "native_windows_qualified": false,
+    "physical_scope_capture_exercised": false,
+    "production_executable_cap_bytes": 536870912,
+    "root_fixture_exceeds_production_capture_cap": true,
+    "summary": {
+      "path": ".codex-effective-policy-build/joint-root-policy-transport-2DNmXm/summary.json",
+      "sha256": "3b6e7ae1ab20416bf3fe9a031e4d3a7eeecd814c286085b734f4f8f659092aa0"
+    },
+    "raw_directory": ".codex-effective-policy-build/joint-root-policy-transport-2DNmXm",
+    "arrival_observations": "Synchronous root stream-arrival hooks and provider TCP observations assert no thread/turn or model/prewarm connection before complete original prompt EOF, rather than relying only on queued controller output.",
+    "deadline_assertion": "Root physical close <= original absolute deadline+1500ms; original deadline never reset.",
+    "observed_deadline_close_delay_ms": [
+      7,
+      10
+    ],
+    "all_controller_cleanup_confirmed": false,
+    "settlement_scope": "TEST_ONLY helper-ready frames; no native terminal and no joined settlement. Every controller completion remains tree_cleanup_confirmed:false, including the successful mock protocol case."
+  },
+  "actual_consumer_source_findings": {
+    "commit": "22841fced59dbd9439477eb68a258d6e65c50502",
+    "tree": "8a33a2455148d055ab74c54929d35c5280127100",
+    "effective_policy_event_validator_in_current_runner_path": false,
+    "runner_invocation": "Legacy argv omits --metaengine-effective-policy and --metaengine-prompt-sha256; launch remains v2 and runner calls one-shot handle.resume(prompt).",
+    "configuration_attestation": "UNAVAILABLE",
+    "configuration_attestation_source": "apps/metaengine-browser/src/codex-cli-execution-policy.mjs",
+    "authority_effect": false,
+    "full_private_consumer_native_end_to_end_executed": false,
+    "required_work": "Implement and independently qualify the private effective-policy consumer, exact producer argv/nonce/digest wiring, staged input lifecycle, native custody and authoritative lease/result path."
+  },
+  "production_limits": {
+    "existing_executable_capture_cap_bytes": 536870912,
+    "debug_root_fixture_bytes": 604210216,
+    "debug_root_exceeds_cap": true,
+    "production_scope_capture_exercised": false,
+    "capture_cap_widened": false,
+    "debug_root_eligible_for_existing_production_capture": false,
+    "actual_runner_task_budget_bytes": 32000,
+    "producer_task_budget_bytes": 32000,
+    "transport_helper_max_prompt_bytes": 65536,
+    "task_budget_widened": false,
+    "scope": "64KiB helper transport capacity does not widen the actual 32,000-byte runner or producer task budget. The debug test image is not admitted by existing production capture."
+  },
+  "native_source_risks": {
+    "source_commit": "6145546e00ab81139e4a7698c8d45863e580efba",
+    "source_file": "apps/metaengine-browser/scripts/codex-cli-job-runner.ps1",
+    "initial_suspended_wait": {
+      "running_native_watchdog": false,
+      "observation": "Initial Console.In.ReadLine waits for bootstrap/resume before the native deadline loop begins. Child initial thread remains suspended; no qualification of bounded initial authorization wait is inferred."
+    },
+    "inflight_prompt_writer_cancellation": {
+      "possible_activation_before_cancel_kill": true,
+      "observation": "The asynchronous prompt writer can finish the original task and close worker stdin (activating EOF) before the control loop processes CANCEL and terminates the job. Synchronous controller fencing does not undo already inflight delivery.",
+      "effects": "UNKNOWN_UNTIL_RECONCILIATION",
+      "unconditional_zero_effects_claim": false,
+      "required_handling": "Preserve possible physical effects and uncertain-delivery settlement; terminate/fence and reconcile before admitting further work.",
+      "physical_windows_race_tested": false
+    },
+    "joint_linux_case_scope": "The synthetic bridge uses process-group kill before pipe close, including cancellation after physical ACK while notification is withheld. Its observed zero traffic does not qualify the real Windows writer/CANCEL race."
   }
 }

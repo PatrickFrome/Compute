@@ -10,7 +10,8 @@ Codex `rust-v0.159.0-alpha.3`, commit
 
 [WIRE-CONTRACT-JS-v1.md](WIRE-CONTRACT-JS-v1.md) is the normative closed keyset
 and inherited-value reference for JS consumers. This document describes the
-activation and custody lifecycle.
+activation and custody lifecycle. [JOIN-CONTRACT.md](JOIN-CONTRACT.md) pins the
+separate transport/consumer interfaces and records their remaining join gaps.
 
 ## Producer and consumer ownership
 
@@ -226,13 +227,14 @@ must be independently qualified. Initial environment readback alone does not
 prove post-bootstrap environment, because root arg0 can load non-CODEX variables
 and prepend helper aliases.
 
-The baseline Windows helper reviewed in this checkout exposes `resume(prompt)`,
-which writes task data and closes stdin; it cannot carry this handshake. Do not
-call it with `ACK+prompt` or replace its original `launchIdentity.prompt_sha256`
-with a framing hash. The separate transport owner must add bootstrap -> policy
--> one ACK -> original task -> EOF
-inside the existing owned job, with the original nonce/digest/deadline and
-single-delivery invariants. Producer does not supply native authority.
+The legacy Windows `resume(prompt)` path writes task data and closes stdin; it
+cannot carry this handshake. Do not call it with `ACK+prompt` or replace its
+original `launchIdentity.prompt_sha256` with a framing hash. Published transport
+`6145546e00ab81139e4a7698c8d45863e580efba` supplies a separate bootstrap -> policy
+-> one ACK -> original task -> EOF API inside the existing owned job. The
+consumer must wire that API with the original nonce/digest/deadline and
+single-delivery invariants described in [JOIN-CONTRACT.md](JOIN-CONTRACT.md).
+Producer does not supply native authority.
 
 Root CLI has been built and physically tested on Linux. The original `7dbeed76`
 root baseline, SHA256
@@ -248,13 +250,16 @@ The added hardening must have its own source overlay/input manifest and receipts
 do not attribute that binary to the old `7dbeed76` bundle. See current
 `VERIFICATION.json` and the preserved `evidence/7dbeed76` record.
 
-The actual native v3 consumer join has not been completed. At this verification
-point, the parent-designated v3 checkpoint
-`46cea51a3060588525ac9cc98dd751c081e2ef97` is unavailable as an object/ref in this
-checkout; its exact fetch reported `upload-pack: not our ref`. The baseline
-Windows helper reviewed here does not implement this staged exchange; the actual
-v3 transport still needs joint verification. Linux fixture success is not
-evidence of actual v3/Windows delivery.
-The transport owner still must validate that join with the unchanged original
-task/nonce/deadline bindings. Windows binary, physical native custody and release
-provenance/signing qualification remain separate pending work.
+The source-availability failure recorded at producer checkpoint
+`74f0568ec6c3e7e6e6d005413157386986dcdccc` is historical. The earlier exact fetch
+of `46cea51a3060588525ac9cc98dd751c081e2ef97` reported `upload-pack: not our ref`;
+published transport `6145546e00ab81139e4a7698c8d45863e580efba` and consumer
+`22841fced59dbd9439477eb68a258d6e65c50502` are now available and reviewed. The
+consumer still seals a legacy launch, calls `resume()` and retains
+`configuration_attestation:'UNAVAILABLE'`; private policy admission and the full
+consumer/native join remain pending. See [JOIN-CONTRACT.md](JOIN-CONTRACT.md)
+for exact checkpoints, caller obligations, the pre-bootstrap deadline gap and
+in-flight EOF/cancellation uncertainty. Any joint actual-controller/root Linux
+protocol receipt belongs in current [VERIFICATION.json](VERIFICATION.json); it
+does not qualify full consumer admission or Windows delivery. Windows binary,
+physical native custody and release provenance/signing remain independent gates.
