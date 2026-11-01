@@ -148,7 +148,7 @@ function installFixture({ kind }) {
       if (state.connectionGate) await state.connectionGate;
       if (!state.connected) throw new Error('simulated_native_bridge_disconnected');
       return { schema: 'metaengine.client.connection-status.v1', local_runtime_ready: true,
-        admin_ready: true, cloud_control_state: 'CONNECTED', authority_effect: false,
+        admin_ready: true, local_control_state: 'CONNECTED', cloud_control_state: 'DISABLED', authority_effect: false,
         native_runtime: { schema: 'metaengine.client.native-runtime-observation.v1', observed_at: new Date().toISOString(),
           state: 'OBSERVED', closed: false, physical_slot_budget: 4, retained_records: 2,
           counts: { preparing: 0, running: 1, result_ready: 0, readback_required: 1, other: 0 },

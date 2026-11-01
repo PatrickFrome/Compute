@@ -84,6 +84,10 @@ export function projectOwnPostgresClientConnection(raw, { localProviderAttested 
     admin_scopes: admin ? Object.freeze(safeScopes(s.admin_scopes)) : Object.freeze([]),
     admin_grant_epoch: admin && Number.isSafeInteger(s.admin_grant_epoch)
       && s.admin_grant_epoch >= 0 ? s.admin_grant_epoch : null,
+    // The supervisor's historical field names its own-PG connection. Expose
+    // that observation separately from the deliberately disabled cloud plane.
+    local_control_state: ready && ['CONNECTED', 'CONNECTING', 'RECONNECTING', 'LOCAL_ONLY', 'ENROLLMENT_REQUIRED']
+      .includes(s.cloud_control_state) ? s.cloud_control_state : 'UNAVAILABLE',
     cloud_control_state: 'DISABLED',
     cloud_health: 'NOT_CONFIGURED',
     hosted_supabase_required: false,

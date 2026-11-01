@@ -556,7 +556,7 @@ function GoalComposer({ detailOpen, onDetailOpenChange, draft }: { detailOpen: b
   const labels: Record<string, string> = {
     READY: "Queued", LEASED: "Assigned", RUNNING: "Working", RESULT_READY: "Reviewing result",
     SUSPENDED: "Waiting for child tasks", COMPLETED: "Completed · proof pending", BLOCKED: "Blocked", FAILED: "Failed",
-    AMBIGUOUS: "Needs reconciliation", FENCED: "Stopped",
+    AMBIGUOUS: "Needs reconciliation", FENCED: "Execution blocked",
   };
   const status = journalEntry?.state === "FAILED" && journalEntry.last_error === "native_goal_rejected_before_dispatch"
     ? "Not started · admission rejected"

@@ -32,7 +32,7 @@ type ProjectAction = "create" | "open";
 type ProjectView = {
   status: ManagedClientProjectStatus | null;
   loading: boolean;
-  pending: { action: ProjectAction; workspaceId: string } | null;
+  pending: { action: ProjectAction; workspaceId: string; outcomeUnknown: boolean } | null;
   error: string | null;
   completed: { action: ProjectAction; workspaceId: string } | null;
 };
@@ -83,12 +83,16 @@ export function createManagedProjectsView({
   let current: ProjectView = { status: null, loading: false, pending: null, error: null, completed: null };
   const listeners = new Set<() => void>();
   let reading: Promise<void> | null = null;
+  let physicalRead: Promise<unknown> | null = null;
   const publish = (patch: Partial<ProjectView>) => {
     current = { ...current, ...patch };
     for (const listener of listeners) listener();
   };
   const refresh = () => {
     if (reading) return reading;
+    // A renderer deadline cannot cancel an IPC invocation. Preserve its read
+    // slot until settlement so polling cannot accumulate abandoned requests.
+    if (physicalRead) return Promise.resolve();
     publish({ loading: true, status: null });
     reading = (async () => {
       await Promise.resolve();
@@ -96,8 +100,12 @@ export function createManagedProjectsView({
       try {
         const native = bridge();
         if (!native?.projectStatus) throw new Error("managed_project_client_unavailable");
+        const observation = Promise.resolve().then(() => native.projectStatus());
+        physicalRead = observation;
+        const settled = () => { if (physicalRead === observation) physicalRead = null; };
+        void observation.then(settled, settled);
         const value = await Promise.race([
-          native.projectStatus(),
+          observation,
           new Promise<never>((_, reject) => { timer = schedule(() => reject(new Error("managed_project_client_status_deadline")), 4_000); }),
         ]);
         if (!validateManagedProjectStatus(value, now())) throw new Error("managed_project_client_status_invalid");
@@ -120,11 +128,18 @@ export function createManagedProjectsView({
       publish({ error: "managed_project_client_action_unavailable", completed: null });
       return false;
     }
-    publish({ pending: { action, workspaceId }, error: null, completed: null });
+    publish({ pending: { action, workspaceId, outcomeUnknown: false }, error: null, completed: null });
     let proven = false;
+    let observationTimer: ReturnType<typeof setTimeout> | undefined;
     try {
       const native = bridge();
       if (!native) throw new Error("managed_project_client_unavailable");
+      // This bounds the observation, not the native operation. Keep custody of
+      // the original invoke and prohibit another effect until it settles.
+      observationTimer = schedule(() => {
+        publish({ pending: { action, workspaceId, outcomeUnknown: true },
+          error: "managed_project_client_outcome_unknown", completed: null });
+      }, 8_000);
       const result = await (action === "create" ? native.createProject({ workspace_id: workspaceId }) : native.openProject({ workspace_id: workspaceId })) as {
         schema?: string; ok?: boolean; state?: string; action?: string; workspace_id?: string;
         task_id?: string; workspace_generation?: number; opened?: boolean; authority_effect?: boolean; automatic_retry_allowed?: boolean;
@@ -139,12 +154,14 @@ export function createManagedProjectsView({
         throw new Error("managed_project_client_result_invalid");
       }
       proven = true;
-      publish({ completed: { action, workspaceId } });
+      publish({ completed: { action, workspaceId }, error: null });
     } catch (error) {
       const reason = error instanceof Error && /^managed_project_client_[a-z_]+$/.test(error.message)
         ? error.message : "managed_project_client_action_failed";
       publish({ error: reason });
     } finally {
+      if (observationTimer !== undefined) cancel(observationTimer);
+      publish({ pending: { action, workspaceId, outcomeUnknown: false } });
       // A read started before the receipt must not count as its final readback.
       if (reading) await reading;
       await refresh();

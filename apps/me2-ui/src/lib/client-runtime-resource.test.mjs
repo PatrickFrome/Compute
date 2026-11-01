@@ -6,7 +6,7 @@ import { createClientRuntimeResource, readClientRuntimePair } from './client-run
 const observation = () => ({
   connection: {
     schema: 'metaengine.client.connection-status.v1', local_runtime_ready: true,
-    admin_ready: true, cloud_control_state: 'CONNECTED', authority_effect: false,
+    admin_ready: true, local_control_state: 'CONNECTED', cloud_control_state: 'DISABLED', authority_effect: false,
   },
   work: {
     schema: 'metaengine.client.work-readiness.v1', observed_at: new Date().toISOString(),

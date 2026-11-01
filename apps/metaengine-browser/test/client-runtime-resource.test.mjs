@@ -3,7 +3,7 @@ import test from 'node:test';
 import { createClientRuntimeResource } from '../../me2-ui/src/lib/client-runtime-resource.ts';
 
 const readback = () => ({
-  connection: { schema: 'metaengine.client.connection-status.v1', admin_ready: true, local_runtime_ready: true, cloud_control_state: 'CONNECTED', authority_effect: false },
+  connection: { schema: 'metaengine.client.connection-status.v1', admin_ready: true, local_runtime_ready: true, local_control_state: 'CONNECTED', cloud_control_state: 'DISABLED', authority_effect: false },
   work: { schema: 'metaengine.client.work-readiness.v1', state: 'READY', execution_ready: true, heartbeat_fresh: true,
     observed_at: new Date().toISOString(), ambiguous_agent_count: 0,
     readiness_scope: 'CHAT_DISPATCH', continuous_autonomy_ready: false, verified_self_improvement: false,
@@ -84,9 +84,9 @@ test('a nominal READY payload without proven agents or matching generations is r
 });
 
 test('a disconnected or stale heartbeat cannot be labeled ready', async () => {
-  for (const field of ['cloud_control_state', 'heartbeat_fresh']) {
+  for (const field of ['local_control_state', 'heartbeat_fresh']) {
     const value = readback();
-    if (field === 'cloud_control_state') value.connection.cloud_control_state = 'RECONNECTING';
+    if (field === 'local_control_state') value.connection.local_control_state = 'RECONNECTING';
     else value.work.heartbeat_fresh = false;
     const h = harness(async () => value); const stop = h.resource.subscribe(() => {});
     await flush(); assert.equal(h.resource.getSnapshot().state, 'UNAVAILABLE'); stop();

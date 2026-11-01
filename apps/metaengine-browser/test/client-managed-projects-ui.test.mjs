@@ -106,10 +106,36 @@ test('status deadline clears positive actions and a late read cannot overwrite f
   await flush(); expire(); await hung;
   assert.equal(view.getSnapshot().loading, false);
   fail = false; await view.refresh();
-  const fresh = view.getSnapshot().status;
+  assert.equal(calls, 2, 'a UI deadline does not release the physical status read');
+  assert.equal(view.getSnapshot().status, null);
   late({}); await flush();
-  assert.equal(view.getSnapshot().status, fresh);
+  assert.equal(view.getSnapshot().status, null, 'late data cannot restore a timed-out observation');
+  await view.refresh();
+  assert.ok(view.getSnapshot().status);
   assert.equal(calls, 3);
+});
+
+for (const outcome of ['resolve', 'reject']) test(`a timed-out status read retains its physical slot until ${outcome}`, async () => {
+  let settle; let expire; let calls = 0;
+  const view = createManagedProjectsView({ now: () => timestamp,
+    bridge: () => ({
+      projectStatus: () => {
+        calls++;
+        return calls === 1 ? new Promise((resolve, reject) => { settle = outcome === 'resolve' ? resolve : reject; }) : Promise.resolve(status());
+      }, createProject: async () => proven(), openProject: async () => proven('PROJECT_OPEN'),
+    }),
+    schedule: fn => { expire = fn; return 1; }, cancel: () => {},
+  });
+  const observation = view.refresh(); await flush(); expire(); await observation;
+  for (let n = 0; n < 10; n++) await view.refresh();
+  assert.equal(calls, 1, 'polling and explicit refresh must not abandon unresolved native reads');
+  assert.equal(view.getSnapshot().status, null);
+  assert.equal(view.getSnapshot().loading, false);
+  settle(outcome === 'resolve' ? status() : new Error('late private native failure')); await flush();
+  assert.equal(view.getSnapshot().status, null, 'a late success or rejection never publishes');
+  await view.refresh();
+  assert.equal(calls, 2);
+  assert.ok(view.getSnapshot().status);
 });
 
 test('missing IPC and native rejection preserve truthful unavailable/error state', async () => {
@@ -190,4 +216,33 @@ test('real preload exposes typed workspace selection only to the primary ME2 ren
   assert.equal(api.project_operations_accept_caller_claim, false);
   assert.equal(api.project_operations_accept_caller_path, false);
   assert.equal(execute({ protocol: 'https:', hostname: 'example.com', port: '' }).exposed.metaengineClient, undefined);
+});
+
+for (const action of ['create', 'open']) test(`an unsettled ${action} stays held after observation expiry and independent status reads`, async () => {
+  let complete; let effects = 0; let reads = 0; let next = 0;
+  const timers = new Map();
+  const available = status(); Object.assign(available.projects[0], { state: 'READY', can_open: true });
+  const dispatch = () => { effects++; return new Promise(resolve => { complete = resolve; }); };
+  const view = createManagedProjectsView({ now: () => timestamp,
+    bridge: () => ({ projectStatus: async () => { reads++; return available; }, createProject: dispatch, openProject: dispatch }),
+    schedule: (fn, ms) => { timers.set(++next, { fn, ms }); return next; }, cancel: id => timers.delete(id),
+  });
+  await view.refresh(); const original = view[action]('workspace-a');
+  const deadline = [...timers.values()].find(timer => timer.ms === 8_000);
+  assert.ok(deadline); deadline.fn();
+  assert.equal(view.getSnapshot().pending.outcomeUnknown, true);
+  assert.equal(view.getSnapshot().completed, null);
+  assert.equal(view.getSnapshot().error, 'managed_project_client_outcome_unknown');
+  await view.refresh();
+  assert.equal(reads, 2);
+  assert.equal(view.getSnapshot().pending.outcomeUnknown, true, 'a status row cannot settle the original operation receipt');
+  assert.equal(await view.create('workspace-a'), false);
+  assert.equal(await view.open('workspace-a'), false);
+  assert.equal(effects, 1);
+  complete(proven(action === 'open' ? 'PROJECT_OPEN' : 'PROJECT_CREATE'));
+  assert.equal(await original, true);
+  assert.equal(view.getSnapshot().pending, null);
+  assert.equal(view.getSnapshot().error, null);
+  assert.equal(view.getSnapshot().completed.action, action);
+  assert.equal(timers.size, 0);
 });
