@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <cstring>
 #include <cwchar>
+#include <new>
 #include <regex>
 #include <string>
 #include <string_view>
@@ -21,6 +22,77 @@
 #include <vector>
 
 namespace metaengine::guardian {
+
+GuardianChildCustody::~GuardianChildCustody() noexcept { join(); }
+
+GuardianChildCustody::Child* GuardianChildCustody::reserve(
+    const GuardianEffectAdmission& admission) noexcept {
+    GuardianChildCustody* owner = admission.children_;
+    if (owner == nullptr) {
+        SetLastError(ERROR_INVALID_HANDLE);
+        return nullptr;
+    }
+    owner->reapTerminal();
+    Child* child = new (std::nothrow) Child;
+    if (child == nullptr) {
+        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        return nullptr;
+    }
+    // Allocation and registration precede CREATE. Its output buffer belongs
+    // to this owner even if STOP wins inside the admitted CAS-to-API gap.
+    child->next_ = owner->children_;
+    owner->children_ = child;
+    return child;
+}
+
+bool GuardianChildCustody::releaseTerminal(Child& child, DWORD timeout) noexcept {
+    if (child.information_.hProcess != nullptr) {
+        const DWORD wait = WaitForSingleObject(child.information_.hProcess, timeout);
+        if (wait != WAIT_OBJECT_0) {
+            // TIMEOUT/API failure is HOLD with the same original handle.
+            if (timeout != 0 && wait != WAIT_TIMEOUT) Sleep(5'000);
+            return false;
+        }
+        if (!CloseHandle(child.information_.hProcess)) {
+            if (timeout != 0) Sleep(5'000);
+            return false;
+        }
+        child.information_.hProcess = nullptr;
+    }
+    if (child.information_.hThread != nullptr) {
+        if (!CloseHandle(child.information_.hThread)) {
+            if (timeout != 0) Sleep(5'000);
+            return false;
+        }
+        child.information_.hThread = nullptr;
+    }
+    return true;
+}
+
+void GuardianChildCustody::reapTerminal() noexcept {
+    Child** link = &children_;
+    while (*link != nullptr) {
+        Child* child = *link;
+        if (!releaseTerminal(*child, 0)) {
+            link = &child->next_;
+            continue;
+        }
+        *link = child->next_;
+        delete child;
+    }
+}
+
+void GuardianChildCustody::join() noexcept {
+    // Called after the sole writer/borrower has physically exited. No mutex,
+    // effect retry, repeated termination or status/checkpoint publication.
+    while (children_ != nullptr) {
+        Child* child = children_;
+        if (!releaseTerminal(*child, 5'000)) continue;
+        children_ = child->next_;
+        delete child;
+    }
+}
+
 namespace {
 
 constexpr char kProbeSchema[] = "metaengine.browser-guardian.owner-challenge-request.v1";
@@ -858,9 +930,10 @@ std::string incarnation(DWORD pid, std::uint64_t created) {
 }
 
 bool terminateNeverResumed(HANDLE process) {
-    if (process == nullptr || process == INVALID_HANDLE_VALUE) return true;
-    DWORD exitCode = STILL_ACTIVE;
-    if (GetExitCodeProcess(process, &exitCode) && exitCode != STILL_ACTIVE) return true;
+    if (process == nullptr || process == INVALID_HANDLE_VALUE) return false;
+    const DWORD wait = WaitForSingleObject(process, 0);
+    if (wait == WAIT_OBJECT_0) return true;
+    if (wait != WAIT_TIMEOUT) return false;
     if (!TerminateProcess(process, ERROR_PROCESS_ABORTED)) return false;
     return WaitForSingleObject(process, 5'000) == WAIT_OBJECT_0;
 }
@@ -882,9 +955,12 @@ GuardianUpdateActuatorResult launchInstaller(
     STARTUPINFOW startup{};
     startup.cb = sizeof(startup);
     startup.lpDesktop = const_cast<LPWSTR>(L"winsta0\\default");
-    PROCESS_INFORMATION processInfo{};
     const std::wstring currentDirectory = executable.substr(0, executable.find_last_of(L"\\/"));
     const DWORD flags = CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | CREATE_NEW_PROCESS_GROUP;
+    auto* child = GuardianChildCustody::reserve(admission);
+    if (child == nullptr) return baseResult("NO_EFFECT_PROVEN", "INSTALLER_CHILD_CUSTODY_UNAVAILABLE", GetLastError());
+    auto& process = *child;
+    PROCESS_INFORMATION& processInfo = process.creationResult();
     if (!admission.admit()) return baseResult("NO_EFFECT_PROVEN", "SERVICE_STOP_BEFORE_INSTALLER_CREATE", ERROR_OPERATION_ABORTED);
     if (!CreateProcessAsUserW(
             userToken,
@@ -900,8 +976,9 @@ GuardianUpdateActuatorResult launchInstaller(
             &processInfo)) {
         return baseResult("NO_EFFECT_PROVEN", "CREATE_PROCESS_AS_USER_FAILED", GetLastError());
     }
-    ScopedHandle process(processInfo.hProcess);
-    ScopedHandle thread(processInfo.hThread);
+    // CREATE wrote its original process handle directly into the SCM-owned
+    // slot. Only the primary thread handle becomes local, never the process.
+    ScopedHandle thread(std::exchange(processInfo.hThread, nullptr));
 
     FILETIME creation{}, exit{}, kernel{}, user{};
     if (!GetProcessTimes(process.get(), &creation, &exit, &kernel, &user)) {

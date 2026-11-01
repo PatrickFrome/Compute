@@ -19,8 +19,17 @@ class GuardianScmEffectOwner final {
 public:
     const GuardianEffectAdmission& context() const noexcept { return context_; }
     void requestStop() noexcept { context_.stop(); }
+#ifdef _WIN32
+    void joinChildren() noexcept { children_.join(); }
+#endif
 private:
+#ifdef _WIN32
+    GuardianChildCustody children_;
+    GuardianEffectAdmission context_{children_};
+#else
+    // Portable status extraction has no Windows child processes.
     GuardianEffectAdmission context_;
+#endif
 };
 }
 
@@ -222,7 +231,7 @@ bool writeResponse(HANDLE pipe, const std::string& response) {
     return ok && written == bytes;
 }
 
-DWORD WINAPI updateActuatorWorker(LPVOID /*context*/) {
+DWORD WINAPI updateActuatorWorker(LPVOID /*context*/) try {
     using namespace metaengine::guardian;
     while (WaitForSingleObject(g_stop_event, 0) == WAIT_TIMEOUT) {
         OwnerEnrollmentPipe pipe;
@@ -252,6 +261,13 @@ DWORD WINAPI updateActuatorWorker(LPVOID /*context*/) {
         writeResponse(pipe.handle(), response);
     }
     return 0;
+} catch (...) {
+    // Post-CREATE allocations, journal/result construction or response work
+    // cannot unwind original child custody out of the SCM owner. Fail closed
+    // without claiming an effect outcome. The stop handle outlives this worker.
+    g_effect_owner.requestStop();
+    SetEvent(g_stop_event);
+    return ERROR_UNHANDLED_EXCEPTION;
 }
 
 void WINAPI serviceMain(DWORD /*argc*/, LPWSTR* /*argv*/) {
@@ -275,7 +291,9 @@ void WINAPI serviceMain(DWORD /*argc*/, LPWSTR* /*argv*/) {
 
     const HANDLE stopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     if (stopEvent == nullptr) {
-        reportStatus(SERVICE_STOPPED, GetLastError(), 0);
+        const DWORD error = GetLastError();
+        g_effect_owner.requestStop();
+        reportStatus(SERVICE_STOPPED, error, 0);
         return;
     }
     {
@@ -288,6 +306,7 @@ void WINAPI serviceMain(DWORD /*argc*/, LPWSTR* /*argv*/) {
     g_worker_thread = CreateThread(nullptr, 0, updateActuatorWorker, nullptr, 0, nullptr);
     if (g_worker_thread == nullptr) {
         const DWORD error = GetLastError();
+        g_effect_owner.requestStop();
         {
             const std::lock_guard<std::mutex> lock(g_status_mutex);
             CloseHandle(g_stop_event);
@@ -313,6 +332,25 @@ void WINAPI serviceMain(DWORD /*argc*/, LPWSTR* /*argv*/) {
         // original checkpoint; do not make a hung worker appear to progress.
         if (workerWait != WAIT_TIMEOUT) Sleep(5'000);
     }
+    // A signalled stop event proves neither successful worker execution nor
+    // its exit code. Preserve a caught worker failure for SCM's existing
+    // non-crash recovery policy, without treating failed readback as success.
+    DWORD final_error = wait_error;
+    DWORD worker_exit = NO_ERROR;
+    if (!GetExitCodeThread(g_worker_thread, &worker_exit)) {
+        const DWORD error = GetLastError();
+        if (final_error == NO_ERROR) final_error = error == NO_ERROR ? ERROR_GEN_FAILURE : error;
+    } else if (final_error == NO_ERROR) {
+        final_error = worker_exit;
+    }
+    // Worker exit is not child exit. CREATE output slots were registered
+    // before the API, including admitted work racing STOP. Drain originals
+    // only after the sole writer/borrower exited, without the status mutex.
+    // Timeouts/API failures remain STOP_PENDING with the original checkpoint.
+    // Current fresh-only installers do not request Guardian stop. Future
+    // in-place service replacement requires terminal completion or a reviewed
+    // authenticated handoff; this join does not qualify replacement support.
+    g_effect_owner.joinChildren();
     {
         // A callback cannot borrow the stop handle while teardown closes it.
         const std::lock_guard<std::mutex> lock(g_status_mutex);
@@ -322,7 +360,7 @@ void WINAPI serviceMain(DWORD /*argc*/, LPWSTR* /*argv*/) {
         g_stop_event = nullptr;
     }
 
-    reportStatus(SERVICE_STOPPED, wait_error, 0);
+    reportStatus(SERVICE_STOPPED, final_error, 0);
 }
 
 int printContract() {
