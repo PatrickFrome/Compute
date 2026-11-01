@@ -1,4 +1,5 @@
 import https from 'node:https';
+import {openSync,writeSync,fsyncSync,closeSync} from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -38,11 +39,16 @@ export async function admit(key,b,file=STATE){if(!safe(key)||['__proto__','const
 });}
 export async function settle(key,result,file=STATE){return locked(file,async()=>{
  const s=JSON.parse(await fs.readFile(file,'utf8')),t=s.tasks[key];if(!t||t.status!=='in_flight')fail('invalid_settlement');
- const u=result.usage;const valid=result.status==='completed'&&u&&Number.isInteger(u.input_tokens)&&u.input_tokens>=0&&u.input_tokens<=t.input_bound&&Number.isInteger(u.output_tokens)&&u.output_tokens>=0&&u.output_tokens<=t.max_output_tokens&&result.model?.startsWith('gpt-6-astra')&&['priority','fast','default'].includes(result.service_tier);
- Object.assign(t,{status:valid?'completed':'unknown',finished_at:new Date().toISOString(),receipt:result});
+ const u=result.usage;const valid=result.terminal_eof===true&&['completed','incomplete','failed'].includes(result.terminal_status)&&result.reason==='response.'+result.terminal_status&&u&&Number.isInteger(u.input_tokens)&&u.input_tokens>=0&&u.input_tokens<=t.input_bound&&Number.isInteger(u.output_tokens)&&u.output_tokens>=0&&u.output_tokens<=t.max_output_tokens&&result.model?.startsWith('gpt-6-astra')&&['priority','fast','default'].includes(result.service_tier);
+ Object.assign(t,{status:valid?result.status:'unknown',accounting_status:valid?'known_usage':'unknown',finished_at:new Date().toISOString(),receipt:result});
  if(valid)t.exposure_micro=cost(u.input_tokens,u.output_tokens);
  await atomic(file,s);return t;
 });}
+export function persistCreated(file,id){
+ if(!safe(id))fail('invalid_response_id');
+ const fd=openSync(file,'wx',0o600);try{writeSync(fd,JSON.stringify({response_id:id,observed_at:new Date().toISOString()})+'\n');fsyncSync(fd);}finally{closeSync(fd);}
+ const dirfd=openSync(path.dirname(file),'r');try{fsyncSync(dirfd);}finally{closeSync(dirfd);}
+}
 export class SSE {
  constructor(onEvent){this.decoder=new StringDecoder('utf8');this.buffer='';this.onEvent=onEvent;this.bytes=0;}
  push(chunk){this.bytes+=chunk.length;if(this.bytes>LIMIT)fail('output_limit');this.buffer+=this.decoder.write(chunk);this.drain();}
@@ -53,12 +59,12 @@ function extract(r){return (r.output||[]).filter(x=>x.type==='message'&&x.role==
 export function streamRequest(body,key,{request=https.request,deadline=1800000,onCreated=()=>{}}={}){
  return new Promise(resolve=>{
  let req,res,done=false,terminal=null,terminalCount=0,meta={status:'unknown',reason:'missing_terminal'},timer;
- const finish=(reason)=>{if(done)return;done=true;clearTimeout(timer);resolve({...meta,...(reason?{status:'unknown',reason}:{}),text:terminal&&meta.status==='completed'?extract(terminal):''});res?.destroy();req?.destroy();};
+ const finish=(reason)=>{if(done)return;done=true;clearTimeout(timer);resolve({...meta,...(reason?{status:'unknown',reason,terminal_eof:false}:{}),text:!reason&&terminal&&meta.status==='completed'?extract(terminal):''});res?.destroy();req?.destroy();};
  const parser=new SSE(e=>{
   if(e.type==='response.created'){meta.response_id=safe(e.response?.id);onCreated(meta.response_id);}
   if(['response.completed','response.failed','response.incomplete'].includes(e.type)){
    terminalCount++;if(terminalCount>1){finish('duplicate_terminal');return;}
-   terminal=e.response;meta={...meta,status:e.type==='response.completed'&&terminal?.status==='completed'&&extract(terminal).length>0?'completed':'unknown',reason:e.type,model:safe(terminal?.model),service_tier:safe(terminal?.service_tier),response_id:safe(terminal?.id),usage:terminal?.usage?{input_tokens:terminal.usage.input_tokens,output_tokens:terminal.usage.output_tokens}:null};
+   terminal=e.response;meta={...meta,status:terminal?.status===e.type.slice(9)?(terminal.status==='completed'&&!extract(terminal).length?'no_final_output':terminal.status):'unknown',terminal_status:terminal?.status===e.type.slice(9)?terminal.status:null,reason:e.type,model:safe(terminal?.model),service_tier:safe(terminal?.service_tier),response_id:safe(terminal?.id),usage:terminal?.usage?{input_tokens:terminal.usage.input_tokens,output_tokens:terminal.usage.output_tokens}:null};
   }else if(e.type==='error')finish('stream_error');
  });
  timer=setTimeout(()=>finish('absolute_deadline'),Math.min(deadline,1800000));
@@ -67,7 +73,7 @@ export function streamRequest(body,key,{request=https.request,deadline=1800000,o
    res=response;meta.http_status=res.statusCode;meta.request_id=safe(res.headers['x-request-id']);
    if(res.statusCode!==200){finish('http_rejected_or_unknown');return;}
    res.on('data',chunk=>{if(done)return;try{parser.push(chunk);}catch{finish('invalid_or_oversized_stream');}});
-   res.on('end',()=>{if(done)return;try{parser.end();}catch{finish('truncated_stream');return;}if(terminalCount===1)finish();else finish('missing_terminal');});
+   res.on('end',()=>{if(done)return;try{parser.end();}catch{finish('truncated_stream');return;}if(terminalCount===1){meta.terminal_eof=true;finish();}else finish('missing_terminal');});
    res.on('error',()=>finish('response_transport_error'));
    res.on('aborted',()=>finish('response_aborted'));
   });
@@ -75,26 +81,29 @@ export function streamRequest(body,key,{request=https.request,deadline=1800000,o
  }catch{finish('request_setup_error');}
  });
 }
-export async function run(key,promptFile,max=32000,dryRun=false){
+export function reasoningEffort(value='max'){if(!['high','xhigh','max'].includes(value))fail('invalid_reasoning_effort');return value;}
+export async function run(key,promptFile,max=32000,dryRun=false,effort='max'){
+ effort=reasoningEffort(effort);
  if(!safe(key)||['__proto__','constructor','prototype'].includes(key))fail('invalid_task_key');
  // Caller provides only pre-reviewed authorized source snippets, tests and deidentified logs.
  if(/(^|\/)\.env(?:\.|$)/.test(promptFile))fail('forbidden_prompt_path');
  const h=await fs.open(promptFile,'r');let raw;try{const st=await h.stat();bounds(st.size,max);raw=Buffer.alloc(st.size+1);let total=0;while(total<raw.length){const {bytesRead}=await h.read(raw,total,raw.length-total,total);if(!bytesRead)break;total+=bytesRead;}const end=await h.stat();if(total!==st.size||end.size!==st.size||end.mtimeMs!==st.mtimeMs)fail('prompt_changed');raw=raw.subarray(0,total);}finally{await h.close();}
- const b=bounds(raw.length,max);const prompt=new TextDecoder('utf-8',{fatal:true}).decode(raw);
- if(dryRun)return {validated:true,task_key:key,...b,requested_model:'gpt-6-astra',requested_service_tier:'fast',reasoning_effort:'max',paid_request_made:false};
+ const b={...bounds(raw.length,max),requested_reasoning_effort:effort};const prompt=new TextDecoder('utf-8',{fatal:true}).decode(raw);
+ if(dryRun)return {validated:true,task_key:key,...b,requested_model:'gpt-6-astra',requested_service_tier:'fast',reasoning_effort:effort,paid_request_made:false};
  const apiKey=process.env.OPENAI_API_KEY;if(!apiKey||/[\r\n]/.test(apiKey))fail('missing_or_invalid_key');
  const admitted=await admit(key,b);if(!admitted.admitted)return admitted;
  console.log(JSON.stringify({task_key:key,status:'admitted',...b}));
- const body=JSON.stringify({tools:[],instructions:'Analyze the supplied authorized project task. Return proposed code changes as JSON patches and test guidance only. Do not execute tools or apply changes.',model:'gpt-6-astra',reasoning:{effort:'max',mode:'standard'},prompt_cache_options:{ttl:'30m'},service_tier:'fast',input:prompt,max_output_tokens:max,stream:true,store:false});
- const result=await streamRequest(body,apiKey,{onCreated:id=>console.log(JSON.stringify({task_key:key,status:'response_created',response_id:id}))});const text=result.text;delete result.text;
+ const body=JSON.stringify({tools:[],instructions:'Analyze the supplied authorized project task. Return proposed code changes as JSON patches and test guidance only. Do not execute tools or apply changes.',model:'gpt-6-astra',reasoning:{effort,mode:'standard'},prompt_cache_options:{ttl:'30m'},service_tier:'fast',input:prompt,max_output_tokens:max,stream:true,store:false});
+ const dir=path.join(ROOT,'outputs');await fs.mkdir(dir,{recursive:true,mode:0o700});
+ const result=await streamRequest(body,apiKey,{onCreated:id=>{persistCreated(path.join(dir,key+'.created.json'),id);console.log(JSON.stringify({task_key:key,status:'response_created',response_id:id}));}});const text=result.text;delete result.text;
+ result.requested_reasoning_effort=effort;
  result.prompt_sha256=createHash('sha256').update(raw).digest('hex');
  const task=await settle(key,result);
- const dir=path.join(ROOT,'outputs');await fs.mkdir(dir,{recursive:true,mode:0o700});
  await fs.writeFile(path.join(dir,key+'.txt'),text,{flag:'wx',mode:0o600});
- await atomic(path.join(dir,key+'.receipt.json'),{task_key:key,...result,accounting_status:task.status});
+ await atomic(path.join(dir,key+'.receipt.json'),{task_key:key,...result,accounting_status:task.accounting_status});
  return {task_key:key,status:task.status,output:path.join(dir,key+'.txt'),receipt:path.join(dir,key+'.receipt.json')};
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
- try{const [cmd,...args]=process.argv.slice(2);let r;if(cmd==='init')r={initialized:!!(await init(STATE,JSON.parse(await fs.readFile(path.join(ROOT,'private-init.json'),'utf8'))))};else if(['run','--validate','dry-run'].includes(cmd)&&args.length>=2)r=await run(args[0],args[1],args[2]===undefined?32000:Number(args[2]),cmd!=='run');else fail('usage_init_or_run_key_prompt_optional_max');console.log(JSON.stringify(r));}
+ try{const [cmd,...args]=process.argv.slice(2);let r;if(cmd==='init')r={initialized:!!(await init(STATE,JSON.parse(await fs.readFile(path.join(ROOT,'private-init.json'),'utf8'))))};else if(['run','--validate','dry-run'].includes(cmd)&&args.length>=2)r=await run(args[0],args[1],args[2]===undefined?32000:Number(args[2]),cmd!=='run',args[3]===undefined?'max':args[3]);else fail('usage_init_or_run_key_prompt_optional_max');console.log(JSON.stringify(r));}
  catch{console.error(JSON.stringify({status:'blocked',reason:'local_validation_or_state_failure_no_retry',hint:'Check CLI arguments, state and filesystem; raw errors suppressed.'}));process.exitCode=1;}
 }
