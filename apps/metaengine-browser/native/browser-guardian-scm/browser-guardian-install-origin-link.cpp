@@ -16,6 +16,7 @@ using detail::InstallOriginFrame;
 using detail::InstallOriginRole;
 constexpr wchar_t kPrefix[] = L"\\\\.\\pipe\\METAENGINEGuardianInstallOriginV1-";
 constexpr DWORD kTimeoutMs = 15'000;
+constexpr DWORD kAvailabilityPollMs = 50;
 constexpr DWORD kClientAccess = FILE_READ_DATA | FILE_WRITE_DATA | FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES | SYNCHRONIZE;
 struct Handle {
     HANDLE value = nullptr;
@@ -76,6 +77,9 @@ struct GuardianInstallOriginLink::State {
 #ifdef METAENGINE_GUARDIAN_INSTALL_ORIGIN_TEST
     std::atomic<unsigned> pending_for_test{0};
     std::atomic<bool> wake_early_for_test{false};
+    // Observation-only latch for a completed real availability wait slice.
+    // Stable through close and never consulted by production decisions.
+    Handle initial_availability_for_test{CreateEventW(nullptr, TRUE, FALSE, nullptr)};
 #endif
 
     bool fail(const char* why, DWORD code = ERROR_SUCCESS) {
@@ -105,11 +109,11 @@ struct GuardianInstallOriginLink::State {
             }
         }
         if (GetOverlappedResult(pipe, operation, bytes, FALSE)) return true;
-        const DWORD error = GetLastError();
+        const DWORD completion_error = GetLastError();
         // A signalled event is not a terminal IRP status. Keep its ORIGINAL
         // stack/event/frame storage alive through cancellation and kernel join.
         if (was_pending && !HasOverlappedIoCompleted(operation)) cancelAndJoinGuardianPipeIo(pipe, operation);
-        SetLastError(error);
+        SetLastError(completion_error);
         return false;
     }
     bool packet(HANDLE pipe, InstallOriginFrame* frame, bool write) {
@@ -130,6 +134,19 @@ struct GuardianInstallOriginLink::State {
         if (!completed) return false;
         if (count != frame->size()) { SetLastError(ERROR_INVALID_DATA); return false; }
         if (!active()) { SetLastError(ERROR_OPERATION_ABORTED); return false; }
+        return true;
+    }
+    bool initialBootstrapLive() {
+        if (!active()) return fail("ORIGINAL_BOOTSTRAP_PIPE_WAIT_CANCELLED", ERROR_OPERATION_ABORTED);
+        const DWORD lifetime = WaitForSingleObject(bootstrap_process.value, 0);
+        if (lifetime != WAIT_TIMEOUT) {
+            const DWORD observed_error = lifetime == WAIT_FAILED ? GetLastError()
+                : lifetime == WAIT_OBJECT_0 ? ERROR_PROCESS_ABORTED : ERROR_INVALID_DATA;
+            return fail(lifetime == WAIT_OBJECT_0 ? "ORIGINAL_BOOTSTRAP_PROCESS_EXITED" : "ORIGINAL_BOOTSTRAP_PROCESS_UNAVAILABLE",
+                observed_error);
+        }
+        if (!origin || !origin->recheck()) return fail("ORIGINAL_COORDINATOR_SCOPE_UNAVAILABLE", ERROR_ACCESS_DENIED);
+        if (!active()) return fail("ORIGINAL_BOOTSTRAP_PIPE_WAIT_CANCELLED", ERROR_OPERATION_ABORTED);
         return true;
     }
     bool bootstrapExact(HANDLE pipe) {
@@ -197,9 +214,45 @@ bool GuardianInstallOriginLink::connectOriginalBootstrap(HANDLE original_bootstr
         (state_->bootstrap_image = image(duplicate)).empty() || WaitForSingleObject(duplicate, 0) != WAIT_TIMEOUT)
         return state_->fail("ORIGINAL_BOOTSTRAP_PROCESS_UNAVAILABLE");
     const std::wstring pipe_name = std::wstring(kPrefix) + state_->routing_id;
-    state_->client_pipe.reset(CreateFileW(pipe_name.c_str(), kClientAccess, 0, nullptr, OPEN_EXISTING,
-        FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION, nullptr));
-    if (!state_->client_pipe.valid()) return state_->fail("ORIGINAL_BOOTSTRAP_PIPE_UNAVAILABLE");
+    // Only initial absence/busy may be polled, on this same route and retained
+    // process. This deadline does NOT bound later I/O or terminal IRP joining.
+    const ULONGLONG deadline = GetTickCount64() + kTimeoutMs;
+    HANDLE waits[] = {state_->cancelled.value, state_->bootstrap_process.value};
+    for (;;) {
+        if (!state_->initialBootstrapLive()) return false;
+        if (GetTickCount64() >= deadline)
+            return state_->fail("ORIGINAL_BOOTSTRAP_PIPE_AVAILABILITY_TIMEOUT", ERROR_TIMEOUT);
+        const HANDLE pipe = CreateFileW(pipe_name.c_str(), kClientAccess, 0, nullptr, OPEN_EXISTING,
+            FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION, nullptr);
+        const DWORD open_error = pipe == INVALID_HANDLE_VALUE ? GetLastError() : ERROR_SUCCESS;
+        state_->client_pipe.reset(pipe);
+        if (state_->client_pipe.valid()) {
+            if (GetTickCount64() >= deadline)
+                return state_->fail("ORIGINAL_BOOTSTRAP_PIPE_AVAILABILITY_TIMEOUT", ERROR_TIMEOUT);
+            break; // Opening any handle permanently ends availability polling.
+        }
+        if (open_error != ERROR_FILE_NOT_FOUND && open_error != ERROR_PIPE_BUSY)
+            return state_->fail("ORIGINAL_BOOTSTRAP_PIPE_UNAVAILABLE", open_error);
+        const ULONGLONG now = GetTickCount64();
+        if (now >= deadline)
+            return state_->fail("ORIGINAL_BOOTSTRAP_PIPE_AVAILABILITY_TIMEOUT", ERROR_TIMEOUT);
+        const ULONGLONG remaining = deadline - now;
+        const DWORD interval = static_cast<DWORD>(remaining < kAvailabilityPollMs ? remaining : kAvailabilityPollMs);
+        const DWORD wait = WaitForMultipleObjects(2, waits, FALSE, interval);
+        const DWORD wait_error = wait == WAIT_FAILED ? GetLastError() : ERROR_OPERATION_ABORTED;
+        if (wait == WAIT_TIMEOUT) {
+#ifdef METAENGINE_GUARDIAN_INSTALL_ORIGIN_TEST
+            if (state_->initial_availability_for_test.valid()) SetEvent(state_->initial_availability_for_test.value);
+#endif
+            continue;
+        }
+        if (wait == WAIT_OBJECT_0)
+            return state_->fail("ORIGINAL_BOOTSTRAP_PIPE_WAIT_CANCELLED", ERROR_OPERATION_ABORTED);
+        if (wait == WAIT_OBJECT_0 + 1)
+            return state_->fail("ORIGINAL_BOOTSTRAP_PROCESS_EXITED", ERROR_PROCESS_ABORTED);
+        return state_->fail("ORIGINAL_BOOTSTRAP_PIPE_WAIT_UNCONFIRMED", wait_error);
+    }
+    if (!state_->initialBootstrapLive()) return false;
     DWORD read_mode = PIPE_READMODE_MESSAGE;
     if (!SetNamedPipeHandleState(state_->client_pipe.value, &read_mode, nullptr, nullptr))
         return state_->fail("INSTALL_ORIGIN_MESSAGE_MODE_UNAVAILABLE");
@@ -328,6 +381,10 @@ std::string GuardianInstallOriginLink::snapshotJson() const {
 std::wstring GuardianInstallOriginLink::routingIdForTest() const {
     std::lock_guard<std::mutex> lock(state_->mutex);
     return state_->routing_id;
+}
+bool GuardianInstallOriginLink::waitForInitialAvailabilityForTest(DWORD timeout_ms) const noexcept {
+    return state_->initial_availability_for_test.valid() &&
+        WaitForSingleObject(state_->initial_availability_for_test.value, timeout_ms) == WAIT_OBJECT_0;
 }
 unsigned GuardianInstallOriginLink::pendingOperationForTest() const noexcept {
     return state_->pending_for_test.load(std::memory_order_acquire);
