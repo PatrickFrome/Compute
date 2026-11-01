@@ -8,7 +8,7 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import { validateUpgradeArguments, makeUpgradeConfigs, assertKeeperIncarnation,
   assertUpgradeReceipt, assertPredecessorImageMatches, stableUpgradeRead, publishOwnerFile, classifyPredecessorBinding, predecessorReadPolicy,
-  completeUpgradeFiles,commitUpgradeAdmission,assertPendingPublication } from '../scripts/qa-owner-runtime-upgrade.mjs';
+  completeUpgradeFiles,commitUpgradeAdmission,assertPendingPublication,readRollbackRuntimeConfig } from '../scripts/qa-owner-runtime-upgrade.mjs';
 import {QA_UPGRADE_ADMISSION_SCHEMA,qaUpgradeAdmissionFile,assertQaUpgradeAdmission} from '../src/local-provider-upgrade-admission.mjs';
 import { INSTALLED_TREE_SCHEMA } from '../scripts/qa-installed-tree-fingerprint.mjs';
 import { QA_IMAGE_SNAPSHOT_SCHEMA } from '../scripts/qa-installed-image-snapshot.mjs';
@@ -217,6 +217,56 @@ async function fixture(t) {
   await fs.writeFile(files.ownerFile,files.oldBytes);await fs.writeFile(files.stagedFile,files.nextBytes);
   return files;
 }
+async function rollbackConfigFixture(t) {
+  const files=await fixture(t),root=path.dirname(files.ownerFile);
+  const config={schema:'compute.runtime-host-config.v1',version:1,bundle_directory:path.join(root,'old-bundle'),
+    expected_bundle_sha256:digest,state_directory:path.join(root,'old-state'),pg_data_directory:path.join(root,'keeper-data'),
+    database_url:'postgresql://qa_api:dummy_api@127.0.0.1:55432/qa_fixture',
+    inspect_database_url:'postgresql://qa_inspect:dummy_inspect@127.0.0.1:55432/qa_fixture',
+    api_port:55433,edge_port:55434,startup_timeout_ms:120000,postgres_mode:'attached',api_role_mode:'direct',
+    expected_cluster_system_identifier:'1234567890123456789'};
+  const bytes=Buffer.from(JSON.stringify(config)+'\n'),proof={backup_config_file:path.join(root,'backup-config.json'),
+    old_config_file:path.join(root,'old-config.json'),old_config_sha256:createHash('sha256').update(bytes).digest('hex')};
+  await fs.writeFile(proof.backup_config_file,bytes);await fs.writeFile(proof.old_config_file,bytes);
+  return {files,config,bytes,proof};
+}
+test('rollback runtime config requires the exact saved and restored predecessor bytes',async t=>{
+  const f=await rollbackConfigFixture(t);
+  assert.deepEqual(await readRollbackRuntimeConfig(f.proof),f.config);
+  assert.deepEqual(await fs.readFile(f.proof.backup_config_file),f.bytes);
+  assert.deepEqual(await fs.readFile(f.proof.old_config_file),f.bytes);
+});
+test('rollback runtime config refuses valid but substituted backup credentials or ports',async t=>{
+  for(const change of [{api_port:55435},{database_url:'postgresql://qa_api:changed_fixture@127.0.0.1:55432/qa_fixture'}]){
+    const f=await rollbackConfigFixture(t);
+    await fs.writeFile(f.proof.backup_config_file,JSON.stringify({...f.config,...change}));
+    await assert.rejects(readRollbackRuntimeConfig(f.proof),/qa_upgrade_backup_changed/);
+    assert.deepEqual(await fs.readFile(f.files.ownerFile),f.files.oldBytes);
+    await assert.rejects(fs.stat(f.files.rollbackFile),{code:'ENOENT'});
+  }
+});
+test('rollback runtime config checks the backup digest before parsing changed JSON',async t=>{
+  const f=await rollbackConfigFixture(t);await fs.writeFile(f.proof.backup_config_file,'{truncated');
+  await assert.rejects(readRollbackRuntimeConfig(f.proof),/qa_upgrade_backup_changed/);
+});
+test('rollback runtime config refuses a changed or missing config used by the restored Owner',async t=>{
+  const f=await rollbackConfigFixture(t);
+  await fs.writeFile(f.proof.old_config_file,JSON.stringify({...f.config,edge_port:55436}));
+  await assert.rejects(readRollbackRuntimeConfig(f.proof),/qa_upgrade_predecessor_config_changed/);
+  await fs.unlink(f.proof.old_config_file);
+  await assert.rejects(readRollbackRuntimeConfig(f.proof),{code:'ENOENT'});
+  assert.deepEqual(await fs.readFile(f.files.ownerFile),f.files.oldBytes);
+});
+test('rollback runtime config rejects a missing digest and aliased saved or restored files',async t=>{
+  const f=await rollbackConfigFixture(t);
+  for(const old_config_sha256 of [undefined,'invalid','0'.repeat(64)])
+    await assert.rejects(readRollbackRuntimeConfig({...f.proof,old_config_sha256}),/qa_upgrade_backup_changed/);
+  for(const key of ['backup_config_file','old_config_file']){
+    const alias=f.proof[key]+'.alias';await fs.link(f.proof[key],alias);
+    await assert.rejects(readRollbackRuntimeConfig(f.proof),/qa_upgrade_path_not_regular/);
+    await fs.unlink(alias);
+  }
+});
 test('atomic publication publishes exact bytes and refuses duplicate or stale predecessor',async t=>{
   const files=await fixture(t);let count=0;
   const receipt=await publishOwnerFile(files,{verifyPublished:async()=>{count++;}});

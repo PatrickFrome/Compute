@@ -124,6 +124,17 @@ export async function stableUpgradeRead(file, maximum=65536) {
   if(a.ino!==b.ino||a.size!==b.size||a.mtimeMs!==b.mtimeMs||a.birthtimeMs!==b.birthtimeMs||bytes.length!==a.size) fail('file_changed');
   return bytes;
 }
+export async function readRollbackRuntimeConfig(proof) {
+  // The saved config supplies keeper/port checks, while the restored Owner
+  // refers to the original config path. Both must still be the exact bytes
+  // pinned by the already verified preparation receipt before any restoration.
+  if(!SHA.test(proof.old_config_sha256||''))fail('backup_changed');
+  const bytes=await stableUpgradeRead(proof.backup_config_file);
+  if(sha(bytes)!==proof.old_config_sha256)fail('backup_changed');
+  const restored=await stableUpgradeRead(proof.old_config_file);
+  if(!restored.equals(bytes))fail('predecessor_config_changed');
+  return validateRuntimeHostConfig(JSON.parse(bytes));
+}
 async function hashFile(file) {
   await physical(file); const h=createHash('sha256');
   for await(const part of createReadStream(file))h.update(part);
@@ -716,10 +727,9 @@ export async function finalizeUpgrade(options){
 export async function recoverUpgrade(options){
   if(process.platform!=='win32')fail('windows_required');
   const {proof,journal}=await pendingUpgrade(options);
-  const bytes=await stableUpgradeRead(proof.backup_config_file);await acl(proof.backup_config_file);
-  if(sha(bytes)!==proof.old_config_sha256)fail('backup_changed');
-  const config=validateRuntimeHostConfig(JSON.parse(bytes));
-  const verify=async()=>{await noBrowser();await pendingCustody(journal);await keeperUnchanged(config,proof.keeper);
+  await acl(proof.backup_config_file);await acl(proof.old_config_file);
+  const config=await readRollbackRuntimeConfig(proof);
+  const verify=async()=>{await noBrowser();await pendingCustody(journal);await readRollbackRuntimeConfig(proof);await keeperUnchanged(config,proof.keeper);
     for(const port of [config.api_port,config.edge_port])await portAbsent(port);};
   await verify();await verifyOperatorNsisSnapshot(proof.predecessor_nsis_snapshot,proof.predecessor_image.package_version);
   const observed=await operatorNsisEffects({mode:'Observe',stateDirectory:proof.state_directory,expectedVersion:proof.predecessor_image.package_version});
@@ -770,9 +780,11 @@ export async function rollbackUpgrade(options) {
   const oldBytes=await stableUpgradeRead(proof.backup_owner_file);await acl(proof.backup_owner_file);
   if(sha(oldBytes)!==proof.old_owner_sha256)fail('backup_changed');
   const current=await stableUpgradeRead(journal.owner_file);if(sha(current)!==journal.new_owner_sha256)fail('rollback_cas_mismatch');
-  const config=validateRuntimeHostConfig(JSON.parse(await stableUpgradeRead(proof.backup_config_file)));
+  await acl(proof.backup_config_file);await acl(proof.old_config_file);
+  const config=await readRollbackRuntimeConfig(proof);
   for(const p of [config.api_port,config.edge_port])await portAbsent(p);await keeperUnchanged(config,proof.keeper);
   const staged=path.join(proof.state_directory,'rollback-owner-'+randomUUID()+'.json');await exclusive(staged,oldBytes);await acl(staged);
+  await readRollbackRuntimeConfig(proof);
   if(!(await stableUpgradeRead(journal.owner_file)).equals(current))fail('rollback_cas_mismatch');
   await fs.rename(staged,journal.owner_file);
   if(!(await stableUpgradeRead(journal.owner_file)).equals(oldBytes))fail('rollback_unconfirmed');

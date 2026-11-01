@@ -12,11 +12,16 @@ export const EMPTY_SCHEMA_FILES = Object.freeze({
   archive: 'canonical-empty-schema.dump',
   manifest: 'canonical-empty-schema-manifest.json',
 });
+// Local implementation files not already bound as schema inputs below. This
+// binds disk/Git bytes, not cached ESM code or the computed external driver.
 export const EMPTY_SCHEMA_EXPORTER_PATHS = Object.freeze([
   'infra/client-state-runtime/test/fresh-schema-disposable.mjs',
   'infra/client-state-runtime/canonical-empty-schema-contract.mjs',
   'infra/client-state-runtime/export-reviewed-empty-schema.mjs',
   'infra/client-state-runtime/owned-postgres-process.mjs',
+  'infra/client-state-runtime/db-api-grants.mjs',
+  'infra/client-state-runtime/attached-postgres-onboarding.mjs',
+  'infra/client-state-runtime/offline-runtime-bundle.mjs',
 ]);
 export const EMPTY_SCHEMA_INPUT_PATHS = Object.freeze([
   'infra/client-state-runtime/fresh-schema-candidate-plan.json',
