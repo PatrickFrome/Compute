@@ -3,6 +3,9 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { verifyForwardArchiveFiles } from './qa-forward-candidate-archive.mjs';
+import { validateEmergencyMaintenanceTrustRoot } from '../src/emergency-maintenance-trust-root.mjs';
 import {
   INSTALLED_RELEASE_ENVELOPE_W68,
   INSTALLED_RELEASE_MANIFEST_W68,
@@ -10,7 +13,7 @@ import {
 } from '../src/installed-executable-provenance-w68.mjs';
 import { RESERVED_PACKAGE_IDENTITIES_W68 } from '../src/client-package-identity-w68.mjs';
 import { RELEASE_FILES_W68, PACKAGE_CODE_FILE_W68, capturePackageCodeW68,
-  verifyPackageCodeW68 } from '../src/installed-package-code-w68.mjs';
+  verifyPackageCodeW68, validatePackageCodeManifestW68 } from '../src/installed-package-code-w68.mjs';
 
 export const RELEASE_PROOF_FILES_W77 = RELEASE_FILES_W68;
 export const RELEASE_PROOF_HANDOFF_SCHEMA_W77 = 'metaengine.browser.release-proof-external-handoff-w77.v2';
@@ -29,6 +32,187 @@ const exact = (value, keys) => object(value) &&
   Object.keys(value).sort().join('\0') === [...keys].sort().join('\0');
 const valid = (value, pattern) => typeof value === 'string' && pattern.test(value);
 const reject = reason => { throw new Error('w77_release_proof_' + reason); };
+const repository = 'PatrickFrome/Compute';
+const producerWorkflow = '.github/workflows/browser-windows-package-smoke.yml';
+const producerBranch = 'physical/build-slsa-provenance-v1';
+const preparedInputs = new WeakMap();
+function positiveId(value) {
+  if ((typeof value !== 'string' && typeof value !== 'number') ||
+      (typeof value === 'number' && !Number.isSafeInteger(value)) ||
+      !/^[1-9][0-9]*$/.test(String(value))) reject('positive_identity');
+  return String(value);
+}
+
+// These paths are the existing builder/offline-runtime layout, not a host
+// discovery list. Presence is necessary but does not qualify dependencies,
+// installation, enrollment or a running service on a clean target machine.
+export function requiredSelfContainedPayloadsW77(version, exeName = 'METAENGINE Browser Test.exe') {
+  if (!valid(version, versionPattern) || RESERVED_PACKAGE_IDENTITIES_W68.includes(version) ||
+      !['METAENGINE Browser Test.exe', 'METAENGINE-Browser.exe'].includes(exeName)) reject('self_contained_version_or_exe');
+  const runtime = 'resources/client-state-runtime/';
+  const postgres = runtime + 'runtime/postgresql/';
+  return Object.freeze({
+    browser_exe: exeName, browser_asar: 'resources/app.asar',
+    codex_job_helper: 'resources/native-coding/codex-cli-job-runner.ps1',
+    offline_manifest: runtime + 'offline-runtime-bundle.json',
+    runtime_host: runtime + 'source/infra/client-state-runtime/runtime-host.mjs',
+    fresh_pg17_initdb: runtime + 'source/infra/client-state-runtime/fresh-pg17-initdb.mjs',
+    bundled_node: runtime + 'runtime/node/node.exe', bundled_deno: runtime + 'runtime/deno/deno.exe',
+    pg17_postgres: postgres + 'bin/postgres.exe', pg17_psql: postgres + 'bin/psql.exe',
+    pg17_initdb: postgres + 'bin/initdb.exe', pg17_pg_ctl: postgres + 'bin/pg_ctl.exe',
+    pg17_pg_config: postgres + 'bin/pg_config.exe', pg17_plpgsql: postgres + 'lib/plpgsql.dll',
+    pg17_catalog: postgres + 'share/postgres.bki',
+    guardian_manifest: 'resources/guardian-native/guardian-native-manifest.json',
+    guardian_service: 'resources/guardian-native/METAENGINEBrowserGuardian.exe',
+    guardian_configurator: 'resources/guardian-native/METAENGINEBrowserGuardianConfigure.exe',
+    guardian_bootstrap_binding: 'resources/guardian-bootstrap/guardian-machine-bootstrap-binding.json',
+    guardian_bootstrap: 'resources/guardian-bootstrap/METAENGINE-Guardian-Bootstrap-' + version + '-x64.exe',
+  });
+}
+
+export function validateRequiredSelfContainedPayloadsW77(manifest, { sourceSha, version,
+  exeName = 'METAENGINE Browser Test.exe' } = {}) {
+  validatePackageCodeManifestW68(manifest, { sourceSha, version, exeName });
+  const roles = requiredSelfContainedPayloadsW77(version, exeName);
+  for (const [role, relative] of Object.entries(roles)) {
+    const entry = manifest.entries.find(row => row.path === relative);
+    if (entry?.kind !== 'file' || entry.size < 1) reject('self_contained_payload_missing_' + role);
+  }
+  return Object.freeze({ scope: 'SOURCE_PAYLOAD_PRESENCE_ONLY', required_roles: roles,
+    // The existing codex-job manifest describes only its process helper.
+    // It declares no delivered Codex/Git executable/dependency role binding.
+    unresolved_role_bindings: Object.freeze(['codex_cli_executable_and_dependencies',
+      'git_executable_and_dependencies']),
+    clean_machine_installation_qualified: false, authority_effect: false });
+}
+
+// Shape checks alone are not GitHub authentication. The production entrypoint
+// below obtains BOTH documents itself through the fixed GitHub CLI GET route.
+export function validateImmutableArtifactBindingW77({ producerRun, artifact,
+  sourceSha, version, runId, attempt, artifactId, archiveSha256 } = {}) {
+  const run = positiveId(runId), tries = positiveId(attempt), id = positiveId(artifactId);
+  if (!valid(sourceSha, sha40) || !valid(archiveSha256, sha256) ||
+      !valid(version, versionPattern) || RESERVED_PACKAGE_IDENTITIES_W68.includes(version)) reject('artifact_identity');
+  if (!object(producerRun) || producerRun.repository?.full_name !== repository ||
+      producerRun.path !== producerWorkflow || producerRun.head_branch !== producerBranch ||
+      producerRun.head_sha !== sourceSha || producerRun.event !== 'push' ||
+      producerRun.status !== 'completed' || producerRun.conclusion !== 'success' ||
+      positiveId(producerRun.id) !== run || positiveId(producerRun.run_attempt) !== tries) reject('artifact_producer');
+  if (!object(artifact) || positiveId(artifact.id) !== id ||
+      artifact.name !== 'metaengine-browser-windows-candidate-' + sourceSha ||
+      artifact.digest !== 'sha256:' + archiveSha256 || artifact.expired !== false ||
+      !object(artifact.workflow_run) || positiveId(artifact.workflow_run.id) !== run ||
+      artifact.workflow_run.head_sha !== sourceSha) reject('artifact_metadata');
+  return Object.freeze({ source_sha: sourceSha, package_version: version,
+    producer_run_id: run, producer_run_attempt: tries, artifact_id: id,
+    artifact_name: artifact.name, archive_sha256: archiveSha256,
+    producer_terminal_success: true, semantic_shape_checked_only: true,
+    cryptographic_verification_claimed: false, authority_effect: false });
+}
+
+// Reuse the existing streaming ZIP parser and complete local-tree readback.
+// This accepts inert bytes in tests and makes no SLSA or signing claim. In the
+// production path its archive pin must first agree with live GitHub metadata.
+export async function verifyImmutableArtifactBytesW77({ archivePath, archiveSha256,
+  candidateRoot, sourceSha, version, runId, attempt } = {}) {
+  if (!valid(sourceSha, sha40) || !valid(version, versionPattern) ||
+      RESERVED_PACKAGE_IDENTITIES_W68.includes(version)) reject('artifact_identity');
+  positiveId(runId); positiveId(attempt);
+  const readback = await verifyForwardArchiveFiles({ archiveFile: archivePath,
+    archiveSha256, directory: candidateRoot });
+  const installerName = 'METAENGINE-Browser-Test-Setup-' + version + '-x64.exe';
+  const required = [installerName, PACKAGE_CODE_FILE_W68,
+    'browser-slsa-provenance/' + RELEASE_PROOF_FILES_W77.bundle,
+    'browser-slsa-provenance/installer-slsa-provenance-receipt.json'];
+  const digests = required.map(name => {
+    const rows = readback.files.filter(row => row[0] === name && row.length === 3);
+    if (rows.length !== 1) reject('artifact_member_missing');
+    return rows[0][2];
+  });
+  const held = [archivePath, candidateRoot, ...readback.files.map(row => path.join(candidateRoot, ...row[0].split('/')))]
+    .map(file => [file, fs.lstatSync(file, { bigint: true })]);
+  const ancestors = new Map();
+  for (const directory of [path.dirname(archivePath), path.dirname(candidateRoot)]) {
+    for (let current = directory;; current = path.dirname(current)) {
+      const stat = fs.lstatSync(current, { bigint: true });
+      if (stat.isSymbolicLink() || !stat.isDirectory()) reject('artifact_ancestor_alias');
+      ancestors.set(current, stat);
+      if (current === path.dirname(current)) break;
+    }
+  }
+  const sameIdentity = (a, b) => a.dev === b.dev && a.ino === b.ino && a.birthtimeNs === b.birthtimeNs;
+  const assertHeld = () => {
+    for (const [file, before] of held) {
+      const after = fs.lstatSync(file, { bigint: true });
+      if (after.isSymbolicLink() || !sameIdentity(before, after) ||
+          before.size !== after.size || before.mtimeNs !== after.mtimeNs ||
+          before.ctimeNs !== after.ctimeNs || before.nlink !== after.nlink ||
+          (before.isFile() ? !after.isFile() || after.nlink !== 1n : !after.isDirectory())) {
+        reject('materialized_file_changed');
+      }
+    }
+    for (const [directory, before] of ancestors) {
+      const after = fs.lstatSync(directory, { bigint: true });
+      if (after.isSymbolicLink() || !after.isDirectory() || !sameIdentity(before, after)) reject('artifact_ancestor_alias');
+    }
+  };
+  const slsaDirectory = path.join(candidateRoot, 'browser-slsa-provenance');
+  let receipt;
+  try { receipt = JSON.parse(checkedFile(path.join(slsaDirectory,
+    'installer-slsa-provenance-receipt.json'), slsaDirectory).toString('utf8').replace(/^\uFEFF/, '')); }
+  catch { reject('producer_receipt_json'); }
+  validateExistingProducerReceiptW77({ receipt, sourceSha, version, installerName,
+    installerSha: digests[0], expectedRunId: runId, expectedAttempt: attempt });
+  assertHeld();
+  const fence = async () => {
+    assertHeld();
+    const after = await verifyForwardArchiveFiles({ archiveFile: archivePath,
+      archiveSha256, directory: candidateRoot });
+    if (after.tree_sha256 !== readback.tree_sha256) reject('artifact_tree_changed');
+    assertHeld();
+  };
+  // The first verifier returns data rather than its retained descriptors.
+  // Recheck after taking our own pins so that the handoff has no unobserved
+  // interval between the shared verifier and this function's custody fence.
+  await fence();
+  return Object.freeze({ archive_sha256: archiveSha256, installer_sha256: digests[0],
+    package_code_sha256: digests[1], bundle_sha256: digests[2], receipt_sha256: digests[3],
+    full_archive_file_membership_verified: true, cryptographic_verification_claimed: false,
+    authority_effect: false, fence });
+}
+
+async function readLiveArtifactBinding({ sourceSha, version, runId, attempt, artifactId, archiveSha256 }) {
+  // Validate before interpolating any path component. Never accept a supplied
+  // API response, alternate hostname, callback verifier, token or API base.
+  positiveId(runId); positiveId(attempt); positiveId(artifactId);
+  const { spawnSync } = await import('node:child_process');
+  const read = endpoint => {
+    const result = spawnSync('gh', ['api', '--hostname', 'github.com', '--method', 'GET',
+      '-H', 'Accept: application/vnd.github+json', '-H', 'X-GitHub-Api-Version: 2022-11-28', endpoint],
+    { encoding: 'utf8', shell: false, windowsHide: true, timeout: 30000,
+      maxBuffer: 2_000_000, stdio: ['ignore', 'pipe', 'pipe'] });
+    if (result.error || result.status !== 0) reject('live_github_metadata');
+    try { return JSON.parse(result.stdout); } catch { reject('live_github_metadata_json'); }
+  };
+  const producerRun = read('repos/' + repository + '/actions/runs/' + positiveId(runId));
+  const artifact = read('repos/' + repository + '/actions/artifacts/' + positiveId(artifactId));
+  const binding = validateImmutableArtifactBindingW77({ producerRun, artifact,
+    sourceSha, version, runId, attempt, artifactId, archiveSha256 });
+  if (!Number.isSafeInteger(artifact.size_in_bytes) || artifact.size_in_bytes < 22 ||
+      !Number.isSafeInteger(producerRun.run_number) || producerRun.run_number < 1) reject('live_github_size_or_run_number');
+  return { binding, size: artifact.size_in_bytes, runNumber: producerRun.run_number };
+}
+
+async function requireIndependentGhCli() {
+  const { spawnSync } = await import('node:child_process');
+  const result = spawnSync('gh', ['attestation', 'verify', '--help'], {
+    encoding: 'utf8', shell: false, windowsHide: true, timeout: 15000,
+    maxBuffer: 100000, stdio: ['ignore', 'pipe', 'pipe'] });
+  if (result.error || result.status !== 0 ||
+      ['--signer-digest', '--source-digest', '--source-ref', '--cert-oidc-issuer',
+        '--deny-self-hosted-runners', '--predicate-type', '--bundle', '--format']
+        .some(flag => !result.stdout?.includes(flag))) reject('gh_attestation_cli_unavailable');
+}
 
 // The W68 consumer signs/verifies domain || JSON.stringify(manifest), in this
 // exact property order. NO key-sorted or user-provided JSON serializer.
@@ -168,7 +352,8 @@ export function probeProductionReleaseProofW77() {
     missing_capabilities: Object.freeze([
       RELEASE_PROOF_SIGNER_BLOCK_W77,
       'EXTERNAL_SIDECAR_INSTALLED_PLACEMENT_UNPROVEN',
-      'IMMUTABLE_VERIFIED_GH_ARTIFACT_BYTES_HANDOFF_NOT_WIRED',
+      'IMMUTABLE_VERIFIED_GH_ARTIFACT_HANDOFF_RUNTIME_NOT_QUALIFIED',
+      'PACKAGED_CODEX_CLI_AND_GIT_ROLE_BINDINGS_NOT_DECLARED',
     ]),
     requires: Object.freeze([
       'existing protected Ed25519 signing capability matching packaged root',
@@ -177,6 +362,11 @@ export function probeProductionReleaseProofW77() {
       'exact final packaged-code inventory and full installed-tree readback',
       'external sidecar receipt installed by reviewed W78 package handoff',
     ]),
+    immutable_artifact_handoff_wired: true,
+    immutable_artifact_handoff_runtime_qualified: false,
+    signing_request_transport_wired: true,
+    self_contained_payload_presence_guard_wired: true,
+    clean_machine_installation_qualified: false,
     production_sidecars_emitted: false,
     installed_authority: false,
     release_authorized: false,
@@ -240,6 +430,7 @@ export function buildPinnedGhVerifyArgsW77({ installer, bundle, sourceSha }) {
     '--repo','PatrickFrome/Compute',
     '--bundle',bundle,
     '--signer-workflow','PatrickFrome/Compute/.github/workflows/browser-windows-package-smoke.yml',
+    '--signer-digest',sourceSha,
     '--source-digest',sourceSha,
     '--source-ref','refs/heads/physical/build-slsa-provenance-v1',
     '--cert-oidc-issuer','https://token.actions.githubusercontent.com',
@@ -251,14 +442,22 @@ export function buildPinnedGhVerifyArgsW77({ installer, bundle, sourceSha }) {
 
 export async function prepareIndependentlyVerifiedReleaseInputsW77({
   candidateRoot, exePath, sourceSha, version, runId, attempt, packagedTrustRoot,
+  artifactId, archivePath, archiveSha256,
 } = {}) {
   if (process.platform !== 'win32') reject('windows_only');
   if (!valid(sourceSha, sha40) || !valid(version, versionPattern) ||
       RESERVED_PACKAGE_IDENTITIES_W68.includes(version) ||
       packagedTrustRoot?.build_sha !== sourceSha) reject('trusted_source_binding');
+  const trustRoot = validateEmergencyMaintenanceTrustRoot(packagedTrustRoot);
+  await requireIndependentGhCli();
   if (!path.isAbsolute(candidateRoot) || path.resolve(candidateRoot) !== candidateRoot ||
       !fs.lstatSync(candidateRoot).isDirectory() ||
       fs.lstatSync(candidateRoot).isSymbolicLink()) reject('candidate_directory');
+  const artifactArguments = { sourceSha, version, runId, attempt, artifactId, archiveSha256 };
+  const liveBefore = await readLiveArtifactBinding(artifactArguments);
+  const archiveBytes = await verifyImmutableArtifactBytesW77({ archivePath, archiveSha256,
+    candidateRoot, sourceSha, version, runId, attempt });
+  if (fs.lstatSync(archivePath).size !== liveBefore.size) reject('artifact_archive_size');
   const installerName = 'METAENGINE-Browser-Test-Setup-' + version + '-x64.exe';
   const installerPath = path.join(candidateRoot,installerName);
   const slsaDir = path.join(candidateRoot,'browser-slsa-provenance');
@@ -281,6 +480,8 @@ export async function prepareIndependentlyVerifiedReleaseInputsW77({
   const packageCode = await verifyPackageCodeW68(exeParent, packageCodeBytes, {
     sourceSha, version, exeName: path.basename(exePath),
   });
+  const payloadPresence = validateRequiredSelfContainedPayloadsW77(packageCode.manifest, {
+    sourceSha, version, exeName: path.basename(exePath) });
   let receipt;
   try { receipt = JSON.parse(receiptBytes.toString('utf8').replace(/^\uFEFF/,'')); }
   catch { reject('receipt_json'); }
@@ -288,6 +489,7 @@ export async function prepareIndependentlyVerifiedReleaseInputsW77({
     receipt,sourceSha,version,installerName,installerSha:digest(installerBytes),
     expectedRunId:runId,expectedAttempt:attempt,
   });
+  if (receipt.run_number !== liveBefore.runNumber) reject('producer_run_number');
   const {spawnSync} = await import('node:child_process');
   const os = await import('node:os');
   const {readWindowsSignedExecutableW60} =
@@ -308,7 +510,6 @@ export async function prepareIndependentlyVerifiedReleaseInputsW77({
         gh.stdout.length < 8 || gh.stdout.length > 2_000_000) reject('independent_gh_slsa_verify');
     fs.writeFileSync(verification,gh.stdout,{flag:'wx',mode:0o600});
     // On Windows file:///C:/... URL pathname has a leading slash; use fileURLToPath.
-    const {fileURLToPath} = await import('node:url');
     const verifierPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
       '../../../scripts/browser-slsa-provenance-verification.mjs');
     const verifierStat = fs.lstatSync(verifierPath);
@@ -351,7 +552,14 @@ export async function prepareIndependentlyVerifiedReleaseInputsW77({
         before.isSymbolicLink() === false && after.isSymbolicLink() === false;
     })) reject('physical_file_or_directory_toctou');
     await packageCode.fence();
-    return Object.freeze({
+    await archiveBytes.fence();
+    const liveAfter = await readLiveArtifactBinding(artifactArguments);
+    if (JSON.stringify(liveBefore) !== JSON.stringify(liveAfter)) reject('live_github_binding_changed');
+    // Metadata reads are asynchronous too; retain the file and tree bindings
+    // through those reads before returning inputs or branding a request.
+    await archiveBytes.fence();
+    await packageCode.fence();
+    const prepared = Object.freeze({
       classification:'VERIFIED_INPUTS_ONLY',
       source_sha:sourceSha, package_version:version,
       exe_sha256:first.installed_exe_sha256,signer_thumbprint:first.signer_thumbprint,
@@ -365,12 +573,88 @@ export async function prepareIndependentlyVerifiedReleaseInputsW77({
       evidence_bytes:Buffer.from(evidenceBytes),
       bundle_bytes:Buffer.from(bundleBytes),
       receipt_sha256:digest(receiptBytes),
+      immutable_artifact: liveAfter.binding,
+      full_archive_file_membership_verified:true,
+      public_key_spki_sha256:trustRoot.public_key_spki_sha256,
+      payload_presence:payloadPresence,
       release_root_signing_available:false,
       production_sidecars_emitted:false,
       installed_placement_verified:false,
       release_authorized:false,authority_effect:false,
     });
+    // Only an actual successful preflight can create a signing request in this
+    // process. A JSON object bearing verified:true cannot enter that boundary.
+    const manifest = { schema: INSTALLED_RELEASE_MANIFEST_W68, source_sha: sourceSha,
+      package_version: version, exe_name: path.basename(exePath),
+      exe_sha256: prepared.exe_sha256, signer_thumbprint: prepared.signer_thumbprint,
+      installer_sha256: prepared.installer_sha256, slsa_bundle_sha256: prepared.slsa_bundle_sha256,
+      slsa_evidence_sha256: prepared.slsa_evidence_sha256, package_code_sha256: prepared.package_code_sha256 };
+    preparedInputs.set(prepared, { manifest: Object.freeze(manifest), root: trustRoot,
+      binding: liveAfter.binding, payloadPresence,
+      fence: async () => { await archiveBytes.fence(); await packageCode.fence(); } });
+    return prepared;
   } finally {
     fs.rmSync(temporary,{recursive:true,force:true});
   }
+}
+
+// A transport contract for the existing protected signer, NOT a signer or a
+// new trusted key. The signer must compare this fingerprint with its existing
+// configured key, sign these exact bytes, and return a detached signature.
+export async function createReleaseRootSigningRequestW77(prepared) {
+  const state = preparedInputs.get(prepared);
+  if (!state) reject('independently_prepared_inputs_required');
+  await state.fence();
+  const payload = serializeReleaseManifestW77(state.manifest);
+  return Object.freeze({ schema: 'metaengine.browser.release-root-signing-request-w77.v1',
+    execution_scope: 'RELEASE_CUSTODY_ONLY',
+    algorithm: 'Ed25519', public_key_spki_sha256: state.root.public_key_spki_sha256,
+    manifest: state.manifest, payload_base64: payload.toString('base64'), payload_sha256: digest(payload),
+    immutable_artifact: state.binding,
+    payload_presence: state.payloadPresence,
+    release_root_signing_available: false, production_sidecars_emitted: false,
+    installed_placement_verified: false, release_authorized: false, authority_effect: false });
+}
+
+// Read-only operator entrypoint. Uses the SAME public key file packaged by the
+// ordinary beforePack hook. No private-key argument, injected signer, API base,
+// fixture switch, artifact resolution by latest, installation or publication.
+export async function runReleaseProofPreflightCliW77(argv) {
+  const names = ['candidate-root', 'exe', 'source-sha', 'version', 'run-id', 'attempt',
+    'artifact-id', 'archive', 'archive-sha256'];
+  const options = {};
+  if (argv.length !== names.length * 2) reject('cli_arguments');
+  for (let i = 0; i < argv.length; i += 2) {
+    const name = argv[i]?.slice(2);
+    if (argv[i] !== '--' + name || !names.includes(name) || Object.hasOwn(options, name) ||
+        typeof argv[i + 1] !== 'string' || !argv[i + 1] || argv[i + 1].startsWith('--')) reject('cli_arguments');
+    options[name] = argv[i + 1];
+  }
+  if (process.platform !== 'win32') reject('windows_only');
+  const publicPath = fileURLToPath(new URL('../build/emergency-maintenance-public-key.pem', import.meta.url));
+  const publicBytes = checkedFile(publicPath, path.dirname(publicPath));
+  if (publicBytes.includes(Buffer.from('PRIVATE KEY'))) reject('public_key_only');
+  const key = crypto.createPublicKey(publicBytes);
+  const root = { schema: 'metaengine.emergency-maintenance-trust-root.v1',
+    build_sha: options['source-sha'], ed25519_public_key_pem: publicBytes.toString('utf8'),
+    public_key_spki_sha256: digest(key.export({ type: 'spki', format: 'der' })) };
+  const prepared = await prepareIndependentlyVerifiedReleaseInputsW77({
+    candidateRoot: options['candidate-root'], exePath: options.exe, sourceSha: options['source-sha'],
+    version: options.version, runId: options['run-id'], attempt: options.attempt,
+    artifactId: options['artifact-id'], archivePath: options.archive,
+    archiveSha256: options['archive-sha256'], packagedTrustRoot: root });
+  return createReleaseRootSigningRequestW77(prepared);
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  runReleaseProofPreflightCliW77(process.argv.slice(2)).then(result => {
+    process.stdout.write(JSON.stringify(result) + '\n');
+  }).catch(error => {
+    // Child process output may contain provider diagnostics or credentials.
+    // Keep it private and return one stable failure code to the operator.
+    const reason = /^w77_release_proof_[a-z0-9_]+$/.test(error?.message || '')
+      ? error.message : 'w77_release_proof_preflight_failed';
+    process.stderr.write(reason + '\n');
+    process.exitCode = 1;
+  });
 }
