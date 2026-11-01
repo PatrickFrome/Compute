@@ -4,6 +4,7 @@ import {createReadStream} from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {promisify} from 'node:util';
+import {openGuardianConnectedPeerNative} from './guardian-connected-peer-native.mjs';
 
 const exec = promisify(execFile);
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
@@ -95,10 +96,11 @@ export function sameRuntimeRecoveryProcess(a,b) {
 }
 
 // main receives an Electron app object, never an executable/PID/shell from IPC.
-// app.relaunch is the actual same-version effect adapter. Returning from it is
-// only a request; success requires the successor's normal-bootstrap readback.
+// The original recovery transaction owns permission. Native connected-peer
+// observation is the first required boundary of the controlled replacement.
+// Until its separate native ARM/receipt prerequisites exist, fail closed here.
 export function createSameExecutableRuntimeRecoveryAdapter({app,beforeRelaunch,readProcess=readRuntimeRecoveryProcess}={}) {
-  if (app?.isPackaged !== true || typeof app.getPath !== 'function' || typeof app.relaunch !== 'function' || typeof app.quit !== 'function'
+  if (app?.isPackaged !== true || typeof app.getPath !== 'function' || typeof app.quit !== 'function'
     || typeof readProcess !== 'function' || typeof beforeRelaunch !== 'function') fail('packaged_app_required');
   async function capture() {
     const executable = await canonicalFile(app.getPath('exe'));
@@ -115,15 +117,19 @@ export function createSameExecutableRuntimeRecoveryAdapter({app,beforeRelaunch,r
   return Object.freeze({capture, readProcess,
     async requestRelaunch(ticket,expected) {
       if (!UUID.test(ticket || '')) fail('relaunch_binding_changed');
-      // Native main coordinates Sentinel's expected transition and its own quit
-      // reason here. That callback supplies no executable/arguments or effect
-      // authority; the durable transaction has already crossed its barrier.
-      await beforeRelaunch(ticket);
       if (!sameRuntimeRecoveryProcess(await capture(),expected)) fail('relaunch_binding_changed');
-      app.relaunch({execPath:expected.executable,args:['--metaengine-runtime-recovery='+ticket]});
-      app.quit();
-      return Object.freeze({schema:'metaengine.browser.runtime-recovery-request.v1',state:'REQUESTED',
-        ticket_id:ticket,successor_ready:false,automatic_retry_allowed:false,authority_effect:false});
+      let peer;
+      try {
+        try {
+          peer=await openGuardianConnectedPeerNative();
+          await peer.recheck();
+        } catch { fail('guardian_connected_peer_unavailable'); }
+        // A diagnostic snapshot/recheck is NOT an ARMED receipt. The next
+        // reviewed stage must consume this original native scope and verify an
+        // exact purpose-bound native ARM before beforeRelaunch or app.quit.
+        // In particular never fall back to app.relaunch on an unavailable peer.
+        fail('controlled_main_launch_prerequisites_unavailable');
+      } finally { if(peer)await peer.close(); }
     },
   });
 }

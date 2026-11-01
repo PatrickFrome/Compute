@@ -258,6 +258,15 @@ async function metaengineGuardianNativeBeforePack(context) {
     throw new Error(`guardian_native_staging_build_failed:${result.status}`);
   }
 
+  // Build-host-only Node-API headers are vendored and hash pinned. The client
+  // receives the native artifact; no end-user compiler, node.exe or PATH lookup.
+  const peerResult = spawnSync(powershell, [
+    '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',
+    path.join(__dirname, 'build-guardian-native-peer.ps1'),
+  ], { cwd: appRoot, stdio: 'inherit', windowsHide: true });
+  if (peerResult.error) throw peerResult.error;
+  if (peerResult.status !== 0) throw new Error(`guardian_native_peer_build_failed:${peerResult.status}`);
+
   const bootstrapResult = spawnSync(powershell, [
     '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',
     path.join(__dirname, 'build-guardian-machine-bootstrap.ps1'),

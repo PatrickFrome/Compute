@@ -13,7 +13,9 @@ test('portable actual atomic primitive distinguishes both deterministic stop/adm
  'guardian_effect_admission_model=PASS; fixture_only=true; windows_effect_execution=UNQUALIFIED\n'));
 test('SCM owns original context and closes it before publishing stop',()=>{
  assert.match(service,/g_effect_owner\.requestStop\(\);[^\n]*\n\s*if \(g_status/);
- assert.match(service,/handleGuardianUpdateActuatorRequest\(request, client, owner, &g_effect_owner.context\(\)\)/);
+ assert.match(service,/GuardianNativeRootSession nativeRootSession\(g_effect_owner.context\(\), g_stop_event\)/);
+ assert.match(service,/nativeRootSession.handleReadRequest\(request, pipe\)/);
+ assert.match(actuator,/handleGuardianUpdateActuatorRequest\(wire, client, owner, &admission_\)/);
  assert.match(header,/const GuardianEffectAdmission\* admission = nullptr/);
  assert.match(actuator,/admission == nullptr \|\| !admission->admit\(\)/);
  assert.match(actuator,/baseResult\("AMBIGUOUS", "SERVICE_EFFECT_ADMISSION_CLOSED"/);

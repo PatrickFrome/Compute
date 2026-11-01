@@ -37,6 +37,15 @@ struct GuardianUpdateActuatorResult {
     bool exact_ready_binding = false;
     bool physical_dispatch_performed = false;
     bool automatic_retry_allowed = false;
+    // Read-only observations. These JSON fields cannot recreate the internal
+    // session/namespace lifetime and are never accepted as launch authority.
+    std::string native_root_custody_reason = "NATIVE_ROOT_NOT_HELD";
+    std::string retained_namespace_sha256;
+    std::string retained_executable_sha256;
+    std::size_t retained_namespace_file_count = 0;
+    bool native_root_custody_held = false;
+    bool retained_release_signature_bound = false;
+    std::string native_root_authenticity_reason = "RELEASE_SIGNATURE_NOT_BOUND";
 };
 
 // Handles one already-read local pipe request. `client` must come from the

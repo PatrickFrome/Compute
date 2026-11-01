@@ -56,6 +56,13 @@
       ]
     },
     {
+      "from": "native-dist/guardian-peer",
+      "to": "guardian-peer",
+      "filter": [
+        "**/*"
+      ]
+    },
+    {
       "from": "native-dist/guardian-bootstrap",
       "to": "guardian-bootstrap",
       "filter": [

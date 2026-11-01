@@ -16,12 +16,13 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $sourceDir = Join-Path $root 'native\browser-guardian-scm'
 $serviceSource = Join-Path $sourceDir 'browser-guardian-scm-service.cpp'
 $actuatorSource = Join-Path $sourceDir 'browser-guardian-update-actuator.cpp'
+$namespaceSource = Join-Path $sourceDir 'browser-guardian-installed-namespace.cpp'
 $ownerObserverSource = Join-Path $sourceDir 'browser-guardian-owner-enrollment-observer.cpp'
 $ownerStoreSource = Join-Path $sourceDir 'browser-guardian-owner-enrollment-store.cpp'
 $ownerReconcilerSource = Join-Path $sourceDir 'browser-guardian-owner-enrollment-reconciler.cpp'
 $ticketClientSource = Join-Path $sourceDir 'browser-guardian-enrollment-ticket-client.cpp'
 $configuratorSource = Join-Path $sourceDir 'browser-guardian-scm-configure.cpp'
-foreach ($path in @($serviceSource,$actuatorSource,$ownerObserverSource,$ownerStoreSource,$ownerReconcilerSource,$ticketClientSource,$configuratorSource)) {
+foreach ($path in @($serviceSource,$actuatorSource,$namespaceSource,$ownerObserverSource,$ownerStoreSource,$ownerReconcilerSource,$ticketClientSource,$configuratorSource)) {
   if (-not (Test-Path $path -PathType Leaf)) { throw "guardian_native_source_missing:$path" }
 }
 
@@ -47,7 +48,7 @@ $configurator = Join-Path $resolvedOut 'METAENGINEBrowserGuardianConfigure.exe'
 # Keep them with the disposable staging outputs, never in the reviewed source.
 Push-Location $resolvedOut
 try {
-$serviceCmd = 'call "{0}" >nul && cl.exe /nologo /std:c++20 /EHsc /MT /W4 /WX /DUNICODE /D_UNICODE "{1}" "{2}" "{3}" "{4}" "{5}" "{6}" /Fe:"{7}" /link advapi32.lib bcrypt.lib shell32.lib ole32.lib userenv.lib wtsapi32.lib winhttp.lib' -f $vcvars,$serviceSource,$actuatorSource,$ownerObserverSource,$ownerStoreSource,$ownerReconcilerSource,$ticketClientSource,$service
+$serviceCmd = 'call "{0}" >nul && cl.exe /nologo /std:c++20 /EHsc /MT /W4 /WX /DUNICODE /D_UNICODE "{1}" "{2}" "{3}" "{4}" "{5}" "{6}" "{7}" /Fe:"{8}" /link advapi32.lib bcrypt.lib shell32.lib ole32.lib userenv.lib wtsapi32.lib winhttp.lib' -f $vcvars,$serviceSource,$actuatorSource,$namespaceSource,$ownerObserverSource,$ownerStoreSource,$ownerReconcilerSource,$ticketClientSource,$service
 & $env:ComSpec /d /s /c $serviceCmd
 if ($LASTEXITCODE -ne 0) { throw "guardian_service_compile_exit_$LASTEXITCODE" }
 $configCmd = 'call "{0}" >nul && cl.exe /nologo /std:c++20 /EHsc /MT /W4 /WX /DUNICODE /D_UNICODE "{1}" /Fe:"{2}" /link advapi32.lib shell32.lib ole32.lib' -f $vcvars,$configuratorSource,$configurator
@@ -71,6 +72,10 @@ if ($actuatorContract.schema -ne 'metaengine.browser-guardian.update-actuator.v1
     -or $actuatorContract.caller_supplied_path_allowed -ne $false `
     -or $actuatorContract.caller_supplied_url_allowed -ne $false `
     -or $actuatorContract.caller_supplied_shell_allowed -ne $false `
+    -or $actuatorContract.native_session_producer_mounted -ne $true `
+    -or $actuatorContract.retained_installed_namespace_observation -ne $true `
+    -or $actuatorContract.native_main_launch_implemented -ne $false `
+    -or $actuatorContract.loaded_runtime_code_attested -ne $false `
     -or $actuatorContract.automatic_retry_allowed -ne $false) {
   throw 'guardian_update_actuator_contract_invalid'
 }
@@ -135,6 +140,9 @@ $manifest = [ordered]@{
   update_actuator_caller_supplied_url_allowed = $false
   update_actuator_caller_supplied_shell_allowed = $false
   update_actuator_self_test_passed = $true
+  native_session_producer_mounted = $true
+  native_main_launch_implemented = $false
+  loaded_runtime_code_attested = $false
   binaries = $binaries
   automatic_retry_allowed = $false
   browser_authority = $false

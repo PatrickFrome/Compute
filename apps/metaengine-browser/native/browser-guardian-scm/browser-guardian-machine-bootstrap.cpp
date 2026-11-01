@@ -6,6 +6,7 @@
 #include <bcrypt.h>
 #include <sddl.h>
 #include <memory>
+#include "browser-guardian-install-origin-link.hpp"
 #include "guardian-bootstrap-binding.hpp" // generated from exact production bytes
 
 namespace {
@@ -233,6 +234,14 @@ int installEmbedded() {
 }
 
 int wmain(int argc, wchar_t** argv) {
+    // A separate bounded observation purpose. It never calls installEmbedded or
+    // interprets routing bytes as original SID/PID/session/release permission.
+    if (argc == 3 && std::wstring_view(argv[1]) == L"--observe-install-origin") {
+        auto origin = metaengine::guardian::GuardianInstallOriginLink::observeBootstrapOrigin(argv[2]);
+        std::cout << origin->snapshotJson() << std::endl;
+        origin->waitForOriginalCoordinatorClose();
+        return 2; // Even a kernel binding remains SOURCE_ONLY/release-unqualified.
+    }
     // Double-click / ShellExecute with no arguments is the explicit UAC install
     // surface used by the packaged Browser. --install remains the deterministic
     // CI harness entry. No caller path, URL, command or arbitrary argument is
