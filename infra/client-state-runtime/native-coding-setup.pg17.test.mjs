@@ -22,7 +22,13 @@ import {SupervisorDeviceIdentity} from '../../apps/metaengine-browser/src/superv
 import {signNativeCodingDeviceRequest} from '../../apps/metaengine-browser/src/native-coding-device-request.mjs';
 import {createNativePreparationTransactions,bindNativeCodingTransactionPool} from './native-coding-preparation-transaction.mjs';
 import {runtimeRecoveryPostgresProof} from './runtime-recovery-postgres-proof.mjs';
+import {readDirectoryIdentity} from './native-coding-fs-identity.mjs';
 import {createNativeCodingHostSetupService} from './native-coding-host-setup-service.mjs';
+import {createNativeCodingSetupMaterializer} from './native-coding-setup-materializer.mjs';
+import {createWorkspaceReservation} from '../../apps/metaengine-browser/src/workspace-manager.mjs';
+import {createManagedTaskProjectSqliteJournal} from '../../apps/metaengine-browser/src/managed-task-project-sqlite-journal.mjs';
+import {createShellFreeGitExecutor} from '../../apps/metaengine-browser/src/managed-task-project-runtime.mjs';
+import {readNativeCodingGitProof} from '../../apps/metaengine-browser/src/native-coding-git-proof.mjs';
 const bin=process.env.METAENGINE_PG_TEST_BIN,driver=process.env.METAENGINE_PG_TEST_DRIVER;
 const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});return{promise,resolve};};
 const tick=()=>new Promise(r=>setImmediate(r));
@@ -122,6 +128,96 @@ test('predescriptor setup uses actual current ADMIN/repository/PG authority with
    gate.resolve();await f.service.drain();assert.equal(effects,0);
    const read=await f.call('READ_NATIVE_SETUP_V1',{workspace_id:f.workspace,operation_id:input.operation_id});assert.equal(read.state,'STOPPED');assert.equal(read.cancellation_requested,true);
   });
+  await t.test('private cold-job scope retains exact immutable operation, actor and custody identities',async()=>{
+   let observed;const f=await fixture({runJob:async scope=>{observed=scope;assert.throws(()=>scope.assertJobDrained(),/job_cleanup_unconfirmed/);return{cleanup_confirmed:true,reason:'EVIDENCE_REQUIRED'};}}),input=await f.input();
+   await f.call('BEGIN_NATIVE_SETUP_V1',input);await f.service.drain();
+   const [row]=await raw.unsafe('select intent,custody_id from destruktion_meta.native_coding_setup_operation_h205f22 where operation_id=$1',[input.operation_id]);
+   assert.equal(observed.operation_id,input.operation_id);assert.equal(observed.custody_id,row.custody_id);assert.deepEqual(observed.input,input);assert.deepEqual(observed.actor,row.intent.actor);
+   for(const value of [observed,observed.input,observed.actor,observed.observation,observed.observation.repository,observed.observation.postgres,observed.observation.postgres.postmaster])assert.equal(Object.isFrozen(value),true);
+   assert.throws(()=>{observed.input.operation_id=randomUUID();},TypeError);assert.throws(()=>{observed.actor.admin_grant_epoch=999;},TypeError);
+   assert.throws(()=>{observed.observation.repository.repo_root='/untrusted';},TypeError);
+   assert.doesNotThrow(()=>observed.assertJobDrained());
+  });
+  await t.test('real own-PG setup hands off to existing Git materializer with no long SQL transaction; native admission/Owner remain fixtures',async()=>{
+   let worker,originalScope,creates=0;const f=await fixture({runJob:scope=>worker(scope)});
+   const env=Object.fromEntries(Object.entries(process.env).filter(([key])=>!/^GIT_/i.test(key)));
+   const git=args=>execFileSync('git',args,{cwd:f.repo,env,stdio:['ignore','pipe','pipe']});
+   git(['init','-q']);await fs.writeFile(path.join(f.repo,'source.txt'),'disposable source\n');git(['add','source.txt']);
+   git(['-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-qm','source']);
+   const source=await readNativeCodingGitProof(f.repo,{env}),claim={coordination_workspace_id:f.workspace,task_id:randomUUID(),claim_id:1,
+    point_id:'setup.materialization',claim_class:'MUTATING',base_sha:source.head,branch_name:'work/setup-'+randomUUID(),agent_id:'agent_'+randomUUID(),
+    tab_id:'tab_'+randomUUID(),target_id:'webcontents:7',agent_generation_epoch:1,lease_generation:1,lease_expires_at:new Date(Date.now()+600000).toISOString()};
+   const binding=createWorkspaceReservation({claim,trusted_repo:{repo_id:'fixture:setup',repo_root:f.repo},workspace_root:f.managedRoot});
+   const request={idempotency_key:'setup:'+randomUUID(),...Object.fromEntries(['coordination_workspace_id','task_id','agent_id','claim_id','lease_generation','workspace_id','workspace_generation'].map(key=>[key,binding[key]]))};
+   const journal=createManagedTaskProjectSqliteJournal({filePath:path.join(f.directory,'effects.sqlite')}),executor=createShellFreeGitExecutor();
+   try{
+    worker=createNativeCodingSetupMaterializer({readAdmittedRequest:async scope=>{originalScope=scope;return{request,source:{head:source.head,artifact_sha256:source.artifact_sha256}};},
+     resolveProjectBinding:async()=>({schema:'metaengine.devos.managed-project-admission.v1',authoritative:true,active:true,
+      device_id:f.d.device_id,client_id:f.d.client_id,admin_grant_epoch:1,claim,workspace_binding:binding,authority_effect:false}),
+     withOwnerCustody:async(_input,effect)=>effect(()=>{}),journal,reserveBinding:async()=>{},finalizeBinding:async()=>{},
+     readSource:({repo_root,signal})=>readNativeCodingGitProof(repo_root,{env,signal}),executePlan:async plan=>{
+      const [activity]=await raw.unsafe("select count(*)::int as n from pg_stat_activity where datname=current_database() and state='idle in transaction'");
+      assert.equal(activity.n,0);assert.throws(()=>originalScope.assertJobDrained(),/job_cleanup_unconfirmed/);
+      if(plan.effect==='WORKTREE_CREATE_LOCKED')creates++;return executor.execute(plan);
+     }});
+    const input=await f.input();await f.call('BEGIN_NATIVE_SETUP_V1',input);await f.service.drain();
+    assert.equal(creates,1);assert.equal(await fs.readFile(path.join(binding.worktree_path,'source.txt'),'utf8'),'disposable source\n');
+    const done=await f.call('READ_NATIVE_SETUP_V1',{workspace_id:f.workspace,operation_id:input.operation_id});
+    assert.equal(done.state,'HOLD');assert.equal(done.reason,'EVIDENCE_REQUIRED');assert.equal(done.cleanup_state,'DRAINED');assert.equal(done.prepared,false);
+    assert.doesNotThrow(()=>originalScope.assertJobDrained());
+    assert.equal(worker.takeJobDrain(originalScope),null,'SQL DRAINED plus a genuine worktree cannot replace the absent native completed-job producer');
+    f.restart();assert.deepEqual(await f.call('BEGIN_NATIVE_SETUP_V1',input),done);assert.equal(creates,1);assert.equal(f.begins,1);
+   }finally{await journal.close();}
+  });
+  for(const failure of ['lost_ack','before_sql'])await t.test('authenticated CANCEL '+failure+' aborts a signal-only worker and joins original custody',async()=>{
+   const entered=deferred(),release=deferred();let signal,calls=0;
+   const f=await fixture({runJob:async scope=>{calls++;signal=scope.signal;entered.resolve();await Promise.race([release.promise,new Promise(resolve=>{if(signal.aborted)resolve();else signal.addEventListener('abort',resolve,{once:true});})]);return{cleanup_confirmed:true,reason:'EVIDENCE_REQUIRED'};}}),input=await f.input();
+   await f.call('BEGIN_NATIVE_SETUP_V1',input);await entered.promise;
+   const [before]=await raw.unsafe('select intent,custody_id from destruktion_meta.native_coding_setup_operation_h205f22 where operation_id=$1',[input.operation_id]);
+   if(failure==='lost_ack')f.lose('CANCEL');else f.fail('CANCEL');
+   try{
+    await assert.rejects(f.call('CANCEL_NATIVE_SETUP_V1',{workspace_id:f.workspace,operation_id:input.operation_id}),failure==='lost_ack'?/ACK lost/:/before terminal dispatch/);
+    assert.equal(signal.aborted,true,'local authorized cancellation must not depend on a SQL acknowledgement');
+   }finally{release.resolve();await f.service.drain();}
+   const [after]=await raw.unsafe('select intent,custody_id,state,reason,cleanup_state from destruktion_meta.native_coding_setup_operation_h205f22 where operation_id=$1',[input.operation_id]);
+   assert.deepEqual(after.intent,before.intent);assert.equal(after.custody_id,before.custody_id);assert.equal(after.state,'STOPPED');assert.equal(after.reason,'CANCELLED');assert.equal(after.cleanup_state,'DRAINED');
+   assert.equal((await f.call('BEGIN_NATIVE_SETUP_V1',input)).state,'STOPPED');assert.equal(calls,1);assert.equal(f.begins,1);
+  });
+  await t.test('another authenticated actor cannot abort the original local setup custody',async()=>{
+   const entered=deferred(),release=deferred();let signal;
+   const f=await fixture({runJob:async scope=>{signal=scope.signal;entered.resolve();await release.promise;return{cleanup_confirmed:true,reason:'EVIDENCE_REQUIRED'};}}),g=await fixture(),input=await f.input();
+   await f.call('BEGIN_NATIVE_SETUP_V1',input);await entered.promise;
+   try{
+    const packet=await g.packet('CANCEL_NATIVE_SETUP_V1',{workspace_id:f.workspace,operation_id:input.operation_id});
+    await assert.rejects(f.service.operations.CANCEL_NATIVE_SETUP_V1(packet));assert.equal(signal.aborted,false);
+    await assert.rejects(f.call('CANCEL_NATIVE_SETUP_V1',{workspace_id:g.workspace,operation_id:input.operation_id}));assert.equal(signal.aborted,false);
+   }finally{release.resolve();await f.service.drain();}
+  });
+  await t.test('changed preflight roots before producer entry publish JOB_FAILED with unused custody drained',async()=>{
+   let calls=0;const f=await fixture({runJob:async()=>{calls++;return{cleanup_confirmed:true,reason:'EVIDENCE_REQUIRED'};}}),input=await f.input();
+   f.after(async action=>{if(action==='CLAIM'){await fs.rename(f.managedRoot,f.managedRoot+'-retained');await fs.mkdir(f.managedRoot);}});
+   await f.call('BEGIN_NATIVE_SETUP_V1',input);await f.service.drain();assert.equal(calls,0);assert.equal(f.service.snapshot().active_jobs,0);
+   const [row]=await raw.unsafe('select state,reason,cleanup_state from destruktion_meta.native_coding_setup_operation_h205f22 where operation_id=$1',[input.operation_id]);
+   assert.deepEqual(row,{state:'HOLD',reason:'JOB_FAILED',cleanup_state:'DRAINED'});
+   const read=await f.call('READ_NATIVE_SETUP_V1',{workspace_id:f.workspace,operation_id:input.operation_id});assert.equal(read.reason,'JOB_FAILED');assert.equal(read.prepared,false);
+  });
+  await t.test('cancelled preflight never enters producer and settles only its unused physical custody',async()=>{
+   const entered=deferred(),release=deferred();let reads=0,calls=0;
+   const f=await fixture({readRootIdentity:async root=>{if(++reads===4){entered.resolve();await release.promise;}return readDirectoryIdentity(root);},runJob:async()=>{calls++;return{cleanup_confirmed:true,reason:'EVIDENCE_REQUIRED'};}}),input=await f.input();
+   // Reset after input discovery: BEGIN uses three reads, then block only the
+   // actual post-CLAIM preflight, never admission.
+   reads=0;
+   await f.call('BEGIN_NATIVE_SETUP_V1',input);await entered.promise;
+   try{await f.call('CANCEL_NATIVE_SETUP_V1',{workspace_id:f.workspace,operation_id:input.operation_id});}finally{release.resolve();}
+   await f.service.drain();assert.equal(calls,0);assert.equal(f.service.snapshot().active_jobs,0);
+   const [row]=await raw.unsafe('select state,reason,cleanup_state from destruktion_meta.native_coding_setup_operation_h205f22 where operation_id=$1',[input.operation_id]);assert.deepEqual(row,{state:'STOPPED',reason:'CANCELLED',cleanup_state:'DRAINED'});
+  });
+  await t.test('producer rejection after entry remains physical HOLD without synthesizing a drained terminal',async()=>{
+   const f=await fixture({runJob:async()=>{throw Error('fixture producer outcome unknown');}}),input=await f.input();
+   await f.call('BEGIN_NATIVE_SETUP_V1',input);await assert.rejects(f.service.drain(),/cleanup_unconfirmed/);assert.equal(f.service.snapshot().active_jobs,1);
+   const [row]=await raw.unsafe('select state,cleanup_state from destruktion_meta.native_coding_setup_operation_h205f22 where operation_id=$1',[input.operation_id]);assert.deepEqual(row,{state:'RUNNING',cleanup_state:'HOLD'});
+   const read=await f.call('READ_NATIVE_SETUP_V1',{workspace_id:f.workspace,operation_id:input.operation_id});assert.equal(read.reason,'CLEANUP_UNCONFIRMED');assert.equal(read.cleanup_state,'HOLD');
+  });
   await t.test('current grant is rechecked before a later fixture effect, not an expired request boolean',async()=>{
    const gate=deferred(),entered=deferred();let effects=0;
    const f=await fixture({runJob:async scope=>{entered.resolve();await gate.promise;try{await scope.revalidate();effects++;}catch{}return{cleanup_confirmed:true,reason:'EVIDENCE_REQUIRED'};}}),input=await f.input();await f.call('BEGIN_NATIVE_SETUP_V1',input);await entered.promise;
@@ -139,8 +235,9 @@ test('predescriptor setup uses actual current ADMIN/repository/PG authority with
   });
   await t.test('swallowed private physical HOLD cannot be cleared by a producer cleanup boolean',async()=>{
    const {markNativePhysicalSettlementUnconfirmed}=await import('../../apps/metaengine-browser/src/native-coding-host-settlement.mjs');
-   const f=await fixture({runJob:async()=>{try{throw markNativePhysicalSettlementUnconfirmed(Error('fixture unconfirmed resource'));}catch{}return{cleanup_confirmed:true,reason:'EVIDENCE_REQUIRED'};}}),input=await f.input();
+   let originalScope;const f=await fixture({runJob:async scope=>{originalScope=scope;try{throw markNativePhysicalSettlementUnconfirmed(Error('fixture unconfirmed resource'));}catch{}return{cleanup_confirmed:true,reason:'EVIDENCE_REQUIRED'};}}),input=await f.input();
    await f.call('BEGIN_NATIVE_SETUP_V1',input);await assert.rejects(f.service.drain(),/cleanup_unconfirmed/);
+   assert.throws(()=>originalScope.assertJobDrained(),/job_cleanup_unconfirmed/);
    const read=await f.call('READ_NATIVE_SETUP_V1',{operation_id:input.operation_id,workspace_id:f.workspace});assert.equal(read.state,'HOLD');assert.equal(read.reason,'CLEANUP_UNCONFIRMED');assert.equal(f.service.snapshot().active_jobs,1);
   });
   await t.test('terminal publication failure after physical drain is durable HOLD, never stale local RUNNING',async()=>{
