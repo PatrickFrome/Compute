@@ -19,7 +19,8 @@ const freeze=value=>{if(value&&typeof value==='object'){for(const item of Object
 export function codexCliPermissionOverrides(mode) {
   if(!modeValid(mode))fail('mode_invalid');
   return ['-c','windows.sandbox="elevated"','-c',`sandbox_mode="${mode}"`,
-    '-c','sandbox_workspace_write.writable_roots=[]','-c','sandbox_workspace_write.network_access=false'];
+    '-c','sandbox_workspace_write.writable_roots=[]','-c','sandbox_workspace_write.network_access=false',
+    '-c','allow_login_shell=false'];
 }
 
 // Bind the actual invocation without persisting environment values, which may
