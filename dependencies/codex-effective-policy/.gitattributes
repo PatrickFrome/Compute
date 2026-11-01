@@ -1,0 +1,3 @@
+# Unified diffs encode an unchanged blank line as a context-space. The prepared
+# Rust checkout is independently checked with git diff --check.
+upstream.patch whitespace=-blank-at-eol
