@@ -9,7 +9,7 @@ import { StringDecoder } from 'node:string_decoder';
 import { CODEX_CLI_RUN_RECEIPT_SCHEMA, codexCliResultSchema, validateCodexCliResult } from './codex-cli-result-schema.mjs';
 import { protectOwnerOnlyWindowsDirectory, verifyOwnerOnlyWindowsStorage } from './private-windows-storage-acl.mjs';
 import {isNativeCodingAgentMcpLaunch} from './native-coding-agent-mcp-launch.mjs';
-import {codexCliPermissionOverrides,captureCodexCliPhysicalScope,codexCliInvocationFingerprint} from './codex-cli-execution-policy.mjs';
+import {codexCliPermissionOverrides,captureCodexCliPhysicalScope,codexCliInvocationFingerprint,assertCodexCliPolicyBindings,assertCodexCliHomeEnvAbsent,validateCodexCliEffectivePolicy} from './codex-cli-execution-policy.mjs';
 import {readDirectoryIdentity} from './native-coding-fs-identity.mjs';
 
 const SHA = /^[a-f0-9]{64}$/; const HEAD = /^[a-f0-9]{40}$/;
@@ -44,15 +44,16 @@ export function codexCliTemporaryEnvironment(environment, temporaryPath) {
   return { ...clean, TEMP: temporaryPath, TMP: temporaryPath, TMPDIR: temporaryPath };
 }
 
-export function buildCodexCliArgv({ role, worktreePath, schemaPath, resultPath, model = null }) {
+export function buildCodexCliArgv({ role, worktreePath, schemaPath, resultPath, model = null, policyNonce, promptSha256 }) {
   if (!['IMPLEMENTER', 'CRITIC'].includes(role)) throw fail('role_invalid');
   for (const value of [worktreePath, schemaPath, resultPath]) if (!path.isAbsolute(value || '')) throw fail('argv_absolute_path_required');
   if (model !== null && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(model)) throw fail('model_invalid');
+  if (typeof policyNonce !== 'string' || !SHA.test(policyNonce) || typeof promptSha256 !== 'string' || !SHA.test(promptSha256)) throw fail('policy_binding_required');
   return ['-a', 'never', '--no-daemon', ...codexCliPermissionOverrides(role === 'CRITIC' ? 'read-only' : 'workspace-write'),
     'exec', '--ignore-user-config',
     '--sandbox', role === 'CRITIC' ? 'read-only' : 'workspace-write', '--json', '--color', 'never',
     ...(model ? ['--model', model] : []), '--output-schema', schemaPath, '--output-last-message', resultPath,
-    '-C', worktreePath, '-'];
+    '-C', worktreePath, '--metaengine-effective-policy', policyNonce, '--metaengine-prompt-sha256', promptSha256, '-'];
 }
 
 async function boundedRead(file, maxBytes) {
@@ -62,6 +63,12 @@ async function boundedRead(file, maxBytes) {
   try { const after = await handle.stat(); if (after.ino !== stat.ino || after.size !== stat.size) throw fail('file_changed_during_read');
     const bytes = await handle.readFile(); if (bytes.length > maxBytes) throw fail('file_too_large'); return bytes;
   } finally { await handle.close(); }
+}
+
+async function durablePolicyRecord(file, bytes) {
+  const handle = await fs.open(file, 'wx', 0o600);
+  try { await handle.writeFile(bytes); await handle.sync(); }
+  finally { await handle.close(); }
 }
 
 async function executableDigest(file) {
@@ -217,8 +224,19 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
       return { root, gitDir };
   };
   const checkOpen = row => {
+    if ((row.deadlineMs ?? Infinity) <= Date.now()) throw fail('prepared_deadline_expired');
     if (row.fenced || row.signal?.aborted) throw fail('prepared_run_cancelled');
     if (Math.min(Date.parse(row.permit.expires_at), row.effectiveExpiry ?? Infinity) <= Date.now()) throw fail('prepared_lease_expired');
+  };
+  const refreshPermit = (row, value) => {
+    const fresh = structuredClone(authorized(value, row.binding, row.root));
+    if (['permit_id', 'owner_epoch', 'user_sid', 'workspace_id', 'project_id'].some(key => fresh[key] !== row.permit[key]))
+      throw fail('prepared_lease_changed');
+    row.effectiveExpiry = Math.min(Date.parse(row.permit.expires_at), row.effectiveExpiry ?? Infinity, Date.parse(fresh.expires_at));
+    row.deadlineMs = Math.min(row.deadlineMs, row.effectiveExpiry);
+    row.receipt.execution_deadline = new Date(row.deadlineMs).toISOString();
+    row.armDeadline?.(); checkOpen(row);
+    return { ...fresh, expires_at: new Date(row.effectiveExpiry).toISOString() };
   };
   const captureScope = (root,role,signal) => captureCodexCliPhysicalScope({cliPath:executablePath,codexHome,
     scratchRoot:workerTempRoot,workspaceRoot:root,mode:role==='CRITIC'?'read-only':'workspace-write',
@@ -343,22 +361,31 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
     row.state = 'RUNNING'; // Consume before the first await: duplicates cannot join/replay a launch.
     try {
       if (row.result) return structuredClone(row.result);
+      checkOpen(row);
+      row.policyNonce = crypto.randomBytes(32).toString('hex');
+      row.deadlineMs = Math.min(Date.now() + timeoutMs, Date.parse(row.permit.expires_at));
+      row.receipt.policy_nonce = row.policyNonce;
+      row.receipt.input_protocol = 'EFFECTIVE_POLICY_ACK_V1';
+      row.receipt.execution_deadline = new Date(row.deadlineMs).toISOString();
+      const expire = () => { row.stopReason ||= 'TIMEOUT'; row.fenced = true; row.abort.abort(); };
+      row.armDeadline = () => {
+        clearTimeout(row.deadlineTimer);
+        const remaining = row.deadlineMs - Date.now();
+        if (remaining <= 0) expire(); else row.deadlineTimer = setTimeout(expire, remaining);
+      };
+      row.armDeadline();
       await verifyPrepared(row);
-      const fresh = structuredClone(authorized(await authorizeLease({ phase: 'BEFORE_PREPARED_RUN',
-        binding: row.binding, worktreePath: row.root, run_id: row.runId }), row.binding, row.root));
-      if (['permit_id', 'owner_epoch', 'user_sid', 'workspace_id', 'project_id'].some(key => fresh[key] !== row.permit[key]))
-        throw fail('prepared_lease_changed');
-      fresh.expires_at = new Date(Math.min(Date.parse(row.permit.expires_at), Date.parse(fresh.expires_at))).toISOString();
-      row.effectiveExpiry = Date.parse(fresh.expires_at);
+      const fresh = refreshPermit(row, await authorizeLease({ phase: 'BEFORE_PREPARED_RUN',
+        binding: row.binding, worktreePath: row.root, run_id: row.runId }));
       await verifyPrepared(row);
       return await executePrepared(row, fresh);
-    } finally { row.state = 'CONSUMED'; }
+    } finally { clearTimeout(row.deadlineTimer); row.armDeadline = null; row.state = 'CONSUMED'; }
   };
   const executePrepared = async (row, permit) => {
       const { request, binding, role, root, before, subject, directory, schemaPath, resultPath,
         runId, receipt, callbackJournal, signal } = row;
       let handle = null, agentBridge=null, abortReason = null, eventError = null, outputBytes = 0, eventCount = 0, threadId = null,
-        completedTurns = 0, failedTurns = 0, pending = '', timer = null, processResult = null, launch=null, bridgeDrained=false,bridgeClose=null;
+        completedTurns = 0, failedTurns = 0, pending = '', processResult = null, launch=null, bridgeDrained=false,bridgeClose=null;
       const decoder = new StringDecoder('utf8'); const stdoutHash = crypto.createHash('sha256');
       const stderrHash = crypto.createHash('sha256');
       const stdoutFile = await fs.open(path.join(directory, 'events.jsonl'), 'wx', 0o600);
@@ -366,8 +393,13 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
       let writes = Promise.resolve();
       const closeBridge=()=>{if(!bridgeClose){let resolveClose,rejectClose;bridgeClose=new Promise((resolve,reject)=>{resolveClose=resolve;rejectClose=reject;});
         void bridgeClose.catch(()=>{});void(async()=>{await agentBridge?.close();})().then(resolveClose,rejectClose);}return bridgeClose;};
-      const terminate = reason => { abortReason ||= reason; if(agentBridge)void closeBridge().catch(()=>{});if (handle) void handle.terminate(reason).catch(() => {}); };
-      const onAbort = () => terminate('CANCELLED');
+      const terminate = reason => {
+        abortReason ||= reason; row.fenced = true;
+        if (!row.abort.signal.aborted) row.abort.abort();
+        if (agentBridge) void closeBridge().catch(() => {});
+        if (handle) void handle.terminate(abortReason).catch(() => {});
+      };
+      const onAbort = () => terminate(row.stopReason || abortReason || 'CANCELLED');
       const parseLine = line => {
         if (!line.trim()) return;
         if (Buffer.byteLength(line) > 256 * 1024) throw fail('event_line_too_large');
@@ -394,7 +426,10 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
           } catch { eventError ||= 'JSONL_INVALID'; terminate(eventError); }
         }
       };
+      signal?.addEventListener('abort', onAbort, { once: true });
+      if (signal?.aborted) onAbort();
       try {
+        checkOpen(row);
         // Never grant the CLI sandbox write access to the shared Windows Temp,
         // journal, auth directory, or any repository-controlled temp location.
         await verifyExecutionScope(row);
@@ -425,14 +460,16 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
         row.pins.push(...await pinParents(temporaryPath));
         const verifyLaunchScope=async()=>{
           await verifyExecutionScope(row);
+          await assertCodexCliHomeEnvAbsent(codexHome,{signal});
           if((await verifyTemporaryStorage(temporaryPath,{operation:'VERIFY_DIRECTORY',signal}))?.owner_dacl_verified!==true)
             throw fail('temporary_storage_unverified');
           await verifyPins(row.pins);checkOpen(row);
         };
-        const deadlineAt = new Date(Math.min(Date.now() + timeoutMs, Date.parse(permit.expires_at))).toISOString();
+        const deadlineAt = new Date(row.deadlineMs).toISOString();
         receipt.execution_deadline = deadlineAt;
         await durableJson(schemaPath, codexCliResultSchema(role, subject?.result_sha256));
-        const args = buildCodexCliArgv({ role, worktreePath: root, schemaPath, resultPath, model });
+        const args = buildCodexCliArgv({ role, worktreePath: root, schemaPath, resultPath, model,
+          policyNonce: row.policyNonce, promptSha256: receipt.prompt_sha256 });
         let launchEnvironment=codexCliTemporaryEnvironment(env,temporaryPath);
         checkOpen(row); await verifyPins(row.pins);
         if(prepareAgentBridge){
@@ -441,10 +478,11 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
             ||typeof agentBridge.close!=='function'||agentBridge.launch.metadata.run_id!==runId)throw fail('agent_bridge_unverified');
           args.unshift(...agentBridge.launch.argv);launchEnvironment=agentBridge.launch.createEnvironment(launchEnvironment);
         }
-        timer = setTimeout(() => terminate('TIMEOUT'), timeoutMs + 30000);
-        signal?.addEventListener('abort', onAbort, { once: true });
-        if (signal?.aborted) throw fail('cancelled_before_spawn');
-        const spec={executablePath,expectedExecutableSha256,args,cwd:root,env:launchEnvironment,timeoutMs,deadlineAt,runId,binding,promptSha256:receipt.prompt_sha256};
+        checkOpen(row);
+        const spec=Object.freeze({executablePath,expectedExecutableSha256,args:Object.freeze([...args]),cwd:root,
+          env:Object.freeze({...launchEnvironment}),timeoutMs,deadlineAt,runId,binding,
+          inputProtocol:'EFFECTIVE_POLICY_ACK_V1',policyNonce:row.policyNonce,promptSha256:receipt.prompt_sha256});
+        assertCodexCliPolicyBindings(spec);
         await verifyLaunchScope();
         receipt.invocation_sha256=codexCliInvocationFingerprint(spec);
         receipt.invocation_binding='INTENDED_ONLY';
@@ -456,6 +494,9 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
         await verifyLaunchScope();
         handle = await processController.spawn({...spec,launch});
         handle.stdout.on('data', data => output('stdout', data)); handle.stderr.on('data', data => output('stderr', data));
+        // Cancellation may have happened while spawn still owned its readiness
+        // observation. Fence the returned handle, but retain its proof and join.
+        if (abortReason || signal?.aborted || row.fenced) terminate(row.stopReason || abortReason || 'CANCELLED');
         const proof = handle.proof;
         if (!proof || proof.tree_control_bound !== true || proof.started_suspended !== true || proof.user_sid !== permit.user_sid
           || proof.executable_sha256 !== expectedExecutableSha256 || !/^pid:[1-9][0-9]*:created_100ns:[1-9][0-9]{16,18}$/.test(proof.process_incarnation_id || '')) throw fail('native_process_proof_invalid');
@@ -464,17 +505,62 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
         receipt.job_id = proof.job_id;
         await durableJson(path.join(directory, 'process.json'), receipt, true);
         checkOpen(row);
-        const recheck = authorized(await authorizeLease({ phase: 'BEFORE_RESUME', binding, worktreePath: root,
+        if (typeof handle.bootstrap !== 'function' || typeof handle.acceptPolicy !== 'function') throw fail('policy_transport_required');
+        refreshPermit(row, await authorizeLease({ phase: 'BEFORE_RESUME', binding, worktreePath: root,
           process: structuredClone(proof), run_id: runId, temporary_path: temporaryPath,
-          temporary_storage_evidence_sha256: receipt.temporary_storage_evidence_sha256 }), binding, root);
-        if (recheck.permit_id !== permit.permit_id || recheck.owner_epoch !== permit.owner_epoch || abortReason || signal?.aborted) throw fail('lease_changed_before_resume');
+          temporary_storage_evidence_sha256: receipt.temporary_storage_evidence_sha256 }));
         await agentBridge?.bindRun(structuredClone(proof));
         await verifyLaunchScope();
-        if(abortReason||signal?.aborted)throw fail('cancelled_before_resume');
         receipt.state = 'EXECUTION_STARTED';
-        receipt.execution_deadline = new Date(Math.min(Date.parse(deadlineAt), Date.parse(recheck.expires_at))).toISOString();
+        receipt.policy_transport = 'BOOTSTRAP_PENDING';
         await durableJson(path.join(directory, 'execution-started.json'), receipt, true);
-        await handle.resume(request.prompt, { deadlineAt: receipt.execution_deadline });
+        await verifyLaunchScope();
+        // The controller owns empty OPEN stdin, framing and reserved-record
+        // exclusion. Never reconstruct this packet or call legacy resume.
+        const bootstrapDeadline = receipt.execution_deadline;
+        const returned = await handle.bootstrap({ deadlineAt: bootstrapDeadline });
+        const raw = Buffer.isBuffer(returned) ? Buffer.from(returned) : returned;
+        checkOpen(row);
+        const observation = validateCodexCliEffectivePolicy(raw, { ...spec, role, codexHome, journalRoot,
+          scratchRoot: workerTempRoot, temporaryPath,agentMcpArgv:agentBridge?.launch.argv??[] });
+        await verifyLaunchScope();
+        // Reuse the implemented live binding check, not another ATTEMPTED/SQL
+        // reservation or a new authority phase. Late success cannot lift a fence.
+        refreshPermit(row, await authorizeLease({ phase: 'BEFORE_PREPARED_RUN', binding, worktreePath: root, run_id: runId }));
+        // The running native watchdog is fixed at BOOTSTRAP. This transport has
+        // no authenticated deadline-shortening command, so a later shortened
+        // lease must refuse task delivery rather than rely only on a JS timer.
+        if(row.deadlineMs<Date.parse(bootstrapDeadline))throw fail('policy_deadline_shortened_after_bootstrap');
+        await verifyLaunchScope();
+        const recordPath = path.join(directory, 'effective-policy-record.json');
+        const commitPath = path.join(directory, 'effective-policy-commit.json');
+        await durablePolicyRecord(recordPath, raw);
+        receipt.effective_policy = {
+          schema: observation.schema, decision: 'ACK_COMMIT_INTENDED', authority_effect: false, automatic_retry_allowed: false,
+          raw_record: 'effective-policy-record.json', raw_sha256: observation.raw_sha256, raw_bytes: observation.raw_bytes,
+          nonce: observation.nonce, context_id: observation.context_id, upstream_commit: observation.upstream_commit,
+          run_id: runId, launch_identity: receipt.launch_identity, lease_binding: binding,
+          permit_id: receipt.permit_id, owner_epoch: receipt.owner_epoch,
+          process_incarnation_id: receipt.process_incarnation_id, job_id: receipt.job_id,
+          prompt_sha256: receipt.prompt_sha256, executable_sha256: expectedExecutableSha256, cwd: root,
+          invocation_sha256: receipt.invocation_sha256, launch_deadline_at: spec.deadlineAt,
+          execution_deadline: receipt.execution_deadline, execution_scope_sha256: hash(JSON.stringify(row.executionScope)),
+          temporary_path: temporaryPath, temporary_identity_sha256: receipt.temporary_identity_sha256,
+          temporary_storage_evidence_sha256: receipt.temporary_storage_evidence_sha256,
+        };
+        await durableJson(commitPath, receipt.effective_policy, true);
+        row.pins.push(await physicalPin(recordPath, 'file'), await physicalPin(commitPath, 'file'));
+        await verifyLaunchScope();
+        if (hash(await boundedRead(recordPath, 65536)) !== observation.raw_sha256) throw fail('policy_record_changed');
+        await assertCodexCliHomeEnvAbsent(codexHome, { signal });
+        checkOpen(row);
+        receipt.policy_transport = 'ACK_OR_PROMPT_DELIVERY_UNCONFIRMED';
+        receipt.possible_task_activation = true;
+        // Native ACK-written and prompt-written/EOF notifications, not a JS
+        // write callback, settle this one-shot input operation. Never replay it.
+        await handle.acceptPolicy(Buffer.from(observation.ack, 'utf8'), request.prompt);
+        checkOpen(row);
+        receipt.policy_transport = 'NATIVE_ACK_AND_PROMPT_CONFIRMED';
         processResult = await handle.completion;
         validateCodexCliJoinedSettlement(processResult?.joined_settlement,{proof:receipt.process,launch});
         pending += decoder.end();
@@ -493,17 +579,21 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
         if (role === 'CRITIC' && before.artifact_sha256 !== after.artifact_sha256) throw fail('critic_workspace_changed');
         receipt.state = 'RESULT_READY'; receipt.terminal_reason = receipt.result.outcome === 'BLOCKED' ? 'MODEL_REPORTED_BLOCKED' : null;
       } catch (error) {
+        row.fenced = true;
         if (handle) { await handle.terminate('RUN_FENCED').catch(() => {}); processResult ||= await handle.completion.catch(() => null); }
         await writes;
         receipt.state = 'AMBIGUOUS'; receipt.terminal_reason = abortReason || eventError || String(error?.message || 'RUN_FAILED').slice(0, 160);
         receipt.process_result = processResult;
         try { receipt.git_after = await gitProof(root, env,gitExecutable); } catch { receipt.git_after = null; }
       } finally {
-        clearTimeout(timer); signal?.removeEventListener('abort', onAbort);
         try{await closeBridge();bridgeDrained=true;}catch{
           receipt.state='AMBIGUOUS';receipt.terminal_reason='AGENT_BRIDGE_REVOCATION_UNCONFIRMED';
         }
         await writes; await stdoutFile.sync(); await stderrFile.sync(); await stdoutFile.close(); await stderrFile.close();
+        signal?.removeEventListener('abort', onAbort);
+      }
+      if (receipt.state === 'RESULT_READY' && (abortReason || signal?.aborted)) {
+        receipt.state = 'AMBIGUOUS'; receipt.terminal_reason = abortReason || row.stopReason || 'CANCELLED';
       }
       // Native cleanup alone is insufficient while a private bridge or journal
       // writer is still owned. Publish only after their actual joined drains.

@@ -83,40 +83,243 @@ async function fixture(t) {
     workerTempRoot, protectTemporaryStorage, verifyTemporaryStorage, lease, authorizeLease, permits };
 }
 
-function controller({ mutate = true, invalidJson = false, hang = false, criticMutate = false, onResume = null } = {}) {
-  let spawns = 0, lastSpec = null;
-  return { get spawns() { return spawns; }, get lastSpec() { return lastSpec; }, async spawn(spec) {
-    spawns++; lastSpec = spec; const stdout = new PassThrough(); const stderr = new PassThrough(); let finish;
-    const completion = new Promise(resolve => { finish = resolve; });
-    const generated=joinedSettlementFixture(spec);
-    return {proof:generated.proof,stdout,stderr,completion,
-      async resume(prompt, options) {
-        await onResume?.(prompt, options);
-        if (hang) return;
-        const role = spec.args[spec.args.indexOf('--sandbox') + 1] === 'read-only' ? 'CRITIC' : 'IMPLEMENTER';
-        if ((role === 'IMPLEMENTER' && mutate) || (role === 'CRITIC' && criticMutate)) await fs.writeFile(path.join(spec.cwd, 'feature.txt'), role === 'CRITIC' ? 'corrupted\n' : 'after\n');
-        const response = result(role);
-        if (role === 'CRITIC') {
-          const schema = JSON.parse(await fs.readFile(spec.args[spec.args.indexOf('--output-schema') + 1], 'utf8'));
-          response.verdict = 'ACCEPT'; response.subject_result_sha256 = schema.properties.subject_result_sha256.const;
-        }
-        await fs.writeFile(spec.args[spec.args.indexOf('--output-last-message') + 1], JSON.stringify(response));
-        stdout.write(invalidJson ? 'not JSON\n' : `${JSON.stringify({ type: 'thread.started', thread_id: id(spawns + 200) })}\n${JSON.stringify({ type: 'turn.completed' })}\n`);
-        finish(generated.complete());
-      },
-      async terminate(_reason) { finish(generated.complete({exit_code:124,reason:'CANCELLED'})); },
-    };
-  } };
+const generatedPolicyRequirementKeys=['allowed_approval_policies','allowed_approvals_reviewers','allowed_sandbox_modes','allowed_permission_profiles',
+  'default_permissions','allow_login_shell','windows.allowed_sandbox_implementations','permission_profile','permissions.filesystem','experimental_network'];
+const generatedPolicyCanonical=value=>Array.isArray(value)?'['+value.map(generatedPolicyCanonical).join(',')+']'
+  :value&&typeof value==='object'?'{'+Object.keys(value).sort((a,b)=>Buffer.compare(Buffer.from(a),Buffer.from(b)))
+    .map(key=>JSON.stringify(key)+':'+generatedPolicyCanonical(value[key])).join(',')+'}':JSON.stringify(value);
+
+// Synthetic projection and existing generated settlement fixture. These are
+// honest process/permit/ACL doubles, never physical Windows qualification.
+function generatedRunnerPolicy(spec){
+  const mode=spec.args[spec.args.indexOf('--sandbox')+1],writer=mode==='workspace-write',cwd=spec.cwd;
+  const source={kind:'session_flags',identity_generation:'sha256:'+sha('generated session identity')},version='sha256:'+sha('generated TOML');
+  const values=Object.fromEntries(generatedPolicyRequirementKeys.map(key=>[key,null]));
+  const sources=Object.fromEntries(generatedPolicyRequirementKeys.map(key=>[key,null]));
+  return {type:'metaengine.effective_policy.v1',nonce:spec.policyNonce,context_id:'018f0000-0000-7000-8000-000000000001',mode:'execute',strict_config:false,
+    thread_start_overrides:{scope:'TYPED_THREAD_START_OVERRIDES',approval_policy:'never',approvals_reviewer:null,sandbox_mode:mode,
+      permission_profile:null,default_permissions:null,persisted_permission_profile_id:null,cwd,workspace_roots:[],additional_writable_roots:[]},
+    policy:{schema:'metaengine.codex.effective-policy.v1',upstream_commit:'3b01b36fa5eb96ba82a776bd3c2fc57f8969181f',stage:'THREAD_START_RESOLVED_BEFORE_SPAWN',cwd,
+      load_mode:{ignore_user_config:true,ignore_project_config:false,ignore_managed_requirements:false,ignore_login_requirements:false,
+        ignore_user_and_project_exec_policy_rules:false,user_config_profile:null,user_config_path_override:false},
+      effective:{permission_profile:{type:'managed',file_system:{type:'restricted',entries:[{path:{type:'special',value:{kind:'root'}},access:'read'},
+        ...(writer?[{path:{type:'special',value:{kind:'project_roots'}},access:'write'},{path:{type:'special',value:{kind:'tmpdir'}},access:'write'}]:[])]},network:'restricted'},
+        active_permission_profile:null,explicit_permission_profile_mode:false,approval_policy:'never',approvals_reviewer:'user',allow_login_shell:false,
+        workspace_roots:[cwd],permission_workspace_roots:[cwd],profile_workspace_roots:[pathToFileURL(cwd).href],
+        windows:{configured_mode:'elevated',configured_backend:'windowsRestrictedToken',effective_local_backend:'windowsRestrictedToken'}},
+      requirements:{values,sources,source_scope:'NORMALIZED_CONSTRAINT',generation:'sha256:'+sha(generatedPolicyCanonical({values,sources}))},
+      layers:[{name:'session_flags',source:{...source},version,enabled:true,loader_ignored:false,content_scope:'RESOLVED_LAYER_CONTENT'}],
+      origins:{sandbox_mode:{name:'session_flags',source:{...source},version}},
+      origins_scope:'CONFIG_LAYER_MERGE_EXCLUDING_REQUIREMENTS_AND_HARNESS_OVERRIDES'}};
 }
 
+function controller({ mutate = true, invalidJson = false, hang = false, criticMutate = false, onResume = null,
+  onBootstrap=null,onAcceptPolicy=null,onTerminate=null,policyMutation=null,missingBootstrap=false,missingAcceptPolicy=false } = {}) {
+  let spawns=0,lastSpec=null,bootstraps=0,accepts=0,terminations=0,lastRaw=null,outputBytes=0;
+  const prompts=[],acks=[];
+  return {get spawns(){return spawns;},get lastSpec(){return lastSpec;},get bootstraps(){return bootstraps;},get accepts(){return accepts;},
+    get terminations(){return terminations;},get prompts(){return [...prompts];},get acks(){return acks.map(value=>Buffer.from(value));},
+    get raw(){return lastRaw&&Buffer.from(lastRaw);},get outputBytes(){return outputBytes;},async spawn(spec){
+    spawns++;lastSpec=spec;
+    assert.equal(spec.inputProtocol,'EFFECTIVE_POLICY_ACK_V1');assert.match(spec.policyNonce,/^[a-f0-9]{64}$/);
+    assert.equal(spec.launch.schema,'metaengine.codex-cli.launch.v3');
+    const launchBody=JSON.parse(spec.launch.canonical_body);
+    assert.equal(launchBody.policy_nonce,spec.policyNonce);assert.equal(launchBody.input_protocol,spec.inputProtocol);
+    assert.equal(launchBody.prompt_sha256,spec.promptSha256);assert.equal(Number(launchBody.deadline_ms),Date.parse(spec.deadlineAt));
+    assert.deepEqual(spec.args.slice(-5),['--metaengine-effective-policy',spec.policyNonce,'--metaengine-prompt-sha256',spec.promptSha256,'-']);
+    assert.equal(spec.args.filter(arg=>arg==='--metaengine-effective-policy').length,1);
+    assert.equal(spec.args.filter(arg=>arg==='--metaengine-prompt-sha256').length,1);
+    const stdout=new PassThrough(),stderr=new PassThrough();let finish,settled=false,terminated=false,termination=null,localBootstraps=0,localAccepts=0,bootstrapDeadline=null;
+    const completion=new Promise(resolve=>{finish=resolve;}),generated=joinedSettlementFixture(spec);
+    const settle=overrides=>{if(!settled){settled=true;finish(generated.complete(overrides));}};
+    const worker={proof:generated.proof,stdout,stderr,completion,
+      async resume(){throw Error('fixture_legacy_resume_forbidden');},
+      async bootstrap(options){
+        bootstraps++;assert.equal(++localBootstraps,1);assert.equal(localAccepts,0);
+        bootstrapDeadline=options.deadlineAt;assert(Date.parse(bootstrapDeadline)<=Date.parse(spec.deadlineAt));
+        await onBootstrap?.(spec,options);if(terminated)throw Error('fixture_bootstrap_fenced');
+        const packet=generatedRunnerPolicy(spec);await policyMutation?.(packet,spec);
+        lastRaw=Buffer.from(' \t'+JSON.stringify(packet)+'\t');return Buffer.from(lastRaw);
+      },
+      async acceptPolicy(ack,prompt){
+        accepts++;assert.equal(++localAccepts,1);assert.equal(localBootstraps,1);assert(Buffer.isBuffer(ack));
+        const packet=JSON.parse(lastRaw.toString('utf8'));
+        assert.equal(ack.toString('utf8'),JSON.stringify({type:'metaengine.effective_policy.accept.v1',nonce:spec.policyNonce,context_id:packet.context_id})+'\n');
+        assert(ack.length<=512);assert.equal(sha(prompt),spec.promptSha256);assert(Buffer.byteLength(prompt)<=32000);acks.push(Buffer.from(ack));
+        await onAcceptPolicy?.(ack,prompt,spec);if(terminated)throw Error('fixture_ack_fenced');
+        prompts.push(prompt);await onResume?.(prompt,{deadlineAt:bootstrapDeadline});
+        if(terminated)throw Error('fixture_prompt_unconfirmed');if(hang)return;
+        const role=spec.args[spec.args.indexOf('--sandbox')+1]==='read-only'?'CRITIC':'IMPLEMENTER';
+        if((role==='IMPLEMENTER'&&mutate)||(role==='CRITIC'&&criticMutate))await fs.writeFile(path.join(spec.cwd,'feature.txt'),role==='CRITIC'?'corrupted\n':'after\n');
+        const response=result(role);
+        if(role==='CRITIC'){
+          const schema=JSON.parse(await fs.readFile(spec.args[spec.args.indexOf('--output-schema')+1],'utf8'));
+          response.verdict='ACCEPT';response.subject_result_sha256=schema.properties.subject_result_sha256.const;
+        }
+        await fs.writeFile(spec.args[spec.args.indexOf('--output-last-message')+1],JSON.stringify(response));
+        const wire=invalidJson?'not JSON\n':`${JSON.stringify({type:'thread.started',thread_id:id(spawns+200)})}\n${JSON.stringify({type:'turn.completed'})}\n`;
+        outputBytes+=Buffer.byteLength(wire);stdout.write(wire);settle();
+      },
+      terminate(reason){
+        if(!termination){terminated=true;terminations++;termination=(async()=>{await onTerminate?.(reason,spec);settle({exit_code:124,reason:'CANCELLED'});await completion;})();}
+        return termination;
+      },
+    };
+    if(missingBootstrap)delete worker.bootstrap;if(missingAcceptPolicy)delete worker.acceptPolicy;
+    return worker;
+  }};
+}
+
+const policyJoinGate=()=>{let resolve;const promise=new Promise(done=>{resolve=done;});return {promise,resolve};};
+
+test('real runner seals v3, persists exact policy bytes before ACK and sends only the immutable original task once',async t=>{
+  const f=await fixture(t),entered=policyJoinGate(),release=policyJoinGate(),original='\uFEFF  first\r\nsecond\nlast  \r\n';
+  let pc;pc=controller({mutate:false,onBootstrap:async()=>{entered.resolve();await release.promise;},onAcceptPolicy:async(ack,prompt,spec)=>{
+    assert.equal(prompt,original);
+    const directory=path.dirname(spec.args[spec.args.indexOf('--output-schema')+1]);
+    assert((await fs.readFile(path.join(directory,'effective-policy-record.json'))).equals(pc.raw));
+    const commit=JSON.parse(await fs.readFile(path.join(directory,'effective-policy-commit.json'),'utf8'));
+    assert.equal(commit.raw_sha256,sha(pc.raw));assert.equal(commit.prompt_sha256,sha(original));assert.equal(commit.nonce,spec.policyNonce);
+    assert.equal(commit.execution_deadline,spec.deadlineAt);assert.equal(commit.authority_effect,false);
+    assert.equal(commit.launch_identity.prompt_sha256,sha(original));assert.equal(Object.keys(commit.launch_identity).length,5);
+    assert.equal(ack[ack.length-1],10);
+  }});
+  const runner=createCodexCliRunner({...f,processController:pc});
+  const request={lease:f.lease(401),role:'IMPLEMENTER',worktreePath:f.worktree,prompt:original};
+  const prepared=await runner.prepare(request);request.prompt='renderer changed its copy';
+  const work=runner.runPrepared(prepared);await entered.promise;
+  try{
+    assert.deepEqual(pc.prompts,[]);assert.equal(pc.accepts,0);
+    await assert.rejects(runner.runPrepared(prepared),/prepared_handle_consumed/);
+  }finally{release.resolve();}
+  const receipt=await work;
+  assert.equal(receipt.state,'RESULT_READY');assert.equal(receipt.prompt_sha256,sha(original));
+  assert.equal(receipt.effective_policy.raw_sha256,sha(pc.raw));assert.equal(receipt.output_bytes,pc.outputBytes);
+  assert.equal(receipt.policy_transport,'NATIVE_ACK_AND_PROMPT_CONFIRMED');assert.deepEqual(pc.prompts,[original]);
+  assert.equal(pc.bootstraps,1);assert.equal(pc.accepts,1);assert.equal(pc.acks.length,1);
+  assert.equal(receipt.production_qualified,false);assert.equal(receipt.useful_work_verified,false);
+  await assert.rejects(runner.runPrepared(prepared),/prepared_handle_consumed/);
+  const nonce=pc.lastSpec.policyNonce;
+  const second=await runner.run({lease:f.lease(402),role:'IMPLEMENTER',worktreePath:f.worktree,prompt:original});
+  assert.equal(second.state,'RESULT_READY');assert.notEqual(pc.lastSpec.policyNonce,nonce);
+  assert.equal(pc.spawns,2);assert.equal(pc.bootstraps,2);assert.equal(pc.accepts,2);
+});
+
+for(const missing of ['bootstrap','acceptPolicy'])test('runner refuses missing '+missing+' without legacy fallback or task input',async t=>{
+  const f=await fixture(t),pc=controller({missingBootstrap:missing==='bootstrap',missingAcceptPolicy:missing==='acceptPolicy'});
+  const runner=createCodexCliRunner({...f,processController:pc});
+  const receipt=await runner.run({lease:f.lease(403),role:'IMPLEMENTER',worktreePath:f.worktree,prompt:'original'});
+  assert.equal(receipt.state,'AMBIGUOUS');assert.match(receipt.terminal_reason,/policy_transport_required/);
+  assert.equal(pc.bootstraps,0);assert.equal(pc.accepts,0);assert.deepEqual(pc.prompts,[]);assert.equal(pc.terminations,1);
+});
+
+test('runner rejects an unsupported raw policy, joins and retains history without ACK/task replay',async t=>{
+  const f=await fixture(t),pc=controller({policyMutation:packet=>{packet.policy.effective.permission_profile.network='enabled';}});
+  const runner=createCodexCliRunner({...f,processController:pc});
+  const request={lease:f.lease(404),role:'IMPLEMENTER',worktreePath:f.worktree,prompt:'never sent'};
+  const receipt=await runner.run(request);
+  assert.equal(receipt.state,'AMBIGUOUS');assert.equal(receipt.automatic_retry_allowed,false);assert.equal(pc.bootstraps,1);
+  assert.equal(pc.accepts,0);assert.deepEqual(pc.prompts,[]);assert.equal(pc.terminations,1);
+  assert.equal(await fs.readFile(path.join(f.worktree,'feature.txt'),'utf8'),'before\n');
+  assert.equal((await runner.run(request)).prior_attempt,true);assert.equal(pc.spawns,1);
+});
+
+for(const timing of ['before-spawn','before-bootstrap','before-ack'])test('runner refuses unapproved home .env '+timing+' without content reads',async t=>{
+  const f=await fixture(t),dotenv=path.join(f.codexHome,'.env');let reads=0;
+  const open=fs.open.bind(fs),readFile=fs.readFile.bind(fs);
+  const guard=file=>{if(path.basename(String(file)).toLowerCase()==='.env'){reads++;throw Error('fixture_dotenv_content_read_forbidden');}};
+  t.mock.method(fs,'open',(file,...args)=>{guard(file);return open(file,...args);});
+  t.mock.method(fs,'readFile',(file,...args)=>{guard(file);return readFile(file,...args);});
+  if(timing==='before-spawn')await fs.writeFile(dotenv,'generated fixture');
+  const pc=controller({onBootstrap:timing==='before-ack'?async()=>{await fs.writeFile(dotenv,'generated fixture');}:null});
+  const authorizeLease=async request=>{
+    const permit=await f.authorizeLease(request);
+    if(timing==='before-bootstrap'&&request.phase==='BEFORE_RESUME')await fs.writeFile(dotenv,'generated fixture');
+    return permit;
+  };
+  const runner=createCodexCliRunner({...f,authorizeLease,processController:pc});
+  const receipt=await runner.run({lease:f.lease(405),role:'IMPLEMENTER',worktreePath:f.worktree,prompt:'not delivered'});
+  assert.equal(receipt.state,'AMBIGUOUS');assert.match(receipt.terminal_reason,/home_dotenv_not_permitted/);
+  assert.equal(pc.spawns,timing==='before-spawn'?0:1);assert.equal(pc.bootstraps,timing==='before-ack'?1:0);
+  assert.equal(pc.accepts,0);assert.deepEqual(pc.prompts,[]);assert.equal(reads,0);
+  assert.equal(receipt.execution_scope.local_configuration.inventory.some(item=>item.path===dotenv),false);
+});
+
+for(const mutation of ['permit','configuration','temporary-acl'])test('post-bootstrap '+mutation+' mutation cannot commit policy',async t=>{
+  const f=await fixture(t),pc=controller();let checks=0,changed=false;
+  const authorizeLease=async request=>{
+    const permit=await f.authorizeLease(request);
+    if(request.phase==='BEFORE_PREPARED_RUN'&&++checks===2){
+      changed=true;
+      if(mutation==='permit')permit.owner_epoch++;
+      if(mutation==='configuration')await fs.writeFile(path.join(f.codexHome,'config.toml'),'model="changed"\n');
+    }
+    return permit;
+  };
+  const verifyTemporaryStorage=async(target,options)=>changed&&mutation==='temporary-acl'&&target===pc.lastSpec?.env.TEMP
+    ?{owner_dacl_verified:false}:f.verifyTemporaryStorage(target,options);
+  const runner=createCodexCliRunner({...f,authorizeLease,verifyTemporaryStorage,processController:pc});
+  const receipt=await runner.run({lease:f.lease(406),role:'IMPLEMENTER',worktreePath:f.worktree,prompt:'not delivered'});
+  assert.equal(receipt.state,'AMBIGUOUS');assert.equal(pc.bootstraps,1);assert.equal(pc.accepts,0);assert.deepEqual(pc.prompts,[]);
+  assert.equal(pc.terminations,1);assert.equal(receipt.automatic_retry_allowed,false);
+});
+
+test('post-bootstrap lease shortening refuses ACK because the native deadline cannot be shortened in place',async t=>{
+  const f=await fixture(t),pc=controller();let checks=0;
+  const authorizeLease=async request=>{
+    const permit=await f.authorizeLease(request);
+    if(request.phase==='BEFORE_PREPARED_RUN'&&++checks===2)permit.expires_at=new Date(Date.now()+10000).toISOString();
+    return permit;
+  };
+  const runner=createCodexCliRunner({...f,authorizeLease,processController:pc});
+  const receipt=await runner.run({lease:f.lease(408),role:'IMPLEMENTER',worktreePath:f.worktree,prompt:'not delivered'});
+  assert.equal(receipt.state,'AMBIGUOUS');assert.match(receipt.terminal_reason,/policy_deadline_shortened_after_bootstrap/);
+  assert.equal(pc.bootstraps,1);assert.equal(pc.accepts,0);assert.deepEqual(pc.prompts,[]);assert.equal(pc.terminations,1);
+});
+
+for(const cause of ['cancel','expiry'])for(const stage of ['authorization','bootstrap','validation','ack','prompt'])test(
+  'owned '+cause+' during held '+stage+' retains the observation and original completion without replay',{timeout:30000},async t=>{
+  const f=await fixture(t),entered=policyJoinGate(),held=policyJoinGate(),stopped=policyJoinGate(),drain=policyJoinGate(),abort=new AbortController();
+  let checks=0,returned=false;
+  const hold=async()=>{entered.resolve();await held.promise;};
+  const pc=controller({onBootstrap:stage==='bootstrap'?hold:null,onAcceptPolicy:stage==='ack'?hold:null,
+    onResume:stage==='prompt'?hold:null,onTerminate:async()=>{stopped.resolve();await drain.promise;}});
+  const authorizeLease=async request=>{
+    const permit=await f.authorizeLease(request);
+    if(request.phase==='BEFORE_PREPARED_RUN')checks++;
+    if(stage==='authorization'&&request.phase==='BEFORE_RESUME'||stage==='validation'&&request.phase==='BEFORE_PREPARED_RUN'&&checks===2)await hold();
+    if(cause==='expiry'&&stage!=='authorization'&&request.phase==='BEFORE_RESUME')permit.expires_at=new Date(Date.now()+2000).toISOString();
+    return permit;
+  };
+  const runner=createCodexCliRunner({...f,authorizeLease,processController:pc,timeoutMs:cause==='expiry'&&stage==='authorization'?4000:60000});
+  const request={lease:f.lease(407),role:'IMPLEMENTER',worktreePath:f.worktree,prompt:'\uFEFFheld\r\noriginal task  '};
+  const work=runner.run(request,{signal:abort.signal});work.then(()=>{returned=true;},()=>{returned=true;});
+  try{
+    await entered.promise;if(cause==='cancel')abort.abort();await stopped.promise;
+    await new Promise(resolve=>setImmediate(resolve));assert.equal(returned,false);
+    held.resolve();await new Promise(resolve=>setImmediate(resolve));assert.equal(returned,false);
+  }finally{held.resolve();drain.resolve();}
+  const receipt=await work;
+  assert.equal(receipt.state,'AMBIGUOUS');assert.match(receipt.terminal_reason,/CANCELLED|TIMEOUT|deadline/);
+  assert.equal(receipt.automatic_retry_allowed,false);assert.equal(receipt.production_qualified,false);assert.equal(receipt.useful_work_verified,false);
+  assert.equal(pc.bootstraps,stage==='authorization'?0:1);assert.equal(pc.accepts,['ack','prompt'].includes(stage)?1:0);
+  assert.deepEqual(pc.prompts,stage==='prompt'?[request.prompt]:[]);assert.equal(pc.terminations,1);
+  if(['ack','prompt'].includes(stage))assert.equal(receipt.possible_task_activation,true);
+  assert.equal((await runner.run(request)).state,'AMBIGUOUS');assert.equal(pc.spawns,1);
+});
+
 test('fixed CLI argv uses saved login, native sandbox and separate critic permissions', () => {
-  const root = path.resolve(os.tmpdir(), 'runner-argv');
+  const root = path.resolve(os.tmpdir(), 'runner-argv'),policyNonce='a'.repeat(64),promptSha256=sha('original task');
   for (const role of ['IMPLEMENTER', 'CRITIC']) {
-    const args = buildCodexCliArgv({ role, worktreePath: root, schemaPath: path.join(root, 'schema.json'), resultPath: path.join(root, 'result.json') });
+    const options={role,worktreePath:root,schemaPath:path.join(root,'schema.json'),resultPath:path.join(root,'result.json'),policyNonce,promptSha256};
+    const args = buildCodexCliArgv(options);
     assert.equal(args[0], '-a'); assert.equal(args[1], 'never'); assert.ok(args.includes('--ignore-user-config'));
     assert.ok(args.slice(0, args.indexOf('exec')).includes('--no-daemon'));
     assert.equal(args[args.indexOf('--sandbox') + 1], role === 'CRITIC' ? 'read-only' : 'workspace-write');
     assert.ok(!args.some(value => /dangerously|full-auto|skip-git|ignore-rules/.test(value)));
+    assert.deepEqual(args.slice(-5),['--metaengine-effective-policy',policyNonce,'--metaengine-prompt-sha256',promptSha256,'-']);
+    assert.throws(()=>buildCodexCliArgv({...options,policyNonce:undefined}),/policy_binding_required/);
+    assert.throws(()=>buildCodexCliArgv({...options,promptSha256:'invalid'}),/policy_binding_required/);
   }
   const env = codexCliEnvironment(root, { PATH: 'path', OPENAI_API_KEY: 'do-not-inherit', CODEX_API_KEY: 'do-not-inherit', OTHER_SECRET: 'do-not-inherit' });
   assert.equal(env.CODEX_HOME, root); assert.equal(env.OPENAI_API_KEY, undefined); assert.equal(env.OTHER_SECRET, undefined);
@@ -588,7 +791,7 @@ test('prepared runner snapshots original request and never extends the first lea
  assert.equal(receipt.state,'RESULT_READY');assert.equal(resumed,original.prompt);assert.equal(receipt.prompt_sha256,sha(original.prompt));
  assert.equal(receipt.task_id,original.lease.task_id);assert.equal(receipt.role,original.role);assert.equal(receipt.worktree_path,original.worktreePath);
  assert.equal(receipt.run_id,descriptor.runId);assert.equal(receipt.execution_deadline,firstExpiry);assert.equal(processController.lastSpec.deadlineAt,firstExpiry);
- assert.deepEqual(phases,['BEFORE_ATTEMPT','BEFORE_PREPARED_RUN','BEFORE_RESUME','AFTER_EXECUTION']);
+ assert.deepEqual(phases,['BEFORE_ATTEMPT','BEFORE_PREPARED_RUN','BEFORE_RESUME','BEFORE_PREPARED_RUN','AFTER_EXECUTION']);
 });
 
 test('prepared handles cannot be forged, serialized, cloned or adopted by another runner',async t=>{
