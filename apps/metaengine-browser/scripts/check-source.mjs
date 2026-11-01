@@ -10,6 +10,7 @@ export const SOURCE_CHECK_FILES = Object.freeze([
   "src/native-coding-capacity-owner.mjs",
   "../../infra/client-state-runtime/native-coding-host-capacity.mjs",
   "../../infra/client-state-runtime/native-coding-physical-custody.mjs",
+  "../../infra/client-state-runtime/native-coding-setup-job-drain.mjs",
   "src/native-coding-host-settlement.mjs",
   "src/native-coding-setup-contract.mjs",
   "src/client-native-setup-route.mjs",

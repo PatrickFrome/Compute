@@ -11,13 +11,33 @@ import {runNativePhysicalSettlementScope,markNativePhysicalSettlementUnconfirmed
 const fail=reason=>{throw Error('native_setup_'+reason);};
 const same=(a,b)=>json(a)===json(b);
 const selectors=input=>({operation_id:input.operation_id,workspace_id:input.workspace_id});
+// The issuer is deliberately local to the actual setup-service lifecycle.
+// There is no exported constructor that accepts an assertion or resolved
+// promise. This token proves ownership of that joined job, not native/full-
+// scope qualification, readiness, or permission to resolve historical capacity.
+const jobDrains=new WeakMap();
+export function consumeNativeSetupJobDrain(token){
+ const owner=jobDrains.get(token);if(!owner)fail('original_job_drain_required');
+ jobDrains.delete(token); // One use, including a refused or failed publication.
+ if(!owner.row.actualJobStarted||!owner.row.actualJobJoined||!owner.row.scopeJoined||!owner.row.physicalConfirmed
+  ||owner.scope.unconfirmed())fail('job_drain_unconfirmed');
+ const {request,...value}=owner.value;
+ return Object.freeze({...structuredClone(value),request});
+}
+function jobDrainToken(row,scope,value){
+ if(!row.actualJobStarted||!row.actualJobJoined||!row.scopeJoined||!row.physicalConfirmed||scope.unconfirmed())fail('job_drain_unconfirmed');
+ const token=Object.freeze({toJSON(){fail('job_drain_not_serializable');}});
+ const {request,...data}=value;
+ jobDrains.set(token,{row,scope,value:Object.freeze({...structuredClone(data),request})});return token;
+}
 // Native Host-only constructor. runJob is intentionally UNBOUND in production
 // Phase3A. Private fixture callbacks exercise custody, never grant readiness.
 export function createNativeCodingHostSetupService({sql,hostInstanceId,hostPid,pgDataDirectory,postgresIdentity,postgresContinuity,
  readRootIdentity=readDirectoryIdentity,readAdmission=readAgentResourceAdmission,readCapacityEvidence=null,runJob=null,physicalCustody=null}={}){
  if(typeof sql?.begin!=='function'||typeof sql?.unsafe!=='function'||!path.isAbsolute(pgDataDirectory||'')
   ||postgresContinuity?.schema!=='metaengine.client-state.postgres-continuity.v1'||!Number.isSafeInteger(postgresIdentity?.pid)||postgresIdentity.pid<1||!Number.isFinite(Date.parse(postgresIdentity.started_at))
-  ||readCapacityEvidence!==null&&typeof readCapacityEvidence!=='function'||![readRootIdentity,readAdmission].every(f=>typeof f==='function')||runJob!==null&&typeof runJob!=='function')fail('dependencies_required');
+  ||readCapacityEvidence!==null&&typeof readCapacityEvidence!=='function'||![readRootIdentity,readAdmission].every(f=>typeof f==='function')
+  ||runJob!==null&&typeof runJob!=='function'||physicalCustody!==null&&typeof physicalCustody?.sealSetup!=='function')fail('dependencies_required');
  const verifier=createNativeCodingDeviceRequestVerifier({sql,hostInstanceId,hostPid}),context=createNativeCodingAuthenticatedRequestContext({verifier});
  let closed=false,custodyRevision=0;const jobs=new Map(),invocations=new Set(),reservations=new Set();
  const open=request=>{if(closed)fail('closed');assertNativeCodingHostRequestOpen(request);};
@@ -144,7 +164,7 @@ export function createNativeCodingHostSetupService({sql,hostInstanceId,hostPid,p
   // Durable ledger precedes registration; any crash in this gap leaves INTENT
   // forever read-only/HOLD, never a replayable job. Register BEFORE CLAIM/ACK.
   open(request);const row={operationId:input.operation_id,custodyId:randomUUID(),actor,input,observation,
-   abort:new AbortController(),work:null,physicalConfirmed:true};jobs.set(input.operation_id,row);custodyRevision++;
+   abort:new AbortController(),work:null,physicalConfirmed:true,actualJobStarted:false,actualJobJoined:false,scopeJoined:false};jobs.set(input.operation_id,row);custodyRevision++;
   let claimed;
   try{claimed=await transition('CLAIM',actor,selectors(input),{custody_id:row.custodyId,host_instance_id:hostInstanceId,host_pid:hostPid},request);}
   catch(error){jobs.delete(input.operation_id);custodyRevision++;throw error;} // no job has started; durable ambiguity is retained.
@@ -159,18 +179,44 @@ export function createNativeCodingHostSetupService({sql,hostInstanceId,hostPid,p
     if(closed||row.abort.signal.aborted)fail('cancelled');
    };
    let result={cleanup_confirmed:true,reason:'MATERIALIZATION_UNAVAILABLE'};
-   if(runJob){await revalidate();row.physicalConfirmed=false;result=await runJob(Object.freeze({signal:row.abort.signal,revalidate,observation:structuredClone(observation)}));}
+   if(runJob){
+    await revalidate();row.physicalConfirmed=false;row.actualJobStarted=true;
+    row.actualJob=Promise.resolve().then(()=>runJob(Object.freeze({signal:row.abort.signal,revalidate,observation:structuredClone(observation)})));
+    try{result=await row.actualJob;}finally{row.actualJobJoined=true;}
+   }
    if(scope.unconfirmed())fail('job_cleanup_unconfirmed');
    if(result?.cleanup_confirmed!==true||!['MATERIALIZATION_UNAVAILABLE','EVIDENCE_REQUIRED'].includes(result.reason))fail('job_cleanup_unconfirmed');
    row.physicalConfirmed=true;
-   await transition('TERMINAL',actor,selectors(input),{custody_id:row.custodyId,state:row.abort.signal.aborted?'STOPPED':'HOLD',
-    reason:row.abort.signal.aborted?'CANCELLED':result.reason,cleanup_state:'DRAINED'});
-   // A distinct producer joins the original BEGIN with the actual job drain
-   // and an independent committed terminal read; BEGIN's IPC terminal alone
-   // cannot release asynchronous setup occupancy.
-   if(physicalCustody)await physicalCustody.sealSetup({operationId:row.operationId,custodyId:row.custodyId,actor,request});
+   const terminal={custody_id:row.custodyId,state:row.abort.signal.aborted?'STOPPED':'HOLD',
+    reason:row.abort.signal.aborted?'CANCELLED':result.reason,cleanup_state:'DRAINED'};
+   await transition('TERMINAL',actor,selectors(input),terminal);
+   if(!runJob)return null; // No actual materializer means no drain token.
+   const readback=await transition('READ',actor,selectors(input));
+   const operation=readback.operation;
+   if(!operation||operation.operation_id!==row.operationId||operation.custody_id!==row.custodyId
+    ||operation.state!==terminal.state||operation.reason!==terminal.reason||operation.cleanup_state!=='DRAINED'
+    ||!same(operation.intent,intent))fail('job_terminal_readback_changed');
+   return operation;
   });
-  custodyRevision++;row.work=scope.promise.catch(()=>{}).finally(()=>{row.finished=true;if(scope.unconfirmed())row.physicalConfirmed=false;if(row.physicalConfirmed)jobs.delete(input.operation_id);custodyRevision++;});
+  custodyRevision++;row.work=scope.promise.then(async operation=>{
+   row.scopeJoined=true;
+   // Mint only after the actual job and the enclosing physical scope have
+   // completed. A caller's operation/custody identifiers cannot mint this.
+   if(operation&&physicalCustody){
+    const token=jobDrainToken(row,scope,{operationId:row.operationId,custodyId:row.custodyId,actor,request,operation,
+     hostInstanceId,hostPid,postgres:observation.postgres,cancellation_requested:row.abort.signal.aborted,
+     schema:'metaengine.native-coding.setup-job-drain-ownership.v1',readiness:false,execution_ready:false,
+     production_qualified:false,automatic_retry_allowed:false,authority_effect:false});
+    // Publication owns its own SQL/native cleanup after the job scope joined.
+    // A swallowed uncertainty mark here must still retain setup cleanup HOLD.
+    const publication=runNativePhysicalSettlementScope(()=>physicalCustody.sealSetup(token));
+    try{
+     await publication.promise;
+     if(publication.unconfirmed())fail('job_publication_cleanup_unconfirmed');
+    }catch(error){if(publication.unconfirmed())row.physicalConfirmed=false;throw error;}
+    finally{jobDrains.delete(token);}
+   }
+  }).catch(()=>{}).finally(()=>{row.finished=true;if(scope.unconfirmed())row.physicalConfirmed=false;if(row.physicalConfirmed)jobs.delete(input.operation_id);custodyRevision++;});
   // There is no production materializer in 3A; do not even briefly advertise
   // it as running/prepared. Fixture cold jobs return only lifecycle acceptance.
   if(!runJob){await row.work;return project((await transition('READ',actor,selectors(input),{},request)).operation,input);}

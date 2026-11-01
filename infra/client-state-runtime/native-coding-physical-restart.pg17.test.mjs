@@ -22,10 +22,11 @@ const setupTable='destruktion_meta.native_coding_setup_operation_h205f22';
 const birth=(pid,when)=>({pid,created_at:new Date(when).toISOString(),
  process_incarnation_id:`pid:${pid}:created_100ns:${BigInt(when)*10000n+116444736000000000n}`});
 
-// Real disposable Linux PG17/WAL/transactions/restart and real producer/consumer.
-// Enrollment, native process birth/Windows OS readers and setup work are GENERATED
-// FIXTURES. This is not Windows qualification, installed execution or readiness.
-test('physical SETUP/TASK closure survives genuine PG restart and rotated Host without releasing incomplete history',{
+// Real disposable PG17/WAL/transactions/restart and source graph audits.
+// Enrollment, native births, helper receipts and protected readers are GENERATED.
+// SETUP source graphs below are deliberately inserted by the fixture, not by an
+// actual materializer. No graph in this test qualifies historical resolution.
+test('physical SETUP/TASK source graphs survive genuine PG restart while every historical resolution stays HOLD',{
  skip:!bin||!driver,timeout:90000,
 },async t=>{
  const base=await fs.realpath(process.env.METAENGINE_PG_TEST_BASE||os.tmpdir());
@@ -128,9 +129,10 @@ test('physical SETUP/TASK closure survives genuine PG restart and rotated Host w
    const ticket=await owner.service.beginRequest(packet);
    const operation=await insertSetup(owner,a,operationId,custodyId,packet.payload.body.input);
    const origin={requestId:packet.request_id,requestDigest:sha(packet)};
-   let closure=null;if(seal)closure=await owner.service.sealSetup({operationId,custodyId,actor:a,request:origin});
+   const f={a,operationId,custodyId,packet,ticket,origin,operation,closure:null};
+   if(seal)f.closure=await forgedClosure(f,()=>{});
    if(terminal)await owner.service.endRequest(ticket);
-   return {a,operationId,custodyId,packet,ticket,origin,operation,closure};
+   return f;
   }
   async function forgedClosure(f,change,kind='SETUP'){
    const [saved]=await sql.unsafe(`select request from ${requestTable} where request_id=$1::uuid`,[f.packet.request_id]);
@@ -145,35 +147,50 @@ test('physical SETUP/TASK closure survives genuine PG restart and rotated Host w
   async function observe(owner,a){
    const evidence={host_instance_id:owner.hostInstanceId,generation:++generation,observed_at:new Date().toISOString(),
     postgres_scope_sha256:sha({postgres:owner.native.postgres,started_at:owner.pg?.started_at??'current'})};
-   const count=await sql.begin('isolation level serializable',async tx=>{
+   const history=()=>sql.unsafe(`select jsonb_build_object(
+    'requests',(select jsonb_agg(to_jsonb(q) order by request_id) from ${requestTable} q),
+    'closures',(select jsonb_agg(to_jsonb(c) order by kind,key) from ${closureTable} c),
+    'fences',(select jsonb_agg(to_jsonb(f) order by run_id) from ${fenceTable} f),
+    'cache',(select jsonb_agg(to_jsonb(r) order by device_id,host_instance_id,generation,kind,key) from ${resolutionTable} r)) as value`).then(r=>r[0].value);
+   const before=await history();
+   const resolved=await sql.begin('isolation level serializable',async tx=>{
     await tx.unsafe('set local synchronous_commit=on');return owner.service.verifyObservation({tx,actor:a,evidence});
    });
+   assert.equal(resolved,0,'persisted graphs cannot supply the absent native/Owner full-scope capability');
    const resolutions=await sql.unsafe(`select * from ${resolutionTable} where device_id=$1::uuid and host_instance_id=$2::uuid and generation=$3::bigint`,
     [a.device_id,owner.hostInstanceId,evidence.generation]);
-   const retained=await sql.unsafe(`select r as row from destruktion_meta.native_coding_capacity_rows_v1($1::uuid,$2::text) r
-    where not exists(select 1 from ${resolutionTable} x where x.device_id=$1::uuid and x.host_instance_id=$3::uuid
-     and x.generation=$4::bigint and x.kind=r->>'kind' and x.key=r->>'key' and x.durable_sha256=r->>'durable_sha256')`,
-    [a.device_id,a.client_id,owner.hostInstanceId,evidence.generation]);
-   return {count,resolutions:Array.from(resolutions),retained:Array.from(retained).map(x=>x.row)};
+   assert.equal(resolutions.length,0,'source audits must never create resolution cache rows');
+   const all=await sql.unsafe('select r as row from destruktion_meta.native_coding_capacity_rows_v1($1::uuid,$2::text) r',[a.device_id,a.client_id]);
+   const candidates=[],unjoined=[];
+   for(const {row} of all){
+    const audit=await sql.begin('isolation level serializable',tx=>owner.service.auditCandidateScope({tx,actor:a,kind:row.kind,key:row.key}));
+    assert.equal(audit.historical_resolution,'HOLD');assert.equal(audit.readiness,false);assert.equal(audit.authority_effect,false);
+    (audit.state==='SOURCE_GRAPH_JOINED'?candidates:unjoined).push(audit.state==='SOURCE_GRAPH_JOINED'?audit:row);
+   }
+   assert.deepEqual(await history(),before,'neither default verification nor candidate auditing may change custody/cache bytes');
+   const retained=await sql.unsafe('select r as row from destruktion_meta.native_coding_capacity_rows_v1($1::uuid,$2::text) r',[a.device_id,a.client_id]);
+   const audited=new Set(all.map(({row})=>`${row.kind}:${row.key}`));
+   for(const {row} of retained)if(!audited.has(`${row.kind}:${row.key}`))unjoined.push(row);
+   return {resolved_count:resolved,candidateCount:candidates.length,candidates,unjoined,retained:Array.from(retained).map(x=>x.row)};
   }
   const positive=await prepare(),incomplete=await prepare({terminal:false});
   const negatives=[];
-  await t.test('producer requires the original request digest and scope before creating a closure',async()=>{
+  await t.test('serialized setup identifiers cannot mint original job drain ownership; candidate audits reject scope and PG substitution',async()=>{
    const f=await prepare({terminal:false,seal:false});
-   await assert.rejects(original.service.sealSetup({operationId:f.operationId,custodyId:f.custodyId,actor:f.a,
-    request:{...f.origin,requestDigest:'0'.repeat(64)}}),/native_physical_custody_setup_origin/);
+   assert.throws(()=>original.service.sealSetup({operationId:f.operationId,custodyId:f.custodyId,actor:f.a,
+    request:{...f.origin,requestDigest:'0'.repeat(64)}}),/native_setup_original_job_drain_required/);
    const scoped=await prepare({terminal:false,seal:false,inputOperationId:randomUUID()});
-   await assert.rejects(original.service.sealSetup({operationId:scoped.operationId,custodyId:scoped.custodyId,actor:scoped.a,
-    request:scoped.origin}),/native_physical_custody_setup_readback/);
+   assert.throws(()=>original.service.sealSetup({operationId:scoped.operationId,custodyId:scoped.custodyId,actor:scoped.a,
+    request:scoped.origin}),/native_setup_original_job_drain_required/);
    const workspace=await prepare({seal:false});
    const [changed]=await sql.unsafe(`update ${setupTable} set intent=jsonb_set(intent,'{workspace_id}',to_jsonb($2::text))
     where operation_id=$1::uuid returning to_jsonb(${setupTable.split('.')[1]}) as value`,[workspace.operationId,randomUUID()]);
    workspace.operation=changed.value;
-   await assert.rejects(original.service.sealSetup({operationId:workspace.operationId,custodyId:workspace.custodyId,actor:workspace.a,
-    request:workspace.origin}),/native_physical_custody_setup_readback/);
+   assert.throws(()=>original.service.sealSetup({operationId:workspace.operationId,custodyId:workspace.custodyId,actor:workspace.a,
+    request:workspace.origin}),/native_setup_original_job_drain_required/);
    await forgedClosure(workspace,()=>{});
-   assert.equal((await observe(original,f.a)).count,0);assert.equal((await observe(original,scoped.a)).count,0);
-   assert.equal((await observe(original,workspace.a)).count,0);negatives.push(f,scoped,workspace);
+   assert.equal((await observe(original,f.a)).candidateCount,0);assert.equal((await observe(original,scoped.a)).candidateCount,0);
+   assert.equal((await observe(original,workspace.a)).candidateCount,0);negatives.push(f,scoped,workspace);
    for(const change of [pg=>{pg.system_identifier='9999999999999999999';},pg=>{pg.data_directory_identity_sha256='0'.repeat(64);},
     pg=>{pg.postmaster.pid++;},pg=>{pg.postmaster.started_at_us=pg.postmaster.started_at_us.replace(/\dZ$/,'9Z');
      if(pg.postmaster.started_at_us===originalIdentity.started_at)pg.postmaster.started_at_us=pg.postmaster.started_at_us.replace(/9Z$/,'8Z');}]){
@@ -181,12 +198,12 @@ test('physical SETUP/TASK closure survives genuine PG restart and rotated Host w
     const [changed]=await sql.unsafe(`update ${setupTable} set intent=$2::text::jsonb where operation_id=$1::uuid
      returning to_jsonb(${setupTable.split('.')[1]}) as value`,[mismatch.operationId,json(intent)]);
     mismatch.operation=changed.value;
-    await assert.rejects(original.service.sealSetup({operationId:mismatch.operationId,custodyId:mismatch.custodyId,
-     actor:mismatch.a,request:mismatch.origin}),/native_physical_custody_setup_postgres_lineage/);
+    assert.throws(()=>original.service.sealSetup({operationId:mismatch.operationId,custodyId:mismatch.custodyId,
+     actor:mismatch.a,request:mismatch.origin}),/native_setup_original_job_drain_required/);
     // A coherent closure and fresh durable-row digest cannot repair an intent
     // whose PG lineage differs from the original native request observation.
     await forgedClosure(mismatch,()=>{});
-    const result=await observe(original,mismatch.a);assert.equal(result.count,0);assert.equal(result.retained.length,1);negatives.push(mismatch);
+    const result=await observe(original,mismatch.a);assert.equal(result.candidateCount,0);assert.equal(result.unjoined.length,1);negatives.push(mismatch);
    }
   });
   await t.test('SQL DRAINED, a held terminal and changed durable setup do not become settlement',async()=>{
@@ -194,7 +211,7 @@ test('physical SETUP/TASK closure survives genuine PG restart and rotated Host w
    const held=await prepare({terminal:false});await original.service.endRequest(held.ticket,true);negatives.push(held);
    const changed=await prepare();
    await sql.unsafe(`update ${setupTable} set reason='CHANGED_AFTER_CLOSURE',updated_at=clock_timestamp() where operation_id=$1::uuid`,[changed.operationId]);negatives.push(changed);
-   for(const f of [drained,held,changed]){const result=await observe(original,f.a);assert.equal(result.count,0);assert.equal(result.retained.length,1);}
+   for(const f of [drained,held,changed]){const result=await observe(original,f.a);assert.equal(result.candidateCount,0);assert.equal(result.unjoined.length,1);}
   });
   await t.test('independent consumer rejects forged digest/Host/original scope, truncated closure and wrong kind',async()=>{
    for(const change of [c=>{c.request_sha256='0'.repeat(64);},c=>{c.host.instance_id=randomUUID();},c=>{delete c.operation;},
@@ -204,7 +221,7 @@ test('physical SETUP/TASK closure survives genuine PG restart and rotated Host w
    const scope=await prepare({seal:false,inputOperationId:randomUUID()});await forgedClosure(scope,()=>{});negatives.push(scope);
    const wrongKind=await prepare({seal:false});await forgedClosure(wrongKind,()=>{},'TASK');negatives.push(wrongKind);
    await sql.unsafe('insert into destruktion_meta.qa_physical_task_capacity(device_id,key) values($1::uuid,$2)',[wrongKind.a.device_id,wrongKind.operationId]);
-   for(const f of negatives){const result=await observe(original,f.a);assert.equal(result.count,0);assert.ok(result.retained.length>=1);}
+   for(const f of negatives){const result=await observe(original,f.a);assert.equal(result.candidateCount,0);assert.ok(result.unjoined.length>=1);}
   });
   const taskPostgres={system_identifier:originalIdentity.system_identifier,started_at:originalIdentity.started_at,pid:originalIdentity.pid,
    process_incarnation_id:original.native.postgres.postmaster.process_incarnation_id,data_directory_identity_sha256:dataIdentity};
@@ -233,10 +250,10 @@ test('physical SETUP/TASK closure survives genuine PG restart and rotated Host w
     scope:s,protectedDirectory,callbackTicket};
   }
   let taskPositive;const taskNegatives=[];
-  await t.test('TASK producer joins actual original reserve/callback terminal with anchored helper and callback closure; UNKNOWN does not replay',async()=>{
+  await t.test('TASK source graph joins recorded reserve and callback terminals without upgrading helper scope or UNKNOWN',async()=>{
    taskPositive=await prepareTask();
    const ack=await original.service.sealTask(taskPositive.scope);
-   assert.equal(ack.proof_sha256,sha(taskPositive.closure));assert.equal(ack.automatic_retry_allowed,false);assert.equal(ack.authority_effect,false);
+   assert.equal(ack.graph_sha256,sha(taskPositive.closure));assert.equal(ack.automatic_retry_allowed,false);assert.equal(ack.authority_effect,false);
    const late=structuredClone(taskPositive.requests[0].request.frame);late.request_id=randomUUID();
    await assert.rejects(original.service.beginRequest(late),/run_fenced/);
    const [stored]=await sql.unsafe(`select closure from ${closureTable} where kind='TASK' and key=$1::text`,
@@ -248,7 +265,7 @@ test('physical SETUP/TASK closure survives genuine PG restart and rotated Host w
    await assert.rejects(original.service.sealTask(missing.scope),/native_physical_custody_terminal_missing/);taskNegatives.push(missing);
    const omitted=await prepareTask({extraCallback:true});
    await assert.rejects(original.service.sealTask(omitted.scope),/native_physical_custody_journal_truncated/);taskNegatives.push(omitted);
-   for(const f of taskNegatives){const observed=await observe(original,f.a);assert.equal(observed.count,0);assert.equal(observed.retained.length,1);}
+   for(const f of taskNegatives){const observed=await observe(original,f.a);assert.equal(observed.candidateCount,0);assert.equal(observed.unjoined.length,1);}
   });
   const recoveredTasks=[];let deferredTask,foreignFenceTask;
   await t.test('lost fence COMMIT ACK reads the exact committed fence and seals proof without dispatch replay',async()=>{
@@ -263,7 +280,7 @@ test('physical SETUP/TASK closure survives genuine PG restart and rotated Host w
    const recovering=factory({pg:originalIdentity,db:losing});
    const [beforeRequests]=await sql.unsafe(`select count(*)::int as count from ${requestTable}`);
    const ack=await recovering.service.sealTask(f.scope);
-   assert.equal(ack.proof_sha256,sha(f.closure));assert.equal(fenceWrites,1);assert.equal(ackLosses,1);
+   assert.equal(ack.graph_sha256,sha(f.closure));assert.equal(fenceWrites,1);assert.equal(ackLosses,1);
    const [fence]=await sql.unsafe(`select * from ${fenceTable} where run_id=$1::uuid`,[f.publication.root.run_id]);
    assert.equal(fence.host_instance_id,original.hostInstanceId);
    assert.notEqual(recovering.hostInstanceId,original.hostInstanceId);
@@ -278,7 +295,7 @@ test('physical SETUP/TASK closure survives genuine PG restart and rotated Host w
    const absent=await sql.unsafe(`select key from ${closureTable} where kind='TASK' and key=$1`,[`${f.scope.task_id}:${f.scope.lease_generation}`]);
    assert.equal(absent.length,0);
    const [beforeRequests]=await sql.unsafe(`select count(*)::int as count from ${requestTable}`);
-   const ack=await original.service.sealTask(f.scope);assert.equal(ack.proof_sha256,sha(f.closure));
+   const ack=await original.service.sealTask(f.scope);assert.equal(ack.graph_sha256,sha(f.closure));
    const [afterFence]=await sql.unsafe(`select to_jsonb(f) as value from ${fenceTable} f where run_id=$1::uuid`,[f.publication.root.run_id]);
    assert.deepEqual(afterFence,beforeFence);
    const [afterRequests]=await sql.unsafe(`select count(*)::int as count from ${requestTable}`);assert.deepEqual(afterRequests,beforeRequests);
@@ -295,7 +312,7 @@ test('physical SETUP/TASK closure survives genuine PG restart and rotated Host w
    assert.equal((await sql.unsafe(`select key from ${closureTable} where kind='TASK' and key=$1`,[`${f.scope.task_id}:${f.scope.lease_generation}`])).length,0);
    const [fence]=await sql.unsafe(`select host_instance_id from ${fenceTable} where run_id=$1::uuid`,[f.publication.root.run_id]);
    assert.equal(fence.host_instance_id,original.hostInstanceId);
-   assert.equal((await observe(original,f.a)).count,0);
+   assert.equal((await observe(original,f.a)).candidateCount,0);
   });
   await t.test('an existing fence with another original Host is refused and its retained history is never overwritten',async()=>{
    foreignFenceTask=await prepareTask();const f=foreignFenceTask,foreign=randomUUID();
@@ -303,7 +320,7 @@ test('physical SETUP/TASK closure survives genuine PG restart and rotated Host w
    const [beforeFence]=await sql.unsafe(`select to_jsonb(f) as value from ${fenceTable} f where run_id=$1::uuid`,[f.publication.root.run_id]);
    await assert.rejects(original.service.sealTask(f.scope),/native_physical_custody_fence_changed/);
    const [afterFence]=await sql.unsafe(`select to_jsonb(f) as value from ${fenceTable} f where run_id=$1::uuid`,[f.publication.root.run_id]);
-   assert.deepEqual(afterFence,beforeFence);assert.equal((await observe(original,f.a)).count,0);
+   assert.deepEqual(afterFence,beforeFence);assert.equal((await observe(original,f.a)).candidateCount,0);
   });
   await t.test('a dispatch with an older SERIALIZABLE snapshot cannot pass a newly committed run fence after waiting on its lock',async()=>{
    const f=await prepareTask();
@@ -333,7 +350,7 @@ test('physical SETUP/TASK closure survives genuine PG restart and rotated Host w
     assert.fail('a dispatch ticket was issued after the durable fence committed because the older snapshot missed it');
    }
    assert.match(outcome.reason.message,/run_fenced|could not serialize access|fence_changed/);
-   assert.equal(sealed.status,'fulfilled');assert.equal(sealed.value.proof_sha256,sha(f.closure));
+   assert.equal(sealed.status,'fulfilled');assert.equal(sealed.value.graph_sha256,sha(f.closure));
    assert.equal((await sql.unsafe(`select request_id from ${requestTable} where request_id=$1::uuid`,[late.request_id])).length,0);
    recoveredTasks.push(f);
   });
@@ -351,7 +368,8 @@ test('physical SETUP/TASK closure survives genuine PG restart and rotated Host w
    const ending=owner.service.endRequest(ticket);await arrived;
    assert.equal(owner.service.snapshot().pending_requests,1);assert.equal(owner.service.snapshot().active_work,1);assert.equal(drained,false);
    release();await ending;await drain;
-   assert.deepEqual(owner.service.snapshot(),{closed:true,pending_requests:0,active_work:0,cleanup_unconfirmed:false});
+   assert.deepEqual(owner.service.snapshot(),{closed:true,pending_requests:0,active_work:0,cleanup_unconfirmed:false,
+    historical_resolution:'HOLD',full_scope_qualification:'UNAVAILABLE',readiness:false,authority_effect:false});
    const [record]=await sql.unsafe(`select request,terminal from ${requestTable} where request_id=$1::uuid`,[packet.request_id]);
    assert.deepEqual(record.request.frame,packet);assert.equal(record.terminal.state,'SETTLED');assert.equal(record.terminal.request_sha256,sha(packet));
   });
@@ -394,46 +412,47 @@ test('physical SETUP/TASK closure survives genuine PG restart and rotated Host w
   assert.equal(restartedIdentity.system_identifier,originalIdentity.system_identifier);
   assert.notEqual(restartedIdentity.started_at,originalIdentity.started_at);
   const current=factory({pg:restartedIdentity});assert.notEqual(current.hostInstanceId,original.hostInstanceId);
-  await t.test('new Host prepareClosures finishes only original settled RESULT_READY proofs and reuses the unchanged original fence',async()=>{
+  await t.test('new Host prepares only original settled RESULT_READY source graphs and reuses the unchanged fence without qualification',async()=>{
    await current.service.prepareClosures();
-   const result=await observe(current,deferredTask.a);assert.equal(result.count,1);assert.equal(result.retained.length,0);
-   assert.equal(result.resolutions[0].proof_sha256,sha(deferredTask.closure));
-   const foreign=await observe(current,foreignFenceTask.a);assert.equal(foreign.count,0);assert.equal(foreign.retained.length,1);
+   const result=await observe(current,deferredTask.a);assert.equal(result.candidateCount,1);assert.equal(result.unjoined.length,0);
+   assert.equal(result.candidates[0].graph_sha256,sha(deferredTask.closure));
+   const foreign=await observe(current,foreignFenceTask.a);assert.equal(foreign.candidateCount,0);assert.equal(foreign.unjoined.length,1);
    await assert.rejects(current.service.sealTask(foreignFenceTask.scope),/native_physical_custody_fence_changed/);
    const foreignData=factory({pg:restartedIdentity,dataHash:'0'.repeat(64)});
    await assert.rejects(foreignData.service.sealTask(deferredTask.scope),/native_physical_custody_task_data_lineage/);
   });
-  await t.test('new Host independently verifies the original full SETUP closure after same-cluster restart',async()=>{
-   const result=await observe(current,positive.a);assert.equal(result.count,1);assert.equal(result.retained.length,0);
-   assert.equal(result.resolutions[0].key,positive.operationId);assert.equal(result.resolutions[0].proof_sha256,sha(positive.closure));
-   assert.equal(result.resolutions[0].host_instance_id,current.hostInstanceId);
+  await t.test('new Host audits original SETUP source graph after restart while historical resolution remains HOLD',async()=>{
+   const result=await observe(current,positive.a);assert.equal(result.candidateCount,1);assert.equal(result.unjoined.length,0);
+   assert.equal(result.candidates[0].key,positive.operationId);assert.equal(result.candidates[0].graph_sha256,sha(positive.closure));
+   assert.equal(result.resolved_count,0);assert.equal(result.retained.length,1);
    assert.equal(positive.closure.host.instance_id,original.hostInstanceId);
    assert.equal(positive.closure.postgres.started_at,originalIdentity.started_at);
-   const lost=await observe(current,ackLost.a);assert.equal(lost.count,1);assert.equal(lost.retained.length,0);
+   const lost=await observe(current,ackLost.a);assert.equal(lost.candidateCount,1);assert.equal(lost.unjoined.length,0);
   });
-  await t.test('new Host independently verifies durable TASK closure, full callback terminals and protected helper bytes after restart',async()=>{
-   const result=await observe(current,taskPositive.a);assert.equal(result.count,1);assert.equal(result.retained.length,0);
-   assert.equal(result.resolutions[0].kind,'TASK');assert.equal(result.resolutions[0].proof_sha256,sha(taskPositive.closure));
+  await t.test('new Host audits recorded TASK graph and generated protected helper bytes after restart without historical release',async()=>{
+   const result=await observe(current,taskPositive.a);assert.equal(result.candidateCount,1);assert.equal(result.unjoined.length,0);
+   assert.equal(result.candidates[0].kind,'TASK');assert.equal(result.candidates[0].graph_sha256,sha(taskPositive.closure));
    assert.deepEqual(JSON.parse(await fs.readFile(path.join(taskPositive.protectedDirectory,'receipt.json'),'utf8')),taskPositive.receipt);
    assert.equal(taskPositive.journal.projection.caller_unknown,1);
-   for(const f of recoveredTasks){const recovered=await observe(current,f.a);assert.equal(recovered.count,1);assert.equal(recovered.retained.length,0);}
-   for(const f of taskNegatives){const negative=await observe(current,f.a);assert.equal(negative.count,0);assert.equal(negative.retained.length,1);}
+   for(const f of recoveredTasks){const recovered=await observe(current,f.a);assert.equal(recovered.candidateCount,1);assert.equal(recovered.unjoined.length,0);}
+   for(const f of taskNegatives){const negative=await observe(current,f.a);assert.equal(negative.candidateCount,0);assert.equal(negative.unjoined.length,1);}
   });
   await t.test('missing/held terminal, forged or truncated closures, changed rows and lineage remain occupied after restart',async()=>{
-   for(const f of [incomplete,...negatives]){const result=await observe(current,f.a);assert.equal(result.count,0);assert.ok(result.retained.length>=1);}
+   for(const f of [incomplete,...negatives]){const result=await observe(current,f.a);assert.equal(result.candidateCount,0);assert.ok(result.unjoined.length>=1);}
    const foreignRoot=factory({pg:restartedIdentity,dataHash:'0'.repeat(64)});
-   assert.equal((await observe(foreignRoot,positive.a)).count,0);
-   assert.equal((await observe(current,{...positive.a,admin_grant_epoch:2})).count,0);
-   assert.equal((await observe(current,{...positive.a,key_fingerprint_sha256:'0'.repeat(64)})).count,0);
+   assert.equal((await observe(foreignRoot,positive.a)).candidateCount,0);
+   assert.equal((await observe(current,{...positive.a,admin_grant_epoch:2})).candidateCount,0);
+   assert.equal((await observe(current,{...positive.a,key_fingerprint_sha256:'0'.repeat(64)})).candidateCount,0);
   });
-  await t.test('new concurrent setup occupancy is retained while only the exact historical closure resolves',async()=>{
+  await t.test('new concurrent setup and complete historical source graph both remain occupied without full scope qualification',async()=>{
    let reached,release;const blocked=new Promise(resolve=>{release=resolve;}),arrived=new Promise(resolve=>{reached=resolve;});let hold=true;
    const reading=factory({pg:restartedIdentity,onRead:async()=>{if(hold){hold=false;reached();await blocked;}}});
    const pending=observe(reading,positive.a);await arrived;
    const operationId=randomUUID();try{await insertSetup(reading,positive.a,operationId,randomUUID());}finally{release();}
-   const result=await pending;assert.equal(result.count,1);assert.deepEqual(result.resolutions.map(x=>x.key),[positive.operationId]);
-   assert.deepEqual(result.retained.map(x=>x.key),[operationId]);
-   const fresh=await observe(current,positive.a);assert.equal(fresh.count,1);assert.deepEqual(fresh.retained.map(x=>x.key),[operationId]);
+   const result=await pending;assert.equal(result.candidateCount,1);assert.deepEqual(result.candidates.map(x=>x.key),[positive.operationId]);
+   assert.equal(result.resolved_count,0);assert.deepEqual(new Set(result.retained.map(x=>x.key)),new Set([positive.operationId,operationId]));
+   assert.deepEqual(result.unjoined.map(x=>x.key),[operationId]);
+   const fresh=await observe(current,positive.a);assert.equal(fresh.candidateCount,1);assert.deepEqual(fresh.unjoined.map(x=>x.key),[operationId]);
   });
   const [after]=await sql.unsafe(`select (select count(*)::int from ${requestTable}) as requests,
    (select count(*)::int from ${closureTable}) as closures,
@@ -448,7 +467,7 @@ test('physical SETUP/TASK closure survives genuine PG restart and rotated Host w
   assert.deepEqual(after.closure_bytes.filter(x=>originalClosureKeys.has(`${x.kind}:${x.key}`)),before.closure_bytes,'every pre-restart closure byte must remain unchanged');
   await fs.writeFile(path.join(directory,'qualification.json'),json({schema:'metaengine.native-physical-custody.restart-qualification.v1',
    platform:process.platform,postgres_version:restartedIdentity.version,original_postgres:originalIdentity,restarted_postgres:restartedIdentity,
-   original_host_instance:original.hostInstanceId,restarted_host_instance:current.hostInstanceId,generated_os_fixtures:true,
+   original_host_instance:original.hostInstanceId,restarted_host_instance:current.hostInstanceId,generated_os_fixtures:true,source_graphs_only:true,historical_resolution:'HOLD',full_scope_qualified:false,
    windows_qualified:false,automatic_retry_allowed:false,authority_effect:false})+'\n');
   t.diagnostic('disposable_receipt_directory='+directory);
  }finally{

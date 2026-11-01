@@ -2,6 +2,7 @@ import {nativeCodingCanonicalJson as json,nativeCodingCanonicalSha256 as sha} fr
 import {nativeCapacityPostgresBirth} from './native-coding-host-capacity.mjs';
 import {nativeCodingHostSettlement,validateNativeCodingHostSettlement,markNativePhysicalSettlementUnconfirmed} from '../../apps/metaengine-browser/src/native-coding-host-settlement.mjs';
 import {validateCodexCliJoinedSettlement,validateCodexCliLocalOutputDrain,codexCliProcessIdentity} from '../../apps/metaengine-browser/src/codex-cli-physical-settlement.mjs';
+import {consumeNativeSetupJobDrain} from './native-coding-setup-job-drain.mjs';
 const fail=why=>{throw Error('native_physical_custody_'+why);};
 const same=(a,b)=>json(a)===json(b),HASH=/^[a-f0-9]{64}$/;
 const tracked=new Set(['RESERVE_EXECUTION','ADVANCE_EXECUTION','AGENT_OPERATION','BEGIN_NATIVE_SETUP_V1']);
@@ -27,8 +28,9 @@ function lineage(r,root){
  if(r.frame.instance_id!==root.host_instance_id||r.frame.host_pid!==root.host_pid||r.host.process_incarnation_id!==root.host_birth
   ||r.main_birth!==root.main_birth||!same(r.postgres,root.pg_identity))fail('request_lineage_changed');
 }
-// Independent reader of anchored bytes. Neither a caller outcome nor a SQL
-// terminal state is physical proof. Reverse inclusion detects omitted dispatch.
+// Read-only source graph audit. Its returned hash is not a native/Owner
+// full-scope qualification capability and cannot authorize historical release.
+// Reverse inclusion detects omitted dispatch within the recorded graph.
 export function verifyNativePhysicalTask({closure,publication,job,receipt,journal,requests,reserve,permit}={}){
  const c=closure,r=publication?.root;
  if(c?.schema!=='metaengine.native-coding.physical-task-closure.v1'||!r||!same(c.publication,publication)
@@ -172,19 +174,22 @@ export function createNativeCodingPhysicalCustody({sql,hostInstanceId,hostPid,po
    await sealTask(r.frame.payload.scope).catch(()=>{});
   }
  }
- async function sealSetup({operationId,custodyId,actor,request:origin}={}){
+ async function sealSetup({operationId,custodyId,actor,request:origin,operation:ownedOperation}={}){
   return write(async tx=>{
    const native=await physical(tx),q=await request(tx,origin?.requestId),r=requestRecord(q);
    if(r.frame.action!=='BEGIN_NATIVE_SETUP_V1'||r.request_sha256!==origin.requestDigest||!same(r.host,native.host)||!same(r.postgres,native.postgres)||r.main_birth!==native.main_birth)fail('setup_origin');
    const [row]=await tx.unsafe('select to_jsonb(s) as value from destruktion_meta.native_coding_setup_operation_h205f22 s where operation_id=$1::uuid',[operationId]);
    const s=row?.value;
+   if(!same(s,ownedOperation))fail('setup_original_job_changed');
    if(s?.custody_id!==custodyId||s.cleanup_state!=='DRAINED'||!['STOPPED','HOLD'].includes(s.state)
     ||s.intent.host_instance_id!==hostInstanceId||s.intent.host_pid!==hostPid||!same(s.intent.actor,actor)
     ||Object.entries(r.frame.payload.body.input).some(([k,v])=>!same(s.intent[k],v)))fail('setup_readback');
    setupLineage(s,r);
    const closure={schema:'metaengine.native-coding.physical-setup-closure.v1',operation:s,request_id:r.frame.request_id,request_sha256:r.request_sha256,
     host:r.host,postgres:r.postgres,main_birth:r.main_birth,automatic_retry_allowed:false,authority_effect:false};
-   await tx.unsafe("insert into destruktion_meta.native_coding_physical_closure_h205f22(kind,key,closure) values('SETUP',$1::text,$2::text::jsonb)",[operationId,json(closure)]);return closure;
+   await tx.unsafe("insert into destruktion_meta.native_coding_physical_closure_h205f22(kind,key,closure) values('SETUP',$1::text,$2::text::jsonb)",[operationId,json(closure)]);
+   return {schema:'metaengine.native-coding.physical-closure-ack.v1',state:'SOURCE_GRAPH_CANDIDATE',graph_sha256:sha(closure),
+    historical_resolution:'HOLD',full_scope_qualification:'UNAVAILABLE',readiness:false,automatic_retry_allowed:false,authority_effect:false};
   },true);
  }
  async function taskInputs(tx,scope){
@@ -237,7 +242,8 @@ export function createNativeCodingPhysicalCustody({sql,hostInstanceId,hostPid,po
     journal:input.journal,reserve_request_sha256:input.reserve.request.request_sha256,automatic_retry_allowed:false,authority_effect:false};
    verifyNativePhysicalTask({...input,closure});
    await tx.unsafe("insert into destruktion_meta.native_coding_physical_closure_h205f22(kind,key,closure) values('TASK',$1::text,$2::text::jsonb)",[`${scope.task_id}:${scope.lease_generation}`,json(closure)]);
-   return {schema:'metaengine.native-coding.physical-closure-ack.v1',proof_sha256:sha(closure),automatic_retry_allowed:false,authority_effect:false};
+   return {schema:'metaengine.native-coding.physical-closure-ack.v1',state:'SOURCE_GRAPH_CANDIDATE',graph_sha256:sha(closure),
+    historical_resolution:'HOLD',full_scope_qualification:'UNAVAILABLE',readiness:false,automatic_retry_allowed:false,authority_effect:false};
   });
  }
  async function verifySetup(tx,c,row,actor,current){
@@ -267,43 +273,47 @@ export function createNativeCodingPhysicalCustody({sql,hostInstanceId,hostPid,po
    for(const {request:r} of rows){after=r.frame.request_id;await sealTask(r.frame.payload.scope).catch(()=>{});}
   }
  }
- async function verifyObservation({tx,actor,evidence}={}){
-  open();const current=await physical(tx);let after=null,count=0;
-  await tx.unsafe('delete from destruktion_meta.native_coding_physical_resolution_h205f22 where device_id=$1::uuid and observed_at<$2::timestamptz-interval \'10 seconds\'',[actor.device_id,evidence.observed_at]);
-  // Bounded keyset pages; history never enters wire evidence or a JS census array.
-  for(;;){
+ async function verifyObservation(){
+  open();
+  // No existing native/Owner producer currently supplies a full-scope private
+  // qualification capability. Persisted graphs, hashes and caller objects do
+  // not fill that gap. This method cannot grant a historical resolution and
+  // deliberately reads/writes neither candidate receipts nor resolution cache.
+  return 0;
+ }
+ async function auditCandidateScope({tx,actor,kind,key}={}){
+  open();
+  const projection={schema:'metaengine.native-coding.physical-candidate-audit.v1',kind,key,
+   state:'HOLD',historical_resolution:'HOLD',full_scope_qualification:'UNAVAILABLE',readiness:false,
+   automatic_retry_allowed:false,authority_effect:false};
+  if(!['SETUP','TASK'].includes(kind)||typeof key!=='string'||!key||key.length>80)fail('audit_selector');
+  try{
+   const current=await physical(tx);
    const rows=await tx.unsafe(`select r as row,c.closure from destruktion_meta.native_coding_capacity_rows_v1($1::uuid,$2::text) r
     join destruktion_meta.native_coding_physical_closure_h205f22 c on c.kind=r->>'kind' and c.key=r->>'key'
-    where ($3::text is null or (r->>'kind')||':'||(r->>'key')>$3::text) order by (r->>'kind')||':'||(r->>'key') limit 32`,[actor.device_id,actor.client_id,after]);
-   if(!rows.length)break;
-   for(const {row,closure} of rows){after=`${row.kind}:${row.key}`;let proof;
-    // Invalid/incomplete historical proof remains occupied. It never creates
-    // retry authority or deletes original receipts, dispatches or history.
-    try{
-     if(row.kind==='SETUP')proof=await verifySetup(tx,closure,row,actor,current);
-     else{
-      const root=closure.publication?.root;
-      if(root?.device_id!==actor.device_id||root.client_id!==actor.client_id||root.admin_grant_epoch!==actor.admin_grant_epoch
-       ||root.key_sha256!==actor.key_fingerprint_sha256||root.pg_identity.system_identifier!==current.postgres.system_identifier
-       ||root.pg_identity.data_directory_identity_sha256!==current.postgres.data_directory_identity_sha256)fail('task_principal');
-      const fence=await tx.unsafe('select run_id from destruktion_meta.native_coding_physical_fence_h205f22 where run_id=$1::uuid and host_instance_id=$2::uuid',[root.run_id,root.host_instance_id]);if(fence.length!==1)fail('task_unfenced');
-      proof=verifyNativePhysicalTask({...await taskInputs(tx,root.scope),closure});
-     }
-    }catch{continue;}
-    await tx.unsafe(`insert into destruktion_meta.native_coding_physical_resolution_h205f22(device_id,client_id,admin_grant_epoch,device_key_fingerprint_sha256,
-     host_instance_id,generation,observed_at,postgres_scope_sha256,kind,key,durable_sha256,proof_sha256)
-     values($1::uuid,$2::text,$3::bigint,$4::text,$5::uuid,$6::bigint,$7::timestamptz,$8::text,$9::text,$10::text,$11::text,$12::text)`,
-     [actor.device_id,actor.client_id,actor.admin_grant_epoch,actor.key_fingerprint_sha256,evidence.host_instance_id,evidence.generation,evidence.observed_at,evidence.postgres_scope_sha256,row.kind,row.key,row.durable_sha256,proof]);count++;
+    where r->>'kind'=$3::text and r->>'key'=$4::text`,[actor.device_id,actor.client_id,kind,key]);
+   if(rows.length!==1)return projection;
+   const {row,closure}=rows[0];let graphSha;
+   if(kind==='SETUP')graphSha=await verifySetup(tx,closure,row,actor,current);
+   else{
+    const root=closure.publication?.root;
+    if(root?.device_id!==actor.device_id||root.client_id!==actor.client_id||root.admin_grant_epoch!==actor.admin_grant_epoch
+     ||root.key_sha256!==actor.key_fingerprint_sha256||root.pg_identity.system_identifier!==current.postgres.system_identifier
+     ||root.pg_identity.data_directory_identity_sha256!==current.postgres.data_directory_identity_sha256)fail('task_principal');
+    const fence=await tx.unsafe('select run_id from destruktion_meta.native_coding_physical_fence_h205f22 where run_id=$1::uuid and host_instance_id=$2::uuid',[root.run_id,root.host_instance_id]);if(fence.length!==1)fail('task_unfenced');
+    graphSha=verifyNativePhysicalTask({...await taskInputs(tx,root.scope),closure});
    }
-  }
-  return count;
+   return {...projection,state:'SOURCE_GRAPH_JOINED',graph_sha256:graphSha,durable_sha256:row.durable_sha256};
+  }catch{return projection;}
  }
  async function drain(){
   while(work.size||liveTickets.size){if(work.size)await Promise.allSettled([...work]);else await new Promise(resolve=>waiters.add(resolve));}
   if(cleanupUnconfirmed)throw markNativePhysicalSettlementUnconfirmed(Error('native_physical_custody_cleanup_unconfirmed'));
  }
  return Object.freeze({beginRequest:frame=>retain(()=>beginRequest(frame)),endRequest:(ticket,held)=>retain(()=>endRequest(ticket,held)),
-  sealSetup:input=>retain(()=>sealSetup(input)),sealTask:scope=>retain(()=>sealTask(scope)),prepareClosures:()=>retain(prepareClosures),
-  verifyObservation:input=>retain(()=>verifyObservation(input)),close(){closed=true;change();},drain,
-  snapshot:()=>Object.freeze({closed,pending_requests:liveTickets.size,active_work:work.size,cleanup_unconfirmed:cleanupUnconfirmed})});
+  sealSetup(token){const source=consumeNativeSetupJobDrain(token);return retain(()=>sealSetup(source));},
+  sealTask:scope=>retain(()=>sealTask(scope)),prepareClosures:()=>retain(prepareClosures),auditCandidateScope:input=>retain(()=>auditCandidateScope(input)),
+  verifyObservation:()=>retain(verifyObservation),close(){closed=true;change();},drain,
+  snapshot:()=>Object.freeze({closed,pending_requests:liveTickets.size,active_work:work.size,cleanup_unconfirmed:cleanupUnconfirmed,
+   historical_resolution:'HOLD',full_scope_qualification:'UNAVAILABLE',readiness:false,authority_effect:false})});
 }

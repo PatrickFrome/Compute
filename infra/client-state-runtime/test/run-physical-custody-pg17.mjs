@@ -10,7 +10,7 @@ try{
  if(!path.isAbsolute(bin||'')||!path.isAbsolute(driver||''))throw Error('physical_pg17_explicit_inputs_required');
  for(const name of ['initdb','pg_ctl','postgres'])if(!(await fs.stat(path.join(bin,name+(process.platform==='win32'?'.exe':'')))).isFile())throw Error('physical_pg17_binary_missing');
  if(!(await fs.stat(driver)).isFile())throw Error('physical_pg17_driver_missing');
- const files=['native-coding-physical-custody.pg17.test.mjs','native-coding-physical-restart.pg17.test.mjs']
+ const files=['native-coding-physical-custody.pg17.test.mjs','native-coding-physical-restart.pg17.test.mjs','native-coding-setup.pg17.test.mjs']
   .map(file=>fileURLToPath(new URL('../'+file,import.meta.url)));
  const output=await new Promise((resolve,reject)=>{
   const child=spawn(process.execPath,['--test','--test-isolation=process','--test-concurrency=1','--test-reporter=tap',...files],

@@ -274,8 +274,8 @@ test('durable physical custody source and PG17 suites are mandatory Windows outc
  const nativeRequired=source.slice(source.indexOf('          const nativeRequired=['),source.indexOf('          const baseline='));
  const sourcePaths=source.slice(source.indexOf('          const sourcePaths=['),source.indexOf('          const sources=[];'));
  for(const [files,lane,required] of [
-  [['native-coding-physical-task.test.mjs','native-coding-physical-ipc.test.mjs'],component,componentRequired],
-  [['native-coding-physical-custody.pg17.test.mjs','native-coding-physical-restart.pg17.test.mjs'],native,nativeRequired],
+  [['native-coding-physical-task.test.mjs','native-coding-physical-ipc.test.mjs','native-coding-physical-authority.test.mjs','native-coding-setup-job-drain.test.mjs'],component,componentRequired],
+  [['native-coding-physical-custody.pg17.test.mjs','native-coding-physical-restart.pg17.test.mjs','native-coding-setup.pg17.test.mjs'],native,nativeRequired],
  ])for(const file of files){
   const full='infra/client-state-runtime/'+file;
   assert.equal(lane.split("'"+full+"',").length-1,1,full+' must run exactly once in its mandatory Windows lane');
@@ -291,6 +291,7 @@ test('durable physical custody source and PG17 suites are mandatory Windows outc
   'infra/client-state-runtime/native-coding-host-capacity.mjs',
   'infra/client-state-runtime/native-coding-capacity-v2.sql',
   'infra/client-state-runtime/native-coding-host-setup-service.mjs',
+  'infra/client-state-runtime/native-coding-setup-job-drain.mjs',
   'infra/client-state-runtime/test/fixtures/native-coding-physical-task-fixture.mjs',
   'infra/client-state-runtime/test/run-physical-custody-pg17.mjs',
   'apps/metaengine-browser/src/native-coding-run-callback-journal.mjs',
@@ -307,10 +308,10 @@ test('durable physical custody source and PG17 suites are mandatory Windows outc
 
 test('physical custody npm entrypoints require actual PG17 execution and cannot succeed by skipping missing inputs',async()=>{
  const pkg=JSON.parse(await readFile(new URL('./package.json',import.meta.url),'utf8'));
- for(const file of ['native-coding-physical-task.test.mjs','native-coding-physical-ipc.test.mjs'])assert.equal(pkg.scripts.test.split(' ').filter(value=>value===file).length,1,file);
+ for(const file of ['native-coding-physical-task.test.mjs','native-coding-physical-ipc.test.mjs','native-coding-physical-authority.test.mjs','native-coding-setup-job-drain.test.mjs'])assert.equal(pkg.scripts.test.split(' ').filter(value=>value===file).length,1,file);
  assert.equal(pkg.scripts['test:physical-custody:pg17'],'node test/run-physical-custody-pg17.mjs');
  const runner=await readFile(new URL('./test/run-physical-custody-pg17.mjs',import.meta.url),'utf8');
- for(const file of ['native-coding-physical-custody.pg17.test.mjs','native-coding-physical-restart.pg17.test.mjs'])assert.ok(runner.includes("'"+file+"'"),file);
+ for(const file of ['native-coding-physical-custody.pg17.test.mjs','native-coding-physical-restart.pg17.test.mjs','native-coding-setup.pg17.test.mjs'])assert.ok(runner.includes("'"+file+"'"),file);
  assert.ok(runner.includes("'--test-isolation=process'"));assert.ok(runner.includes("'--test-concurrency=1'"));
  assert.ok(runner.includes('physical_pg17_required_case_not_executed'));
  const env=Object.fromEntries(Object.entries(process.env).filter(([key])=>!/^METAENGINE_PG_TEST_(?:BIN|DRIVER|BASE)$/i.test(key)));

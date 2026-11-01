@@ -294,7 +294,7 @@
     },
     {
       "path": "infra/client-state-runtime/native-coding-capacity-v2.sql",
-      "sha256": "1963eb11879d1436f69c8c92cc53799d659f96389daae2b500fe06e68080a133"
+      "sha256": "37299a883ecd6265f4616d3f21108a537a9e8ae5038b3289f557d973cb9622ff"
     },
     {
       "path": "infra/client-state-runtime/native-coding-callback-publication-v1.sql",

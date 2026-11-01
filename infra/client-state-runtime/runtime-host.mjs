@@ -683,7 +683,7 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
         pgDataDirectory:config.pg_data_directory,postgresIdentity:runtime.postgresIdentity,postgresContinuity,
         physicalCustody:nativePhysicalCustody,readCapacityEvidence:input=>nativeCapacityService.readSetupAdmission(input)});
       nativeCapacityService=createNativeCodingHostCapacity({sql:nativeCodingSql,hostInstanceId:descriptor.instance_id,hostPid:process.pid,
-        postgresIdentity:runtime.postgresIdentity,readNativeScope:native.readNativeScope,readSetupCustody:()=>nativeSetupService.readCapacityCustody(),physicalCustody:nativePhysicalCustody});
+        postgresIdentity:runtime.postgresIdentity,readNativeScope:native.readNativeScope,readSetupCustody:()=>nativeSetupService.readCapacityCustody()});
       nativeCodingAuthority=Object.freeze({...nativeSetupService.operations,...nativeCapacityService.operations,
         close(){nativeSetupService.close();nativeCapacityService.close();}});
       startSchemaDiagnosis(postgres,descriptor,postgresContinuity);
