@@ -163,7 +163,7 @@ public static class MetaengineCodexJob {
       Require(SetHandleInformation(stdinWrite,1,0)&&SetHandleInformation(stdoutRead,1,0)&&SetHandleInformation(stderrRead,1,0),"parent_pipe_inheritance_failed");
       var startup=new Startup(); startup.flags=0x100|1; startup.show=0;
       startup.stdin=stdinRead; startup.stdout=stdoutWrite; startup.stderr=stderrWrite;
-      var command=new StringBuilder(Quote(exe)); foreach(string arg in args) command.Append(" "+Quote(arg));
+      var childCommandLine=new StringBuilder(Quote(exe)); foreach(string arg in args) childCommandLine.Append(" "+Quote(arg));
       // Windows 10+/Server 2016+ JOB_LIST binds within CreateProcess, before the
       // initial thread can run. Unsupported attributes refuse before creation;
       // there is deliberately no create-then-assign or breakaway fallback.
@@ -183,7 +183,7 @@ public static class MetaengineCodexJob {
         Require(UpdateProcThreadAttribute(attributes,0,new UIntPtr(0x00020002),handleList,new UIntPtr((uint)(IntPtr.Size*3)),IntPtr.Zero,IntPtr.Zero),"handle_attribute_failed");
         var extended=new StartupEx(); extended.startup=startup; extended.startup.cb=Marshal.SizeOf(typeof(StartupEx)); extended.attributes=attributes;
         ProcessInfo createdProcess;
-        bool created=CreateProcess(exe,command,IntPtr.Zero,IntPtr.Zero,true,0x08000004|0x00080000,IntPtr.Zero,cwd,ref extended,out createdProcess);
+        bool created=CreateProcess(exe,childCommandLine,IntPtr.Zero,IntPtr.Zero,true,0x08000004|0x00080000,IntPtr.Zero,cwd,ref extended,out createdProcess);
         Require(created,"create_process_failed");
         // Failed PROCESS_INFORMATION outputs are not owned handles. Transfer
         // them into the outer cleanup scope only after successful creation.
