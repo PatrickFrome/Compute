@@ -12,7 +12,7 @@ import {verifyOwnerOnlyWindowsStorage,protectOwnerOnlyWindowsDirectory} from './
 import {verifyInstalledClientStateResources} from './local-runtime-host-controller.mjs';
 import {readWindowsSandboxHostBoot,windowsSandboxBootIdentity,evaluateCodexSandboxProbe} from './codex-cli-sandbox-probe.mjs';
 import {captureCodexCliPhysicalScope} from './codex-cli-execution-policy.mjs';
-import {codexCliEnvironment,snapshotCodexCliPrivateTools} from './codex-cli-runner.mjs';
+import {codexCliEnvironment,codexCliPrivateEnvironment,snapshotCodexCliPrivateTools} from './codex-cli-runner.mjs';
 
 // Electron's normal fs treats app.asar as a virtual directory. Image identity,
 // inventories and hashes require the physical archive file. Failure to load the
@@ -183,11 +183,12 @@ export function createNativeCodingResultStore({journalRoot,indexRoot,verifyStora
 
 export async function readNativeCodingSandboxEvidence({pin,cliPath,worktreePath,codexHome,scratchRoot,role,hostProcessId=process.pid,
   readProcess=readNativeCodingWindowsProcess,readBoot=readWindowsSandboxHostBoot,verifyStorage=verifyOwnerOnlyWindowsStorage,
-  signal,readExecutableSha256=(file,{signal}={})=>hashFile(file,512*1024*1024,false,signal),
+  signal,privateTools=null,readExecutableSha256=(file,{signal}={})=>hashFile(file,512*1024*1024,false,signal),
   readLogSha256=(file,{signal}={})=>hashFile(file,16*1024*1024,true,signal)}={}) {
   if(signal?.aborted)fail('request_cancelled');
   if(!pin||!HASH.test(pin.sha256||'')||!['IMPLEMENTER','CRITIC'].includes(role))fail('sandbox_receipt_not_pinned');
   if(typeof readExecutableSha256!=='function'||typeof readLogSha256!=='function')fail('sandbox_image_reader_invalid');
+  const tools=privateTools===null?null:snapshotCodexCliPrivateTools(privateTools,{cliExecutable:cliPath});
   const controller=new AbortController(),observationSignal=controller.signal;
   const cancel=()=>controller.abort(signal.reason);
   signal?.addEventListener('abort',cancel,{once:true});
@@ -206,6 +207,8 @@ export async function readNativeCodingSandboxEvidence({pin,cliPath,worktreePath,
     return results.map(result=>result.value);
   };
   try {
+  await tools?.revalidate();
+  if(signal?.aborted)fail('request_cancelled');
   const [{value,sha256},boot,host,cliSha]=await join([
     ()=>readNativeCodingProtectedJson(pin.path,{signal:observationSignal,
       // Abort the outer scope immediately on either ACL failure, while the
@@ -217,6 +220,7 @@ export async function readNativeCodingSandboxEvidence({pin,cliPath,worktreePath,
   ]);
   if(signal?.aborted)fail('request_cancelled');
   if(!HASH.test(cliSha||''))fail('sandbox_image_digest_invalid');
+  if(tools&&cliSha!==tools.cliExecutableSha256)fail('private_tools_cli_digest_mismatch');
   const mode=role==='CRITIC'?'read-only':'workspace-write';
   if(sha256!==pin.sha256||!['metaengine.codex-cli.sandbox-probe.v1','metaengine.codex-cli.sandbox-probe.v2'].includes(value.schema)||value.mode!==mode
     ||!same(value.workspace_path||'',worktreePath)||value.cli_sha256!==cliSha
@@ -241,8 +245,11 @@ export async function readNativeCodingSandboxEvidence({pin,cliPath,worktreePath,
   // Existing protected pins do not upgrade a historical canary's scope. Keep
   // its bytes usable for diagnostics, never as current execution evidence.
   if(value.schema==='metaengine.codex-cli.sandbox-probe.v1')fail('historical_sandbox_receipt_hold');
+  await tools?.revalidate();
   const scope=await captureCodexCliPhysicalScope({cliPath,codexHome,scratchRoot,workspaceRoot:worktreePath,mode,
-    environment:codexCliEnvironment(codexHome),verifyStorage,signal:observationSignal});
+    environment:tools?codexCliPrivateEnvironment(codexHome,tools):codexCliEnvironment(codexHome),verifyStorage,signal:observationSignal});
+  await tools?.revalidate();
+  if(signal?.aborted)fail('request_cancelled');
   if(JSON.stringify(scope)!==JSON.stringify(value.execution_scope))fail('sandbox_execution_scope_mismatch');
   // Local source hashes cannot attest cloud/managed resolution, nor equate
   // sandbox's --include-managed-config with exec's --ignore-user-config.
@@ -455,7 +462,7 @@ export function createNativeCodingHostObservers({app,resourcesPath,cliPath,ident
       await checkTools();
       const pin=pins.find(v=>(v.provider_id===undefined||v.provider_id===query.provider_id)&&(v.agent_id===undefined||v.agent_id===query.agent_id)&&v.role===query.role);
       const evidence=await readNativeCodingSandboxEvidence({pin,cliPath,worktreePath:query.worktree_path,
-        codexHome,scratchRoot:workerTempRoot,role:query.role,hostProcessId:processId,readProcess,readBoot,verifyStorage,signal:query.signal});
+        codexHome,scratchRoot:workerTempRoot,role:query.role,hostProcessId:processId,readProcess,readBoot,verifyStorage,privateTools:tools,signal:query.signal});
       await checkTools();return observe('OS_SANDBOX_CANARY_READBACK',evidence);
     },
   });

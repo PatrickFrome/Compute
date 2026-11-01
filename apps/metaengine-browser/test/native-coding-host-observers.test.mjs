@@ -305,6 +305,27 @@ async function sandboxFixture(t){
   const options={pin:await save(),cliPath,worktreePath,codexHome,scratchRoot,role:'IMPLEMENTER',readProcess:async()=>proc,
     readBoot:async()=>structuredClone(value.host_boot),verifyStorage:yes};return {root,value,options,save,captureScope};
 }
+test('sandbox readback revalidates the captured private tool capability before and after observations',async t=>{
+ const f=await sandboxFixture(t);let drift=false,checks=0;
+ const privateTools={cliExecutable:f.options.cliPath,gitExecutable:process.execPath,
+  cliExecutableSha256:hash('fixture-cli'),gitExecutableSha256:'a'.repeat(64),environment:{PATH:''},
+  revalidate:async()=>{checks++;if(drift)throw Error('fixture_sandbox_tools_drift');}};
+ drift=true;
+ await assert.rejects(readNativeCodingSandboxEvidence({...f.options,privateTools,
+  readBoot:()=>assert.fail('invalid tools must stop before native reads')}),/fixture_sandbox_tools_drift/);
+ drift=false;checks=0;
+ await assert.rejects(readNativeCodingSandboxEvidence({...f.options,privateTools,
+  readLogSha256:async file=>{drift=true;return hash(await fs.readFile(file));}}),/fixture_sandbox_tools_drift/);
+ assert.ok(checks>=2);
+});
+
+test('sandbox readback rejects a private CLI digest mismatch without promoting configuration evidence',async t=>{
+ const f=await sandboxFixture(t);
+ const privateTools={cliExecutable:f.options.cliPath,gitExecutable:process.execPath,
+  cliExecutableSha256:'f'.repeat(64),gitExecutableSha256:'a'.repeat(64),environment:{PATH:''},revalidate:async()=>{}};
+ await assert.rejects(readNativeCodingSandboxEvidence({...f.options,privateTools}),/private_tools_cli_digest_mismatch/);
+});
+
 test('prepared sandbox image reader preserves exact bytes and invalidates a changed executable',async t=>{
   const {createNativeCodingHostImageGuard}=await import('../../../infra/client-state-runtime/native-coding-host-os-scope.mjs');
   const f=await sandboxFixture(t),guard=createNativeCodingHostImageGuard();

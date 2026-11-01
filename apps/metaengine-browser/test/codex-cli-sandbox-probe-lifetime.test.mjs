@@ -86,6 +86,16 @@ test('probe bundle drift before resume terminates and joins its suspended worker
  assert.equal(settled,false);assert.ok(f.handles.every(h=>!h.closed));
  f.finish({fixture_only:true});assert.match((await result).message,/process_unconfirmed/);assert.ok(f.handles.every(h=>h.closed));
 });
+test('probe private bundle drift after canary completion cannot emit OBSERVED',async()=>{
+ const f=fixture();let drift=false;
+ const privateTools={cliExecutable:'/fixture/cli',gitExecutable:'/fixture/git',cliExecutableSha256:'a'.repeat(64),gitExecutableSha256:'b'.repeat(64),
+  environment:{PATH:'package-only'},revalidate:async()=>{if(drift)throw Error('fixture_bundle_drift');}};
+ const pending=f.run({privateTools});await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(f.events.includes('resume'),true);drift=true;f.finish({fixture_only:true});
+ const result=await pending;assert.equal(result.state,'BLOCKED');
+ assert.equal(result.reason,'SANDBOX_EXECUTION_SCOPE_CHANGED');assert.equal(result.boundary_observed,false);
+});
+
 test('probe refuses absent explicit home or scratch selection before creating files or spawning',async()=>{
  for(const extra of [{codexHome:undefined},{scratchRoot:undefined},{codexHome:'relative'},{scratchRoot:'relative'}]){
   const f=fixture();await assert.rejects(f.run(extra),/configuration_invalid/);

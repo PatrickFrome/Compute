@@ -312,7 +312,7 @@ export async function runCodexCliSandboxProbe({ cliPath, workspaceRoot, receiptD
     :evaluateCodexSandboxProbe({ mode, report, nativeProcess, hostReadback, completion, hostUserSid, hostBootIdentity:hostBoot });
   if (outputLimitExceeded) observation = Object.freeze({ state: 'BLOCKED', reason: 'SANDBOX_PROBE_OUTPUT_LIMIT', boundary_observed: false, execution_authorized: false, authority_effect: false });
   if (logWriteFailed) observation = Object.freeze({ state: 'BLOCKED', reason: 'SANDBOX_PROBE_LOG_WRITE_FAILED', boundary_observed: false, execution_authorized: false, authority_effect: false });
-  try{await verifyScope({beforeSandboxSetup:false});}catch{
+  try{await tools?.revalidate();await verifyScope({beforeSandboxSetup:false});await tools?.revalidate();}catch{
     observation=Object.freeze({state:'BLOCKED',reason:'SANDBOX_EXECUTION_SCOPE_CHANGED',boundary_observed:false,execution_authorized:false,authority_effect:false});
   }
   const evidence = { schema: CODEX_SANDBOX_PROBE_SCHEMA, run_id: runId, observed_at: new Date().toISOString(), ...observation,

@@ -45,10 +45,10 @@ if ($VcVarsPath) {
   if ($vcvars -match '[%!"\r\n&|<>^()]') { throw 'guardian_nasm_vcvars_shell_metacharacter_forbidden' }
 }
 if (-not $env:ComSpec -or -not (Test-Path -LiteralPath $env:ComSpec -PathType Leaf)) { throw 'guardian_nasm_cmd_missing' }
-$python = (Get-Command python.exe -CommandType Application -ErrorAction Stop).Source
+$python = (Get-Command python.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
 $extractor = Join-Path $PSScriptRoot 'extract-guardian-pinned-source.py'
 if (-not (Test-Path -LiteralPath $extractor -PathType Leaf)) { throw 'guardian_nasm_pinned_source_extractor_missing' }
-$perl = (Get-Command perl.exe -CommandType Application -ErrorAction Stop).Source
+$perl = (Get-Command perl.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
 $perlVersion = (& $perl -e 'print $^V').Trim()
 if ($LASTEXITCODE -ne 0 -or $perlVersion -notmatch '^v5\.') { throw 'guardian_nasm_perl5_required' }
 $perlHost = (& $perl -e 'print $^O').Trim()
