@@ -91,7 +91,7 @@ async function gitProof(root, env, gitExecutable) {
   const head = (await git(root, ['rev-parse', 'HEAD'], env,gitExecutable)).toString().trim();
   if (!HEAD.test(head)) throw fail('git_head_invalid');
   const status = await git(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--no-renames'], env,gitExecutable);
-  const rows = status.toString('utf8').split('\0').filter(Boolean);
+  const rows = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(status).split('\0').filter(Boolean);
   if (rows.length > 128) throw fail('changed_file_budget_exceeded');
   const files = []; let total = 0;
   for (const row of rows) {
