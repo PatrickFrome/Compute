@@ -214,6 +214,7 @@ jobs:
             'infra/client-state-runtime/native-coding-host-os-scope.test.mjs',
             'infra/client-state-runtime/native-coding-host-transaction-scope.test.mjs',
             'apps/metaengine-browser/test/client-native-coding-goal.test.mjs',
+            'apps/metaengine-browser/test/project-control-state.test.mjs',
             'apps/metaengine-browser/test/native-resource-recovery.test.mjs',
             'apps/metaengine-browser/test/managed-project-inventory-case.test.mjs',
             'apps/metaengine-browser/test/managed-task-project-runtime.test.mjs',
@@ -257,6 +258,7 @@ jobs:
             'apps/metaengine-browser/test/browser-parent-suspension-cycle.test.mjs',
           ];
           const native=[
+            'infra/client-state-runtime/project-control-state.pg17.test.mjs',
             'infra/client-state-runtime/native-coding-workspace-preparation.pg17.test.mjs',
             'infra/client-state-runtime/native-coding-pending-goal.pg17.test.mjs',
             'infra/client-state-runtime/host-owner-preseal-w74.pg17.test.mjs',

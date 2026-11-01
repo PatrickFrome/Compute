@@ -46,7 +46,7 @@ begin
 
  if p.prosrc is null or p.lanname<>'plpgsql' or p.prosecdef is distinct from true or p.provolatile<>'v'
   or p.proconfig is distinct from ARRAY['search_path=pg_catalog, public, destruktion_meta, pg_temp']::text[]
-  or encode(extensions.digest(convert_to(replace(p.prosrc,E'\r\n',E'\n'),'UTF8'),'sha256'),'hex') not in('bdbb0c2c3cf3e1a17d6d6eec1d261aa505bcc48cb1695e6294c5cea44374cad1','55b91c1935bf14b1dad3b02468a93827ae8fab4f12036b05c68f72bc20441aa0')
+  or encode(extensions.digest(convert_to(replace(p.prosrc,E'\r\n',E'\n'),'UTF8'),'sha256'),'hex') not in('bdbb0c2c3cf3e1a17d6d6eec1d261aa505bcc48cb1695e6294c5cea44374cad1','55b91c1935bf14b1dad3b02468a93827ae8fab4f12036b05c68f72bc20441aa0','2f5ed27d52c265fb284d72448e3596b935a1e56777d24f2d30bcc17c2b9a51b9')
  then raise exception 'native_coding_repair_predecessor_requires_review:public.h205f22_project_snapshot_v1(uuid,uuid,uuid,bigint,integer,uuid,text,bigint)' using errcode='55000';end if;
 end $review$;
 do $review$
@@ -509,6 +509,8 @@ begin
     'checkpoint_sha256',s.checkpoint_sha256,'awaited_children',s.awaited_children,'status',s.status,'state',projected,
     'lease',s.resumed_lease,'automatic_retry_allowed',false,'authority_effect',false);
 end $$;
+-- Stored project control is independent of the computed execution aggregate.
+-- PAUSED does not cancel work; neither value proves physical settlement.
 create or replace function public.h205f22_project_snapshot_v1(p_workspace_id uuid,p_project_id uuid,p_task_id uuid,p_task_after_seq bigint,p_limit integer,
   p_device_id uuid,p_client_id text,p_admin_grant_epoch bigint)
 returns jsonb language plpgsql security definer set search_path=pg_catalog,public,destruktion_meta,pg_temp as $$
@@ -541,7 +543,7 @@ begin
     when pending=0 and not exists(select 1 from destruktion_meta.project_task_h205f22 x join destruktion_meta.devos_fleet_task_h205f22 t using(task_id) where x.project_id=id and t.state<>'COMPLETED' and destruktion_meta.native_coding_repair_obligation_v1(t.task_id) is distinct from 'RESOLVED') and destruktion_meta.project_completion_ready_h205f22(r.root_task_id) is true then 'COMPLETED'
     when pending>0 or exists(select 1 from destruktion_meta.project_task_h205f22 x join destruktion_meta.devos_fleet_task_h205f22 t using(task_id) where x.project_id=id and x.parent_task_id is not null and t.state<>'COMPLETED' and destruktion_meta.native_coding_repair_obligation_v1(t.task_id) is distinct from 'RESOLVED') then 'WAITING_CHILDREN' else 'ACTIVE' end;
   return jsonb_build_object('schema','metaengine.devos.project-snapshot.v1','found',true,'project_id',id,'coordination_workspace_id',r.workspace_id,'request_id',r.request_id,'root_task_id',r.root_task_id,
-    'state',computed_state,'goal',r.goal,'last_seq',r.last_seq,'total_tasks',r.total_tasks,'policy',jsonb_build_object('generation',r.policy_generation,'max_depth',r.max_depth,'max_tasks',r.max_tasks,'max_children',r.max_children),
+    'state',computed_state,'control_state',r.state,'goal',r.goal,'last_seq',r.last_seq,'total_tasks',r.total_tasks,'policy',jsonb_build_object('generation',r.policy_generation,'max_depth',r.max_depth,'max_tasks',r.max_tasks,'max_children',r.max_children),
     'selected_task',destruktion_meta.project_task_projection_h205f22(id,selected),'immediate_children',children,'children_truncated',(select count(*)>128 from destruktion_meta.project_task_h205f22 where project_id=id and parent_task_id=selected),
     'proposals_truncated',(select count(*)>128 from destruktion_meta.project_child_proposal_h205f22 where project_id=id and parent_task_id=selected),'pending_proposals',pending,
     'native_review_rejection',review_rejection,'tasks',rows,'proposals',proposals,'task_cursor',jsonb_build_object('after_seq',p_task_after_seq,'next_seq',n,'has_more',n<r.total_tasks),
