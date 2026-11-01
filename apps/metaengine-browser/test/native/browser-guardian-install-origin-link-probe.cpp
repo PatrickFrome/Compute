@@ -260,11 +260,18 @@ void rejectHello(const std::function<void(std::vector<std::uint8_t>&)>& mutate) 
     Handle connected = client(id); observer.waitPending(2);
     const auto frame = metaengine::guardian::detail::makeInstallOriginFrame(InstallOriginRole::Coordinator, nonce);
     std::vector<std::uint8_t> bytes(frame.begin(), frame.end()); mutate(bytes);
+    const bool oversized = bytes.size() > frame.size();
     writePacket(connected.value, bytes); observer.join();
     require(!observer.result, "invalid_hello_became_bound_origin");
     const auto json = observer.link->snapshotJson(); noAuthority(json);
-    require(field(json, "reason") == "INSTALL_ORIGIN_HELLO_INVALID" && json.find("\"original_user\":null") != std::string::npos,
+    // Message-mode reads refuse an overlong packet with ERROR_MORE_DATA before
+    // frame parsing. A complete malformed frame reaches only the frame guard.
+    require(field(json, "kernel_binding") == "UNPROVEN" && json.find("\"original_user\":null") != std::string::npos,
         "invalid_hello_reached_user_capture");
+    require(field(json, "reason") == (oversized ? "INSTALL_ORIGIN_HELLO_IO_UNCONFIRMED" : "INSTALL_ORIGIN_HELLO_INVALID"),
+        "hello_rejection_wrong_phase");
+    require(number(json, "win32_error") == (oversized ? ERROR_MORE_DATA : ERROR_INVALID_DATA),
+        "hello_rejection_lost_exact_kernel_or_frame_error");
 }
 
 // A disposable native server for malicious REPLY fixtures. It stays alive until
