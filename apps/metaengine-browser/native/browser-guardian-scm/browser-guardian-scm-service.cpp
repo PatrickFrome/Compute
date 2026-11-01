@@ -3,6 +3,7 @@
 
 #include <array>
 #include <iostream>
+#include <mutex>
 #include <string>
 #include <string_view>
 
@@ -63,26 +64,51 @@ SERVICE_STATUS g_status{};
 HANDLE g_stop_event = nullptr;
 HANDLE g_worker_thread = nullptr;
 DWORD g_checkpoint = 1;
+std::mutex g_status_mutex;
+bool g_stopped_reported = false;
+bool g_last_status_report_succeeded = false;
 
-bool reportStatus(DWORD state, DWORD win32_exit_code = NO_ERROR, DWORD wait_hint_ms = 0) {
+// Hold the lock through the RPC, not merely while copying SERVICE_STATUS: a
+// final STOPPED report must never overtake an in-flight pending-state report.
+bool reportStatusLocked(DWORD state, DWORD win32_exit_code, DWORD wait_hint_ms) {
     if (g_status_handle == nullptr) return false;
+    if (g_stopped_reported) return state == SERVICE_STOPPED && g_last_status_report_succeeded;
+    if (g_status.dwCurrentState == SERVICE_STOP_PENDING
+        && state != SERVICE_STOP_PENDING && state != SERVICE_STOPPED) return false;
+    if ((state == SERVICE_START_PENDING || state == SERVICE_RUNNING)
+        && g_effect_owner.context().stopped()) {
+        state = SERVICE_STOP_PENDING;
+        wait_hint_ms = 5'000;
+    }
+    const DWORD previousState = g_status.dwCurrentState;
+    if (previousState == state && g_status.dwWin32ExitCode == win32_exit_code
+        && g_status.dwWaitHint == wait_hint_ms) return g_last_status_report_succeeded;
 
     g_status.dwServiceType = SERVICE_WIN32_OWN_PROCESS;
     g_status.dwCurrentState = state;
     g_status.dwWin32ExitCode = win32_exit_code;
     g_status.dwServiceSpecificExitCode = 0;
     g_status.dwWaitHint = wait_hint_ms;
-    g_status.dwControlsAccepted = (state == SERVICE_START_PENDING)
-        ? 0
-        : (SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN);
+    g_status.dwControlsAccepted = (state == SERVICE_RUNNING)
+        ? (SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN)
+        : 0;
 
     if (state == SERVICE_RUNNING || state == SERVICE_STOPPED) {
         g_status.dwCheckPoint = 0;
-    } else {
+    } else if (previousState != state) {
         g_status.dwCheckPoint = g_checkpoint++;
     }
 
-    return SetServiceStatus(g_status_handle, &g_status) != FALSE;
+    // The first STOPPED RPC closes its context. Even a failed return is not
+    // permission to retry that terminal RPC or publish another state afterward.
+    if (state == SERVICE_STOPPED) g_stopped_reported = true;
+    g_last_status_report_succeeded = SetServiceStatus(g_status_handle, &g_status) != FALSE;
+    return g_last_status_report_succeeded;
+}
+
+bool reportStatus(DWORD state, DWORD win32_exit_code = NO_ERROR, DWORD wait_hint_ms = 0) {
+    const std::lock_guard<std::mutex> lock(g_status_mutex);
+    return reportStatusLocked(state, win32_exit_code, wait_hint_ms);
 }
 
 DWORD WINAPI serviceControlHandler(
@@ -92,15 +118,18 @@ DWORD WINAPI serviceControlHandler(
     LPVOID /*context*/) {
     switch (control) {
         case SERVICE_CONTROL_STOP:
-        case SERVICE_CONTROL_SHUTDOWN:
+        case SERVICE_CONTROL_SHUTDOWN: {
             g_effect_owner.requestStop(); // Linearize refusal BEFORE status/event publication.
-            if (g_status.dwCurrentState == SERVICE_RUNNING) {
-                reportStatus(SERVICE_STOP_PENDING, NO_ERROR, 5'000);
+            const std::lock_guard<std::mutex> lock(g_status_mutex);
+            if (!g_stopped_reported) {
+                reportStatusLocked(SERVICE_STOP_PENDING, NO_ERROR, 5'000);
                 if (g_stop_event != nullptr) SetEvent(g_stop_event);
             }
             return NO_ERROR;
+        }
         case SERVICE_CONTROL_INTERROGATE:
-            reportStatus(g_status.dwCurrentState, g_status.dwWin32ExitCode, g_status.dwWaitHint);
+            // There is no state transition to report. In particular, never
+            // reuse a context that a concurrent final STOPPED RPC has closed.
             return NO_ERROR;
         default:
             return ERROR_CALL_NOT_IMPLEMENTED;
@@ -226,23 +255,44 @@ DWORD WINAPI updateActuatorWorker(LPVOID /*context*/) {
 }
 
 void WINAPI serviceMain(DWORD /*argc*/, LPWSTR* /*argv*/) {
-    g_status = {};
-    g_checkpoint = 1;
-    g_status_handle = RegisterServiceCtrlHandlerExW(kServiceName, serviceControlHandler, nullptr);
-    if (g_status_handle == nullptr) return;
+    {
+        const std::lock_guard<std::mutex> lock(g_status_mutex);
+        g_status = {};
+        g_checkpoint = 1;
+        g_stopped_reported = false;
+        g_last_status_report_succeeded = false;
+        g_status_handle = nullptr;
+    }
+    const SERVICE_STATUS_HANDLE statusHandle =
+        RegisterServiceCtrlHandlerExW(kServiceName, serviceControlHandler, nullptr);
+    if (statusHandle == nullptr) return;
+    {
+        const std::lock_guard<std::mutex> lock(g_status_mutex);
+        g_status_handle = statusHandle;
+    }
 
     reportStatus(SERVICE_START_PENDING, NO_ERROR, 5'000);
 
-    g_stop_event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    if (g_stop_event == nullptr) {
+    const HANDLE stopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (stopEvent == nullptr) {
         reportStatus(SERVICE_STOPPED, GetLastError(), 0);
         return;
+    }
+    {
+        const std::lock_guard<std::mutex> lock(g_status_mutex);
+        g_stop_event = stopEvent;
+        // A STOP can arrive during START_PENDING, before the event exists.
+        // The irreversible admission latch carries that request across publish.
+        if (g_effect_owner.context().stopped()) SetEvent(g_stop_event);
     }
     g_worker_thread = CreateThread(nullptr, 0, updateActuatorWorker, nullptr, 0, nullptr);
     if (g_worker_thread == nullptr) {
         const DWORD error = GetLastError();
-        CloseHandle(g_stop_event);
-        g_stop_event = nullptr;
+        {
+            const std::lock_guard<std::mutex> lock(g_status_mutex);
+            CloseHandle(g_stop_event);
+            g_stop_event = nullptr;
+        }
         reportStatus(SERVICE_STOPPED, error, 0);
         return;
     }
@@ -253,18 +303,24 @@ void WINAPI serviceMain(DWORD /*argc*/, LPWSTR* /*argv*/) {
     const DWORD wait_error = wait_result == WAIT_FAILED ? GetLastError() : NO_ERROR;
     g_effect_owner.requestStop();
     SetEvent(g_stop_event);
+    reportStatus(SERVICE_STOP_PENDING, wait_error, 5'000);
     // A timeout is not worker exit. In particular a cancelled overlapped
     // operation still owns its stack buffers/event until physical completion.
     for (;;) {
         const DWORD workerWait = WaitForSingleObject(g_worker_thread, 5'000);
         if (workerWait == WAIT_OBJECT_0) break;
-        reportStatus(SERVICE_STOP_PENDING, wait_error, 5'000);
+        // Merely waiting is not shutdown progress. Retain the pending state and
+        // original checkpoint; do not make a hung worker appear to progress.
         if (workerWait != WAIT_TIMEOUT) Sleep(5'000);
     }
-    CloseHandle(g_worker_thread);
-    g_worker_thread = nullptr;
-    CloseHandle(g_stop_event);
-    g_stop_event = nullptr;
+    {
+        // A callback cannot borrow the stop handle while teardown closes it.
+        const std::lock_guard<std::mutex> lock(g_status_mutex);
+        CloseHandle(g_worker_thread);
+        g_worker_thread = nullptr;
+        CloseHandle(g_stop_event);
+        g_stop_event = nullptr;
+    }
 
     reportStatus(SERVICE_STOPPED, wait_error, 0);
 }
