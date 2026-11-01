@@ -361,6 +361,47 @@ test('predescriptor setup uses actual current ADMIN/repository/PG authority with
    assert.deepEqual(row,{state:'HOLD',reason:'JOB_FAILED',cleanup_state:'DRAINED'});
    const read=await f.call('READ_NATIVE_SETUP_V1',{workspace_id:f.workspace,operation_id:input.operation_id});assert.equal(read.reason,'JOB_FAILED');assert.equal(read.prepared,false);
   });
+  await t.test('pre-entry fallback retains original SQL connection-loss cleanup HOLD',async()=>{
+   const {nativePhysicalSettlementUnconfirmed}=await import('../../apps/metaengine-browser/src/native-coding-host-settlement.mjs');
+   const entered=deferred(),release=deferred();let f,calls=0,seals=0,terminals=0,killStarted=false,terminalFault;
+   const observed=new Proxy(sql,{get(target,key){if(key!=='begin')return target[key];return async(mode,body)=>{
+    let action;
+    try{
+     const result=await sql.begin(mode,tx=>body({...tx,unsafe:async(q,args)=>{
+      if(q.includes('native_coding_setup_operation_v1'))action=args[0];
+      const lose=action==='TERMINAL'&&++terminals===1;
+      const value=await tx.unsafe(q,args);
+      // Test-only connection loss on this disposable fixture's exact reservation.
+      if(lose){entered.resolve();await release.promise;killStarted=true;await tx.unsafe('select pg_terminate_backend(pg_backend_pid())');}
+      return value;
+     }}));
+     // Change the canonical root only after the original CLAIM has committed.
+     if(action==='CLAIM'){await fs.rename(f.managedRoot,f.managedRoot+'-retained');await fs.mkdir(f.managedRoot);}
+     return result;
+    }catch(error){if(action==='TERMINAL')terminalFault=error;throw error;}
+   };}});
+   f=await fixture({sql:observed,runJob:async()=>{calls++;return{cleanup_confirmed:true,reason:'EVIDENCE_REQUIRED'};},
+    physicalCustody:{sealSetup:async()=>{seals++;}}});const input=await f.input();
+   await f.call('BEGIN_NATIVE_SETUP_V1',input);
+   let settled=false;const joined=f.service.drain();joined.then(()=>{settled=true;},()=>{settled=true;});
+   try{
+    await bounded(entered.promise,'fallback_terminal_entry');
+    await tick();assert.equal(settled,false,'drain must join the original fallback SQL');
+   }finally{
+    release.resolve();
+    await assert.rejects(bounded(joined,'fallback_connection_loss'),/cleanup_unconfirmed/);
+   }
+   assert.equal(killStarted,true);
+   assert.equal(nativePhysicalSettlementUnconfirmed(terminalFault),true,'original transaction monitor must mark its exact backend loss');
+   const [row]=await raw.unsafe('select state,cleanup_state from destruktion_meta.native_coding_setup_operation_h205f22 where operation_id=$1',[input.operation_id]);
+   assert.deepEqual(row,{state:'RUNNING',cleanup_state:'HOLD'});
+   const read=await f.call('READ_NATIVE_SETUP_V1',{workspace_id:f.workspace,operation_id:input.operation_id});
+   assert.equal(read.state,'HOLD');assert.equal(read.reason,'CLEANUP_UNCONFIRMED');assert.equal(read.cleanup_state,'HOLD');
+   assert.equal(read.prepared,false);assert.equal(read.execution_ready,false);assert.equal(read.production_qualified,false);assert.equal(read.automatic_retry_allowed,false);assert.equal(read.authority_effect,false);
+   await assert.rejects(bounded(f.service.drain(),'fallback_retained_drain'),/cleanup_unconfirmed/);
+   assert.deepEqual(f.service.snapshot(),{active_jobs:1,pending_handoffs:0,active_requests:0,closed:false,authority_effect:false});
+   assert.equal(terminals,1);assert.equal(calls,0);assert.equal(seals,0);
+  });
   await t.test('cancelled preflight never enters producer and settles only its unused physical custody',async()=>{
    const entered=deferred(),release=deferred();let reads=0,calls=0;
    const f=await fixture({readRootIdentity:async root=>{if(++reads===4){entered.resolve();await release.promise;}return readDirectoryIdentity(root);},runJob:async()=>{calls++;return{cleanup_confirmed:true,reason:'EVIDENCE_REQUIRED'};}}),input=await f.input();
