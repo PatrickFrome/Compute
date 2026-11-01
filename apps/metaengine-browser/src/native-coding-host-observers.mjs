@@ -11,6 +11,8 @@ import {readDirectoryIdentity} from './native-coding-fs-identity.mjs';
 import {verifyOwnerOnlyWindowsStorage,protectOwnerOnlyWindowsDirectory} from './private-windows-storage-acl.mjs';
 import {verifyInstalledClientStateResources} from './local-runtime-host-controller.mjs';
 import {readWindowsSandboxHostBoot,windowsSandboxBootIdentity,evaluateCodexSandboxProbe} from './codex-cli-sandbox-probe.mjs';
+import {captureCodexCliPhysicalScope} from './codex-cli-execution-policy.mjs';
+import {codexCliEnvironment} from './codex-cli-runner.mjs';
 
 // Electron's normal fs treats app.asar as a virtual directory. Image identity,
 // inventories and hashes require the physical archive file. Failure to load the
@@ -179,7 +181,7 @@ export function createNativeCodingResultStore({journalRoot,indexRoot,verifyStora
   });
 }
 
-export async function readNativeCodingSandboxEvidence({pin,cliPath,worktreePath,role,hostProcessId=process.pid,
+export async function readNativeCodingSandboxEvidence({pin,cliPath,worktreePath,codexHome,scratchRoot,role,hostProcessId=process.pid,
   readProcess=readNativeCodingWindowsProcess,readBoot=readWindowsSandboxHostBoot,verifyStorage=verifyOwnerOnlyWindowsStorage,
   signal,readExecutableSha256=(file,{signal}={})=>hashFile(file,512*1024*1024,false,signal),
   readLogSha256=(file,{signal}={})=>hashFile(file,16*1024*1024,true,signal)}={}) {
@@ -216,7 +218,7 @@ export async function readNativeCodingSandboxEvidence({pin,cliPath,worktreePath,
   if(signal?.aborted)fail('request_cancelled');
   if(!HASH.test(cliSha||''))fail('sandbox_image_digest_invalid');
   const mode=role==='CRITIC'?'read-only':'workspace-write';
-  if(sha256!==pin.sha256||value.schema!=='metaengine.codex-cli.sandbox-probe.v1'||value.mode!==mode
+  if(sha256!==pin.sha256||!['metaengine.codex-cli.sandbox-probe.v1','metaengine.codex-cli.sandbox-probe.v2'].includes(value.schema)||value.mode!==mode
     ||!same(value.workspace_path||'',worktreePath)||value.cli_sha256!==cliSha
     ||!same(value.cli_path||'',cliPath)||value.model_called!==false||value.authority_effect!==false
     ||!value.host_boot?.system_process)fail('sandbox_receipt_scope_mismatch');
@@ -236,6 +238,17 @@ export async function readNativeCodingSandboxEvidence({pin,cliPath,worktreePath,
     if(!HASH.test(value.logs?.[hashKey]||'')||await readLogSha256(value.logs[fileKey],{signal:observationSignal})!==value.logs[hashKey])fail('sandbox_log_digest_mismatch');
   }));
   if(signal?.aborted)fail('request_cancelled');
+  // Existing protected pins do not upgrade a historical canary's scope. Keep
+  // its bytes usable for diagnostics, never as current execution evidence.
+  if(value.schema==='metaengine.codex-cli.sandbox-probe.v1')fail('historical_sandbox_receipt_hold');
+  const scope=await captureCodexCliPhysicalScope({cliPath,codexHome,scratchRoot,workspaceRoot:worktreePath,mode,
+    environment:codexCliEnvironment(codexHome),verifyStorage,signal:observationSignal});
+  if(JSON.stringify(scope)!==JSON.stringify(value.execution_scope))fail('sandbox_execution_scope_mismatch');
+  // Local source hashes cannot attest cloud/managed resolution, nor equate
+  // sandbox's --include-managed-config with exec's --ignore-user-config.
+  // Only a future genuine CLI-produced effective-policy observation can close
+  // this boundary; receipt flags or injected JSON cannot qualify it.
+  if(scope.configuration_attestation==='UNAVAILABLE')fail('sandbox_configuration_equivalence_unverified');
   return {backend:'CODEX_WINDOWS_ELEVATED',mode,evidence_sha256:sha256,outside_write_denied:true,worktree_write_denied:role==='CRITIC'};
   } catch(error) {
     controller.abort(error);throw error;
@@ -318,6 +331,7 @@ export function createNativeCodingWorkerRegistry({processController,readProcess=
 
 /** These closures are native main/Host capabilities, never renderer parameters. */
 export function createNativeCodingHostObservers({app,resourcesPath,cliPath,identity,ownPostgres,permitRegistry,
+  codexHome,workerTempRoot,
   sandboxReceipts=[],gitExecutable,readNativeWorker,readCriticSubject,readProcess=readNativeCodingWindowsProcess,
   readBoot=readWindowsSandboxHostBoot,verifyStorage=verifyOwnerOnlyWindowsStorage,
   verifyResources=verifyInstalledClientStateResources,readPackage=null,runGit=run,processId=process.pid}={}) {
@@ -423,7 +437,7 @@ export function createNativeCodingHostObservers({app,resourcesPath,cliPath,ident
     async readSandbox(query) {
       const pin=pins.find(v=>(v.provider_id===undefined||v.provider_id===query.provider_id)&&(v.agent_id===undefined||v.agent_id===query.agent_id)&&v.role===query.role);
       return observe('OS_SANDBOX_CANARY_READBACK',await readNativeCodingSandboxEvidence({pin,cliPath,worktreePath:query.worktree_path,
-        role:query.role,hostProcessId:processId,readProcess,readBoot,verifyStorage,signal:query.signal}));
+        codexHome,scratchRoot:workerTempRoot,role:query.role,hostProcessId:processId,readProcess,readBoot,verifyStorage,signal:query.signal}));
     },
   });
 }

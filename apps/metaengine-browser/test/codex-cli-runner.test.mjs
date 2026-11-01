@@ -503,6 +503,36 @@ test('actual default runner/bridge directory-durability gate blocks before broke
 
 const preparedRequest = f => ({lease:f.lease(310),role:'IMPLEMENTER',worktreePath:f.worktree,prompt:'Original private fixture prompt'});
 
+for (const change of ['home-replaced','config-created','config-changed','scratch-replaced','acl-revoked'])
+test('prepared execution refuses physical policy drift before spawn: '+change,async t=>{
+ const f=await fixture(t),processController=controller({mutate:false});let aclAllowed=true;
+ if(change==='config-changed')await fs.writeFile(path.join(f.codexHome,'config.toml'),'sandbox_mode="workspace-write"\n');
+ if(change==='scratch-replaced')await fs.mkdir(f.workerTempRoot);
+ const runner=createCodexCliRunner({...f,processController,verifyTemporaryStorage:async()=>({owner_dacl_verified:aclAllowed})});
+ const prepared=await runner.prepare(preparedRequest(f));
+ if(change==='home-replaced'){await fs.rename(f.codexHome,f.codexHome+'-retained');await fs.mkdir(f.codexHome);}
+ if(change==='config-created')await fs.writeFile(path.join(f.codexHome,'config.toml'),'sandbox_mode="read-only"\n');
+ if(change==='config-changed')await fs.writeFile(path.join(f.codexHome,'config.toml'),'sandbox_mode="read-only"\n');
+ if(change==='scratch-replaced'){await fs.rename(f.workerTempRoot,f.workerTempRoot+'-retained');await fs.mkdir(f.workerTempRoot);}
+ if(change==='acl-revoked')aclAllowed=false;
+ await assert.rejects(runner.runPrepared(prepared),/execution_scope_changed|storage_unverified/);
+ assert.equal(processController.spawns,0);
+});
+
+test('exclusive scratch creation cannot adopt a replaced prepared parent',async t=>{
+ const f=await fixture(t),processController=controller({mutate:false}),parent=path.join(f.directory,'scratch-parent');
+ await fs.mkdir(parent);const workerTempRoot=path.join(parent,'worker-temp');
+ const runner=createCodexCliRunner({...f,workerTempRoot,processController}),prepared=await runner.prepare(preparedRequest(f));
+ const mkdir=fs.mkdir;let replaced=false;
+ t.mock.method(fs,'mkdir',async(target,...args)=>{
+  if(target===workerTempRoot&&!replaced){replaced=true;await fs.rename(parent,parent+'-retired');await mkdir(parent);}
+  return mkdir(target,...args);
+ });
+ const receipt=await runner.runPrepared(prepared);
+ assert.equal(replaced,true);assert.equal(receipt.state,'AMBIGUOUS');assert.equal(receipt.terminal_reason,'codex_cli_execution_scope_changed');
+ assert.equal(processController.spawns,0);
+});
+
 test('prepared runner creates only immutable local attempt and unclaimed callback HEADER without dispatch',async t=>{
  const f=await fixture(t),processController=controller();let bridges=0;const phases=[];
  const runner=createCodexCliRunner({...f,processController,authorizeLease:async value=>{phases.push(value.phase);return f.authorizeLease(value);},

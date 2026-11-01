@@ -117,6 +117,7 @@ jobs:
           node ../../.github/browser-ci-resource-observation.mjs isolated-windows-native 2>&1 | tee "$NATIVE_PROBE_LOG"
           node --test --test-concurrency=1 \
             test/codex-cli-runner.test.mjs \
+            test/codex-cli-execution-policy.test.mjs \
             test/codex-cli-sandbox-probe.test.mjs \
             test/native-coding-host-observers.test.mjs \
             test/windows-local-computer-executor.test.mjs \
