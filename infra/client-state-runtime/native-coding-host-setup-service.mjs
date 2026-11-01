@@ -11,8 +11,13 @@ import {runNativePhysicalSettlementScope,markNativePhysicalSettlementUnconfirmed
 const fail=reason=>{throw Error('native_setup_'+reason);};
 const same=(a,b)=>json(a)===json(b);
 const selectors=input=>({operation_id:input.operation_id,workspace_id:input.workspace_id});
-// Native Host-only constructor. runJob is intentionally UNBOUND in production
-// Phase3A. Private fixture callbacks exercise custody, never grant readiness.
+const frozenCopy=value=>{
+ const freeze=current=>{if(current&&typeof current==='object'){for(const child of Object.values(current))freeze(child);Object.freeze(current);}return current;};
+ return freeze(structuredClone(value));
+};
+// Native Host-only constructor. Default runtime-host composition remains
+// UNBOUND until Main supplies the original admission and native Owner custody
+// to the setup materializer. Constructor callbacks never grant readiness.
 export function createNativeCodingHostSetupService({sql,hostInstanceId,hostPid,pgDataDirectory,postgresIdentity,postgresContinuity,
  readRootIdentity=readDirectoryIdentity,readAdmission=readAgentResourceAdmission,readCapacityEvidence=null,runJob=null}={}){
  if(typeof sql?.begin!=='function'||typeof sql?.unsafe!=='function'||!path.isAbsolute(pgDataDirectory||'')
@@ -159,7 +164,22 @@ export function createNativeCodingHostSetupService({sql,hostInstanceId,hostPid,p
     if(closed||row.abort.signal.aborted)fail('cancelled');
    };
    let result={cleanup_confirmed:true,reason:'MATERIALIZATION_UNAVAILABLE'};
-   if(runJob){await revalidate();row.physicalConfirmed=false;result=await runJob(Object.freeze({signal:row.abort.signal,revalidate,observation:structuredClone(observation)}));}
+   if(runJob){
+    try{await revalidate();}
+    catch(error){
+     // Only this pre-entry boundary proves no producer was called. Retain the
+     // original custody/intent and publish its unused physical slot as drained.
+     // A producer rejection below never acquires this cleanup conclusion.
+     if(!scope.unconfirmed())await transition('TERMINAL',actor,selectors(input),{custody_id:row.custodyId,
+      state:row.abort.signal.aborted?'STOPPED':'HOLD',reason:row.abort.signal.aborted?'CANCELLED':'JOB_FAILED',cleanup_state:'DRAINED'});
+     throw error;
+    }
+    const privateScope=Object.freeze({operation_id:row.operationId,custody_id:row.custodyId,input:frozenCopy(input),actor:frozenCopy(actor),
+     signal:row.abort.signal,revalidate,observation:frozenCopy(observation),assertJobDrained:()=>{
+      if(!row.finished||!row.physicalConfirmed||scope.unconfirmed())fail('job_cleanup_unconfirmed');
+     }});
+    row.physicalConfirmed=false;result=await runJob(privateScope);
+   }
    if(scope.unconfirmed())fail('job_cleanup_unconfirmed');
    if(result?.cleanup_confirmed!==true||!['MATERIALIZATION_UNAVAILABLE','EVIDENCE_REQUIRED'].includes(result.reason))fail('job_cleanup_unconfirmed');
    row.physicalConfirmed=true;
@@ -178,8 +198,14 @@ export function createNativeCodingHostSetupService({sql,hostInstanceId,hostPid,p
   if(action==='READ_NATIVE_SETUP_ROUTE_V1')return readRoute(actor,input,request);
   if(action==='DISCOVER_NATIVE_SETUP_V1')return discover(actor,input,request);
   if(action==='BEGIN_NATIVE_SETUP_V1')return begin(actor,input,request);
+  const abortOwned=()=>{const row=jobs.get(input.operation_id);if(row&&row.input.workspace_id===input.workspace_id&&same(row.actor,actor))row.abort.abort();};
+  // The request is authenticated already. Fence this exact local custody
+  // before SQL: a failed/lost CANCEL acknowledgement must still stop a worker
+  // that is waiting solely on its cancellation signal. No SQL outcome is
+  // inferred here, and a different actor/workspace cannot stop this producer.
+  if(action==='CANCEL_NATIVE_SETUP_V1')abortOwned();
   const value=await transition(action==='CANCEL_NATIVE_SETUP_V1'?'CANCEL':'READ',actor,input,{},request);
-  if(action==='CANCEL_NATIVE_SETUP_V1'||value.operation?.state==='CANCEL_REQUESTED')jobs.get(input.operation_id)?.abort.abort();
+  if(value.operation?.state==='CANCEL_REQUESTED')abortOwned();
   if(value.operation){const fresh=await discover(actor,input,request);if(!same(fresh.postgres,value.operation.intent.postgres))return {...project(value.operation,input),state:'HOLD',reason:'POSTGRES_CHANGED'};}
   return project(value.operation,input);
  }
