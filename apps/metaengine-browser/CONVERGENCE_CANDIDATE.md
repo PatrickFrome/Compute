@@ -1,3 +1,11 @@
+Prepared source package identity is `0.7.0-dev.2529132193489.1`.
+
+2026-11-01: Previous version `0.7.0-dev.2457446823794.1` was consumed by run 41359882719 at `c5bb36cbdfbd9980ecd6681b46aaf96eb1d806d5`, reservation artifact 13105160114. Its attached PostgreSQL test incorrectly used fresh onboarding after provisioning an existing direct API login. This successor tests authenticated upgrade with the same credentials and additionally rejects unauthenticated replay against existing grants. Local real PostgreSQL 17 replay passed; full Windows bundled qualification is still required. The ordinary producer must independently check and reserve this new identity.
+
+User acceptance requires BOTH self-contained clean-PC installation and data-preserving replacement of the older installed client. The current fresh-only installer gate does not satisfy the second requirement. Neither this package proposal nor passing database tests closes the installer upgrade, first-Owner, or applied-policy blockers. Windows publisher signing is deferred for this test build only. No installation or production readiness is claimed.
+
+Historical predecessor notes:
+
 Prepared source package identity is `0.7.0-dev.2457446823794.1`.
 
 2026-11-01: Previous attempt `0.7.0-dev.2309832227245.1` reserved artifact 13103954936 in run 41358637734 at `ba060afef14f6692abf78151ec0ac93388492292`, then failed before creating an installer because the runtime staging caller had not created its fixed native-dist parent. This successor repairs that preparation order. The normal CI producer must still verify and reserve this distinct version. Unsigned test package only; internal Guardian trust and unresolved first-Owner/policy gates remain unchanged. No installation result is claimed.

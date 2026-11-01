@@ -13,6 +13,7 @@ import { provisionLocalApiLogin, refreshLocalApiRpcGrants } from './db-api-grant
 import { startDbApi } from './db-api.mjs';
 import { inspectAttachedApiAdmission, onboardAttachedPostgres } from './attached-postgres-onboarding.mjs';
 import { applyLocalRuntimeMigrations, loadLocalRuntimeMigrationPlan } from './local-runtime-migrations.mjs';
+import { attestNativeMigrationApiIdentity } from './native-coding-migration-api-identity.mjs';
 import { initializeLocalVaultKey } from './local-vault-key.mjs';
 import { verifyOfflineRuntimeBundle } from './offline-runtime-bundle.mjs';
 import { startOwnedWindowsPostgres } from './owned-postgres-process.mjs';
@@ -270,6 +271,22 @@ test('disposable PostgreSQL pinned migration groups and restricted direct API gr
   assert.deepEqual((await sql.unsafe('SELECT xmin::text AS version FROM pg_catalog.pg_authid WHERE rolname=$1', [login]))[0], roleBeforeRefresh);
   assert.deepEqual(await serviceGrants(), beforeAcl, 'upgrade must not modify shared service_role grants');
   assert.equal((await inspectAttachedApiAdmission({ sql: api, apiLogin: login })).rpc_names_granted, RPC_ALLOWLIST.length);
+  // Existing direct grants require the original authenticated API identity.
+  // A fresh-onboarding replay must not silently adopt an existing principal.
+  await assert.rejects(
+    applyLocalRuntimeMigrations({ sql, expectedMigrationSourcesSha256: plan.source_manifest_sha256 }),
+    /native_callback_function_requires_review/,
+  );
+  await sql.begin(async migrationOwner => {
+    const authenticatedApiIdentity = await attestNativeMigrationApiIdentity({
+      apiSql: api, ownerSql: migrationOwner, apiLogin: login,
+    });
+    await applyLocalRuntimeMigrations({
+      sql: { begin: run => run(migrationOwner) }, expectedMigrationSourcesSha256: plan.source_manifest_sha256,
+      authenticatedApiIdentity,
+    });
+  });
+  assert.deepEqual((await sql.unsafe('SELECT xmin::text AS version FROM pg_catalog.pg_authid WHERE rolname=$1', [login]))[0], roleBeforeRefresh);
   const cognitiveSignature = 'public.h205f22_a2_browser_cognitive_accept_v1(uuid,text,text,uuid,bigint,bigint,jsonb,boolean)';
   const cognitiveMigration = await fs.readFile(new URL('./cognitive-acceptor-direct-api-v1.sql', import.meta.url), 'utf8');
   // Pass the JSON text through text first: postgres.js otherwise serializes a
@@ -376,20 +393,22 @@ test('disposable PostgreSQL pinned migration groups and restricted direct API gr
       FROM pg_catalog.pg_control_system()`);
     const pidBefore = await fs.readFile(path.join(data, 'postmaster.pid'));
     const vaultBefore = await fs.readFile(path.join(data, 'client-vault.key'));
-    const attachedPassword = randomBytes(32).toString('hex');
     let apiPort;
     do { apiPort = await freePort(); } while (apiPort === port);
     let edgePort;
     do { edgePort = await freePort(); } while (edgePort === apiPort || edgePort === port);
-    const onboarding = await onboardAttachedPostgres({ ownerAction: 'ONBOARD_EXISTING_LOCAL_POSTGRES_17',
+    const onboarding = await onboardAttachedPostgres({ ownerAction: 'UPGRADE_EXISTING_LOCAL_POSTGRES_17',
       bundleDirectory: attachedBundle, expectedBundleDigest: attachedBundleSha256,
       stateDirectory, pgDataDirectory: data, runtimeConfigFile,
       expectedMigrationSourcesSha256: plan.source_manifest_sha256,
       expectedClusterSystemIdentifier: cluster.id, expectedPostmasterStartedAt: cluster.started,
       adminDatabaseUrl: `postgres://${owner}:${ownerPassword}@127.0.0.1:${port}/postgres`,
-      apiLogin: 'attached_migration_fixture_api', apiPassword: attachedPassword, apiPort, edgePort,
+      apiLogin: login, apiPassword: password, apiPort, edgePort,
     });
     assert.equal(onboarding.state, 'CONFIGURED_UNQUALIFIED');
+    assert.equal(onboarding.existing_api_credentials_preserved, true);
+    assert.equal(onboarding.api_login_created, false);
+    assert.deepEqual((await sql.unsafe('SELECT xmin::text AS version FROM pg_catalog.pg_authid WHERE rolname=$1', [login]))[0], roleBeforeRefresh);
     assert.equal(onboarding.restricted_api_admission.rpc_names_granted, RPC_ALLOWLIST.length);
     assert.equal(onboarding.database_initialized, false);
     assert.equal(onboarding.postgres_started, false);
@@ -401,7 +420,7 @@ test('disposable PostgreSQL pinned migration groups and restricted direct API gr
     assert.equal(config.postgres_mode, 'attached');
     assert.equal(config.api_role_mode, 'direct');
     assert.equal(config.expected_cluster_system_identifier, cluster.id);
-    assert.equal(new URL(config.database_url).username, 'attached_migration_fixture_api');
+    assert.equal(new URL(config.database_url).username, login);
     await assert.rejects(fs.lstat(path.join(stateDirectory, 'runtime-host-lock.json')), { code: 'ENOENT' });
     await runtime.close();
     runtime = await startDbApi({ databaseUrl: config.database_url, apiKey, port: 0, roleMode: config.api_role_mode });
@@ -415,6 +434,7 @@ test('disposable PostgreSQL pinned migration groups and restricted direct API gr
     direct_role_zero_memberships: true, column_grants: true, rls_reads: true, direct_http_health_reads_insert: true, shared_service_role_modified: false,
     role_ddl_rollback: true, scram_api_credentials_exercised: true,
     missing_insert_grant_rejected_at_startup: true, overloaded_rpc_rejected_at_startup: true,
-    full_attached_onboarding: Boolean(attachedBundle), bundle_verification_stubbed: false,
+    full_attached_onboarding: Boolean(attachedBundle), attached_upgrade_existing_credentials: Boolean(attachedBundle),
+    unauthenticated_existing_grants_replay_rejected: true, authenticated_existing_grants_replay_passed: true, bundle_verification_stubbed: false,
     bundle_sha256: attachedBundleSha256 || null, remaining_rpc_bodies_synthetic: true, production_qualification: false }));
 });

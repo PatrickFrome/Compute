@@ -1,6 +1,7 @@
 // Source-side identity refusal only; W69 alone freezes a *new* package version.
 // Historical NSIS version reservations must never be rebuilt/reused.
 export const RESERVED_PACKAGE_IDENTITIES_W68 = Object.freeze([
+  '0.7.0-dev.2457446823794.1', // artifact 13105160114, run 41359882719; consumed
   '0.7.0-dev.37781000062.1',
   '0.7.0-dev.842024784850.1',
   '0.7.0-dev.2309832227245.1', // artifact 13103954936, run 41358637734; consumed
