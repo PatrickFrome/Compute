@@ -75,20 +75,11 @@ jobs:
       - name: Acquire authenticated crypto source before reserving a package identity
         shell: bash
         env:
-          OPENSSL_PUBLIC_CERTIFICATE_B64: ${{ vars.GUARDIAN_OPENSSL_SIGNING_CERTIFICATE_B64 }}
+          OPENSSL_SIGNING_CERTIFICATE_B64: ${{ vars.GUARDIAN_OPENSSL_SIGNING_CERTIFICATE_B64 }}
         run: |
           set -euo pipefail
-          python3 - <<'PYCODE'
-          import base64, os
-          from pathlib import Path
-          value = os.environ['OPENSSL_PUBLIC_CERTIFICATE_B64']
-          if not value or len(value) > 262144:
-              raise SystemExit('official_public_openssl_certificate_required_before_package_reservation')
-          certificate = base64.b64decode(value, validate=True)
-          if not certificate or len(certificate) > 131072:
-              raise SystemExit('openssl_public_certificate_size_invalid')
-          (Path(os.environ['RUNNER_TEMP']) / 'openssl-public.asc').write_bytes(certificate)
-          PYCODE
+          python3 -B apps/metaengine-browser/scripts/prepare-guardian-openssl-certificate.py \
+            --output-file "$RUNNER_TEMP/openssl-public.asc"
           python3 -B apps/metaengine-browser/scripts/acquire-guardian-openssl-source.py \
             --certificate-file "$RUNNER_TEMP/openssl-public.asc" \
             --output-dir "$RUNNER_TEMP/guardian-openssl-source"

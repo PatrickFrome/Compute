@@ -1,5 +1,6 @@
 # Local diagnostics and tool state are not release sources.
 /.audit-local/
+/.codex-effective-policy-build/
 /supabase/.temp/
 
 # Runtime state of the me2-daemon: SQLite (может содержать vault-токены —

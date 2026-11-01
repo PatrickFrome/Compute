@@ -222,18 +222,37 @@ async function metaengineGuardianNativeBeforePack(context) {
   const packagedJobManifest = path.join(jobManifestDirectory, 'native-coding-job-runtime.json');
   fs.writeFileSync(packagedJobManifest, jobManifestBytes);
   if (!fs.readFileSync(packagedJobManifest).equals(jobManifestBytes)) throw new Error('codex_job_runtime_package_manifest_readback_failed');
+  // Acquisition is a build operation. The installed client never downloads a
+  // missing compiler, package manager or tool from PATH during admission.
+  const { acquirePrivateNativeToolArchives, stagePrivateNativeTools, assertPrivateNativeToolsManifestPins } = await import('./stage-private-native-tools.mjs');
+  const { privateNativeToolsBinding, resolvePrivateNativeTools } = await import('../src/private-native-tools.mjs');
+  const privateToolsRoot = path.join(appRoot, 'native-dist', 'private-native-tools');
+  if (!fs.existsSync(privateToolsRoot)) {
+    const archiveDirectory = path.join(appRoot, 'native-cache', 'private-tools');
+    fs.mkdirSync(archiveDirectory, { recursive: true });
+    await acquirePrivateNativeToolArchives({ archiveDirectory });
+    await stagePrivateNativeTools({ archiveDirectory, outputDirectory: privateToolsRoot });
+  }
+  const privateManifestBytes = fs.readFileSync(path.join(privateToolsRoot, 'manifest.json'));
+  const privateManifest = JSON.parse(privateManifestBytes.toString('utf8'));
+  await assertPrivateNativeToolsManifestPins(privateManifest);
+  const privateToolsBinding = privateNativeToolsBinding(privateManifestBytes);
+  const privateTools = await resolvePrivateNativeTools({ toolsRoot: privateToolsRoot, binding: privateToolsBinding });
+  await privateTools.revalidate();
   const trustRoot = buildEmergencyTrustRootMetadata({ appRoot, repoRoot });
   const packageVersion = String(require(path.join(appRoot, 'package.json')).version || '');
   const offlineRuntimeBinding = await buildOfflineRuntimeBinding({
     bundleDirectory: path.join(appRoot, 'client-state-runtime-dist'),
-    repoRoot, sourceHead: trustRoot.build_sha, packageVersion,
+    repoRoot, sourceHead: trustRoot.build_sha, packageVersion, privateToolsBinding,
   });
+  await privateTools.revalidate();
   const priorMetadata = context.packager?.config?.extraMetadata;
   if (!context.packager?.config) throw new Error('emergency_trust_root_packager_config_unavailable');
   context.packager.config.extraMetadata = {
     ...(priorMetadata && typeof priorMetadata === 'object' ? priorMetadata : {}),
     metaengineEmergencyTrustRoot: trustRoot,
     metaengineClientStateRuntime: offlineRuntimeBinding,
+    metaenginePrivateNativeTools: privateToolsBinding,
   };
 
   await buildDevOSSourceSnapshot({

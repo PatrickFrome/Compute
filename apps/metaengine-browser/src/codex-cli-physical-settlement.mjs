@@ -4,9 +4,10 @@ import {nativeCodingCanonicalJson as canonical} from './native-coding-task-conte
 // Deny-only data contract. Only the owning controller can observe child close;
 // a valid object by itself is NEVER a capability or historical capacity proof.
 export const CODEX_CLI_LAUNCH_SCHEMA='metaengine.codex-cli.launch.v2';
+export const CODEX_CLI_POLICY_LAUNCH_SCHEMA='metaengine.codex-cli.launch.v3';
 export const CODEX_CLI_NATIVE_TERMINAL_SCHEMA='metaengine.codex-cli.native-terminal.v2';
 export const CODEX_CLI_JOINED_SETTLEMENT_SCHEMA='metaengine.codex-cli.joined-settlement.v1';
-export const CODEX_CLI_JOB_PROTOCOL='REQUEST_BOUND_JOINED_STDIO_V2';
+export const CODEX_CLI_JOB_PROTOCOL='REQUEST_BOUND_POLICY_STDIO_V3';
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const HASH=/^[a-f0-9]{64}$/;
 const fail=why=>{throw Error('codex_cli_settlement_'+why);};
@@ -28,35 +29,45 @@ export function codexCliProcessIdentity(value){
   return structuredClone(value);
 }
 export const codexCliPublicProcess=value=>({pid:value.pid,created_at:value.created_at??value.started_at,process_incarnation_id:value.process_incarnation_id});
+function launchInput(spec){
+  if(spec.inputProtocol===undefined){if(spec.policyNonce!==undefined)fail('launch_input_protocol');return {};}
+  if(spec.inputProtocol!=='EFFECTIVE_POLICY_ACK_V1'||typeof spec.policyNonce!=='string'||!HASH.test(spec.policyNonce))fail('launch_input_protocol');
+  return {input_protocol:spec.inputProtocol,policy_nonce:spec.policyNonce};
+}
 export function createCodexCliLaunch(spec,{requestId=randomUUID()}={}){
-  const body={schema:CODEX_CLI_LAUNCH_SCHEMA,request_id:requestId,run_id:spec.runId,
+  const input=launchInput(spec),schema=spec.inputProtocol===undefined?CODEX_CLI_LAUNCH_SCHEMA:CODEX_CLI_POLICY_LAUNCH_SCHEMA;
+  const body={schema,request_id:requestId,run_id:spec.runId,
     executable_path:spec.executablePath,args:spec.args,cwd:spec.cwd,timeout_ms:spec.timeoutMs,
     expected_sha256:spec.expectedExecutableSha256,deadline_ms:spec.deadlineAt==null?'':String(Date.parse(spec.deadlineAt)),
-    prompt_sha256:spec.promptSha256??sha(''),binding_sha256:codexCliSettlementSha256(spec.binding??null)};
+    prompt_sha256:spec.promptSha256??sha(''),binding_sha256:codexCliSettlementSha256(spec.binding??null),...input};
   const canonical_body=canonical(body);
-  const launch={schema:CODEX_CLI_LAUNCH_SCHEMA,canonical_body,request_sha256:sha(canonical_body)};
+  const launch={schema,canonical_body,request_sha256:sha(canonical_body)};
   validateCodexCliLaunch(launch,spec);return Object.freeze(launch);
 }
 export function validateCodexCliLaunch(launch,spec=null){
-  if(!exact(launch,['schema','canonical_body','request_sha256'])||launch.schema!==CODEX_CLI_LAUNCH_SCHEMA
+  if(!exact(launch,['schema','canonical_body','request_sha256'])||![CODEX_CLI_LAUNCH_SCHEMA,CODEX_CLI_POLICY_LAUNCH_SCHEMA].includes(launch.schema)
     ||typeof launch.canonical_body!=='string'||Buffer.byteLength(launch.canonical_body)>131072
     ||!HASH.test(launch.request_sha256||'')||sha(launch.canonical_body)!==launch.request_sha256)fail('launch_digest');
   let body;try{body=JSON.parse(launch.canonical_body);}catch{fail('launch_json');}
-  if(!exact(body,['schema','request_id','run_id','executable_path','args','cwd','timeout_ms','expected_sha256','deadline_ms','prompt_sha256','binding_sha256'])
-    ||canonical(body)!==launch.canonical_body||body.schema!==CODEX_CLI_LAUNCH_SCHEMA||!UUID.test(body.request_id||'')||!UUID.test(body.run_id||'')
+  const phased=launch.schema===CODEX_CLI_POLICY_LAUNCH_SCHEMA;
+  if(!exact(body,['schema','request_id','run_id','executable_path','args','cwd','timeout_ms','expected_sha256','deadline_ms','prompt_sha256','binding_sha256',...(phased?['input_protocol','policy_nonce']:[])])
+    ||canonical(body)!==launch.canonical_body||body.schema!==launch.schema||!UUID.test(body.request_id||'')||!UUID.test(body.run_id||'')
+    ||(phased&&(body.input_protocol!=='EFFECTIVE_POLICY_ACK_V1'||typeof body.policy_nonce!=='string'||!HASH.test(body.policy_nonce)))
     ||![body.expected_sha256,body.prompt_sha256,body.binding_sha256].every(v=>HASH.test(v||''))
     ||typeof body.executable_path!=='string'||typeof body.cwd!=='string'||!body.executable_path||!body.cwd
     ||!Array.isArray(body.args)||body.args.length>256||body.args.some(v=>typeof v!=='string'||v.includes('\0'))
     ||!Number.isSafeInteger(body.timeout_ms)||body.timeout_ms<100||body.timeout_ms>1800000
     ||(body.deadline_ms!==''&&!/^[1-9]\d{0,15}$/.test(body.deadline_ms)))fail('launch_body');
-  if(spec){const expected={...body,run_id:spec.runId,executable_path:spec.executablePath,args:spec.args,cwd:spec.cwd,
+  if(spec){const input=launchInput(spec),schema=spec.inputProtocol===undefined?CODEX_CLI_LAUNCH_SCHEMA:CODEX_CLI_POLICY_LAUNCH_SCHEMA;
+    if(body.schema!==schema)fail('launch_spec_changed');
+    const expected={...body,schema,...input,run_id:spec.runId,executable_path:spec.executablePath,args:spec.args,cwd:spec.cwd,
       timeout_ms:spec.timeoutMs,expected_sha256:spec.expectedExecutableSha256,
       deadline_ms:spec.deadlineAt==null?'':String(Date.parse(spec.deadlineAt)),prompt_sha256:spec.promptSha256??sha(''),
       binding_sha256:codexCliSettlementSha256(spec.binding??null)};
     if(!same(body,expected))fail('launch_spec_changed');}
   return body;
 }
-export function codexCliLaunchWire(launch){validateCodexCliLaunch(launch);return {schema:CODEX_CLI_LAUNCH_SCHEMA,body_b64:Buffer.from(launch.canonical_body,'utf8').toString('base64'),request_sha256:launch.request_sha256};}
+export function codexCliLaunchWire(launch){validateCodexCliLaunch(launch);return {schema:launch.schema,body_b64:Buffer.from(launch.canonical_body,'utf8').toString('base64'),request_sha256:launch.request_sha256};}
 export function codexCliLaunchIdentity(launch){
   const body=validateCodexCliLaunch(launch);
   return {request_id:body.request_id,request_sha256:launch.request_sha256,run_id:body.run_id,

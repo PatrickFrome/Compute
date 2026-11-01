@@ -38,6 +38,17 @@ test('ASAR metadata seals actual offline source, runtime bytes and the protected
   assert.equal(proof.authority_effect, false);
 });
 
+test('before-pack requires the exact canonical tools binding carried by the offline inventory', async t => {
+  const f = await offlineRuntimePackageFixture(t);
+  assert.deepEqual(f.manifest.private_native_tools, f.privateToolsBinding);
+  await assert.rejects(build({ ...f, privateToolsBinding: undefined }), /private_native_tools_binding_mismatch/);
+  await assert.rejects(build({ ...f, privateToolsBinding: { ...f.privateToolsBinding,
+    manifest_sha256: '0'.repeat(64) } }), /private_native_tools_binding_mismatch/);
+  await assert.rejects(build({ ...f, privateToolsBinding: { ...f.privateToolsBinding,
+    caller_verified: true } }), /private_native_tools_binding_mismatch/);
+  assert.equal((await build(f)).bundle_sha256, f.manifest.bundle_sha256);
+});
+
 test('before-pack refuses staged byte drift and a stale checkout source bundle', async t => {
   const f = await offlineRuntimePackageFixture(t);
   await writeFile(path.join(f.bundleDirectory, 'runtime/node/node.exe'), 'tampered');

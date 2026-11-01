@@ -44,3 +44,40 @@ export async function sendRuntimeHostLifecycleMessage(channel, message, { timeou
     try { channel.send(message, error => finish(!error)); } catch { finish(false); }
   });
 }
+
+// Private ordering for existing setup services, not a cleanup attestation.
+// A query may require owned PostgreSQL shutdown to finish. Observe the original
+// native-resource stage before child stop, then join the full operation AFTER
+// child stop. A timeout is only PENDING here; it never means resources drained.
+export function createRuntimeSetupDrain({timeoutMs=6500}={}){
+ if(!Number.isSafeInteger(timeoutMs)||timeoutMs<1||timeoutMs>6500)throw failure('runtime_setup_drain_timeout_invalid');
+ const records=new Map();
+ const observe=work=>{
+  const row={settled:false,ok:false};
+  row.promise=Promise.resolve().then(work).then(value=>{row.settled=true;row.ok=value===undefined;},()=>{row.settled=true;row.ok=false;});
+  return row;
+ };
+ const record=service=>{
+  if(!service)return null;
+  if(typeof service.drainResources!=='function'||typeof service.drain!=='function')throw failure('runtime_setup_drain_service_invalid');
+  let row=records.get(service);
+  if(!row){row={service,resources:observe(()=>service.drainResources()),full:null};records.set(service,row);}
+  return row;
+ };
+ const bounded=async rows=>{
+  let timer;
+  try{await Promise.race([Promise.all(rows.map(row=>row.promise)),new Promise(resolve=>{timer=setTimeout(resolve,timeoutMs);})]);}
+  finally{clearTimeout(timer);}
+  return rows.every(row=>row.settled&&row.ok);
+ };
+ return Object.freeze({
+  async beforeStop(service){const row=record(service);if(!row)return true;return bounded([row.resources]);},
+  async finish(service){
+   record(service);
+   // Do not lose an earlier observed service merely because startup finished
+   // or the caller supplied a different/current service at finalization.
+   for(const row of records.values())row.full??=observe(()=>row.service.drain());
+   return bounded([...records.values()].flatMap(row=>[row.resources,row.full]));
+  },
+ });
+}

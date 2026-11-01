@@ -1,5 +1,5 @@
 import { createWorkspaceReservation, normalizeMutationClaimBinding } from './workspace-manager.mjs';
-import { createManagedTaskProjectRuntime } from './managed-task-project-runtime.mjs';
+import { createManagedTaskProjectRuntime } from './managed-task-project-runtime-core.mjs';
 
 export const MANAGED_PROJECT_COMMAND_ACTIONS = Object.freeze(['PROJECT_CREATE', 'PROJECT_OPEN']);
 export const MANAGED_PROJECT_ADMISSION_SCHEMA = 'metaengine.devos.managed-project-admission.v1';
@@ -20,7 +20,7 @@ function requestOf(command) {
   return Object.freeze(request);
 }
 
-function checkedAdmission(value, request, expected = null) {
+export function validateManagedProjectAdmission(value, request, expected = null) {
   if (!value || value.schema !== MANAGED_PROJECT_ADMISSION_SCHEMA || value.authoritative !== true || value.active !== true || value.authority_effect !== false) throw new Error('managed_project_authoritative_admission_required');
   const claim = normalizeMutationClaimBinding(value.claim);
   const binding = value.workspace_binding;
@@ -50,10 +50,10 @@ export function createManagedTaskProjectCommandAdapter({ executeCommand, resolve
     if (!MANAGED_PROJECT_COMMAND_ACTIONS.includes(command?.action)) return executeCommand(command);
     const action = command.action;
     const request = requestOf(command);
-    const reservation = checkedAdmission(await resolveProjectBinding(request), request);
+    const reservation = validateManagedProjectAdmission(await resolveProjectBinding(request), request);
     const runtime = createManagedTaskProjectRuntime({ executePlan, journal, reserveBinding, finalizeBinding, openProject,
       validateClaim: async (expected) => {
-        checkedAdmission(await resolveProjectBinding(request), request, expected);
+        validateManagedProjectAdmission(await resolveProjectBinding(request), request, expected);
         return true;
       },
     });

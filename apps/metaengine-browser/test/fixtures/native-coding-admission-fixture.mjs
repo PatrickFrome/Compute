@@ -3,7 +3,7 @@ import {canonicalNativeCodingAdmissionJSON} from '../../supabase/a2-browser-nati
 // Generated verifier/disposable-DB fixtures. Never installed/enrolled or
 // represented as native execution, OS sandbox or useful-work evidence.
 export const digest=value=>createHash('sha256').update(canonicalNativeCodingAdmissionJSON(value)).digest('hex');
-export function admissionFixture(){
+export function admissionFixture({cliExecutableSha256='f'.repeat(64)}={}){
   const now=Date.now(),iso=delta=>new Date(now+delta).toISOString();
   const pair=generateKeyPairSync('ec',{namedCurve:'prime256v1'}),raw=pair.publicKey.export({format:'jwk'});
   const jwk={crv:raw.crv,ext:true,key_ops:['verify'],kty:raw.kty,x:raw.x,y:raw.y};
@@ -14,7 +14,7 @@ export function admissionFixture(){
     goal_id:randomUUID(),goal_sha256:'a'.repeat(64),owner_epoch:1,user_sid:'S-1-5-21-1-2-3-1001',device_id:deviceId,
     device_key_fingerprint_sha256:fingerprint,workspace_id:workspaceId,project_id:randomUUID(),provider_id:providerId,
     agent_id:'agent_native-fixture1',role:'IMPLEMENTER',agent_generation_epoch:1,physical_slot_budget:2,
-    artifact:{installed_exe_sha256:'b'.repeat(64),installed_asar_sha256:'c'.repeat(64),runtime_bundle_sha256:'d'.repeat(64),source_sha:'e'.repeat(40),cli_executable_sha256:'f'.repeat(64)},
+    artifact:{installed_exe_sha256:'b'.repeat(64),installed_asar_sha256:'c'.repeat(64),runtime_bundle_sha256:'d'.repeat(64),source_sha:'e'.repeat(40),cli_executable_sha256:cliExecutableSha256},
     postgres:{system_identifier:'7521123456789012345',postmaster:birth(8056,-120000),data_directory_identity_sha256:'1'.repeat(64)},
     worktree:{path:'C:\\METAENGINE\\fixture',root_identity_sha256:'2'.repeat(64),base_sha:'3'.repeat(40)},
     issued_at:iso(-120000),expires_at:iso(600000),revoked:false,storage_evidence_sha256:'4'.repeat(64),record_sha256:'5'.repeat(64)};

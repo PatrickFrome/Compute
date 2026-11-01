@@ -105,7 +105,7 @@ def _msys_gpg_argument(value):
     matched = re.fullmatch(r'([A-Za-z]):[\\/](.*)', raw, flags=re.DOTALL)
     if matched:
         return '/' + matched.group(1).lower() + '/' + matched.group(2).replace('\\', '/')
-    if raw.startswith(('\\', '//')):
+    if raw.startswith(('\\', '//')) or re.match(r'^[A-Za-z]:', raw):
         raise AcquisitionError('msys_gpg_unanchored_or_unc_path_unsupported')
     return raw
 
@@ -152,32 +152,58 @@ def verify_certificate_listing(listing, primary_fingerprint, signing_fingerprint
 
 
 def import_certificate(home, certificate, primary_fingerprint, signing_fingerprint, gpg_binary='gpg'):
-    imported = subprocess.run(gpg_command(home, '--status-fd', '1', '--import', str(certificate), gpg_binary=gpg_binary),
-                              capture_output=True, text=True, check=False)
-    if imported.returncode != 0:
-        raise AcquisitionError('signing_certificate_import_failed')
-    secret = subprocess.run(gpg_command(home, '--with-colons', '--list-secret-keys', gpg_binary=gpg_binary),
-                            capture_output=True, text=True, check=False)
-    if secret.returncode != 0 or any(line.startswith(('sec:', 'ssb:')) for line in secret.stdout.splitlines()):
+    # Public verification must not require the secret-key gpg-agent. A normal
+    # --import probes that agent even for public keys; with our --no-autostart
+    # policy it fails on a fresh home. Inspect without importing, reject secret
+    # packet rows, then stage a dedicated public keyring from the exact bytes.
+    inspected = subprocess.run(gpg_command(home, '--with-colons', '--fingerprint', '--fingerprint',
+                                          '--import-options', 'show-only', '--import', str(certificate),
+                                          gpg_binary=gpg_binary), capture_output=True, text=True, check=False)
+    if inspected.returncode != 0:
+        raise AcquisitionError('signing_certificate_inspection_failed')
+    if any(line.startswith(('sec:', 'ssb:')) for line in inspected.stdout.splitlines()):
         raise AcquisitionError('signing_certificate_must_contain_public_keys_only')
-    listed = subprocess.run(gpg_command(home, '--with-colons', '--fixed-list-mode', '--fingerprint', '--fingerprint',
-                                       '--list-keys', primary_fingerprint, gpg_binary=gpg_binary), capture_output=True, text=True, check=False)
+    verify_certificate_listing(inspected.stdout, primary_fingerprint, signing_fingerprint)
+    keyring = Path(home) / 'openssl-release-public.gpg'
+    if keyring.exists():
+        raise AcquisitionError('signing_certificate_keyring_already_exists')
+    staged = subprocess.run(gpg_command(home, '--output', str(keyring), '--dearmor', str(certificate),
+                                       gpg_binary=gpg_binary), capture_output=True, text=True, check=False)
+    if staged.returncode != 0:
+        raise AcquisitionError('signing_certificate_public_keyring_failed')
+    listed = subprocess.run(gpg_command(home, '--no-default-keyring', '--keyring', str(keyring),
+                                       '--with-colons', '--fixed-list-mode', '--fingerprint', '--fingerprint',
+                                       '--list-keys', primary_fingerprint, gpg_binary=gpg_binary),
+                            capture_output=True, text=True, check=False)
     if listed.returncode != 0:
         raise AcquisitionError('signing_certificate_pinned_primary_missing')
     verify_certificate_listing(listed.stdout, primary_fingerprint, signing_fingerprint)
-    return imported
+    return inspected
 
 
 def verify_gpg_status(status, primary_fingerprint, signing_fingerprint):
+    # NOTATION_DATA may contain non-UTF8 bytes (e.g. Sequoia signature salt).
+    # Preserve raw evidence. Only the authenticated status markers/VALIDSIG
+    # fields are ASCII; opaque notation bytes confer no signature authority.
+    raw = status.encode('utf-8') if isinstance(status, str) else status
+    if not isinstance(raw, bytes):
+        raise AcquisitionError('openssl_release_status_type_invalid')
     valid = []
-    for line in status.splitlines():
-        if not line.startswith('[GNUPG:] '):
+    for line in raw.split(b'\n'):
+        if not line.startswith(b'[GNUPG:] '):
             continue
         fields = line.split()
-        marker = fields[1] if len(fields) > 1 else ''
+        try:
+            marker = fields[1].decode('ascii') if len(fields) > 1 else ''
+        except UnicodeDecodeError as error:
+            raise AcquisitionError('openssl_release_status_marker_invalid') from error
         if marker in UNSAFE_GPG_STATUSES:
             raise AcquisitionError(f'openssl_release_signature_rejected:{marker}')
         if marker == 'VALIDSIG':
+            try:
+                fields = [field.decode('ascii') for field in fields]
+            except UnicodeDecodeError as error:
+                raise AcquisitionError('openssl_release_signature_identity_or_algorithm_mismatch') from error
             if (len(fields) != 12 or fields[2] != signing_fingerprint or fields[11] != primary_fingerprint
                     or fields[9] not in {'8', '9', '10'} or fields[10] != '00'):
                 raise AcquisitionError('openssl_release_signature_identity_or_algorithm_mismatch')
@@ -188,13 +214,16 @@ def verify_gpg_status(status, primary_fingerprint, signing_fingerprint):
 
 
 def verify_signature(home, archive, signature, primary_fingerprint, signing_fingerprint, output_dir, gpg_binary='gpg'):
-    checked = subprocess.run(gpg_command(home, '--status-fd', '1', '--verify', str(signature), str(archive), gpg_binary=gpg_binary),
-                             capture_output=True, text=True, check=False)
-    (output_dir / 'gpg-status.txt').write_text(checked.stdout, encoding='utf-8')
-    (output_dir / 'gpg-stderr.txt').write_text(checked.stderr, encoding='utf-8')
+    checked = subprocess.run(gpg_command(home, '--no-default-keyring', '--keyring', str(Path(home) / 'openssl-release-public.gpg'),
+                                         '--status-fd', '1', '--verify', str(signature), str(archive), gpg_binary=gpg_binary),
+                             capture_output=True, check=False)
+    stdout = checked.stdout.encode('utf-8') if isinstance(checked.stdout, str) else checked.stdout
+    stderr = checked.stderr.encode('utf-8') if isinstance(checked.stderr, str) else checked.stderr
+    (output_dir / 'gpg-status.txt').write_bytes(stdout)
+    (output_dir / 'gpg-stderr.txt').write_bytes(stderr)
     if checked.returncode != 0:
         raise AcquisitionError(f'openssl_release_signature_gpg_exit_{checked.returncode}')
-    return verify_gpg_status(checked.stdout, primary_fingerprint, signing_fingerprint)
+    return verify_gpg_status(stdout, primary_fingerprint, signing_fingerprint)
 
 
 def checkout_head():

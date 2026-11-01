@@ -11,8 +11,10 @@ const SHA=/^[a-f0-9]{64}$/,UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 
 /** One private capability per actual leased run; no allocator or provider API. */
-export async function prepareNativeCodingAgentRunBridge({ownPostgres,runId,binding,permit,authorization,deadlineAt,pins,callbackJournal}={}){
-  if(typeof ownPostgres?.openAgentRunCustody!=='function'||!UUID.test(runId||'')||!permit||!authorization
+export async function prepareNativeCodingAgentRunBridge({ownPostgres,runId,binding,permit,authorization,deadlineAt,pins,callbackJournal,takePreparedCustody}={}){
+  const prepared=takePreparedCustody!==undefined;
+  if((prepared?typeof takePreparedCustody!=='function':typeof ownPostgres?.openAgentRunCustody!=='function')
+    ||!UUID.test(runId||'')||!permit||!authorization
     ||permit.permit_id!==authorization.permit_id||permit.owner_epoch!==authorization.owner_epoch
     ||permit.workspace_id!==authorization.workspace_id||permit.project_id!==authorization.project_id
     ||permit.user_sid!==authorization.user_sid||permit.revoked!==false||permit.trust_namespace!=='LOCAL_OPERATOR_QA'
@@ -28,8 +30,7 @@ export async function prepareNativeCodingAgentRunBridge({ownPostgres,runId,bindi
   const scope=Object.freeze({run_id:runId,workspace_id:permit.workspace_id,project_id:permit.project_id,
     task_id:binding.task_id,lease_generation:binding.lease_generation,agent_id:binding.agent_id,
     agent_generation_epoch:binding.agent_generation_epoch,provider_id:permit.provider_id,role:binding.role});
-  let closed=false,job=null,broker=null,closePromise=null,callbackJoin=null;
-  const custody=await ownPostgres.openAgentRunCustody({binding:scope,journal:callbackJournal});
+  let closed=false,job=null,broker=null,custody=null,closePromise=null,callbackJoin=null;
   const open=()=>{if(closed||Date.now()>=Date.parse(deadlineAt))fail();};
   const host=async(operation,args)=>{
     open();if(!job)fail();
@@ -49,6 +50,17 @@ export async function prepareNativeCodingAgentRunBridge({ownPostgres,runId,bindi
     checkContext(context);return host(tool,args);
   }]));
   try{
+    // The prepared reservation already owns the original Host facet and its
+    // six-phase Owner callback. Consume that exact handoff once; any failure
+    // is terminal for this bridge, never permission to claim a second journal.
+    custody=prepared?takePreparedCustody():await ownPostgres.openAgentRunCustody({binding:scope,journal:callbackJournal});
+    if(prepared&&custody&&typeof custody.then==='function'){
+      // The real Host take is synchronous. Retain a malformed late handoff
+      // until it can be fenced/joined below, without opening broker or launch.
+      custody=await custody;fail();
+    }
+    if(!custody||!['agentOperation','trackCallback','fence','finish'].every(key=>typeof custody[key]==='function'))fail();
+    open();
     broker=await createNativeCodingAgentMcpBroker({maxRuns:1,operations,assertInvocationAuthorized:assertAuthorized,
       async readIntentReceipt(context){
         checkContext(context);const row=await host('READ_INTENT',{request_id:context.request_id});
@@ -101,5 +113,13 @@ export async function prepareNativeCodingAgentRunBridge({ownPostgres,runId,bindi
         return closePromise;
       },
     });return bridge;
-  }catch(error){closed=true;await custody.fence().catch(()=>{});await broker?.close();await custody.finish();throw error;}
+  }catch(error){
+    closed=true;
+    // Join every cleanup capability actually handed over, including malformed
+    // facets. A failed close must not skip the original Host callback join.
+    // Rejection remains a rejection; no local cleanup result attests settlement.
+    try{await custody?.fence?.();}catch{}
+    try{await broker?.close();}finally{await custody?.finish?.();}
+    throw error;
+  }
 }

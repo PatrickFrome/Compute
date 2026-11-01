@@ -36,7 +36,7 @@ for(const entry of ['operator','installed']){
     const row=await launch(t,{entry});
     assert.equal(row.reason,entry==='installed'?'installed_fresh_provider_consent_declined':'fresh_provider_native_consent_declined');
     assert.deepEqual(row.events,entry==='installed'
-      ?['installed-bundle-read','app-ready','bundle-read','schema-read','native-consent-boundary']
+      ?['installed-bundle-read','app-ready','canonical-tools-boundary','bundle-read','schema-read','native-consent-boundary']
       :['bundle-read','schema-read','native-consent-boundary']);
   });
   test(entry+': missing, timeout or arbitrary native decision remains requires-review, never denial',async t=>{

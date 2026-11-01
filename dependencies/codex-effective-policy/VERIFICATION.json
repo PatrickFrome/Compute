@@ -1,0 +1,600 @@
+{
+  "schema": "metaengine.codex.producer-local-verification.v1",
+  "verification_revision": "ROOT_CLI_DIGEST_GATE_WITH_PUBLISHED_TRANSPORT_PROTOCOL_FIXTURE",
+  "recorded_at": "2026-11-01T02:50:50.945951+00:00",
+  "base": {
+    "commit": "0e43a569ad52134bee65dea3182ee9a4c4bbc56f",
+    "tree": "897948a6e65c980f560f97b71abaca96c91e4069"
+  },
+  "upstream": {
+    "tag": "rust-v0.159.0-alpha.3",
+    "commit": "3b01b36fa5eb96ba82a776bd3c2fc57f8969181f",
+    "tree": "d22150f47f6f6d6b1332583987e862981c951388"
+  },
+  "source_inputs_sha256": "5a969fb681c8ffe844940aece03c3bc5f2e7d2b8733fe46f6713b735b821bb37",
+  "patch_sha256": "068c1e3e8eccef9c29713213e51fa51b638e85e99713c676d805a445229a656c",
+  "source_pin": {
+    "path": "dependencies/codex-effective-policy/source-pin.json",
+    "sha256": "014f582ec89c9e249a7d3021fd7918c1ed3de755f4b9d5f2e2106755f46aeff2"
+  },
+  "source_input_files_sha256": {
+    "upstream.patch": "068c1e3e8eccef9c29713213e51fa51b638e85e99713c676d805a445229a656c",
+    "LICENSE": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc",
+    "NOTICE": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915",
+    "src/metaengine_effective_policy.rs": "7fd846c9738eae71144fce5c86a01e30db7d81f1ca78e106dc1d72243680c0fd",
+    "src/metaengine_effective_policy_projection.rs": "2988354f1e46f1bf16d60140ffdc736029be093b909ea47d3f33cc94d1d34936",
+    "src/metaengine_effective_policy_projection_tests.rs": "b4cba0a5ead68de89427e193dd3f3c055dea74ce37f7e073906eb45c28ee9f2f",
+    "src/metaengine_effective_policy_tests.rs": "40169c88567bef58e899946bdb129a23cbece0bdae57d85343d50fa7796fe634"
+  },
+  "platform": "linux",
+  "target": "x86_64-unknown-linux-gnu",
+  "rust_toolchain": "1.95.0",
+  "binary": {
+    "kind": "root codex --no-daemon exec",
+    "profile": "dev, debug=0",
+    "sha256": "be8e0db3ad73bd0ff96150959565eb527f236564e77376997a928d433c9bd8e4",
+    "private_path": ".codex-effective-policy-build/bin/root-prompt-sha/codex",
+    "rebuilt_path": ".codex-effective-policy-build/target/debug/codex",
+    "final_rebuild_command": "cargo build --locked -p codex-cli --bin codex",
+    "final_source_before_after_inputs_sha256": "5a969fb681c8ffe844940aece03c3bc5f2e7d2b8733fe46f6713b735b821bb37",
+    "rebuilt_image_matches_qualified_image": true,
+    "physical_receipts_reused_because_source_and_image_unchanged": true,
+    "build_cache_scope": "Existing Cargo cache reused. This establishes finalized source/build/image binding, not an independently clean reproducible-build claim."
+  },
+  "checks": [
+    {
+      "name": "exact upstream source/tree, source input digests and final prepared-source readback",
+      "result": "PASS"
+    },
+    {
+      "name": "workspace-version-only lockfile normalization; external dependency versions/checksums unchanged",
+      "result": "PASS",
+      "workspace_packages_normalized": 158,
+      "original_lock_sha256": "5c3fd1fe59676117cd7fc9c55daafee90d95d0afedd13b9e1a71e10cad029a81",
+      "normalized_lock_sha256": "76435de9b4ebb0cd3d364d99699151f231e4c8344c94d313aab13d64cf5b1570"
+    },
+    {
+      "name": "source preparation real-checkout tests",
+      "result": "PASS",
+      "passed": 3,
+      "skipped": 0
+    },
+    {
+      "name": "just fmt-check",
+      "result": "PASS",
+      "log": "root-cli-fmt-check.log"
+    },
+    {
+      "name": "just fix for app-server/exec/client tests",
+      "result": "PASS",
+      "source_inputs_unchanged": true,
+      "elapsed": "3m09s"
+    },
+    {
+      "name": "clean subsequent just clippy for app-server/exec/client tests",
+      "result": "PASS",
+      "elapsed": "3m53s"
+    },
+    {
+      "name": "full root CLI unit tests",
+      "result": "PASS",
+      "passed": 307,
+      "skipped": 1
+    },
+    {
+      "name": "full app-server library tests",
+      "result": "PASS",
+      "passed": 380,
+      "skipped": 0,
+      "producer_tests_included": 14
+    },
+    {
+      "name": "full exec and app-server-client regression tests",
+      "result": "PASS",
+      "passed": 173,
+      "skipped": 0,
+      "slow": 2
+    },
+    {
+      "name": "final root CLI rebuild against finalized source manifest",
+      "result": "PASS",
+      "elapsed_including_artifact_lock_wait": "3m42s",
+      "image_sha256": "be8e0db3ad73bd0ff96150959565eb527f236564e77376997a928d433c9bd8e4"
+    },
+    {
+      "name": "physical root CLI disposable-context no-model barrier checks",
+      "result": "PASS",
+      "passed": 8,
+      "http_requests": 0,
+      "model_requests": 0,
+      "websocket_requests": 0
+    },
+    {
+      "name": "physical root CLI bootstrap and dotenv checks",
+      "result": "PASS",
+      "passed": 5,
+      "pre_ack_http_requests": 0,
+      "pre_ack_websocket_requests": 0,
+      "post_ack_mock_model_requests": 3,
+      "external_model_calls": 0
+    },
+    {
+      "name": "physical root CLI original-prompt transport, rejections and fixed deadlines",
+      "result": "PASS",
+      "passed": 10,
+      "pre_ack_tcp_connections": 0,
+      "pre_ack_http_or_websocket_requests": 0,
+      "mock_model_post_requests": 1,
+      "real_model_calls": 0,
+      "orphan_fixture_traffic": 0
+    },
+    {
+      "name": "legacy root duplicate ACK contaminates model-visible prompt",
+      "result": "EXPECTED_REGRESSION_REPRODUCED",
+      "cases": 1,
+      "legacy_binary_sha256": "f0980f72638a4c581299865d6f61c9114127359d2b742b5069cb1a4903cf13da",
+      "original_prompt_sha256": "f079834f0a7e3686a3b2b0aeca3585e792604dda3bc86f3021d6804dda296751",
+      "observed_contaminated_prompt_sha256": "5d5e07a632d066c63597ee0105153efbb74befe89855def4355faec038b182e3",
+      "post_ack_loopback_mock_model_requests": 1,
+      "real_model_calls": 0,
+      "new_binary_duplicate_ack_result": "refused before thread/model request"
+    },
+    {
+      "name": "published transport checkpoint policy component tests",
+      "result": "PASS",
+      "passed": 70,
+      "skipped": 4,
+      "skip_scope": "Windows physical tests on Linux",
+      "failed": 0,
+      "test_files": 4,
+      "transport_commit": "6145546e00ab81139e4a7698c8d45863e580efba",
+      "log": ".codex-effective-policy-build/joint-transport-component-tests.log"
+    },
+    {
+      "name": "actual published JS controller plus real Linux root protocol through TEST_ONLY helper bridge",
+      "result": "PASS",
+      "passed": 10,
+      "failed": 0,
+      "scope": "TEST_ONLY_PUBLISHED_JS_CONTROLLER_PLUS_REAL_LINUX_ROOT_PROTOCOL",
+      "summary": ".codex-effective-policy-build/joint-root-policy-transport-2DNmXm/summary.json",
+      "pre_ack_tcp": 0,
+      "pre_ack_http_or_websocket": 0,
+      "before_prompt_eof_tcp": 0,
+      "premature_thread_or_turn": 0,
+      "loopback_mock_model_posts": 1,
+      "real_model_calls": 0,
+      "orphan_fixture_traffic": 0,
+      "native_terminal_frames_emitted": 0,
+      "joined_settlement_emitted": false,
+      "native_cleanup_confirmed": false
+    }
+  ],
+  "physical_fixture_evidence": [
+    {
+      "suite": "no-model barrier",
+      "summary": ".codex-effective-policy-build/root-cli-no-model-summary.json",
+      "directory": ".codex-effective-policy-build/metaengine-policy-no-model-fhreWh",
+      "cases": [
+        "inspect_open_stdin",
+        "reject_nonce",
+        "reject_context",
+        "reject_unknown_field",
+        "reject_eof",
+        "reject_invalid_nonce",
+        "reject_disabled_exec_server",
+        "reject_remote_exec_server"
+      ]
+    },
+    {
+      "suite": "root bootstrap",
+      "summary": ".codex-effective-policy-build/root-bootstrap-recheck-summary.json",
+      "directory": ".codex-effective-policy-build/metaengine-root-bootstrap-bfEOBs",
+      "cases": [
+        "explicit_home_no_dotenv",
+        "dotenv_codeX_keys_filtered",
+        "dotenv_non_codeX_HOME_changes_implicit_home",
+        "dotenv_non_codeX_canary_after_ACK_loopback_mock",
+        "held_execute_cancelled_at_original_deadline"
+      ]
+    },
+    {
+      "suite": "hardened prompt transport",
+      "summary": ".codex-effective-policy-build/root-transport-hardened-3xiE1S/summary.json",
+      "directory": ".codex-effective-policy-build/root-transport-hardened-3xiE1S",
+      "original_prompt_sha256": "f079834f0a7e3686a3b2b0aeca3585e792604dda3bc86f3021d6804dda296751",
+      "cases": [
+        "exact_prompt_after_ack",
+        "ack_then_eof_without_original_prompt",
+        "duplicate_ack_rejected",
+        "tampered_prompt_rejected",
+        "wrong_original_digest_rejected",
+        "oversize_prompt_rejected",
+        "missing_digest_argument_rejected",
+        "malformed_digest_argument_rejected",
+        "fixed_deadline_before_ack",
+        "fixed_deadline_after_ack_before_prompt"
+      ]
+    },
+    {
+      "suite": "legacy duplicate-ACK red reproduction",
+      "summary": ".codex-effective-policy-build/root-transport-legacy-red-BB4kk7/summary.json",
+      "directory": ".codex-effective-policy-build/root-transport-legacy-red-BB4kk7",
+      "cases": [
+        "legacy_duplicate_ack_contaminates_prompt"
+      ]
+    },
+    {
+      "suite": "strengthened published-controller and real-root Linux protocol fixture",
+      "summary": ".codex-effective-policy-build/joint-root-policy-transport-2DNmXm/summary.json",
+      "directory": ".codex-effective-policy-build/joint-root-policy-transport-2DNmXm",
+      "harness": "dependencies/codex-effective-policy/test/joint-root-policy-transport-probe.mjs",
+      "harness_sha256": "c9d3d1ec523fa55babc927654313a25cf437f2265eb9519db8cda32636c257e2",
+      "original_prompt_sha256": "f079834f0a7e3686a3b2b0aeca3585e792604dda3bc86f3021d6804dda296751",
+      "cases": [
+        "exact_original_task",
+        "no_ack_cancel",
+        "controller_wrong_original_prompt_rejected",
+        "controller_second_ack_record_rejected",
+        "root_wrong_immutable_digest_rejected",
+        "root_duplicate_ack_injected_by_double_rejected",
+        "forged_ack_written_context_rejected",
+        "cancel_after_physical_ack_before_notification",
+        "fixed_deadline_before_ack",
+        "fixed_deadline_after_physical_ack"
+      ]
+    }
+  ],
+  "current_local_evidence_sha256": {
+    ".codex-effective-policy-build/root-cli-unit-tests.log": "1a16aa711ad3d8879c38b62524ed5ce450d0a4710bb409a6cbbe9b584aec69bf",
+    ".codex-effective-policy-build/root-cli-app-server-tests.log": "2db36034bce5cac563b1ae7a44e70e7b714fab56e53c4b082854800fc1cf3afc",
+    ".codex-effective-policy-build/root-cli-exec-client-tests.log": "86f17412fc7dc2bed40cceecbfb7d0196f990a3f2954241c6c17af343177eed9",
+    ".codex-effective-policy-build/root-cli-fix-final.log": "54605377872772de678788a925398bef9cd4e9aa2f73520c870716d902289935",
+    ".codex-effective-policy-build/root-cli-clippy-clean.log": "6a82546545b18afcea90b8f2090af514b8800b83aedb66e61a005cdd66277c9e",
+    ".codex-effective-policy-build/root-cli-fmt-check.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    ".codex-effective-policy-build/root-cli-prepare-check.json": "8b5691831f4dc774c7660176733b3e9b4e69c00085974dffdab72c515499e560",
+    ".codex-effective-policy-build/root-cli-prepare-tests.log": "16ea10f6b69e5fe9155bd3e56354b95c20bf7b321ff4a8eab32945b5a969c8b3",
+    ".codex-effective-policy-build/root-cli-final-build.log": "e74caba3d4feee9b9fa6d37927d08cca65cd1ae5eac4cef2e6bc963030a8bb0e",
+    ".codex-effective-policy-build/root-cli-repro-build.log": "dac173a93e81aae5ba60b7bc0d2b0e56a4ae0ce1095bce8dce4e0fa8cc6f19c1",
+    ".codex-effective-policy-build/root-cli-rebuild-source-before.json": "8b5691831f4dc774c7660176733b3e9b4e69c00085974dffdab72c515499e560",
+    ".codex-effective-policy-build/root-cli-rebuild-source-after.json": "8b5691831f4dc774c7660176733b3e9b4e69c00085974dffdab72c515499e560",
+    ".codex-effective-policy-build/root-cli-rebuild-image-sha256.txt": "f75be8169c675e8531fdf91acfa66f7d50dd7e15e9671df219d51bbc712c878d",
+    ".codex-effective-policy-build/root-cli-no-model-summary.json": "05b799c317d8c11a5cefdddfd90f7fd7ef9275ccd041217b403e597d5363d124",
+    ".codex-effective-policy-build/root-bootstrap-recheck-summary.json": "8daaf8906805f2b591ddcaaee107bcb024c8f47937a905894d71ab26bba1981a",
+    ".codex-effective-policy-build/root-transport-hardened-3xiE1S/summary.json": "f042ba7636902aef592056a06969d58e15e027559d29fc40b6ccd953cb61b690",
+    ".codex-effective-policy-build/root-transport-legacy-red-BB4kk7/summary.json": "b99d5d50750f0dd7e3d0407546d45d564f83f5767c39a4dc9baaf199af4dfeff",
+    ".codex-effective-policy-build/root-cli-7d-no-model-summary.json": "8b96f3c9ccfe68c16e40fae6f4640d73586afa51c609a4592da41a3395334141",
+    ".codex-effective-policy-build/joint-transport-component-tests.log": "32b9eac821b7c034fb36f439fe3aeca1866d9f1a7ee85f3eb6a25876a169c81e",
+    ".codex-effective-policy-build/joint-root-policy-transport-2DNmXm/summary.json": "3b6e7ae1ab20416bf3fe9a031e4d3a7eeecd814c286085b734f4f8f659092aa0",
+    ".codex-effective-policy-build/joint-root-policy-transport-2DNmXm/source-readback.json": "181996b2994f650518f0dc164fccd294cec3bb6b035540c5fcde3312560bf99f",
+    ".codex-effective-policy-build/joint-root-policy-transport-2DNmXm/network-observations.json": "76b44c04fd2f7073d4f6295fe6d72c48bdf7b08023c0487790d8a379923698fc"
+  },
+  "verification_tools_sha256": {
+    "dependencies/codex-effective-policy/test/no-model-probe.mjs": "a2ba65fbc3b09c7aadd0c5e452728089c36a1529bf668743142792701fde845c",
+    "dependencies/codex-effective-policy/test/root-bootstrap-probe.mjs": "86b31f41c7f91f2effb679b34c997a8bb0134b37d6e7b6d646e49f99c4f0c159",
+    "dependencies/codex-effective-policy/test/root-prompt-transport-probe.mjs": "9a63bf65741bc8af1021e51f0e2786f91a5964a89374df04d2dd4ee000073731",
+    "dependencies/codex-effective-policy/test/prepare.test.mjs": "9e20f0a252f77e58032fcc062970a731a225563fa8ec0fb1c62374e31783f58c",
+    "dependencies/codex-effective-policy/test/joint-root-policy-transport-probe.mjs": "c9d3d1ec523fa55babc927654313a25cf437f2265eb9519db8cda32636c257e2"
+  },
+  "historical_evidence": {
+    "preserved_original_record": {
+      "path": "dependencies/codex-effective-policy/evidence/7dbeed76/VERIFICATION.json",
+      "sha256": "449fcc191ee39d59822fda4027b4cee94495730b813f0a1d9ed9b18273670e2e"
+    },
+    "preserved_source_pin": {
+      "path": "dependencies/codex-effective-policy/evidence/7dbeed76/source-pin.json",
+      "sha256": "88172dac2cbf1b62d4ea6e56ecbe0def8f8de45336e866f4bfd360ae19dfff72"
+    },
+    "directory": "dependencies/codex-effective-policy/evidence/7dbeed76",
+    "original_source_inputs_sha256": "020a5c2d97901b102441b75488e4e855019a00e7e197ba6af34fb0a8e1009c9f",
+    "original_patch_sha256": "cf8a897fe5fb2afb43f34e0c69f93c2aacdd790de0b9bd56057a1cae6e122549",
+    "binaries": [
+      {
+        "kind": "original standalone codex-exec",
+        "sha256": "5bb78cd7ae0d2c451452ad9757fad3797352090b7e02d851049ce42e2f1deb02",
+        "private_path": ".codex-effective-policy-build/bin/codex-exec",
+        "current_digest_gate_qualified": false
+      },
+      {
+        "kind": "original 7d root CLI",
+        "sha256": "f0980f72638a4c581299865d6f61c9114127359d2b742b5069cb1a4903cf13da",
+        "private_path": ".codex-effective-policy-build/bin/root-7dbeed76/codex",
+        "supplementary_no_model_summary": ".codex-effective-policy-build/root-cli-7d-no-model-summary.json",
+        "current_digest_gate_qualified": false
+      }
+    ],
+    "attribution_rule": "Old 5bb standalone and f098 root receipts do not qualify the current be8 root; original 7d source and receipts remain preserved.",
+    "published_74f_record": {
+      "commit": "74f0568ec6c3e7e6e6d005413157386986dcdccc",
+      "tree": "299ac4c71c6e31495bf974e138aded4ea277ff16",
+      "verification": {
+        "path": "dependencies/codex-effective-policy/evidence/74f0568e/VERIFICATION.json",
+        "sha256": "9ceb3884123cebee9b78597eafd9c4fe3ca5f54e7002f23bee60aa617ee7eee5"
+      },
+      "preservation": "Byte-exact git show from published checkpoint; historical source-unavailable and publication-time statements remain unchanged."
+    },
+    "superseded_joint_fixture_runs": [
+      {
+        "summary": {
+          "path": ".codex-effective-policy-build/joint-root-policy-transport-ap7IcU/summary.json",
+          "sha256": "01e08c54ca0cb1badbe7515f49baaf231d715a99ee7ced3a77faa40d066e0ee7"
+        },
+        "reported_cases": 9,
+        "status": "HISTORICAL_SUPERSEDED_NOT_CURRENT_QUALIFICATION",
+        "reason": "Superseded after review found arrival-versus-queued and thread-timing assertion weaknesses."
+      },
+      {
+        "summary": {
+          "path": ".codex-effective-policy-build/joint-root-policy-transport-KuBBjx/summary.json",
+          "sha256": "7ce3c6e98fbf9c31c4027fc1d6be0a73e85ff15f7ee4f1f873202b558ff7030e"
+        },
+        "reported_cases": 10,
+        "status": "HISTORICAL_SUPERSEDED_NOT_CURRENT_QUALIFICATION",
+        "reason": "Superseded by frozen final run with physical deadline-close <= original+1500ms assertion and exact harness digest."
+      }
+    ]
+  },
+  "observed_bootstrap_boundary": {
+    "dotenv_read_before_exec_flag_parsing": true,
+    "CODEX_prefixed_dotenv_keys_filtered": true,
+    "non_CODEX_HOME_changed_implicit_home_in_disposable_fixture": true,
+    "non_CODEX_canary_reached_loopback_mock_header_after_ack": true,
+    "explicit_owned_CODEX_HOME_required_by_native_contract": true,
+    "no_shared_daemon_artifacts_in_disposable_root_checks": true,
+    "policy_event_attests_resulting_environment": false,
+    "required_native_handling": "Refuse an unapproved protected-home .env without reading secret contents, or independently qualify post-bootstrap environment and helper PATH before acceptance. The producer does not replace that custody."
+  },
+  "activation_contract": {
+    "execute_requires_immutable_argv_flag": "--metaengine-prompt-sha256 ORIGINAL_PROMPT_SHA256",
+    "digest_scope": "SHA256 of the original nonempty UTF-8 task bytes; never ACK or ACK+task",
+    "max_prompt_bytes": 32000,
+    "task_byte_rules": "No BOM removal, newline normalization, trimming, appended bytes or substitution. Validate digest before UTF-8 decoding; transfer admitted task once without a second stdin read.",
+    "wire_order": "empty owned stdin bootstrap -> one final policy event -> one matching ACK -> original task bytes -> EOF",
+    "thread_and_prewarm_barrier": "Both ACK and complete correctly hashed task must qualify before thread creation or prewarm.",
+    "eof_rule": "EOF after valid ACK and complete correctly hashed task activates normal execution. EOF is not a cancellation primitive.",
+    "cancellation_rule": "Terminate/fence the owned process tree before closing pipes; preserve original deadline, settlement and uncertain-delivery reconciliation. Do not retransmit ACK, change original prompt hash or automatically retry.",
+    "deadline_fixture_scope": "Disposable Node controller uses private process-group termination before pipe close. No native Windows watchdog qualification is inferred.",
+    "native_implementation_cancellation_limit": "The normative kill-before-pipe-close contract is not proven for every actual Windows inflight-writer race; possible effects remain UNKNOWN and require reconciliation as recorded in native_source_risks."
+  },
+  "network_evidence_scope": {
+    "real_model_or_external_api_calls_in_physical_fixtures": 0,
+    "post_ack_destinations": "authorized configured loopback mocks only",
+    "pre_ack_observation": "zero configured-provider HTTP, WebSocket and transport-probe TCP connections",
+    "general_os_egress_attestation": false,
+    "joint_protocol_observations": {
+      "pre_ack_tcp": 0,
+      "pre_ack_http_or_websocket": 0,
+      "before_original_task_eof_tcp": 0,
+      "premature_thread_or_turn": 0,
+      "post_ack_after_validated_task_loopback_mock_posts": 1,
+      "real_model_calls": 0,
+      "general_os_egress_attestation": false
+    }
+  },
+  "scope": {
+    "runtime_consumer_changed": false,
+    "activated": false,
+    "native_process_environment_custody_qualified": false,
+    "windows_binary_qualified": false,
+    "root_cli_binary_built": true,
+    "installed": false,
+    "published": false,
+    "published_field_scope": "This local successor verification record only; the earlier 74f checkpoint was published as recorded below.",
+    "actual_published_js_controller_protocol_exercised_on_linux": true,
+    "full_private_consumer_native_end_to_end_qualified": false
+  },
+  "limitations": [
+    "Linux root CLI source/build and disposable fixtures only; no installed-client, Windows binary, OS sandbox, native process/environment custody or signed release qualification.",
+    "Fresh enabled local exec only; no resume/fork/review/OSS/worktree/images/positional-task or remote/disabled execution modes.",
+    "Managed model-conditional AutoReview requirements are refused before emission; later model/account/routing policy remains an independent gate.",
+    "Requirement sources are normalized constraint provenance; layer origins exclude harness overrides. Ignored user metadata fingerprints an empty placeholder, not ignored file bytes.",
+    "Full workspace core/protocol/TUI suites and cross-platform qualification are not inferred from the scoped suites recorded here.",
+    "The actual published JS controller is exercised through a TEST_ONLY Linux helper bridge against the real pinned root. Windows helper/kernel proofs and the production private policy consumer remain unqualified; no native terminal or joined settlement is fabricated.",
+    "Source availability is resolved, but actual 22841 consumer still uses legacy argv/launch.v2/resume and reports configuration_attestation:UNAVAILABLE.",
+    "This 604,210,216-byte debug root exceeds the unchanged 536,870,912-byte production capture cap. Existing actual runner and producer task budgets remain 32,000 bytes.",
+    "The actual native helper has no running deadline watchdog during its initial suspended control read, and an inflight prompt writer may deliver activating EOF before CANCEL kill; possible effects remain UNKNOWN pending reconciliation."
+  ],
+  "remaining_blockers": [
+    {
+      "action": "Implement and qualify production private effective-policy consumer plus exact producer argv and staged transport wiring",
+      "target_commit": "22841fced59dbd9439477eb68a258d6e65c50502",
+      "status": "PENDING_IMPLEMENTATION_AND_FULL_INTEGRATION",
+      "evidence": "Actual source is available/clean; current runner lacks event validator, uses legacy launch.v2/one-shot resume and reports configuration_attestation:UNAVAILABLE.",
+      "completed": "Actual published controller component tests and TEST_ONLY Linux controller/root protocol fixture",
+      "full_private_consumer_native_end_to_end_executed": false
+    },
+    {
+      "action": "Qualify Windows Job Object/process/environment custody, watchdog phases, bootstrap dotenv/helper PATH and inflight-writer cancellation/reconciliation",
+      "target_transport_commit": "6145546e00ab81139e4a7698c8d45863e580efba",
+      "status": "PENDING_NATIVE_WINDOWS_QUALIFICATION",
+      "known_limits": "Initial suspended wait lacks a running native watchdog. Inflight prompt/EOF can race CANCEL kill; effects must remain UNKNOWN until reconciliation.",
+      "completed": "Read-only source review and Linux protocol fixture only"
+    },
+    {
+      "action": "Produce and qualify a supported artifact within existing capture limits and complete source/release provenance",
+      "status": "PENDING_ARTIFACT_QUALIFICATION",
+      "existing_capture_cap_bytes": 536870912,
+      "debug_fixture_bytes": 604210216,
+      "cap_widened": false,
+      "windows_binary_qualified": false
+    }
+  ],
+  "resolved_historical_test_isolation_note": {
+    "action": "upstream arg0 PATH-alias setup during one baseline help and the first Rust test batch",
+    "target": "default CODEX_HOME/tmp/arg0",
+    "outcome": "filesystem rejected alias creation as read-only; no writes occurred",
+    "default_dotenv_presence_checked_without_reading_contents": "absent",
+    "correction": "subsequent checks used a project-owned disposable child HOME/CODEX_HOME; platform settings unchanged"
+  },
+  "publication": {
+    "state_at_recording": "LOCAL_SUCCESSOR_CHECKPOINT_PENDING_PUBLICATION",
+    "record_scope": "This current source/tests/docs verification successor has not been committed or published by this agent. Prior checkpoint publication is separate history.",
+    "published_checkpoint": {
+      "commit": "74f0568ec6c3e7e6e6d005413157386986dcdccc",
+      "tree": "299ac4c71c6e31495bf974e138aded4ea277ff16",
+      "draft_pull_request": "https://github.com/PatrickFrome/Compute/pull/1407",
+      "publication_completed": true,
+      "library_archive_v1": "COMPLETED_COORDINATOR_REPORTED",
+      "historical_verification": {
+        "path": "dependencies/codex-effective-policy/evidence/74f0568e/VERIFICATION.json",
+        "sha256": "9ceb3884123cebee9b78597eafd9c4fe3ca5f54e7002f23bee60aa617ee7eee5"
+      }
+    },
+    "successor_publication": {
+      "state": "PENDING_COORDINATOR",
+      "attempted_by_this_agent": false
+    },
+    "authorization": "Parent relayed explicit user permission: разрешаю всем потокам публиковать изменения",
+    "excluded_actions": [
+      "push to main or shared integration branches",
+      "merge or approve PR",
+      "publish credentials/auth/profiles/userdata or unqualified binary packages"
+    ]
+  },
+  "verification_tools_hash_scope": {
+    "meaning": "Hashes identify the current worktree verification tools; they do not alone establish exact executed harness byte identity.",
+    "root_prompt_transport_post_suite_change": "After the Linux suite, only the Windows termination metadata label was edited; Linux branch/runtime unchanged, coordinator reported. Current script syntax check passed.",
+    "current_root_prompt_transport_sha256": "9a63bf65741bc8af1021e51f0e2786f91a5964a89374df04d2dd4ee000073731",
+    "independent_clean_reproducibility_claim": false,
+    "joint_root_policy_transport": "Frozen script SHA c9d3d1ec523fa55babc927654313a25cf437f2265eb9519db8cda32636c257e2 matched before/after the final 10-case physical run; syntax check passed. This exact execution-source binding is distinct from previously noted metadata-only edits to the older harness."
+  },
+  "available_integration_sources": {
+    "status": "SOURCE_UNAVAILABILITY_RESOLVED_AFTER_PUBLISHED_74F",
+    "transport_original_checkpoint": "46cea51a3060588525ac9cc98dd751c081e2ef97",
+    "available_transport_commit": "6145546e00ab81139e4a7698c8d45863e580efba",
+    "mapping_evidence": "6145546e commit message explicitly identifies the source checkpoint matching 46cea51a3060588525ac9cc98dd751c081e2ef97.",
+    "consumer_commit": "22841fced59dbd9439477eb68a258d6e65c50502",
+    "source_readbacks": [
+      {
+        "role": "published transport",
+        "private_checkout": "/workspace/Compute-policy-transport-join",
+        "commit": "6145546e00ab81139e4a7698c8d45863e580efba",
+        "tree": "8e81f6ae5925b273232ef792b4739c73aa56433b",
+        "checked_at": "2026-11-01T02:50:50.945951+00:00",
+        "working_tree_clean": true,
+        "status_porcelain_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "files_sha256": {
+          "apps/metaengine-browser/src/codex-cli-windows-process-controller.mjs": "46a2063d6167bdf3632aa349ec4d9a40ee40d271451e4060cb019c622e192a01",
+          "apps/metaengine-browser/src/codex-cli-physical-settlement.mjs": "9cefac202ebb4734cd29fa873f31084969f58d8838f7fe8b851a0e7a384d2a8f",
+          "apps/metaengine-browser/scripts/codex-cli-job-runner.ps1": "34442f17ce160f2d9273cc7a91687949dc2c7fd2b300f3a986e47b53a4e7cf3a"
+        }
+      },
+      {
+        "role": "published consumer checkpoint",
+        "private_checkout": "/workspace/Compute-policy-consumer-join",
+        "commit": "22841fced59dbd9439477eb68a258d6e65c50502",
+        "tree": "8a33a2455148d055ab74c54929d35c5280127100",
+        "checked_at": "2026-11-01T02:50:50.945951+00:00",
+        "working_tree_clean": true,
+        "status_porcelain_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "files_sha256": {
+          "apps/metaengine-browser/src/codex-cli-runner.mjs": "7c6f2dfcdbedaf724599dd529afe9d8e90097fe9aa6e3fa72196d6750ce99d50",
+          "apps/metaengine-browser/src/codex-cli-execution-policy.mjs": "15ce8a1a35481fc27c76685c6869fb3cdc0895d55229ba415d797d3908d07d7d"
+        }
+      }
+    ],
+    "scope": "Available source resolves the former artifact-lookup blocker; it does not complete private-consumer or native integration."
+  },
+  "joint_protocol_qualification": {
+    "scope": "TEST_ONLY_PUBLISHED_JS_CONTROLLER_PLUS_REAL_LINUX_ROOT_PROTOCOL",
+    "transport": {
+      "commit": "6145546e00ab81139e4a7698c8d45863e580efba",
+      "tree": "8e81f6ae5925b273232ef792b4739c73aa56433b",
+      "files": [
+        {
+          "file": "apps/metaengine-browser/src/codex-cli-windows-process-controller.mjs",
+          "sha256": "46a2063d6167bdf3632aa349ec4d9a40ee40d271451e4060cb019c622e192a01"
+        },
+        {
+          "file": "apps/metaengine-browser/src/codex-cli-physical-settlement.mjs",
+          "sha256": "9cefac202ebb4734cd29fa873f31084969f58d8838f7fe8b851a0e7a384d2a8f"
+        },
+        {
+          "file": "apps/metaengine-browser/src/native-coding-task-context.mjs",
+          "sha256": "ed6b39a2c6211ee7fb244148efeb3ece5d3ddf92b04c3c4a19428d35da853885"
+        },
+        {
+          "file": "apps/metaengine-browser/src/native-coding-windows-process-observer.mjs",
+          "sha256": "bbf46806db17d15345ff13b2da6b37f9fe6af2bb8bec6d5090225ea9be1ffcd1"
+        },
+        {
+          "file": "apps/metaengine-browser/src/windows-native-read-environment.mjs",
+          "sha256": "84a27e5a43b6357fbdc264bf4307c394fbb6416771b88f12447665bdaf6c6875"
+        }
+      ]
+    },
+    "harness_sha256": "c9d3d1ec523fa55babc927654313a25cf437f2265eb9519db8cda32636c257e2",
+    "root_binary_sha256": "be8e0db3ad73bd0ff96150959565eb527f236564e77376997a928d433c9bd8e4",
+    "root_binary_bytes": 604210216,
+    "pre_ack_tcp": 0,
+    "pre_ack_http_or_websocket": 0,
+    "pre_prompt_eof_tcp": 0,
+    "premature_thread_or_turn": 0,
+    "mock_model_posts": 1,
+    "orphan_fixture_traffic": 0,
+    "real_model_calls": 0,
+    "network_capture_scope": "configured loopback provider only; no general OS egress attestation",
+    "fixture_policy_checks": "test-scoped closed projection checks; production private consumer policy admission NOT exercised",
+    "deadline_owner": "TEST_ONLY Node bridge private Linux process-group SIGKILL before closing root stdin; same original absolute deadline",
+    "helper_ready_frames": "SYNTHETIC TEST ONLY; required to exercise published controller parser; not Windows/native proof",
+    "native_terminal_frames_emitted": 0,
+    "joined_settlement_emitted": false,
+    "native_windows_qualified": false,
+    "physical_scope_capture_exercised": false,
+    "production_executable_cap_bytes": 536870912,
+    "root_fixture_exceeds_production_capture_cap": true,
+    "summary": {
+      "path": ".codex-effective-policy-build/joint-root-policy-transport-2DNmXm/summary.json",
+      "sha256": "3b6e7ae1ab20416bf3fe9a031e4d3a7eeecd814c286085b734f4f8f659092aa0"
+    },
+    "raw_directory": ".codex-effective-policy-build/joint-root-policy-transport-2DNmXm",
+    "arrival_observations": "Synchronous root stream-arrival hooks and provider TCP observations assert no thread/turn or model/prewarm connection before complete original prompt EOF, rather than relying only on queued controller output.",
+    "deadline_assertion": "Root physical close <= original absolute deadline+1500ms; original deadline never reset.",
+    "observed_deadline_close_delay_ms": [
+      7,
+      10
+    ],
+    "all_controller_cleanup_confirmed": false,
+    "settlement_scope": "TEST_ONLY helper-ready frames; no native terminal and no joined settlement. Every controller completion remains tree_cleanup_confirmed:false, including the successful mock protocol case."
+  },
+  "actual_consumer_source_findings": {
+    "commit": "22841fced59dbd9439477eb68a258d6e65c50502",
+    "tree": "8a33a2455148d055ab74c54929d35c5280127100",
+    "effective_policy_event_validator_in_current_runner_path": false,
+    "runner_invocation": "Legacy argv omits --metaengine-effective-policy and --metaengine-prompt-sha256; launch remains v2 and runner calls one-shot handle.resume(prompt).",
+    "configuration_attestation": "UNAVAILABLE",
+    "configuration_attestation_source": "apps/metaengine-browser/src/codex-cli-execution-policy.mjs",
+    "authority_effect": false,
+    "full_private_consumer_native_end_to_end_executed": false,
+    "required_work": "Implement and independently qualify the private effective-policy consumer, exact producer argv/nonce/digest wiring, staged input lifecycle, native custody and authoritative lease/result path."
+  },
+  "production_limits": {
+    "existing_executable_capture_cap_bytes": 536870912,
+    "debug_root_fixture_bytes": 604210216,
+    "debug_root_exceeds_cap": true,
+    "production_scope_capture_exercised": false,
+    "capture_cap_widened": false,
+    "debug_root_eligible_for_existing_production_capture": false,
+    "actual_runner_task_budget_bytes": 32000,
+    "producer_task_budget_bytes": 32000,
+    "transport_helper_max_prompt_bytes": 65536,
+    "task_budget_widened": false,
+    "scope": "64KiB helper transport capacity does not widen the actual 32,000-byte runner or producer task budget. The debug test image is not admitted by existing production capture."
+  },
+  "native_source_risks": {
+    "source_commit": "6145546e00ab81139e4a7698c8d45863e580efba",
+    "source_file": "apps/metaengine-browser/scripts/codex-cli-job-runner.ps1",
+    "initial_suspended_wait": {
+      "running_native_watchdog": false,
+      "observation": "Initial Console.In.ReadLine waits for bootstrap/resume before the native deadline loop begins. Child initial thread remains suspended; no qualification of bounded initial authorization wait is inferred."
+    },
+    "inflight_prompt_writer_cancellation": {
+      "possible_activation_before_cancel_kill": true,
+      "observation": "The asynchronous prompt writer can finish the original task and close worker stdin (activating EOF) before the control loop processes CANCEL and terminates the job. Synchronous controller fencing does not undo already inflight delivery.",
+      "effects": "UNKNOWN_UNTIL_RECONCILIATION",
+      "unconditional_zero_effects_claim": false,
+      "required_handling": "Preserve possible physical effects and uncertain-delivery settlement; terminate/fence and reconcile before admitting further work.",
+      "physical_windows_race_tested": false
+    },
+    "joint_linux_case_scope": "The synthetic bridge uses process-group kill before pipe close, including cancellation after physical ACK while notification is withheld. Its observed zero traffic does not qualify the real Windows writer/CANCEL race."
+  }
+}

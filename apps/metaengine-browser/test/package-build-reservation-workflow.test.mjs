@@ -39,6 +39,9 @@ test('Package Smoke reserves one source/version before dependency install or phy
   assert.match(workflow, /ME2_GUARDIAN_CRYPTO_OUTPUT_DIR:/);
   const acquire = workflow.indexOf('- name: Acquire authenticated crypto source before reserving a package identity');
   assert.ok(acquire > 0 && acquire < workflow.indexOf('  windows-nsis-package-smoke:'));
+  const publicInput=workflow.indexOf('prepare-guardian-openssl-certificate.py',acquire);
+  assert.ok(publicInput>acquire&&publicInput<workflow.indexOf('acquire-guardian-openssl-source.py',acquire));
+  assert.doesNotMatch(workflow,/official_public_openssl_certificate_required_before_package_reservation/);
   assert.match(workflow.slice(acquire, workflow.indexOf('  windows-nsis-package-smoke:')), /acquire-guardian-openssl-source\.py/);
   assert.match(workflow, /slsa-provenance-verify:[\s\S]*?timeout-minutes:\s*10/);
 

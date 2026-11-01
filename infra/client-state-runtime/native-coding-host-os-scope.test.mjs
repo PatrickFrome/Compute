@@ -7,6 +7,8 @@ import {createHash} from 'node:crypto';
 import vm from 'node:vm';
 import {assertNativeCodingHostRequestOpen,joinNativeCodingHostReads} from './native-coding-host-request-lifetime.mjs';
 import {createNativeCodingHostImageGuard} from './native-coding-host-os-scope.mjs';
+import {validateNativeCodingInstalledPathScope} from '../../apps/metaengine-browser/src/native-coding-operator-paths.mjs';
+import {generatedInstalledOperator,generatedInstalledTools,installedOperatorReaderSource} from './test/native-coding-installed-operator-fixture.mjs';
 import {admissionFixture} from '../../apps/metaengine-browser/test/fixtures/native-coding-admission-fixture.mjs';
 
 // The production guard intentionally rejects aliased paths. Windows TEMP may
@@ -79,11 +81,13 @@ async function scopeFixture(){
   const start=source.indexOf('  async function postgres('),end=source.indexOf('  function journalPath(');
   assert.ok(start>0&&end>start);
   const f=admissionFixture(),p=f.permit,pg=p.postgres.postmaster,host=f.provider.payload.host_process;
-  const resources=path.resolve('C:/METAENGINE/fixture-install/resources'),expectedExe=path.join(path.dirname(resources),'METAENGINE Browser Test.exe');
-  const config={bundle_directory:path.join(resources,'client-state-runtime'),state_directory:path.resolve('C:/METAENGINE/fixture-state'),
+  const {resources,privateTools}=await generatedInstalledTools();
+  p.artifact.cli_executable_sha256=privateTools.cliExecutableSha256;
+  const expectedExe=path.join(path.dirname(resources),'METAENGINE Browser Test.exe');
+  const config={bundle_directory:path.join(resources,'client-state-runtime'),state_directory:path.resolve('generated-host-state'),
     pg_data_directory:path.resolve('C:/METAENGINE/fixture-pg'),inspect_database_url:'postgresql://127.0.0.1:55432/fixture',
     expected_cluster_system_identifier:p.postgres.system_identifier,expected_bundle_sha256:p.artifact.runtime_bundle_sha256};
-  const operator={cli_executable:path.resolve('C:/METAENGINE/fixture-cli/codex.exe'),git_executable:path.resolve('C:/METAENGINE/fixture-git/git.exe')};
+  const operator=generatedInstalledOperator({resources,stateDirectory:config.state_directory});
   const pidText=[pg.pid,config.pg_data_directory,Math.floor(Date.parse(pg.created_at)/1000),55432,'','127.0.0.1','ready',''].join('\n');
   const counts={transactionReads:0,baseReads:0,processReads:0,operatorReads:0,bootReads:0,sandboxReads:0,worktreeReads:0};
   const tx={unsafe:async text=>{counts.transactionReads++;assert.match(text,/pg_control_system/);return[{data_directory:config.pg_data_directory,
@@ -91,12 +95,12 @@ async function scopeFixture(){
   const sql={unsafe:async()=>{counts.baseReads++;throw Error('EXTRA_BASE_POOL_BORROW');}};
   const fileHashes=new Map([[expectedExe,p.artifact.installed_exe_sha256],[path.join(resources,'app.asar'),p.artifact.installed_asar_sha256],
     [operator.cli_executable,p.artifact.cli_executable_sha256]]);
-  const scope={assertNativeCodingHostRequestOpen,joinNativeCodingHostReads,sql,config,resources,expectedExe,parentPid:host.pid,path,URL,Date,Number,Promise,structuredClone,
+  const scope={assertNativeCodingHostRequestOpen,joinNativeCodingHostReads,validateNativeCodingInstalledPathScope,sql,config,resources,expectedExe,parentPid:host.pid,path,URL,Date,Number,Promise,structuredClone,TextDecoder,readPrivateTools:async()=>{await privateTools.revalidate();return privateTools;},
     process:{env:{SystemRoot:'C:/Windows'}},fs:{readFile:async()=>pidText},
     fail:reason=>{throw Error('native_coding_host_os_'+reason);},
     samePath:(a,b)=>path.resolve(a).toLowerCase()===path.resolve(b).toLowerCase(),
     publicProcess:value=>({pid:value.pid,created_at:value.created_at,process_incarnation_id:value.process_incarnation_id}),
-    readNativeCodingWindowsProcess:async pid=>{counts.processReads++;return pid===pg.pid?{...pg,exe_path:path.resolve('C:/METAENGINE/fixture-pg-bin/postgres.exe')}:
+    readNativeCodingWindowsProcess:async pid=>{counts.processReads++;return pid===pg.pid?{...pg,exe_path:path.join(config.bundle_directory,'runtime','postgresql','bin','postgres.exe')}:
       {...host,exe_path:expectedExe,user_sid:p.user_sid};},
     readDirectoryIdentity:async directory=>{if(directory===config.pg_data_directory)return p.postgres.data_directory_identity_sha256;
       counts.worktreeReads++;return p.worktree.root_identity_sha256;},
@@ -109,11 +113,12 @@ async function scopeFixture(){
       await assert.rejects(options.readProcess(host.pid+1),/scope_batch_process_mismatch/);
       return structuredClone(p.sandbox);},
     image:{prepare:async()=>{},read:async file=>fileHashes.get(file)},
-    run:async()=>({stdout:p.worktree.base_sha}),
+    run:async()=>({stdout:Buffer.from(p.worktree.base_sha)}),
     readNativeCodingGitProof:async()=>({head:p.worktree.base_sha,artifact_sha256:'a'.repeat(64)}),
   };
-  const readers=vm.runInNewContext(source.slice(start,end)+'\n({readNativeScope,readNativeScopeBatch,readCheckpointScope})',scope);
-  return {readers,counts,p,tx,scope};
+  const prepare=source.slice(source.indexOf('  async function prepareNativeScopes('),start);
+  const readers=vm.runInNewContext(installedOperatorReaderSource(source)+prepare+source.slice(start,end)+'\n({prepareNativeScopes,readNativeScope,readNativeScopeBatch,readCheckpointScope})',scope);
+  return {readers,counts,p,tx,scope,operator};
 }
 
 test('actual checkpoint and native OS scope functions route PG identity through the private active reader',async()=>{
@@ -222,4 +227,42 @@ test('failed common physical read does not abandon its active SQL transaction re
  scope.readNativeCodingOperatorPaths=async()=>{throw Error('OPERATOR_READ_FAILED');};
  const outcome=assert.rejects(readers.readNativeScopeBatch([p],true,tx),/OPERATOR_READ_FAILED/).then(()=>{settled=true;});
  await entered;await new Promise(resolve=>setTimeout(resolve,30));try{assert.equal(settled,false);}finally{release();await outcome;}
+});
+
+for(const method of ['prepare','scope','batch'])test('Host '+method+' rejects an externally installed CLI/Git before image or worktree operations',async()=>{
+ const {readers,counts,p,tx,scope,operator}=await scopeFixture();let images=0,gits=0;
+ scope.image.prepare=async()=>{images++;};scope.run=async()=>{gits++;return {stdout:Buffer.from(p.worktree.base_sha)};};
+ scope.readNativeCodingOperatorPaths=async()=>({...operator,git_executable:path.resolve('unowned-machine-git/git.exe')});
+ const operation=method==='prepare'?()=>readers.prepareNativeScopes():method==='scope'?()=>readers.readNativeScope(p,false,tx):()=>readers.readNativeScopeBatch([p],false,tx);
+ await assert.rejects(operation(),/installed_path_scope_tool_not_owned/);
+ assert.equal(images,0);assert.equal(gits,0);assert.equal(counts.worktreeReads,0);assert.equal(counts.sandboxReads,0);
+});
+
+test('Host checkpoint revalidates a replacement protected operator before its final Git read',async()=>{
+ const {readers,p,tx,scope,operator}=await scopeFixture();let operators=0,proofs=0;
+ scope.readNativeCodingOperatorPaths=async()=>({...operator,...(++operators===2?{git_executable:path.resolve('unowned-machine-git/git.exe')}:{})});
+ scope.readNativeCodingGitProof=async()=>{proofs++;return {head:p.worktree.base_sha};};
+ await assert.rejects(readers.readCheckpointScope(p,tx),/installed_path_scope_tool_not_owned/);
+ assert.equal(operators,2);assert.equal(proofs,0);
+});
+
+test('Host installation scope forwards the original cancellation signal and exact owned roots on every read',async()=>{
+ const {readers,p,tx,scope}=await scopeFixture(),signal=new AbortController().signal,seen=[],reads=[];
+ const original=scope.readNativeCodingOperatorPaths;
+ scope.readNativeCodingOperatorPaths=async(directory,options)=>{reads.push([directory,options?.signal]);return original();};
+ scope.validateNativeCodingInstalledPathScope=(operator,options)=>{seen.push(options);return validateNativeCodingInstalledPathScope(operator,options);};
+ await readers.readCheckpointScope(p,tx,{signal});assert.equal(seen.length,2);assert.equal(reads.length,2);
+ for(const options of seen){assert.equal(options.resourcesPath,scope.resources);assert.equal(options.stateDirectory,scope.config.state_directory);}
+ for(const [directory,observed]of reads){assert.equal(directory,scope.config.state_directory);assert.equal(observed,signal);}
+});
+
+test('same-name PostgreSQL outside the verified installed bundle cannot attest even the correct own cluster',async()=>{
+ const {readers,counts,p,tx,scope}=await scopeFixture(),read=scope.readNativeCodingWindowsProcess;
+ scope.readNativeCodingWindowsProcess=async(pid,options)=>{
+  const value=await read(pid,options);
+  return pid===p.postgres.postmaster.pid?{...value,exe_path:path.resolve('preinstalled-machine-postgresql/bin/postgres.exe')}:value;
+ };
+ await assert.rejects(readers.readNativeScope(p,false,tx),/postgres_incarnation_unverified/);
+ assert.equal(counts.transactionReads,1,'the matching own cluster row alone cannot identify the installed PostgreSQL executable');
+ assert.equal(counts.operatorReads,0);assert.equal(counts.worktreeReads,0);assert.equal(counts.sandboxReads,0);
 });

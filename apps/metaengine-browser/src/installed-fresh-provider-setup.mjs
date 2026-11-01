@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {verifyInstalledClientStateResources} from './local-runtime-host-controller.mjs';
+import {readPackagedPrivateNativeTools} from './private-native-tools.mjs';
 const ACTION='INITIALIZE_FRESH_LOCAL_POSTGRES_17_WITH_VAULT';
 const ENTRY='source/infra/client-state-runtime/fresh-client-provider.mjs';
 const IDENTITY_ENTRY='source/infra/client-state-runtime/fresh-provider-native-device-identity.mjs';
@@ -52,6 +53,12 @@ export async function setupInstalledFreshProvider({app,resourcesPath=process.res
   await app.whenReady();
   observeSetup('ELECTRON_READY_OBSERVED');
   if(globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__===true)throw Error('installed_fresh_provider_cancelled');
+  // Verify our own canonical inventory before importing the native operator or
+  // allowing any fresh-provider/PG effect. This is the already-owned Electron
+  // app/resources context, not a caller-supplied readiness assertion.
+  const privateTools=await readPackagedPrivateNativeTools({app,resourcesPath});
+  if(globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__===true)throw Error('installed_fresh_provider_cancelled');
+  if(!privateTools)throw Error('installed_fresh_provider_private_tools_required');
   // The operator acquires the actual Electron app/safeStorage/profile itself,
   // only after native consent. No signer, storage or identity path is supplied.
   // Execute the verified module in trusted native main, never a renderer or a

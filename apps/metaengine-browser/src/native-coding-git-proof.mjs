@@ -46,7 +46,7 @@ export async function readNativeCodingGitProof(root,{env,gitExecutable='git',sig
   const head=(await git(root,['rev-parse','HEAD'],env,gitExecutable,signal)).toString().trim();
   if(!/^[a-f0-9]{40}$/.test(head))fail('head_invalid');
   const status=await git(root,['status','--porcelain=v1','-z','--untracked-files=all','--no-renames'],env,gitExecutable,signal);
-  const rows=status.toString('utf8').split('\0').filter(Boolean);
+  const rows=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(status).split('\0').filter(Boolean);
   if(rows.length>128)fail('changed_file_budget');
   const files=[];let total=0;
   for(const row of rows) {

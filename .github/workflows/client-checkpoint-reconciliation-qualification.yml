@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'apps/metaengine-browser/src/codex-cli-sandbox-probe.mjs'
+      - 'apps/metaengine-browser/src/codex-cli-execution-policy.mjs'
+      - 'apps/metaengine-browser/test/codex-cli-execution-policy.test.mjs'
       - 'apps/metaengine-browser/test/codex-cli-sandbox-probe*.test.mjs'
       - 'apps/metaengine-browser/src/client-native-*.mjs'
       - 'apps/metaengine-browser/src/client-prepared-goal*.mjs'
@@ -33,6 +35,13 @@ on:
       - 'apps/metaengine-browser/src/agent-resource-admission.mjs'
       - 'apps/metaengine-browser/test/native-resource-recovery.test.mjs'
       - 'apps/metaengine-browser/src/managed-task-project-runtime.mjs'
+      - 'apps/metaengine-browser/src/managed-task-project-runtime-core.mjs'
+      - 'apps/metaengine-browser/test/managed-task-project-native-executor.test.mjs'
+      - 'infra/client-state-runtime/native-coding-repository-preparation.test.mjs'
+      - 'apps/metaengine-browser/src/managed-task-project-native-executor.mjs'
+      - 'apps/metaengine-browser/src/native-coding-repository-preparation-plan.mjs'
+      - 'infra/client-state-runtime/native-coding-repository-preparation.mjs'
+      - 'infra/client-state-runtime/native-coding-setup-preparation-v1.sql'
       - 'apps/metaengine-browser/src/workspace-git-hardening.mjs'
       - 'apps/metaengine-browser/test/managed-project-inventory-case.test.mjs'
       - 'apps/metaengine-browser/test/managed-task-project-runtime.test.mjs'
@@ -51,6 +60,8 @@ on:
       - 'apps/metaengine-browser/test/fixtures/autonomous-project-*.mjs'
       - 'apps/metaengine-browser/test/fixtures/browser-parent-suspension-fixture.mjs'
       - 'infra/client-state-runtime/native-coding-*.mjs'
+      - 'infra/client-state-runtime/test/fixtures/native-coding-physical-task-fixture.mjs'
+      - 'infra/client-state-runtime/test/run-physical-custody-pg17.mjs'
       - 'infra/client-state-runtime/test/native-workspace-preparation-fixture.mjs'
       - 'infra/client-state-runtime/test/pending-owner-phase-fixture.mjs'
       - 'infra/client-state-runtime/native-coding-*.sql'
@@ -194,6 +205,13 @@ jobs:
           // Use the installed Git launcher verified by checkout; internal toolchain directories changed in Git 2.56.
           const executable=await fs.realpath('C:/Program Files/Git/bin/git.exe');assert.ok((await fs.stat(executable)).isFile());
           const component=[
+            'apps/metaengine-browser/test/managed-task-project-native-executor.test.mjs',
+            'infra/client-state-runtime/native-coding-repository-preparation.test.mjs',
+            'apps/metaengine-browser/test/codex-cli-execution-policy.test.mjs',
+            'infra/client-state-runtime/native-coding-physical-authority.test.mjs',
+            'infra/client-state-runtime/native-coding-setup-job-drain.test.mjs',
+            'infra/client-state-runtime/native-coding-physical-task.test.mjs',
+            'infra/client-state-runtime/native-coding-physical-ipc.test.mjs',
             'apps/metaengine-browser/test/codex-cli-sandbox-probe.test.mjs',
             'apps/metaengine-browser/test/codex-cli-sandbox-probe-lifetime.test.mjs',
             'apps/metaengine-browser/test/client-native-runtime-observation.test.mjs',
@@ -257,6 +275,9 @@ jobs:
             'apps/metaengine-browser/test/browser-parent-suspension-cycle.test.mjs',
           ];
           const native=[
+            'infra/client-state-runtime/native-coding-setup.pg17.test.mjs',
+            'infra/client-state-runtime/native-coding-physical-custody.pg17.test.mjs',
+            'infra/client-state-runtime/native-coding-physical-restart.pg17.test.mjs',
             'infra/client-state-runtime/native-coding-workspace-preparation.pg17.test.mjs',
             'infra/client-state-runtime/native-coding-pending-goal.pg17.test.mjs',
             'infra/client-state-runtime/host-owner-preseal-w74.pg17.test.mjs',
@@ -276,6 +297,38 @@ jobs:
             'infra/client-state-runtime/browser-parent-message-wake.pg17.test.mjs',
           ];
           const componentRequired=[
+            'retained readback rejects foreign schemas and added readiness fields',
+            'native fixed Git executor uses original environment and joins only original result and job',
+            'close during original spawn fences resume and waits for original suspended child completion',
+            'close during pending pre-birth verification cannot report drain or spawn early',
+            'revoked authority after child readiness cancels the original child without resume',
+            'missing or fabricated native terminal remains HOLD even after request has left pending set',
+            'asynchronous Owner veto never reaches native birth',
+            'changed private executable digest never falls back to ambient Git',
+            'nonzero Git and invalid UTF8 reject while retaining original cleanup join',
+            'output overflow cancels and drains without retaining unlimited bytes',
+            'ADMIN preparation uses one reserved mutation and retains exact readback without a task lease',
+            'lost RESERVE acknowledgement never executes or replays the mutation',
+            'lost terminal acknowledgement recovers exact original receipt without another Git create',
+            'partial effect remains AMBIGUOUS and never automatically retries',
+            'foreign scope, changed source, expired authority and cancellation cannot reserve or mutate',
+            'late changed admission after reservation leaves AMBIGUOUS without mutation',
+            'retained PROVEN receipt cannot be swapped to a different original binding',
+            'fixed preparation plans refuse command, argv, path and branch substitutions',
+            'complete generated source graph remains audit data and grants no observation authority',
+            'no transaction or claimed proof object is needed to retain fail-closed observation authority',
+            'serialized SETUP scope and fabricated drain tokens are refused before SQL or native observations',
+            'a closed consumer cannot be reopened by supplying a claimed qualification',
+            'setup job drain seam exposes only one-use consumption and no issuer or authority factory',
+            'serialized identifiers, drain promises and readiness flags cannot reconstruct actual setup job ownership',
+            'full generated TASK joins original reserve, anchored callbacks and helper/local-output closure without changing receipts',
+            'caller UNKNOWN remains UNKNOWN while independently joined physical settlement verifies',
+            'fenced UNSENT with no dispatched request is structurally distinct from an actual terminal',
+            'physical TASK verifier independently checks exact permit hash',
+            'actual Host IPC waits for original durable request before effect and durable terminal before releasing capacity',
+            'actual Host IPC retains HOLD if terminal persistence is uncertain',
+            'durable request failure cannot dispatch an effect or reconstruct an original ticket',
+            'caller timeout stays UNKNOWN while original delayed producer still joins terminal and prevents late dispatch',
             'validated Git plans receive only the fixed invocation-local Windows long-path option',
             'real Git long managed paths preserve exact locked creation and readback without persistent configuration',
             'unsupported new Windows target is refused before reservation or Git add',
@@ -348,6 +401,72 @@ jobs:
             'existing cycle suspends parent and child with one slot, then exact completion and restored receipts unwind without Send replay',
           ];
           const nativeRequired=[
+            'generic cleanup callbacks and forged materializer facets cannot publish setup origin custody',
+            'actual Git/SQLite without an original native drain producer retains no origin publication capability',
+            'actual Git materializer publishes one origin token after resource milestone and terminal readback while full job drain waits',
+            'unconfirmed native resources or lost terminal ACK/readback prevent origin publication and cannot replay Git',
+            'late native output and cancellation completion hold the original setup through service close and full shutdown',
+            'private cold-job scope retains exact immutable operation, actor and custody identities',
+            'real own-PG setup hands off to existing Git materializer with no long SQL transaction; native admission/Owner remain fixtures',
+            'another authenticated actor cannot abort the original local setup custody',
+            'changed preflight roots before producer entry publish JOB_FAILED with unused custody drained',
+            'pre-entry fallback retains original SQL connection-loss cleanup HOLD',
+            'cancelled preflight never enters producer and settles only its unused physical custody',
+            'producer rejection after entry remains physical HOLD without synthesizing a drained terminal',
+            'signed ADMIN repository preparation records one real Git effect without inventing task or lease',
+            'preparation migration rejects modified function, widened ACL and partial schema without repairing it',
+            'actual signed setup service hands its opaque joined job token to the real durable writer while historical authority remains HOLD',
+            'predescriptor setup uses actual current ADMIN/repository/PG authority without native execution readiness',
+            'no operator descriptor is needed for genuine current repo/PG/root discovery; BEGIN is unavailable not prepared',
+            'default setup with no actual materializer cannot issue job-drain ownership or publish a SETUP closure',
+            'actual joined setup job issues one opaque one-use ownership token only after cancellation and committed terminal readback',
+            'unconfirmed job owner or missing committed terminal readback cannot issue setup job-drain ownership',
+            'setup ownership publication cannot swallow a physical uncertainty mark or turn it into a clean drain',
+            'unconsumed setup job ownership expires after its original publication attempt and cannot be readopted',
+            'admission counts pending custody handoffs and retires drained jobs without limiting durable operation history',
+            'foreign workspace/device, revoked ADMIN/pairing and changed root identities never insert an intent',
+            'shutdown after ledger COMMIT but before registry handoff cannot ACK or restart an unowned job',
+            'accepted cold fixture job holds no SQL transaction; CANCEL is requested until callback physically returns',
+            'lost CANCEL commit acknowledgement still fences the next job effect through durable current state',
+            'current grant is rechecked before a later fixture effect, not an expired request boolean',
+            'failed physical cleanup remains held and cannot be erased by CANCEL or shutdown promise',
+            'post-CLAIM close before job start leaves no fake running custody and never invokes producer',
+            'swallowed private physical HOLD cannot be cleared by a producer cleanup boolean',
+            'terminal publication failure after physical drain is durable HOLD, never stale local RUNNING',
+            'failed terminal SQL before commit retires physically drained job but projects durable stale RUNNING as HOLD',
+            'terminal SQL private HOLD survives successful producer physical drain',
+            'nested canonical roots of a distinct workspace cannot overlap a retained physical operation',
+            'migration refuses widened ACL, altered body/schema or partial install instead of repairing it',
+            'SQL lexical overlap refuses volume/share roots, trailing separators and Windows case/mixed-separator aliases',
+            'BEGIN then removed protected repository config and missing descriptors stays HOLD, never silent Browser',
+            'route absence is current-device/workspace scoped; grant/key/Host rotation does not erase retained intent',
+            'draft namespace uses genuine current signed PG scope before preparation and performs zero ensure/persistence',
+            'same-cluster PG restart invalidates bound postmaster despite unchanged system ID and data root',
+            'physical custody registration pins all private history/cache relations and guards',
+            'physical custody PG17 preserves immutable receipts and rejects weakened schema or unowned writes',
+            'original request and terminal persist exactly once; full history cannot be rewritten or truncated',
+            'SETUP and TASK closures and run fences are append-only; only private observation cache is removable',
+            'API identity cannot read or modify physical custody',
+            'every replay rejects partial, changed function/table/trigger/index/ACL/RLS schema rather than repairing it',
+            'physical SETUP/TASK source graphs survive genuine PG restart while every historical resolution stays HOLD',
+            'serialized setup identifiers cannot mint original job drain ownership; candidate audits reject scope and PG substitution',
+            'SQL DRAINED, a held terminal and changed durable setup do not become settlement',
+            'independent consumer rejects forged digest/Host/original scope, truncated closure and wrong kind',
+            'TASK source graph joins recorded reserve and callback terminals without upgrading helper scope or UNKNOWN',
+            'TASK producer refuses missing actual terminal and omitted original dispatch despite a complete helper/local journal',
+            'lost fence COMMIT ACK reads the exact committed fence and seals proof without dispatch replay',
+            'proof failure after a durable fence permits proof-only recovery on the same Host without changing the fence',
+            'SETTLED original RESULT_READY survives a post-fence proof failure for later proof-only collection',
+            'an existing fence with another original Host is refused and its retained history is never overwritten',
+            'a dispatch with an older SERIALIZABLE snapshot cannot pass a newly committed run fence after waiting on its lock',
+            'close fences new producers; drain joins the original pending ticket and exact terminal SQL after close',
+            'a physically held original terminal prevents successful service drain after close',
+            'lost terminal COMMIT acknowledgement retains UNKNOWN without replay; committed bytes remain independently readable',
+            'new Host prepares only original settled RESULT_READY source graphs and reuses the unchanged fence without qualification',
+            'new Host audits original SETUP source graph after restart while historical resolution remains HOLD',
+            'new Host audits recorded TASK graph and generated protected helper bytes after restart without historical release',
+            'missing/held terminal, forged or truncated closures, changed rows and lineage remain occupied after restart',
+            'new concurrent setup and complete historical source graph both remain occupied without full scope qualification',
             'Host schema-only diagnosis with actual registered disposable PG17 preserves minimum service and owned cleanup',
             'valid schema diagnosis does not delay provider return or admit execution, and normal stop owns API before owner pool',
             'partial installed schema remains SCHEMA_HOLD without repair or removing minimum Host service',
@@ -582,7 +701,22 @@ jobs:
           await runSuite('native-pg17',native,nativeRequired,await createSuiteEnvironment('native-pg17',true),false);
           stage='SOURCE_READBACK';
           const sourcePaths=[
+            'apps/metaengine-browser/src/managed-task-project-native-executor.mjs',
+            'apps/metaengine-browser/src/native-coding-repository-preparation-plan.mjs',
+            'infra/client-state-runtime/native-coding-repository-preparation.mjs',
+            'infra/client-state-runtime/native-coding-setup-preparation-v1.sql',
+            'infra/client-state-runtime/native-coding-setup-job-drain.mjs',
+            'infra/client-state-runtime/native-coding-physical-custody.mjs',
+            'infra/client-state-runtime/native-coding-physical-custody-v1.sql',
+            'infra/client-state-runtime/native-coding-host-capacity.mjs',
+            'infra/client-state-runtime/native-coding-capacity-v2.sql',
+            'infra/client-state-runtime/native-coding-host-setup-service.mjs',
+            'infra/client-state-runtime/test/fixtures/native-coding-physical-task-fixture.mjs',
+            'infra/client-state-runtime/test/run-physical-custody-pg17.mjs',
+            'apps/metaengine-browser/src/native-coding-run-callback-journal.mjs',
+            'infra/client-state-runtime/package.json',
             'apps/metaengine-browser/src/managed-task-project-runtime.mjs',
+            'apps/metaengine-browser/src/managed-task-project-runtime-core.mjs',
             'infra/client-state-runtime/runtime-host.mjs',
             'infra/client-state-runtime/native-coding-installed-publication-schema.mjs',
             'infra/client-state-runtime/native-coding-preparation-transaction.mjs',

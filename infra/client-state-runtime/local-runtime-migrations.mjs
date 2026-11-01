@@ -227,6 +227,12 @@ export const LOCAL_RUNTIME_MIGRATIONS = Object.freeze([
     source_url:new URL('./native-coding-pending-activation-v1.sql',import.meta.url),reviewed_native_pending_activation_upgrade:true},
   {path:'native-coding-setup-operation-v1.sql',signature:'destruktion_meta.native_coding_setup_operation_v1(text,jsonb,jsonb,jsonb)',
     relations:Object.freeze(['destruktion_meta.native_coding_setup_operation_h205f22']),source_url:new URL('./native-coding-setup-operation-v1.sql',import.meta.url),reviewed_native_setup_upgrade:true},
+  {path:'native-coding-setup-preparation-v1.sql',signature:'destruktion_meta.native_coding_setup_preparation_v1(text,jsonb,jsonb,jsonb,jsonb)',
+    signatures:Object.freeze(['destruktion_meta.native_coding_setup_preparation_v1(text,jsonb,jsonb,jsonb,jsonb)','destruktion_meta.native_coding_setup_preparation_guard_v1()']),
+    relations:Object.freeze(['destruktion_meta.native_coding_setup_preparation_h205f22']),
+    triggers:Object.freeze([{relation:'destruktion_meta.native_coding_setup_preparation_h205f22',name:'native_setup_preparation_write_guard_v1',signature:'destruktion_meta.native_coding_setup_preparation_guard_v1()'},
+      {relation:'destruktion_meta.native_coding_setup_preparation_h205f22',name:'native_setup_preparation_truncate_guard_v1',signature:'destruktion_meta.native_coding_setup_preparation_guard_v1()'}]),
+    source_url:new URL('./native-coding-setup-preparation-v1.sql',import.meta.url),reviewed_native_setup_upgrade:true},
   {path:'native-coding-capacity-v2.sql',signature:'destruktion_meta.native_coding_service_heartbeat_v2(uuid,text,bigint,uuid,integer,jsonb,text,jsonb,jsonb)',
     signatures:Object.freeze(['destruktion_meta.native_coding_capacity_lock_v1(uuid,text)',
       'destruktion_meta.native_coding_capacity_effect_fence_v1(uuid,text)',
@@ -250,6 +256,15 @@ export const LOCAL_RUNTIME_MIGRATIONS = Object.freeze([
     signatures:Object.freeze(["destruktion_meta.native_execution_task_fence_v1()", "destruktion_meta.native_job_initial_anchor_v1()", "destruktion_meta.native_claim_task_history_v1()", "destruktion_meta.native_running_anchor_v1()"]),
     triggers:Object.freeze([{"relation": "destruktion_meta.native_coding_execution_h205f22", "name": "aa_native_execution_task_fence_v1", "signature": "destruktion_meta.native_execution_task_fence_v1()"}, {"relation": "destruktion_meta.native_coding_job_registration_h205f22", "name": "aa_native_job_initial_anchor_v1", "signature": "destruktion_meta.native_job_initial_anchor_v1()"}, {"relation": "destruktion_meta.devos_fleet_claim_h205f22", "name": "aa_native_claim_task_history_v1", "signature": "destruktion_meta.native_claim_task_history_v1()"}, {"relation": "destruktion_meta.devos_fleet_task_h205f22", "name": "aa_native_running_anchor_v1", "signature": "destruktion_meta.native_running_anchor_v1()"}]),
     source_url:new URL('./native-coding-initial-anchor-task-fence-v1.sql',import.meta.url),reviewed_native_publication_upgrade:true},
+  {path:'native-coding-physical-custody-v1.sql',signature:'destruktion_meta.native_coding_physical_write_guard_v1()',
+    signatures:Object.freeze(['destruktion_meta.native_coding_physical_write_guard_v1()']),
+    relations:Object.freeze(['destruktion_meta.native_coding_physical_request_h205f22','destruktion_meta.native_coding_physical_closure_h205f22',
+      'destruktion_meta.native_coding_physical_fence_h205f22','destruktion_meta.native_coding_physical_resolution_h205f22']),
+    triggers:Object.freeze(['native_coding_physical_request_h205f22','native_coding_physical_closure_h205f22',
+      'native_coding_physical_fence_h205f22','native_coding_physical_resolution_h205f22'].flatMap(table=>[
+      {relation:'destruktion_meta.'+table,name:'native_physical_write_guard_v1',signature:'destruktion_meta.native_coding_physical_write_guard_v1()'},
+      {relation:'destruktion_meta.'+table,name:'native_physical_truncate_guard_v1',signature:'destruktion_meta.native_coding_physical_write_guard_v1()'}])),
+    source_url:new URL('./native-coding-physical-custody-v1.sql',import.meta.url),reviewed_native_physical_custody_upgrade:true},
 ]);
 
 const REQUIRED_COLUMNS = {
@@ -466,7 +481,7 @@ export async function applyLocalRuntimeMigrations({ sql, expectedMigrationSource
       if(migration.reviewed_native_setup_upgrade){
         await tx.unsafe(migration.source);
         if(!(await inspectMigrationObjects(tx,migration)).complete)throw Error('local_runtime_native_setup_readback_failed');
-        receipts.push({source:migration.path,source_sha256:migration.sha256,signature:migration.signature,signatures:[migration.signature],
+        receipts.push({source:migration.path,source_sha256:migration.sha256,signature:migration.signature,signatures:migration.signatures||[migration.signature],
           status:before.complete?'ALREADY_PRESENT_NOT_MODIFIED':'APPLIED_LOCAL_ONLY',existing_bodies_attested:true,setup_only_no_execution_authority:true});
         continue;
       }
@@ -499,6 +514,15 @@ export async function applyLocalRuntimeMigrations({ sql, expectedMigrationSource
         if(!(await inspectMigrationObjects(tx,migration)).complete)throw Error('local_runtime_native_publication_readback_failed');
         receipts.push({source:migration.path,source_sha256:migration.sha256,signature:migration.signature,signatures:migration.signatures,
           status:before.complete?'ALREADY_PRESENT_NOT_MODIFIED':'APPLIED_LOCAL_ONLY',existing_bodies_attested:true,native_publication_schema_only:true});
+        continue;
+      }
+      if(migration.reviewed_native_physical_custody_upgrade){
+        // Replay attests exact logged history/cache schema, immutable guards,
+        // RLS, ACLs, columns, constraints and indexes before any DDL is applied.
+        await tx.unsafe(migration.source);
+        if(!(await inspectMigrationObjects(tx,migration)).complete)throw Error('local_runtime_native_physical_custody_readback_failed');
+        receipts.push({source:migration.path,source_sha256:migration.sha256,signature:migration.signature,signatures:migration.signatures,
+          status:before.complete?'ALREADY_PRESENT_NOT_MODIFIED':'APPLIED_LOCAL_ONLY',existing_bodies_attested:true,native_physical_history_retained:true});
         continue;
       }
       if (before.complete) {

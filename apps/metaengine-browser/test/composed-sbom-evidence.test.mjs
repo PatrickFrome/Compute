@@ -184,6 +184,7 @@ async function offlineFixture(t) {
   const f = fixture();
   t.after(() => fs.rmSync(f.root, { recursive: true, force: true }));
   const offline = await offlineRuntimePackageFixture(t);
+  assert.deepEqual(offline.manifest.private_native_tools, offline.privateToolsBinding);
   const binding = await bindingTools.buildOfflineRuntimeBinding({ ...offline, sourceHead: HEAD, packageVersion: VERSION });
   const proof = await bindingTools.assertPackagedOfflineRuntimeBinding(binding, {
     expectedHead: HEAD, packageVersion: VERSION, resourcesDir: offline.resourcesDir, verifierBytes: offline.verifierBytes,

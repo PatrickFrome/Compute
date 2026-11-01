@@ -63,12 +63,18 @@ function assertBinding(binding, { expectedHead, packageVersion }) {
   return binding;
 }
 
-async function buildOfflineRuntimeBinding({ bundleDirectory, repoRoot, sourceHead, packageVersion }) {
+async function buildOfflineRuntimeBinding({ bundleDirectory, repoRoot, sourceHead, packageVersion, privateToolsBinding }) {
   if (!SHA40.test(sourceHead || '')) fail('client_state_runtime_source_head_invalid');
   if (!/^\d+\.\d+\.\d+-dev\.\d+\.1$/.test(packageVersion || '')) fail('client_state_runtime_package_version_invalid');
   const verifierBytes = checkoutVerifierBytes(repoRoot);
   const initial = JSON.parse(manifestBytes(bundleDirectory).toString('utf8'));
   const { manifest, manifestSha256 } = await verifiedBundle(bundleDirectory, initial.bundle_sha256, verifierBytes);
+  const toolKeys = ['schema', 'manifest_sha256', 'manifest_bytes', 'file_count'];
+  if (!privateToolsBinding || !manifest.private_native_tools
+    || Object.keys(privateToolsBinding).sort().join(',') !== [...toolKeys].sort().join(',')
+    || toolKeys.some(key => privateToolsBinding[key] !== manifest.private_native_tools[key])) {
+    fail('client_state_runtime_private_native_tools_binding_mismatch');
+  }
   // Bind staged source/dependency bytes to this checkout before sealing the external resources in ASAR.
   const source = JSON.parse(fs.readFileSync(path.join(bundleDirectory, 'source/runtime-source-bundle.json'), 'utf8'));
   for (const record of source.files) {

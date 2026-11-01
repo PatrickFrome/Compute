@@ -31,6 +31,8 @@ function parsePowerShellFile(file) {
 test('electron-builder owns the single Guardian native staging build boundary', () => {
   assert.equal(builder.beforePack, './scripts/electron-builder-before-pack.cjs');
   assert.deepEqual(builder.extraResources, [{
+    from: 'native-dist/private-native-tools', to: 'private-native-tools', filter: ['**/*'],
+  }, {
     // The native child process cannot import these entry points through ASAR.
     // Keep the external surface an exact file list, never the whole src tree.
     from: 'src',

@@ -85,10 +85,14 @@ test('fresh inventory includes every registered upgrade in order and includes on
     ...(row.upgrade_source ? [{ path: row.upgrade_source, sha256: row.upgrade_source_sha256 }] : []),
   ]);
   assert.deepEqual(candidate.upgrades.map(row => ({ path: path.basename(row.path), sha256: row.sha256 })), actual);
-  assert.equal(actual.at(-1).path, 'native-coding-initial-anchor-task-fence-v1.sql');
+  assert.equal(actual.at(-1).path, 'native-coding-physical-custody-v1.sql');
   assert.equal(LOCAL_RUNTIME_MIGRATIONS.filter(row => row.path === 'native-coding-capacity-v2.sql').length, 1);
   assert.equal(candidate.upgrades.some(row => row.path.endsWith('native-coding-callback-publication-v1.sql')), true);
   assert.equal(LOCAL_RUNTIME_MIGRATIONS.some(row => row.path === 'native-coding-callback-publication-v1.sql'), true);
+  const physical=LOCAL_RUNTIME_MIGRATIONS.filter(row=>row.path==='native-coding-physical-custody-v1.sql');
+  assert.equal(physical.length,1);
+  assert.equal(physical[0].reviewed_native_physical_custody_upgrade,true);
+  assert.deepEqual(physical[0].relations,['request','closure','fence','resolution'].map(kind=>'destruktion_meta.native_coding_physical_'+kind+'_h205f22'));
 });
 
 test('actual fresh loader rejects missing, duplicate, reordered, forged and unregistered inventory before SQL access', async () => {

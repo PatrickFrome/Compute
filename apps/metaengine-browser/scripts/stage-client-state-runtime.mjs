@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { mkdir, realpath, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -65,6 +65,21 @@ export async function stageClientStateRuntime({ repositoryRoot = path.resolve(he
   if (process.platform !== 'win32') throw new Error('runtime_build_windows_x64_required');
   const root = await realpath(repositoryRoot);
   const work = externalBuildWorkDirectory(root, workDirectory);
+  // Build-only acquisition uses the same pinned canonical producer as beforePack.
+  // No caller supplies a tools digest and the installed Host never downloads it.
+  const { acquirePrivateNativeToolArchives, stagePrivateNativeTools, assertPrivateNativeToolsManifestPins } = await import('./stage-private-native-tools.mjs');
+  const { privateNativeToolsBinding, resolvePrivateNativeTools } = await import('../src/private-native-tools-core.mjs');
+  const privateToolsRoot = path.join(root, 'apps/metaengine-browser/native-dist/private-native-tools');
+  if (!await stat(privateToolsRoot).catch(error => { if (error.code === 'ENOENT') return null; throw error; })) {
+    const toolArchives = path.join(root, 'apps/metaengine-browser/native-cache/private-tools');
+    await mkdir(toolArchives, { recursive: true });
+    await acquirePrivateNativeToolArchives({ archiveDirectory: toolArchives });
+    await stagePrivateNativeTools({ archiveDirectory: toolArchives, outputDirectory: privateToolsRoot });
+  }
+  const privateManifestBytes = await readFile(path.join(privateToolsRoot, 'manifest.json'));
+  await assertPrivateNativeToolsManifestPins(JSON.parse(privateManifestBytes.toString('utf8')));
+  const privateToolsBinding = privateNativeToolsBinding(privateManifestBytes);
+  const privateTools = await resolvePrivateNativeTools({ toolsRoot: privateToolsRoot, binding: privateToolsBinding });
   const output = path.resolve(outputDirectory || path.join(root, 'apps/metaengine-browser/client-state-runtime-dist'));
   await mkdir(work, { recursive: true });
   externalBuildWorkDirectory(root, await realpath(work));
@@ -108,8 +123,11 @@ export async function stageClientStateRuntime({ repositoryRoot = path.resolve(he
     expectedSourceDigest: buildInventory.source_manifest_sha256, includeRuntimeHost: true });
   const sources = { sourceBundleDirectory: sourceStage, nodeDirectory, postgresDirectory, denoExecutable,
     denoNpmDirectory: path.join(cache, 'npm'), licenseDirectory: licenses };
-  const inventory = await captureOfflineRuntimeInventory({ sources, sourceBundleDigest: source.bundle_sha256, componentOrigins: RUNTIME_ORIGINS });
+  await privateTools.revalidate();
+  const inventory = await captureOfflineRuntimeInventory({ sources, sourceBundleDigest: source.bundle_sha256, componentOrigins: RUNTIME_ORIGINS,
+    privateNativeToolsBinding: privateToolsBinding });
   const manifest = await stageOfflineRuntimeBundle({ stagingDirectory: output, sources, inventory, expectedInventoryDigest: inventory.inventory_sha256 });
+  await privateTools.revalidate();
   await writeFile(path.join(work, 'build-resource-inventory.json'), JSON.stringify(buildInventory, null, 2) + '\n', { flag: 'wx' });
   await writeFile(path.join(work, 'offline-resource-inventory.json'), JSON.stringify(inventory, null, 2) + '\n', { flag: 'wx' });
   console.log(JSON.stringify({ schema: 'compute.client-runtime-package-stage.v1', bundle_sha256: manifest.bundle_sha256,

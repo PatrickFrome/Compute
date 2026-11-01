@@ -1,0 +1,128 @@
+{
+  "schema": "metaengine.codex.producer-local-verification.v1",
+  "recorded_at": "2026-11-01T01:58:39.086140+00:00",
+  "base": {
+    "commit": "0e43a569ad52134bee65dea3182ee9a4c4bbc56f",
+    "tree": "897948a6e65c980f560f97b71abaca96c91e4069"
+  },
+  "upstream": {
+    "tag": "rust-v0.159.0-alpha.3",
+    "commit": "3b01b36fa5eb96ba82a776bd3c2fc57f8969181f",
+    "tree": "d22150f47f6f6d6b1332583987e862981c951388"
+  },
+  "source_inputs_sha256": "020a5c2d97901b102441b75488e4e855019a00e7e197ba6af34fb0a8e1009c9f",
+  "patch_sha256": "cf8a897fe5fb2afb43f34e0c69f93c2aacdd790de0b9bd56057a1cae6e122549",
+  "platform": "linux",
+  "target": "x86_64-unknown-linux-gnu",
+  "rust_toolchain": "1.95.0",
+  "binary": {
+    "kind": "standalone codex-exec",
+    "profile": "dev, debug=0",
+    "sha256": "5bb78cd7ae0d2c451452ad9757fad3797352090b7e02d851049ce42e2f1deb02",
+    "private_path": ".codex-effective-policy-build/bin/codex-exec"
+  },
+  "checks": [
+    {
+      "name": "upstream source/tree and input digests",
+      "result": "PASS"
+    },
+    {
+      "name": "external lockfile dependency versions/checksums unchanged",
+      "result": "PASS",
+      "workspace_versions_normalized": 158
+    },
+    {
+      "name": "just fmt",
+      "result": "PASS"
+    },
+    {
+      "name": "just fix and clean subsequent just clippy for app-server/exec/client tests",
+      "result": "PASS"
+    },
+    {
+      "name": "source preparation real-checkout tests",
+      "result": "PASS",
+      "passed": 3,
+      "skipped": 0
+    },
+    {
+      "name": "full app-server library tests, including 11 producer tests",
+      "result": "PASS",
+      "passed": 377,
+      "skipped": 0
+    },
+    {
+      "name": "full exec and app-server-client tests",
+      "result": "PASS",
+      "passed": 173,
+      "skipped": 0
+    },
+    {
+      "name": "physical disposable-context no-model barrier checks",
+      "result": "PASS",
+      "passed": 8,
+      "model_requests": 0,
+      "http_requests": 0,
+      "websocket_requests": 0,
+      "js_requirement_generation_reproduced": true
+    },
+    {
+      "name": "unmodified pinned CLI lacks the producer flag",
+      "result": "EXPECTED_FAILURE",
+      "completed_probe_cases": 0,
+      "reason": "unexpected argument '--metaengine-effective-policy'"
+    }
+  ],
+  "original_local_log_sha256": {
+    "build-final.log": "486ab279a378673042b49813800fb0cb899d9ccb3ffcd434a53a6efe60556de8",
+    "clippy.log": "064401a711cb078c10fa5a8f938e5d52ec732be28f69d54e3ef39d74ad020e57",
+    "fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "recipe-tests-final.log": "9212db730f3de53768b3290314612bf9fbdbcf2072cfbbed54d0b78d8ee5d0c4",
+    "policy-tests-red.log": "58fb5cf1328183cc3b95a52b1afb06aaf67cdeda46d5b99aed329a6282724f4e",
+    "policy-tests.log": "6ce75e9e740bdb47394da599ac9f5f6ef9e97b0afb8ca238e6573dace95b5c90",
+    "regression-final.log": "62093df2ab826685a9a5bb579f2a69ce9dcb6290ab71bb8ce1840f80744f57d6",
+    "app-server-lib-final.log": "a4c37cb1ab39306af7886c9f3a3943c718a910c4c34852bd704f522ba7820c66",
+    "no-model-summary.json": "628f60beba84ab868bef5f62c5a31e989ba5d3bfaee9cee412a2b0326a0c61ff"
+  },
+  "original_no_model_stdout_sha256": {
+    "reject_disabled_exec_server": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "reject_nonce": "febd089f5e40ca7ab43a5f9c0608fcb3dadcf6cd9c38d1a4255e27a292354244",
+    "reject_context": "106c18e23c4ac72d11426d0232a4a5b6348e78193862c7c8394c0ce6197c3610",
+    "reject_eof": "40d066e708837700469d144c454de217a52ae73dd259e7ac946bad91e0a8a2d0",
+    "inspect_open_stdin": "9e8f3079bf140389366ede7c298aa74f78aa5aee53cdc4fa9c074562f17b936e",
+    "reject_unknown_field": "62de08cd224785087596ab7e81cc91f0df1f050581c726c4b5e8c58ea8d5935f",
+    "reject_remote_exec_server": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "reject_invalid_nonce": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "private_evidence_directory": ".codex-effective-policy-build/metaengine-policy-no-model-ml7586",
+  "scope": {
+    "runtime_consumer_changed": false,
+    "activated": false,
+    "native_process_environment_custody_qualified": false,
+    "windows_binary_qualified": false,
+    "root_cli_binary_built": false,
+    "installed": false,
+    "published": false
+  },
+  "limitations": [
+    "Fresh local exec only; no resume/fork/review/OSS/worktree modes.",
+    "Managed model-conditional AutoReview requirements are refused before policy emission in v1.",
+    "Requirements sources are normalized constraint provenance; layer origins exclude harness overrides.",
+    "Ignored user metadata fingerprints an empty placeholder, not user config file bytes.",
+    "Native owner must qualify protected home, dotenv/bootstrap environment and helper paths; event is not an environment attestation.",
+    "Consumer/native owner must resume with empty stdin, validate final policy/custody/deadline, then send acceptance and task bytes through the owned pipe.",
+    "Source/binary release provenance, root CLI Windows build and physical Windows qualification remain pending."
+  ],
+  "resolved_test_isolation_note": {
+    "action": "upstream arg0 PATH-alias setup during one baseline help and the first Rust test batch",
+    "target": "default CODEX_HOME/tmp/arg0",
+    "outcome": "filesystem rejected alias creation as read-only; no writes occurred",
+    "default_dotenv_presence_checked_without_reading_contents": "absent",
+    "correction": "subsequent checks used a project-owned disposable child HOME/CODEX_HOME; platform settings unchanged"
+  },
+  "publication": {
+    "state": "PENDING_COORDINATOR",
+    "action": "push a per-stream branch and create a Draft PR in PatrickFrome/Compute",
+    "attempted": false
+  }
+}

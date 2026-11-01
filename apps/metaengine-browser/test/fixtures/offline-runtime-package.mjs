@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { captureOfflineRuntimeInventory, stageOfflineRuntimeBundle } from '../../../../infra/client-state-runtime/offline-runtime-bundle.mjs';
+import { PRIVATE_NATIVE_TOOL_REQUIRED_FILES, privateNativeToolsBinding, resolvePrivateNativeTools } from '../../src/private-native-tools-core.mjs';
 
 export const HEAD = 'a'.repeat(40);
 export const VERSION = '0.7.0-dev.37628000001.1';
@@ -11,7 +12,7 @@ export const verifierRelativePath = 'infra/client-state-runtime/offline-runtime-
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 
 export async function offlineRuntimePackageFixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'me2-offline-package-'));
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'me2-offline-package-')));
   t.after(() => rm(root, { recursive: true, force: true }));
   const put = async (name, bytes) => {
     const target = path.join(root, name);
@@ -19,6 +20,29 @@ export async function offlineRuntimePackageFixture(t) {
     await writeFile(target, bytes);
     return target;
   };
+  // Inert generated package data only: exercise the real canonical manifest
+  // producer/verifier without running fixture binaries or claiming a release.
+  const components = [];
+  const toolsRoot = path.join(root, 'resources/private-native-tools');
+  for (const [id, entrypoint] of [['git', 'ucrt64/bin/git.exe'], ['codex', 'bin/codex.exe']]) {
+    const extras = id === 'git' ? ['ucrt64/libexec/git-core/git-helper', 'ucrt64/etc/ssl/cert.pem',
+      'ucrt64/etc/ssl/openssl.cnf', 'ucrt64/lib/ossl-modules/fixture.dll'] : [];
+    const files = [];
+    for (const name of [...new Set([...PRIVATE_NATIVE_TOOL_REQUIRED_FILES[id], ...extras])].sort()) {
+      const bytes = Buffer.from('inert generated package resource: ' + id + '/' + name);
+      await put('resources/private-native-tools/' + id + '/' + name, bytes);
+      files.push({ path: name, bytes: bytes.length, sha256: digest(bytes) });
+    }
+    components.push({ id, version: id === 'git' ? '2.56.0.4' : '0.166.0',
+      repository: id === 'git' ? 'git-for-windows/git' : 'openai/codex', tag: 'generated-package-test',
+      release_id: 1, asset_id: 2, archive_name: id + '.zip', archive_sha256: 'f'.repeat(64), archive_bytes: 1,
+      entrypoint, files });
+  }
+  const toolsBytes = Buffer.from(JSON.stringify({ schema: 'metaengine.private-native-tools.v1',
+    platform: 'win32', arch: 'x64', components }));
+  await put('resources/private-native-tools/manifest.json', toolsBytes);
+  const privateToolsBinding = privateNativeToolsBinding(toolsBytes);
+  const privateTools = await resolvePrivateNativeTools({ toolsRoot, binding: privateToolsBinding });
   const host = 'export const host = true;\n';
   const firstRun = 'export const firstRun = true;\n';
   const support = 'export const support = true;\n';
@@ -59,9 +83,10 @@ export async function offlineRuntimePackageFixture(t) {
     deno: { version: '2.9.7', url: 'https://github.com/denoland/deno/releases/download/v2.9.7/deno-x86_64-pc-windows-msvc.zip', archive_sha256: 'b'.repeat(64) },
     postgresql: { version: '17.11.0', url: 'https://get.enterprisedb.com/postgresql/postgresql-17.11-1-windows-x64-binaries.zip', archive_sha256: 'c'.repeat(64) },
   };
-  const inventory = await captureOfflineRuntimeInventory({ sources, sourceBundleDigest: sourceManifest.bundle_sha256, componentOrigins });
+  const inventory = await captureOfflineRuntimeInventory({ sources, sourceBundleDigest: sourceManifest.bundle_sha256, componentOrigins, privateNativeToolsBinding: privateToolsBinding });
   const manifest = await stageOfflineRuntimeBundle({ stagingDirectory: bundleDirectory, sources,
     inventory, expectedInventoryDigest: inventory.inventory_sha256 });
-  return { root, put, bundleDirectory, repoRoot: path.join(root, 'checkout'), resourcesDir: path.join(root, 'resources'), verifierBytes, manifest, sources,
+  await privateTools.revalidate();
+  return { root, put, toolsRoot, privateToolsBinding, bundleDirectory, repoRoot: path.join(root, 'checkout'), resourcesDir: path.join(root, 'resources'), verifierBytes, manifest, sources,
     copyBundle: async target => cp(bundleDirectory, target, { recursive: true }) };
 }

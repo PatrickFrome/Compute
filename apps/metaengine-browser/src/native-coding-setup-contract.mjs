@@ -4,12 +4,24 @@ export const NATIVE_SETUP_ACTIONS=Object.freeze(['DISCOVER_NATIVE_SETUP_V1','BEG
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const HASH=/^[a-f0-9]{64}$/;
 const exact=(v,keys)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).sort().join('|')===[...keys].sort().join('|');
+export const NATIVE_REPOSITORY_PREPARATION_SCHEMA='metaengine.native-coding.repository-preparation.v1';
+// Approval is the exact source and choices in the existing signed ADMIN BEGIN.
+// An observed checkout is never an implicit approved source, task or lease.
+export function validateNativeRepositoryPreparation(value){
+ if(!exact(value,['schema','source','choices'])||value.schema!==NATIVE_REPOSITORY_PREPARATION_SCHEMA
+  ||!exact(value.source,['head','artifact_sha256'])||!/^[a-f0-9]{40}$/.test(value.source.head||'')||!HASH.test(value.source.artifact_sha256||'')
+  ||!exact(value.choices,['worktree','branch'])||value.choices.worktree!=='CREATE_LOCKED_OPERATION_WORKTREE'
+  ||value.choices.branch!=='CREATE_OPERATION_BRANCH')throw Error('native_setup_preparation_invalid');
+ return structuredClone(value);
+}
 export function validateNativeSetupInput(action,value){
  const keys=['workspace_id',...(['DISCOVER_NATIVE_SETUP_V1','READ_NATIVE_SETUP_ROUTE_V1'].includes(action)?[]:['operation_id']),
-  ...(action==='BEGIN_NATIVE_SETUP_V1'?['repository_scope_sha256','repo_root_identity_sha256','managed_root_identity_sha256']:[])];
+  ...(action==='BEGIN_NATIVE_SETUP_V1'?['repository_scope_sha256','repo_root_identity_sha256','managed_root_identity_sha256',
+   ...(Object.hasOwn(value||{},'preparation')?['preparation']:[])]:[])];
  if(!NATIVE_SETUP_ACTIONS.includes(action)||!exact(value,keys)||!(action==='READ_NATIVE_SETUP_ROUTE_V1'&&value.workspace_id===null)&&!UUID.test(value.workspace_id||'')
   ||!['DISCOVER_NATIVE_SETUP_V1','READ_NATIVE_SETUP_ROUTE_V1'].includes(action)&&!UUID.test(value.operation_id||'')
   ||keys.filter(k=>k.endsWith('_sha256')).some(k=>!HASH.test(value[k]||'')))throw Error('native_setup_input_invalid');
+ if(Object.hasOwn(value,'preparation'))validateNativeRepositoryPreparation(value.preparation);
  return Object.freeze(structuredClone(value));
 }
 

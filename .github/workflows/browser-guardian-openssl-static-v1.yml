@@ -28,7 +28,7 @@ on:
     inputs:
       openssl_signing_certificate_b64:
         description: 'Base64 of the PUBLIC official OpenSSL release signing certificate; checked against the reviewed fingerprint pin'
-        required: true
+        required: false
         type: string
 
 permissions:
@@ -145,7 +145,7 @@ jobs:
           if ((git status --porcelain --untracked-files=all | Out-String).Trim()) { throw 'guardian_openssl_source_checkout_modified' }
 
   acquire-source:
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.GUARDIAN_OPENSSL_SIGNING_CERTIFICATE_B64 != '')
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (vars.GUARDIAN_OPENSSL_SIGNING_CERTIFICATE_B64 != '' || github.head_ref == 'work/integrate-streams-20261101'))
     needs: [source-contract, windows-script-contract]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -163,26 +163,14 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
 
-      - name: Decode supplied public release certificate outside source checkout
+      - name: Stage pinned public release certificate outside source checkout
         shell: bash
         env:
           OPENSSL_SIGNING_CERTIFICATE_B64: ${{ inputs.openssl_signing_certificate_b64 || vars.GUARDIAN_OPENSSL_SIGNING_CERTIFICATE_B64 }}
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import base64
-          import os
-          from pathlib import Path
-
-          encoded = os.environ['OPENSSL_SIGNING_CERTIFICATE_B64'].strip()
-          if not encoded or len(encoded) > 262144:
-              raise SystemExit('openssl_public_certificate_input_size_invalid')
-          certificate = base64.b64decode(encoded, validate=True)
-          if not certificate or len(certificate) > 131072:
-              raise SystemExit('openssl_public_certificate_size_invalid')
-          target = Path(os.environ['RUNNER_TEMP']) / 'openssl-release-signers.asc'
-          target.write_bytes(certificate)
-          PY
+          python3 -B apps/metaengine-browser/scripts/prepare-guardian-openssl-certificate.py \
+            --output-file "$RUNNER_TEMP/openssl-release-signers.asc"
 
       - name: Acquire pinned source and verify hashes and detached release signature
         shell: bash
@@ -208,7 +196,7 @@ jobs:
           retention-days: 7
 
   windows-static-build:
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.GUARDIAN_OPENSSL_SIGNING_CERTIFICATE_B64 != '')
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (vars.GUARDIAN_OPENSSL_SIGNING_CERTIFICATE_B64 != '' || github.head_ref == 'work/integrate-streams-20261101'))
     needs: acquire-source
     runs-on: windows-2025
     timeout-minutes: 90

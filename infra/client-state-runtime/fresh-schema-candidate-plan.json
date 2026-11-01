@@ -1,6 +1,6 @@
 {
   "schema": "compute.fresh-schema-candidate.v1",
-  "reviewed_source_head": "04af080c9cc369d5038ed672c9cd1d36a4a567e3",
+  "reviewed_source_head": "afcd759913f6cd12669845fa70c34f45a8723819",
   "baseline": [
     {
       "step": 1,
@@ -293,8 +293,12 @@
       "sha256": "18cf78ff5400706ba42749a468cffdc9405e3612c405eee94824873518c1bf5a"
     },
     {
+      "path": "infra/client-state-runtime/native-coding-setup-preparation-v1.sql",
+      "sha256": "0a03c9ee323f91bb12b2b5e84aa176085cf38b0af2555c150ce76f357ed313c1"
+    },
+    {
       "path": "infra/client-state-runtime/native-coding-capacity-v2.sql",
-      "sha256": "7892d0fd3594ebaa115080402ced50b99d6c54940f75533e71fe262ae14d914c"
+      "sha256": "37299a883ecd6265f4616d3f21108a537a9e8ae5038b3289f557d973cb9622ff"
     },
     {
       "path": "infra/client-state-runtime/native-coding-callback-publication-v1.sql",
@@ -303,6 +307,10 @@
     {
       "path": "infra/client-state-runtime/native-coding-initial-anchor-task-fence-v1.sql",
       "sha256": "cc834bb95da3944a6e63d727c7fd0312c224623a5c73f930b9a119a962353822"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-physical-custody-v1.sql",
+      "sha256": "ed33431c256ae8f40e14bd4363f2156dd1967ff06a391f15ca35c192451bc643"
     }
   ],
   "unresolved_dependencies": [

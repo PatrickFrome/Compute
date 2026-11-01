@@ -43,8 +43,10 @@ function safeRelativePath(value) {
       && part !== '.' && part !== '..' && !part.startsWith('.'))) fail('bundle_path_invalid');
   // A reviewed implementation filename is source, not a private data folder.
   // The exact path still requires the normal source catalog and digest checks.
-  const aclSource='apps/metaengine-browser/src/private-windows-storage-acl.mjs';
-  if (value!==aclSource && value!=='repository/'+aclSource
+  const implementationSources=['apps/metaengine-browser/src/private-windows-storage-acl.mjs',
+    'apps/metaengine-browser/src/private-native-tools-core.mjs',
+  'apps/metaengine-browser/src/native-coding-repository-preparation-plan.mjs','apps/metaengine-browser/src/private-native-tools.mjs'];
+  if (!implementationSources.some(source=>value===source||value==='repository/'+source)
     && value.split('/').some(part => /^(?:private|secrets?|credentials?|passwords?|dumps?|backups?|pgdata|profiles?)(?:[._-]|$)/i.test(part))) fail('bundle_private_path_forbidden');
   return value;
 }
@@ -91,6 +93,12 @@ const REMOTE_SUPPORT_SOURCE_CLOSURE = new Set([
   'apps/metaengine-browser/src/runtime-recovery-policy.mjs',
 ]);
 const NATIVE_CODING_HOST_SOURCE_CLOSURE=new Set([
+  'apps/metaengine-browser/src/managed-task-project-command-adapter.mjs',
+  'apps/metaengine-browser/src/managed-task-project-authority-resolver.mjs',
+  'apps/metaengine-browser/src/managed-task-project-runtime.mjs',
+  'apps/metaengine-browser/src/managed-task-project-runtime-core.mjs',
+  'apps/metaengine-browser/src/workspace-manager.mjs',
+  'apps/metaengine-browser/src/workspace-git-hardening.mjs',
   'apps/metaengine-browser/src/native-coding-capacity-contract.mjs',
   'apps/metaengine-browser/src/native-coding-host-settlement.mjs',
   'apps/metaengine-browser/src/native-coding-setup-contract.mjs',
@@ -125,9 +133,12 @@ const NATIVE_CODING_HOST_SOURCE_CLOSURE=new Set([
   'apps/metaengine-browser/src/native-coding-pg-ledger.mjs',
   'apps/metaengine-browser/src/native-coding-transport-proof.mjs',
   'apps/metaengine-browser/src/private-windows-storage-acl.mjs',
+  'apps/metaengine-browser/src/private-native-tools-core.mjs',
+  'apps/metaengine-browser/src/native-coding-repository-preparation-plan.mjs',
   'apps/metaengine-browser/src/codex-cli-sandbox-probe.mjs',
   'apps/metaengine-browser/src/windows-native-read-environment.mjs',
   'apps/metaengine-browser/src/codex-cli-runner.mjs',
+  'apps/metaengine-browser/src/codex-cli-execution-policy.mjs',
   'apps/metaengine-browser/src/native-coding-git-proof.mjs',
   'apps/metaengine-browser/src/codex-cli-result-schema.mjs',
 ]);

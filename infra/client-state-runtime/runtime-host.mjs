@@ -1,4 +1,5 @@
 import {createNativeCodingHostCapacity} from './native-coding-host-capacity.mjs';
+import {createNativeCodingPhysicalCustody} from './native-coding-physical-custody.mjs';
 import {createNativeCodingHostSetupService} from './native-coding-host-setup-service.mjs';
 import {createNativePreparationTransactions,bindNativeCodingTransactionPool,bindNativeCodingPublicationTransactionPool} from './native-coding-preparation-transaction.mjs';
 import {createNativeInstalledPublicationSchemaVerifier} from './native-coding-installed-publication-schema.mjs';
@@ -23,7 +24,7 @@ import {createNativeCodingDeviceRequestVerifier,createNativeCodingAuthenticatedR
 import {createNativeCodingHostServiceHeartbeat,createNativeCodingHostServiceHeartbeatV2} from './native-coding-host-service-heartbeat.mjs';
 import { createNativeCodingHostOsScope,readNativeCodingOperatorPaths } from './native-coding-host-os-scope.mjs';
 import { requireRuntimeHostLaunchNonce, runtimeHostTerminalMessage, runtimeHostFailureMessage,
-  sendRuntimeHostLifecycleMessage } from './runtime-host-lifecycle.mjs';
+  sendRuntimeHostLifecycleMessage,createRuntimeSetupDrain } from './runtime-host-lifecycle.mjs';
 
 const hostEntry = fileURLToPath(import.meta.url);
 const repositoryRoot = path.resolve(path.dirname(hostEntry), '../..');
@@ -366,6 +367,10 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
     || canonical(await realpath(hooks.executablePath || process.execPath)) !== canonical(verified.paths.nodeExecutable)) {
     throw failure('runtime_host_execution_resource_mismatch');
   }
+  // Only the actual default verifier and actual entry/Node-image check convey
+  // installed package context. Test path/verifier overrides cannot mint it.
+  // Merely retaining this result does not read or admit native tools.
+  const installedBundle = hooks.verifyBundle || hooks.modulePath || hooks.executablePath ? null : verified;
   const postgresMode = config.postgres_mode || 'owned';
   const launcherConfig = normalizeLauncherConfig({ mode: 'local', postgresMode,
     apiRoleMode: config.api_role_mode || 'service_role',
@@ -392,7 +397,9 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
   const guardianAbort = new AbortController();
   let nativeCodingAuthority = null;
   let nativeCapacityService = null;
+  let nativePhysicalCustody = null;
   let nativeSetupService = null,setupCleanupUnconfirmed=false;
+  const setupDrain=createRuntimeSetupDrain();
   let nativeCodingRawSql = null,nativeCodingSql = null,nativeSchemaSql = null;
   let nativeSchemaVerifier=null,nativeSchemaApi=null,nativeSchemaOpening=null,nativeSchemaDraining=null;
   let schemaCleanupUnconfirmed=false,schemaPhysicalUnconfirmed=false,schemaApiEnding=false,schemaApiLost=false,schemaDrainJoined=false,schemaApiReads=0;
@@ -534,7 +541,7 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
   })();
   const finalize = outcome => {
     // Fence private ticket consumption synchronously, before any cleanup await.
-    guardianAbort.abort();closeSchemaDiagnosis();
+    guardianAbort.abort();closeSchemaDiagnosis();nativePhysicalCustody?.close();
     void guardianTicketConsumer?.close().catch(()=>{});
     if (!terminalPromise) terminalPromise = (async () => {
       let confirmed = outcome.children_stopped === true;
@@ -550,13 +557,19 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
       // Attached PG is not an owned child and cannot inherit that proof.
       if(schemaPhysicalUnconfirmed&&!(schemaDrainJoined&&postgresMode==='owned'&&outcome.children_stopped===true))schemaCleanupUnconfirmed=true;
       if(schemaCleanupUnconfirmed)confirmed=false;
-      nativeCodingAuthority?.close();nativeSetupService?.close();nativeCapacityService?.close();
+      nativeCodingAuthority?.close();nativeSetupService?.close();nativeCapacityService?.close();nativePhysicalCustody?.close();
       await nativeCapacityService?.drain();
-      try{await nativeSetupService?.drain();}catch{setupCleanupUnconfirmed=true;}
+      try{if(!await setupDrain.finish(nativeSetupService))setupCleanupUnconfirmed=true;}catch{setupCleanupUnconfirmed=true;}
       if(setupCleanupUnconfirmed)confirmed=false;
       nativeCodingSeedBinding?.close();
       await nativeCodingSeedBinding?.drain?.();
-      if(nativeCodingSql&&schemaDrainJoined) {
+      let physicalJoined=true,physicalTimer;
+      try{await Promise.race([nativePhysicalCustody?.drain(),new Promise((_,reject)=>{
+        physicalTimer=setTimeout(()=>reject(failure('runtime_host_cleanup_unconfirmed')),6500);
+      })]);}catch{physicalJoined=false;confirmed=false;}finally{clearTimeout(physicalTimer);}
+      // A pending original terminal producer still owns native reads/SQL. Its
+      // timed-out drain is HOLD and cannot authorize pool disposal or terminal.
+      if(nativeCodingSql&&schemaDrainJoined&&physicalJoined&&!setupCleanupUnconfirmed) {
         try{await nativeCodingSql.end({timeout:5});nativeCodingSql=null;nativeCodingRawSql=null;nativeSchemaSql=null;}
         catch{schemaCleanupUnconfirmed=true;confirmed=false;}
       }
@@ -588,17 +601,17 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
     return terminalPromise;
   };
   const stop = (reason = 'requested') => {
-    guardianAbort.abort();closeSchemaDiagnosis();nativeSetupService?.close();nativeCapacityService?.close();
+    guardianAbort.abort();closeSchemaDiagnosis();nativeSetupService?.close();nativeCapacityService?.close();nativePhysicalCustody?.close();
     const guardianDrain=guardianTicketConsumer?.close();
     void guardianDrain?.catch(()=>{});
     if (!stopPromise) stopPromise = (async () => {
       let outcome;
       // The setup registry owns cold jobs independently of their short IPC ACK.
-      // Join them while own-PG is still available, before runtime child stop.
+      // Join their native resource stage first; do not await SQL publication here.
       // Read-only census must not delay the existing PG shutdown that may be
       // needed to settle its query. finalize joins its exact invocation before
       // SQL disposal/ownership release, after runtime.stop has drained children.
-      try{await nativeSetupService?.drain();}catch{setupCleanupUnconfirmed=true;}
+      try{await setupDrain.beforeStop(nativeSetupService);}catch{setupCleanupUnconfirmed=true;}
       let guardianClean=true;
       try{await drainGuardianLane();await guardianDrain;}catch{guardianClean=false;guardianCleanupUnconfirmed=true;}
       try { outcome = await runtime.stop(['requested', 'signal', 'parent_disconnect', 'startup_cancelled'].includes(reason) ? reason : 'requested'); }
@@ -668,10 +681,12 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
         debug:preparationTransactions.debug,onclose:preparationTransactions.onclose});
       nativeCodingSql=bindNativeCodingTransactionPool(nativeCodingRawSql,preparationTransactions);
       nativeSchemaSql=bindNativeCodingPublicationTransactionPool(nativeCodingRawSql,preparationTransactions);
+      const native=createNativeCodingHostOsScope({config,sql:nativeCodingSql,parentPid:process.ppid,installedBundle});
+      nativePhysicalCustody=createNativeCodingPhysicalCustody({sql:nativeCodingSql,hostInstanceId:descriptor.instance_id,hostPid:process.pid,
+        postgresIdentity:runtime.postgresIdentity,...native});
       nativeSetupService=createNativeCodingHostSetupService({sql:nativeCodingSql,hostInstanceId:descriptor.instance_id,hostPid:process.pid,
         pgDataDirectory:config.pg_data_directory,postgresIdentity:runtime.postgresIdentity,postgresContinuity,
-        readCapacityEvidence:input=>nativeCapacityService.readSetupAdmission(input)});
-      const native=createNativeCodingHostOsScope({config,sql:nativeCodingSql,parentPid:process.ppid});
+        physicalCustody:nativePhysicalCustody,readCapacityEvidence:input=>nativeCapacityService.readSetupAdmission(input)});
       nativeCapacityService=createNativeCodingHostCapacity({sql:nativeCodingSql,hostInstanceId:descriptor.instance_id,hostPid:process.pid,
         postgresIdentity:runtime.postgresIdentity,readNativeScope:native.readNativeScope,readSetupCustody:()=>nativeSetupService.readCapacityCustody()});
       nativeCodingAuthority=Object.freeze({...nativeSetupService.operations,...nativeCapacityService.operations,
@@ -739,7 +754,7 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
     });
     await nativeCodingStartup;
     return { descriptor, statusFile: path.join(config.state_directory, 'runtime-instance.json'), stop, finished,
-      nativeCodingAuthority, handleGuardianTicketMessage };
+      nativeCodingAuthority, nativePhysicalCustody, handleGuardianTicketMessage };
   } catch (error) {
     // Also fence a pending optional binding when stop/finalize already has a
     // cached promise. Closing it cannot stop or replace the working PostgreSQL.
@@ -772,7 +787,7 @@ async function main() {
   let host;
   let pendingStop = null;
   let nativeCodingIpc = null;
-  const requestStop = reason => { pendingStop ||= reason; controller.abort(); if (host) void host.stop(reason).catch(() => { process.exitCode = 1; }); };
+  const requestStop = reason => { pendingStop ||= reason; nativeCodingIpc?.close();controller.abort(); if (host) void host.stop(reason).catch(() => { process.exitCode = 1; }); };
   process.once('SIGINT', () => requestStop('signal'));
   process.once('SIGTERM', () => requestStop('signal'));
   process.once('disconnect', () => requestStop('parent_disconnect'));
@@ -788,7 +803,7 @@ async function main() {
   });
   if(host.nativeCodingAuthority && process.send && process.connected) {
     nativeCodingIpc=createNativeCodingHostIpcServer({instanceId:host.descriptor.instance_id,
-      operations:host.nativeCodingAuthority,hostPid:process.pid,parentPid:process.ppid,send:process.send.bind(process)});
+      operations:host.nativeCodingAuthority,physicalCustody:host.nativePhysicalCustody,hostPid:process.pid,parentPid:process.ppid,send:process.send.bind(process)});
   }
   if (pendingStop || (process.send && !process.connected)) await host.stop(pendingStop || 'parent_disconnect');
   else if (process.send) process.send(host.descriptor);

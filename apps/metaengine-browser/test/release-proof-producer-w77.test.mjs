@@ -8,7 +8,8 @@ import {
   RELEASE_PROOF_FILES_W77, RELEASE_PROOF_SIGNER_BLOCK_W77,
   probeProductionReleaseProofW77, validateSlsaEvidenceBytesW77,
   validateExistingProducerReceiptW77, serializeReleaseManifestW77,
-  emitStagingReleaseProofW77, buildPinnedGhVerifyArgsW77, prepareIndependentlyVerifiedReleaseInputsW77,
+  createExternalReleaseProofHandoffW77, emitStagingReleaseProofW77, buildPinnedGhVerifyArgsW77, prepareIndependentlyVerifiedReleaseInputsW77,
+  parseUntrustedReleaseSignerResultW77,
 } from '../scripts/release-proof-producer-w77.mjs';
 import {
   INSTALLED_RELEASE_SIGNATURE_DOMAIN_W68,
@@ -233,11 +234,12 @@ test('actual production GH verifier command pins repo, workflow, source, issuer,
   for (const term of [
     'PatrickFrome/Compute',
     'PatrickFrome/Compute/.github/workflows/browser-windows-package-smoke.yml',
-    '--source-digest','--source-ref','refs/heads/physical/build-slsa-provenance-v1',
+    '--signer-digest','--source-digest','--source-ref','refs/heads/physical/build-slsa-provenance-v1',
     '--cert-oidc-issuer','https://token.actions.githubusercontent.com',
     '--deny-self-hosted-runners','--predicate-type','https://slsa.dev/provenance/v1',
   ]) assert.ok(args.includes(term), term);
   assert.equal(args[args.indexOf('--source-digest')+1],SHA);
+  assert.equal(args[args.indexOf('--signer-digest')+1],SHA);
   assert.throws(()=>buildPinnedGhVerifyArgsW77({
     installer:'relative.exe',bundle:path.resolve('bundle.json'),sourceSha:SHA,
   }),/gh_cli_arguments/);
@@ -265,4 +267,93 @@ test('producer refuses missing or stale code inventory before it can emit even a
     await assert.rejects(()=>f.emit(),/ENOENT/);
     assert.equal(fs.existsSync(path.join(f.dir,RELEASE_PROOF_FILES_W77.envelope)),false);
   });
+});
+
+test('canonical release signing bytes reject accessor drift and hidden fields', () => {
+  const good = {
+    schema:'metaengine.browser.installed-release-manifest.v2',
+    source_sha:SHA, package_version:VERSION, exe_name:'METAENGINE Browser Test.exe',
+    exe_sha256:'1'.repeat(64), signer_thumbprint:THUMB,
+    installer_sha256:'2'.repeat(64), slsa_bundle_sha256:'3'.repeat(64),
+    slsa_evidence_sha256:'4'.repeat(64), package_code_sha256:'5'.repeat(64),
+  };
+  const canonical = serializeReleaseManifestW77(good);
+  assert.equal(canonical.toString('utf8'),
+    INSTALLED_RELEASE_SIGNATURE_DOMAIN_W68 + JSON.stringify(good));
+  let reads=0;
+  const swapping={...good};
+  Object.defineProperty(swapping,'source_sha',{enumerable:true, configurable:true,
+    get() { return ++reads===1 ? SHA : 'f'.repeat(40); }});
+  assert.throws(()=>serializeReleaseManifestW77(swapping),/w77_release_proof_manifest_/,
+    'an accessor may return valid data for validation and different bytes for signature');
+  const hidden={...good};
+  Object.defineProperty(hidden,'extra_authority',{value:true,enumerable:false});
+  assert.throws(()=>serializeReleaseManifestW77(hidden),/w77_release_proof_manifest_/);
+  const symbol={...good,[Symbol('hidden-signing-claim')]:true};
+  assert.throws(()=>serializeReleaseManifestW77(symbol),/w77_release_proof_manifest_/);
+});
+
+test('external handoff fields match the same validated manifest snapshot, not later proxy reads', () => {
+  const good = {
+    schema:'metaengine.browser.installed-release-manifest.v2',
+    source_sha:SHA, package_version:VERSION, exe_name:'METAENGINE Browser Test.exe',
+    exe_sha256:'1'.repeat(64), signer_thumbprint:THUMB,
+    installer_sha256:'2'.repeat(64), slsa_bundle_sha256:'3'.repeat(64),
+    slsa_evidence_sha256:'4'.repeat(64), package_code_sha256:'5'.repeat(64),
+  };
+  const untrusted = new Proxy(good, {
+    get(target, prop, receiver) {
+      if (prop === 'source_sha') return 'f'.repeat(40);
+      if (prop === 'installer_sha256') return '0'.repeat(64);
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+  const stable = createExternalReleaseProofHandoffW77(untrusted);
+  assert.equal(stable.source_sha, SHA);
+  assert.equal(stable.final_installer_sha256, good.installer_sha256);
+  assert.equal(stable.installed_placement_verified, false);
+  assert.equal(stable.release_authorized, false);
+});
+
+test('external signer result v1 has an exact canonical parse boundary without custody authority', () => {
+  const fixtureResult = {
+    schema:'metaengine.browser.release-proof-sign-result-w77.v1',
+    operation:'sign_installed_release_manifest_v2',
+    request_sha256:'1'.repeat(64), signing_input_sha256:'2'.repeat(64),
+    public_key_spki_sha256:'3'.repeat(64),
+    signature_algorithm:'Ed25519', signature_base64:Buffer.alloc(64,7).toString('base64'),
+    invocation_id:'fixture-only-not-authenticated',
+    implementation_revision:'4'.repeat(40),
+    release_authorized:false, authority_effect:false,
+  };
+  const bytes=Buffer.from(JSON.stringify(fixtureResult),'utf8');
+  const parsed=parseUntrustedReleaseSignerResultW77(bytes);
+  assert.equal(parsed.classification,'SOURCE_PARSE_ONLY');
+  assert.equal(parsed.request_sha256,fixtureResult.request_sha256);
+  assert.equal(parsed.signature_bytes_sha256,hash(Buffer.alloc(64,7)));
+  assert.equal(parsed.cryptographic_signature_verified,false);
+  assert.equal(parsed.signer_invocation_authenticated,false);
+  assert.equal(parsed.installed_placement_verified,false);
+  assert.equal(parsed.release_authorized,false);
+  const tampered = [
+    Buffer.from(' '+bytes.toString('utf8')),
+    Buffer.concat([bytes,Buffer.from('\n')]),
+    Buffer.from(bytes.toString('utf8').replace('"request_sha256":',
+      '"request_sha256":"9'.concat('9'.repeat(63),'","request_sha256":'))),
+    Buffer.from(JSON.stringify({...fixtureResult, verified:true})),
+    Buffer.from(JSON.stringify({...fixtureResult, release_authorized:true})),
+    Buffer.from(JSON.stringify({...fixtureResult, authority_effect:true})),
+    Buffer.from(JSON.stringify({...fixtureResult, signature_base64:'a'.repeat(88)})),
+    Buffer.from(JSON.stringify({...fixtureResult, signature_base64:Buffer.alloc(63,7).toString('base64')})),
+    Buffer.from(JSON.stringify({...fixtureResult, signature_algorithm:'RSA'})),
+    Buffer.from(JSON.stringify({...fixtureResult, request_sha256:'A'.repeat(64)})),
+    Buffer.from(JSON.stringify({...fixtureResult, implementation_revision:'caller-claims-verified'})),
+    Buffer.from(JSON.stringify({...fixtureResult, invocation_id:'\u0000fixture'})),
+    Buffer.from(JSON.stringify({...fixtureResult, invocation_id:' '.repeat(3)})),
+    Buffer.from(JSON.stringify(Object.fromEntries(Object.entries(fixtureResult).reverse()))),
+  ];
+  for (const [i,b] of tampered.entries()) {
+    assert.throws(()=>parseUntrustedReleaseSignerResultW77(b),/w77_release_proof_sign_result_/,String(i));
+  }
+  assert.throws(()=>parseUntrustedReleaseSignerResultW77(fixtureResult),/w77_release_proof_sign_result_/);
 });
