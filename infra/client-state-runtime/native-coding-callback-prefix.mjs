@@ -16,19 +16,20 @@ async function identity(directory){
 }
 // Only the protected OS composition derives directory. Test injection here is
 // a generated ACL fixture, NEVER a producer of trusted publication authority.
-export async function readNativeCallbackProtectedPrefix({directory,expected=null,intent=null,publicationCursor=null,request,readProtectedJson=readNativeCodingProtectedJson}={}){
+export async function readNativeCallbackProtectedPrefix({directory,expected=null,intent=null,publicationCursor=null,request,readProtectedJson=readNativeCodingProtectedJson,includeRecords=false}={}){
  open(request);if(!path.isAbsolute(directory||''))fail();
  const root=path.join(directory,'host-callback-custody'),before=await identity(root);
  const attempt=(await readProtectedJson(path.join(directory,'attempt.json'),{maximumBytes:256*1024,signal:request?.signal})).value;
  const first=await readNativeRunCallbackJournal(directory);
  if(first.state==='HOLD'||first.records<2||!Number.isSafeInteger(first.records))fail();
- let head='0'.repeat(64),header=null,bound=null,anchorSeen=expected===null,initialHead=null;
+ let head='0'.repeat(64),header=null,bound=null,anchorSeen=expected===null,initialHead=null;const records=includeRecords?[]:null;
  let publicationSeen=publicationCursor===null,intentSequence=null;
  for(let sequence=0;sequence<first.records;sequence++){
   open(request);
   const file=path.join(root,String(sequence).padStart(16,'0')+'.json'),s=await fs.lstat(file,{bigint:true});
   if(!s.isFile()||s.isSymbolicLink()||s.nlink!==1n||s.size>8192n)fail();
   const record=(await readProtectedJson(file,{maximumBytes:8192,signal:request?.signal})).value;
+  if(records)records.push(structuredClone(record));
   const after=await fs.lstat(file,{bigint:true});
   if(['dev','ino','birthtimeNs','ctimeNs','mtimeNs','size','nlink'].some(k=>s[k]!==after[k])
    ||record.sequence!==sequence||record.previous_sha256!==head)fail();
@@ -54,5 +55,6 @@ export async function readNativeCallbackProtectedPrefix({directory,expected=null
   prefix_identity_sha256:before,header_sha256:sha(header),bound_sha256:initialHead,
   record_count:first.records,intent_count:first.requests,head_sha256:head,dispatch_fenced:first.dispatch_fenced,
   ...(intent?{intent_sha256:sha(intent),intent_sequence:intentSequence}:{}),
-  local_durability:'DIRECTORY_DURABILITY_UNQUALIFIED',structural_only:true});
+  local_durability:'DIRECTORY_DURABILITY_UNQUALIFIED',structural_only:true,
+  ...(records?{closure_journal:{records,projection:first,prefix_identity_sha256:before,attempt_sha256:sha(attempt)}}:{})});
 }
