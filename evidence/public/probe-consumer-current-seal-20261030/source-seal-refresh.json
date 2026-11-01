@@ -1,0 +1,53 @@
+{
+  "schema": "metaengine.reviewed-current-source-seal-refresh.v1",
+  "functional_source": "c85eb01216bebe6727bc9ee38b8490550e5ff463",
+  "previous_manifest_blob": "da5c150d32125ba900829bc5c8a304d4b180fd26",
+  "current_manifest_sha256": "de91f0d21b91918dfb7b8f27cf9fb78a984ef8849fad670e213fc5294facddcd",
+  "updated_existing_paths": [
+    "apps/metaengine-browser/src/codex-cli-sandbox-probe.mjs",
+    "apps/metaengine-browser/src/native-coding-host-observers.mjs",
+    "apps/metaengine-browser/test/codex-cli-sandbox-probe-lifetime.test.mjs",
+    "apps/metaengine-browser/test/codex-cli-sandbox-probe.test.mjs",
+    "apps/metaengine-browser/test/native-coding-host-observers.test.mjs",
+    "apps/metaengine-browser/test/windows-native-read-environment.test.mjs"
+  ],
+  "newly_sealed_paths": [],
+  "reviewed_changes": [
+    {
+      "path": "apps/metaengine-browser/src/codex-cli-sandbox-probe.mjs",
+      "previous_blob": "b94fe1cb46654dcf55624b7cbf0217d9abd11533",
+      "current_blob": "a9805308541b85c5efdf09dcd349e9d53666beae"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-host-observers.mjs",
+      "previous_blob": "1b9cd61ff61065c22e957f1d908c32ff9d5d78ce",
+      "current_blob": "704fc2b5569ce82a11165beeb8e95b265aca7cfa"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-sandbox-probe-lifetime.test.mjs",
+      "previous_blob": "48efdc2d3312f5655a750280deb5db92238fd288",
+      "current_blob": "ea4250c4e7ef5331a5751ae0bf61f3379f94beb0"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-sandbox-probe.test.mjs",
+      "previous_blob": "42523f4a55a03b1cd183a9522bdfb62ef6f82103",
+      "current_blob": "1ce04227e96adf5e00c34ec326d187ca75dc226b"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-host-observers.test.mjs",
+      "previous_blob": "0e01cb3f822f179f1af147bac6d0c098b7427f5e",
+      "current_blob": "b7c068e52d41a8720b4508272a396d0035172c88"
+    },
+    {
+      "path": "apps/metaengine-browser/test/windows-native-read-environment.test.mjs",
+      "previous_blob": "f1801ab83306c29c24ae597043c4d9978b8673eb",
+      "current_blob": "65b645fc5fae06aefd7b9857d2212f4f0796a913"
+    }
+  ],
+  "total_sealed_files": 1042,
+  "all_non_blob_manifest_fields_unchanged": true,
+  "package_version_changed": false,
+  "qualification_promoted": false,
+  "authority_effect": false,
+  "validation": "PENDING_FINAL_COMMIT_TESTS_AND_EXACT_HEAD_CI"
+}

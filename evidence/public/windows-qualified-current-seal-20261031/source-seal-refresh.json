@@ -1,0 +1,90 @@
+{
+  "schema": "metaengine.reviewed-current-source-seal-refresh.v1",
+  "functional_source": "579a66aa3aba690fdf0095f6588bbc37ac2903c5",
+  "previous_manifest_blob": "9b37ee331e2156044f89173b235e6b4115f6a8f9",
+  "current_manifest_sha256": "4e1c6a38d2bd65b9079b22cbbadfbda62a395a1df47b3b8c3957b7f03825a355",
+  "updated_existing_paths": [
+    "apps/metaengine-browser/test/codex-cli-startup-observation.test.mjs",
+    "apps/metaengine-browser/test/codex-cli-windows-handle-list.test.mjs",
+    "apps/metaengine-browser/test/native-coding-agent-callback-custody.test.mjs",
+    "apps/metaengine-browser/test/native-coding-agent-close-lifetime.test.mjs",
+    "apps/metaengine-browser/test/native-coding-agent-run-bridge.test.mjs",
+    "apps/metaengine-browser/test/native-coding-execution-pool.test.mjs",
+    "apps/metaengine-browser/test/native-coding-host-ipc.test.mjs",
+    "apps/metaengine-browser/test/native-coding-runtime.test.mjs"
+  ],
+  "newly_sealed_paths": [
+    "apps/metaengine-browser/test/self-update-continuity-oneshot-repair.test.mjs",
+    "apps/metaengine-browser/test/tab-registry-census.test.mjs",
+    "apps/metaengine-browser/test/tab-registry.test.mjs",
+    "apps/metaengine-browser/test/tab-view-lifecycle.test.mjs"
+  ],
+  "reviewed_changes": [
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-startup-observation.test.mjs",
+      "previous_blob": "27118f54b9c6f7bc5c146fe9dcd49a1efb9d76dc",
+      "current_blob": "4069f4cf3edce3a39cd02e59cbc2081f70775e28"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-windows-handle-list.test.mjs",
+      "previous_blob": "ce1b50b6c55cbe0ef1597253d3aa6f498983ce52",
+      "current_blob": "e7b83bdd24e4e5932dfdbd5e5a5bd1b5ff048b91"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-agent-callback-custody.test.mjs",
+      "previous_blob": "b4e69662965c1e7813f4af85f7012b54b76e967d",
+      "current_blob": "a465d003493729237bb706a9d214fb70282c7987"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-agent-close-lifetime.test.mjs",
+      "previous_blob": "19a27cd149bbff6018b7544b396cf6be4ad0af43",
+      "current_blob": "825460f33133c8fbbd9233ce4a6d88fa35e4379b"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-agent-run-bridge.test.mjs",
+      "previous_blob": "cb1e35b4b0aa8e7e552e1514c5ef30e87870beb8",
+      "current_blob": "40586fbfc51aa8e5bbbedbd6595b99c59a375ef1"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-execution-pool.test.mjs",
+      "previous_blob": "26bb53384ff56dc53a20f6c3685fda097e9d8682",
+      "current_blob": "abc5c0983a17e9990ed91c586da1d6ab1ee1d365"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-host-ipc.test.mjs",
+      "previous_blob": "a83b3a92bbac2ac82ce6f5fc9fbfaeeb8620f66e",
+      "current_blob": "6307c159c4025cd82e40218f42851f77728f2862"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-runtime.test.mjs",
+      "previous_blob": "08bdae90249da7721fc6d85dfc0312565cc935c0",
+      "current_blob": "a11618afa48a434b5023f8dc62aa9b9c00d2a05b"
+    },
+    {
+      "path": "apps/metaengine-browser/test/self-update-continuity-oneshot-repair.test.mjs",
+      "previous_blob": null,
+      "current_blob": "ca412a1505b54158511583405f60d2039375a5c3"
+    },
+    {
+      "path": "apps/metaengine-browser/test/tab-registry-census.test.mjs",
+      "previous_blob": null,
+      "current_blob": "058f41b2148297fd7622adce3b4eb6968f2587a2"
+    },
+    {
+      "path": "apps/metaengine-browser/test/tab-registry.test.mjs",
+      "previous_blob": null,
+      "current_blob": "c0362c6c5bbaa8372c95ea5eac112a5298ee023e"
+    },
+    {
+      "path": "apps/metaengine-browser/test/tab-view-lifecycle.test.mjs",
+      "previous_blob": null,
+      "current_blob": "14c1965aecfecf87dc23b21985f40e27dbbcfc0a"
+    }
+  ],
+  "total_sealed_files": 1046,
+  "all_non_blob_manifest_fields_unchanged": true,
+  "package_version_changed": false,
+  "qualification_promoted": false,
+  "authority_effect": false,
+  "validation": "PENDING_FINAL_COMMIT_TESTS_AND_EXACT_HEAD_CI"
+}

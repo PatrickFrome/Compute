@@ -1,0 +1,34 @@
+{
+  "schema": "metaengine.prepared-run-source-verification.v1",
+  "classification": "AFFECTED_SOURCE_TESTS_NOT_INSTALLED_ACCEPTANCE",
+  "tested_local_source": "83630839d9bd16b2517a364e51bc9548a61b7df4",
+  "tested_tree": "c93cbefc524f2153c0083f37a67c1626a31f0c10",
+  "windows_source": "c24d890da05c62d993f7a16545f5c8751356630e",
+  "windows": {
+    "tests": 326, "pass": 325, "fail": 0, "cancelled": 0, "skipped": 1,
+    "skip": "non-Windows production bridge refusal leaves no worker or Host effect",
+    "duration_ms": 270115.6952,
+    "tap_sha256": "7b3e91a8c376490f431a39e4217cf6f32ca0598b198662809fa87fda9df6bc09"
+  },
+  "linux": {
+    "tests": 325, "pass": 318, "fail": 0, "cancelled": 0, "skipped": 7,
+    "log_sha256": "31e2db9916a6f9630ac53f9ba364c520bfc171d88e36d46396eb7207bd42a57f"
+  },
+  "real_disposable_pg17": {
+    "pass": 72, "fail": 0, "skipped": 0,
+    "source_checkpoint": "c05223481de8a8ed02fd985a47a2b55828ece348",
+    "log_sha256": "33a40ebed64737ab49770ee81ee19513793fd2c79844ace7160d3c09f049271c",
+    "native_owner_evidence": "GENERATED_NOT_INSTALLED"
+  },
+  "windows_helper": {
+    "helper_sha256": "79d21e1236f927347155a83324edad55bc26752109c40701ce874a885db3faab",
+    "template_sha256": "e3b4a8ad4afecea049d6f539e77e783ec915c5b918d3bae13a3b6bc21cf9afff",
+    "release_authority": false
+  },
+  "prior_failed_windows_selection": {"pass":205,"fail":10,"skipped":1,"relabelled":false},
+  "publication_sql_registered": false,
+  "default_execution_gate": "CLOSED",
+  "installer_built": false,
+  "installed_qualification": false,
+  "authority_effect": false
+}

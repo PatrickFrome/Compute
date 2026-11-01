@@ -170,3 +170,20 @@ test('DOS device contexts refuse before either native reader launches', async t 
   await assert.rejects(readNativeCodingWindowsProcess(123, {platform: 'win32', exec}), /native_process_unavailable/);
   assert.equal(calls, 0);
 });
+
+// Keep the native read narrow without extending its deadline or adding retries.
+test('fixed boot inventory requests only required CIM properties and closes its unused input',async t=>{
+ controlledEnvironment(t);
+ let calls=0,closed=0;
+ const expectedBoot=boot();
+ const value=await readWindowsSandboxHostBoot({platform:'win32',exec:(file,args,options)=>{
+  calls++;assert.equal(file,'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe');
+  assert.equal(options.timeout,12000);assert.equal(options.shell,false);
+  const script=Buffer.from(args.at(-1),'base64').toString('utf16le');
+  assert.equal(script.split("Get-CimInstance Win32_Process -Filter 'ProcessId=4' -Property Name,CreationDate").length-1,2);
+  assert.equal(script.split('Get-CimInstance Win32_OperatingSystem -Property LastBootUpTime,Version').length-1,1);
+  assert.match(script,/ToFileTimeUtc\(\) -ne \$birth.ToFileTimeUtc\(\)/);
+  const pending=Promise.resolve({stdout:JSON.stringify(expectedBoot)});pending.child={stdin:{end(){closed++;}}};return pending;
+ }});
+ assert.equal(calls,1);assert.equal(closed,1);assert.deepEqual(value,expectedBoot);
+});

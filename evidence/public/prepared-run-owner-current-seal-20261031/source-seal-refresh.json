@@ -1,0 +1,180 @@
+{
+  "schema": "metaengine.reviewed-current-source-seal-refresh.v1",
+  "functional_source": "061afab62c5a979a4b1725dc3523458bc41c4c17",
+  "previous_manifest_blob": "542916d4e813d8d03525ab3e46aea6dfd8605c9b",
+  "current_manifest_sha256": "f12e254b4bdd1941fba102f4a7651284934f012aa910d2e0f38a66765f7cc29f",
+  "updated_existing_paths": [
+    ".github/client-ci-train-w82.test.mjs",
+    ".github/workflows/client-checkpoint-reconciliation-qualification.yml",
+    ".github/workflows/client-source-candidate-w73.yml",
+    "apps/metaengine-browser/src/codex-cli-runner.mjs",
+    "apps/metaengine-browser/src/native-coding-host-ipc-client.mjs",
+    "apps/metaengine-browser/src/native-coding-lease-executor.mjs",
+    "apps/metaengine-browser/src/native-coding-run-owner-main.mjs",
+    "apps/metaengine-browser/src/native-coding-run-owner-phase.mjs",
+    "apps/metaengine-browser/src/native-coding-runtime.mjs",
+    "apps/metaengine-browser/test/codex-cli-runner.test.mjs",
+    "apps/metaengine-browser/test/native-coding-host-ipc.test.mjs",
+    "apps/metaengine-browser/test/native-coding-lease-executor.test.mjs",
+    "apps/metaengine-browser/test/native-coding-runtime.test.mjs",
+    "coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md",
+    "infra/client-state-runtime/native-coding-callback-publication.mjs",
+    "infra/client-state-runtime/native-coding-callback-publication.pg17.test.mjs",
+    "infra/client-state-runtime/native-coding-host-authority.mjs",
+    "infra/client-state-runtime/native-coding-host-ipc.mjs",
+    "infra/client-state-runtime/package.json",
+    "infra/client-state-runtime/runtime-host.mjs",
+    "infra/client-state-runtime/windows-qualification-registration.test.mjs"
+  ],
+  "newly_sealed_paths": [
+    "apps/metaengine-browser/test/fixtures/prepared-runner-test-adapter.mjs",
+    "apps/metaengine-browser/test/native-coding-publication-owner-phase.test.mjs",
+    "apps/metaengine-browser/test/native-coding-reserve-owner-ipc.test.mjs",
+    "apps/metaengine-browser/test/native-coding-run-owner-main.test.mjs",
+    "docs/architecture/NATIVE_PREPARED_RUN_PUBLICATION_20261031.md",
+    "infra/client-state-runtime/native-coding-callback-publication-lifetime.test.mjs"
+  ],
+  "reviewed_changes": [
+    {
+      "path": ".github/client-ci-train-w82.test.mjs",
+      "previous_blob": "b0ef2d4815c4c74303a5cd911405030994210e7d",
+      "current_blob": "488ab8202b6a6713ac82ef7e0e316169ed238df7"
+    },
+    {
+      "path": ".github/workflows/client-checkpoint-reconciliation-qualification.yml",
+      "previous_blob": "cb547cd6be32e32b7f0cddd2673b8700a54e54ab",
+      "current_blob": "65f5dfed9924c2c27c31cc7f79675f23eaaa4934"
+    },
+    {
+      "path": ".github/workflows/client-source-candidate-w73.yml",
+      "previous_blob": "a006717d1a7edd7b6fddb77580ba4e35c4d36239",
+      "current_blob": "c7e23ce78938f36d6ce1b31a1c4296b212f8a53a"
+    },
+    {
+      "path": "apps/metaengine-browser/src/codex-cli-runner.mjs",
+      "previous_blob": "6133f7428a8550990f4cb3bf9f3aea554bfc5c2c",
+      "current_blob": "a99256dd2fd80b84432e42b96d7d4f527d25bf15"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-host-ipc-client.mjs",
+      "previous_blob": "0f18fdc883dcaad28e38326bf02faab2a92fd481",
+      "current_blob": "54d10a97e1895687baba067cfa096aa33b857bc7"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-lease-executor.mjs",
+      "previous_blob": "39ca142a1fccfe02392b8ed99e290673ef9daab2",
+      "current_blob": "43afe96c95aafe3423353467aa6a14f4a916d7de"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-run-owner-main.mjs",
+      "previous_blob": "2096aaff283fbdb2b76428e2f8970e2595bcb497",
+      "current_blob": "68922353be348174c35246a5ff6e13fdfd1235bd"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-run-owner-phase.mjs",
+      "previous_blob": "facaa3db6d2ca04ac6a02322ffde36e3f77beb15",
+      "current_blob": "79366e8e6e066142e4cd007b12d115aa3b466c09"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-runtime.mjs",
+      "previous_blob": "b78f2cbd9bc8d743f17b34e47b1119a4fc3eb320",
+      "current_blob": "e58ddfc866cd2654a39d1cc18a49f4c16e3d2ede"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-runner.test.mjs",
+      "previous_blob": "0f75e6e200f015d30f7379d61a742834a09465c3",
+      "current_blob": "df9467983f97fef05af199b9d300d6390eb26701"
+    },
+    {
+      "path": "apps/metaengine-browser/test/fixtures/prepared-runner-test-adapter.mjs",
+      "previous_blob": null,
+      "current_blob": "e9ae268303684aecf6907d64fe4e6dc3404a9c7d"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-host-ipc.test.mjs",
+      "previous_blob": "6307c159c4025cd82e40218f42851f77728f2862",
+      "current_blob": "142052a25b66ea8160465f8e936a1cc20aa835a0"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-lease-executor.test.mjs",
+      "previous_blob": "c15106292ef94e8b74956474fadb68080bcea331",
+      "current_blob": "4d9980f294fd7e028e4aedbd3787d178d681e7fb"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-publication-owner-phase.test.mjs",
+      "previous_blob": null,
+      "current_blob": "cb48f03bf1a5cd33673147dddc849a51f0d1793c"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-reserve-owner-ipc.test.mjs",
+      "previous_blob": null,
+      "current_blob": "8649178f9a726dff160da9f6a44b8624cc4e42a2"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-run-owner-main.test.mjs",
+      "previous_blob": null,
+      "current_blob": "a16b5f8df1cd929d2f71a892a801dc4c2ac1ea6e"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-runtime.test.mjs",
+      "previous_blob": "a11618afa48a434b5023f8dc62aa9b9c00d2a05b",
+      "current_blob": "5bac498a387a277b0be984ace78c7a4dbdd06865"
+    },
+    {
+      "path": "coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md",
+      "previous_blob": "97be91866417490c4d640eb4eb0268f93add7689",
+      "current_blob": "ee016d18a3026fc3f5c00b096cd7b6e1e301c427"
+    },
+    {
+      "path": "docs/architecture/NATIVE_PREPARED_RUN_PUBLICATION_20261031.md",
+      "previous_blob": null,
+      "current_blob": "0a22d06882e32515ac951f1f7979ba3e421056d8"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-callback-publication-lifetime.test.mjs",
+      "previous_blob": null,
+      "current_blob": "370ace308e4fe737d45fc41a57c2e9a9b38e32f4"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-callback-publication.mjs",
+      "previous_blob": "ea68534db3687279ff527bd7ce0fc03132048e8c",
+      "current_blob": "4a0691c330e0a19c0b58a8bb00313f5eca8e798b"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-callback-publication.pg17.test.mjs",
+      "previous_blob": "27de8b10257459c56e910dc6405735ae9301ee6d",
+      "current_blob": "b03bd692cf0000250cd4a18bd5b8e90235b55664"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-authority.mjs",
+      "previous_blob": "c59a1c49c7928bffe8285cb6c169847305831631",
+      "current_blob": "00b8fcdb81cde50cac0ca6f9ce0d59510289f73b"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-ipc.mjs",
+      "previous_blob": "248e8778bef5af6d2dd094e0d9ca767b32295cd8",
+      "current_blob": "28df924f6bd5414bb59bf6c0a7f469119d983036"
+    },
+    {
+      "path": "infra/client-state-runtime/package.json",
+      "previous_blob": "e2c7616fcc7b42bd622545bd944bfc6e6e247b02",
+      "current_blob": "72a9c612951458ca4dcf043d88635793de622491"
+    },
+    {
+      "path": "infra/client-state-runtime/runtime-host.mjs",
+      "previous_blob": "82fce9457bd75e2e1fad37c840220b63833b014a",
+      "current_blob": "1ee4feb69409d1108d2dc2f283cf88e278ac9761"
+    },
+    {
+      "path": "infra/client-state-runtime/windows-qualification-registration.test.mjs",
+      "previous_blob": "20a8e0dbcf3b699652bfe07f1f02602638877bf7",
+      "current_blob": "b618a031098ee032c0e456f5d361f4e5ff6c9545"
+    }
+  ],
+  "total_sealed_files": 1052,
+  "all_non_blob_manifest_fields_unchanged": true,
+  "package_version_changed": false,
+  "qualification_promoted": false,
+  "authority_effect": false,
+  "validation": "PENDING_FINAL_COMMIT_TESTS_AND_EXACT_HEAD_CI"
+}

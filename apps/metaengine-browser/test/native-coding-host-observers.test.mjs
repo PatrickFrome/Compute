@@ -224,7 +224,7 @@ async function sandboxFixture(t){
   const denied={outcome:'ERROR',access_denied:true,error_type:'System.UnauthorizedAccessException'},written={outcome:'WRITTEN',access_denied:false};
   const canary={schema:'metaengine.codex-cli.sandbox-canary.v1',mode:'workspace-write',pid:124,started_at:'2026-10-22T04:00:00.123Z',user_sid:'S-1-5-21-111-1002',
     inside_append:written,inside_create:written,outside_append:denied,outside_create:denied};
-  const value={schema:'metaengine.codex-cli.sandbox-probe.v1',mode:'workspace-write',workspace_path:root,cli_path:cliPath,cli_sha256:hash('fixture-cli'),
+  const value={state:'OBSERVED',reason:null,boundary_observed:true,sandbox_backend:'CODEX_WINDOWS_ELEVATED',execution_authorized:false,schema:'metaengine.codex-cli.sandbox-probe.v1',mode:'workspace-write',workspace_path:root,cli_path:cliPath,cli_sha256:hash('fixture-cli'),
     model_called:false,authority_effect:false,host_boot:{schema:'metaengine.windows.kernel-boot.v1',kernel_boot_id:29,
       system_process:{pid:4,created_at:'2026-10-22T03:00:00.000Z',created_100ns:String(BigInt(Date.parse('2026-10-22T03:00:00.000Z'))*10000n+116444736000000000n)},
       last_boot_at:'2026-10-22T03:00:00.000Z',os_version:'10.0.19045'},canary,
@@ -303,4 +303,15 @@ test('abort reaches held ACL observation without waiting for its join; late succ
  }});work.then(()=>{ended=true;},()=>{ended=true;});
  await started;controller.abort();assert.equal(aborted,true);await new Promise(r=>setImmediate(r));assert.equal(ended,false);
  release();await assert.rejects(work,/request_cancelled/);
+});
+
+for(const patch of [
+ {state:'BLOCKED',reason:'SANDBOX_PROBE_OUTPUT_LIMIT',boundary_observed:false},
+ {state:'BLOCKED',reason:'SANDBOX_PROBE_LOG_WRITE_FAILED',boundary_observed:false},
+ {state:'OBSERVED',reason:'SANDBOX_PROBE_OUTPUT_LIMIT'},
+ {boundary_observed:false},{state:undefined},{reason:undefined},
+ {sandbox_backend:'OTHER'},{execution_authorized:true},
+])test('sandbox reader refuses blocked or incomplete producer outcome '+JSON.stringify(patch),async t=>{
+ const f=await sandboxFixture(t);Object.assign(f.value,patch);
+ await assert.rejects(readNativeCodingSandboxEvidence({...f.options,pin:await f.save()}),/sandbox_producer_outcome_invalid/);
 });

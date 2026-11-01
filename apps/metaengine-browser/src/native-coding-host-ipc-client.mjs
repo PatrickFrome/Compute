@@ -1,4 +1,6 @@
+import {RUN_OWNER_READ,RUN_OWNER_PHASE,PUBLICATION_OWNER_PHASE,createPublicationOwnerClientPhases,createRunOwnerClientPhases} from './native-coding-run-owner-phase.mjs';
 import {claimNativeRunCallbackJournal} from './native-coding-run-callback-journal.mjs';
+import {NATIVE_CALLBACK_PUBLICATION_ACTION,validateNativeCallbackPublicationIntent,validateNativeCallbackPublicationAck,validateNativeCallbackInitialPublicationAck} from './native-coding-publication-handoff-contract.mjs';
 import {validateNativeCodingAgentMcpBinding} from './native-coding-agent-mcp-broker.mjs';
 import {NATIVE_SETUP_ACTIONS} from './native-coding-setup-contract.mjs';
 import {NATIVE_CODING_HOST_SETTLEMENT,validateNativeCodingHostSettlement} from './native-coding-host-settlement.mjs';
@@ -57,7 +59,8 @@ function scope(value,reservation=false) {
 }
 function payload(action,value) {
   json(value);
-  if(action==='READ_SCOPE'){
+  if(action===NATIVE_CALLBACK_PUBLICATION_ACTION){try{validateNativeCallbackPublicationIntent(value);}catch{invalid('INVALID_PAYLOAD');}}
+  else if(action==='READ_SCOPE'){
     keys(value,Object.hasOwn(value,'after_permit_id')?['after_permit_id']:[]);
     if(Object.hasOwn(value,'after_permit_id')&&!UUID.test(value.after_permit_id))invalid('INVALID_PAYLOAD');
   }
@@ -68,7 +71,7 @@ function payload(action,value) {
       ||!/^agent_[a-z0-9-]{8,64}$/.test(s.agent_id||'')
       ||!['lease_generation','agent_generation_epoch'].every(name=>Number.isSafeInteger(s[name])&&s[name]>0))invalid('INVALID_PAYLOAD');
   }
-  else if(['SERVICE_HEARTBEAT_V2','READ_SERVICE_HEARTBEAT_V2','READ_NATIVE_CAPACITY_V1',...NATIVE_SETUP_ACTIONS,'ACTIVATE_PREPARED_GOAL_V1','READ_PREPARED_GOAL_ACTIVATION_V1','ESTABLISH_PENDING_OWNER_V1','READ_PENDING_OWNER_V1','ADMIT_PREPARED_GOAL_V1','READ_PREPARED_GOAL_V1','PREPARE_WORKSPACE_V1','READ_WORKSPACE_PREPARATION_V1','SEED_GOAL','READ_SEED','LIST_SEEDS','SERVICE_HEARTBEAT','READ_SERVICE_HEARTBEAT'].includes(action)){try{validateNativeCodingDeviceRequest(value,action);}catch{invalid('INVALID_PAYLOAD');}}
+  else if([RUN_OWNER_READ,'SERVICE_HEARTBEAT_V2','READ_SERVICE_HEARTBEAT_V2','READ_NATIVE_CAPACITY_V1',...NATIVE_SETUP_ACTIONS,'ACTIVATE_PREPARED_GOAL_V1','READ_PREPARED_GOAL_ACTIVATION_V1','ESTABLISH_PENDING_OWNER_V1','READ_PENDING_OWNER_V1','ADMIT_PREPARED_GOAL_V1','READ_PREPARED_GOAL_V1','PREPARE_WORKSPACE_V1','READ_WORKSPACE_PREPARATION_V1','SEED_GOAL','READ_SEED','LIST_SEEDS','SERVICE_HEARTBEAT','READ_SERVICE_HEARTBEAT'].includes(action)){try{validateNativeCodingDeviceRequest(value,action);}catch{invalid('INVALID_PAYLOAD');}}
   else if(action==='AGENT_OPERATION'){try{validateNativeCodingAgentHostRequest(value);}catch{invalid('INVALID_PAYLOAD');}}
   else if(action==='READ_PROJECT_REJECTION'){
     keys(value,['project_id','writer_task_id','writer_lease_generation','critic_task_id','critic_lease_generation','result_sha256']);
@@ -129,13 +132,22 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
     ||!UUID.test(instanceId||'')||!Number.isSafeInteger(hostPid)||hostPid<1||child.pid!==hostPid
     ||!Number.isSafeInteger(timeoutMs)||timeoutMs<1||timeoutMs>30000||!Number.isSafeInteger(maxInflight)||maxInflight<1||maxInflight>16)
     throw new NativeCodingHostIpcError('CHANNEL_CLOSED');
-  const pending=new Map(),physical=new Map(),unavailableListeners=new Set(),runs=new Map(),waiters=new Set();
-  let closed=false,unavailable=null,transportLost=false;
+  const pending=new Map(),physical=new Map(),stages=new Map(),unavailableListeners=new Set(),runs=new Map(),waiters=new Set();
+  const preparedRuns=new WeakMap(),journalWork=new Set();
+  let closed=false,unavailable=null,transportLost=false,journalHold=false;
   const change=()=>{for(const done of waiters)done();waiters.clear();};
   const waitChange=()=>new Promise(resolve=>waiters.add(resolve));
   const detach=()=>{if(!closed||physical.size)return;child.off('message',onMessage);child.off('exit',onExit);child.off('disconnect',onDisconnect);child.off('error',onError);};
+  const localJoined=row=>row.localDone&&(!row.strictOwner||(!row.sendAttempted||row.sendDone)&&!row.phaseSends);
   const release=row=>{
-    if(row.remoteSettled&&row.localDone&&!row.auditPending){physical.delete(row.id);row.runScope?.rows.delete(row);change();detach();}
+    if(row.ticket){
+      if(row.remoteSettled&&localJoined(row))stages.delete(row.id);
+      release(row.ticket);change();return;
+    }
+    if(row.remoteSettled&&localJoined(row)&&!row.auditPending
+      &&(!row.publication||row.publication.remoteSettled&&localJoined(row.publication))){
+      physical.delete(row.id);stages.delete(row.id);row.runScope?.rows.delete(row);change();detach();
+    }
   };
   const audit=(row,event)=>{
     if(!row.runScope)return Promise.resolve();row.auditPending=(row.auditPending||0)+1;
@@ -144,21 +156,32 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
   };
   const requestEvidence=row=>({request_id:row.id,request_sha256:row.digest});
   const localDone=(row,outcome='OK')=>{if(row.localDone)return;
+    if(row.strictOwner&&!row.preparedRun)clearTimeout(row.timer);
     void audit(row,{kind:'CALLER',...requestEvidence(row),outcome}).catch(()=>{});
     row.localDone=true;release(row);change();};
   const reject=(row,reason,unknown=row.write)=>{
     const error=new NativeCodingHostIpcError(reason,{action:row.action,requestId:row.id,instanceId,unknown});
+    if(row.preparedRun){
+      if(row.preparedFailure)return;row.preparedFailure=error;row.preparedRun.reservationError=error;
+      void abandonRun(row.preparedRun).catch(()=>{});change();
+    }
+    row.publication?.ownerPhases?.close();
     const done=()=>{localDone(row,unknown?'UNKNOWN':'REJECTED');row.reject(error);};
     if(row.ownerPhases){row.ownerPhases.close();void row.ownerPhases.drain().then(done,done);}
     else done();
   };
-  const take=id=>{const row=pending.get(id);if(row){clearTimeout(row.timer);pending.delete(id);}return row;};
+  const take=id=>{const row=pending.get(id);if(row){if(!row.strictOwner)clearTimeout(row.timer);pending.delete(id);}return row;};
   const notify=listener=>{try{Promise.resolve(listener(unavailable)).catch(()=>{});}catch{/* Consumer failure cannot bypass other fences. */}};
   const stop=reason=>{
     // Explicit close removes dispatch authority but still listens for physical
     // settlement; it is not a channel-loss/Host-shutdown witness.
     if(reason!=='CLIENT_CLOSED')transportLost=true;
     if(!closed){closed=true;
+      // Join only inert claim/fence IO here, never Host-dependent active callbacks.
+      for(const run of runs.values())if(run.mode!=='ACTIVE'){
+        if(run.reservationRow&&!run.reservationDone)reject(run.reservationRow,reason);
+        void abandonRun(run).catch(()=>{});
+      }
       unavailable=Object.freeze({schema:'metaengine.native-coding.host-unavailable.v1',reason,
         instance_id:instanceId,host_pid:hostPid,automatic_retry_allowed:false,authority_effect:false});
       for(const id of [...pending.keys()])reject(take(id),reason);
@@ -169,19 +192,20 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
   function onMessage(message,sendHandle) {
     if(message?.schema===NATIVE_CODING_HOST_SETTLEMENT){
       if(transportLost)return; // Protocol/channel loss requires independent Host shutdown, not late frames.
-      const row=physical.get(message.request_id);if(!row)return; // Other private capabilities share the channel.
+      const row=stages.get(message.request_id);if(!row)return; // Other private capabilities share the channel.
       try{
         json(message);if(sendHandle)invalid('RESPONSE_INVALID');
         const state=validateNativeCodingHostSettlement(message,{instance_id:instanceId,host_pid:hostPid,
           request_id:row.id,action:row.action,request_sha256:row.digest});
         if(row.held&&state!=='HOLD'||row.remoteSettled&&state!=='SETTLED')invalid('RESPONSE_INVALID');
         if(state==='HOLD'?!row.held:!row.remoteSettled)void audit(row,{kind:'TERMINAL',...requestEvidence(row),state,terminal_sha256:digest(message)}).catch(()=>{});
-        if(state==='HOLD'){row.held=true;if(row.runScope)row.runScope.evidenceHold=true;}
+        if(state==='HOLD'){row.held=true;const ticket=row.ticket||row;ticket.held=true;if(ticket.runScope)ticket.runScope.evidenceHold=true;
+          if(row.preparedRun)reject(take(row.id)||row,'PHYSICAL_CLEANUP_UNCONFIRMED');}
         else{row.remoteSettled=true;row.protocolSettled=true;}
         release(row);change();
       }catch{stop('RESPONSE_INVALID');}return;
     }
-    if(message?.schema===PENDING_OWNER_PHASE||message?.schema===PENDING_ACTIVATION_PHASE){pending.get(message.request_id)?.ownerPhases?.receive(message,sendHandle);return;}
+    if(message?.schema===RUN_OWNER_PHASE||message?.schema===PUBLICATION_OWNER_PHASE||message?.schema===PENDING_OWNER_PHASE||message?.schema===PENDING_ACTIVATION_PHASE){pending.get(message.request_id)?.ownerPhases?.receive(message,sendHandle);return;}
     if(message?.schema==='compute.runtime-host-terminal.v1'){stop('HOST_TERMINATED');return;}
     if(!plain(message)||message.schema!==NATIVE_CODING_HOST_IPC_RESPONSE)return;
     const row=pending.get(message.request_id);if(!row)return; // A late OK never upgrades caller UNKNOWN.
@@ -190,10 +214,12 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
       if(sendHandle||message.instance_id!==instanceId||message.host_pid!==hostPid||message.request_id!==row.id
         ||message.action!==row.action||message.request_sha256!==row.digest||!['OK','REJECTED','UNKNOWN'].includes(message.outcome)
         ||(message.outcome==='OK'?(message.reason!==null):(!REASONS.has(message.reason)||message.value!==null)))invalid('RESPONSE_INVALID');
+      if(!row.sendAttempted)invalid('RESPONSE_INVALID');
+      if(row.ticket&&message.outcome==='OK')validateNativeCallbackPublicationAck(message.value,row.intent);
     }catch{stop('RESPONSE_INVALID');return;}
     take(row.id);
     if(message.outcome==='OK'){
-      if(row.ownerPhases)void row.ownerPhases.finish(structuredClone(message.value)).then(value=>{localDone(row);row.resolve(value);},()=>reject(row,'RESPONSE_INVALID'));
+      if(row.ownerPhases)void row.ownerPhases.finish(structuredClone(message.value)).then(value=>{if(row.preparedFailure)return;localDone(row);row.resolve(value);},()=>reject(row,'RESPONSE_INVALID'));
       else{localDone(row);row.resolve(structuredClone(message.value));}
     }else reject(row,message.reason,message.outcome==='UNKNOWN');
   }
@@ -203,7 +229,11 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
   function drainPhysical({wait=true}={}){
     if(wait&&draining)return draining;
     const work=(async()=>{
-      while(physical.size){
+      while(physical.size||journalWork.size){
+        if(journalWork.size){
+          if(!wait)throw new NativeCodingHostIpcError('PHYSICAL_CLEANUP_UNCONFIRMED');
+          await Promise.allSettled([...journalWork]);continue;
+        }
         if(transportLost||[...physical.values()].some(row=>row.held)){
           // Supplied only by the controller which captured this exact child.
           // No stopping/restarting here; missing evidence is finite HOLD.
@@ -212,8 +242,10 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
             ||witness.instance_id!==instanceId||witness.host_pid!==hostPid||witness.cleanup_confirmed!==true
             ||witness.authority_effect!==false)throw new NativeCodingHostIpcError('PHYSICAL_CLEANUP_UNCONFIRMED');
           for(const row of physical.values()){
+            if(row.publication&&!row.publication.remoteSettled&&row.runScope)row.runScope.evidenceHold=true;
             if(!row.remoteSettled){if(row.runScope)row.runScope.evidenceHold=true;
               void audit(row,{kind:'CLEANUP_ONLY',...requestEvidence(row)}).catch(()=>{});}
+            if(row.publication){row.publication.remoteSettled=true;row.publication.held=false;stages.delete(row.publication.id);}
             row.remoteSettled=true;row.held=false;release(row);
           }
           if(!physical.size)break;
@@ -221,63 +253,235 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
         if(!wait)throw new NativeCodingHostIpcError('PHYSICAL_CLEANUP_UNCONFIRMED');
         await waitChange();
       }
+      if(journalHold)throw new NativeCodingHostIpcError('PHYSICAL_CLEANUP_UNCONFIRMED');
       return Object.freeze({schema:'metaengine.native-coding.physical-drain.v1',instance_id:instanceId,host_pid:hostPid,
         cleanup_confirmed:true,automatic_retry_allowed:false,authority_effect:false});
     })();
     if(!wait)return work;
     draining=work;const done=()=>{if(draining===work)draining=null;};work.then(done,done);return work;
   }
-  function invoke(action,value,ownerScopeCallback=null,runScope=null) {
+  function attachOwnerPhases(row,callback,value,run){
+    const action=row.action,publication=['RESERVE_EXECUTION',NATIVE_CALLBACK_PUBLICATION_ACTION,'AGENT_OPERATION'].includes(action);
+    if(typeof callback!=='function'||!publication&&action!==RUN_OWNER_READ&&!PENDING_OWNER_ACTIONS.includes(action)&&action!=='ACTIVATE_PREPARED_GOAL_V1')invalid('INVALID_PAYLOAD');
+    row.phaseSends=0;
+    row.ownerPhases=(publication?createPublicationOwnerClientPhases:action===RUN_OWNER_READ?createRunOwnerClientPhases:action==='ACTIVATE_PREPARED_GOAL_V1'?createPendingActivationClientPhases:createPendingOwnerClientPhases)({
+      binding:{instance_id:instanceId,host_pid:hostPid,request_id:row.id,action,request_sha256:row.digest,
+        ...(publication?{}:{body_sha256:value.headers['x-a2-device-body-sha256']})},callback,
+      ...(publication?{scope:action==='RESERVE_EXECUTION'?value.scope:run?.executionScope}:{input:value.body.input}),
+      assertLifetime:()=>{if(closed||child.connected!==true||child.pid!==hostPid||performance.now()>=row.expiresMono)throw new NativeCodingHostIpcError('CHANNEL_CLOSED');},
+      send:phase=>{
+        row.phaseSends++;let done=false;
+        const sent=error=>{if(done)return;done=true;row.phaseSends--;if(error)stop('SEND_FAILED');release(row);change();};
+        try{child.send(phase,sent);}catch(error){sent(error);throw error;}
+      },
+    });
+  }
+  function invoke(action,value,ownerScopeCallback=null,runScope=null,preparedRun=null) {
     if(child.connected!==true)stop('CHANNEL_CLOSED');
     if(closed||runScope?.fenced||runScope?.failed)return Promise.reject(new NativeCodingHostIpcError('CHANNEL_CLOSED'));
     if(physical.size>=maxInflight)return Promise.reject(new NativeCodingHostIpcError('INFLIGHT_LIMIT'));
+    // Reserve the SAME existing physical ticket before UUID/digest/local intent.
+    // Its entry survives both publication and original request stages.
+    const ticketKey={},expiresMono=performance.now()+timeoutMs;
+    physical.set(ticketKey,null);
     let frame;
     try{payload(action,value);frame={schema:NATIVE_CODING_HOST_IPC_REQUEST,instance_id:instanceId,host_pid:hostPid,request_id:randomUUID(),action,payload:structuredClone(value)};json(frame);}
-    catch(error){return Promise.reject(new NativeCodingHostIpcError(REASONS.has(error.reason)?error.reason:'INVALID_PAYLOAD'));}
+    catch(error){physical.delete(ticketKey);return Promise.reject(new NativeCodingHostIpcError(REASONS.has(error.reason)?error.reason:'INVALID_PAYLOAD'));}
     const requestDigest=digest(frame);
     return new Promise((resolve,rejectPromise)=>{
-      const row={id:frame.request_id,action,write:writes(action,value),digest:requestDigest,resolve,reject:rejectPromise,timer:null,runScope,sendAttempted:false};
-      if(ownerScopeCallback){
-        if(!(PENDING_OWNER_ACTIONS.includes(action)||action==='ACTIVATE_PREPARED_GOAL_V1')||typeof ownerScopeCallback!=='function'){rejectPromise(new NativeCodingHostIpcError('INVALID_PAYLOAD'));return;}
-        row.ownerPhases=(action==='ACTIVATE_PREPARED_GOAL_V1'?createPendingActivationClientPhases:createPendingOwnerClientPhases)({binding:{instance_id:instanceId,host_pid:hostPid,request_id:row.id,action,
-          request_sha256:requestDigest,body_sha256:value.headers['x-a2-device-body-sha256']},callback:ownerScopeCallback,input:value.body.input,
-          assertLifetime:()=>{if(closed||child.connected!==true||child.pid!==hostPid)throw new NativeCodingHostIpcError('CHANNEL_CLOSED');},
-          send:phase=>{child.send(phase,error=>{if(error)stop('SEND_FAILED');});},
-        });
-      }
-      row.timer=setTimeout(()=>{const current=take(row.id);if(current)reject(current,'REQUEST_TIMEOUT');},timeoutMs);
-      pending.set(row.id,row);physical.set(row.id,row);runScope?.rows.add(row);
+      const row={id:frame.request_id,action,write:runScope?.published===true||writes(action,value),digest:requestDigest,resolve,reject:rejectPromise,timer:null,runScope,preparedRun,strictOwner:!!preparedRun||!!runScope?.ownerCallback,sendAttempted:false,sendConfirmed:false,expiresMono};
+      if(preparedRun)preparedRun.reservationRow=row;
+      try{if(ownerScopeCallback)attachOwnerPhases(row,ownerScopeCallback,value,runScope);}
+      catch{physical.delete(ticketKey);rejectPromise(new NativeCodingHostIpcError('INVALID_PAYLOAD'));return;}
+      row.timer=setTimeout(()=>{const current=take(row.id);if(current)reject(current,'REQUEST_TIMEOUT');
+        else if(preparedRun&&!preparedRun.reservationDone||row.strictOwner&&!row.localDone)reject(row,'REQUEST_TIMEOUT');},timeoutMs);
+      physical.delete(ticketKey);pending.set(row.id,row);physical.set(row.id,row);stages.set(row.id,row);runScope?.rows.add(row);
       const unsent=()=>{
         if(row.sendAttempted)return;
         void audit(row,{kind:'UNSENT',...requestEvidence(row)}).catch(()=>{});row.remoteSettled=true;
-        const current=take(row.id);if(current)reject(current,'CHANNEL_CLOSED',false);release(row);change();
+        const current=take(row.id);if(current)reject(current,row.publication?.error?.reason||'CHANNEL_CLOSED',row.publication?.error?.effect_outcome==='UNKNOWN');release(row);change();
       };
       const send=()=>{
-        if(runScope&&(closed||runScope.fenced||runScope.failed||child.connected!==true||!pending.has(row.id))){unsent();return;}
-        row.sendAttempted=true;
-        try{child.send(frame,error=>{if(error)stop('SEND_FAILED');});}catch{stop('SEND_FAILED');}
+        if(closed||runScope?.fenced||runScope?.failed||child.connected!==true||!pending.has(row.id)){unsent();return;}
+        row.write=writes(action,value);row.sendAttempted=true;
+        try{child.send(frame,error=>{row.sendDone=true;if(error)stop('SEND_FAILED');else row.sendConfirmed=true;release(row);change();});}
+        catch{row.sendDone=true;stop('SEND_FAILED');release(row);}
       };
-      if(runScope)void audit(row,{kind:'INTENT',...requestEvidence(row),operation:value.operation,job_binding_sha256:digest(value.job_binding)}).then(send,unsent);
+      const publishThenSend=async()=>{
+        if(!runScope?.published){send();return;}
+        if(closed||runScope.fenced||runScope.failed||!pending.has(row.id)){unsent();return;}
+        const intent={binding:structuredClone(value.binding),request_id:row.id,request_sha256:row.digest,
+          operation:value.operation,job_binding_sha256:digest(value.job_binding)};
+        const publicationFrame={schema:NATIVE_CODING_HOST_IPC_REQUEST,instance_id:instanceId,host_pid:hostPid,
+          request_id:randomUUID(),action:NATIVE_CALLBACK_PUBLICATION_ACTION,payload:intent};
+        payload(publicationFrame.action,intent);json(publicationFrame);
+        const publication={id:publicationFrame.request_id,action:publicationFrame.action,digest:digest(publicationFrame),
+          write:true,ticket:row,intent,strictOwner:!!runScope.ownerCallback,expiresMono:row.expiresMono,sendAttempted:false,sendConfirmed:false,resolve:value=>{publication.value=value;change();},
+          reject:error=>{publication.error=error;change();}};
+        if(runScope.ownerCallback)attachOwnerPhases(publication,runScope.ownerCallback,intent,runScope);
+        row.publication=publication;pending.set(publication.id,publication);stages.set(publication.id,publication);
+        publication.timer=setTimeout(()=>{const current=take(publication.id);if(current)reject(current,'REQUEST_TIMEOUT');
+          else if(publication.strictOwner&&!publication.localDone)reject(publication,'REQUEST_TIMEOUT');},Math.max(1,row.expiresMono-performance.now()));
+        publication.sendAttempted=true;
+        try{child.send(publicationFrame,error=>{publication.sendDone=true;if(error)stop('SEND_FAILED');else publication.sendConfirmed=true;release(publication);change();});}
+        catch{publication.sendDone=true;stop('SEND_FAILED');release(publication);}
+        while(!publication.localDone||(runScope.ownerCallback?!publication.protocolSettled:!publication.remoteSettled)
+          ||runScope.ownerCallback&&(!publication.sendConfirmed||publication.phaseSends)){
+          if(closed||runScope.fenced||runScope.failed||publication.error||publication.held||!pending.has(row.id)){unsent();return;}
+          await waitChange();
+        }
+        if(publication.error||publication.held||!publication.value){unsent();return;}
+        send();
+      };
+      if(runScope)void audit(row,{kind:'INTENT',...requestEvidence(row),operation:value.operation,job_binding_sha256:digest(value.job_binding)}).then(publishThenSend,unsent).catch(unsent);
       else send();
     });
   }
-  async function openAgentRunCustody({binding,journal}={}){
-    const pinned=structuredClone(validateNativeCodingAgentMcpBinding(binding));
-    if(closed||runs.has(pinned.run_id))throw new NativeCodingHostIpcError('CHANNEL_CLOSED');
-    const run={binding:pinned,writer:null,rows:new Set(),callbacks:new Set(),completedCallbacks:0,job:null,fenced:false,failed:false,evidenceHold:false,fenceWork:null,finishWork:null};
+  // One writer/claim for both inert preparation and the existing source facets.
+  // These local promises do not depend on Host SQL or callback completion.
+  function retainJournalWork(work){
+    journalWork.add(work);
+    work.then(()=>{journalWork.delete(work);change();},()=>{journalHold=true;journalWork.delete(work);change();});
+    return work;
+  }
+  function assertRunHost(){
+    if(child.connected!==true)stop('CHANNEL_CLOSED');
+    if(child.pid!==hostPid)stop('HOST_PID_MISMATCH');
+    if(closed)throw new NativeCodingHostIpcError('CHANNEL_CLOSED');
+  }
+  function fenceRun(run){
+    if(run.fenceWork)return run.fenceWork;run.fenced=true;
+    run.fenceWork=run.writer.append({kind:'FENCE'});run.fenceWork.catch(()=>{run.failed=true;});change();return run.fenceWork;
+  }
+  function abandonRun(run){
+    if(run.abandonWork)return run.abandonWork;
+    run.fenced=true;run.mode='ABANDONING';change();
+    run.abandonWork=retainJournalWork((async()=>{
+      try{
+        await run.claimWork;
+        // Preserve BOUND and append exactly one FENCE; never create a candidate
+        // or infer historical cleanup from an inert run's empty request set.
+        await fenceRun(run);await run.writer.drain();run.mode='ABANDONED';
+        return preparedSnapshot(run);
+      }catch{run.failed=true;run.mode='HOLD';throw new NativeCodingHostIpcError('PHYSICAL_CLEANUP_UNCONFIRMED');}
+      finally{if(runs.get(run.binding.run_id)===run)runs.delete(run.binding.run_id);}
+    })());
+    if(run.reservationRow&&!run.reservationDone&&!run.reservationReadback&&!run.reservationError)
+      reject(take(run.reservationRow.id)||run.reservationRow,'CLIENT_CLOSED');
+    return run.abandonWork;
+  }
+  function preparedSnapshot(run){
+    return Object.freeze({schema:'metaengine.native-coding.prepared-run-custody.v1',state:run.failed?'HOLD':run.mode,
+      binding:run.binding,host_instance_id:instanceId,host_pid:hostPid,dispatch_available:false,dispatch_fenced:run.fenced,
+      durability_scope:'PROCESS_CRASH_ONLY',directory_durability:'DIRECTORY_DURABILITY_UNQUALIFIED',chain_root:'CHAIN_ROOT_UNANCHORED',
+      lineage:'LINEAGE_UNBOUND',all_effects_cleanup:'UNCONFIRMED',authority_effect:false,automatic_retry_allowed:false});
+  }
+  async function claimRun({binding,journal}={}){
+    const pinned=validateNativeCodingAgentMcpBinding(binding);assertRunHost();
+    if(runs.has(pinned.run_id))throw new NativeCodingHostIpcError('CHANNEL_CLOSED');
+    const run={binding:pinned,mode:'CLAIMING',published:false,writer:null,rows:new Set(),callbacks:new Set(),completedCallbacks:0,
+      job:null,fenced:false,failed:false,evidenceHold:false,fenceWork:null,finishWork:null,claimWork:null,abandonWork:null};
     runs.set(pinned.run_id,run);
-    try{run.writer=await claimNativeRunCallbackJournal(journal,{binding:pinned,instanceId,hostPid});}
-    catch{runs.delete(pinned.run_id);throw new NativeCodingHostIpcError('PHYSICAL_CLEANUP_UNCONFIRMED');}
-    const fenceRun=()=>{
-      if(run.fenceWork)return run.fenceWork;run.fenced=true;
-      run.fenceWork=run.writer.append({kind:'FENCE'});run.fenceWork.catch(()=>{run.failed=true;});change();return run.fenceWork;
-    };
+    run.claimWork=retainJournalWork((async()=>{
+      try{run.writer=await claimNativeRunCallbackJournal(journal,{binding:pinned,instanceId,hostPid});}
+      catch{run.failed=true;run.mode='HOLD';if(runs.get(pinned.run_id)===run)runs.delete(pinned.run_id);throw new NativeCodingHostIpcError('PHYSICAL_CLEANUP_UNCONFIRMED');}
+    })());
+    await run.claimWork;
+    try{assertRunHost();if(run.fenced)throw new NativeCodingHostIpcError('CHANNEL_CLOSED');}
+    catch(error){await abandonRun(run).catch(()=>{});throw error;}
+    return run;
+  }
+  async function prepareAgentRunCustody(options){
+    const run=await claimRun(options);
+    // Recheck the asynchronous handoff too: close can run after claim resolves.
+    try{assertRunHost();if(run.fenced)throw new NativeCodingHostIpcError('CHANNEL_CLOSED');}
+    catch(error){await abandonRun(run).catch(()=>{});throw error;}
+    run.mode='PREPARED';
+    const token=Object.freeze({toJSON(){throw new NativeCodingHostIpcError('INVALID_PAYLOAD');}});
+    preparedRuns.set(token,run);return token;
+  }
+  function preparedRun(token){
+    const run=preparedRuns.get(token);if(!run)throw new NativeCodingHostIpcError('INVALID_PAYLOAD');return run;
+  }
+  async function reservePreparedExecution(rawScope,token,ownerCallback){
+    const run=preparedRun(token);
+    if(run.mode!=='PREPARED'||run.fenced||run.failed)throw new NativeCodingHostIpcError('INVALID_PAYLOAD');
+    // Consume before validation/await. A bad or uncertain attempt cannot retry
+    // the original reservation under the same prepared journal.
+    run.mode='RESERVING';run.ownerCycles=0;
+    try{
+      scope(rawScope);const fixed=Object.freeze(structuredClone(rawScope)),b=run.binding;
+      if(typeof ownerCallback!=='function'||['workspace_id','task_id','lease_generation','agent_id','agent_generation_epoch'].some(k=>fixed[k]!==b[k])
+        ||fixed.target_id!==`codex-cli:${b.provider_id}`)invalid('INVALID_PAYLOAD');
+      assertRunHost();let originalOwner=null;
+      run.ownerCallback=async tx=>{
+        const current=tx.runOwner;
+        if(run.fenced||current.project_id!==b.project_id||SCOPE.some(k=>current.execution[k]!==fixed[k])
+          ||run.executionScope&&digest(current.execution)!==digest(run.executionScope))invalid('INVALID_PAYLOAD');
+        const identity=digest({...current,observed_at:null});
+        if(run.mode==='RESERVING'){
+          run.ownerCycles++;
+          if(originalOwner&&originalOwner!==identity)invalid('INVALID_PAYLOAD');originalOwner=identity;
+          run.executionScope=Object.freeze(structuredClone(current.execution));
+        }
+        return ownerCallback(tx);
+      };
+      const value=await invoke('RESERVE_EXECUTION',{scope:fixed},run.ownerCallback,null,run),row=run.reservationRow;
+      if(value?.state==='READBACK_ONLY'){
+        if(run.ownerCycles!==0)invalid('RESPONSE_INVALID');
+        // The phase verifier accepts this exact shape only at zero cycles.
+        run.reservationReadback=true;await abandonRun(run);return value;
+      }
+      keys(value,['state','scope','execution','automatic_retry_allowed','authority_effect','initial_callback_publication']);scope(value.scope,true);
+      if(run.ownerCycles!==6||value.state!=='RESERVED'||value.automatic_retry_allowed!==false||value.authority_effect!==false
+        ||SCOPE.some(k=>value.scope[k]!==fixed[k])||!run.executionScope||digest(value.scope)!==digest(run.executionScope)
+        ||value.execution?.state!=='RESERVED')invalid('RESPONSE_INVALID');
+      validateNativeCallbackInitialPublicationAck(value.initial_callback_publication,{scope:value.scope,runId:b.run_id,requestId:row.id});
+      // Do not join the client's global drain or accept cleanup-only shutdown.
+      // Original timer stays armed across ACK, callback drain and exact terminal.
+      while(!row.protocolSettled||!row.localDone||!row.sendConfirmed||row.phaseSends){
+        assertPreparedReservation(run);await waitChange();
+      }
+      assertPreparedReservation(run);run.mode='VERIFIED_RESERVATION';return value;
+    }catch(error){
+      await abandonRun(run).catch(()=>{});
+      if(error instanceof NativeCodingHostIpcError)throw error;
+      throw new NativeCodingHostIpcError(REASONS.has(error.reason)?error.reason:'RESPONSE_INVALID',
+        {action:'RESERVE_EXECUTION',requestId:run.reservationRow?.id,instanceId,unknown:run.reservationRow?.sendAttempted===true});
+    }finally{run.reservationDone=true;if(run.reservationRow)clearTimeout(run.reservationRow.timer);}
+  }
+  function assertPreparedReservation(run){
+    if(run.reservationError)throw run.reservationError;
+    const row=run.reservationRow;
+    if(!row||row.held||run.fenced||run.failed)throw new NativeCodingHostIpcError('PHYSICAL_CLEANUP_UNCONFIRMED',
+      {action:'RESERVE_EXECUTION',requestId:row?.id,instanceId,unknown:true});
+    assertRunHost();
+    if(performance.now()>=row.expiresMono)throw new NativeCodingHostIpcError('REQUEST_TIMEOUT',
+      {action:'RESERVE_EXECUTION',requestId:row.id,instanceId,unknown:true});
+  }
+  function takePreparedAgentRunCustody(token){
+    const run=preparedRun(token);
+    if(run.mode!=='VERIFIED_RESERVATION')throw new NativeCodingHostIpcError('INVALID_PAYLOAD');
+    try{assertPreparedReservation(run);const facet=createRunFacet(run,true);preparedRuns.delete(token);return facet;}
+    catch(error){void abandonRun(run).catch(()=>{});throw error;}
+  }
+  async function openAgentRunCustody(options,published=false){
+    const run=await claimRun(options);
+    try{assertRunHost();if(run.fenced)throw new NativeCodingHostIpcError('CHANNEL_CLOSED');}
+    catch(error){await abandonRun(run).catch(()=>{});throw error;}
+    return createRunFacet(run,published);
+  }
+  function createRunFacet(run,published){
+    // Private existing facet seam, NOT a promotion API for prepared tokens.
+    // Only the exact original prepared reservation can enter VERIFIED_RESERVATION.
+    if(!['CLAIMING','VERIFIED_RESERVATION'].includes(run.mode))throw new NativeCodingHostIpcError('CHANNEL_CLOSED');
+    const pinned=run.binding;
+    run.mode='ACTIVE';run.published=published;
     const trackCallback=operation=>{
       if(run.finishWork||typeof operation!=='function')return Promise.reject(new NativeCodingHostIpcError('CHANNEL_CLOSED'));
       const work=Promise.resolve().then(operation);run.callbacks.add(work);
       const done=()=>{run.callbacks.delete(work);run.completedCallbacks++;change();};work.then(done,done);return work;
     };
-    if(closed){await fenceRun().catch(()=>{});runs.delete(pinned.run_id);throw new NativeCodingHostIpcError('CHANNEL_CLOSED');}
     return Object.freeze({
       agentOperation(request){
         try{validateNativeCodingAgentHostRequest(request);
@@ -285,12 +489,12 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
           const job=digest(request.job_binding);if(run.job===null){if(request.operation!=='CHECK')throw Error();run.job=job;}
           else if(job!==run.job)throw Error();
         }catch{return Promise.reject(new NativeCodingHostIpcError('INVALID_PAYLOAD'));}
-        return invoke('AGENT_OPERATION',request,null,run);
-      },trackCallback,fence:fenceRun,
+        return invoke('AGENT_OPERATION',request,run.ownerCallback||null,run);
+      },trackCallback,fence:()=>fenceRun(run),
       finish(){
         if(run.finishWork)return run.finishWork;
         run.finishWork=(async()=>{
-          await fenceRun().catch(()=>{});
+          await fenceRun(run).catch(()=>{});
           while(run.callbacks.size)await Promise.allSettled([...run.callbacks]);
           while(run.rows.size){
             if(transportLost||[...run.rows].some(row=>row.held)){
@@ -314,7 +518,13 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
     });
   }
   return Object.freeze({
-    openAgentRunCustody,
+    prepareAgentRunCustody,reservePreparedExecution,takePreparedAgentRunCustody,
+    describePreparedAgentRunCustody:token=>preparedSnapshot(preparedRun(token)),
+    abandonPreparedAgentRunCustody:token=>abandonRun(preparedRun(token)),
+    openAgentRunCustody:options=>openAgentRunCustody(options),
+    // Source handoff path only. The default bridge gate remains closed and the
+    // production Host does not mount a publisher until genuine custody exists.
+    openPublishedAgentRunCustody:options=>openAgentRunCustody(options,true),
     async readScope(){
       let after=null,current=null;const bindings=[],seen=new Set();
       do{
@@ -334,6 +544,7 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
     registerProvider:descriptor=>invoke('REGISTER_PROVIDER',{descriptor}),
     readExecution:scope=>invoke('READ_EXECUTION',{scope}),readPriorExecution:selector=>invoke('READ_PRIOR_EXECUTION',{selector}),
     reserveExecution:scope=>invoke('RESERVE_EXECUTION',{scope}),
+    reserveExecutionWithOwner:(scope,callback)=>typeof callback==='function'?invoke('RESERVE_EXECUTION',{scope},callback):Promise.reject(new NativeCodingHostIpcError('INVALID_PAYLOAD')),
     advanceExecution:(scope,transition)=>invoke('ADVANCE_EXECUTION',{scope,transition}),
     reconcileProject:project_id=>invoke('RECONCILE_PROJECT',{project_id}),
     readProjectCheckpoint:project_id=>invoke('READ_PROJECT_CHECKPOINT',{project_id}),
@@ -342,6 +553,7 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
     finishCheckpoint:value=>invoke('FINISH_CHECKPOINT',value),
     readFinishCheckpoint:value=>invoke('READ_FINISH_CHECKPOINT',value),
     reconcileFinishCheckpoint:value=>invoke('RECONCILE_FINISH_CHECKPOINT',value),
+    withRunOwnerScope:(value,callback)=>typeof callback==='function'?invoke(RUN_OWNER_READ,value,callback):Promise.reject(new NativeCodingHostIpcError('INVALID_PAYLOAD')),
     withPendingOwnerScope:(operation,value,callback)=>{
       if(!PENDING_OWNER_ACTIONS.includes(operation)||typeof callback!=='function')return Promise.reject(new NativeCodingHostIpcError('INVALID_PAYLOAD'));
       return invoke(operation,value,callback);
@@ -366,6 +578,7 @@ export function createNativeCodingHostIpcClient({child,instanceId,hostPid,timeou
     readNativeSetup:value=>invoke('READ_NATIVE_SETUP_V1',value),cancelNativeSetup:value=>invoke('CANCEL_NATIVE_SETUP_V1',value),
     drainPhysical,
     close:()=>stop('CLIENT_CLOSED'),snapshot:()=>Object.freeze({instance_id:instanceId,host_pid:hostPid,inflight:pending.size,physical_inflight:physical.size,
-      physical_cleanup_state:physical.size?(transportLost||[...physical.values()].some(row=>row.held)?'HOLD':'DRAINING'):'DRAINED',closed,automatic_retry_allowed:false}),
+      local_journal_inflight:journalWork.size,local_journal_hold:journalHold,
+      physical_cleanup_state:journalHold?'HOLD':physical.size||journalWork.size?(transportLost||[...physical.values()].some(row=>row.held)?'HOLD':'DRAINING'):'DRAINED',closed,automatic_retry_allowed:false}),
   });
 }

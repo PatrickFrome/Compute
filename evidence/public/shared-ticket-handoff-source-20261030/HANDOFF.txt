@@ -1,0 +1,65 @@
+SHARED-TICKET PUBLICATION SOURCE CHECKPOINT -- INCOMPLETE / HOLD
+
+Public base: 5d7ec74db1c72b15921a6e00a2826a09a72f4fb2
+Base tree: f03a14e41ca4b8c54547af2e28db0c2cf42370c2
+Separate Windows fixture fix: 74d52127414e202b59a05ef1eb606da0f1ce94ab
+Fixture tree: 2a07a16e8d1cc3203b5f8d2789d71b9cde30bc02
+
+The Windows bridge counterfactual fixture now accepts CRLF source imports and
+uses the existing broker's Windows endpoint default. Production endpoint
+validation is unchanged. A targeted Windows run passed both the counterfactual
+and the 280-request run-history regression (2 PASS, 0 FAIL, 0 SKIP). This is a
+counterfactual fixture result, not default bridge readiness.
+
+The remaining changes are an unfinished source checkpoint for review. They add
+a fixed publication subrequest and private client entry point, preserve one
+physical admission ticket through publication and the original AGENT_OPERATION,
+and keep Host pending publication custody in the existing bounded active domain.
+Original admission requires exact publication response and physical settlement;
+unknown outcomes and close/fence paths do not authorize replay.
+
+The private PG producer adapter keeps opaque one-use handoff objects in a WeakMap,
+bound to a genuine fresh reservation, signed job, original request digest,
+protected INTENT, PG publication cursor and current control readback. Recheck
+allows a later compatible prefix while proving the original cursor remains in
+the protected chain. Wire ACKs contain correlation fields, not PG authority.
+
+DEFAULT COMPOSITION IS STILL BLOCKED. The production bridge gate is unchanged,
+readOwnerControl remains null, the private callbackPublication adapter is not
+mounted, and publication SQL remains unregistered. Owner WIP 104c2518 was read
+only and was not merged. No capacity release, installer, materializer, release
+or historical migration/seal changes are included.
+
+Observed checks on the working source represented by this checkpoint:
+- Actual disposable PostgreSQL 17.11: 55 PASS, 0 FAIL, 0 SKIP. PostgreSQL itself
+  is real; Owner/native control observations in these tests are GENERATED
+  fixtures. This is not installed Windows native qualification.
+- Targeted Windows IPC regressions: 2 PASS, 0 FAIL, 0 SKIP.
+- Source parser: source_checks_passed:274.
+- Final standalone handoff transport suite: 17 PASS, 2 FAIL, 0 SKIP (19 tests).
+  Failures: budget-one request timeout/unhandled rejection; lost-ACK fixture
+  event timeout. These remain unresolved.
+- Final combined component selection: 131 PASS, 11 FAIL, 0 SKIP (142 tests).
+  Four IPC failures: three request-timeout failures and the settlement-send-
+  failed assertion (SCOPED_REQUESTS_JOINED versus expected HOLD). Seven protected
+  prefix failures hit Windows sandbox EPERM in realpath/symlink operations.
+  No rerun or exemption converts these failures to PASS. Cause and any overlap
+  with concurrent runner load still need investigation.
+- git diff --check passed before checkpoint commit.
+
+Remaining work before integration approval:
+1. Resolve the failed transport/component checks without weakening deadlines,
+   custody, settlement, fence or path checks.
+2. Review both sides of the one-ticket state machine, including shutdown/fence
+   ordering and all original default-flow regressions.
+3. Bind the separate genuine Owner reader and complete fresh-reservation/run-root
+   anchor composition. No production reader or initial anchor mount is supplied.
+4. Exercise real PG plus actual IPC plus genuine current native control together.
+   The current PG and transport suites prove separate fixture compositions.
+5. Coordinate SQL registration/replay/privilege checks and fresh-schema plan with
+   the integrator. Parent review is required before changing the default gate.
+
+Development was stopped at the user's request to collect all streams. No new
+long-running verification, installation, merge, release or readiness claim was
+performed after that request. Raw logs, dependencies, profiles, local paths and
+private transfer material are excluded from this public source checkpoint.

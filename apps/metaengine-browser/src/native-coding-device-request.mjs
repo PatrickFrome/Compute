@@ -1,9 +1,10 @@
+import {RUN_OWNER_READ,validateRunOwnerReadInput} from './native-coding-run-owner-phase.mjs';
 import {validateNativeCapacityReadInput} from './native-coding-capacity-contract.mjs';
 import {NATIVE_SETUP_ACTIONS,validateNativeSetupInput} from './native-coding-setup-contract.mjs';
 import {pendingActivationInput} from './native-coding-pending-activation-phase.mjs';
 import {nativeCodingCanonicalJson as json} from './native-coding-task-context.mjs';
 
-export const NATIVE_CODING_DEVICE_PATHS=Object.freeze({SERVICE_HEARTBEAT_V2:'/private/native-coding/service-heartbeat-v2',READ_SERVICE_HEARTBEAT_V2:'/private/native-coding/read-service-heartbeat-v2',READ_NATIVE_CAPACITY_V1:'/private/native-coding/read-native-capacity-v1',...Object.fromEntries(NATIVE_SETUP_ACTIONS.map(action=>[action,'/private/native-coding/'+action.toLowerCase().replaceAll('_','-')])),ACTIVATE_PREPARED_GOAL_V1:'/private/native-coding/activate-prepared-goal-v1',READ_PREPARED_GOAL_ACTIVATION_V1:'/private/native-coding/read-prepared-goal-activation-v1',ESTABLISH_PENDING_OWNER_V1:'/private/native-coding/establish-pending-owner-v1',READ_PENDING_OWNER_V1:'/private/native-coding/read-pending-owner-v1',ADMIT_PREPARED_GOAL_V1:'/private/native-coding/admit-prepared-goal-v1',READ_PREPARED_GOAL_V1:'/private/native-coding/read-prepared-goal-v1',PREPARE_WORKSPACE_V1:'/private/native-coding/prepare-workspace-v1',READ_WORKSPACE_PREPARATION_V1:'/private/native-coding/read-workspace-preparation-v1',SEED_GOAL:'/private/native-coding/seed-goal',
+export const NATIVE_CODING_DEVICE_PATHS=Object.freeze({[RUN_OWNER_READ]:'/private/native-coding/read-run-owner-custody-v1',SERVICE_HEARTBEAT_V2:'/private/native-coding/service-heartbeat-v2',READ_SERVICE_HEARTBEAT_V2:'/private/native-coding/read-service-heartbeat-v2',READ_NATIVE_CAPACITY_V1:'/private/native-coding/read-native-capacity-v1',...Object.fromEntries(NATIVE_SETUP_ACTIONS.map(action=>[action,'/private/native-coding/'+action.toLowerCase().replaceAll('_','-')])),ACTIVATE_PREPARED_GOAL_V1:'/private/native-coding/activate-prepared-goal-v1',READ_PREPARED_GOAL_ACTIVATION_V1:'/private/native-coding/read-prepared-goal-activation-v1',ESTABLISH_PENDING_OWNER_V1:'/private/native-coding/establish-pending-owner-v1',READ_PENDING_OWNER_V1:'/private/native-coding/read-pending-owner-v1',ADMIT_PREPARED_GOAL_V1:'/private/native-coding/admit-prepared-goal-v1',READ_PREPARED_GOAL_V1:'/private/native-coding/read-prepared-goal-v1',PREPARE_WORKSPACE_V1:'/private/native-coding/prepare-workspace-v1',READ_WORKSPACE_PREPARATION_V1:'/private/native-coding/read-workspace-preparation-v1',SEED_GOAL:'/private/native-coding/seed-goal',
   READ_SEED:'/private/native-coding/read-seed',LIST_SEEDS:'/private/native-coding/list-seeds',
   SERVICE_HEARTBEAT:'/private/native-coding/service-heartbeat',READ_SERVICE_HEARTBEAT:'/private/native-coding/read-service-heartbeat'});
 export const NATIVE_CODING_DEVICE_HEADER_KEYS=Object.freeze(['content-type','x-a2-chat-bridge-client','x-a2-device-profile',
@@ -23,7 +24,8 @@ export function validateNativeCodingDeviceRequest(value,operation){
     ||!/^[-_a-zA-Z0-9]{32,96}$/.test(headers['x-a2-device-nonce']||'')
     ||!/^[-_a-zA-Z0-9]{86}$/.test(headers['x-a2-device-signature']||'')
     ||!/^[a-f0-9]{64}$/.test(headers['x-a2-device-body-sha256']||''))fail('binding_invalid');
-  if(operation==='READ_NATIVE_CAPACITY_V1'){validateNativeCapacityReadInput(body.input);
+  if(operation===RUN_OWNER_READ){validateRunOwnerReadInput(body.input);}
+  else if(operation==='READ_NATIVE_CAPACITY_V1'){validateNativeCapacityReadInput(body.input);
   }else if(NATIVE_SETUP_ACTIONS.includes(operation)){validateNativeSetupInput(operation,body.input);
   }else if(['ACTIVATE_PREPARED_GOAL_V1','READ_PREPARED_GOAL_ACTIVATION_V1'].includes(operation)){
     pendingActivationInput(body.input);
@@ -84,4 +86,14 @@ export async function signLoadedNativeSetupRouteRead({identity,binding,input}={}
  const body=signingBody(binding,'READ_NATIVE_SETUP_ROUTE_V1',input);
  const headers=await identity.nativeSetupRouteReadHeaders(body);
  return signedRequest(identity,device,body,headers);
+}
+
+// Fixed loaded-only read. The existing canonical signer owns all signature bytes.
+export async function signLoadedRunOwnerRead({identity,binding,input}={}){
+ const before=identity?.snapshot?.();
+ if(before?.enrolled!==true||typeof identity?.runOwnerReadHeaders!=='function')fail('loaded_identity_required');
+ const body={host_instance_id:binding?.instance_id,host_pid:binding?.host_pid,operation:RUN_OWNER_READ,input:validateRunOwnerReadInput(input)};
+ const headers=await identity.runOwnerReadHeaders(body),after=identity.snapshot();
+ if(['device_id','client_id','key_fingerprint_sha256','enrolled'].some(k=>before[k]!==after[k]))fail('identity_changed');
+ return validateNativeCodingDeviceRequest({body,headers},RUN_OWNER_READ);
 }

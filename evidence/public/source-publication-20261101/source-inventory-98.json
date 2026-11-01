@@ -1,0 +1,549 @@
+{
+  "schema": "metaengine.reviewed-source-delta-inventory.v1",
+  "source": "98d436c10553a716c42c3cc22e558c36db80f026",
+  "source_tree": "edf713b9315a240db6ca37c79a18e60c2610e054",
+  "previous_public_source": "7599ccbfb2a8cd76b7db5d6207f32aa655895097",
+  "scope": "COMMITTED_SOURCE_DELTA_NOT_INSTALLED_PROOF",
+  "changed_files": 67,
+  "files": [
+    {
+      "path": ".github/workflows/client-checkpoint-reconciliation-qualification.yml",
+      "status": "M",
+      "previous_git_blob": "65f5dfed9924c2c27c31cc7f79675f23eaaa4934",
+      "git_blob": "8dc6baf481fa209df4c8ccdc3772f6a5389da9eb",
+      "bytes": 57353,
+      "sha256": "c50fdfe05826e54a98397dc9a590a64f6561d4af6b5ba74f006a3cae57f46ba0"
+    },
+    {
+      "path": ".github/workflows/client-reviewed-empty-schema.yml",
+      "status": "M",
+      "previous_git_blob": "fc6118a2662d72cf1d6cdb366be92d4a9d9c41dd",
+      "git_blob": "578c9afb94d34f4f05461d0cf0575d92ee9c55c9",
+      "bytes": 6044,
+      "sha256": "c9a8405027834134a76554b41c30aaabf31902cf41afde186035fca4c52de728"
+    },
+    {
+      "path": ".github/workflows/client-wave10-w62-source-r97.yml",
+      "status": "M",
+      "previous_git_blob": "e141ee86a037bf6dc5a89e1e5be919fade6b0eaf",
+      "git_blob": "4acff84182bce1ae5f695d2b70fb847c2b880da9",
+      "bytes": 11669,
+      "sha256": "9ca338230df2b6d1c7edc9118841ed528e4098e399976ca6c7956a9bad564d75"
+    },
+    {
+      "path": "apps/metaengine-browser/README-native-coding-runtime.md",
+      "status": "M",
+      "previous_git_blob": "11ff74b63b97d8cbd6d47c199ef391951c4b173c",
+      "git_blob": "df92efef4656be2a05a073363a694afbb2868843",
+      "bytes": 8610,
+      "sha256": "152685393671da424bd0a3fda1f1c0629102a615c900a7976e3ee91240036e4f"
+    },
+    {
+      "path": "apps/metaengine-browser/scripts/check-source.mjs",
+      "status": "M",
+      "previous_git_blob": "f608b5d68fa944c845b2f7431db4a70c6423406a",
+      "git_blob": "d23e72167fb106b18c1df7f0c076b7efd5bf7c6f",
+      "bytes": 13793,
+      "sha256": "c130c93b2737eb2a6fcee3429f66cb86f728f3c019cffbce40bf338dfe4354f9"
+    },
+    {
+      "path": "apps/metaengine-browser/src/managed-task-project-runtime.mjs",
+      "status": "M",
+      "previous_git_blob": "bb56d8cf79dec22ef67d1e4fbf06019c5ed307d3",
+      "git_blob": "b0524542a86c3a034f5a12974831865b0b8a6e99",
+      "bytes": 18510,
+      "sha256": "979d2ca7cdcd29703d7804806df7eab23b35523ec461cb2e2dec55ef8727e732"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-host-ipc-client.mjs",
+      "status": "M",
+      "previous_git_blob": "54d10a97e1895687baba067cfa096aa33b857bc7",
+      "git_blob": "061faff0edc8e8d41633ec6aac3504638de943d7",
+      "bytes": 43943,
+      "sha256": "dc314a76bf2a8679338c3ecd358554353e4a056e9fd1b2b934082a829bb81998"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-prepared-custody-adapter.mjs",
+      "status": "A",
+      "previous_git_blob": null,
+      "git_blob": "c1320c1322510c275dcfdc63990ad09a1bfdf359",
+      "bytes": 10646,
+      "sha256": "dceff009b0e32d335587ff8f051bbb0b93469d359feb9aeedc25fb58a743bf4e"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-publication-handoff-contract.mjs",
+      "status": "M",
+      "previous_git_blob": "043fbf16aeb5614d313d654019d9dad659a4aed7",
+      "git_blob": "f4e8e715e8df3f66d576f5c5e341d0fa7b8d26e3",
+      "bytes": 4073,
+      "sha256": "d1c668a1dd3fb1b4037702e8b8a2003bb69d531fb768663b69158315eba8112e"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-run-owner-phase.mjs",
+      "status": "M",
+      "previous_git_blob": "79366e8e6e066142e4cd007b12d115aa3b466c09",
+      "git_blob": "bbdf4629d8ad961bcc590ebfdf5c5e427e1fe315",
+      "bytes": 19418,
+      "sha256": "078a4d8b319c516baa6d2aa51da634305e4b4dec335394678313d110200c3621"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-runtime.mjs",
+      "status": "M",
+      "previous_git_blob": "e58ddfc866cd2654a39d1cc18a49f4c16e3d2ede",
+      "git_blob": "eb8cd9475296b3efb2b2994a174f1b763724078a",
+      "bytes": 35195,
+      "sha256": "3592549254503e625741122841351a0f6a9a6c4797706762bc42bc591a658d93"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-runner.test.mjs",
+      "status": "M",
+      "previous_git_blob": "df9467983f97fef05af199b9d300d6390eb26701",
+      "git_blob": "2c4059cc65516b981015cf1cb5d54e5197603584",
+      "bytes": 68817,
+      "sha256": "9df32e953d2312ada5c7c031f3f9f486c0622f0a31b3226933ca5e0e31fe2668"
+    },
+    {
+      "path": "apps/metaengine-browser/test/managed-task-project-runtime.test.mjs",
+      "status": "M",
+      "previous_git_blob": "66e4b6f73d8e42e7c2880fbcbf5515c2e41b823d",
+      "git_blob": "f2134e069b5ffad4f2864b7de19dae873336e7e2",
+      "bytes": 23454,
+      "sha256": "515f728eb712d73879e1ac8e544f91a2e872be137e3a72b2d9a7cdd94f8e6bd5"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-host-ipc.test.mjs",
+      "status": "M",
+      "previous_git_blob": "142052a25b66ea8160465f8e936a1cc20aa835a0",
+      "git_blob": "204935c2c4b991b0df93fd6a826ea5d33fb654a4",
+      "bytes": 87228,
+      "sha256": "3934a3e4bee3e75664fa6db4ca435cf0405ec04ad808d5ca612bda27d72d5f4c"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-inert-run-custody.test.mjs",
+      "status": "A",
+      "previous_git_blob": null,
+      "git_blob": "87df292038d2ff42d82694b69ad9dd388d2d3d02",
+      "bytes": 14474,
+      "sha256": "6eea72c255bfb160d85480501384d632569bed8d9f854d40db768a8f0abcdaa6"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-initial-publication-contract.test.mjs",
+      "status": "A",
+      "previous_git_blob": null,
+      "git_blob": "d509018eb670caa5cafc1a2059a4eabb4a8ea1f5",
+      "bytes": 2825,
+      "sha256": "f7b7a9d841b747c75132fea1cce4165ad560d3272a4e358ea47b0f53912a36b0"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-prepared-custody-adapter.test.mjs",
+      "status": "A",
+      "previous_git_blob": null,
+      "git_blob": "82c0322b06678328d0e5bfcf501329e78aa0c017",
+      "bytes": 15256,
+      "sha256": "f37f38093689a853fd88006ed3837ee3709f8eb2f2fb5656b71aade47f31a1db"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-prepared-custody-ipc.test.mjs",
+      "status": "A",
+      "previous_git_blob": null,
+      "git_blob": "ba5656e71a38a5625d83d7a678f0289dd1b96dc2",
+      "bytes": 12016,
+      "sha256": "fa23d8a8dba6d8a2a4bcc86ec48e4616834f819edaa7723e4d30a451d177b0fc"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-prepared-reservation.test.mjs",
+      "status": "A",
+      "previous_git_blob": null,
+      "git_blob": "3e775806a88d639780ee0089bd7ee946c9ea1138",
+      "bytes": 23372,
+      "sha256": "24db23689ac54da2078687dbeaf86c329538e847d20e83c0d92d2658fe33169c"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-publication-handoff.test.mjs",
+      "status": "M",
+      "previous_git_blob": "7233b392ab54b8c65f6ca9263b977316573c49ab",
+      "git_blob": "0b092ada7a11161669fa2b996cfd16d77b5b4f43",
+      "bytes": 13902,
+      "sha256": "e2a123ea209e097c1e079c735b8dcb91ad3768c60f827f1586eff119a19da80c"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-publication-owner-phase.test.mjs",
+      "status": "M",
+      "previous_git_blob": "cb48f03bf1a5cd33673147dddc849a51f0d1793c",
+      "git_blob": "103673b61a601de3542744cf941381f99b426705",
+      "bytes": 10588,
+      "sha256": "030627aae1ebd289e79431a8a91a6a267ab39f4e861239bf9a0440013ccf8ee6"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-runtime.test.mjs",
+      "status": "M",
+      "previous_git_blob": "5bac498a387a277b0be984ace78c7a4dbdd06865",
+      "git_blob": "bc557cb12c90d68d4fec9ebeb96a1923cb9a4eed",
+      "bytes": 69535,
+      "sha256": "6acab04e7bdc94c6837bb1ca19a92e3c921e9bd8c9c1d3940cc233fb18a581fc"
+    },
+    {
+      "path": "apps/metaengine-browser/test/r97-electron-provisioning-w78.test.mjs",
+      "status": "M",
+      "previous_git_blob": "3567105e5ce299b587307e729b83449e4ed8911e",
+      "git_blob": "2ade2dbe51a765fd703d997ec7d005cb3cb35223",
+      "bytes": 5191,
+      "sha256": "76beaaa2653201b32a9f4375860c77cb424ebf598964d4e02d3d40a8ae23e247"
+    },
+    {
+      "path": "coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md",
+      "status": "M",
+      "previous_git_blob": "ee016d18a3026fc3f5c00b096cd7b6e1e301c427",
+      "git_blob": "de358c24594ca19dab5f9e4d1dd677621c88dd1e",
+      "bytes": 101434,
+      "sha256": "8b2bd17452136087cb1f08ceeaed8c4fdc10c5924bd4c3073bae527521d4ee40"
+    },
+    {
+      "path": "docs/architecture/NATIVE_LOADED_CODE_CUSTODY_CLOSURE_20261031.md",
+      "status": "A",
+      "previous_git_blob": null,
+      "git_blob": "702fff1eb510056c756059d83b0527c1d3e82dd2",
+      "bytes": 6420,
+      "sha256": "7689c5dc2bf4741ccdd66a801888584e83ac314b9e1b0fdc381c7d87f09eb79a"
+    },
+    {
+      "path": "docs/architecture/NATIVE_PREPARED_RUN_PUBLICATION_20261031.md",
+      "status": "M",
+      "previous_git_blob": "0a22d06882e32515ac951f1f7979ba3e421056d8",
+      "git_blob": "ec2d2c519b8dd7fb4d39edf34885f6bbde58268d",
+      "bytes": 10318,
+      "sha256": "225a3392d5b0c0bdec63df73f5407e9f3b0f39e791010d680b74079930be2108"
+    },
+    {
+      "path": "evidence/public/prepared-run-composition-20261031/REVIEW.md",
+      "status": "A",
+      "previous_git_blob": null,
+      "git_blob": "61d88006744e14fb0214451f2253cce2db6f65c4",
+      "bytes": 8924,
+      "sha256": "1a4b65088fc80d36c3f4f447ab2de6a0da8d357e26c8a0f22f72b28101e49298"
+    },
+    {
+      "path": "evidence/public/prepared-run-composition-20261031/windows-source-checkpoint.json",
+      "status": "A",
+      "previous_git_blob": null,
+      "git_blob": "9d25ba023ff459343f346beab42adb1e0b78d663",
+      "bytes": 1275,
+      "sha256": "ecd57393a58d76d23d7fb68e24bd018b5aeec99bb7fd1a42ecad3b7a61191819"
+    },
+    {
+      "path": "infra/client-state-runtime/README-native-coding-installed-schema.md",
+      "status": "A",
+      "previous_git_blob": null,
+      "git_blob": "5eda86fbe2add7946205e6be2b2364443c81da3e",
+      "bytes": 5575,
+      "sha256": "e93c26b90f18504db294b5a42106469e7d7bcd2473aca6dd97099800259ef254"
+    },
+    {
+      "path": "infra/client-state-runtime/attached-postgres-onboarding.mjs",
+      "status": "M",
+      "previous_git_blob": "f8298a5c301f7ff923d3bbd0bdec4d79aaeeebbc",
+      "git_blob": "9242dea54b5f47d42e22899dfe8df83313f6a716",
+      "bytes": 32087,
+      "sha256": "67040f1996bf791bc7d6c663d8386a624a5b34ce1054a6d2520e9450a33c5f0b"
+    },
+    {
+      "path": "infra/client-state-runtime/canonical-empty-schema-contract.mjs",
+      "status": "M",
+      "previous_git_blob": "c6db5f4bb1c583bd0ed8195a7d4ea7ae4cb3aa51",
+      "git_blob": "7475c7ec0d6d4b95013470afe70a38cb61ac7d7d",
+      "bytes": 40123,
+      "sha256": "565018614118384cf0f2020a06671c8a32e95fd1c6a06919b0205eb2ec05be54"
+    },
+    {
+      "path": "infra/client-state-runtime/fresh-schema-candidate-plan.json",
+      "status": "M",
+      "previous_git_blob": "8d2aec94487a2631065725be0a32c25b761338ec",
+      "git_blob": "90f2e071113d7760d71addb473ec9c6248c4936f",
+      "bytes": 18472,
+      "sha256": "19839210b2b114c7bd870fe8d346fc64062bc3ee03b03cd37af115bbfba42add"
+    },
+    {
+      "path": "infra/client-state-runtime/fresh-schema-plan.test.mjs",
+      "status": "M",
+      "previous_git_blob": "e4926e4b6f38a9bac167b264daddfc018af5ab5c",
+      "git_blob": "45547de11cc4f4cedeae0e5e0321ad771a3ea708",
+      "bytes": 9092,
+      "sha256": "251e6434b87373dd380eca1c81c7d40440351a20cb372c24e828e655c4c5f834"
+    },
+    {
+      "path": "infra/client-state-runtime/local-runtime-migrations.mjs",
+      "status": "M",
+      "previous_git_blob": "d9378e7471e1a3edb099499c7cd84b42fd951c16",
+      "git_blob": "5f66102b182541544170cfb95bb6670821d97f80",
+      "bytes": 48602,
+      "sha256": "5bc49805c4ba1f302e704b4a20d035ddc7badf4f58c87ba569f6fef6e1cf507e"
+    },
+    {
+      "path": "infra/client-state-runtime/local-runtime-migrations.test.mjs",
+      "status": "M",
+      "previous_git_blob": "38de2de70987fadb332e56fa311e3ade1ed0ed9a",
+      "git_blob": "4d9a4645046c78ba0e66134641a26ca79214b036",
+      "bytes": 21796,
+      "sha256": "d170517cc61a1ea91eee468dc21e5486105aca88787945c59e8102689e13cb17"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-agent-host-tools.integration.test.mjs",
+      "status": "M",
+      "previous_git_blob": "17d1a7c88cb3fc5179a182c6c12dd4ae721a77e2",
+      "git_blob": "e4e15c9218c5983eef6495fa802bb40d5ee02c6a",
+      "bytes": 27938,
+      "sha256": "42f89f729859347a1620efec6f24557147b561bfb1b995e7bdd137b6b0ea0ad5"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-agent-host-tools.mjs",
+      "status": "M",
+      "previous_git_blob": "18e09357b8b56f9fd1dcb479729e1a6e107487ed",
+      "git_blob": "cd153bec60ee16e30a8541fcd2e2883f1fde5a1b",
+      "bytes": 9606,
+      "sha256": "063df8adf41754fd1135053943e4457b3d25f1e08c8f5d862db75d4da049a9c8"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-agent-host-tools.test.mjs",
+      "status": "M",
+      "previous_git_blob": "f66ae1ac8d1987a4fbdb80b7c3a2f8e79cd98c9a",
+      "git_blob": "567f3d09d198136ec6d2c3a444d5f41fc72a2cb9",
+      "bytes": 9629,
+      "sha256": "6c829eb1d7aede2a7f8e80b29f15d4979a3a159ec74d0a7076ae41231209ebea"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-callback-publication-api-acl.pg17.test.mjs",
+      "status": "A",
+      "previous_git_blob": null,
+      "git_blob": "92ef91690429587000b965013180cec0b5a20b01",
+      "bytes": 14528,
+      "sha256": "bb10bde891977108eeade49cdf5300d00e7d6187ac7294f659271b227a595a48"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-callback-publication-source.test.mjs",
+      "status": "M",
+      "previous_git_blob": "bdc2b9fcf638f21a4a31bc7e51f77b0b3e09627b",
+      "git_blob": "a4f933a039befbe7c1a0d707215b1a2cfbc33b09",
+      "bytes": 3251,
+      "sha256": "f36b3bf28f6c457ef113b855a0b8f11c0dd98af5a49bf84cd00fbb2f43594e7e"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-callback-publication-v1.sql",
+      "status": "M",
+      "previous_git_blob": "32a30e552087d5f6177e7f277fd4250acadd417b",
+      "git_blob": "3f6c7cd8dc71e6d68948223962652169311a0843",
+      "bytes": 35316,
+      "sha256": "f20a87dde4ba9a67066a67261ace32a83557e73b215e988520db056a0725760c"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-callback-publication.mjs",
+      "status": "M",
+      "previous_git_blob": "4a0691c330e0a19c0b58a8bb00313f5eca8e798b",
+      "git_blob": "eb4e33b4bd857086fbdb41bd5de9e1dab1bc5236",
+      "bytes": 20027,
+      "sha256": "bb7918b0ccc785ae702437ff8a813435fe8b0af26ba686b09bccb189e1d37103"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-callback-publication.pg17.test.mjs",
+      "status": "M",
+      "previous_git_blob": "b03bd692cf0000250cd4a18bd5b8e90235b55664",
+      "git_blob": "4f42ca0b4a71c7409c81dd3dfb51bfb30fb3f9fb",
+      "bytes": 83091,
+      "sha256": "5fa32de686bf767bf44792feeee8f199292906ef602e3c465417df96bc45e0a5"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-authority.mjs",
+      "status": "M",
+      "previous_git_blob": "00b8fcdb81cde50cac0ca6f9ce0d59510289f73b",
+      "git_blob": "b9cbd6e8d263b3ff6a7314fa41d60a34b938b058",
+      "bytes": 53484,
+      "sha256": "0b90631f6ecc9c9cf7bfc5d28fd85387fa9e699bde83ac9f20715b9e5bd2713e"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-ipc.mjs",
+      "status": "M",
+      "previous_git_blob": "28df924f6bd5414bb59bf6c0a7f469119d983036",
+      "git_blob": "5161509b57840d1f6062072ce9aa9fc6867abe98",
+      "bytes": 24936,
+      "sha256": "06a373b2db42ad3916a3b0480f5e267455ae4e78b940eb60dc0ec921cd4e69f3"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-schema-diagnosis.pg17.test.mjs",
+      "status": "A",
+      "previous_git_blob": null,
+      "git_blob": "eedf4c9cf0ca99bd8266d07daa423aa368ba010b",
+      "bytes": 27914,
+      "sha256": "16db57d529413a1d9385bb4436e7e4db13b22ed5ea3952b1a6b2a0e99d444265"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-initial-anchor-task-fence-v1.sql",
+      "status": "A",
+      "previous_git_blob": null,
+      "git_blob": "a7fb3e4f2f3cd596b903567deba356842a1eb531",
+      "bytes": 15575,
+      "sha256": "cc834bb95da3944a6e63d727c7fd0312c224623a5c73f930b9a119a962353822"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-initial-anchor-task-fence.pg17.test.mjs",
+      "status": "A",
+      "previous_git_blob": null,
+      "git_blob": "8764aa1f56ba4bd96a4f05d57047e0e965d7a530",
+      "bytes": 24824,
+      "sha256": "b69555ed491076c181fdba8e7096cdc34d519b34ef6ee4c984c121fee124ee3b"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-installed-publication-schema.mjs",
+      "status": "A",
+      "previous_git_blob": null,
+      "git_blob": "0158f944b80aa985ef1c582f9b4535d89beff927",
+      "bytes": 17409,
+      "sha256": "60187240617cb82845286ad5c44f96380311b3069a921ee8001ce8640883c7c2"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-installed-publication-schema.pg17.test.mjs",
+      "status": "A",
+      "previous_git_blob": null,
+      "git_blob": "ed70e130e1566c3e412800582a0b368cb2cc93f5",
+      "bytes": 36562,
+      "sha256": "cd84d30817d401863828e8d0a66e4c2f03392e788348127f024455e789930e0e"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-installed-publication-schema.test.mjs",
+      "status": "A",
+      "previous_git_blob": null,
+      "git_blob": "a859300b42192055e52a39dc8405e01eb915a5af",
+      "bytes": 13739,
+      "sha256": "1975c4a93af7203be799aa922f9e9cf091141ac428ed805033ba33e0063b73a3"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-migration-api-identity.mjs",
+      "status": "A",
+      "previous_git_blob": null,
+      "git_blob": "6a9c438ff20ed647f8a563c434f83f94d549d2f3",
+      "bytes": 5297,
+      "sha256": "4e708c3afbbec6d8d8ff40c9011a6ae44a17100df074b2d5e37467f096781373"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-migration-api-identity.test.mjs",
+      "status": "A",
+      "previous_git_blob": null,
+      "git_blob": "8278ab2f7baf1f7389782a172e22e01094c81c72",
+      "bytes": 4419,
+      "sha256": "7cfa3bc256f4e1b74fe88cc0a30773c86af31bbb7e08335a14c0fd18e07ff810"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-preparation-transaction.mjs",
+      "status": "M",
+      "previous_git_blob": "47661fa5ba3f7666ab7722ae58d72d101f58e5a8",
+      "git_blob": "211db78f4ce6fd2ca3ba26abc7a369e913ed9375",
+      "bytes": 10788,
+      "sha256": "759bdc39ed61ead7820262922ba4a62575fdc7002fb8d2d032c9e5b2d743385d"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-preparation-transaction.pg17.test.mjs",
+      "status": "A",
+      "previous_git_blob": null,
+      "git_blob": "db1390535222ecc6d4611df2068b41d9b71f5a88",
+      "bytes": 15040,
+      "sha256": "2fed0e16215fb94ac71e95880bf88950ab5265e25a50a2954ea776537865217c"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-preparation-transaction.test.mjs",
+      "status": "M",
+      "previous_git_blob": "d20e946732cbebff97ca9dd969ffdc13651549ba",
+      "git_blob": "2e140b29c81d69f03a2b161a24d30b461124ebc6",
+      "bytes": 27979,
+      "sha256": "13441d61a877a76fe8c26c2d63b32111e3c74c8d809c3f6fb8bdfef00190a7f9"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-publication-registration.pg17.test.mjs",
+      "status": "A",
+      "previous_git_blob": null,
+      "git_blob": "6163c8024c401aed003d2a6b35fa7fea707974c8",
+      "bytes": 15721,
+      "sha256": "7a9fb57dd97757017460f4313b25b1b9a3e862563c9eb6cdabf7ab80c04e89ae"
+    },
+    {
+      "path": "infra/client-state-runtime/native-host-schema-diagnosis.test.mjs",
+      "status": "A",
+      "previous_git_blob": null,
+      "git_blob": "5d73b14a1e353ce4d4ccf0ef5dba5293ef561c51",
+      "bytes": 27570,
+      "sha256": "cebd81d0622c6aba85aac113c80825052248c9e1c7fc2fd352bd2fdec4794898"
+    },
+    {
+      "path": "infra/client-state-runtime/package-runtime-resources.test.mjs",
+      "status": "M",
+      "previous_git_blob": "56806f680a6cd45ff7768f2b41afb85299865935",
+      "git_blob": "baf3f8401bb6d5caa71d824a92c29126f2fecaf9",
+      "bytes": 31633,
+      "sha256": "9f96aa5ffce385f21894b6b808dfbc1a4319d2e7b6d91bd947ff0e0f90200a91"
+    },
+    {
+      "path": "infra/client-state-runtime/package.json",
+      "status": "M",
+      "previous_git_blob": "72a9c612951458ca4dcf043d88635793de622491",
+      "git_blob": "7df00a883a5049e2b920e439aa2660bdef7efc68",
+      "bytes": 6096,
+      "sha256": "a8650a28a47aec07b18e2319217ec5971794fe8f32d1ca7d90c418791294ab52"
+    },
+    {
+      "path": "infra/client-state-runtime/pg17-one-shot-disposable-dump-executor.test.mjs",
+      "status": "M",
+      "previous_git_blob": "e0f421c60d2b100d5d8837b8745e8034ff1613da",
+      "git_blob": "171cc9ac9ff2aab084f2ed6af9cb28cd0b34619a",
+      "bytes": 4313,
+      "sha256": "d2381a05182ffd68c087975d9a985f11aa1920eedafc3083b10cbb8f2fa303b3"
+    },
+    {
+      "path": "infra/client-state-runtime/reviewed-empty-schema.test.mjs",
+      "status": "M",
+      "previous_git_blob": "4f222f72b8e5eeb3d0e87295abdcd2a4a0e0d3da",
+      "git_blob": "1b6de59d5697c649d7db72131d0761e7356824bb",
+      "bytes": 41805,
+      "sha256": "c6b62378602ffa29504a346363ee9bf1b55ea8e3b353429fc8de0f45655c981d"
+    },
+    {
+      "path": "infra/client-state-runtime/runtime-host-lifecycle.test.mjs",
+      "status": "M",
+      "previous_git_blob": "f3502e7ddc470e77a5602cc7001659bc10ba2e58",
+      "git_blob": "37c89c8675bd2d6f16e190fc0e2aadd5b5188bd0",
+      "bytes": 10956,
+      "sha256": "8f8806b52915f50b4c6489ecd1ce1d85f56328abc3c1f5d1a9f171ce7719943e"
+    },
+    {
+      "path": "infra/client-state-runtime/runtime-host.mjs",
+      "status": "M",
+      "previous_git_blob": "1ee4feb69409d1108d2dc2f283cf88e278ac9761",
+      "git_blob": "57d3bfff32808594fdf936f2f046d84cf6ba93ca",
+      "bytes": 56451,
+      "sha256": "ff2d66e61d2a42c87f7bc2098e33670f52490ef8797eb86219e3c806d8c4613b"
+    },
+    {
+      "path": "infra/client-state-runtime/test/fresh-schema-disposable.mjs",
+      "status": "M",
+      "previous_git_blob": "611a7c5d309995e74dfc6d9490d88ac22a8ea31f",
+      "git_blob": "fd978717ee431985b6b64f25960e50ff6413bfa7",
+      "bytes": 40028,
+      "sha256": "8f96bf140775f9d2e85a731150dff99a66a77153a186e778622ba03f8d8c9bb5"
+    },
+    {
+      "path": "infra/client-state-runtime/test/native-host-startup-lifecycle-loader.mjs",
+      "status": "M",
+      "previous_git_blob": "6dc5f5863dc99c3af4e1cde0c5f49aeade9e7f23",
+      "git_blob": "2d568047c3a79f1dee14f71149706d80f7dd942f",
+      "bytes": 2487,
+      "sha256": "066dd444f5a2c3da187a5c33eebbc3bc0ef74a683ebdeec0241257536d5a153e"
+    },
+    {
+      "path": "infra/client-state-runtime/windows-qualification-registration.test.mjs",
+      "status": "M",
+      "previous_git_blob": "b618a031098ee032c0e456f5d361f4e5ff6c9545",
+      "git_blob": "2fc0be05ce52612ac330e6f42a2ecb7667a6571c",
+      "bytes": 21778,
+      "sha256": "20ffd8fee6f9563b1e710851e722574128c95e24ee9edb80e091132e8ec5d6f0"
+    }
+  ],
+  "evidence_files_included": false,
+  "self_reference_excluded": true,
+  "authority_effect": false
+}

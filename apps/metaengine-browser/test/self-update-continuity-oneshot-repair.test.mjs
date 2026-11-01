@@ -350,7 +350,7 @@ test('duplicate cleanup closes only provable duplicates of this attempt, never l
 // ---------------------------------------------------------------------------
 
 test('tab registry stamps immutable created_by_continuity_id provenance', () => {
-  const registry = new TabRegistry();
+  const registry = new TabRegistry({readResources:()=>({physical_start_allowed:true,memory_headroom:8})});
   const continuityId = '11111111-2222-4333-8444-555555555555';
   const tab = registry.create({ url: 'https://chatgpt.com/c/a', kind: 'CHATGPT', created_by_continuity_id: continuityId });
   assert.equal(tab.created_by_continuity_id, continuityId);

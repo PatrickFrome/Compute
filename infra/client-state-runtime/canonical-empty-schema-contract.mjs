@@ -26,6 +26,7 @@ export const EMPTY_SCHEMA_INPUT_PATHS = Object.freeze([
   'infra/client-state-runtime/fresh-schema-plan.mjs',
   'infra/client-state-runtime/fresh-schema-application-plan.mjs',
   'infra/client-state-runtime/local-runtime-migrations.mjs',
+  'infra/client-state-runtime/native-coding-migration-api-identity.mjs',
   'infra/client-state-runtime/local-vault-compat.sql',
   'infra/client-state-runtime/db-api-core.mjs',
 ]);

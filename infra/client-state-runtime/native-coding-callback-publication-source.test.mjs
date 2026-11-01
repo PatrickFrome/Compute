@@ -20,12 +20,16 @@ for(const file of ['20261022070000_native_coding_execution_ledger_v1.sql','20261
   const spec=specs.find(s=>s.signature.startsWith(name+'('));assert.equal(spec.old_sha256,createHash('sha256').update(body).digest('hex'));
  }
 });
-test('SQL remains unregistered and default gate refuses every caller override',()=>{
- assert.equal(LOCAL_RUNTIME_MIGRATIONS.some(m=>String(m.source_url).includes('callback-publication')),false);
+test('SQL is registered in reviewed order but default gate refuses every caller override',()=>{
+ assert.deepEqual(LOCAL_RUNTIME_MIGRATIONS.slice(-2).map(m=>m.path),['native-coding-callback-publication-v1.sql','native-coding-initial-anchor-task-fence-v1.sql']);
+ assert(LOCAL_RUNTIME_MIGRATIONS.slice(-2).every(m=>m.reviewed_native_publication_upgrade===true));
  for(const value of [undefined,{},true,{directory_durable:true,pg_committed:true,send_capability:true}])assert.throws(()=>requireNativeRunCallbackPublication(value),/directory_durability_unqualified/);
 });
-test('default composition names the genuine missing Owner reader; no new IPC publication action',async()=>{
+test('default composition keeps Owner and publication handoff unmounted despite the additive transport contract',async()=>{
  const host=await fs.readFile(new URL('./runtime-host.mjs',import.meta.url),'utf8');assert.match(host,/callbackPublicationIdentity:\{hostInstanceId:descriptor.instance_id,hostPid:process.pid,postgresIdentity:runtime.postgresIdentity\}/);
  assert.match(host,/readOwnerControl:null/);
- const ipc=await fs.readFile(new URL('./native-coding-host-ipc.mjs',import.meta.url),'utf8');assert.ok(!ipc.includes('callback_publication'));assert.ok(!ipc.includes('CALLBACK_PUBLICATION'));
+ assert.doesNotMatch(host,/callbackPublication\s*:/);
+ const ipc=await fs.readFile(new URL('./native-coding-host-ipc.mjs',import.meta.url),'utf8');assert.match(ipc,/callbackPublication=null/);
+ const bridge=await fs.readFile(new URL('../../apps/metaengine-browser/src/native-coding-agent-run-bridge.mjs',import.meta.url),'utf8');
+ assert.match(bridge,/requireNativeRunCallbackPublication\(callbackJournal\)/);assert.doesNotMatch(bridge,/openPublishedAgentRunCustody/);
 });

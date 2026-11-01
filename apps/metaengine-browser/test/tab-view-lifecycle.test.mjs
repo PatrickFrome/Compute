@@ -10,7 +10,7 @@ import { reconcileDestroyedTabView } from '../src/tab-view-lifecycle.mjs';
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 test('destroyed WebContents reconciliation removes the logical tab exactly once', async () => {
-  const registry = new TabRegistry();
+  const registry = new TabRegistry({readResources:()=>({physical_start_allowed:true,memory_headroom:8})});
   const first = registry.create({ url: 'https://chat.z.ai/', kind: 'GLM_CHAT', role: 'USER' });
   const second = registry.create({ url: 'https://chat.z.ai/c/second', kind: 'GLM_CHAT', role: 'USER' });
   registry.select(first.tab_id);

@@ -34,6 +34,9 @@ test('private agent Host tools execute exact queries and atomic effects on dispo
   let started=false,sql,passed=0,cluster;const authorities=[];
   try {
     await command('initdb',['-D',data,'--username=state_owner','--auth=trust','--no-locale','--encoding=UTF8','--no-sync']);
+    // Empty socket directory is config syntax, not shell quoting: Windows
+    // otherwise treats the literal two quotes as a directory name.
+    await fs.appendFile(path.join(data,'postgresql.conf'),"\nunix_socket_directories = ''\n");
     started=true;await command('pg_ctl',['-D',data,'-l',path.join(directory,'postgres.log'),'-o',`-h 127.0.0.1 -p ${port}`,'-w','start']);
     const postgres=(await import(pathToFileURL(driver))).default;
     sql=postgres({host:'127.0.0.1',port,user:'state_owner',database:'postgres',max:2,onnotice:()=>{},connect_timeout:5,
@@ -145,25 +148,34 @@ test('private agent Host tools execute exact queries and atomic effects on dispo
     // The harness seeds a generated historical pair. Configure a distinct
     // current writer fixture directly as state_owner; this does not claim a
     // real worker was launched, nor bypass any installed authority boundary.
-    async function toolsFixture({closeAfterMessage=false}={}){
+    async function toolsFixture({closeAfterMessage=false,controls={}}={}){
       const x=await fixture(),w=x.f.writer,p=w.permit,j=w.registration.job_envelope;
       await sql.unsafe("update destruktion_meta.devos_fleet_task_h205f22 set state='RUNNING' where task_id=$1",[w.task.task_id]);
       await sql.unsafe("update destruktion_meta.native_coding_execution_h205f22 set state='ATTEMPTED',result_sha256=null where task_id=$1",[w.task.task_id]);
       await sql.unsafe('update destruktion_meta.native_coding_job_registration_h205f22 set result_receipt=null,canonical_result_receipt=null,result_receipt_sha256=null,result_registered_at=null where task_id=$1',[w.task.task_id]);
       await sql.unsafe("update destruktion_meta.devos_fleet_claim_h205f22 set state='ACTIVE' where task_id=$1",[w.task.task_id]);
       let tools,workerReads=0,nativeReads=0;
-      const privateSql={unsafe:(q,a)=>sql.unsafe(q,a),begin:(mode,cb)=>sql.begin(mode,tx=>cb({async unsafe(q,a){
-        const result=await tx.unsafe(q,a);if(closeAfterMessage&&q.includes('native_coding_agent_message_v1'))tools.close();return result;
-      }}))};
+      const wrap=tx=>({async unsafe(q,a){
+        const result=await tx.unsafe(q,a);
+        if(q.includes('native_coding_agent_message_v1')){if(closeAfterMessage)tools.close();await controls.afterEffect?.();}
+        if(q.includes('native_coding_agent_intent_read_v1'))await controls.afterRead?.();
+        return result;
+      }});
+      const privateSql={unsafe:(q,a)=>sql.unsafe(q,a),begin:async(mode,cb)=>{
+        controls.begins=(controls.begins??0)+1;
+        const result=await sql.begin(mode,tx=>{const wrapped=wrap(tx);controls.tx=wrapped;return cb(wrapped);});
+        await controls.afterCommit?.();return result;
+      }};
       const worker={...j.payload.worker_process,user_sid:p.user_sid,run_id:j.payload.run_id,job_id:j.payload.job_id,prompt_sha256:j.payload.prompt_sha256};
-      tools=createNativeCodingAgentHostTools({sql:privateSql,readNativeScope:async(permit,includeSandbox)=>{
+      tools=createNativeCodingAgentHostTools({sql:privateSql,readNativeScope:async(permit,includeSandbox,tx,request)=>{
+        controls.observedTx=tx;controls.observedRequest=request;await controls.nativeRead?.();
         nativeReads++;assert.equal(includeSandbox,false);assert.deepEqual(permit,p);
         return {artifact:p.artifact,postgres:p.postgres,worktree:p.worktree,host_process:j.payload.host_process,user_sid:p.user_sid};
-      },readNativeWorker:async()=>{workerReads++;return structuredClone(worker);}});authorities.push(tools);
+      },readNativeWorker:async(_pid,options)=>{controls.workerRequest=options.request;workerReads++;await controls.workerRead?.();return structuredClone(worker);}});authorities.push(tools);
       const binding={run_id:j.payload.run_id,workspace_id:p.workspace_id,project_id:p.project_id,task_id:w.task.task_id,
         lease_generation:1,agent_id:p.agent_id,agent_generation_epoch:1,provider_id:p.provider_id,role:p.role};
       const job_binding={job_id:j.payload.job_id,pid:worker.pid,process_incarnation_id:worker.process_incarnation_id,executable_sha256:p.artifact.cli_executable_sha256};
-      return {...x,tools,request:(operation='CHECK',args={})=>({binding:structuredClone(binding),job_binding:structuredClone(job_binding),operation,args}),
+      return {...x,tools,privateSql,request:(operation='CHECK',args={})=>({binding:structuredClone(binding),job_binding:structuredClone(job_binding),operation,args}),
         get workerReads(){return workerReads;},get nativeReads(){return nativeReads;}};
     }
     await t.test('real current context and protected registration JOIN support CHECK, paged overview/history and one durable full message',async()=>{
@@ -193,7 +205,60 @@ test('private agent Host tools execute exact queries and atomic effects on dispo
       const status=await x.tools.invoke(x.request('READ_INTENT',{request_id:requestId}));
       assert.equal(status.found,true);assert.equal(status.readback_only,true);assert.equal(status.physical_effect_replayed,false);assert.equal(x.workerReads,before);passed++;
     });
-    assert.equal(passed,3);
+    const counts=async x=>({
+      intents:(await sql.unsafe('select count(*)::int as n from destruktion_meta.native_coding_agent_intent_h205f22 where run_id=$1',[x.f.writer.registration.run_id]))[0].n,
+      events:(await sql.unsafe("select count(*)::int as n from destruktion_meta.project_event_h205f22 where project_id=$1 and event_type='NATIVE_AGENT_MESSAGE'",[x.f.project.project_id]))[0].n});
+    const message=x=>x.request('agent_send_message',{request_id:randomUUID(),target_agent_id:x.f.critic.permit.agent_id,message:'Generated lifetime boundary'});
+    for(const boundary of ['nativeRead','workerRead'])for(const mode of ['abort','deadline'])await t.test(`${mode} while ${boundary} held prevents actual PG intent and event`,async()=>{
+      let enter,release;const entered=new Promise(r=>enter=r),held=new Promise(r=>release=r);
+      const controls={[boundary]:async()=>{enter();await held;}},x=await toolsFixture({controls}),abort=new AbortController();
+      const context={signal:abort.signal,deadlineAt:Date.now()+120000};
+      const pending=x.tools.invoke(message(x),context);await entered;
+      if(mode==='abort')abort.abort();else context.deadlineAt=Date.now()-1;
+      release();await assert.rejects(pending,/cancelled|deadline/);
+      assert.deepEqual(await counts(x),{intents:0,events:0});
+      assert.equal(controls.observedRequest,context);if(boundary==='workerRead')assert.equal(controls.workerRequest,context);passed++;
+    });
+    await t.test('abort after actual effect SQL rolls back intent and event before transaction return',async()=>{
+      const abort=new AbortController(),controls={afterEffect:()=>abort.abort()},x=await toolsFixture({controls});
+      await assert.rejects(x.tools.invoke(message(x),{signal:abort.signal}),/cancelled/);
+      assert.deepEqual(await counts(x),{intents:0,events:0});passed++;
+    });
+    await t.test('private transaction invocation uses exact existing tx and original context without nested begin',async()=>{
+      const controls={},x=await toolsFixture({controls}),context={signal:new AbortController().signal};
+      await x.privateSql.begin('isolation level serializable',async tx=>{
+        assert.equal((await x.tools.invokeInTransaction(tx,message(x),context)).stored,true);
+        assert.equal(controls.observedTx,tx);assert.equal(controls.observedRequest,context);assert.equal(controls.workerRequest,context);
+        assert.equal((await tx.unsafe("select current_setting('synchronous_commit') as value"))[0].value,'on');
+      });
+      assert.equal(controls.begins,1);assert.deepEqual(await counts(x),{intents:1,events:1});passed++;
+    });
+    await t.test('READ_INTENT checks original cancellation after SQL and does not acquire worker authority',async()=>{
+      const abort=new AbortController(),controls={afterRead:()=>abort.abort()},x=await toolsFixture({controls});
+      await assert.rejects(x.tools.invoke(x.request('READ_INTENT',{request_id:randomUUID()}),{signal:abort.signal}),/cancelled/);
+      assert.equal(x.workerReads,0);assert.equal(x.nativeReads,0);assert.deepEqual(await counts(x),{intents:0,events:0});passed++;
+    });
+    await t.test('lost COMMIT acknowledgement is not effect absence: exact historical readback finds one durable message',async()=>{
+      const controls={afterCommit:()=>{throw Error('generated_lost_commit_ack');}},x=await toolsFixture({controls}),payload=message(x);
+      await assert.rejects(x.tools.invoke(payload,{signal:new AbortController().signal}),e=>e.effect_outcome==='UNKNOWN'&&e.automatic_retry_allowed===false);
+      controls.afterCommit=null;assert.deepEqual(await counts(x),{intents:1,events:1});
+      const status=await x.tools.invoke(x.request('READ_INTENT',{request_id:payload.args.request_id}));
+      assert.equal(status.found,true);assert.equal(status.readback_only,true);assert.equal(status.physical_effect_replayed,false);passed++;
+    });
+    await t.test('cancellation after COMMIT rejects UNKNOWN while durable intent and event remain for readonly recovery',async()=>{
+      const abort=new AbortController(),controls={afterCommit:()=>abort.abort()},x=await toolsFixture({controls}),payload=message(x);
+      await assert.rejects(x.tools.invoke(payload,{signal:abort.signal}),e=>/cancelled/.test(e.message)&&e.effect_outcome==='UNKNOWN'&&e.automatic_retry_allowed===false);
+      assert.deepEqual(await counts(x),{intents:1,events:1});controls.afterCommit=null;
+      const status=await x.tools.invoke(x.request('READ_INTENT',{request_id:payload.args.request_id}));
+      assert.equal(status.found,true);assert.equal(status.readback_only,true);assert.deepEqual(await counts(x),{intents:1,events:1});passed++;
+    });
+    await t.test('private continuation propagates cancellation to the owning transaction and rolls actual effect back',async()=>{
+      const abort=new AbortController(),controls={afterEffect:()=>abort.abort()},x=await toolsFixture({controls});
+      await assert.rejects(x.privateSql.begin('isolation level serializable',tx=>x.tools.invokeInTransaction(tx,message(x),{signal:abort.signal})),/cancelled/);
+      assert.equal(controls.begins,1);assert.deepEqual(await counts(x),{intents:0,events:0});passed++;
+    });
+    assert.equal(passed,13);
+
     await fs.writeFile(path.join(directory,'receipt.json'),JSON.stringify({schema:'metaengine.native-coding.agent-host.disposable-qa.v1',state:'PASS',
       source_classification:'REAL_DISPOSABLE_PG_WITH_GENERATED_OS_IMAGE_GIT_SANDBOX_FIXTURES',subtests:passed,port,postgres_system_identifier:cluster,
       installed_keeper_used:false,installed_autonomy_proven:false,model_calls:0,authority_effect:false},null,2));

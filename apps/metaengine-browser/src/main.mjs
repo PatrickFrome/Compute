@@ -4,6 +4,7 @@ import {readClientNativeSetupRoute,readLoadedClientNativeSetupRoute} from './cli
 import {createNativeHostScopeCleanup,drainNativeHostScopeCleanups,nativeHostScopeCleanupHeld,nativeHostScopeCleanupHold} from './native-host-scope-cleanup.mjs';
 import {createPreparedActivationRouter,readPreparedActivationProfilePin} from './client-prepared-goal-activation.mjs';
 import {readWindowsKernelProcessW60} from './host-native-owner-producers-w60.mjs';
+import {readLoadedNativeRunOwner} from './native-coding-run-owner-main.mjs';
 import {readVerifiedInstalledExecutableW68} from './installed-executable-provenance-w68.mjs';
 import {prepareNativeWorkspaceFromStage} from './native-coding-workspace-preparation.mjs';
 import { RsiVerifiedSkillDispatch } from './rsi-verified-skill-dispatch.mjs';
@@ -934,6 +935,18 @@ function ensureNativeCodingRuntimeMounted() {
       if(permits.length===0||hashes.length!==1)throw Error('native_coding_protected_permits_required');
       const sandboxReceipts=permits.map(permit=>({...resolveNativeCodingSandboxPin(operator,permit),provider_id:permit.provider_id,agent_id:permit.agent_id,role:permit.role}));
       candidate=createNativeCodingRuntime({identity,ownPostgres:capability,capacityOwner:nativeCodingCapacityOwner,
+        readRunOwner:async execution=>{
+          // Classify before signing/dispatch. This shares the runtime's original
+          // Phase1B maps; runtime custody alone owns capability.close().
+          const closing=managedTaskProjectHostClosing;
+          const cleanup={kind:'HOST_SCOPE',candidate:createNativeHostScopeCleanup({capability:{
+            drainPhysical:options=>capability.drainPhysical(options),close:()=>{},
+          }})};
+          nativeInitializationCleanupCandidates.add(cleanup);
+          try{return await readLoadedNativeRunOwner({identity,capability,app,input:{scope:execution},assertOpen:()=>{
+            assertNativeSupervisorInitializationOpen(closing,cleanup);assertOpen(summary);
+          }});}finally{await cleanupPendingNativeHostScope(cleanup);}
+        },
         capacityDevice:scope.bindings.find(row=>row.device_id===device.device_id&&row.client_id===device.client_id)?.device,readResourceAdmission:readAgentResourceAdmission,
         readServiceControl:()=>{
           const snapshot=nativeSupervisor?.snapshot?.();

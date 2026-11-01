@@ -1,0 +1,29 @@
+{
+  "schema": "metaengine.reviewed-current-source-seal-refresh.v1",
+  "functional_source": "a897540fcf92ccde018ef8ac193938bedfa6431e",
+  "previous_manifest_blob": "4dd3d5988e86faf3b94a0b5266a794fb21190b34",
+  "current_manifest_sha256": "b3e3742afb71ade1d9f78378e7b574e1a2c1a035415c2100cd4cdd9afc907ad0",
+  "updated_existing_paths": [
+    "infra/client-state-runtime/package-runtime-resources.mjs",
+    "infra/client-state-runtime/package-runtime-resources.test.mjs"
+  ],
+  "newly_sealed_paths": [],
+  "reviewed_changes": [
+    {
+      "path": "infra/client-state-runtime/package-runtime-resources.mjs",
+      "previous_blob": "8cba926f37e76238cbe0679cb9ed78e32602ab99",
+      "current_blob": "05140e50c8a0aa3f1356a4fe1669bb2c525291fc"
+    },
+    {
+      "path": "infra/client-state-runtime/package-runtime-resources.test.mjs",
+      "previous_blob": "ffbd6624c33e919c27431465c5f35e7af30ba720",
+      "current_blob": "56806f680a6cd45ff7768f2b41afb85299865935"
+    }
+  ],
+  "total_sealed_files": 1042,
+  "all_non_blob_manifest_fields_unchanged": true,
+  "package_version_changed": false,
+  "qualification_promoted": false,
+  "authority_effect": false,
+  "validation": "PENDING_FINAL_COMMIT_TESTS_AND_EXACT_HEAD_CI"
+}

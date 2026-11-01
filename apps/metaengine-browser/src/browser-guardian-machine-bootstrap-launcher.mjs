@@ -292,14 +292,15 @@ export function createBrowserGuardianMachineBootstrapLauncher({
     });
   }
 
-  async function observePrepared(preparedValue) {
+  async function observePrepared(preparedValue,{loadedOnly=false,signal}={}) {
     const commandId = crypto.randomUUID();
     const requestNonce = identity.randomNonce();
     try {
-      const result = await actuator().observeOwner({
+      const observer=actuator();
+      const result = await (loadedOnly?observer.observeOwnerLoaded({command_id:commandId,request_nonce:requestNonce,signal}):observer.observeOwner({
         command_id: commandId,
         request_nonce: requestNonce,
-      });
+      }));
       return ownerObservationState(result, preparedValue.binding);
     } catch (error) {
       const message = String(error?.message || error);
@@ -349,6 +350,12 @@ export function createBrowserGuardianMachineBootstrapLauncher({
     const p = prepared();
     if (p.result) return p.result;
     return observePrepared(p);
+  }
+
+  async function statusLoaded({signal}={}) {
+    if(signal?.aborted)return state('HOLD','GUARDIAN_OWNER_READ_CANCELLED');
+    const p=prepared();if(p.result)return p.result;
+    return observePrepared(p,{loadedOnly:true,signal});
   }
 
   async function activate() {
@@ -419,7 +426,7 @@ export function createBrowserGuardianMachineBootstrapLauncher({
     return inFlight;
   }
 
-  return Object.freeze({ status, activate });
+  return Object.freeze({ status, statusLoaded, activate });
 }
 
 export function browserGuardianMachineBootstrapLauncherContract() {

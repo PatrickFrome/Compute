@@ -29,12 +29,12 @@ export function instrumentWindowsNativeReadScript(reader, source) {
     [cimImport,phase('MODULE_IMPORT_END'),true],
     ["$native=$type.CreateType()",phase('NATIVE_BIND_READY'),true],
     ["$boot=Read-KernelBootId",phase('BOOT_FIRST_READ'),true],
-    ["$system=Get-CimInstance Win32_Process -Filter 'ProcessId=4'",phase('SYSTEM_CIM_BEGIN'),false],
-    ["$system=Get-CimInstance Win32_Process -Filter 'ProcessId=4'",phase('SYSTEM_CIM_END'),true],
-    ["$os=Get-CimInstance Win32_OperatingSystem",phase('OS_CIM_BEGIN'),false],
-    ["$os=Get-CimInstance Win32_OperatingSystem",phase('OS_CIM_END'),true],
-    ["$again=Get-CimInstance Win32_Process -Filter 'ProcessId=4'",phase('SYSTEM_CONFIRM_BEGIN'),false],
-    ["$again=Get-CimInstance Win32_Process -Filter 'ProcessId=4'",phase('SYSTEM_CONFIRM_END'),true],
+    ["$system=Get-CimInstance Win32_Process -Filter 'ProcessId=4' -Property Name,CreationDate",phase('SYSTEM_CIM_BEGIN'),false],
+    ["$system=Get-CimInstance Win32_Process -Filter 'ProcessId=4' -Property Name,CreationDate",phase('SYSTEM_CIM_END'),true],
+    ["$os=Get-CimInstance Win32_OperatingSystem -Property LastBootUpTime,Version",phase('OS_CIM_BEGIN'),false],
+    ["$os=Get-CimInstance Win32_OperatingSystem -Property LastBootUpTime,Version",phase('OS_CIM_END'),true],
+    ["$again=Get-CimInstance Win32_Process -Filter 'ProcessId=4' -Property Name,CreationDate",phase('SYSTEM_CONFIRM_BEGIN'),false],
+    ["$again=Get-CimInstance Win32_Process -Filter 'ProcessId=4' -Property Name,CreationDate",phase('SYSTEM_CONFIRM_END'),true],
     ["if(-not $again -or $again.CreationDate.ToUniversalTime().ToFileTimeUtc() -ne $birth.ToFileTimeUtc() -or (Read-KernelBootId) -ne $boot){throw 'kernel_boot_changed'}",phase('BOOT_CONFIRM_END'),true],
     ["@{schema='metaengine.windows.kernel-boot.v1';kernel_boot_id=$boot;",phase('JSON_BEGIN'),false],
     ["last_boot_at=$os.LastBootUpTime.ToUniversalTime().ToString('o');os_version=$os.Version}|ConvertTo-Json -Depth 4 -Compress",phase('JSON_END'),true],
@@ -52,6 +52,10 @@ export function instrumentWindowsNativeReadScript(reader, source) {
   ];
   const positions=edits.map(([anchor,marker,after],order)=>{
     if(source.split(anchor).length!==2)throw invalid();
+    // A marker after a partial command would split any new arguments and
+    // turn them into executable diagnostic text. Refuse unreviewed suffixes.
+    const next=source[source.indexOf(anchor)+anchor.length];
+    if(after&&next!==undefined&&!['\r','\n',';'].includes(next))throw invalid();
     return {at:source.indexOf(anchor)+(after?anchor.length:0),text:after?eol+marker:marker+eol,order};
   });
   for(const edit of positions.sort((a,b)=>b.at-a.at||b.order-a.order))source=source.slice(0,edit.at)+edit.text+source.slice(edit.at);

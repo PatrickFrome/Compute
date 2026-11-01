@@ -1,0 +1,29 @@
+{
+  "schema": "metaengine.reviewed-current-source-seal-refresh.v1",
+  "functional_source": "b7b8039b503d812396880ceedba6a113c7ca5f07",
+  "previous_manifest_blob": "006b4ec3584a1374b83a698cade404779446cb12",
+  "current_manifest_sha256": "0ece1afe95a5e0592fcb7531e614c3f1a40e309d4e9232f39d12e37dd558fb10",
+  "updated_existing_paths": [
+    "apps/metaengine-browser/src/codex-cli-sandbox-probe.mjs",
+    "apps/metaengine-browser/test/codex-cli-sandbox-probe-lifetime.test.mjs"
+  ],
+  "newly_sealed_paths": [],
+  "reviewed_changes": [
+    {
+      "path": "apps/metaengine-browser/src/codex-cli-sandbox-probe.mjs",
+      "previous_blob": "2ecdbdc1da9ecc51178233b9c06070171d93f515",
+      "current_blob": "04c842e4aa1386b9a2e505b16c504b0e915b7db2"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-sandbox-probe-lifetime.test.mjs",
+      "previous_blob": "20ab70f1e86036226f38924c4d4d209cf2f5216e",
+      "current_blob": "48efdc2d3312f5655a750280deb5db92238fd288"
+    }
+  ],
+  "total_sealed_files": 1042,
+  "all_non_blob_manifest_fields_unchanged": true,
+  "package_version_changed": false,
+  "qualification_promoted": false,
+  "authority_effect": false,
+  "validation": "PENDING_FINAL_COMMIT_TESTS_AND_EXACT_HEAD_CI"
+}

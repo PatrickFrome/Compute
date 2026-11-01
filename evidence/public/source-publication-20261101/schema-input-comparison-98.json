@@ -1,0 +1,18 @@
+{
+  "schema": "metaengine.exact-schema-artifact-input-comparison.v1",
+  "artifact_schema_source": "6839e58c419e5a4c182fe52c20d3658e99f4bfbf",
+  "artifact_exporter_source": "6839e58c419e5a4c182fe52c20d3658e99f4bfbf",
+  "compared_source": "98d436c10553a716c42c3cc22e558c36db80f026",
+  "source_inputs_verified": 76,
+  "exporter_inputs_verified": 4,
+  "schema_inputs_sha256": "7e825a496640fd88d62b29ee539e4251ddfaaff60c6b2f38bac4b4e175c4b75b",
+  "exporter_inputs_sha256": "057fb41c51504f11c47628ba96542dbe922155ad403bc20bad9fe121736f6df0",
+  "all_inputs_equal_to_original_manifest": true,
+  "actual_working_bytes_verified": true,
+  "archive_sha256": "3a9797ca0a715f18cb0043df4746b6a8ebd22ade9ea025c4c5ffbd16f284ed95",
+  "archive_bytes": 974494,
+  "native_export_rerun_at_compared_source": false,
+  "original_manifest_changed": false,
+  "production_qualified": false,
+  "runtime_ready": false
+}

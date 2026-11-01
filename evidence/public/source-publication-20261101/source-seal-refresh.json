@@ -1,0 +1,462 @@
+{
+  "schema": "metaengine.reviewed-current-source-seal-refresh.v1",
+  "functional_source": "84f3b61adff23f0da03237653673b9e71602b94d",
+  "previous_manifest_blob": "443e7641fda71a3c5e18502f00c6e1bbf8013220",
+  "current_manifest_sha256": "d60a92b6bb1ac4f407221441991f1e8a59843b003e72fce459d37a95c3e41bf1",
+  "updated_existing_paths": [
+    ".github/workflows/client-checkpoint-reconciliation-qualification.yml",
+    ".github/workflows/client-reviewed-empty-schema.yml",
+    ".github/workflows/client-wave10-w62-source-r97.yml",
+    "apps/metaengine-browser/scripts/check-source.mjs",
+    "apps/metaengine-browser/src/native-coding-host-ipc-client.mjs",
+    "apps/metaengine-browser/src/native-coding-publication-handoff-contract.mjs",
+    "apps/metaengine-browser/src/native-coding-run-owner-phase.mjs",
+    "apps/metaengine-browser/src/native-coding-runtime.mjs",
+    "apps/metaengine-browser/test/codex-cli-runner.test.mjs",
+    "apps/metaengine-browser/test/native-coding-host-ipc.test.mjs",
+    "apps/metaengine-browser/test/native-coding-publication-handoff.test.mjs",
+    "apps/metaengine-browser/test/native-coding-publication-owner-phase.test.mjs",
+    "apps/metaengine-browser/test/native-coding-runtime.test.mjs",
+    "apps/metaengine-browser/test/r97-electron-provisioning-w78.test.mjs",
+    "coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md",
+    "docs/architecture/NATIVE_PREPARED_RUN_PUBLICATION_20261031.md",
+    "infra/client-state-runtime/attached-postgres-onboarding.mjs",
+    "infra/client-state-runtime/canonical-empty-schema-contract.mjs",
+    "infra/client-state-runtime/fresh-schema-candidate-plan.json",
+    "infra/client-state-runtime/fresh-schema-plan.test.mjs",
+    "infra/client-state-runtime/local-runtime-migrations.mjs",
+    "infra/client-state-runtime/local-runtime-migrations.test.mjs",
+    "infra/client-state-runtime/native-coding-agent-host-tools.integration.test.mjs",
+    "infra/client-state-runtime/native-coding-agent-host-tools.mjs",
+    "infra/client-state-runtime/native-coding-agent-host-tools.test.mjs",
+    "infra/client-state-runtime/native-coding-callback-publication-source.test.mjs",
+    "infra/client-state-runtime/native-coding-callback-publication-v1.sql",
+    "infra/client-state-runtime/native-coding-callback-publication.mjs",
+    "infra/client-state-runtime/native-coding-callback-publication.pg17.test.mjs",
+    "infra/client-state-runtime/native-coding-host-authority.mjs",
+    "infra/client-state-runtime/native-coding-host-ipc.mjs",
+    "infra/client-state-runtime/native-coding-preparation-transaction.mjs",
+    "infra/client-state-runtime/native-coding-preparation-transaction.test.mjs",
+    "infra/client-state-runtime/package-runtime-resources.test.mjs",
+    "infra/client-state-runtime/package.json",
+    "infra/client-state-runtime/pg17-one-shot-disposable-dump-executor.test.mjs",
+    "infra/client-state-runtime/reviewed-empty-schema.test.mjs",
+    "infra/client-state-runtime/runtime-host-lifecycle.test.mjs",
+    "infra/client-state-runtime/runtime-host.mjs",
+    "infra/client-state-runtime/test/fresh-schema-disposable.mjs",
+    "infra/client-state-runtime/test/native-host-startup-lifecycle-loader.mjs",
+    "infra/client-state-runtime/windows-qualification-registration.test.mjs"
+  ],
+  "newly_sealed_paths": [
+    "apps/metaengine-browser/README-native-coding-runtime.md",
+    "apps/metaengine-browser/src/managed-task-project-runtime.mjs",
+    "apps/metaengine-browser/src/native-coding-prepared-custody-adapter.mjs",
+    "apps/metaengine-browser/test/managed-task-project-runtime.test.mjs",
+    "apps/metaengine-browser/test/native-coding-inert-run-custody.test.mjs",
+    "apps/metaengine-browser/test/native-coding-initial-publication-contract.test.mjs",
+    "apps/metaengine-browser/test/native-coding-prepared-custody-adapter.test.mjs",
+    "apps/metaengine-browser/test/native-coding-prepared-custody-ipc.test.mjs",
+    "apps/metaengine-browser/test/native-coding-prepared-reservation.test.mjs",
+    "docs/architecture/NATIVE_LOADED_CODE_CUSTODY_CLOSURE_20261031.md",
+    "evidence/public/prepared-run-composition-20261031/REVIEW.md",
+    "evidence/public/prepared-run-composition-20261031/windows-source-checkpoint.json",
+    "evidence/public/source-publication-20261101/README.md",
+    "evidence/public/source-publication-20261101/canonical-empty-schema-manifest-6839.json",
+    "evidence/public/source-publication-20261101/evidence-index.json",
+    "evidence/public/source-publication-20261101/schema-input-comparison-98.json",
+    "evidence/public/source-publication-20261101/source-inventory-98.json",
+    "evidence/public/source-publication-20261101/windows-source-6839.json",
+    "evidence/public/source-publication-20261101/workflow-guards-98.json",
+    "infra/client-state-runtime/README-native-coding-installed-schema.md",
+    "infra/client-state-runtime/native-coding-callback-publication-api-acl.pg17.test.mjs",
+    "infra/client-state-runtime/native-coding-host-schema-diagnosis.pg17.test.mjs",
+    "infra/client-state-runtime/native-coding-initial-anchor-task-fence-v1.sql",
+    "infra/client-state-runtime/native-coding-initial-anchor-task-fence.pg17.test.mjs",
+    "infra/client-state-runtime/native-coding-installed-publication-schema.mjs",
+    "infra/client-state-runtime/native-coding-installed-publication-schema.pg17.test.mjs",
+    "infra/client-state-runtime/native-coding-installed-publication-schema.test.mjs",
+    "infra/client-state-runtime/native-coding-migration-api-identity.mjs",
+    "infra/client-state-runtime/native-coding-migration-api-identity.test.mjs",
+    "infra/client-state-runtime/native-coding-preparation-transaction.pg17.test.mjs",
+    "infra/client-state-runtime/native-coding-publication-registration.pg17.test.mjs",
+    "infra/client-state-runtime/native-host-schema-diagnosis.test.mjs"
+  ],
+  "reviewed_changes": [
+    {
+      "path": ".github/workflows/client-checkpoint-reconciliation-qualification.yml",
+      "previous_blob": "65f5dfed9924c2c27c31cc7f79675f23eaaa4934",
+      "current_blob": "8dc6baf481fa209df4c8ccdc3772f6a5389da9eb"
+    },
+    {
+      "path": ".github/workflows/client-reviewed-empty-schema.yml",
+      "previous_blob": "fc6118a2662d72cf1d6cdb366be92d4a9d9c41dd",
+      "current_blob": "578c9afb94d34f4f05461d0cf0575d92ee9c55c9"
+    },
+    {
+      "path": ".github/workflows/client-wave10-w62-source-r97.yml",
+      "previous_blob": "e141ee86a037bf6dc5a89e1e5be919fade6b0eaf",
+      "current_blob": "4acff84182bce1ae5f695d2b70fb847c2b880da9"
+    },
+    {
+      "path": "apps/metaengine-browser/README-native-coding-runtime.md",
+      "previous_blob": null,
+      "current_blob": "df92efef4656be2a05a073363a694afbb2868843"
+    },
+    {
+      "path": "apps/metaengine-browser/scripts/check-source.mjs",
+      "previous_blob": "f608b5d68fa944c845b2f7431db4a70c6423406a",
+      "current_blob": "d23e72167fb106b18c1df7f0c076b7efd5bf7c6f"
+    },
+    {
+      "path": "apps/metaengine-browser/src/managed-task-project-runtime.mjs",
+      "previous_blob": null,
+      "current_blob": "b0524542a86c3a034f5a12974831865b0b8a6e99"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-host-ipc-client.mjs",
+      "previous_blob": "54d10a97e1895687baba067cfa096aa33b857bc7",
+      "current_blob": "061faff0edc8e8d41633ec6aac3504638de943d7"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-prepared-custody-adapter.mjs",
+      "previous_blob": null,
+      "current_blob": "c1320c1322510c275dcfdc63990ad09a1bfdf359"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-publication-handoff-contract.mjs",
+      "previous_blob": "043fbf16aeb5614d313d654019d9dad659a4aed7",
+      "current_blob": "f4e8e715e8df3f66d576f5c5e341d0fa7b8d26e3"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-run-owner-phase.mjs",
+      "previous_blob": "79366e8e6e066142e4cd007b12d115aa3b466c09",
+      "current_blob": "bbdf4629d8ad961bcc590ebfdf5c5e427e1fe315"
+    },
+    {
+      "path": "apps/metaengine-browser/src/native-coding-runtime.mjs",
+      "previous_blob": "e58ddfc866cd2654a39d1cc18a49f4c16e3d2ede",
+      "current_blob": "eb8cd9475296b3efb2b2994a174f1b763724078a"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-runner.test.mjs",
+      "previous_blob": "df9467983f97fef05af199b9d300d6390eb26701",
+      "current_blob": "2c4059cc65516b981015cf1cb5d54e5197603584"
+    },
+    {
+      "path": "apps/metaengine-browser/test/managed-task-project-runtime.test.mjs",
+      "previous_blob": null,
+      "current_blob": "f2134e069b5ffad4f2864b7de19dae873336e7e2"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-host-ipc.test.mjs",
+      "previous_blob": "142052a25b66ea8160465f8e936a1cc20aa835a0",
+      "current_blob": "204935c2c4b991b0df93fd6a826ea5d33fb654a4"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-inert-run-custody.test.mjs",
+      "previous_blob": null,
+      "current_blob": "87df292038d2ff42d82694b69ad9dd388d2d3d02"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-initial-publication-contract.test.mjs",
+      "previous_blob": null,
+      "current_blob": "d509018eb670caa5cafc1a2059a4eabb4a8ea1f5"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-prepared-custody-adapter.test.mjs",
+      "previous_blob": null,
+      "current_blob": "82c0322b06678328d0e5bfcf501329e78aa0c017"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-prepared-custody-ipc.test.mjs",
+      "previous_blob": null,
+      "current_blob": "ba5656e71a38a5625d83d7a678f0289dd1b96dc2"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-prepared-reservation.test.mjs",
+      "previous_blob": null,
+      "current_blob": "3e775806a88d639780ee0089bd7ee946c9ea1138"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-publication-handoff.test.mjs",
+      "previous_blob": "7233b392ab54b8c65f6ca9263b977316573c49ab",
+      "current_blob": "0b092ada7a11161669fa2b996cfd16d77b5b4f43"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-publication-owner-phase.test.mjs",
+      "previous_blob": "cb48f03bf1a5cd33673147dddc849a51f0d1793c",
+      "current_blob": "103673b61a601de3542744cf941381f99b426705"
+    },
+    {
+      "path": "apps/metaengine-browser/test/native-coding-runtime.test.mjs",
+      "previous_blob": "5bac498a387a277b0be984ace78c7a4dbdd06865",
+      "current_blob": "bc557cb12c90d68d4fec9ebeb96a1923cb9a4eed"
+    },
+    {
+      "path": "apps/metaengine-browser/test/r97-electron-provisioning-w78.test.mjs",
+      "previous_blob": "3567105e5ce299b587307e729b83449e4ed8911e",
+      "current_blob": "2ade2dbe51a765fd703d997ec7d005cb3cb35223"
+    },
+    {
+      "path": "coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md",
+      "previous_blob": "ee016d18a3026fc3f5c00b096cd7b6e1e301c427",
+      "current_blob": "de358c24594ca19dab5f9e4d1dd677621c88dd1e"
+    },
+    {
+      "path": "docs/architecture/NATIVE_LOADED_CODE_CUSTODY_CLOSURE_20261031.md",
+      "previous_blob": null,
+      "current_blob": "702fff1eb510056c756059d83b0527c1d3e82dd2"
+    },
+    {
+      "path": "docs/architecture/NATIVE_PREPARED_RUN_PUBLICATION_20261031.md",
+      "previous_blob": "0a22d06882e32515ac951f1f7979ba3e421056d8",
+      "current_blob": "ec2d2c519b8dd7fb4d39edf34885f6bbde58268d"
+    },
+    {
+      "path": "evidence/public/prepared-run-composition-20261031/REVIEW.md",
+      "previous_blob": null,
+      "current_blob": "61d88006744e14fb0214451f2253cce2db6f65c4"
+    },
+    {
+      "path": "evidence/public/prepared-run-composition-20261031/windows-source-checkpoint.json",
+      "previous_blob": null,
+      "current_blob": "9d25ba023ff459343f346beab42adb1e0b78d663"
+    },
+    {
+      "path": "evidence/public/source-publication-20261101/README.md",
+      "previous_blob": null,
+      "current_blob": "2f5d1661b180422bc9aa8675d90325f74f1591b7"
+    },
+    {
+      "path": "evidence/public/source-publication-20261101/canonical-empty-schema-manifest-6839.json",
+      "previous_blob": null,
+      "current_blob": "94a576085ce510fab2572661f540a246edff0ee7"
+    },
+    {
+      "path": "evidence/public/source-publication-20261101/evidence-index.json",
+      "previous_blob": null,
+      "current_blob": "d66737d12a749ce09fae3aaf7b66085b79191bf7"
+    },
+    {
+      "path": "evidence/public/source-publication-20261101/schema-input-comparison-98.json",
+      "previous_blob": null,
+      "current_blob": "cb7f4652549c684edd21b2b4140a9eacc7632a7c"
+    },
+    {
+      "path": "evidence/public/source-publication-20261101/source-inventory-98.json",
+      "previous_blob": null,
+      "current_blob": "95a68cab8be31fb99e72148ef24b8ebaf40748fb"
+    },
+    {
+      "path": "evidence/public/source-publication-20261101/windows-source-6839.json",
+      "previous_blob": null,
+      "current_blob": "b73f92414ddf1571b8e9f637c0dce738539a186d"
+    },
+    {
+      "path": "evidence/public/source-publication-20261101/workflow-guards-98.json",
+      "previous_blob": null,
+      "current_blob": "8cbe57e8834e52fa105bd1f39764ae2faad17ce0"
+    },
+    {
+      "path": "infra/client-state-runtime/README-native-coding-installed-schema.md",
+      "previous_blob": null,
+      "current_blob": "5eda86fbe2add7946205e6be2b2364443c81da3e"
+    },
+    {
+      "path": "infra/client-state-runtime/attached-postgres-onboarding.mjs",
+      "previous_blob": "f8298a5c301f7ff923d3bbd0bdec4d79aaeeebbc",
+      "current_blob": "9242dea54b5f47d42e22899dfe8df83313f6a716"
+    },
+    {
+      "path": "infra/client-state-runtime/canonical-empty-schema-contract.mjs",
+      "previous_blob": "c6db5f4bb1c583bd0ed8195a7d4ea7ae4cb3aa51",
+      "current_blob": "7475c7ec0d6d4b95013470afe70a38cb61ac7d7d"
+    },
+    {
+      "path": "infra/client-state-runtime/fresh-schema-candidate-plan.json",
+      "previous_blob": "8d2aec94487a2631065725be0a32c25b761338ec",
+      "current_blob": "90f2e071113d7760d71addb473ec9c6248c4936f"
+    },
+    {
+      "path": "infra/client-state-runtime/fresh-schema-plan.test.mjs",
+      "previous_blob": "e4926e4b6f38a9bac167b264daddfc018af5ab5c",
+      "current_blob": "45547de11cc4f4cedeae0e5e0321ad771a3ea708"
+    },
+    {
+      "path": "infra/client-state-runtime/local-runtime-migrations.mjs",
+      "previous_blob": "d9378e7471e1a3edb099499c7cd84b42fd951c16",
+      "current_blob": "5f66102b182541544170cfb95bb6670821d97f80"
+    },
+    {
+      "path": "infra/client-state-runtime/local-runtime-migrations.test.mjs",
+      "previous_blob": "38de2de70987fadb332e56fa311e3ade1ed0ed9a",
+      "current_blob": "4d9a4645046c78ba0e66134641a26ca79214b036"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-agent-host-tools.integration.test.mjs",
+      "previous_blob": "17d1a7c88cb3fc5179a182c6c12dd4ae721a77e2",
+      "current_blob": "e4e15c9218c5983eef6495fa802bb40d5ee02c6a"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-agent-host-tools.mjs",
+      "previous_blob": "18e09357b8b56f9fd1dcb479729e1a6e107487ed",
+      "current_blob": "cd153bec60ee16e30a8541fcd2e2883f1fde5a1b"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-agent-host-tools.test.mjs",
+      "previous_blob": "f66ae1ac8d1987a4fbdb80b7c3a2f8e79cd98c9a",
+      "current_blob": "567f3d09d198136ec6d2c3a444d5f41fc72a2cb9"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-callback-publication-api-acl.pg17.test.mjs",
+      "previous_blob": null,
+      "current_blob": "92ef91690429587000b965013180cec0b5a20b01"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-callback-publication-source.test.mjs",
+      "previous_blob": "bdc2b9fcf638f21a4a31bc7e51f77b0b3e09627b",
+      "current_blob": "a4f933a039befbe7c1a0d707215b1a2cfbc33b09"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-callback-publication-v1.sql",
+      "previous_blob": "32a30e552087d5f6177e7f277fd4250acadd417b",
+      "current_blob": "3f6c7cd8dc71e6d68948223962652169311a0843"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-callback-publication.mjs",
+      "previous_blob": "4a0691c330e0a19c0b58a8bb00313f5eca8e798b",
+      "current_blob": "eb4e33b4bd857086fbdb41bd5de9e1dab1bc5236"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-callback-publication.pg17.test.mjs",
+      "previous_blob": "b03bd692cf0000250cd4a18bd5b8e90235b55664",
+      "current_blob": "4f42ca0b4a71c7409c81dd3dfb51bfb30fb3f9fb"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-authority.mjs",
+      "previous_blob": "00b8fcdb81cde50cac0ca6f9ce0d59510289f73b",
+      "current_blob": "b9cbd6e8d263b3ff6a7314fa41d60a34b938b058"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-ipc.mjs",
+      "previous_blob": "28df924f6bd5414bb59bf6c0a7f469119d983036",
+      "current_blob": "5161509b57840d1f6062072ce9aa9fc6867abe98"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-host-schema-diagnosis.pg17.test.mjs",
+      "previous_blob": null,
+      "current_blob": "eedf4c9cf0ca99bd8266d07daa423aa368ba010b"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-initial-anchor-task-fence-v1.sql",
+      "previous_blob": null,
+      "current_blob": "a7fb3e4f2f3cd596b903567deba356842a1eb531"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-initial-anchor-task-fence.pg17.test.mjs",
+      "previous_blob": null,
+      "current_blob": "8764aa1f56ba4bd96a4f05d57047e0e965d7a530"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-installed-publication-schema.mjs",
+      "previous_blob": null,
+      "current_blob": "0158f944b80aa985ef1c582f9b4535d89beff927"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-installed-publication-schema.pg17.test.mjs",
+      "previous_blob": null,
+      "current_blob": "ed70e130e1566c3e412800582a0b368cb2cc93f5"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-installed-publication-schema.test.mjs",
+      "previous_blob": null,
+      "current_blob": "a859300b42192055e52a39dc8405e01eb915a5af"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-migration-api-identity.mjs",
+      "previous_blob": null,
+      "current_blob": "6a9c438ff20ed647f8a563c434f83f94d549d2f3"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-migration-api-identity.test.mjs",
+      "previous_blob": null,
+      "current_blob": "8278ab2f7baf1f7389782a172e22e01094c81c72"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-preparation-transaction.mjs",
+      "previous_blob": "47661fa5ba3f7666ab7722ae58d72d101f58e5a8",
+      "current_blob": "211db78f4ce6fd2ca3ba26abc7a369e913ed9375"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-preparation-transaction.pg17.test.mjs",
+      "previous_blob": null,
+      "current_blob": "db1390535222ecc6d4611df2068b41d9b71f5a88"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-preparation-transaction.test.mjs",
+      "previous_blob": "d20e946732cbebff97ca9dd969ffdc13651549ba",
+      "current_blob": "2e140b29c81d69f03a2b161a24d30b461124ebc6"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-publication-registration.pg17.test.mjs",
+      "previous_blob": null,
+      "current_blob": "6163c8024c401aed003d2a6b35fa7fea707974c8"
+    },
+    {
+      "path": "infra/client-state-runtime/native-host-schema-diagnosis.test.mjs",
+      "previous_blob": null,
+      "current_blob": "5d73b14a1e353ce4d4ccf0ef5dba5293ef561c51"
+    },
+    {
+      "path": "infra/client-state-runtime/package-runtime-resources.test.mjs",
+      "previous_blob": "56806f680a6cd45ff7768f2b41afb85299865935",
+      "current_blob": "baf3f8401bb6d5caa71d824a92c29126f2fecaf9"
+    },
+    {
+      "path": "infra/client-state-runtime/package.json",
+      "previous_blob": "72a9c612951458ca4dcf043d88635793de622491",
+      "current_blob": "7df00a883a5049e2b920e439aa2660bdef7efc68"
+    },
+    {
+      "path": "infra/client-state-runtime/pg17-one-shot-disposable-dump-executor.test.mjs",
+      "previous_blob": "e0f421c60d2b100d5d8837b8745e8034ff1613da",
+      "current_blob": "171cc9ac9ff2aab084f2ed6af9cb28cd0b34619a"
+    },
+    {
+      "path": "infra/client-state-runtime/reviewed-empty-schema.test.mjs",
+      "previous_blob": "4f222f72b8e5eeb3d0e87295abdcd2a4a0e0d3da",
+      "current_blob": "1b6de59d5697c649d7db72131d0761e7356824bb"
+    },
+    {
+      "path": "infra/client-state-runtime/runtime-host-lifecycle.test.mjs",
+      "previous_blob": "f3502e7ddc470e77a5602cc7001659bc10ba2e58",
+      "current_blob": "37c89c8675bd2d6f16e190fc0e2aadd5b5188bd0"
+    },
+    {
+      "path": "infra/client-state-runtime/runtime-host.mjs",
+      "previous_blob": "1ee4feb69409d1108d2dc2f283cf88e278ac9761",
+      "current_blob": "57d3bfff32808594fdf936f2f046d84cf6ba93ca"
+    },
+    {
+      "path": "infra/client-state-runtime/test/fresh-schema-disposable.mjs",
+      "previous_blob": "611a7c5d309995e74dfc6d9490d88ac22a8ea31f",
+      "current_blob": "fd978717ee431985b6b64f25960e50ff6413bfa7"
+    },
+    {
+      "path": "infra/client-state-runtime/test/native-host-startup-lifecycle-loader.mjs",
+      "previous_blob": "6dc5f5863dc99c3af4e1cde0c5f49aeade9e7f23",
+      "current_blob": "2d568047c3a79f1dee14f71149706d80f7dd942f"
+    },
+    {
+      "path": "infra/client-state-runtime/windows-qualification-registration.test.mjs",
+      "previous_blob": "b618a031098ee032c0e456f5d361f4e5ff6c9545",
+      "current_blob": "2fc0be05ce52612ac330e6f42a2ecb7667a6571c"
+    }
+  ],
+  "total_sealed_files": 1084,
+  "all_non_blob_manifest_fields_unchanged": true,
+  "package_version_changed": false,
+  "qualification_promoted": false,
+  "authority_effect": false,
+  "validation": "PENDING_FINAL_COMMIT_TESTS_AND_EXACT_HEAD_CI"
+}

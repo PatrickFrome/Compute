@@ -5,6 +5,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fork } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { randomUUID,createHash } from 'node:crypto';
 import {inMemoryNativeBroker} from './fixtures/native-coding-in-memory-broker.mjs';
 import {nativeCodingAgentMcpIntentBodySha256} from '../src/native-coding-agent-mcp-broker.mjs';
@@ -26,7 +27,42 @@ const agentRequest=(operation='CHECK')=>({operation,args:operation==='agent_send
   binding:{run_id:id(),workspace_id:id(),project_id:id(),task_id:id(),lease_generation:1,agent_id:'agent_native-test-1234',agent_generation_epoch:1,provider_id:id(),role:'IMPLEMENTER'},
   job_binding:{job_id:id(),pid:1234,process_incarnation_id:'pid:1234:created_100ns:134371917225776174',executable_sha256:'a'.repeat(64)}});
 
-async function setup(t,mode='normal',{timeoutMs=1000,maxInflight=16,serverMaxInflight=16,serverTimeoutMs=1000,readShutdownSettlement=null}={}) {
+// Test-fixture diagnostics only: never change production IPC deadlines or infer
+// physical settlement from this watchdog. Failure retains the fixture directory.
+function stopFixtureChild(child,root,{timeoutMs=5000}={}) {
+  if(child.exitCode!==null||child.signalCode!==null)return Promise.resolve();
+  return new Promise((resolve,reject)=>{
+    let timer,done=false;
+    const finish=error=>{if(done)return;done=true;clearTimeout(timer);child.off('exit',exited);child.off('error',failed);error?reject(error):resolve();};
+    const error=reason=>Error(`test_child_teardown_${reason}: pid=${child.pid}; fixture retained: ${root}`);
+    const exited=()=>finish(),failed=()=>finish(error('error'));
+    child.once('exit',exited);child.once('error',failed);
+    timer=setTimeout(()=>finish(error('timeout')),timeoutMs);
+    // Windows may already be exiting: kill(false) is neither exit proof nor
+    // a reason to discard the bounded exit observation already installed.
+    try{child.kill();}catch{finish(error('kill_failed'));}
+  });
+}
+function readFixtureStats(child,{timeoutMs=5000}={}) {
+  const requestId=id();
+  return new Promise((resolve,reject)=>{
+    let timer,done=false;
+    const finish=(error,value)=>{if(done)return;done=true;clearTimeout(timer);
+      child.off('message',message);child.off('exit',exited);child.off('error',failed);child.off('disconnect',disconnected);
+      error?reject(error):resolve(value);};
+    const error=reason=>Error(`test_child_stats_${reason}: pid=${child.pid}; request=${requestId}`);
+    const message=value=>{if(value?.schema==='test.native-coding.stats'&&value.request_id===requestId)finish(null,value);};
+    const exited=()=>finish(error('exited')),failed=()=>finish(error('error')),disconnected=()=>finish(error('disconnected'));
+    if(child.exitCode!==null||child.signalCode!==null){finish(error('exited'));return;}
+    if(!child.connected){finish(error('disconnected'));return;}
+    child.on('message',message);child.once('exit',exited);child.once('error',failed);child.once('disconnect',disconnected);
+    timer=setTimeout(()=>finish(error('timeout')),timeoutMs);
+    try{child.send({schema:'test.native-coding.stats',request_id:requestId},error=>{if(error)finish(Error(`test_child_stats_send_failed: pid=${child.pid}; request=${requestId}`));});}
+    catch{finish(error('send_failed'));}
+  });
+}
+
+async function setup(t,mode='normal',{timeoutMs=1000,maxInflight=16,serverMaxInflight=16,serverTimeoutMs=1000,readShutdownSettlement=null,lateAckMs=100}={}) {
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-private-ipc-'));
   const script=path.join(root,'child.mjs'),instanceId=id();
   await fs.writeFile(path.join(root,'private-fixture.json'),'{"schema":"generated"}');
@@ -38,11 +74,15 @@ const mode=process.env.METAENGINE_IPC_TEST_MODE;let calls=0,protocolErrors=[];
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const operations={
  READ_SCOPE:async (value,context)=>{const n=++calls;
-  if(mode==='acl-rejection-held')return readNativeCodingProtectedJson(${JSON.stringify(path.join(root,'private-fixture.json'))},{signal:context.signal,verifyStorage:(_target,{operation,signal})=>{
+  if(['acl-rejection-held','acl-rejection-held-delayed','acl-rejection-before-start'].includes(mode)){
+   if(mode==='acl-rejection-held-delayed')await delay(1200);
+   const file=${JSON.stringify(path.join(root,'private-fixture.json'))}+(mode==='acl-rejection-before-start'?'.missing':'');
+   return readNativeCodingProtectedJson(file,{signal:context.signal,verifyStorage:(_target,{operation,signal})=>{
    if(operation==='VERIFY_DIRECTORY')return Promise.reject(Error('generated_directory_denied'));
    return new Promise(resolve=>{const release=m=>{if(m?.schema==='test.release-acl'){process.off('message',release);resolve({owner_dacl_verified:true});}};
-    process.on('message',release);signal.addEventListener('abort',()=>process.send({schema:'test.acl-aborted'}),{once:true});process.send({schema:'test.acl-started'});});
+    process.on('message',release);signal.addEventListener('abort',()=>process.send({schema:'test.acl-aborted'}),{once:true});process.send({schema:'test.acl-started',signal_aborted:signal.aborted});});
   }});
+  }
 if(mode==='request-context')return {bindings:[],has_signal:context.signal instanceof AbortSignal,aborted:context.signal.aborted,deadline_at:context.deadlineAt,remaining_ms:context.deadlineAt-Date.now()};if(mode==='delayed-read')await delay(80);
   if(mode==='paged-scope'){
    const all=Array.from({length:160},(_,i)=>({permit_id:'00000000-0000-4000-8000-'+String(i+1).padStart(12,'0'),permit:{padding:'x'.repeat(3000)}}));
@@ -91,7 +131,10 @@ if(['reconciliation-mounted','slow-reconciliation','held-reconciliation','exit-r
 };
 if(mode==='service-v2-mounted')for(const action of ['SERVICE_HEARTBEAT_V2','READ_SERVICE_HEARTBEAT_V2'])operations[action]=async request=>{calls++;return {fixture_transport_only:true,operation:action,input:request.body.input};};
 if(mode==='seed-mounted'||mode==='slow-seed'||mode==='secret-preparation')for(const action of ['ADMIT_PREPARED_GOAL_V1','READ_PREPARED_GOAL_V1','PREPARE_WORKSPACE_V1','READ_WORKSPACE_PREPARATION_V1','SEED_GOAL','READ_SEED','LIST_SEEDS'])operations[action]=async request=>{
- if(action==='SEED_GOAL'||action==='PREPARE_WORKSPACE_V1'||action==='ADMIT_PREPARED_GOAL_V1'){calls++;if(mode==='slow-seed')await delay(180);}
+ if(action==='SEED_GOAL'||action==='PREPARE_WORKSPACE_V1'||action==='ADMIT_PREPARED_GOAL_V1'){calls++;if(mode==='slow-seed')await new Promise(resolve=>{
+      const release=m=>{if(m?.schema==='test.release-seed'){process.off('message',release);resolve();}};
+      process.on('message',release);process.send({schema:'test.seed-started'});
+    });}
  if(mode==='secret-preparation')throw Object.assign(Error('SENTINEL_PRIVATE_QUERY_PARAMETER'),{query:'SENTINEL_PRIVATE_QUERY_PARAMETER',parameters:['SENTINEL_PRIVATE_QUERY_PARAMETER'],args:['SENTINEL_PRIVATE_QUERY_PARAMETER']});
  return {fixture_transport_only:true,operation:action,input:request.body.input};
 };
@@ -132,7 +175,7 @@ const send=(frame,callback)=>{
   if(mode==='settlement-missing')return;
   if(mode==='settlement-send-failed'){callback(Error('fixture channel write failed'));return;}
  }
- if((mode==='late-ok'||mode==='late-agent-ok'&&frame.value?.operation==='agent_send_message')&&frame.schema==='metaengine.native-coding.host-ipc.response.v1'){setTimeout(()=>process.send({...copy,outcome:'OK',reason:null,value:{late:true}},callback),100);return;}
+ if((mode==='late-ok'||mode==='late-agent-ok'&&frame.value?.operation==='agent_send_message')&&frame.schema==='metaengine.native-coding.host-ipc.response.v1'){setTimeout(()=>process.send({...copy,outcome:'OK',reason:null,value:{late:true}},error=>{callback?.(error);if(!error)process.send({schema:'test.late-response-sent'});}),Number(process.env.METAENGINE_IPC_TEST_LATE_ACK_MS));return;}
  if(mode==='wrong-action')copy.action='READ_LEASE';
  if(mode==='wrong-digest')copy.request_sha256='0'.repeat(64);
  if(mode==='wrong-instance')copy.instance_id='00000000-0000-4000-8000-000000000000';
@@ -144,9 +187,14 @@ const server=createNativeCodingHostIpcServer({instanceId:process.env.METAENGINE_
  onProtocolError:reason=>protocolErrors.push(reason)});
 process.on('message',(message,handle)=>{
  if(message?.schema==='test.close-server'){server.close();return;}
- if(message?.schema==='test.release-acl')return;
+ if(message?.schema==='test.release-acl'||message?.schema==='test.release-seed')return;
  if(message?.schema==='test.native-coding.release-reconciliation')return;
- if(message?.schema==='test.native-coding.stats'){process.send({schema:'test.native-coding.stats',calls,protocolErrors,snapshot:server.snapshot()});return;}
+ if(message?.schema==='test.native-coding.stats'){
+  if(mode==='no-stats-reply')return;
+  if(mode==='exit-before-stats')process.exit(23);
+  if(mode==='wrong-stats-reply')process.send({schema:'test.native-coding.stats',request_id:'wrong',calls:-1});
+  process.send({schema:'test.native-coding.stats',request_id:message.request_id,calls,protocolErrors,snapshot:server.snapshot()});return;
+ }
  if(message?.schema==='test.native-coding.handle'){server.handleMessage(message.frame,{});return;}
  server.handleMessage(message,handle);
 });
@@ -155,11 +203,12 @@ process.send({schema:'test.native-coding.ready'});
 `);
   const child=fork(script,[],{execPath:process.execPath,windowsHide:true,stdio:['ignore','ignore','ignore','ipc'],env:{...process.env,
     METAENGINE_IPC_TEST_MODE:mode,METAENGINE_IPC_TEST_INSTANCE:instanceId,METAENGINE_IPC_TEST_SERVER_MAX:String(serverMaxInflight),
-    METAENGINE_IPC_TEST_SERVER_TIMEOUT:String(serverTimeoutMs)}});
+    METAENGINE_IPC_TEST_SERVER_TIMEOUT:String(serverTimeoutMs),METAENGINE_IPC_TEST_LATE_ACK_MS:String(lateAckMs)}});
   let client;
   t.after(async()=>{
     client?.close();
-    if(child.exitCode===null&&child.signalCode===null){const stopped=new Promise(resolve=>child.once('exit',resolve));child.kill();await stopped;}
+    await stopFixtureChild(child,root);
+    assert.ok(child.exitCode!==null||child.signalCode!==null,'test_child_teardown_exit_unconfirmed; fixture retained: '+root);
     const actual=await fs.realpath(root),parent=await fs.realpath(os.tmpdir());
     assert.ok(actual.startsWith(parent+path.sep)&&path.basename(actual).startsWith('metaengine-private-ipc-'));
     await fs.rm(actual,{recursive:true,force:true});
@@ -171,10 +220,56 @@ process.send({schema:'test.native-coding.ready'});
     child.once('exit',()=>{clearTimeout(timer);reject(Error('test_child_exited_before_ready'));});
   });
   client=createNativeCodingHostIpcClient({child,instanceId,hostPid:child.pid,timeoutMs,maxInflight,readShutdownSettlement});
-  const stats=()=>new Promise(resolve=>{const listener=message=>{if(message?.schema==='test.native-coding.stats'){child.off('message',listener);resolve(message);}};
-    child.on('message',listener);child.send({schema:'test.native-coding.stats'});});
+  const stats=options=>readFixtureStats(child,options);
   return {child,client,instanceId,stats};
 }
+
+test('fixture teardown watchdog retains UNKNOWN custody and removes wait listeners',{timeout:3000},async()=>{
+ // A deliberately inert child double tests the watchdog, not native settlement.
+ const child=Object.assign(new EventEmitter(),{pid:123,exitCode:null,signalCode:null,kill:()=>true});
+ await assert.rejects(stopFixtureChild(child,'generated-retained-fixture',{timeoutMs:20}),
+   /test_child_teardown_timeout: pid=123; fixture retained: generated-retained-fixture/);
+ assert.equal(child.exitCode,null);assert.equal(child.signalCode,null);
+ assert.equal(child.listenerCount('exit'),0);assert.equal(child.listenerCount('error'),0);
+});
+test('fixture teardown bounds kill false without claiming an unobserved exit',{timeout:3000},async()=>{
+ const child=Object.assign(new EventEmitter(),{pid:123,exitCode:null,signalCode:null,kill:()=>false});
+ await assert.rejects(stopFixtureChild(child,'generated-retained-fixture',{timeoutMs:20}),/test_child_teardown_timeout/);
+ assert.equal(child.exitCode,null);assert.equal(child.signalCode,null);
+ assert.equal(child.listenerCount('exit'),0);assert.equal(child.listenerCount('error'),0);
+});
+test('fixture teardown waits for a later exit when Windows-style kill returns false',{timeout:3000},async()=>{
+ let killed=false;
+ const child=Object.assign(new EventEmitter(),{pid:123,exitCode:null,signalCode:null,kill:()=>{killed=true;return false;}});
+ let settled=false;const stopped=stopFixtureChild(child,'generated-retained-fixture');
+ stopped.then(()=>settled=true);await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(killed,true);assert.equal(settled,false);
+ child.exitCode=23;child.emit('exit',23,null);await stopped;
+ assert.equal(settled,true);assert.equal(child.listenerCount('exit'),0);assert.equal(child.listenerCount('error'),0);
+});
+test('fixture teardown error remains a failure even if kill returned false',{timeout:3000},async()=>{
+ const child=Object.assign(new EventEmitter(),{pid:123,exitCode:null,signalCode:null,kill:()=>false});
+ const stopped=stopFixtureChild(child,'generated-retained-fixture');
+ child.emit('error',Error('generated child failure'));
+ await assert.rejects(stopped,/test_child_teardown_error/);
+ assert.equal(child.listenerCount('exit'),0);assert.equal(child.listenerCount('error'),0);
+});
+test('fixture stats watchdog bounds a missing real child reply and removes its listeners',{timeout:10000},async t=>{
+ const {child,stats}=await setup(t,'no-stats-reply');
+ const events=['message','exit','error','disconnect'],before=events.map(e=>child.listenerCount(e));
+ await assert.rejects(stats({timeoutMs:50}),/test_child_stats_timeout: pid=.+; request=/);
+ assert.deepEqual(events.map(e=>child.listenerCount(e)),before);
+ assert.equal(child.exitCode,null);assert.equal(child.signalCode,null);
+});
+test('fixture stats rejects when the real child exits before its reply',{timeout:10000},async t=>{
+ const {stats}=await setup(t,'exit-before-stats');
+ await assert.rejects(stats(),/test_child_stats_(exited|disconnected)/);
+});
+test('fixture stats correlates concurrent requests and ignores a foreign reply',{timeout:10000},async t=>{
+ const {stats}=await setup(t,'wrong-stats-reply');
+ const [a,b]=await Promise.all([stats(),stats()]);
+ assert.notEqual(a.request_id,b.request_id);assert.equal(a.calls,0);assert.equal(b.calls,0);
+});
 
 test('paged private scope crosses the per-message byte budget without truncating a 160-agent roster',async t=>{
  const {client,stats}=await setup(t,'paged-scope');
@@ -317,25 +412,31 @@ test('unmounted optional capability still rejects malformed and foreign envelope
 });
 
 test('optional discovery cannot downgrade an outstanding write by reusing its request UUID',async t=>{
-  const {child,instanceId,stats}=await setup(t,'slow-write');
+  const {child,instanceId,stats}=await setup(t,'slow-write',{serverTimeoutMs:5000});
   const replies=[];child.on('message',message=>{if(message?.schema==='metaengine.native-coding.host-ipc.response.v1')replies.push(message);});
   const frame={schema:'metaengine.native-coding.host-ipc.request.v1',instance_id:instanceId,host_pid:child.pid,
     request_id:id(),action:'RESERVE_EXECUTION',payload:{scope:scope()}};
+  const originalReply=fixtureMessage(child,m=>m?.schema==='metaengine.native-coding.host-ipc.response.v1'&&m.request_id===frame.request_id&&m.action==='RESERVE_EXECUTION');
+  const conflictReply=fixtureMessage(child,m=>m?.schema==='metaengine.native-coding.host-ipc.response.v1'&&m.request_id===frame.request_id&&m.action==='LIST_SEEDS');
   child.send(frame);
   child.send({...frame,action:'LIST_SEEDS',payload:seedRequest('LIST_SEEDS',instanceId,child.pid)});
-  await sleep(220);
+  await Promise.all([originalReply,conflictReply]);
   assert.equal((await stats()).calls,1);
   const conflict=replies.find(reply=>reply.action==='LIST_SEEDS');
   assert.equal(conflict.outcome,'UNKNOWN');assert.equal(conflict.reason,'REQUEST_ID_REUSED');
   assert.equal(replies.find(reply=>reply.action==='RESERVE_EXECUTION').outcome,'OK');
 });
 
-test('seed timeout retains unknown mutation while read-only seed recovery cannot become another dispatch',async t=>{
-  const {client,instanceId,child,stats}=await setup(t,'slow-seed',{timeoutMs:30,serverTimeoutMs:1000});
-  const request=seedRequest('SEED_GOAL',instanceId,child.pid);
-  await assert.rejects(client.seedGoal(request),e=>e.effect_outcome==='UNKNOWN'&&e.readback_required===true);
+test('seed timeout retains unknown mutation while read-only seed recovery cannot become another dispatch',{timeout:15000},async t=>{
+  const {client,instanceId,child,stats}=await setup(t,'slow-seed',{timeoutMs:1000,serverTimeoutMs:10000});
+  const request=seedRequest('SEED_GOAL',instanceId,child.pid),entered=messageOnce(child,'test.seed-started');
+  const pending=client.seedGoal(request);pending.catch(()=>{});
+  await Promise.race([entered,pending.then(()=>{throw Error('fixture_seed_completed_before_hold');},()=>{throw Error('fixture_seed_expired_before_hold');})]);
+  await assert.rejects(pending,e=>e.effect_outcome==='UNKNOWN'&&e.readback_required===true);
   const read=seedRequest('READ_SEED',instanceId,child.pid);read.body.input=request.body.input;
-  assert.equal((await client.readSeed(read)).operation,'READ_SEED');await sleep(220);assert.equal((await stats()).calls,1);
+  assert.equal((await client.readSeed(read)).operation,'READ_SEED');
+  assert.equal((await stats()).calls,1);assert.equal(client.snapshot().physical_inflight,1);
+  child.send({schema:'test.release-seed'});await client.drainPhysical();assert.equal((await stats()).calls,1);
 });
 
 test('private prior-execution IPC transports only typed selectors and rejects caller old scope, hashes, paths and model actions',async t=>{
@@ -616,7 +717,19 @@ test('owned ChildProcess lost activation ACK is unknown; exact readback never ac
 
 // Physical settlement evidence below is real owned ChildProcess IPC with inert
 // operation/SQL-driver fixtures. Not installed Windows or real SQL authority.
-const messageOnce=(child,schema)=>new Promise(resolve=>{const read=m=>{if(m?.schema===schema){child.off('message',read);resolve(m);}};child.on('message',read);});
+function fixtureMessage(child,accept){
+ const pending=new Promise((resolve,reject)=>{
+  const cleanup=()=>{clearTimeout(timer);child.off('message',read);child.off('exit',exited);};
+  const read=m=>{if(accept(m)){cleanup();resolve(m);}};
+  const exited=()=>{cleanup();reject(Error('fixture_child_exited_before_event'));};
+  const timer=setTimeout(()=>{cleanup();reject(Error('fixture_event_deadline'));},5000);
+  child.on('message',read);child.once('exit',exited);
+ });
+ // Some tests arm a later observation before an earlier assertion can fail.
+ // Keep that observation bounded without an unhandled cleanup rejection.
+ pending.catch(()=>{});return pending;
+}
+const messageOnce=(child,schema)=>fixtureMessage(child,m=>m?.schema===schema);
 test('caller timeout retains physical admission until actual operation finishes; no resend',async t=>{
  const f=await setup(t,'held-physical',{timeoutMs:1000,serverTimeoutMs:40,maxInflight:1});
  const entered=messageOnce(f.child,'test.physical-started');let error;
@@ -627,12 +740,19 @@ test('caller timeout retains physical admission until actual operation finishes;
  await sleep(20);assert.equal(drained,false);f.child.send({schema:'test.release-physical'});await drain;
  assert.equal(f.client.snapshot().physical_inflight,0);assert.equal(error.effect_outcome,'UNKNOWN');assert.equal((await f.stats()).calls,1);
 });
-test('timeout during COMMIT after RELEASE keeps Main drain until commit acknowledgement and reservation release',async t=>{
- const f=await setup(t,'owner-held-commit',{timeoutMs:1000,serverTimeoutMs:50});
+test('timeout during COMMIT after RELEASE keeps Main drain until commit acknowledgement and reservation release',{timeout:15000},async t=>{
+ // Let the actual multi-roundtrip Owner phase reach the held COMMIT first.
+ // The old 50ms fixture deadline could expire before that state on Windows,
+ // then await a commit-started event that could never happen. Production
+ // deadlines are unchanged; this fixture still requires a real server timeout.
+ const f=await setup(t,'owner-held-commit',{timeoutMs:10000,serverTimeoutMs:2000});
  const entered=messageOnce(f.child,'test.commit-started'),released=messageOnce(f.child,'test.reservation-released');let seals=0;
  const work=f.client.withPendingOwnerScope('ESTABLISH_PENDING_OWNER_V1',seedRequest('ESTABLISH_PENDING_OWNER_V1',f.instanceId,f.child.pid),async tx=>{
   await tx.readScope();await tx.prepareTransition({previous_sha256:null,next_sha256:'d'.repeat(64)});for(let i=0;i<3;i++)await tx.readScope();seals++;return true;
- });work.catch(()=>{});await entered;await assert.rejects(work,e=>e.effect_outcome==='UNKNOWN');let drained=false;
+ });
+ const beforeCommit=work.then(()=>{throw Error('fixture_completed_before_held_commit');},()=>{throw Error('fixture_timed_out_before_held_commit');});
+ await Promise.race([entered,beforeCommit]);
+ await assert.rejects(work,e=>e.effect_outcome==='UNKNOWN');let drained=false;
  const drain=f.client.drainPhysical().then(()=>{drained=true;});await sleep(20);assert.equal(drained,false);assert.equal(f.client.snapshot().physical_inflight,1);
  f.child.send({schema:'test.release-physical'});await released;await drain;assert.equal(seals,1);assert.equal((await f.stats()).calls,1);
 });
@@ -728,7 +848,7 @@ async function runCustody(t,client,{open=true}={}){
  const facet=open?await client.openAgentRunCustody({binding:request.binding,journal}):null;
  return{directory,request,facet,journal,write:()=>({...request,operation:'agent_send_message',args:{request_id:id(),target_agent_id:'agent_native-peer123',message:'SECRET_BODY_NOT_JOURNALED'}})};
 }
-async function waitAgent(child,runId){return new Promise(resolve=>{const listener=row=>{if(row?.schema==='test.agent-started'&&row.run_id===runId){child.off('message',listener);resolve();}};child.on('message',listener);});}
+const waitAgent=(child,runId)=>fixtureMessage(child,row=>row?.schema==='test.agent-started'&&row.run_id===runId);
 test('run facet includes initial CHECK, exact original job and validated settlement before response; no wire/body widening',async t=>{
  const {client,stats}=await setup(t),f=await runCustody(t,client);
  await assert.rejects(f.facet.agentOperation(f.write()),/INVALID_PAYLOAD/);assert.equal((await stats()).calls,0);
@@ -742,11 +862,13 @@ test('run facet includes initial CHECK, exact original job and validated settlem
  assert.ok(records.every(text=>!text.includes('SECRET_BODY_NOT_JOURNALED')));assert.equal((await stats()).calls,2);
  await assert.rejects(f.facet.agentOperation(f.request));assert.equal((await stats()).calls,2);
 });
-test('two run facets share the original physical budget and one finishes without stealing the other request custody',async t=>{
- const {client,child,stats}=await setup(t,'held-agent',{maxInflight:2,timeoutMs:30,serverTimeoutMs:30}),a=await runCustody(t,client),b=await runCustody(t,client);
+test('two run facets share the original physical budget and one finishes without stealing the other request custody',{timeout:15000},async t=>{
+ const {client,child,stats}=await setup(t,'held-agent',{maxInflight:2,timeoutMs:10000,serverTimeoutMs:2000}),a=await runCustody(t,client),b=await runCustody(t,client);
  await a.facet.agentOperation(a.request);await b.facet.agentOperation(b.request);await client.drainPhysical();
  const enteredA=waitAgent(child,a.request.binding.run_id),enteredB=waitAgent(child,b.request.binding.run_id);
- const wa=a.facet.agentOperation(a.write()),wb=b.facet.agentOperation(b.write());wa.catch(()=>{});wb.catch(()=>{});await Promise.all([enteredA,enteredB]);
+ const wa=a.facet.agentOperation(a.write()),wb=b.facet.agentOperation(b.write());wa.catch(()=>{});wb.catch(()=>{});
+ const early=work=>work.then(()=>{throw Error('fixture_completed_before_agent_hold');},()=>{throw Error('fixture_expired_before_agent_hold');});
+ await Promise.all([Promise.race([enteredA,early(wa)]),Promise.race([enteredB,early(wb)])]);
  await assert.rejects(client.readLease(lease()),/INFLIGHT_LIMIT/);await assert.rejects(wa);await assert.rejects(wb);
  assert.equal(client.snapshot().physical_inflight,2);const doneA=a.facet.finish(),doneB=b.facet.finish();let bDone=false;doneB.then(()=>{bDone=true;});
  child.send({schema:'test.release-agent',run_id:a.request.binding.run_id});const result=await doneA;
@@ -770,11 +892,12 @@ test('intent write failure prevents send and retains HOLD without a fabricated c
  await assert.rejects(f.facet.agentOperation(f.request));assert.equal((await stats()).calls,0);assert.equal((await f.facet.finish()).state,'HOLD');
  assert.equal((await readNativeRunCallbackJournal(f.directory)).state,'HOLD');assert.equal(client.snapshot().physical_inflight,0);
 });
-test('a late OK cannot upgrade the persisted UNKNOWN caller after genuine earlier physical SETTLED',async t=>{
- const {client}=await setup(t,'late-agent-ok',{timeoutMs:30,serverTimeoutMs:1000}),f=await runCustody(t,client);
+test('a late OK cannot upgrade the persisted UNKNOWN caller after genuine earlier physical SETTLED',{timeout:10000},async t=>{
+ const {client,child}=await setup(t,'late-agent-ok',{timeoutMs:1000,serverTimeoutMs:5000,lateAckMs:2000}),f=await runCustody(t,client);
+ const lateReply=messageOnce(child,'test.late-response-sent');
  await f.facet.agentOperation(f.request);await client.drainPhysical();
  await assert.rejects(f.facet.agentOperation(f.write()),error=>error.effect_outcome==='UNKNOWN');const result=await f.facet.finish();assert.equal(result.caller_unknown,1);
- await sleep(130);assert.deepEqual(await readNativeRunCallbackJournal(f.directory),result);assert.equal(result.state,'SCOPED_REQUESTS_JOINED');
+ await lateReply;assert.deepEqual(await readNativeRunCallbackJournal(f.directory),result);assert.equal(result.state,'SCOPED_REQUESTS_JOINED');
 });
 test('actual callback promise remains owned after a public request settled and run dispatch was fenced',async t=>{
  const {client}=await setup(t),f=await runCustody(t,client),gate=Promise.withResolvers(),entered=Promise.withResolvers();
@@ -827,13 +950,13 @@ for(const failure of ['fsync-intent','fsync-terminal','fsync-candidate'])test(`a
  }finally{fs.open=original;}
 });
 
-test('underlying bridge counterfactual (publication unqualified) bindRun CHECK and broker callbacks join the same real IPC run facet after transport closes',async t=>{
- const f=await setup(t,'bridge-held',{timeoutMs:75}),run=await runCustody(t,f.client,{open:false}),brokerModule=await inMemoryNativeBroker(t);
+test('underlying bridge counterfactual (publication unqualified) bindRun CHECK and broker callbacks join the same real IPC run facet after transport closes',{timeout:15000},async t=>{
+ const f=await setup(t,'bridge-held',{timeoutMs:1000,serverTimeoutMs:10000}),run=await runCustody(t,f.client,{open:false}),brokerModule=await inMemoryNativeBroker(t);
  let registration,broker;
  const source=await fs.readFile(new URL('../src/native-coding-agent-run-bridge.mjs',import.meta.url),'utf8');
  const prepare=new Function('requireNativeRunCallbackPublication','createHash','createNativeCodingAgentMcpBroker','nativeCodingAgentMcpIntentBodySha256','createNativeCodingAgentMcpLaunch',
-  'validateNativeCodingAgentHostRequest','canonical',source.replace(/^import .*;\n/gm,'').replace('export async function','async function')+'\nreturn prepareNativeCodingAgentRunBridge;')
-  (()=>{},createHash,async options=>{broker=await brokerModule.createNativeCodingAgentMcpBroker({...options,endpoint:'/fixture/in-memory-only',timeoutMs:500});return broker;},
+  'validateNativeCodingAgentHostRequest','canonical',source.replace(/^import .*;\r?\n/gm,'').replace('export async function','async function')+'\nreturn prepareNativeCodingAgentRunBridge;')
+  (()=>{},createHash,async options=>{broker=await brokerModule.createNativeCodingAgentMcpBroker({...options,endpoint:process.platform==='win32'?undefined:'/fixture/in-memory-only',timeoutMs:5000});return broker;},
    nativeCodingAgentMcpIntentBodySha256,async options=>{registration=options.registration;return{fixture_only:true};},validateNativeCodingAgentHostRequest,nativeCodingCanonicalJson);
  const binding={...run.request.binding,base_sha:'a'.repeat(40)},expiry=new Date(Date.now()+60000).toISOString();
  const authorization={...binding,authorized:true,trust_namespace:'LOCAL_OPERATOR_QA',permit_id:id(),owner_epoch:1,user_sid:'S-1-5-21-111-1001',worktree_path:'/fixture/worktree'};
@@ -842,23 +965,61 @@ test('underlying bridge counterfactual (publication unqualified) bindRun CHECK a
  t.after(()=>bridge.close());
  await bridge.bindRun({...run.request.job_binding,user_sid:permit.user_sid,tree_control_bound:true,started_suspended:true,job_bound_before_resume:true});
  const tool=await brokerModule.connectNativeCodingAgentMcpBroker(registration);t.after(()=>tool.close());
- const entered=waitAgent(f.child,binding.run_id),write=tool.invoke('agent_send_message',run.write().args);write.catch(()=>{});await entered;
+ const entered=waitAgent(f.child,binding.run_id),write=tool.invoke('agent_send_message',run.write().args);write.catch(()=>{});await Promise.race([entered,write.then(()=>{throw Error('fixture_bridge_completed_before_hold');},()=>{throw Error('fixture_bridge_expired_before_hold');})]);
  assert.equal((await f.stats()).calls,3,'initial bind CHECK + invocation CHECK + actual operation');
  await bridge.close();await assert.rejects(write);assert.equal(broker.snapshot().retained_callbacks,1);
  const joined=bridge.drainCallbacks();assert.equal(bridge.drainCallbacks(),joined);let done=false;joined.then(()=>{done=true;});
- await sleep(100);assert.equal(done,false);assert.equal(broker.snapshot().retained_callbacks,0,'public IPC timeout joined JS handler only');
+ await broker.drainCallbacks(binding.run_id);assert.equal(done,false);assert.equal(broker.snapshot().retained_callbacks,0,'public IPC timeout joined JS handler only');
  assert.equal(f.client.snapshot().physical_inflight,1,'Host SQL still owned after broker callback returned');
  f.child.send({schema:'test.release-agent',run_id:binding.run_id});const value=await joined;
  assert.equal(value.state,'SCOPED_REQUESTS_JOINED');assert.equal(value.requests,3);assert.equal(value.caller_unknown,1);assert.equal(value.callbacks,2);
  assert.equal(value.all_effects_cleanup,'UNCONFIRMED');assert.deepEqual(await readNativeRunCallbackJournal(run.directory),value);
 });
 
-test('actual Host close aborts protected ACL observation before joining it; no pre-stop callback cycle',async t=>{
- const f=await setup(t,'acl-rejection-held',{timeoutMs:1000,serverTimeoutMs:1000});
- const event=schema=>new Promise(resolve=>{const listener=m=>{if(m?.schema===schema){f.child.off('message',listener);resolve();}};f.child.on('message',listener);});
- const started=event('test.acl-started'),aborted=event('test.acl-aborted'),read=f.client.readScope();read.catch(()=>{});await started;
- assert.equal((await f.stats()).snapshot.inflight,1);let drained=false;const physical=f.client.drainPhysical().then(()=>{drained=true;});
- f.child.send({schema:'test.close-server'});await aborted;await assert.rejects(read);assert.equal(drained,false);
+// This is a causal shutdown test, not a request-timeout test. Canonical file
+// checks can finish before the ACL observer starts (or reject without starting
+// it). Never wait forever for an event that such a read cannot produce.
+function protectedAclReadFixture(f){
+ const started=messageOnce(f.child,'test.acl-started'),aborted=messageOnce(f.child,'test.acl-aborted');
+ let readSettled=false,abortObserved=false,startObserved=false;
+ started.then(()=>{startObserved=true;},()=>{});aborted.then(()=>{abortObserved=true;},()=>{});
+ const began=performance.now(),read=f.client.readScope();read.then(()=>{readSettled=true;},()=>{readSettled=true;});
+ const ready=Promise.race([started,read.then(
+  ()=>{throw Error('fixture_acl_read_resolved_before_observer_start');},
+  cause=>{throw Error('fixture_acl_read_rejected_before_observer_start: '+(cause.reason||cause.name),{cause});},
+ )]);ready.catch(()=>{});
+ return {read,ready,aborted,began,get readSettled(){return readSettled;},get abortObserved(){return abortObserved;},get startObserved(){return startObserved;}};
+}
+for(const delayed of [false,true])test('actual Host close aborts protected ACL observation before joining it; no pre-stop callback cycle'+(delayed?' (observer delayed past former 1s request boundary)':''),{timeout:15000},async t=>{
+ // Generous FIXTURE-ONLY deadlines ensure explicit close, not a competing
+ // request timer, is the abort cause. Production deadlines remain unchanged.
+ const f=await setup(t,delayed?'acl-rejection-held-delayed':'acl-rejection-held',{timeoutMs:30000,serverTimeoutMs:30000});
+ const observed=protectedAclReadFixture(f),started=await observed.ready;
+ if(delayed)assert.ok(performance.now()-observed.began>=1000,'delayed observer must cross the old request deadline before starting');
+ assert.equal(started.signal_aborted,false,'observer must start with a live request');
+ assert.equal((await f.stats()).snapshot.inflight,1);assert.equal(f.client.snapshot().physical_inflight,1);
+ let drained=false;const physical=f.client.drainPhysical().then(value=>{drained=true;return value;});physical.catch(()=>{});
+ assert.equal(observed.readSettled,false,'read must remain pending until explicit Host close');
+ assert.equal(observed.abortObserved,false,'a request timeout must not substitute for Host close');assert.equal(drained,false);
+ f.child.send({schema:'test.close-server'});await observed.aborted;
+ await assert.rejects(observed.read,error=>error.reason==='SERVER_CLOSED');assert.equal(observed.abortObserved,true);assert.equal(drained,false);
+ assert.equal(f.client.snapshot().physical_inflight,1);
  assert.equal((await f.stats()).snapshot.inflight,1,'original native observation still owned after public close');
- f.child.send({schema:'test.release-acl'});await physical;assert.equal((await f.stats()).snapshot.inflight,0);
+ f.child.send({schema:'test.release-acl'});assert.equal((await physical).cleanup_confirmed,true);assert.equal((await f.stats()).snapshot.inflight,0);
+ assert.equal(f.client.snapshot().physical_inflight,0);
+});
+
+test('ACL close fixture reports an actual early canonical failure instead of waiting for observer start',{timeout:15000},async t=>{
+ const f=await setup(t,'acl-rejection-before-start',{timeoutMs:30000,serverTimeoutMs:30000}),observed=protectedAclReadFixture(f);
+ await assert.rejects(observed.ready,error=>error.message==='fixture_acl_read_rejected_before_observer_start: OPERATION_FAILED'
+  &&error.cause?.reason==='OPERATION_FAILED');
+ assert.equal(observed.readSettled,true);assert.equal(observed.startObserved,false);assert.equal(observed.abortObserved,false);
+ await f.client.drainPhysical();assert.equal((await f.stats()).snapshot.inflight,0);
+});
+
+test('ACL close fixture reports early read success without silently treating it as observer start',{timeout:15000},async t=>{
+ const f=await setup(t,'normal',{timeoutMs:30000,serverTimeoutMs:30000}),observed=protectedAclReadFixture(f);
+ await assert.rejects(observed.ready,/^Error: fixture_acl_read_resolved_before_observer_start$/);
+ assert.equal(observed.readSettled,true);assert.equal(observed.startObserved,false);assert.equal(observed.abortObserved,false);
+ await f.client.drainPhysical();assert.equal((await f.stats()).snapshot.inflight,0);
 });

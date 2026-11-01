@@ -80,6 +80,31 @@ jobs:
           node .\scripts\qualify-r97-electron-w78.mjs --verify-binary
           if ($LASTEXITCODE -ne 0) { throw 'w78_electron_binary_unverified' }
 
+      - name: Verify actual Electron ASAR recovery boundary in a disposable profile
+        working-directory: apps/metaengine-browser
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP ('recovery-electron-' + [guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $root | Out-Null
+          Get-ChildItem Env:METAENGINE_* | ForEach-Object { Remove-Item ('Env:' + $_.Name) }
+          foreach ($name in @('APPDATA','LOCALAPPDATA','USERPROFILE','HOME','XDG_CONFIG_HOME','XDG_CACHE_HOME','XDG_DATA_HOME','XDG_STATE_HOME','TEMP','TMP','TMPDIR')) {
+            $directory = Join-Path $root $name
+            New-Item -ItemType Directory -Path $directory | Out-Null
+            Set-Item ('Env:' + $name) $directory
+          }
+          $env:METAENGINE_ELECTRON_BINARY = (Resolve-Path 'node_modules/electron/dist/electron.exe').Path
+          $tap = Join-Path $env:RUNNER_TEMP 'runtime-recovery-electron.tap'
+          node --test --test-reporter=tap --test-timeout=60000 test/runtime-recovery-installed-binding.test.mjs | Tee-Object -FilePath $tap
+          if ($LASTEXITCODE -ne 0) { throw 'recovery_electron_boundary_failed' }
+          $lines = Get-Content $tap
+          foreach ($summary in @('# tests 6','# pass 6','# fail 0','# cancelled 0','# skipped 0','# todo 0')) {
+            if (@($lines | Where-Object { $_ -eq $summary }).Count -ne 1) { throw "recovery_electron_summary_invalid:$summary" }
+          }
+          if (@($lines | Where-Object { $_ -match '^ok \d+ - real Electron pins physical ASAR bytes while package reads remain archive-aware$' }).Count -ne 1) {
+            throw 'recovery_electron_actual_case_missing'
+          }
+
       - name: Frozen UI typecheck, build and pack without package identity reservation
         working-directory: apps/me2-ui
         shell: pwsh
@@ -149,6 +174,7 @@ jobs:
         with:
           name: w69-r97-source-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
+            ${{ runner.temp }}\runtime-recovery-electron.tap
             ${{ runner.temp }}\client-w69-r97-evidence\*.png
             ${{ runner.temp }}\client-w69-r97-evidence\r85-visual-evidence.json
           if-no-files-found: ignore

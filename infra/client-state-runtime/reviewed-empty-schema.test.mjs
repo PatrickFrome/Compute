@@ -12,6 +12,7 @@ import {
   inspectCanonicalEmptySchema, runEmptySchemaCommand,
   emptySchemaPostgresStartOptions, classifyEmptySchemaPostmasterStartLog,
   prepareEmptySchemaPostmasterLogObservation,
+  EMPTY_SCHEMA_INPUT_PATHS,
 } from './canonical-empty-schema-contract.mjs';
 import { assertPublishableEmptySchemaEvidence, emptySchemaFailureReceipt } from './export-reviewed-empty-schema.mjs';
 
@@ -617,4 +618,17 @@ test('all native fresh-schema fixture starts share Windows-safe empty socket opt
   assert.match(source,/'-o',emptySchemaPostgresStartOptions\(port\),'-w','start'/);
   assert.doesNotMatch(source,/unix_socket_directories=''/);
   assert.doesNotMatch(source,/archiveOperation\?emptySchemaPostgresStartOptions/);
+});
+
+test('bound migration API identity changes trigger both canonical export review events',async()=>{
+  const input='infra/client-state-runtime/native-coding-migration-api-identity.mjs';
+  assert.ok(EMPTY_SCHEMA_INPUT_PATHS.includes(input),'the authenticated migration identity is an actual schema input');
+  const workflow=await fs.readFile(new URL('../../.github/workflows/client-reviewed-empty-schema.yml',import.meta.url),'utf8');
+  for(const [event,next] of [['pull_request','push'],['push','workflow_dispatch']]){
+    const start=workflow.indexOf('  '+event+':');
+    const end=workflow.indexOf('  '+next+':',start);
+    assert.ok(start>=0&&end>start,'the original event boundary must be present');
+    const paths=[...workflow.slice(start,end).matchAll(/^\s+- '([^']+)'$/gm)].map(match=>match[1]);
+    assert.equal(paths.filter(value=>value===input).length,1,event+' must retain the exact schema input trigger');
+  }
 });

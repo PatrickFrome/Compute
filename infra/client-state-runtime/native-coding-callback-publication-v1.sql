@@ -1,9 +1,37 @@
--- UNREGISTERED. Attest BEFORE any change; refuse partial/tampered replay.
+-- Reviewed publication schema prerequisite. Attest BEFORE any change; refuse partial/tampered replay.
 do $review$
 declare expected jsonb:='[{"signature":"destruktion_meta.native_coding_callback_publication_valid_v1(jsonb)","args":["v"],"return_type":"boolean","language":"plpgsql","definer":false,"volatile":"i","defaults":0,"sha256":"556dff78af2f58f9680badde2897248b2208a3390421e50eb97c46511fe20797","old_sha256":null,"public_context":false},{"signature":"destruktion_meta.native_coding_callback_publication_guard_v1()","args":[],"return_type":"trigger","language":"plpgsql","definer":false,"volatile":"v","defaults":0,"sha256":"25ad1c6e288ce37f872b5d7dceb4525f8bca898792e7411d6987164173b9bd38","old_sha256":null,"public_context":false},{"signature":"destruktion_meta.native_coding_callback_publication_cas_v1(uuid,bigint,uuid,jsonb,jsonb)","args":["p_task","p_generation","p_reservation","p_expected","p_value"],"return_type":"jsonb","language":"plpgsql","definer":false,"volatile":"v","defaults":0,"sha256":"e127166f1f1754affaeb2a40707a0064fb799cf3ef672080a43a0ae8b5685cfa","old_sha256":null,"public_context":false},{"signature":"destruktion_meta.native_coding_callback_publication_read_v1(uuid,bigint,uuid)","args":["p_task","p_generation","p_reservation"],"return_type":"jsonb","language":"plpgsql","definer":false,"volatile":"v","defaults":0,"sha256":"120566f6e16f0a6529177b1c840cc6a7b5d1d810db579ad91ee729705914d455","old_sha256":null,"public_context":false},{"signature":"destruktion_meta.native_coding_reserve_v1(uuid,uuid,bigint,text,text,bigint,uuid,text,text)","args":["p_workspace","p_task","p_generation","p_agent","p_target","p_epoch","p_reservation","p_host_incarnation","p_scope_sha256"],"return_type":"jsonb","language":"plpgsql","definer":true,"volatile":"v","defaults":0,"sha256":"46f8375181bbc7cb0aff3616a37e9341732e8e3cae65de4370f9ad381cb64277","old_sha256":"648bcb43281432c67fe83d9e47f3dfdd828ab8b6f4e095bf6bf6e998747343c9","public_context":false},{"signature":"destruktion_meta.native_coding_advance_v1(uuid,bigint,uuid,text,text,text,text,text,text,text)","args":["p_task","p_generation","p_reservation","p_scope_sha256","p_host_incarnation","p_from","p_to","p_evidence_sha256","p_critic_sha256","p_checkpoint_sha256"],"return_type":"jsonb","language":"plpgsql","definer":true,"volatile":"v","defaults":2,"sha256":"37dd144d751feadf216bc2517d67ac540714a6b18553cc5d3a9d35172119da87","old_sha256":"17d8aeebee4b0609d7645d22ba303221abe654491649a16bcb62101e9a7a112f","public_context":false},{"signature":"destruktion_meta.native_coding_read_v1(uuid,uuid,bigint)","args":["p_workspace","p_task","p_generation"],"return_type":"jsonb","language":"sql","definer":true,"volatile":"s","defaults":0,"sha256":"81b06429e44cd7688ceacd48af4f7de6500402f6eb46020178c732e5cedb2c9e","old_sha256":"d0165f2d09e78fdddaee82a132a51b9c7ba025fd5e7052c96da185cb6c4c094c","public_context":false},{"signature":"public.native_coding_execution_context_v1(uuid,text,uuid,bigint)","args":["p_workspace","p_client","p_task","p_generation"],"return_type":"jsonb","language":"plpgsql","definer":true,"volatile":"v","defaults":0,"sha256":"f9c590be915d6994f348fa825d337e70c467094e8eae724a2e11f07e5f7fa57d","old_sha256":"1c4cbad72b47952872baa4cfedc5467192dab5b0c9bf8c46ba6ced2c0835f428","public_context":true}]'::jsonb;
- spec jsonb;f record;tr record;col boolean;n integer;hash text;
+ spec jsonb;f record;tr record;col boolean;n integer;hash text;api_oid oid;identity_relation oid;identity_row record;
 begin
  if current_user<>'state_owner' or session_user<>'state_owner' then raise exception 'native_callback_migration_owner_required';end if;
+ -- Only private same-backend owner transaction evidence from authenticated onboarding.
+ -- A restricted API session's own pg_temp relation cannot be observed here.
+ identity_relation:=to_regclass('pg_temp.native_callback_migration_api_identity_v1');
+ if identity_relation is not null then
+  if not exists(select 1 from pg_catalog.pg_class c where c.oid=identity_relation and c.relnamespace=pg_my_temp_schema()
+   and c.relowner=to_regrole('state_owner') and c.relkind='r' and c.relpersistence='t' and not c.relispartition
+   and not c.relrowsecurity and not c.relforcerowsecurity
+   and not exists(select 1 from aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a where a.grantee<>c.relowner))
+   or exists(select 1 from pg_catalog.pg_attribute a where a.attrelid=identity_relation and a.attnum>0 and (a.attisdropped or a.attacl is not null or a.atthasdef or a.attidentity<>'' or a.attgenerated<>''))
+   or (select jsonb_agg(jsonb_build_array(a.attname,a.atttypid::regtype::text,a.attnotnull) order by a.attnum) from pg_catalog.pg_attribute a where a.attrelid=identity_relation and a.attnum>0)
+    is distinct from '[["backend","integer",true],["backend_start","timestamp with time zone",true],["transaction_id","bigint",true],["database_oid","oid",true],["postmaster","timestamp with time zone",true],["role_oid","oid",true],["role_name","text",true]]'::jsonb
+   or exists(select 1 from pg_catalog.pg_trigger where tgrelid=identity_relation)
+   or exists(select 1 from pg_catalog.pg_rewrite where ev_class=identity_relation)
+  then raise exception 'native_callback_api_evidence_requires_review';end if;
+  execute 'select count(*) from pg_temp.native_callback_migration_api_identity_v1' into n;
+  if n<>1 then raise exception 'native_callback_api_evidence_requires_review';end if;
+  execute 'select * from pg_temp.native_callback_migration_api_identity_v1' into identity_row;
+  if identity_row.backend<>pg_backend_pid() or identity_row.backend_start is distinct from (select backend_start from pg_catalog.pg_stat_activity where pid=pg_backend_pid()) or identity_row.transaction_id<>txid_current()
+   or identity_row.database_oid<>(select oid from pg_catalog.pg_database where datname=current_database())
+   or identity_row.postmaster<>pg_postmaster_start_time()
+   or not exists(select 1 from pg_catalog.pg_roles r where r.oid=identity_row.role_oid and r.rolname=identity_row.role_name
+    and r.rolcanlogin and not r.rolinherit and not r.rolsuper and not r.rolcreatedb and not r.rolcreaterole and not r.rolreplication and not r.rolbypassrls
+    and not exists(select 1 from pg_catalog.pg_auth_members where member=r.oid or roleid=r.oid)
+    and has_database_privilege(r.oid,current_database(),'CONNECT') and not has_database_privilege(r.oid,current_database(),'CREATE'))
+  then raise exception 'native_callback_api_evidence_requires_review';end if;
+  api_oid:=identity_row.role_oid;
+  execute 'delete from pg_temp.native_callback_migration_api_identity_v1'; -- One SQL preflight only.
+ end if;
  if not exists(select 1 from pg_class c where c.oid='destruktion_meta.native_coding_execution_h205f22'::regclass
   and c.relowner=to_regrole('state_owner') and c.relkind='r' and c.relpersistence='p' and not c.relispartition and c.relrowsecurity and not c.relforcerowsecurity
   and not exists(select 1 from aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a where a.grantee<>c.relowner))
@@ -23,8 +51,11 @@ begin
    or f.prosecdef is distinct from (spec->>'definer')::boolean or f.pronargdefaults<>(spec->>'defaults')::int or f.provariadic<>0
    or coalesce(to_jsonb(f.proargnames),'[]'::jsonb) is distinct from spec->'args'
    or f.proconfig is distinct from array['search_path=pg_catalog, destruktion_meta']::text[]
-   or exists(select 1 from aclexplode(coalesce(f.proacl,acldefault('f',f.proowner))) a where a.grantee<>f.proowner and not ((spec->>'public_context')::boolean and a.grantee=to_regrole('service_role') and a.privilege_type='EXECUTE' and not a.is_grantable))
-   or ((spec->>'public_context')::boolean and not has_function_privilege('service_role',f.oid,'EXECUTE'))
+   or exists(select 1 from aclexplode(coalesce(f.proacl,acldefault('f',f.proowner))) a where a.grantee<>f.proowner and not ((spec->>'public_context')::boolean and (a.grantee=to_regrole('service_role') or (api_oid is not null and a.grantee=api_oid)) and a.privilege_type='EXECUTE' and not a.is_grantable))
+   or ((spec->>'public_context')::boolean and not ((api_oid is null and (has_function_privilege('service_role',f.oid,'EXECUTE')
+      -- Canonical pre-provision profile: exact reviewed body, no external ACL at all.
+      or not exists(select 1 from aclexplode(coalesce(f.proacl,acldefault('f',f.proowner))) a where a.grantee<>f.proowner)))
+    or (api_oid is not null and exists(select 1 from aclexplode(f.proacl) a where a.grantee=api_oid and a.privilege_type='EXECUTE' and not a.is_grantable))))
    or encode(extensions.digest(convert_to(replace(f.prosrc,E'\r\n',E'\n'),'UTF8'),'sha256'),'hex')<>hash
    or ((spec->>'defaults')::int>0 and pg_get_expr(f.proargdefaults,0) is distinct from 'NULL::text, NULL::text')
   then raise exception 'native_callback_function_requires_review:%',spec->>'signature';end if;
@@ -43,7 +74,7 @@ begin
  then raise exception 'native_callback_trigger_requires_review';end if;
 end $review$;
 -- END CALLBACK PUBLICATION REPLAY ATTESTATION
--- UNREGISTERED SOURCE PREREQUISITE. No IPC action or effect/send capability.
+-- Registered SQL prerequisite only. No IPC action or effect/send capability.
 -- A WAL anchor in the EXISTING execution evidence row, not a new allocator.
 alter table destruktion_meta.native_coding_execution_h205f22 add column if not exists callback_publication jsonb;
 

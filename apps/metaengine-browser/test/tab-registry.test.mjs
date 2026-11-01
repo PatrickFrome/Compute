@@ -3,7 +3,7 @@ import test from 'node:test';
 import { TabRegistry } from '../src/tab-registry.mjs';
 
 test('tab registry uses stable logical ids and deterministic selection on close', () => {
-  const r = new TabRegistry();
+  const r = new TabRegistry({readResources:()=>({physical_start_allowed:true,memory_headroom:8})});
   const a = r.create({ url: 'https://chatgpt.com/', kind: 'CHATGPT' });
   const b = r.create({ url: 'https://github.com/', kind: 'USER_WEB' });
   assert.notEqual(a.tab_id, b.tab_id);
@@ -16,7 +16,7 @@ test('tab registry uses stable logical ids and deterministic selection on close'
 
 
 test('tab registry allocates one immutable canonical BrowserCell per logical tab', () => {
-  const r = new TabRegistry();
+  const r = new TabRegistry({readResources:()=>({physical_start_allowed:true,memory_headroom:8})});
   const a = r.create({ url: 'https://chat.z.ai/', kind: 'GLM_CHAT', role: 'FLEET' });
   const b = r.create({ url: 'https://chatgpt.com/', kind: 'CHATGPT', role: 'USER' });
 

@@ -1,3 +1,4 @@
+import {attestNativeMigrationApiIdentity} from './native-coding-migration-api-identity.mjs';
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
@@ -366,6 +367,7 @@ export async function onboardAttachedPostgres(options = {}, hooks = {}) {
       apiSql = connect(api.href);
       await (hooks.inspectApiLogin || inspectAttachedApiLogin)({ sql: apiSql, apiLogin: options.apiLogin });
     }
+    const authenticatedApiIdentity=upgrading&&plan.migrations?.some(row=>row.source==='native-coding-callback-publication-v1.sql')?await attestNativeMigrationApiIdentity({apiSql,ownerSql:sql,apiLogin:options.apiLogin}):undefined;
     // Runtime host and setup acquire the same exclusive pathname. Neither may
     // race a schema/role update against a running API process.
     lockFile = path.join(state, 'runtime-host-lock.json');
@@ -388,7 +390,7 @@ export async function onboardAttachedPostgres(options = {}, hooks = {}) {
       await tx.unsafe('SET LOCAL log_transaction_sample_rate = 0');
       await inspectIdentity(tx, options, physical, admin, pidBytes);
       const transaction = { unsafe: tx.unsafe.bind(tx), begin: run => run(tx) };
-      const receipt = await (hooks.applyMigrations || applyLocalRuntimeMigrations)({ sql: transaction, expectedMigrationSourcesSha256: options.expectedMigrationSourcesSha256 });
+      const receipt = await (hooks.applyMigrations || applyLocalRuntimeMigrations)({ sql: transaction, expectedMigrationSourcesSha256: options.expectedMigrationSourcesSha256, authenticatedApiIdentity });
       if (receipt?.source_manifest_sha256 !== options.expectedMigrationSourcesSha256) fail('migration_receipt_unattested');
       stage = 'role_provision';
       if (upgrading) {

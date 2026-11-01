@@ -15,6 +15,11 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+# Superseded source-only generations cannot qualify the current candidate.
+concurrency:
+  group: client-live-mechanics-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   browser-mechanics:
     strategy:

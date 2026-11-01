@@ -1,0 +1,53 @@
+{
+  "schema": "metaengine.reviewed-current-source-seal-refresh.v1",
+  "functional_source": "385c4ba78fe6db6b9c80aea193c63ae9bd646edf",
+  "previous_manifest_blob": "df66a2103a15c0e96c317582dcfe8bbf34a115bb",
+  "current_manifest_sha256": "5ad4ebaac8de7326615ff91ea36ad284be742646602f3f32a3f2c269cd6e99c0",
+  "updated_existing_paths": [
+    ".github/client-ci-train-w82.test.mjs",
+    ".github/workflows/client-checkpoint-reconciliation-qualification.yml",
+    ".github/workflows/client-live-mechanics-recovery-v1.yml",
+    ".github/workflows/client-source-candidate-w73.yml",
+    "apps/metaengine-browser/src/codex-cli-sandbox-probe.mjs",
+    "apps/metaengine-browser/test/codex-cli-sandbox-probe.test.mjs"
+  ],
+  "newly_sealed_paths": [],
+  "reviewed_changes": [
+    {
+      "path": ".github/client-ci-train-w82.test.mjs",
+      "previous_blob": "65eb75036876fd29c5a14b5c4af1d3327ec67845",
+      "current_blob": "b0ef2d4815c4c74303a5cd911405030994210e7d"
+    },
+    {
+      "path": ".github/workflows/client-checkpoint-reconciliation-qualification.yml",
+      "previous_blob": "4404c3779757aec2b1892c40b4606ad9448e80eb",
+      "current_blob": "cb547cd6be32e32b7f0cddd2673b8700a54e54ab"
+    },
+    {
+      "path": ".github/workflows/client-live-mechanics-recovery-v1.yml",
+      "previous_blob": "2f398be3ba38c9268f2717fa549b406d4d02768c",
+      "current_blob": "635dcd0f1715a55cef4d27ac20fa2fcd4df05048"
+    },
+    {
+      "path": ".github/workflows/client-source-candidate-w73.yml",
+      "previous_blob": "c0d9b024199b9f172c2d5a836e7bd9963483d902",
+      "current_blob": "a006717d1a7edd7b6fddb77580ba4e35c4d36239"
+    },
+    {
+      "path": "apps/metaengine-browser/src/codex-cli-sandbox-probe.mjs",
+      "previous_blob": "04c842e4aa1386b9a2e505b16c504b0e915b7db2",
+      "current_blob": "b94fe1cb46654dcf55624b7cbf0217d9abd11533"
+    },
+    {
+      "path": "apps/metaengine-browser/test/codex-cli-sandbox-probe.test.mjs",
+      "previous_blob": "1ce04227e96adf5e00c34ec326d187ca75dc226b",
+      "current_blob": "42523f4a55a03b1cd183a9522bdfb62ef6f82103"
+    }
+  ],
+  "total_sealed_files": 1042,
+  "all_non_blob_manifest_fields_unchanged": true,
+  "package_version_changed": false,
+  "qualification_promoted": false,
+  "authority_effect": false,
+  "validation": "PENDING_FINAL_COMMIT_TESTS_AND_EXACT_HEAD_CI"
+}

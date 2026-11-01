@@ -7,19 +7,25 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
+import { createWorkspaceReservation } from '../src/workspace-manager.mjs';
+import { planLockedWorkspaceMaterialization, planWorkspaceInventory } from '../src/workspace-git-hardening.mjs';
 import { createManagedTaskProjectMemoryJournal, createManagedTaskProjectRuntime, createShellFreeGitExecutor } from '../src/managed-task-project-runtime.mjs';
 
 const exec = promisify(execFile);
 
-async function fixture(t) {
+async function fixture(t, { rootLength = 0 } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-project-test-'));
-  const repo = path.join(root, 'repo'); const managed = path.join(root, 'projects');
+  t.after(async () => { await fs.rm(root, { recursive: true, force: true }); });
+  // Keep the repository itself short enough for unconfigured Git init, but put
+  // its genuine worktree administration files beyond the legacy Win32 limit.
+  const base = rootLength > root.length ? path.join(root, 'p'.repeat(Math.max(1, rootLength - root.length - 1))) : root;
+  if (base !== root) await fs.mkdir(base);
+  const repo = path.join(base, 'repo'); const managed = path.join(base, 'projects');
   await fs.mkdir(repo); await fs.mkdir(managed);
   const git = (args) => exec('git', args, { cwd: repo, windowsHide: true });
   await git(['init', '-q']);
   await git(['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '--allow-empty', '-qm', 'seed']);
   const { stdout } = await git(['rev-parse', 'HEAD']);
-  t.after(async () => { await fs.rm(root, { recursive: true, force: true }); });
   return {
     idempotency_key: 'task-project:create:v1',
     trusted_repo: { repo_id: 'github:test/repo', repo_root: await fs.realpath(repo) },
@@ -215,4 +221,104 @@ test('renewed replay still refuses revoked and expired claims before opening', a
   await assert.rejects(runtime.open(renewed), /managed_project_lease_expired/);
   assert.equal(creates, 1); assert.equal(opens, 0);
   assert.deepEqual(journal.snapshot().map(row => row.state), ['RESERVED', 'PROVEN']);
+});
+
+
+test('validated Git plans receive only the fixed invocation-local Windows long-path option', async (t) => {
+  const request = await fixture(t), binding = createWorkspaceReservation(request);
+  const plans = [planWorkspaceInventory(binding), planLockedWorkspaceMaterialization(binding),
+    ...Object.entries({ WORKTREE_STATUS_READ: ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignore-submodules=none'],
+      WORKTREE_UPSTREAM_READ: ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'],
+      WORKTREE_ORIGIN_READ: ['remote', 'get-url', 'origin'] }).map(([effect, argv]) => ({ ...planWorkspaceInventory(binding), effect, argv }))];
+  const calls = [];
+  const executor = createShellFreeGitExecutor({ spawnProcess: (executable, argv, options) => {
+    calls.push({ executable, argv, options });
+    const child = new EventEmitter(); child.stdout = new PassThrough(); child.stderr = new PassThrough();
+    queueMicrotask(() => child.emit('close', 0, null)); return child;
+  } });
+  for (const plan of plans) {
+    const before = structuredClone(plan); await executor.execute(plan);
+    const call = calls.at(-1);
+    assert.equal(call.executable, 'git'); assert.equal(call.options.shell, false); assert.equal(call.options.cwd, plan.cwd);
+    const expected = [...plan.argv];
+    if (process.platform === 'win32' && plan.effect === 'WORKTREE_CREATE_LOCKED') {
+      expected[7] = './' + path.relative(plan.cwd, plan.argv[7]).split(path.sep).join('/');
+      assert.equal(path.resolve(call.options.cwd, call.argv[9]), plan.argv[7]);
+    }
+    assert.deepEqual(call.argv, [...(process.platform === 'win32' ? ['-c', 'core.longpaths=true'] : []), ...expected]);
+    assert.deepEqual(plan, before, 'configuration must not rewrite the admitted plan or its authority binding');
+    assert.equal(call.options.env.GIT_CONFIG_PARAMETERS, undefined); assert.equal(call.options.env.GIT_CONFIG_COUNT, undefined);
+  }
+  const count = calls.length;
+  for (const config of ['core.longpaths=false', 'core.hooksPath=untrusted', 'core.worktree=other'])
+    await assert.rejects(executor.execute({ ...plans[0], argv: ['-c', config, ...plans[0].argv] }), /managed_project_git_plan_invalid/);
+  assert.equal(calls.length, count, 'caller configuration must be refused before spawning');
+});
+
+test('real Git long managed paths preserve exact locked creation and readback without persistent configuration', async (t) => {
+  const request = await fixture(t, { rootLength: 139 }), journal = createManagedTaskProjectMemoryJournal();
+  const config = path.join(request.trusted_repo.repo_root, '.git', 'config'), beforeConfig = await fs.readFile(config);
+  const executor = createShellFreeGitExecutor(); let adds = 0;
+  const runtime = createManagedTaskProjectRuntime({ journal, validateClaim: async () => true,
+    executePlan: plan => { if (plan.effect === 'WORKTREE_CREATE_LOCKED') adds++; return executor.execute(plan); } });
+  const first = await runtime.create(request);
+  assert.ok(path.join(request.trusted_repo.repo_root, '.git', 'worktrees', path.basename(first.reservation.worktree_path), 'refs').length >= 249);
+  assert.ok(Buffer.byteLength(first.reservation.worktree_path + '/.git', 'utf8') <= 259);
+  assert.equal(first.state, 'PROVEN'); assert.equal(first.reservation.state, 'READY'); assert.equal(first.proof.locked, true);
+  assert.equal(first.proof.head_sha, request.claim.base_sha);
+  const replay = await runtime.create(request);
+  assert.equal(replay.replayed, true); assert.equal(adds, 1);
+  assert.equal(replay.binding_digest, first.binding_digest);
+  assert.deepEqual(journal.snapshot().map(row => row.state), ['RESERVED', 'PROVEN']);
+  assert.deepEqual(await fs.readFile(config), beforeConfig, 'invocation policy must not persist repository configuration');
+});
+
+
+test('unsupported new Windows target is refused before reservation or Git add', async (t) => {
+  const request = await fixture(t, { rootLength: 176 }), journal = createManagedTaskProjectMemoryJournal();
+  const binding = createWorkspaceReservation(request), executor = createShellFreeGitExecutor(); let adds = 0, reserves = 0;
+  assert.ok(Buffer.byteLength(binding.worktree_path + '/.git', 'utf8') > 259);
+  const runtime = createManagedTaskProjectRuntime({ journal, validateClaim: async () => true,
+    reserveBinding: async () => { reserves++; },
+    executePlan: plan => { if (plan.effect === 'WORKTREE_CREATE_LOCKED') adds++; return executor.execute(plan); } });
+  if (process.platform === 'win32') {
+    await assert.rejects(runtime.create(request), /managed_project_windows_path_requires_shorter_root/);
+    assert.equal(adds, 0); assert.equal(reserves, 0); assert.deepEqual(journal.snapshot(), []);
+    await assert.rejects(fs.stat(binding.worktree_path), { code: 'ENOENT' });
+    const branches = await exec('git', ['show-ref', '--heads'], { cwd: request.trusted_repo.repo_root, windowsHide: true });
+    assert.equal(branches.stdout.includes(request.claim.branch_name), false);
+  } else {
+    assert.equal((await runtime.create(request)).state, 'PROVEN');
+    assert.equal(adds, 1); assert.equal(reserves, 1);
+  }
+});
+
+test('derived Windows spelling refuses cross-volume, malformed and UTF8-overlimit creation plans before spawn', async (t) => {
+  const request = await fixture(t), binding = createWorkspaceReservation(request), plan = planLockedWorkspaceMaterialization(binding);
+  let spawns = 0;
+  const executor = createShellFreeGitExecutor({ spawnProcess: () => { spawns++; throw Error('must_not_spawn'); } });
+  for (const target of ['../escape', path.join(plan.cwd, 'child') + path.sep + '..' + path.sep + 'escape', 'C:drive-relative'])
+    await assert.rejects(executor.execute({ ...plan, argv: plan.argv.map((v, i) => i === 7 ? target : v) }), /managed_project_git_plan_invalid/);
+  if (process.platform === 'win32') {
+    const drive = path.parse(plan.cwd).root[0].toLowerCase() === 'z' ? 'Y' : 'Z';
+    const foreign = drive + ':\\other\\approved-looking';
+    await assert.rejects(executor.execute({ ...plan, argv: plan.argv.map((v, i) => i === 7 ? foreign : v) }), /managed_project_windows_cross_volume_worktree_unsupported/);
+    const unicode = path.join(path.parse(plan.cwd).root, 'é'.repeat(130));
+    assert.ok(unicode.length < 220); assert.ok(Buffer.byteLength(unicode + '/.git', 'utf8') > 259);
+    await assert.rejects(executor.execute({ ...plan, argv: plan.argv.map((v, i) => i === 7 ? unicode : v) }), /managed_project_windows_path_requires_shorter_root/);
+  }
+  assert.equal(spawns, 0);
+});
+
+
+test('derived target remains the same physical worktree from a nested Git executor cwd', async (t) => {
+  const request = await fixture(t, { rootLength: 139 }), binding = createWorkspaceReservation(request);
+  const nested = path.join(request.trusted_repo.repo_root, 'nested'); await fs.mkdir(nested);
+  const executor = createShellFreeGitExecutor(), plan = planLockedWorkspaceMaterialization(binding);
+  await executor.execute({ ...plan, cwd: await fs.realpath(nested) });
+  const inventory = await executor.execute(planWorkspaceInventory(binding));
+  const { verifyWorkspaceInventory } = await import('../src/workspace-git-hardening.mjs');
+  const proof = verifyWorkspaceInventory(binding, inventory.stdout);
+  assert.equal(proof.worktree_path, binding.worktree_path); assert.equal(proof.head_sha, request.claim.base_sha); assert.equal(proof.locked, true);
+  assert.equal(await fs.realpath(binding.worktree_path), binding.worktree_path);
 });

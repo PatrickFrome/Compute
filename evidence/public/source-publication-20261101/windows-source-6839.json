@@ -1,0 +1,75 @@
+{
+  "schema": "metaengine.local-windows-source-observation.v1",
+  "functional_source": "6839e58c419e5a4c182fe52c20d3658e99f4bfbf",
+  "source_tree": "e31757e12ae0af5e3911f37b4213d14c43781ab2",
+  "qualification_scope": "EXACT_WORKFLOW_COMPONENT_AND_NATIVE_PG17_CASES_ON_LOCAL_WINDOWS",
+  "github_hosted": false,
+  "user_pc_used": true,
+  "installed_user_profile_used": false,
+  "platform": "win32-x64",
+  "node_version": "v24.21.0",
+  "postgres_major": 17,
+  "suite_policy": {
+    "test_isolation": "process",
+    "test_concurrency": 1,
+    "per_suite_timeout_ms": 1080000,
+    "per_suite_max_bytes": 25165824,
+    "required_case_skip_allowed": false
+  },
+  "suites": [
+    {
+      "name": "component",
+      "files": 61,
+      "required_cases": 70,
+      "tests": 1188,
+      "pass": 1187,
+      "fail": 0,
+      "skipped": 1,
+      "cancelled": 0,
+      "todo": 0,
+      "duration_ms": 829732.5558,
+      "raw_tap_sha256": "2c8d4404420c3b7414ace06efd12484c769788ad576678a7cd787355d7ddc01f",
+      "sanitized_tap_sha256": "2bf113a329f70884b64f4802bded677f31999f9f575923e38b1c82e2026f227c",
+      "allowed_skip": "BASE reproduction: killed child after durable Git receipt leaves COMMITTED/PENDING and observer HOLD"
+    },
+    {
+      "name": "native-pg17",
+      "files": 17,
+      "required_cases": 103,
+      "tests": 389,
+      "pass": 389,
+      "fail": 0,
+      "skipped": 0,
+      "cancelled": 0,
+      "todo": 0,
+      "duration_ms": 671549.935,
+      "raw_tap_sha256": "0ffc5737ffc6fc6613114333c66e6ab605df74642cffed59b5644523ff7251a3",
+      "sanitized_tap_sha256": "b4b95e2eeba2336b77ea87448867f6de35d8f3a8a53b59709c8ffe01232fb6f6"
+    }
+  ],
+  "observations": {
+    "unchanged_source_before_after": true,
+    "exact_workflow_case_and_required_lists": true,
+    "local_harness_policy_independently_audited": true,
+    "supplemental_managed_git_executor_hash_recorded": true,
+    "installed_owner_markers_absent_before_after": true,
+    "cleanup_inventory_recorded": true,
+    "no_postmaster_pid_in_qualification_profile": true,
+    "no_global_git_or_os_policy_change": true,
+    "four_nonfatal_native_timeout_negative_warnings_retained": true
+  },
+  "evidence_sha256": {
+    "harness": "14e6c056e7bc052a7dfed4308413d92153109535931edf39f11c6c87bde04930",
+    "result": "06032e277abf9f3a362b6b339b95f0582989708a8944ffaa22309b9073857397",
+    "plan": "8df01b7243ab37f0aa92962f2af008f1b30c803cc8285cf9b616324bb1f9cd82",
+    "cleanup_inventory": "1c349f0f4cae9886f90c92b133a10f11437f833591ac14eb1c16359d447a2077"
+  },
+  "full_browser_suite_qualified_at_this_head": false,
+  "hosted_ci_qualified": false,
+  "installed_qualification": false,
+  "release_qualification": false,
+  "later_source_edits_qualified": false,
+  "authority_effect": false,
+  "automatic_retry_allowed": false,
+  "evidence_origin": "Separate source qualification run and retained receipts; no raw machine paths, process identifiers, credentials or installed-profile data included here."
+}

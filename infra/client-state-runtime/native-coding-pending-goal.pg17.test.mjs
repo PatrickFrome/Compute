@@ -1,4 +1,5 @@
 import {prepareNativeCodingSeedProfile} from './native-coding-seed-profile-preparation.mjs';
+import {activeRunOwnerPgCoverage} from './test/active-run-owner-pg-fixture.mjs';
 import {pendingOwnerScopeFixture,bindStagingPendingOwner,pendingActivationScopeFixture} from './test/pending-owner-phase-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -297,6 +298,9 @@ test('native PG17 prepared goal remains durably nonrunnable through signed admis
    };
    return {...g,admission,profile,input,activate};
   }
+  await t.test('active Owner read derives current activated project through real W30 and reservation',async child=>{
+   await activeRunOwnerPgCoverage(child,{sql,activationFixture,monitor});
+  });
   await t.test('activation uses exact saved project/root and preserves immutable pending receipt without a second seed goal',async()=>{
    const g=await activationFixture(),before=await fs.readFile(path.join(g.root,'identity.json'),'utf8');
    const value=await g.activate();assert.equal(value.state,'ACTIVATED');assert.equal(value.activation.root_task_id,g.admission.root_task_id);assert.equal(value.activation.project_id,g.admission.project_id);

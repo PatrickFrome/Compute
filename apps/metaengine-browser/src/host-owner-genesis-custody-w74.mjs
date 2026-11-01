@@ -38,12 +38,26 @@ export const W74_SCOPE_LOCK_SQL = `SELECT pg_catalog.pg_advisory_xact_lock(
 
 // Authority inputs are _private provider closures_, not identity values. A
 // positive boolean returned by a page, test, or JSON field has no authority.
-export function createHostOwnerGenesisCustodyW74({
+export function createHostOwnerGenesisCustodyW74(options={}) {
+  return createOwnerCustody(options,false);
+}
+
+// Per-request READ facade; never installed as global genesis custody. The
+// original validator/digest is shared, but create/write capability is absent.
+export function createLoadedHostOwnerReadW74({scope,...options}={}) {
+  if(!scope||typeof scope.verifyOwnerRecord!=='function'||!scope.runOwner)throw Error('w74_run_read_scope_required');
+  const bound=createOwnerCustody({...options,staging:false,
+    withOwnerScope:async(mode,body)=>{if(mode!=='READ_CUSTODY')throw Error('w74_read_only');return body(scope);},
+    writeSealed:()=>{throw Error('w74_read_only');}},true);
+  return Object.freeze({read:bound.read,close:bound.close,drain:bound.drain});
+}
+
+function createOwnerCustody({
   identity, transaction, readAuthenticatedAdmin = () => null, readGuardian, withOwnerScope = null,
   readSourceProof, readNativeKernel, readSealed, writeSealed,
   now = Date.now, staging = false, assertLifetime = () => {},
-} = {}) {
-  if (!identity || typeof identity.ensure !== 'function' ||
+} = {},loadedOnly=false) {
+  if (!identity || !loadedOnly&&typeof identity.ensure !== 'function' ||
       typeof identity.snapshot !== 'function' ||
       (withOwnerScope !== null && typeof withOwnerScope !== 'function') ||
       [withOwnerScope || transaction,readAuthenticatedAdmin,readGuardian,readSourceProof,
@@ -71,7 +85,7 @@ export function createHostOwnerGenesisCustodyW74({
   };
   const check = async (readAdmin = readAuthenticatedAdmin) => {
     open();
-    await identity.ensure();open();
+    if(!loadedOnly)await identity.ensure();open();
     const device = identity.snapshot();
     if (!UUID.test(device?.client_id || '') || !UUID.test(device?.device_id || '') ||
         !HEX.test(device?.key_fingerprint_sha256 || '') || device?.enrolled !== true) return null;
@@ -176,13 +190,24 @@ export function createHostOwnerGenesisCustodyW74({
     if (!sameEvidence(x,after)) return null;
     // Activation expectations arrive only through the private READ-only phase.
     // Compare fresh signed package evidence before Host can release/activate SQL.
-    if(tx.activation){
-      const artifact=tx.activation.artifact;
+    if(tx.activation||tx.runOwner){
+      const artifact=(tx.activation||tx.runOwner).artifact;
       if(record.source_sha!==artifact.source_sha||x.source.source_sha!==artifact.source_sha
         ||record.pending_custody.installed_exe_sha256!==artifact.installed_exe_sha256
         ||x.source.installed_exe_sha256!==artifact.installed_exe_sha256
         ||x.source.installed_asar_sha256!==artifact.installed_asar_sha256
         ||after.source.installed_asar_sha256!==artifact.installed_asar_sha256)return null;
+    }
+    if(loadedOnly){
+      const current=await readSealed();open();
+      if(sealedOwnerDigestW74(current)!==sealedOwnerDigestW74(record))return null;
+      const evidence=Object.freeze({schema:'metaengine.host.run-owner-read-evidence.v1',
+        sealed_record:structuredClone(record),sealed_sha256:sealedOwnerDigestW74(record),
+        observed_at:new Date(now()).toISOString(),source:{
+          source_sha:after.source.source_sha,installed_exe_sha256:after.source.installed_exe_sha256,
+          package_code_sha256:after.source.package_code_sha256,proof_identity:after.source.proof_identity,
+          loaded_runtime_code_attested:false,production_qualified:false},authority_effect:false});
+      await tx.verifyOwnerRecord(evidence);tx.assertOpen();open();return evidence;
     }
     await tx.verifyTransition({sealed_sha256:sealedOwnerDigestW74(record)});
     tx.assertOpen();open();
@@ -207,6 +232,7 @@ export function createHostOwnerGenesisCustodyW74({
   });
   const create = () => serialized(async () => {
     try {
+      if(loadedOnly)throw Error('w74_read_only');
       let x = withOwnerScope ? null : await check();
       if (!withOwnerScope && !x) return null;
       // PostgreSQL serializes generation transitions against another Host

@@ -9,7 +9,7 @@ async function fixture(t,options={}){
  const binding={run_id:randomUUID(),workspace_id:randomUUID(),project_id:randomUUID(),task_id:randomUUID(),lease_generation:1,
   agent_id:'agent_callback-fixture123',agent_generation_epoch:1,provider_id:randomUUID(),role:'IMPLEMENTER'};
  const job={job_id:randomUUID(),pid:123,process_incarnation_id:'pid:123:created_100ns:134371917225776174',executable_sha256:'a'.repeat(64)};
- const broker=await exports.createNativeCodingAgentMcpBroker({endpoint:'/fixture/in-memory-only',timeoutMs:50,
+ const broker=await exports.createNativeCodingAgentMcpBroker({endpoint:process.platform==='win32'?String.raw`\\.\pipe\METAENGINE-NativeMcp-${randomUUID()}`:'/fixture/in-memory-only',timeoutMs:50,
   operations:{project_overview:async()=>({read:true}),agent_send_message:async()=>({stored:true})},assertInvocationAuthorized:async()=>{},...options});
  const registration=broker.issueRun({binding,jobBinding:job,expiresAt:Date.now()+60000,allowedTools:['project_overview','agent_send_message']});
  const client=await exports.connectNativeCodingAgentMcpBroker(registration);t.after(async()=>{client.close();await broker.close();});

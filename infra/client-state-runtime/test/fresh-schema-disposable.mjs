@@ -1,3 +1,4 @@
+import {attestNativeMigrationApiIdentity} from '../native-coding-migration-api-identity.mjs';
 // TEST SUPPORT ONLY. Factories own and destroy each new disposable cluster.
 // Exact historical sources contain COMMIT: whole-baseline rollback is NOT possible.
 // Not an installer or an activation producer.
@@ -110,7 +111,7 @@ async function qualifyDisposableFreshSchema({ sql, engine } = {}) {
 }
 
 
-async function qualifyAtomicFreshSchema({sql,engine,beforeApiProvision = null,stage = async (_name,action) => action()}) {
+async function qualifyAtomicFreshSchema({sql,engine,beforeApiProvision = null,withAuthenticatedApi = null,stage = async (_name,action) => action()}) {
   const plan=await stage('SCHEMA_LOAD',() => loadFreshSchemaApplicationPlan());
   const [version]=await sql.unsafe("select current_setting('server_version_num')::int as value");
   assert.equal(Math.floor(Number(version.value)/10000),engine==='NATIVE_PG17'?17:18);
@@ -143,14 +144,26 @@ async function qualifyAtomicFreshSchema({sql,engine,beforeApiProvision = null,st
   }
   const catalog=await stage('COMMIT',() => sql.begin(tx=>apply(tx)));
   await assert.rejects(sql.begin(tx=>apply(tx)),/refuse partial/);
-  const repeat=await stage('REPEAT_UPGRADES',() => applyLocalRuntimeMigrations({sql,expectedMigrationSourcesSha256:plan.upgrade_sources_sha256}));
-  assert(repeat.migrations.every(row=>row.status==='ALREADY_PRESENT_NOT_MODIFIED'));
+  // The canonical pre-provision schema is the exact restricted OWNER_ONLY profile.
+  const ownerOnlyRepeat=await stage('REPEAT_UPGRADES',()=>applyLocalRuntimeMigrations({sql,expectedMigrationSourcesSha256:plan.upgrade_sources_sha256}));
+  assert(ownerOnlyRepeat.migrations.every(row=>row.status==='ALREADY_PRESENT_NOT_MODIFIED'));
   // Internal export hook: the canonical owner transaction is committed, repeat
   // upgrades are attested, and no temporary direct API role/ACL exists yet.
   if (beforeApiProvision) await beforeApiProvision({sql,plan,catalog});
   return stage('API_PROBES',async () => {
   const [identity]=await sql.unsafe('select current_database() as database,session_user::text as login');
-  await provisionLocalApiLogin({sql,databaseName:identity.database,login:'atomic_fresh_api',password:randomBytes(32).toString('hex'),roleMode:'direct'});
+  const apiPassword=randomBytes(32).toString('hex');
+  await provisionLocalApiLogin({sql,databaseName:identity.database,login:'atomic_fresh_api',password:apiPassword,roleMode:'direct'});
+  // Native factory opens a separate real SCRAM login; SET ROLE is not authentication.
+  if(engine==='NATIVE_PG17'){
+    assert.equal(typeof withAuthenticatedApi,'function');
+    await withAuthenticatedApi('atomic_fresh_api',apiPassword,async apiSql=>{
+      await inspectAttachedApiAdmission({sql:apiSql,apiLogin:'atomic_fresh_api'});
+      const authenticatedApiIdentity=await attestNativeMigrationApiIdentity({apiSql,ownerSql:sql,apiLogin:'atomic_fresh_api'});
+      const repeat=await stage('REPEAT_UPGRADES',()=>applyLocalRuntimeMigrations({sql,expectedMigrationSourcesSha256:plan.upgrade_sources_sha256,authenticatedApiIdentity}));
+      assert(repeat.migrations.every(row=>row.status==='ALREADY_PRESENT_NOT_MODIFIED'));
+    });
+  }
   const admission=await sql.begin(async tx=>{
     await tx.unsafe('set local role atomic_fresh_api');
     return inspectAttachedApiAdmission({sql:tx,apiLogin:'atomic_fresh_api',expectedSessionLogin:identity.login});
@@ -364,6 +377,22 @@ async function runFreshSchemaNative({ bin, driver, base = os.tmpdir(), applicati
       await stage('ARCHIVE_CHECK',() => archiveOperation.assertArchive());
       archiveEvidence = await inspect(plan);
       await runEmptySchemaStage('ROUNDTRIP_COMPARE',() => assertEmptySchemaRoundtrip(archiveOperation.sourceEvidence,archiveEvidence));
+      // Qualify the actual NEW attached-onboarding SQL order on this restored,
+      // verified OWNER_ONLY schema. No installed Windows/ACL authority is claimed.
+      const restoredApiPassword=randomBytes(32).toString('hex');
+      await stage('API_PROBES',()=>wrap(reserved).begin(async tx=>{
+        const transaction={unsafe:tx.unsafe.bind(tx),begin:fn=>fn(tx)};
+        const upgrades=await applyLocalRuntimeMigrations({sql:transaction,expectedMigrationSourcesSha256:plan.upgrade_sources_sha256});
+        assert(upgrades.migrations.every(row=>row.status==='ALREADY_PRESENT_NOT_MODIFIED'));
+        await provisionLocalApiLogin({sql:transaction,databaseName:'postgres',login:'restored_new_api',password:restoredApiPassword,roleMode:'direct'});
+        await tx.unsafe('set local role restored_new_api');
+        await inspectAttachedApiAdmission({sql:tx,apiLogin:'restored_new_api',expectedSessionLogin:'state_owner'});
+        await tx.unsafe('reset role');
+      }));
+      const postgres=(await import(pathToFileURL(driver))).default;
+      const restoredApi=postgres({host:'127.0.0.1',port,user:'restored_new_api',password:restoredApiPassword,database:'postgres',max:1,onnotice:()=>{},connect_timeout:5});
+      try{await inspectAttachedApiAdmission({sql:restoredApi,apiLogin:'restored_new_api'});}
+      finally{await restoredApi.end({timeout:5});}
       receipt = {classification:'NATIVE_PG17',status:'CANONICAL_EMPTY_SCHEMA_RESTORE_CHECKS_PASSED',production_qualified:false};
     } else {
       const beforeApiProvision = archiveOperation ? async ({sql:ownedSql,plan}) => {
@@ -384,7 +413,12 @@ async function runFreshSchemaNative({ bin, driver, base = os.tmpdir(), applicati
           post_upgrade_acl_sha256:plan.post_upgrade_acl_sha256};
       } : null;
       receipt=await (applicationMode==='ATOMIC_SLICE'?qualifyAtomicFreshSchema:qualifyDisposableFreshSchema)({
-        sql:wrap(reserved),engine:'NATIVE_PG17',beforeApiProvision,stage});
+        sql:wrap(reserved),engine:'NATIVE_PG17',beforeApiProvision,stage,
+        withAuthenticatedApi:async(login,apiPassword,action)=>{
+          const postgres=(await import(pathToFileURL(driver))).default;
+          const api=postgres({host:'127.0.0.1',port,user:login,password:apiPassword,database:'postgres',max:1,onnotice:()=>{},connect_timeout:5});
+          try{return await action(api);}finally{await api.end({timeout:5});}
+        }});
     }
     let exerciseResult=null;
     if(exercise) {

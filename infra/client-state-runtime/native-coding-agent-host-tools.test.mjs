@@ -33,7 +33,7 @@ function fixture(){
     assert.equal(includeSandbox,false);assert.deepEqual(permit,p);nativeReads++;return structuredClone(native);},
     readNativeWorker:async()=>{workerReads++;return structuredClone(worker);}});
   const request=(operation='CHECK',args={})=>({binding:structuredClone(binding),job_binding:structuredClone(job_binding),operation,args});
-  return {f,w,p,j,native,worker,context,queries,tools,request,setHook:x=>hook=x,setRole:x=>role=x,
+  return {f,w,p,j,native,worker,context,queries,tools,sql,request,setHook:x=>hook=x,setRole:x=>role=x,
     get committed(){return committed;},get nativeReads(){return nativeReads;},get workerReads(){return workerReads;}};
 }
 test('current protected canonical job, exact ledger scope and independent native reads qualify every tool',async()=>{
@@ -98,3 +98,18 @@ test('strict request schema rejects arrays, invalid UUID/PID mismatch, identitie
   await assert.rejects(x.tools.invoke(x.request('agent_ack_message',{request_id:randomUUID(),message_seq:0})));
   x.tools.close();
  });
+
+test('private transaction entry cannot open another transaction and preserves fixed SQL contract',async()=>{
+  const x=fixture();x.sql.begin=()=>{throw Error('nested_transaction_forbidden');};
+  assert.equal((await x.tools.invokeInTransaction(x.sql,x.request())).authorized,true);
+  assert(x.queries.some(({q})=>q==='set local synchronous_commit=on'));
+  const bad=x.request();bad.operation='ARBITRARY_SQL';
+  await assert.rejects(x.tools.invokeInTransaction(x.sql,bad));
+  x.setRole('service_role');await assert.rejects(x.tools.invokeInTransaction(x.sql,x.request()),/state_owner_required/);
+});
+test('private transaction entry checks cancelled or expired original context before any query',async()=>{
+  for(const context of [{signal:AbortSignal.abort()},{deadlineAt:Date.now()-1}]){
+    const x=fixture();await assert.rejects(x.tools.invokeInTransaction(x.sql,x.request(),context),/cancelled|deadline/);
+    assert.equal(x.queries.length,0);
+  }
+});

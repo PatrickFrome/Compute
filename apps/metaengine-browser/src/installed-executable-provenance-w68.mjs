@@ -53,6 +53,14 @@ async function readFixedRegularFile(file, base, io, maxBytes = 2_000_000) {
   return { bytes, stat: after };
 }
 
+async function joinedReads(readers) {
+  // A refused proof is not a cleanup witness until every started sidecar read
+  // has joined. Preserve the original validation/failure outcome afterwards.
+  const results=await Promise.allSettled(readers.map(read=>Promise.resolve().then(read)));
+  const failed=results.find(result=>result.status==='rejected');if(failed)throw failed.reason;
+  return results.map(result=>result.value);
+}
+
 async function verifyCore({ executable, version, trustRoot, nativeRead, io, staging }) {
   try {
     if (!clean(version, VERSION) || !trustRoot || !clean(trustRoot.build_sha, SHA40)) return null;
@@ -73,8 +81,8 @@ async function verifyCore({ executable, version, trustRoot, nativeRead, io, stag
     if (!first || first.native_signature_verified !== true || first.exact_bytes_verified !== true ||
         !clean(first.installed_exe_sha256, SHA256) ||
         !clean(first.signer_thumbprint, THUMBPRINT)) return null;
-    const [envelopeFile, bundleFile, evidenceFile, packageCodeFile] = await Promise.all(
-      Object.values(NAMES).map(name => readFixedRegularFile(path.join(base, name), base, io,
+    const [envelopeFile, bundleFile, evidenceFile, packageCodeFile] = await joinedReads(
+      Object.values(NAMES).map(name => () => readFixedRegularFile(path.join(base, name), base, io,
         name === NAMES.packageCode ? PACKAGE_CODE_MAX_MANIFEST_BYTES_W68 : 2_000_000))
     );
     if (!envelopeFile || !bundleFile || !evidenceFile || !packageCodeFile) return null;
@@ -122,7 +130,7 @@ async function verifyCore({ executable, version, trustRoot, nativeRead, io, stag
     const second = await nativeRead(exe);
     const exeAfter = await io.lstat(exe);
     const afterDir = await io.lstat(base);
-    const sidecarsAfter = await Promise.all(Object.values(NAMES).map(name => io.lstat(path.join(base, name))));
+    const sidecarsAfter = await joinedReads(Object.values(NAMES).map(name => () => io.lstat(path.join(base, name))));
     if (!sidecarsAfter.every((stat, index) => sameStat([envelopeFile, bundleFile, evidenceFile, packageCodeFile][index].stat, stat))) return null;
     if (!second || second.native_signature_verified !== true || second.exact_bytes_verified !== true ||
         second.installed_exe_sha256 !== first.installed_exe_sha256 ||
