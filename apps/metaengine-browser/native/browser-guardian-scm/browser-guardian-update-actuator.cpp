@@ -869,7 +869,8 @@ GuardianUpdateActuatorResult launchInstaller(
     const std::wstring& executable,
     HANDLE userToken,
     DWORD sessionId,
-    const std::wstring& expectedOwnerSid) {
+    const std::wstring& expectedOwnerSid,
+    const GuardianEffectAdmission& admission) {
     if (!userToken || userToken == INVALID_HANDLE_VALUE) return baseResult("NO_EFFECT_PROVEN", "USER_TOKEN_INVALID", ERROR_INVALID_HANDLE);
     ScopedEnvironment environment;
     if (!CreateEnvironmentBlock(environment.out(), userToken, FALSE)) {
@@ -884,6 +885,7 @@ GuardianUpdateActuatorResult launchInstaller(
     PROCESS_INFORMATION processInfo{};
     const std::wstring currentDirectory = executable.substr(0, executable.find_last_of(L"\\/"));
     const DWORD flags = CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | CREATE_NEW_PROCESS_GROUP;
+    if (!admission.admit()) return baseResult("NO_EFFECT_PROVEN", "SERVICE_STOP_BEFORE_INSTALLER_CREATE", ERROR_OPERATION_ABORTED);
     if (!CreateProcessAsUserW(
             userToken,
             executable.c_str(),
@@ -943,6 +945,10 @@ GuardianUpdateActuatorResult launchInstaller(
     if (!ownerExact) {
         return baseResult(terminateNeverResumed(process.get()) ? "NO_EFFECT_PROVEN" : "AMBIGUOUS",
             "INSTALLER_OWNER_SID_MISMATCH", ERROR_INVALID_OWNER);
+    }
+    if (!admission.admit()) {
+        return baseResult(terminateNeverResumed(process.get()) ? "NO_EFFECT_PROVEN" : "AMBIGUOUS",
+            "SERVICE_STOP_BEFORE_INSTALLER_RESUME", ERROR_OPERATION_ABORTED);
     }
     if (ResumeThread(thread.get()) == static_cast<DWORD>(-1)) {
         const DWORD error = GetLastError();
@@ -1048,7 +1054,12 @@ GuardianUpdateActuatorResult observeEffect(
 GuardianUpdateActuatorResult handleGuardianUpdateActuatorRequest(
     const std::string& wireRequest,
     const OwnerEnrollmentObservation& client,
-    const OwnerEnrollmentStoreResult& owner) {
+    const OwnerEnrollmentStoreResult& owner,
+    const GuardianEffectAdmission* admission) {
+    // This is not a claim that historical effects are absent. A stopped/new
+    // request cannot erase or reopen any existing durable effect barrier.
+    const auto stopped = [] { return baseResult("AMBIGUOUS", "SERVICE_EFFECT_ADMISSION_CLOSED", ERROR_OPERATION_ABORTED); };
+    if (admission == nullptr || !admission->admit()) return stopped();
     ProbeRequest probe;
     if (parseProbe(wireRequest, &probe)) {
         if (!clientTransportExact(client)) {
@@ -1092,6 +1103,7 @@ GuardianUpdateActuatorResult handleGuardianUpdateActuatorRequest(
         if (ownerSid.empty() || ownerSidSha256.empty()) {
             return baseResult("NO_EFFECT_PROVEN", "OWNER_ENROLLMENT_SID_INVALID", ERROR_ACCESS_DENIED);
         }
+        if (!admission->admit()) return stopped();
         const GuardianEnrollmentTicketRedemption redemption =
             redeemBrowserGuardianEnrollmentTicket(probe.enrollment_ticket, fingerprint, ownerSidSha256);
         if (redemption.reason == "LOCAL_OWNER_BRIDGE_REQUIRED" && !redemption.accepted
@@ -1118,6 +1130,7 @@ GuardianUpdateActuatorResult handleGuardianUpdateActuatorRequest(
         }
 
         const OwnerEnrollmentStore store(browserGuardianOwnerEnrollmentStoreDefaultRoot());
+        if (!admission->admit()) return stopped();
         const OwnerEnrollmentStoreResult effect = store.createIfAbsent(candidate);
         const OwnerEnrollmentStoreResult readback = store.read();
         const OwnerEnrollmentReconcileResult reconciled = reconcileOwnerEnrollmentReadback(readback, candidate);
@@ -1160,7 +1173,12 @@ GuardianUpdateActuatorResult handleGuardianUpdateActuatorRequest(
     if (localAppData.empty()) return baseResult("NO_EFFECT_PROVEN", "OWNER_LOCALAPPDATA_UNAVAILABLE", GetLastError());
     const std::wstring machineRoot = browserGuardianOwnerEnrollmentStoreDefaultRoot();
     if (machineRoot.empty() || !directoryExact(machineRoot)) return baseResult("NO_EFFECT_PROVEN", "GUARDIAN_MACHINE_ROOT_UNAVAILABLE", ERROR_PATH_NOT_FOUND);
-    if (!createSecureDirectory(join(machineRoot, kCandidateDir)) || !createSecureDirectory(join(machineRoot, kEffectsDir))) {
+    if (!admission->admit()) return stopped();
+    if (!createSecureDirectory(join(machineRoot, kCandidateDir))) {
+        return baseResult("NO_EFFECT_PROVEN", "GUARDIAN_UPDATE_STATE_ROOT_UNAVAILABLE", ERROR_PATH_NOT_FOUND);
+    }
+    if (!admission->admit()) return stopped();
+    if (!createSecureDirectory(join(machineRoot, kEffectsDir))) {
         return baseResult("NO_EFFECT_PROVEN", "GUARDIAN_UPDATE_STATE_ROOT_UNAVAILABLE", GetLastError());
     }
 
@@ -1169,6 +1187,7 @@ GuardianUpdateActuatorResult handleGuardianUpdateActuatorRequest(
     const std::wstring intakeInstaller = join(intakeDir, kCandidateName);
     const std::wstring intakeManifest = join(intakeDir, kManifestName);
     const std::wstring candidateDir = join(join(machineRoot, kCandidateDir), digestDir);
+    if (!admission->admit()) return stopped();
     if (!createSecureDirectory(candidateDir)) return baseResult("NO_EFFECT_PROVEN", "CANDIDATE_MACHINE_SLOT_UNAVAILABLE", GetLastError());
     const std::wstring stagedInstaller = join(candidateDir, kCandidateName);
     const std::wstring effectPath = effectRecordPath(machineRoot, request.effect_id);
@@ -1187,6 +1206,7 @@ GuardianUpdateActuatorResult handleGuardianUpdateActuatorRequest(
         attachOwnerProof(&out, client, owner);
         return out;
     }
+    if (!admission->admit()) return stopped();
     if (!copyExactCandidate(intakeInstaller, stagedInstaller, request.installer_sha256)) {
         GuardianUpdateActuatorResult out = baseResult("NO_EFFECT_PROVEN", "MACHINE_CANDIDATE_STAGING_UNPROVEN");
         out.effect_absent_proven = true;
@@ -1195,6 +1215,7 @@ GuardianUpdateActuatorResult handleGuardianUpdateActuatorRequest(
     }
 
     EffectReadback barrier;
+    if (!admission->admit()) return stopped();
     if (!createEffectBarrier(effectPath, request, &barrier)) {
         if (barrier.exists && barrier.exact && barrier.state == "DISPATCHED") {
             GuardianUpdateActuatorResult out = baseResult("DISPATCHED", "EXACT_PRIOR_NATIVE_DISPATCH_READBACK");
@@ -1224,7 +1245,7 @@ GuardianUpdateActuatorResult handleGuardianUpdateActuatorRequest(
         stagedInstaller,
         userToken.get(),
         client.session_id,
-        owner.record.expected_owner_sid);
+        owner.record.expected_owner_sid, *admission);
     attachOwnerProof(&launch, client, owner);
     if (launch.state == "NO_EFFECT_PROVEN") {
         launch.effect_absent_proven = true;

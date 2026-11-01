@@ -8,6 +8,7 @@
 
 #include "browser-guardian-owner-enrollment-observer.hpp"
 #include "browser-guardian-owner-enrollment-store.hpp"
+#include "browser-guardian-effect-admission.hpp"
 
 namespace metaengine::guardian {
 
@@ -42,11 +43,13 @@ struct GuardianUpdateActuatorResult {
 // impersonated named-pipe token and `owner` from the machine-secure durable owner
 // store. The wire request cannot provide a path, URL, shell string, owner SID or
 // session id. Those values are derived locally and all effectful execution is
-// fenced by the native write-ahead effect record.
+// fenced by the native write-ahead effect record. Missing original service
+// admission context refuses effects; a caller boolean cannot replace it.
 GuardianUpdateActuatorResult handleGuardianUpdateActuatorRequest(
     const std::string& wire_request,
     const OwnerEnrollmentObservation& client,
-    const OwnerEnrollmentStoreResult& owner);
+    const OwnerEnrollmentStoreResult& owner,
+    const GuardianEffectAdmission* admission = nullptr);
 
 std::string serializeGuardianUpdateActuatorResult(const GuardianUpdateActuatorResult& result);
 
