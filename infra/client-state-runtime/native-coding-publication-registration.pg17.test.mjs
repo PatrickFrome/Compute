@@ -14,6 +14,14 @@ import {attestNativeMigrationApiIdentity,bindNativeMigrationApiIdentity} from '.
 
 const bin=process.env.METAENGINE_PG_TEST_BIN,driver=process.env.METAENGINE_PG_TEST_DRIVER;
 const migrations=new URL('../../supabase/migrations/',import.meta.url);
+function publicationRows(receipt){
+  const sources=['native-coding-callback-publication-v1.sql','native-coding-initial-anchor-task-fence-v1.sql'];
+  const indices=sources.map(source=>receipt.migrations.findIndex(row=>row.source===source));
+  assert.ok(indices[0]>=0&&indices[1]===indices[0]+1,'reviewed publication migrations must remain adjacent and ordered');
+  for(const source of sources)assert.equal(receipt.migrations.filter(row=>row.source===source).length,1);
+  return indices.map(index=>receipt.migrations[index]);
+}
+
 
 // Real SQL / casts / locks / transactions in a NEW disposable PG17 cluster.
 // Genuine existing provisioning/authentication on generated disposable identities.
@@ -63,8 +71,8 @@ test('registered publication schema fresh/attached/replay/rollback on disposable
       exists(select 1 from pg_attribute where attrelid='destruktion_meta.native_coding_execution_h205f22'::regclass and attname='callback_publication' and not attisdropped) as anchor,
       exists(select 1 from pg_constraint where conrelid='destruktion_meta.native_coding_execution_h205f22'::regclass and conname='native_execution_one_task_v1') as task_fence`))[0];
     await run('fresh registry applies both protections in reviewed order inside baseline transaction',async()=>{
-      assert.deepEqual(initialReceipt.migrations.slice(-2).map(x=>x.source),['native-coding-callback-publication-v1.sql','native-coding-initial-anchor-task-fence-v1.sql']);
-      assert(initialReceipt.migrations.slice(-2).every(x=>x.existing_bodies_attested&&x.status==='APPLIED_LOCAL_ONLY'));
+      assert.deepEqual(publicationRows(initialReceipt).map(x=>x.source),['native-coding-callback-publication-v1.sql','native-coding-initial-anchor-task-fence-v1.sql']);
+      assert(publicationRows(initialReceipt).every(x=>x.existing_bodies_attested&&x.status==='APPLIED_LOCAL_ONLY'));
       assert.deepEqual({...await schema()},{anchor:true,task_fence:true});
     });
     await sql.begin(tx=>tx.unsafe(plan.post_upgrade_acl_sql));
@@ -106,7 +114,7 @@ test('registered publication schema fresh/attached/replay/rollback on disposable
       const acl=async()=>(await sql.unsafe("select proacl::text as acl from pg_proc where oid='public.native_coding_execution_context_v1(uuid,text,uuid,bigint)'::regprocedure"))[0].acl;
       const before=await acl();const receipt=await apply(await attest());
       assert(receipt.migrations.every(x=>x.status==='ALREADY_PRESENT_NOT_MODIFIED'));assert.equal(await acl(),before);
-      assert(receipt.migrations.slice(-2).every(x=>x.existing_bodies_attested));
+      assert(publicationRows(receipt).every(x=>x.existing_bodies_attested));
     });
     await run('missing and fabricated API identities remain blocked',async()=>{
       await assert.rejects(apply(undefined),/function_requires_review/);await assert.rejects(apply({}),/identity_unattested/);
@@ -123,7 +131,7 @@ test('registered publication schema fresh/attached/replay/rollback on disposable
     await run('attached old direct-login schema upgrades atomically through actual registry',async()=>{
       const ticket=await attest();await sql.begin(async tx=>{
         await predecessor(tx);assert.deepEqual({...await schema(tx)},{anchor:false,task_fence:false});
-        const receipt=await apply(ticket,nested(tx));assert(receipt.migrations.slice(-2).every(x=>x.status==='APPLIED_LOCAL_ONLY'));
+        const receipt=await apply(ticket,nested(tx));assert(publicationRows(receipt).every(x=>x.status==='APPLIED_LOCAL_ONLY'));
         assert.deepEqual({...await schema(tx)},{anchor:true,task_fence:true});
       });
       await inspectAttachedApiAdmission({sql:api,apiLogin:'actual_registry_api'});

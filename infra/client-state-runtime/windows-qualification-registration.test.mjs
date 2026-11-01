@@ -1,4 +1,5 @@
 import test from 'node:test';
+import vm from 'node:vm';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {spawnSync} from 'node:child_process';
@@ -229,8 +230,9 @@ test('exact status bytes and substituted directory alias remain mandatory named 
   'committed status with intended U+FFFD cannot accept same-inode malformed UTF8 after lost rename acknowledgement',
   'distinct malformed UTF8 preimage bytes cannot authorize a status rename even when both decode to U+FFFD'])
   assert.ok(required.includes("'"+name+"',"),name+' must remain a required non-skipped case');
- // The sole existing counterfactual baseline skip is not broadened for aliases.
- assert.match(source,/skipped\.length!==1\|\|skipped\[0\]\.name!==baseline/);
+ // Only the counterfactual baseline and an impossible POSIX raw-byte filename case may skip; never Windows alias cases.
+ assert.match(source,/expectedSkipped=\[baseline,windowsNonApplicable\]/);
+ assert.match(source,/expectedSkipped\.some\(name=>skipped\.filter\(row=>row\.name===name\)\.length!==1\)/);
 });
 
 test('directory alias negative runs on Windows with a real disposable junction, not a platform skip',async()=>{
@@ -301,7 +303,8 @@ test('durable physical custody source and PG17 suites are mandatory Windows outc
  }
  assert.match(source,/assert\.equal\(process\.platform,'win32'\)/);
  assert.match(source,/counts\.skipped!==0\|\|skipped\.length/);
- assert.match(source,/skipped\.length!==1\|\|skipped\[0\]\.name!==baseline/);
+ assert.match(source,/expectedSkipped=\[baseline,windowsNonApplicable\]/);
+ assert.match(source,/expectedSkipped\.some\(name=>skipped\.filter\(row=>row\.name===name\)\.length!==1\)/);
  assert.match(source,/scope:'SOURCE_COMPONENT_AND_DISPOSABLE_PG17_FIXTURES'/);
  assert.match(source,/installed_autonomy_proven:false,production_qualified:false/);
 });
@@ -318,4 +321,20 @@ test('physical custody npm entrypoints require actual PG17 execution and cannot 
  const result=spawnSync(process.execPath,[fileURLToPath(new URL('./test/run-physical-custody-pg17.mjs',import.meta.url))],
   {env,encoding:'utf8',windowsHide:true,shell:false,timeout:5000});
  assert.equal(result.status,1);assert.equal(result.stdout,'');assert.equal(result.stderr.trim(),'physical_pg17_explicit_inputs_required');
+});
+
+
+test('actual Windows TAP gate rejects unknown or duplicate skips and never skips required/native cases',()=>{
+ const baseline='BASE reproduction: killed child after durable Git receipt leaves COMMITTED/PENDING and observer HOLD';
+ const windowsNonApplicable='physical Git proof rejects raw invalid UTF-8 POSIX filenames before and after content changes';
+ const start=source.indexOf('          function inspectTap('),end=source.indexOf('          // No source test',start);
+ assert.ok(start>=0&&end>start);
+ const inspect=vm.runInNewContext(source.slice(start,end)+';inspectTap',{baseline,windowsNonApplicable,publicName:v=>v,hash:()=> 'fixture'});
+ const tap=(names,required='required')=>['TAP version 13',...names.map((name,i)=>`ok ${i+1} - ${name} # SKIP`),
+  `ok ${names.length+1} - ${required}`,`1..${names.length+1}`,`# tests ${names.length+1}`,'# suites 0','# pass 1','# fail 0','# cancelled 0',`# skipped ${names.length}`,'# todo 0'].join('\n');
+ assert.equal(inspect(tap([baseline,windowsNonApplicable]),['required'],true).bad.length,0);
+ for(const names of [[baseline],[baseline,baseline],[baseline,'unknown'],[baseline,windowsNonApplicable,'unknown']])
+  assert.ok(inspect(tap(names),['required'],true).bad.includes('current_component_case_skipped'));
+ assert.ok(inspect(tap([baseline,windowsNonApplicable]),[windowsNonApplicable],true).bad.some(v=>v.startsWith('required_case_missing_')));
+ assert.ok(inspect(tap([baseline,windowsNonApplicable]),[],false).bad.includes('native_case_skipped'));
 });

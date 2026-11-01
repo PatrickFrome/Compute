@@ -14,6 +14,7 @@ import path from 'node:path';
 import net from 'node:net';
 import {spawn,execFileSync,fork} from 'node:child_process';
 import {configureManagedTaskProjectRepository,readManagedTaskProjectRepository} from '../../apps/metaengine-browser/src/managed-task-project-repository.mjs';
+import {protectOwnerOnlyWindowsDirectory} from '../../apps/metaengine-browser/src/private-windows-storage-acl.mjs';
 import {MANAGED_TASK_PROJECT_DIRECTORY_NAME} from '../../apps/metaengine-browser/src/managed-task-project-storage.mjs';
 import {readClientNativeSetupRoute} from '../../apps/metaengine-browser/src/client-native-setup-route.mjs';
 import {readClientGoalSubmissionMode} from '../../apps/metaengine-browser/src/client-native-coding-goal.mjs';
@@ -103,7 +104,7 @@ test('predescriptor setup uses actual current ADMIN/repository/PG authority with
     catch(error){workerError=error;throw error;}
    }});
    const git=args=>execFileSync('git',args,{cwd:f.repo,env,stdio:['ignore','pipe','pipe']});
-   git(['init','-q']);await fs.writeFile(path.join(f.repo,'original.txt'),'ADMIN preparation fixture\n');git(['add','original.txt']);
+   git(['init','-q']);git(['config','core.autocrlf','false']);await fs.writeFile(path.join(f.repo,'original.txt'),'ADMIN preparation fixture\n');git(['add','original.txt']);
    git(['-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-qm','source']);
    const observed=await readNativeCodingGitProof(f.repo,{env});
    const input={...await f.input(),preparation:{schema:'metaengine.native-coding.repository-preparation.v1',
@@ -142,7 +143,7 @@ test('predescriptor setup uses actual current ADMIN/repository/PG authority with
    const f=await fixture({physicalCustody});
    const env=Object.fromEntries(Object.entries(process.env).filter(([key])=>!/^GIT_/i.test(key)));
    const git=args=>execFileSync('git',args,{cwd:f.repo,env,stdio:['ignore','pipe','pipe']});
-   git(['init','-q']);await fs.writeFile(path.join(f.repo,'source.txt'),'combined disposable source\n');git(['add','source.txt']);
+   git(['init','-q']);git(['config','core.autocrlf','false']);await fs.writeFile(path.join(f.repo,'source.txt'),'combined disposable source\n');git(['add','source.txt']);
    git(['-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-qm','source']);
    const sourceProof=await readNativeCodingGitProof(f.repo,{env}),claim={coordination_workspace_id:f.workspace,task_id:randomUUID(),claim_id:1,
     point_id:'setup.materialization',claim_class:'MUTATING',base_sha:sourceProof.head,branch_name:'work/setup-'+randomUUID(),agent_id:'agent_'+randomUUID(),
@@ -352,7 +353,7 @@ test('predescriptor setup uses actual current ADMIN/repository/PG authority with
    let worker,originalScope,creates=0;const f=await fixture({runJob:scope=>worker(scope)});
    const env=Object.fromEntries(Object.entries(process.env).filter(([key])=>!/^GIT_/i.test(key)));
    const git=args=>execFileSync('git',args,{cwd:f.repo,env,stdio:['ignore','pipe','pipe']});
-   git(['init','-q']);await fs.writeFile(path.join(f.repo,'source.txt'),'disposable source\n');git(['add','source.txt']);
+   git(['init','-q']);git(['config','core.autocrlf','false']);await fs.writeFile(path.join(f.repo,'source.txt'),'disposable source\n');git(['add','source.txt']);
    git(['-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-qm','source']);
    const source=await readNativeCodingGitProof(f.repo,{env}),claim={coordination_workspace_id:f.workspace,task_id:randomUUID(),claim_id:1,
     point_id:'setup.materialization',claim_class:'MUTATING',base_sha:source.head,branch_name:'work/setup-'+randomUUID(),agent_id:'agent_'+randomUUID(),
@@ -591,7 +592,9 @@ process.send({test:'ready'});
   await t.test('BEGIN then removed protected repository config and missing descriptors stays HOLD, never silent Browser',async()=>{
    const f=await fixture();execFileSync('git',['init','--initial-branch=fixture',f.repo],{stdio:'ignore'});
    execFileSync('git',['-C',f.repo,'-c','user.name=Fixture','-c','user.email=fixture@example.invalid','-c','commit.gpgsign=false','commit','--allow-empty','-m','TEST fixture'],{stdio:'ignore'});
-   await fs.chmod(f.managedRoot,0o700);
+   // chmod does not provision a Windows owner-only DACL on this generated directory.
+   if(process.platform==='win32')assert.equal((await protectOwnerOnlyWindowsDirectory(f.managedRoot)).owner_dacl_verified,true);
+   else await fs.chmod(f.managedRoot,0o700);
    await configureManagedTaskProjectRepository({userDataPath:f.directory,repository:{schema:'metaengine.devos.managed-project-repository-config.v1',coordination_workspace_id:f.workspace,repo_id:'fixture:setup',repo_root:f.repo,managed_root:f.managedRoot}});
    const readNativeSetupRoute=async()=>readClientNativeSetupRoute({repository:await readManagedTaskProjectRepository({userDataPath:f.directory}),identity:f.identity,
     capability:{snapshot:()=>f.host,readNativeSetupRoute:packet=>f.service.operations.READ_NATIVE_SETUP_ROUTE_V1(packet)}});

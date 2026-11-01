@@ -572,7 +572,10 @@ jobs:
             'protected profile authorized before random UI goal joins real seed, Git commit and PG successor',
           ];
           const baseline='BASE reproduction: killed child after durable Git receipt leaves COMMITTED/PENDING and observer HOLD';
-          const publicNames=new Set([...componentRequired,...nativeRequired,baseline]);
+          // POSIX raw-byte filenames cannot exist on Windows. This exact N/A
+          // remains a SKIP, never a PASS; native Windows required cases cannot skip.
+          const windowsNonApplicable='physical Git proof rejects raw invalid UTF-8 POSIX filenames before and after content changes';
+          const publicNames=new Set([...componentRequired,...nativeRequired,baseline,windowsNonApplicable]);
           // Unknown test names are hashed: failure diagnostics, generated data,
           // absolute fixture paths, PG logs and private receipts never escape.
           const publicName=name=>publicNames.has(name)?name:'test-name-sha256-'+hash(name);
@@ -606,7 +609,11 @@ jobs:
             if(!counts.tests||!counts.pass||counts.fail!==0||counts.cancelled!==0||counts.todo!==0)bad.push('tests_not_successful');
             if(records.some(r=>r.status!=='ok'||r.directive==='TODO'))bad.push('failed_or_todo_case');
             const skipped=records.filter(r=>r.directive==='SKIP');
-            if(allowBaseline){if(counts.skipped!==1||skipped.length!==1||skipped[0].name!==baseline)bad.push('current_component_case_skipped');}
+            if(allowBaseline){
+              const expectedSkipped=[baseline,windowsNonApplicable];
+              if(counts.skipped!==expectedSkipped.length||skipped.length!==expectedSkipped.length
+                ||expectedSkipped.some(name=>skipped.filter(row=>row.name===name).length!==1))bad.push('current_component_case_skipped');
+            }
             else if(counts.skipped!==0||skipped.length)bad.push('native_case_skipped');
             for(const name of required)if(!records.some(r=>r.name===name&&r.status==='ok'&&!r.directive))bad.push('required_case_missing_'+hash(name).slice(0,16));
             return {tap:sanitized.join('\n')+'\n',counts,bad};
