@@ -27,10 +27,12 @@ test('consumer lookup requires the original materializer closure, not matching f
 async function fixture(t){
  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'setup-materializer-'))),repo=path.join(root,'repo'),managed=path.join(root,'managed');
  await fs.mkdir(repo);await fs.mkdir(managed);
- t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ // Windows cannot unlink an open SQLite file. Own teardown in one ordered join.
+ let journal=null;
+ t.after(async()=>{await journal?.close();await fs.rm(root,{recursive:true,force:true});});
  const env=Object.fromEntries(Object.entries(process.env).filter(([key])=>!/^GIT_/i.test(key)));
  const git=args=>exec('git',args,{cwd:repo,env});
- await git(['init','-q']);await fs.writeFile(path.join(repo,'source.txt'),'original\n');await git(['add','source.txt']);
+ await git(['init','-q']);await git(['config','core.autocrlf','false']);await fs.writeFile(path.join(repo,'source.txt'),'original\n');await git(['add','source.txt']);
  await git(['-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-qm','source']);
  const source=await readNativeCodingGitProof(repo,{env}),workspace=randomUUID(),operation=randomUUID();
  const actor={device_id:randomUUID(),client_id:randomUUID(),key_fingerprint_sha256:'1'.repeat(64),admin_grant_epoch:1};
@@ -44,8 +46,7 @@ async function fixture(t){
   observation:{workspace_id:workspace,repository:{repo_id:'fixture:setup',repo_root:repo,managed_root:managed}},signal:abort.signal,
   revalidate:async()=>{if(abort.signal.aborted)throw Error('fixture_cancelled');},
   assertJobResourcesDrained:()=>{if(!jobDrained)throw Error('fixture_original_job_not_drained');}};
- const journalFile=path.join(root,'effects.sqlite');let journal=createManagedTaskProjectSqliteJournal({filePath:journalFile});
- t.after(()=>journal.close());
+ const journalFile=path.join(root,'effects.sqlite');journal=createManagedTaskProjectSqliteJournal({filePath:journalFile});
  const executor=createShellFreeGitExecutor();let creates=0,ownerChecks=0;
  const deps={
   readAdmittedRequest:async()=>({request,source:{head:source.head,artifact_sha256:source.artifact_sha256}}),

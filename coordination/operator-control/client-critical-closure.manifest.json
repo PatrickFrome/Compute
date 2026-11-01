@@ -1281,7 +1281,7 @@
     "infra/client-state-runtime/native-coding-setup-job-drain.mjs": "4c935dc21addd937eba100b2b6574b9d3d1a8329",
     "infra/client-state-runtime/native-coding-setup-job-drain.test.mjs": "e14526083c0c5da580dc14e5379f66437d269026",
     "infra/client-state-runtime/native-coding-setup-materializer.mjs": "e250ebf460b7419fa305a420c541f42a8c2ce122",
-    "infra/client-state-runtime/native-coding-setup-materializer.test.mjs": "57a092d8d746b2275eccccb7b9d8759f7bd742b8",
+    "infra/client-state-runtime/native-coding-setup-materializer.test.mjs": "021eaafb130808878e29a786c56ec8e4a4b4f774",
     "infra/client-state-runtime/native-coding-setup-operation-v1.sql": "c1d6cca782c76abfc54e6b8fbd8b7c25a025e3dd",
     "infra/client-state-runtime/native-coding-setup-preparation-v1.sql": "32b586b45c7600bdfe958e267b2321ae030f22ba",
     "infra/client-state-runtime/native-coding-setup.pg17.test.mjs": "e56011c2ce9323d91b75c00355f3d6bf85037189",
