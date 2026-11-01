@@ -1,4 +1,4 @@
-import {populateFreshClientSchema} from './test/fresh-provider-private-loader.mjs';
+import {populateFreshClientSchema,cleanEnvironment} from './test/fresh-provider-private-loader.mjs';
 import test from 'node:test';
 import path from 'node:path';
 import os from 'node:os';
@@ -7,8 +7,50 @@ import {readFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {freshClientLayout,FRESH_CLIENT_INSTALL_ACTION,verifyFreshConnectionIdentity,provisionFreshClientProvider} from './fresh-client-provider.mjs';
 import {parseFreshClientArguments} from './fresh-client-provider-cli.mjs';
+import {ownedWindowsInitdbEnvironment} from '../../apps/metaengine-browser/src/owned-windows-runtime-environment.mjs';
 const digest='a'.repeat(64);
 const options={localAppData:path.join(os.tmpdir(),'private','local'),appData:path.join(os.tmpdir(),'private','roaming'),bundleDirectory:path.join(os.tmpdir(),'installed','runtime'),expectedBundleDigest:digest,ownerAction:FRESH_CLIENT_INSTALL_ACTION};
+
+const windowsBundle='C:\\Program Files\\METAENGINE\\resources\\client-state-runtime';
+const runtimePaths={sourceRoot:windowsBundle+'\\source',nodeExecutable:windowsBundle+'\\runtime\\node\\node.exe',
+  denoExecutable:windowsBundle+'\\runtime\\deno\\deno.exe',postgresBinDirectory:windowsBundle+'\\runtime\\postgresql\\bin'};
+const windowsContext={TEMP:'C:\\Users\\RUNNER~1\\AppData\\Local\\Temp',TMP:'C:\\Users\\Runner\\AppData\\Local\\Temp',
+  USERPROFILE:'C:\\Users\\Runner',APPDATA:'C:\\Users\\Runner\\AppData\\Roaming',LOCALAPPDATA:'C:\\Users\\Runner\\AppData\\Local'};
+test('fresh provider child discovery uses its bundled runtimes even when inherited tools are absent or hostile',()=>{
+  for(const source of [windowsContext,{...windowsContext,PATH:'D:\\preinstalled-pg;D:\\preinstalled-node',Path:'D:\\different',
+    NODE_OPTIONS:'--require fixture-private-token',NODE_PATH:'D:\\private-modules',PGPASSWORD:'fixture-private-password',
+    HTTP_PROXY:'fixture-private-proxy',PSModulePath:'D:\\private-modules',HOME:'D:\\unrelated-home'}]){
+    const actual=cleanEnvironment({paths:runtimePaths},source);
+    assert.equal(actual.PATH,[runtimePaths.postgresBinDirectory,path.win32.dirname(runtimePaths.nodeExecutable),
+      path.win32.dirname(runtimePaths.denoExecutable),'C:\\Windows\\System32'].join(';'));
+    assert.equal(actual.Path,undefined);assert.equal(actual.USERPROFILE,windowsContext.USERPROFILE);
+    assert.equal(actual.SystemRoot,'C:\\Windows');assert.equal(actual.SYSTEMROOT,'C:\\Windows');
+    assert.equal(actual.PSModulePath,'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules');
+    assert.doesNotMatch(JSON.stringify(actual),/fixture-private|preinstalled|unrelated-home/);
+  }
+});
+test('owned runtime environment never reads unapproved discovery and credential values or modifies its source',()=>{
+  const source={...windowsContext};
+  for(const key of ['PATH','Path','NODE_OPTIONS','NODE_PATH','PGPASSWORD','DATABASE_URL','HTTP_PROXY','PSModulePath','COMSPEC'])
+    Object.defineProperty(source,key,{enumerable:true,get(){throw Error('unapproved_environment_was_read');}});
+  const actual=cleanEnvironment({paths:runtimePaths},source);
+  assert.ok(Object.isFrozen(actual));assert.equal(actual.TEMP,windowsContext.TEMP);
+  assert.equal(source.USERPROFILE,windowsContext.USERPROFILE);
+  assert.deepEqual(ownedWindowsInitdbEnvironment(runtimePaths.postgresBinDirectory+'\\initdb.exe',source),actual);
+});
+test('owned runtime environment rejects escape, UNC, ambiguous PATH and foreign runtime locations',()=>{
+  for(const key of Object.keys(runtimePaths))for(const value of ['',null,'relative','C:relative',
+    '\\\\server\\share','\\\\?\\C:\\image','C:\\path;D:\\injected','C:\\path\nprivate',
+    'C:\\path\\..\\other','C:\\path\\NUL.txt','D:\\preinstalled\\runtime'])
+    assert.throws(()=>cleanEnvironment({paths:{...runtimePaths,[key]:value}},windowsContext),
+      {message:'owned_runtime_environment_paths_invalid'});
+  assert.throws(()=>cleanEnvironment({paths:runtimePaths},{...windowsContext,temp:'D:\\conflicting-temp'}),
+    {message:'windows_native_read_environment_context_invalid'});
+  for(const image of ['C:\\unrelated\\bin\\initdb.exe',runtimePaths.postgresBinDirectory+'\\postgres.exe',
+    runtimePaths.postgresBinDirectory+'\\initdb.exe;D:\\image'])
+    assert.throws(()=>ownedWindowsInitdbEnvironment(image,windowsContext),{message:'owned_runtime_environment_paths_invalid'});
+  assert.throws(()=>cleanEnvironment({},windowsContext),{message:'owned_runtime_environment_paths_invalid'});
+});
 
 test('fresh setup has fixed private paths and exact typed owner action, no endpoint or SQL input',()=>{
   const layout=freshClientLayout(options);

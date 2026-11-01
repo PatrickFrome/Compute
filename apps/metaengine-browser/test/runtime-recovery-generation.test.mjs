@@ -48,9 +48,15 @@ async function inertHost(t, healthFailure=failure()) {
   const config={schema:LOCAL_STATE_PROVIDER_CONFIG_SCHEMA,version:1,profile:LOCAL_STATE_PROVIDER_PROFILE,provider:'LOCAL_POSTGRES',
     base_url:endpoint,runtime_identity_file:status,authority_effect:false,
     runtime_host:{bundle_directory:bundle,config_file:configFile,expected_bundle_sha256:bundleHash}};
+  const verifiedPaths=process.platform==='win32'?{
+    nodeExecutable:path.join(bundle,'runtime','node','node.exe'),sourceRoot:path.join(bundle,'source'),hostEntry:hostFile,
+    denoExecutable:path.join(bundle,'runtime','deno','deno.exe'),postgresBinDirectory:path.join(bundle,'runtime','postgresql','bin'),
+  }:{nodeExecutable:process.execPath,hostEntry:hostFile,sourceRoot:bundle};
   const summary=await startConfiguredLocalRuntimeHost({config,env:{...process.env},startupTimeoutMs:30000,stopTimeoutMs:5000,
-    verifyBundleImpl:async()=>({paths:{nodeExecutable:process.execPath,hostEntry:hostFile,sourceRoot:bundle}}),
-    spawnImpl:(...args)=>{child=spawn(...args);return child;}});
+    verifyBundleImpl:async()=>({paths:verifiedPaths}),
+    spawnImpl:(image,args,options)=>{
+      child=spawn(image===verifiedPaths.nodeExecutable?process.execPath:image,args,{...options,cwd:bundle});return child;
+    }});
   return {summary,root,status,fail:()=>child.send({schema:'fixture.fail'})};
 }
 

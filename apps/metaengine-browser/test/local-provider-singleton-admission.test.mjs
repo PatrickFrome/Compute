@@ -120,8 +120,14 @@ async function addManagedHost(f, { mode = 'ready', descriptorInstance = currentI
   const config = JSON.parse(await fs.readFile(f.ownerFile, 'utf8'));
   config.runtime_host = { bundle_directory: bundleDirectory, expected_bundle_sha256: 'a'.repeat(64), config_file: configFile };
   await fs.writeFile(f.ownerFile, JSON.stringify(config));
-  return { evidenceFile, configFile, managedHost: { sourceRoot: bundleDirectory, hostEntry,
-    nodeExecutable: process.execPath, digest: 'a'.repeat(64), evidenceFile } };
+  const paths=process.platform==='win32'?{
+    sourceRoot:path.join(bundleDirectory,'source'),hostEntry,
+    nodeExecutable:path.join(bundleDirectory,'runtime','node','node.exe'),
+    denoExecutable:path.join(bundleDirectory,'runtime','deno','deno.exe'),
+    postgresBinDirectory:path.join(bundleDirectory,'runtime','postgresql','bin'),
+  }:{sourceRoot:bundleDirectory,hostEntry,nodeExecutable:process.execPath};
+  return { evidenceFile, configFile, managedHost: {...paths,bundleDirectory,
+    inertNodeExecutable:process.execPath,digest:'a'.repeat(64),evidenceFile} };
 }
 
 const event = (result, kind) => result.events.find(value => value[0] === kind);

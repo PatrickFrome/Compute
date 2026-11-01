@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { installedGitExecutable, installedGitEnvironment } from './packaged-native-tools.mjs';
 
 import { createWorkspaceReservation, recordWorkspaceMaterializationReadback } from './workspace-manager.mjs';
 import { planLockedWorkspaceMaterialization, planWorkspaceInventory, verifyWorkspaceInventory, parseWorktreePorcelainZ, samePhysicalWorkspacePath } from './workspace-git-hardening.mjs';
@@ -111,24 +112,28 @@ function gitInvocationArgv(plan) {
 }
 
 /** Execute only the fixed argv plans emitted by workspace-git-hardening. */
-export function createShellFreeGitExecutor({ timeoutMs = 120000, spawnProcess = spawn } = {}) {
+export function createShellFreeGitExecutor({ timeoutMs = 120000, spawnProcess = spawn, resolveExecutable = installedGitExecutable } = {}) {
   const boundedTimeout = Math.max(1000, Math.min(300000, Number(timeoutMs) || 120000));
   return Object.freeze({
     async execute(plan) {
       const argv = gitInvocationArgv(plan);
+      // Resolve the integrity-bound package before a process can be born. A
+      // missing own Git never selects another installation through PATH.
+      const executable = await resolveExecutable();
       return new Promise((resolve, reject) => {
         // The repository remains trusted: Git can execute its configured hooks.
         // On timeout/output overflow wait for close before returning a receipt.
         // Host roots are verified with Git overrides removed. Apply the same
         // environment fence to inventory and creation, or inherited GIT_DIR /
         // GIT_WORK_TREE could redirect the effect away from the admitted repo.
-        const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^GIT_/i.test(key)));
+        const env = Object.fromEntries(Object.entries(installedGitEnvironment(executable)).filter(([key]) => !/^GIT_/i.test(key)));
+        env.GIT_CONFIG_NOSYSTEM='1';env.GIT_CONFIG_GLOBAL=process.platform==='win32'?'NUL':'/dev/null';
         // Even observational Git must not update index locks or enable prompts.
         if (plan.effect.endsWith('_READ')) {
           env.GIT_OPTIONAL_LOCKS = '0'; env.GIT_TERMINAL_PROMPT = '0';
           env.GCM_INTERACTIVE = 'never'; env.GCM_GUI_PROMPT = '0';
         }
-        const child = spawnProcess('git', argv, { cwd: plan.cwd, shell: false, windowsHide: true, env });
+        const child = spawnProcess(executable, argv, { cwd: plan.cwd, shell: false, windowsHide: true, env });
         const out = []; const err = []; let bytes = 0; let timer; let failure = null;
         const stop = (reason) => { if (failure) return; failure = new Error(reason); child.kill(); };
         const collect = (target, chunk) => { bytes += chunk.length; if (bytes > 8 * 1024 * 1024) { stop('managed_project_git_output_too_large'); return; } target.push(chunk); };

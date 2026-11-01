@@ -15,6 +15,7 @@ globalThis.__freshConsentFixture=options;
 const data=source=>'data:text/javascript;base64,'+Buffer.from(source).toString('base64');
 const effect=name=>`export async function ${name}(){globalThis.__freshConsentTrace('unexpected-effect:${name}');throw Error('fixture_effect_forbidden');}`;
 const mocks=new Map([
+  [new URL('../../../apps/metaengine-browser/src/packaged-native-tools.mjs',import.meta.url).href,data(`export async function loadInstalledNativeTools(){globalThis.__freshConsentTrace('installed-tools-read');return {execution_ready:false,authority_effect:false};}`)],
   [new URL('offline-runtime-bundle.mjs',runtime).href,data(`export async function verifyOfflineRuntimeBundle(){globalThis.__freshConsentTrace('bundle-read');return {manifest:{bundle_sha256:globalThis.__freshConsentFixture.digest},paths:{}};}`)],
   [new URL('fresh-schema-application-plan.mjs',runtime).href,data(`export async function loadFreshSchemaApplicationPlan(){globalThis.__freshConsentTrace('schema-read');return {};}${effect('verifyFreshSchemaCatalogue')}`)],
   [new URL('fresh-provider-native-consent.mjs',runtime).href,data(`export async function confirmFreshProviderNativeConsent(){globalThis.__freshConsentTrace('native-consent-boundary');if(globalThis.__freshConsentFixture.mode!=='post-consent-identity')throw Error(globalThis.__freshConsentFixture.reason);}`)],

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { inspectClientFirstRun } from './first-run-preflight.mjs';
 import { verifyOfflineRuntimeBundle } from './offline-runtime-bundle.mjs';
 import { initializeLocalVaultKey } from './local-vault-key.mjs';
+import { ownedWindowsInitdbEnvironment } from '../../apps/metaengine-browser/src/owned-windows-runtime-environment.mjs';
 
 const runFile = promisify(execFile);
 const digest = /^[0-9a-f]{64}$/;
@@ -47,8 +48,8 @@ export async function runClientInitdb({
   executable, dataDirectory, passwordFile, stateDirectory, timeoutMs = 120000, databaseOwner = 'postgres',
 }) {
   const username = databaseOwnerName(databaseOwner);
-  const env = {};
-  for (const name of ['SystemRoot', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'PATH', 'HOME', 'USERPROFILE', 'LANG']) {
+  const env = process.platform === 'win32' ? ownedWindowsInitdbEnvironment(executable) : {};
+  if (process.platform !== 'win32') for (const name of ['SystemRoot', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'PATH', 'HOME', 'USERPROFILE', 'LANG']) {
     if (typeof process.env[name] === 'string') env[name] = process.env[name];
   }
   const args = ['-D', dataDirectory, `--username=${username}`, '--auth=scram-sha-256',

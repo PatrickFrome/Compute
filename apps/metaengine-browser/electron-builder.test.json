@@ -35,6 +35,11 @@
   "afterAllArtifactBuild": "./scripts/electron-builder-after-all-artifact-build.cjs",
   "extraResources": [
     {
+      "from": "native-dist/native-tools",
+      "to": "native-tools",
+      "filter": ["**/*"]
+    },
+    {
       "from": "src",
       "to": "native-coding/agent-mcp",
       "filter": ["native-coding-agent-mcp-entry.mjs", "native-coding-agent-mcp-broker.mjs", "native-coding-agent-mcp-stdio.mjs"]

@@ -56,6 +56,7 @@ test('convergence product head contains no temporary patch authority and package
 
   const builder = JSON.parse(await source('electron-builder.test.json'));
   assert.deepEqual(builder.extraResources, [
+    { from: 'native-dist/native-tools', to: 'native-tools', filter: ['**/*'] },
     { from: 'src', to: 'native-coding/agent-mcp',
       filter: ['native-coding-agent-mcp-entry.mjs', 'native-coding-agent-mcp-broker.mjs', 'native-coding-agent-mcp-stdio.mjs'] },
     { from: 'native-dist/codex-cli/codex-cli-job-runner.ps1', to: 'native-coding/codex-cli-job-runner.ps1' },

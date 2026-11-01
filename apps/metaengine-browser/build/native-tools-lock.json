@@ -1,0 +1,17 @@
+{
+  "schema": "metaengine.native-tools.source-lock.v1",
+  "codex": {
+    "version": "0.166.0",
+    "release_tag": "rust-v0.166.0",
+    "url": "https://github.com/openai/codex/releases/download/rust-v0.166.0/codex-package-x86_64-pc-windows-msvc.tar.gz",
+    "archive_sha256": "d559bb88e74d471265857b93b7f19bc250dae527673b9191b33534478093f6bc",
+    "archive_size": 202589789
+  },
+  "git": {
+    "version": "2.56.0.4",
+    "release_tag": "v2.56.0.windows.4",
+    "url": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.4/MinGit-2.56.0.4-64-bit.zip",
+    "archive_sha256": "e3bf78351fe777fba47ddee5950082f8a98bb0f02604fdc7ba3ee2cb68ffa877",
+    "archive_size": 39846926
+  }
+}

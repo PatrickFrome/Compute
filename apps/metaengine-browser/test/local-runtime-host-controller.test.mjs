@@ -79,14 +79,21 @@ async function fixture(t, { mode = 'ready', descriptorPatch = {}, holdExit = fal
     METAENGINE_LOCAL_STATE_INSTANCE_ID: instance, NODE_OPTIONS: '--fixture-loader-must-not-inherit',
     NODE_PATH: 'fixture-loader-path', LD_PRELOAD: 'fixture-preload',
     SUPABASE_SERVICE_ROLE_KEY: 'fixture-service-secret', GITHUB_TOKEN: 'fixture-github-secret', OPENAI_API_KEY: 'fixture-api-secret' };
+  const verifiedPaths=process.platform==='win32'?{
+    nodeExecutable:path.join(bundleDirectory,'runtime','node','node.exe'),sourceRoot:path.join(bundleDirectory,'source'),hostEntry:hostFile,
+    denoExecutable:path.join(bundleDirectory,'runtime','deno','deno.exe'),postgresBinDirectory:path.join(bundleDirectory,'runtime','postgresql','bin'),
+  }:{nodeExecutable:process.execPath,sourceRoot:bundleDirectory,hostEntry:hostFile};
   let verifications = 0;
   const verifyBundleImpl = async options => {
     verifications++;
     assert.deepEqual(options, { bundleDirectory, expectedBundleDigest: 'a'.repeat(64) });
-    return { paths: { nodeExecutable: process.execPath, sourceRoot: bundleDirectory, hostEntry: hostFile } };
+    return { paths: verifiedPaths };
   };
   const children = [];
   const spawnImpl = (...args) => {
+    // The verifier is inert. Preserve its complete Windows layout while
+    // executing only the fixture's own Node child in the disposable directory.
+    if(args[0]===verifiedPaths.nodeExecutable){args[0]=process.execPath;args[2]={...args[2],cwd:bundleDirectory};}
     const child = spawn(...args);
     const record = { child, exited: false, messages: [] };
     record.ended = new Promise(resolve => child.once('exit', (code, signal) => { record.exited = true; resolve({ code, signal }); }));
@@ -94,7 +101,7 @@ async function fixture(t, { mode = 'ready', descriptorPatch = {}, holdExit = fal
     children.push(record);
     return child;
   };
-  return { config, env, evidenceFile, verifyBundleImpl, spawnImpl, children, verifications: () => verifications };
+  return { config, env, evidenceFile, verifyBundleImpl, verifiedPaths, spawnImpl, children, verifications: () => verifications };
 }
 
 test('explicit managed host descriptor accepts only public pinned canonical resource/config locations', () => {
@@ -171,6 +178,42 @@ test('one verified external host starts from a private file, binds ready IPC and
   assert.equal(stopped.cleanup_confirmed, true);
 });
 
+test('Windows production spawn isolates bundled discovery while terminal IPC retains mutable parent lifecycle context',async t=>{
+  const f=await fixture(t);
+  const bundle='C:\\METAENGINE\\resources\\client-state-runtime';
+  const paths={sourceRoot:bundle+'\\source',hostEntry:bundle+'\\source\\infra\\client-state-runtime\\runtime-host.mjs',
+    nodeExecutable:bundle+'\\runtime\\node\\node.exe',denoExecutable:bundle+'\\runtime\\deno\\deno.exe',
+    postgresBinDirectory:bundle+'\\runtime\\postgresql\\bin'};
+  const inheritedPath='D:\\unrelated-pg;D:\\unrelated-node';
+  const env={PATH:inheritedPath,Path:'D:\\other-tools',NODE_OPTIONS:'--require fixture-private-token',
+    USERPROFILE:'C:\\Users\\Runner',TEMP:'C:\\Users\\Runner\\AppData\\Local\\Temp',
+    TMP:'C:\\Users\\Runner\\AppData\\Local\\Temp',SystemRoot:'C:\\Windows'};
+  let childEnvironment;
+  const descriptor=Object.getOwnPropertyDescriptor(process,'platform');
+  Object.defineProperty(process,'platform',{...descriptor,value:'win32'});
+  try {
+    await startConfiguredLocalRuntimeHost({...f,env,startupTimeoutMs:FIXTURE_START_TIMEOUT_MS,stopTimeoutMs:2000,
+      verifyBundleImpl:async options=>{await f.verifyBundleImpl(options);return {paths};},
+      spawnImpl:(image,args,options)=>{
+        assert.equal(image,paths.nodeExecutable);assert.deepEqual(args,[paths.hostEntry]);
+        childEnvironment=options.env;
+        // Full Windows layout is a verifier fixture. Launch only the existing
+        // inert Node child; no Windows payload or PostgreSQL runs in this test.
+        return f.spawnImpl(process.execPath,[path.join(f.config.runtime_host.bundle_directory,'runtime-host-fixture.mjs')],
+          {...options,cwd:f.config.runtime_host.bundle_directory});
+      }});
+  }finally{Object.defineProperty(process,'platform',descriptor);}
+  assert.equal(childEnvironment.PATH,[paths.postgresBinDirectory,path.win32.dirname(paths.nodeExecutable),
+    path.win32.dirname(paths.denoExecutable),'C:\\Windows\\System32'].join(';'));
+  assert.equal(childEnvironment.Path,undefined);assert.equal(childEnvironment.NODE_OPTIONS,undefined);
+  assert.equal(childEnvironment.PSModulePath,'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules');
+  assert.equal(env.PATH,inheritedPath,'parent process context is not rewritten');
+  assert.equal((await stopOwnedLocalRuntimeHost({timeoutMs:2000})).cleanup_confirmed,true);
+  assert.equal(env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE,'BLOCKED');
+  assert.equal(env.METAENGINE_LOCAL_PROVIDER_BOOT_REASON,'OWNED_RUNTIME_HOST_STOPPED');
+  assert.doesNotMatch(childEnvironment.PATH,/unrelated|other-tools/);
+});
+
 test('shutdown delays Electron quit until the owned host has acknowledged exit', async t => {
   const f = await fixture(t);
   await startConfiguredLocalRuntimeHost({ ...f, startupTimeoutMs: FIXTURE_START_TIMEOUT_MS, stopTimeoutMs: 2000 });
@@ -222,8 +265,10 @@ test('server failure and bounded readiness timeout do not expose private stderr 
 test('a nonexistent executable fails promptly without retaining an owned PID or leaking its path', async t => {
   const f = await fixture(t);
   await assert.rejects(startConfiguredLocalRuntimeHost({ ...f, startupTimeoutMs: FIXTURE_START_TIMEOUT_MS, stopTimeoutMs: 100,
-    verifyBundleImpl: async () => ({ paths: { nodeExecutable: path.join(path.dirname(f.evidenceFile), 'nonexistent-private-node.exe'),
-      sourceRoot: f.config.runtime_host.bundle_directory, hostEntry: 'fixture.mjs' } }),
+    verifyBundleImpl: async () => ({ paths: process.platform==='win32'?f.verifiedPaths:
+      { nodeExecutable: path.join(path.dirname(f.evidenceFile), 'nonexistent-private-node.exe'),
+        sourceRoot: f.config.runtime_host.bundle_directory, hostEntry: 'fixture.mjs' } }),
+    spawnImpl:spawn,
   }), error => error.message === 'local_runtime_host_spawn_failed');
   assert.equal((await stopOwnedLocalRuntimeHost({ timeoutMs: 100 })).state, 'NO_OWNED_HOST');
 });
