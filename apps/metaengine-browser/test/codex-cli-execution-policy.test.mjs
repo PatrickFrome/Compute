@@ -179,6 +179,29 @@ test('generated writer and critic projections validate as frozen deny-only data 
   }
 });
 
+test('no-login-shell bounds reject effective true and missing, duplicate or contradictory argv',()=>{
+  for(const role of ['IMPLEMENTER','CRITIC']){
+    const enabled=generatedWireFixture(role);
+    assert.doesNotThrow(()=>enabled.read());
+    enabled.packet.policy.effective.allow_login_shell=true;
+    assert.throws(()=>enabled.read(),/codex_cli_policy_effective_selection/);
+    for(const mutate of [
+      (args,index)=>{args.splice(index-1,2);},
+      (args,index)=>{args[index]='allow_login_shell=true';},
+      (args,index)=>{args[index]='allow_login_shell="false"';},
+      (args,index)=>{args.splice(index-1,0,'-c','allow_login_shell=true');},
+      args=>{args.splice(args.indexOf('exec'),0,'-c','allow_login_shell=true');},
+      args=>{args.splice(args.indexOf('exec'),0,'-c','allow_login_shell=false');},
+      args=>{args.splice(args.indexOf('exec')+1,0,'-c','allow_login_shell=true');}
+    ]){
+      const f=generatedWireFixture(role),args=f.context.args,index=args.indexOf('allow_login_shell=false');
+      assert(index>0);assert.equal(args[index-1],'-c');
+      mutate(args,index);
+      assert.throws(()=>f.read(),/codex_cli_policy_invocation_flags/);
+    }
+  }
+});
+
 test('policy input bindings reject absent, malformed, misplaced and duplicate producer flags',()=>{
   const f=generatedWireFixture();assert.doesNotThrow(()=>assertCodexCliPolicyBindings(f.context));
   for(const patch of [{inputProtocol:undefined},{policyNonce:'bad'},{promptSha256:'A'.repeat(64)},
@@ -265,6 +288,8 @@ test('fixed keysets, requirements generations and real nonempty requirements rem
   }
   for(const mutate of [
     p=>{p.policy.requirements.values.allowed_sandbox_modes=['read-only'];},
+    p=>{p.policy.requirements.values.allow_login_shell=true;},
+    p=>{p.policy.requirements.values.allow_login_shell=false;},
     p=>{p.policy.requirements.values['permissions.filesystem']={deny_read:['private']};},
     p=>{p.policy.requirements.values.experimental_network={enabled:true};},
     p=>{p.policy.requirements.sources.allow_login_shell={kind:'system_requirements',identity_generation:'sha256:'+'1'.repeat(64)};},
