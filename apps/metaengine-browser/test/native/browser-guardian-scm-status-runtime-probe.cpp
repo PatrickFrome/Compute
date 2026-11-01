@@ -100,12 +100,23 @@ DWORD WINAPI controlledWorker(LPVOID) {
     std::unique_lock<std::mutex> lock(mutex);
     workerEntered = true;
     changed.notify_all();
-    if (mode == "worker-join" || mode == "teardown") {
+    if (mode == "worker-join" || mode == "teardown" || mode == "worker-failure"
+        || mode == "worker-readback-failure" || mode == "worker-readback-zero") {
         if (!changed.wait_for(lock, 12s, [] { return releaseWorker; })) fail("worker_release_timeout");
     } else if (::WaitForSingleObject(stopHandle, 0) != WAIT_OBJECT_0) {
         fail("startup_stop_not_carried_to_event");
     }
-    return 0;
+    return mode == "worker-failure" ? ERROR_UNHANDLED_EXCEPTION : 0;
+}
+
+BOOL WINAPI readWorkerExit(HANDLE worker, LPDWORD exitCode) {
+    if (mode == "worker-readback-failure" || mode == "worker-readback-zero") {
+        // Named test-only API fault after actual worker completion. It does
+        // not fabricate a running worker's termination or child cleanup.
+        ::SetLastError(mode == "worker-readback-zero" ? NO_ERROR : ERROR_ACCESS_DENIED);
+        return FALSE;
+    }
+    return ::GetExitCodeThread(worker, exitCode);
 }
 
 HANDLE WINAPI createControlledWorker(LPSECURITY_ATTRIBUTES attributes, SIZE_T stackSize,
@@ -142,9 +153,11 @@ BOOL WINAPI closeOwnedHandle(HANDLE handle) {
 #define CreateEventW status_probe::createStopEvent
 #define CreateThread status_probe::createControlledWorker
 #define CloseHandle status_probe::closeOwnedHandle
+#define GetExitCodeThread status_probe::readWorkerExit
 #define wmain guardianServiceEntryForStatusProbe
 #include "../../native/browser-guardian-scm/browser-guardian-scm-service.cpp"
 #undef wmain
+#undef GetExitCodeThread
 #undef CloseHandle
 #undef CreateThread
 #undef CreateEventW
@@ -245,7 +258,8 @@ void runLifecycle() {
             releaseEventCreation = true;
             changed.notify_all();
         }
-    } else if (mode == "worker-join" || mode == "teardown") {
+    } else if (mode == "worker-join" || mode == "teardown" || mode == "worker-failure"
+        || mode == "worker-readback-failure" || mode == "worker-readback-zero") {
         {
             std::unique_lock<std::mutex> lock(mutex);
             if (!changed.wait_for(lock, 5s, [] { return workerEntered && !trace.empty()
@@ -312,6 +326,11 @@ void runLifecycle() {
     }
     if (!stopping || stoppedCount != 1 || !workerClosed || !stopClosed) fail("lifecycle_terminal_proof_missing");
     if (g_stop_event != nullptr || g_worker_thread != nullptr) fail("closed_handle_still_published");
+    const DWORD expectedError = mode == "worker-failure" ? ERROR_UNHANDLED_EXCEPTION
+        : mode == "worker-readback-failure" ? ERROR_ACCESS_DENIED
+        : mode == "worker-readback-zero" ? ERROR_GEN_FAILURE : NO_ERROR;
+    if (trace.back().dwCurrentState != SERVICE_STOPPED
+        || trace.back().dwWin32ExitCode != expectedError) fail("worker_terminal_error_not_preserved");
 }
 #endif
 }
@@ -322,7 +341,8 @@ int main(int argc, char** argv) {
     if (mode == "status") runStatusOrdering();
     else if (mode == "checkpoint") runCheckpoint();
 #if !defined(GUARDIAN_STATUS_PORTABLE)
-    else if (mode == "before-start" || mode == "start-pending" || mode == "worker-join" || mode == "teardown") runLifecycle();
+    else if (mode == "before-start" || mode == "start-pending" || mode == "worker-join" || mode == "teardown"
+        || mode == "worker-failure" || mode == "worker-readback-failure" || mode == "worker-readback-zero") runLifecycle();
 #endif
     else fail("unknown_probe_case");
     std::cout << "{\"schema\":\"metaengine.browser-guardian.scm-status-runtime-proof.v1\",\"ok\":true,\"case\":\"" << mode

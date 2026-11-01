@@ -90,7 +90,7 @@ if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'guardian_io_prob
 if ($Probe -eq 'Status') {
   $exitCode = 0
   $caseProofs = @()
-  foreach ($caseName in @('status', 'checkpoint', 'before-start', 'start-pending', 'worker-join', 'teardown')) {
+  foreach ($caseName in @('status', 'checkpoint', 'before-start', 'start-pending', 'worker-join', 'teardown', 'worker-failure', 'worker-readback-failure', 'worker-readback-zero')) {
     $caseRaw = (& $exe $caseName | Out-String).Trim()
     $caseExit = $LASTEXITCODE
     if ($caseExit -eq 0 -and $caseRaw) {

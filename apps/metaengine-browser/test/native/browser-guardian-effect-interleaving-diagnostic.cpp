@@ -42,8 +42,10 @@ class GuardianScmEffectOwner final {
 public:
     const GuardianEffectAdmission& context() const noexcept { return context_; }
     void requestStop() noexcept { context_.stop(); }
+    void joinChildren() noexcept { children_.join(); }
 private:
-    GuardianEffectAdmission context_;
+    GuardianChildCustody children_;
+    GuardianEffectAdmission context_{children_};
 };
 }
 
@@ -70,6 +72,8 @@ struct State {
     DWORD child_pid = 0;
     std::uint64_t initial_creation_time_100ns = 0;
     bool cleanup_failure_injected = false;
+    bool inject_custody_wait_failure = false;
+    bool custody_wait_failure_injected = false;
     unsigned original_process_closes = 0;
     bool original_process_closed_while_child_live = false;
 };
@@ -191,13 +195,26 @@ BOOL WINAPI observedTerminateProcess(HANDLE process, UINT exit_code) {
     if (current != nullptr && current->scenario == Scenario::FailedSuspendedCleanup
         && process == current->original_process) {
         // Named fault injection only. The real kernel child remains suspended;
-        // the diagnostic records source ownership loss, then rescues it by the
-        // original retained kernel object. This is not an observed OS denial.
+        // the fixture owner must retain its original process handle until the
+        // probe rescues its exact helper. This is not an observed OS denial.
         current->cleanup_failure_injected = true;
         SetLastError(ERROR_ACCESS_DENIED);
         return FALSE;
     }
     return TerminateProcess(process, exit_code);
+}
+
+DWORD WINAPI observedWaitForSingleObject(HANDLE handle, DWORD timeout) {
+    if (current != nullptr && current->inject_custody_wait_failure
+        && handle == current->original_process) {
+        // One-shot fault enabled only after fixture-worker exit, before join.
+        // The real original handle stays valid; this is not an OS failure.
+        current->inject_custody_wait_failure = false;
+        current->custody_wait_failure_injected = true;
+        SetLastError(ERROR_INVALID_HANDLE);
+        return WAIT_FAILED;
+    }
+    return WaitForSingleObject(handle, timeout);
 }
 
 BOOL WINAPI observedCloseHandle(HANDLE handle) {
@@ -211,13 +228,15 @@ BOOL WINAPI observedCloseHandle(HANDLE handle) {
 }
 }  // namespace guardian_effect_probe
 
-// Only scheduling and telemetry hooks. All headers are already included, so the
-// API names in Windows declarations are not rewritten by these source hooks.
+// Scheduling/telemetry and explicitly named API-failure hooks. All Windows
+// headers are included already; their declarations are not rewritten.
 #define CreateProcessAsUserW guardian_effect_probe::observedCreateProcessAsUserW
 #define ResumeThread guardian_effect_probe::observedResumeThread
 #define TerminateProcess guardian_effect_probe::observedTerminateProcess
 #define CloseHandle guardian_effect_probe::observedCloseHandle
+#define WaitForSingleObject guardian_effect_probe::observedWaitForSingleObject
 #include "../../native/browser-guardian-scm/browser-guardian-update-actuator.cpp"
+#undef WaitForSingleObject
 #undef CloseHandle
 #undef TerminateProcess
 #undef ResumeThread
@@ -271,8 +290,10 @@ struct CaseResult {
     bool child_marker = false;
 };
 
-CaseResult runCase(const char* label, Scenario scenario, bool inject, HANDLE token, DWORD session, const std::wstring& sid) {
-    metaengine::guardian::GuardianScmEffectOwner owner;
+CaseResult runCase(const char* label, Scenario scenario, bool inject, HANDLE token, DWORD session,
+    const std::wstring& sid, metaengine::guardian::GuardianScmEffectOwner* sharedOwner = nullptr) {
+    metaengine::guardian::GuardianScmEffectOwner localOwner;
+    auto& owner = sharedOwner == nullptr ? localOwner : *sharedOwner;
     State telemetry;
     telemetry.owner = &owner;
     telemetry.scenario = scenario;
@@ -291,6 +312,12 @@ CaseResult runCase(const char* label, Scenario scenario, bool inject, HANDLE tok
             || !GetExitCodeProcess(child.get(), &child_exit)) fatal("child_join_failed");
         marker = childMarkerExact(telemetry.child_pid);
     }
+    // The independent watch handle already observed terminal completion.
+    // It does not release or substitute for the owner's original handle.
+    const bool retainedUntilJoin = !telemetry.create_succeeded || telemetry.original_process_closes == 0;
+    owner.joinChildren();
+    const bool ownershipSettled = retainedUntilJoin && (!telemetry.create_succeeded
+        || (telemetry.original_process_closes == 1 && !telemetry.original_process_closed_while_child_live));
     {
         std::lock_guard<std::mutex> lock(ownership_mutex);
         current = nullptr;
@@ -310,7 +337,7 @@ CaseResult runCase(const char* label, Scenario scenario, bool inject, HANDLE tok
         && (scenario != Scenario::StopInResumeGap || telemetry.resume_after_stop);
     telemetry.owner = nullptr;
     telemetry.child = nullptr;
-    return {label, expected && gap_observed, launch.state, launch.reason, telemetry, child_exit, marker};
+    return {label, expected && gap_observed && ownershipSettled, launch.state, launch.reason, telemetry, child_exit, marker};
 }
 
 struct HeldWorkerContext {
@@ -335,17 +362,33 @@ DWORD WINAPI heldWorkerFixture(void* raw) {
     return 0;
 }
 
+struct OwnerJoinContext {
+    metaengine::guardian::GuardianScmEffectOwner* owner;
+    HANDLE done;
+};
+
+DWORD WINAPI ownedJoinFixture(LPVOID raw) {
+    auto* context = static_cast<OwnerJoinContext*>(raw);
+    context->owner->joinChildren();
+    if (!SetEvent(context->done)) fatal("owner_join_signal_failed");
+    return 0;
+}
+
 struct OwnershipResult {
     bool qualified = false;
     bool escaped_lifetime = false;
     bool launcher_returned = false;
     bool fixture_worker_joined = false;
+    bool fixture_owner_joined = false;
+    bool original_retained_while_child_live = false;
+    bool owner_join_held_while_child_live = false;
     bool child_live_after_stop_and_join = false;
     bool exact_kernel_birth = false;
     bool child_marker = false;
     unsigned original_process_closes = 0;
     bool original_process_closed_while_live = false;
     bool cleanup_failure_injected = false;
+    bool custody_wait_failure_injected = false;
     bool exact_handle_rescue_performed = false;
     DWORD create_error = ERROR_SUCCESS;
     DWORD child_exit = 0;
@@ -400,6 +443,25 @@ OwnershipResult heldChildOwnershipCase(
         DWORD exit_code = 0;
         proof.child_live_after_stop_and_join = WaitForSingleObject(child.get(), 0) == WAIT_TIMEOUT
             && GetExitCodeProcess(child.get(), &exit_code) && exit_code == STILL_ACTIVE;
+        // Borrow the actual original value for telemetry; the duplicate watch
+        // handle is never credited as the fixture owner's custody.
+        proof.original_retained_while_child_live = proof.child_live_after_stop_and_join
+            && telemetry.original_process_closes == 0
+            && GetProcessId(telemetry.original_process) == telemetry.child_pid
+            && WaitForSingleObject(telemetry.original_process, 0) == WAIT_TIMEOUT;
+    }
+    Handle owner_joined(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+    if (owner_joined.get() == nullptr) fatal("owner_join_event_failed");
+    OwnerJoinContext join_context{&owner, owner_joined.get()};
+    telemetry.inject_custody_wait_failure = cleanup_failure;
+    Handle joiner(CreateThread(nullptr, 0, ownedJoinFixture, &join_context, 0, nullptr));
+    if (joiner.get() == nullptr) fatal("owner_join_thread_failed");
+    proof.owner_join_held_while_child_live = proof.child_live_after_stop_and_join
+        && WaitForSingleObject(owner_joined.get(), 250) == WAIT_TIMEOUT
+        && WaitForSingleObject(child.get(), 0) == WAIT_TIMEOUT;
+    // Release/rescue from this independent fixture thread, not after waiting
+    // for owner join. A launcher wait or premature owner return must fail.
+    if (child.get() != nullptr) {
         if (cleanup_failure) {
             proof.exact_handle_rescue_performed = TerminateProcess(child.get(), ERROR_PROCESS_ABORTED) != FALSE;
             if (!proof.exact_handle_rescue_performed) fatal("failed_cleanup_probe_rescue_failed");
@@ -407,12 +469,17 @@ OwnershipResult heldChildOwnershipCase(
         if (WaitForSingleObject(child.get(), kWaitMs) != WAIT_OBJECT_0
             || !GetExitCodeProcess(child.get(), &proof.child_exit)) fatal("held_child_release_join_failed");
     }
+    if (WaitForSingleObject(owner_joined.get(), kWaitMs) != WAIT_OBJECT_0
+        || WaitForSingleObject(joiner.get(), kWaitMs) != WAIT_OBJECT_0) fatal("owner_join_failed");
+    proof.fixture_owner_joined = true;
     proof.original_process_closes = telemetry.original_process_closes;
     proof.original_process_closed_while_live = telemetry.original_process_closed_while_child_live;
     proof.cleanup_failure_injected = telemetry.cleanup_failure_injected;
+    proof.custody_wait_failure_injected = telemetry.custody_wait_failure_injected;
     proof.qualified = proof.exact_kernel_birth && (cleanup_failure
         ? context.launch.state == "AMBIGUOUS" && context.launch.reason == "SERVICE_STOP_BEFORE_INSTALLER_RESUME"
-            && proof.cleanup_failure_injected && telemetry.resume_calls == 0 && !proof.child_marker
+            && proof.cleanup_failure_injected && proof.custody_wait_failure_injected
+            && telemetry.terminate_calls == 1 && telemetry.resume_calls == 0 && !proof.child_marker
             && proof.exact_handle_rescue_performed && proof.child_exit == ERROR_PROCESS_ABORTED
         : context.launch.state == "DISPATCHED" && context.launch.physical_dispatch_performed
             && proof.child_marker && proof.child_exit == 0);
@@ -429,6 +496,9 @@ void printOwnership(const OwnershipResult& proof) {
     std::cout << "{\"qualified\":" << (proof.qualified ? "true" : "false")
         << ",\"actual_scm_worker_exercised\":false,\"launcher_returned\":" << (proof.launcher_returned ? "true" : "false")
         << ",\"fixture_worker_joined\":" << (proof.fixture_worker_joined ? "true" : "false")
+        << ",\"fixture_owner_joined\":" << (proof.fixture_owner_joined ? "true" : "false")
+        << ",\"original_process_retained_while_child_live\":" << (proof.original_retained_while_child_live ? "true" : "false")
+        << ",\"fixture_owner_join_held_while_child_live\":" << (proof.owner_join_held_while_child_live ? "true" : "false")
         << ",\"child_live_after_stop_and_fixture_worker_join\":" << (proof.child_live_after_stop_and_join ? "true" : "false")
         << ",\"exact_original_kernel_object_retained_by_probe\":" << (proof.exact_kernel_birth ? "true" : "false")
         << ",\"original_process_handle_closes\":" << proof.original_process_closes
@@ -437,6 +507,7 @@ void printOwnership(const OwnershipResult& proof) {
         << ",\"child_exit\":" << proof.child_exit << ",\"create_error\":" << proof.create_error
         << ",\"launch_state\":\"" << proof.launch_state << "\",\"launch_reason\":\"" << proof.launch_reason << '"'
         << ",\"cleanup_failure_injected\":" << (proof.cleanup_failure_injected ? "true" : "false")
+        << ",\"custody_wait_failure_injected\":" << (proof.custody_wait_failure_injected ? "true" : "false")
         << ",\"exact_handle_probe_rescue_performed\":" << (proof.exact_handle_rescue_performed ? "true" : "false")
         << ",\"escaped_owned_lifetime_reproduced\":" << (proof.escaped_lifetime ? "true" : "false") << '}';
 }
@@ -487,6 +558,9 @@ int wmain(int argc, wchar_t** argv) {
     cases.push_back(runCase("stop_in_create_cas_to_api_gap", Scenario::StopInCreateGap, inject, token.get(), session, sid));
     cases.push_back(runCase("stop_in_resume_cas_to_api_gap", Scenario::StopInResumeGap, inject, token.get(), session, sid));
     cases.push_back(runCase("normal_harmless_child_control", Scenario::Control, inject, token.get(), session, sid));
+    metaengine::guardian::GuardianScmEffectOwner sequentialOwner;
+    cases.push_back(runCase("sequential_dispatch_first", Scenario::Control, inject, token.get(), session, sid, &sequentialOwner));
+    cases.push_back(runCase("sequential_dispatch_second", Scenario::Control, inject, token.get(), session, sid, &sequentialOwner));
     const OwnershipResult ownership = heldChildOwnershipCase(inject, token.get(), session, sid);
     const OwnershipResult failed_cleanup = heldChildOwnershipCase(inject, token.get(), session, sid, true);
     bool cases_ok = true;
@@ -497,14 +571,17 @@ int wmain(int argc, wchar_t** argv) {
             || (row.telemetry.create_after_stop && row.telemetry.create_succeeded)
             || (row.telemetry.resume_after_stop && row.telemetry.resume_succeeded);
     }
-    // Default expects reproduction on the reviewed old source. Assertion mode
-    // instead requires both measured children already terminal at worker join;
-    // it must not simultaneously require the old escaped-lifetime outcome.
-    // This fixture still cannot qualify an actual SCM registry shutdown path.
-    const bool ownership_outcome = require_owned_join
-        ? ownership.qualified && failed_cleanup.qualified
-            && !ownership.child_live_after_stop_and_join && !failed_cleanup.child_live_after_stop_and_join
-        : ownership.escaped_lifetime && failed_cleanup.escaped_lifetime;
+    // Worker exit may precede child exit, but original custody may not escape.
+    // Measure the fixture owner's separate terminal join while the main test
+    // thread releases/rescues only its exact helper. Neither this fixture owner
+    // nor its watch handle qualifies an installed SCM shutdown path.
+    const auto owned = [](const OwnershipResult& proof) {
+        return proof.qualified && proof.launcher_returned && proof.fixture_worker_joined
+            && proof.child_live_after_stop_and_join && proof.original_retained_while_child_live
+            && proof.owner_join_held_while_child_live && proof.fixture_owner_joined
+            && proof.original_process_closes == 1 && !proof.original_process_closed_while_live;
+    };
+    const bool ownership_outcome = owned(ownership) && owned(failed_cleanup);
     const bool ok = cases_ok && ownership_outcome && (!require_strong || !physical_after_stop);
     std::cout << "{\"schema\":\"metaengine.browser-guardian.effect-interleaving-diagnostic.v1\",\"ok\":"
         << (ok ? "true" : "false") << ",\"diagnostic_only\":true,\"stop_schedule_injected\":true,"
@@ -514,6 +591,8 @@ int wmain(int argc, wchar_t** argv) {
            "\"scm_installation_exercised\":false,\"installer_execution_exercised\":false,"
            "\"create_process_as_user_substituted\":" << (inject ? "true" : "false")
         << ",\"admission_before_stop_is_owned_in_flight\":true,\"strong_assertion_is_original_contract\":false"
+        << ",\"require_owned_child_join\":" << (require_owned_join ? "true" : "false")
+        << ",\"fixture_owned_child_join_satisfied\":" << (ownership_outcome ? "true" : "false")
         << ",\"post_stop_physical_call_observed\":" << (cases_ok ? (physical_after_stop ? "true" : "false") : "null")
         << ",\"shutdown_contract_qualification_performed\":false"
         << ",\"owned_child_shutdown_satisfied\":" << (ownership.escaped_lifetime || failed_cleanup.escaped_lifetime ? "false" : "null")

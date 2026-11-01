@@ -38,6 +38,6 @@ test('portable actual SCM status functions serialize terminal RPC and stop latch
 });
 
 const binary=process.env.METAENGINE_GUARDIAN_SCM_STATUS_TEST_BINARY;
-for(const name of ['status','checkpoint','before-start','start-pending','worker-join','teardown'])test('Windows native SCM status lifecycle: '+name,{
+for(const name of ['status','checkpoint','before-start','start-pending','worker-join','teardown','worker-failure','worker-readback-failure','worker-readback-zero'])test('Windows native SCM status lifecycle: '+name,{
  skip:process.platform!=='win32'?'Windows kernel qualification unavailable':!binary?'compiled Windows status probe missing':false,timeout:20000,
 },()=>proof(execFileSync(binary,[name],{encoding:'utf8',timeout:15000,maxBuffer:8192}),name,true));

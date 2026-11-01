@@ -5,6 +5,7 @@
 
 namespace metaengine::guardian {
 class GuardianScmEffectOwner;
+class GuardianChildCustody;
 
 // Revocation ONLY, subordinate to every existing Owner/device/ticket check.
 // Only the actual SCM owner (defined in its service translation unit) constructs
@@ -30,8 +31,11 @@ public:
     }
 private:
     GuardianEffectAdmission() noexcept = default;
+    explicit GuardianEffectAdmission(GuardianChildCustody& children) noexcept : children_(&children) {}
     void stop() noexcept { state_.fetch_or(1U,std::memory_order_acq_rel); }
     mutable std::atomic<std::uint64_t> state_{0};
+    GuardianChildCustody* const children_ = nullptr;
     friend class GuardianScmEffectOwner;
+    friend class GuardianChildCustody;
 };
 }  // namespace metaengine::guardian

@@ -12,6 +12,36 @@
 
 namespace metaengine::guardian {
 
+// Windows custody, not effect authority. Only the SCM worker reserves slots;
+// its owner joins that worker before draining. A subsequent reservation may
+// reap terminal predecessors, never a slot still borrowed by a launcher.
+// The admission binding is private and cannot be reset.
+class GuardianChildCustody final {
+public:
+    class Child final {
+    public:
+        Child(const Child&) = delete;
+        Child& operator=(const Child&) = delete;
+        HANDLE get() const noexcept { return information_.hProcess; }
+        PROCESS_INFORMATION& creationResult() noexcept { return information_; }
+    private:
+        Child() noexcept = default;
+        PROCESS_INFORMATION information_{};
+        Child* next_ = nullptr;
+        friend class GuardianChildCustody;
+    };
+    GuardianChildCustody() noexcept = default;
+    ~GuardianChildCustody() noexcept;
+    GuardianChildCustody(const GuardianChildCustody&) = delete;
+    GuardianChildCustody& operator=(const GuardianChildCustody&) = delete;
+    static Child* reserve(const GuardianEffectAdmission& admission) noexcept;
+    void join() noexcept;
+private:
+    static bool releaseTerminal(Child& child, DWORD timeout) noexcept;
+    void reapTerminal() noexcept;
+    Child* children_ = nullptr;
+};
+
 constexpr wchar_t kBrowserGuardianUpdatePipeName[] = L"\\\\.\\pipe\\METAENGINEBrowserGuardianUpdateV1";
 
 struct GuardianUpdateActuatorResult {

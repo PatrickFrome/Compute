@@ -40,3 +40,38 @@ test('create and resume each admit separately; stop before resume joins never-re
  assert.match(actuator,/appendEffectEvent\(effectPath, "NO_EFFECT_PROVEN"\)/);
  assert.match(actuator,/appendEffectEvent\(effectPath, dispatched\)/);
 });
+test('source contract: SCM owns CREATE output before admission and drains children after worker exit',()=>{
+ const admissionSource=readFileSync(new URL('browser-guardian-effect-admission.hpp',base),'utf8');
+ assert.match(admissionSource,/GuardianChildCustody\* const children_ = nullptr;/);
+ assert.doesNotMatch(admissionSource,/#include <windows.h>/);
+ assert.match(header,/class GuardianChildCustody final/);
+ const launch=actuator.slice(actuator.indexOf('GuardianUpdateActuatorResult launchInstaller('),actuator.indexOf('\nbool exactProcessStillRunning('));
+ const reservation=launch.indexOf('GuardianChildCustody::reserve(admission)');
+ assert.ok(reservation>=0 && reservation<launch.indexOf('if (!admission.admit())'));
+ assert.match(launch,/PROCESS_INFORMATION& processInfo = process.creationResult\(\);/);
+ assert.match(launch,/&processInfo\)\)/);
+ assert.doesNotMatch(launch,/ScopedHandle process\(|process\.release\(/);
+ const shutdown=service.slice(service.indexOf('const DWORD wait_result = WaitForSingleObject(g_stop_event'),service.indexOf('\nint printContract()'));
+ const drain=shutdown.indexOf('g_effect_owner.joinChildren();');
+ assert.ok(drain>shutdown.indexOf('if (workerWait == WAIT_OBJECT_0) break;'));
+ assert.ok(drain<shutdown.indexOf('const std::lock_guard<std::mutex> lock(g_status_mutex)'));
+ assert.ok(drain<shutdown.indexOf('CloseHandle(g_worker_thread)'));
+ assert.ok(drain<shutdown.indexOf('reportStatus(SERVICE_STOPPED'));
+});
+test('source contract: only terminal waits release original children; worker exceptions fail closed',()=>{
+ const cleanup=actuator.slice(actuator.indexOf('bool terminateNeverResumed('),actuator.indexOf('GuardianUpdateActuatorResult launchInstaller('));
+ assert.match(cleanup,/const DWORD wait = WaitForSingleObject\(process, 0\);/);
+ assert.match(cleanup,/if \(wait != WAIT_TIMEOUT\) return false;/);
+ assert.match(cleanup,/return WaitForSingleObject\(process, 5'000\) == WAIT_OBJECT_0;/);
+ assert.doesNotMatch(cleanup,/GetExitCodeProcess/);
+ const release=actuator.slice(actuator.indexOf('bool GuardianChildCustody::releaseTerminal('),actuator.indexOf('void GuardianChildCustody::reapTerminal('));
+ assert.match(release,/if \(wait != WAIT_OBJECT_0\) \{[\s\S]*?return false;/);
+ assert.ok(release.indexOf('if (wait != WAIT_OBJECT_0)')<release.indexOf('CloseHandle(child.information_.hProcess)'));
+ assert.match(service,/DWORD WINAPI updateActuatorWorker\(LPVOID \/\*context\*\/\) try \{/);
+ assert.match(service,/catch \(\.\.\.\) \{[\s\S]*g_effect_owner.requestStop\(\);[\s\S]*SetEvent\(g_stop_event\);[\s\S]*return ERROR_UNHANDLED_EXCEPTION;/);
+ const shutdown=service.slice(service.indexOf('const DWORD wait_result = WaitForSingleObject(g_stop_event'),service.indexOf('\nint printContract()'));
+ assert.ok(shutdown.indexOf('GetExitCodeThread(g_worker_thread, &worker_exit)')>shutdown.indexOf('if (workerWait == WAIT_OBJECT_0) break;'));
+ assert.match(shutdown,/if \(final_error == NO_ERROR\) final_error = error == NO_ERROR \? ERROR_GEN_FAILURE : error;/);
+ assert.match(shutdown,/final_error = worker_exit;/);
+ assert.match(shutdown,/reportStatus\(SERVICE_STOPPED, final_error, 0\)/);
+});
