@@ -5,10 +5,11 @@ import {registerHooks} from 'node:module';
 const target=new URL('../fresh-client-provider.mjs?private-helper-qualification',import.meta.url).href;
 const hook=registerHooks({load(url,context,nextLoad){
   const result=nextLoad(url,context);
-  return url===target?{...result,source:String(result.source)+'\nexport {populateFreshClientSchema,enrollFreshLocalDeviceOwner};\n'}:result;
+  return url===target?{...result,source:String(result.source)+'\nexport {populateFreshClientSchema,enrollFreshLocalDeviceOwner,cleanEnvironment};\n'}:result;
 }});
 let privateModule;
 try {privateModule=await import(target);}finally{hook.deregister();}
 export const populateFreshClientSchema=privateModule.populateFreshClientSchema;
 
 export const enrollFreshLocalDeviceOwner=privateModule.enrollFreshLocalDeviceOwner;
+export const cleanEnvironment=privateModule.cleanEnvironment;

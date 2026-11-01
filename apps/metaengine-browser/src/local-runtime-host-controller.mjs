@@ -7,6 +7,7 @@ import { LOCAL_STATE_INSTANCE_UUID, validateLocalStateProviderConfig } from './l
 import { createNativeCodingHostIpcClient } from './native-coding-host-ipc-client.mjs';
 import { verifyOwnerOnlyWindowsStorage } from './private-windows-storage-acl.mjs';
 import { finiteRuntimeRecoveryHealthFailure } from './runtime-recovery-policy.mjs';
+import { ownedWindowsRuntimeEnvironment } from './owned-windows-runtime-environment.mjs';
 
 const START_TIMEOUT_MS = 120_000;
 const STOP_TIMEOUT_MS = 45_000;
@@ -388,8 +389,15 @@ export async function startConfiguredLocalRuntimeHost({
     // A late verifier result must never create a new child after that stop.
     assertActive();
     const launchNonce = randomUUID();
+    // Every Windows start, including the first post-setup revalidation and
+    // later cold starts, receives its own verified resource discovery. Keep
+    // the caller's mutable provider lifecycle context separate from this
+    // child-only snapshot; terminal IPC updates that original context below.
+    const childEnvironment = process.platform === 'win32'
+      ? ownedWindowsRuntimeEnvironment(verified, env) : env;
     const child = spawnImpl(verified.paths.nodeExecutable, [verified.paths.hostEntry], {
-      cwd: verified.paths.sourceRoot, env: { ...localRuntimeHostEnvironment(configFile, env),
+      cwd: verified.paths.sourceRoot, env: { ...localRuntimeHostEnvironment(configFile, childEnvironment),
+        ...(process.platform === 'win32' ? { PSModulePath: childEnvironment.PSModulePath } : {}),
         COMPUTE_RUNTIME_HOST_LAUNCH_NONCE: launchNonce },
       stdio: ['ignore', 'ignore', 'pipe', 'ipc'], windowsHide: true, shell: false,
     });

@@ -7,6 +7,7 @@ const path = require('node:path');
 const { buildDevOSSourceSnapshot } = require('./devos-source-snapshot-builder.cjs');
 const { buildOfflineRuntimeBinding } = require('./offline-runtime-package-binding.cjs');
 const { localBuildSelected, captureLocalBuildIdentity } = require('./local-build-identity.cjs');
+const { prepareNativeToolsPackage } = require('./native-tools-package-binding.cjs');
 const {
   createBuildIdentity,
   createBuildIdentityV3,
@@ -222,6 +223,7 @@ async function metaengineGuardianNativeBeforePack(context) {
   if (!fs.readFileSync(packagedJobManifest).equals(jobManifestBytes)) throw new Error('codex_job_runtime_package_manifest_readback_failed');
   const trustRoot = buildEmergencyTrustRootMetadata({ appRoot, repoRoot });
   const packageVersion = String(require(path.join(appRoot, 'package.json')).version || '');
+  const nativeToolsBinding = await prepareNativeToolsPackage({appRoot,sourceHead:trustRoot.build_sha,packageVersion});
   const offlineRuntimeBinding = await buildOfflineRuntimeBinding({
     bundleDirectory: path.join(appRoot, 'client-state-runtime-dist'),
     repoRoot, sourceHead: trustRoot.build_sha, packageVersion,
@@ -232,6 +234,7 @@ async function metaengineGuardianNativeBeforePack(context) {
     ...(priorMetadata && typeof priorMetadata === 'object' ? priorMetadata : {}),
     metaengineEmergencyTrustRoot: trustRoot,
     metaengineClientStateRuntime: offlineRuntimeBinding,
+    metaengineNativeTools: nativeToolsBinding,
   };
 
   await buildDevOSSourceSnapshot({

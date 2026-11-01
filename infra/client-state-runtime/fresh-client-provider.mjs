@@ -19,6 +19,7 @@ import {localStateProviderOwnerFile,validateLocalStateRuntimeIdentity,localState
 import {provisionPersistentClientProvider} from './persistent-client-provider.mjs';
 import {runtimeRecoveryPostgresProof} from './runtime-recovery-postgres-proof.mjs';
 import {canonicalLocalStateSupervisorBase} from '../../apps/metaengine-browser/src/local-state-provider-policy.mjs';
+import {ownedWindowsRuntimeEnvironment} from '../../apps/metaengine-browser/src/owned-windows-runtime-environment.mjs';
 
 export const FRESH_CLIENT_INSTALL_ACTION='INITIALIZE_FRESH_LOCAL_POSTGRES_17_WITH_VAULT';
 const exec=promisify(execFile), SHA=/^[a-f0-9]{64}$/;
@@ -58,9 +59,8 @@ async function freePort() {
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
   const port=server.address().port;await new Promise((resolve,reject)=>server.close(e=>e?reject(e):resolve()));return port;
 }
-function cleanEnvironment() {
-  return Object.fromEntries(['SystemRoot','SYSTEMROOT','WINDIR','USERPROFILE','TEMP','TMP','APPDATA','LOCALAPPDATA','PATH','Path','HOMEDRIVE','HOMEPATH']
-    .filter(k=>typeof process.env[k]==='string').map(k=>[k,process.env[k]]));
+function cleanEnvironment(verified,source=process.env) {
+  return ownedWindowsRuntimeEnvironment(verified,source);
 }
 const databaseUrl=(port,login,password)=>{
   const value=new URL('postgres://127.0.0.1/postgres');
@@ -326,6 +326,7 @@ export async function provisionFreshClientProvider(options={}) {
       const device=freshDeviceSnapshot(deviceIdentity);
       if(device.device_id||device.enrollment_request_id)fail('existing_device_binding_requires_review');
     }
+    const childEnvironment=cleanEnvironment(verified);
     requireActiveInstall();
     await fs.mkdir(path.dirname(selected.root),{recursive:true});await noAliases(path.dirname(selected.root));
     await fs.mkdir(selected.root,{mode:0o700});rootIdentity=await fs.lstat(selected.root);
@@ -344,9 +345,9 @@ export async function provisionFreshClientProvider(options={}) {
     await record('PG17_INITIALIZED_UNPROVISIONED');
     const ports=new Set();while(ports.size<3)ports.add(await freePort());const [pgPort,apiPort,edgePort]=[...ports];
     owned=await startOwnedWindowsPostgres({pgBinDir:verified.paths.postgresBinDirectory,pgDataDir:selected.pgDataDirectory,
-      databasePort:pgPort,env:cleanEnvironment(),startupTimeoutMs:120000});
+      databasePort:pgPort,env:childEnvironment,startupTimeoutMs:120000});
     const control=await exec(path.join(verified.paths.postgresBinDirectory,'pg_controldata.exe'),['-D',selected.pgDataDirectory],
-      {env:{...cleanEnvironment(),LC_ALL:'C',LANG:'C'},windowsHide:true,shell:false,timeout:10000,maxBuffer:32768});
+      {env:{...childEnvironment,LC_ALL:'C',LANG:'C'},windowsHide:true,shell:false,timeout:10000,maxBuffer:32768});
     const systemIdentifier=/Database system identifier:\s*([1-9][0-9]{0,19})/.exec(control.stdout)?.[1];
     if(!systemIdentifier)fail('cluster_identifier_unconfirmed');
     const {default:postgres}=await import('postgres');
@@ -373,7 +374,7 @@ export async function provisionFreshClientProvider(options={}) {
       runtime_identity_file:path.join(selected.stateDirectory,'runtime-instance.json'),runtime_host:{bundle_directory:options.bundleDirectory,
         expected_bundle_sha256:options.expectedBundleDigest,config_file:selected.runtimeConfigFile},authority_effect:false};
     requireActiveInstall();hostAttempted=true;
-    const host=await startConfiguredLocalRuntimeHost({config:publicConfig,env:cleanEnvironment()});
+    const host=await startConfiguredLocalRuntimeHost({config:publicConfig,env:{...childEnvironment}});
     const runtimeStatus=JSON.parse(await fs.readFile(publicConfig.runtime_identity_file,'utf8'));
     const identity=validateLocalStateRuntimeIdentity(runtimeStatus,publicConfig.base_url);
     if(host.state!=='READY'||host.instance_id!==identity.instance_id||host.runtime_owned!==true||host.endpoint!==publicConfig.base_url)fail('runtime_identity_unconfirmed');

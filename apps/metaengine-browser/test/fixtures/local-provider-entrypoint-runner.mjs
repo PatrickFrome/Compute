@@ -14,6 +14,7 @@ const entry = new URL(options.entry, src);
 const endpoint = new URL('native-supervisor-endpoints.mjs', src).href;
 const bootstrap = new URL('local-state-provider-bootstrap.mjs', src).href;
 const offlineVerifier = new URL('../../../infra/client-state-runtime/offline-runtime-bundle.mjs', src).href;
+const runtimeController = new URL('local-runtime-host-controller.mjs', src).href;
 const events = [];
 globalThis.__traceEntrypoint = (...event) => events.push(event);
 const trace = globalThis.__traceEntrypoint;
@@ -214,17 +215,30 @@ if (options.managedHost) {
     'export async function verifyOfflineRuntimeBundle(options) {',
     '  const fixture = globalThis.__singletonTestRuntimePaths;',
     '  globalThis.__traceEntrypoint("managed-bundle-verified", options.bundleDirectory, options.expectedBundleDigest);',
-    '  if (options.bundleDirectory !== fixture.sourceRoot || options.expectedBundleDigest !== fixture.digest) throw new Error("fixture_bundle_pin_invalid");',
+    '  if (options.bundleDirectory !== fixture.bundleDirectory || options.expectedBundleDigest !== fixture.digest) throw new Error("fixture_bundle_pin_invalid");',
     options.installerDuringStartup
       ? '  setTimeout(() => { globalThis.__traceEntrypoint("installer-signal-during-startup"); globalThis.__singletonTestElectron.app.emit("second-instance", null, ["browser.exe", "--metaengine-installer-shutdown"]); }, 0);'
       : '',
-    '  return { paths: { nodeExecutable: fixture.nodeExecutable, sourceRoot: fixture.sourceRoot, hostEntry: fixture.hostEntry } };',
+    '  return { paths: { nodeExecutable: fixture.nodeExecutable, sourceRoot: fixture.sourceRoot, hostEntry: fixture.hostEntry,',
+    '    denoExecutable: fixture.denoExecutable, postgresBinDirectory: fixture.postgresBinDirectory } };',
     '}',
   ].join('\n')));
 }
+// The verified resource layout above is inert. This test-process-only adapter
+// launches its existing Node child, never the synthetic installed image path.
+const fixtureChildProcess=dataModule([
+  'import {spawn as nativeSpawn} from "node:child_process";',
+  'export function spawn(image,args,options) {',
+  ' const fixture=globalThis.__singletonTestRuntimePaths;',
+  ' if(image!==fixture.nodeExecutable)throw Error("fixture_child_image_invalid");',
+  ' return nativeSpawn(fixture.inertNodeExecutable,args,{...options,cwd:fixture.bundleDirectory});',
+  '}',
+].join('\n'));
 registerHooks({
   resolve(specifier, context, nextResolve) {
     if (specifier === 'electron') return { url: electronModule, shortCircuit: true };
+    if(options.managedHost&&context.parentURL===runtimeController&&specifier==='node:child_process')
+      return {url:fixtureChildProcess,shortCircuit:true};
     const resolved = nextResolve(specifier, context);
     if (resolved.url.startsWith(src.href)) trace('module', path.basename(fileURLToPath(resolved.url)));
     const mock = mocks.get(resolved.url);

@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {verifyInstalledClientStateResources} from './local-runtime-host-controller.mjs';
+import {loadInstalledNativeTools} from './packaged-native-tools.mjs';
 const ACTION='INITIALIZE_FRESH_LOCAL_POSTGRES_17_WITH_VAULT';
 const ENTRY='source/infra/client-state-runtime/fresh-client-provider.mjs';
 const IDENTITY_ENTRY='source/infra/client-state-runtime/fresh-provider-native-device-identity.mjs';
@@ -52,6 +53,12 @@ export async function setupInstalledFreshProvider({app,resourcesPath=process.res
   await app.whenReady();
   observeSetup('ELECTRON_READY_OBSERVED');
   if(globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__===true)throw Error('installed_fresh_provider_cancelled');
+  // Verify all own CLI/Git helpers before creating the private database. A
+  // runner's global tools or an old user profile cannot satisfy this preflight.
+  // Account login and effective sandbox policy remain separate admissions.
+  observeSetup('NATIVE_TOOL_VERIFICATION_STARTED');
+  await loadInstalledNativeTools({resourcesPath,packageFile});
+  observeSetup('NATIVE_TOOL_VERIFICATION_COMPLETED');
   // The operator acquires the actual Electron app/safeStorage/profile itself,
   // only after native consent. No signer, storage or identity path is supplied.
   // Execute the verified module in trusted native main, never a renderer or a

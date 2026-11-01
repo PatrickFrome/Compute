@@ -55,6 +55,22 @@ test('existing interrupted namespace holds before consent or launch and preserve
  assert.deepEqual(await fs.readdir(state),['install-journal.json']);
 });
 
+test('a clean first boot with absent own native tools stops before database or credentials are created',async t=>{
+ const fs=await import('node:fs/promises'),os=await import('node:os'),path=await import('node:path');
+ const {setupInstalledFreshProvider}=await import('../src/installed-fresh-provider-setup.mjs');
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'fresh-absent-tools-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ const packageFile=path.join(root,'package.json'),head='b'.repeat(40),version='0.7.0-dev.123.1';
+ await fs.writeFile(packageFile,JSON.stringify({version,metaengineEmergencyTrustRoot:{build_sha:head},
+  metaengineClientStateRuntime:{package_version:version,bundle_sha256:digest},
+  metaengineNativeTools:{schema:'metaengine.native-tools.package-binding.v1',source_head:head,package_version:version,
+   manifest_sha256:digest,file_count:10,authority_effect:false}}));
+ await assert.rejects(setupInstalledFreshProvider({platform:'win32',env:{LOCALAPPDATA:root,APPDATA:root},resourcesPath:root,packageFile,
+  app:{isPackaged:true,whenReady:async()=>{}},verify:async()=>({manifest:{files:[
+   {path:'source/infra/client-state-runtime/fresh-client-provider.mjs'},
+   {path:'source/infra/client-state-runtime/fresh-provider-native-device-identity.mjs'}]}})}),/native_tools_resources_unavailable/);
+ assert.deepEqual(await fs.readdir(root),['package.json']);
+});
+
 test('uses actual Electron profile under APPDATA, never a guessed product-name identity',async t=>{
  const fs=await import('node:fs/promises'),os=await import('node:os'),path=await import('node:path');
  const {validateInstalledFreshIdentityDirectory}=await import('../src/fresh-provider-device-profile.mjs');

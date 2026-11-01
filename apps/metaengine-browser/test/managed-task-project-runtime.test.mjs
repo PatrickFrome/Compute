@@ -13,6 +13,21 @@ import { createManagedTaskProjectMemoryJournal, createManagedTaskProjectRuntime,
 
 const exec = promisify(execFile);
 
+test('executor resolves its packaged Git before spawning and refuses absent payloads',async()=>{
+  const plan={schema:'metaengine.devos.workspace-git-plan.v1',effect:'WORKTREE_INVENTORY_READ',executable:'git',shell:false,
+    argv:['worktree','list','--porcelain','-z'],cwd:path.resolve('.'),workspace_id:'2de9f84b-7c0a-4091-911c-894ff1d6eaf4',
+    task_id:'cc891801-2adf-4561-8f7a-8091162032ff',lease_generation:1};
+  const executable=path.resolve('owned-runtime/git/cmd/git.exe');let spawned=0;
+  const spawnProcess=(file)=>{
+    spawned++;assert.equal(file,executable);
+    const child=new EventEmitter();child.stdout=new PassThrough();child.stderr=new PassThrough();child.kill=()=>{};
+    queueMicrotask(()=>child.emit('close',0,null));return child;
+  };
+  await createShellFreeGitExecutor({spawnProcess,resolveExecutable:async()=>executable}).execute(plan);
+  await assert.rejects(createShellFreeGitExecutor({spawnProcess,resolveExecutable:async()=>{throw Error('native_tools_resources_unavailable');}}).execute(plan),/native_tools_resources_unavailable/);
+  assert.equal(spawned,1);
+});
+
 async function fixture(t, { rootLength = 0 } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-project-test-'));
   t.after(async () => { await fs.rm(root, { recursive: true, force: true }); });

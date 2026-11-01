@@ -3,9 +3,26 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
+import {fileURLToPath} from 'node:url';
 import { initializeFreshClientPg17, runClientInitdb } from './fresh-pg17-initdb.mjs';
 
 const sha = 'a'.repeat(64);
+test('production initdb launch call uses own Windows discovery in a subprocess double',async()=>{
+  const runner=fileURLToPath(new URL('./test/owned-initdb-environment-runner.mjs',import.meta.url));
+  const {stdout}=await promisify(execFile)(process.execPath,[runner],{shell:false,windowsHide:true,timeout:10000,maxBuffer:16384});
+  const call=JSON.parse(stdout);
+  assert.equal(call.file,'C:\\METAENGINE\\resources\\client-state-runtime\\runtime\\postgresql\\bin\\initdb.exe');
+  assert.equal(call.options.env.PATH,[
+    'C:\\METAENGINE\\resources\\client-state-runtime\\runtime\\postgresql\\bin',
+    'C:\\METAENGINE\\resources\\client-state-runtime\\runtime\\node',
+    'C:\\METAENGINE\\resources\\client-state-runtime\\runtime\\deno','C:\\Windows\\System32'].join(';'));
+  assert.doesNotMatch(JSON.stringify(call.options.env),/fixture-private|preinstalled/);
+  assert.equal(call.options.env.NODE_OPTIONS,undefined);assert.equal(call.options.env.NODE_PATH,undefined);
+  assert.equal(call.options.shell,false);assert.equal(call.options.cwd,'C:\\METAENGINE-owned-state');
+  assert(call.args.includes('--username=state_owner'));assert(call.args.includes('--auth=scram-sha-256'));
+});
 async function fixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'compute-initdb-fixture-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));

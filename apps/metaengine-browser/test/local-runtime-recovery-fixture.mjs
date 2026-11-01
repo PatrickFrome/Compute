@@ -123,6 +123,10 @@ export async function createLocalRuntimeRecoveryFixture(t) {
   const controller = await import(controllerUrl.href);
   const env = { ...process.env, METAENGINE_STATE_PROVIDER: 'LOCAL_POSTGRES' };
   delete env.METAENGINE_LOCAL_STATE_INSTANCE_ID;
+  const verifiedPaths=process.platform==='win32'?{
+    nodeExecutable:path.join(bundleDirectory,'runtime','node','node.exe'),sourceRoot:path.join(bundleDirectory,'source'),hostEntry:entry,
+    denoExecutable:path.join(bundleDirectory,'runtime','deno','deno.exe'),postgresBinDirectory:path.join(bundleDirectory,'runtime','postgresql','bin'),
+  }:{nodeExecutable:process.execPath,sourceRoot:bundleDirectory,hostEntry:entry};
   const children = [], plans = [], healthGates = [];
   let verificationCount = 0, verificationGate = null;
 
@@ -148,11 +152,13 @@ export async function createLocalRuntimeRecoveryFixture(t) {
       verificationCount++;
       assert.deepEqual(options, { bundleDirectory, expectedBundleDigest: 'a'.repeat(64) });
       if (verificationGate) { const gate = verificationGate; gate.entered.resolve(); await gate.released.promise; }
-      return { paths: { nodeExecutable: process.execPath, sourceRoot: bundleDirectory, hostEntry: entry } };
+      return { paths: verifiedPaths };
     },
     spawnImpl: (executable, args, options) => {
       const generation = children.length + 1;
-      const child = spawn(executable, [...args, JSON.stringify({ ...plans.shift(), generation })], options);
+      // These resource paths are verifier fixtures, never installed images.
+      const child = spawn(executable===verifiedPaths.nodeExecutable?process.execPath:executable,
+        [...args, JSON.stringify({ ...plans.shift(), generation })], {...options,cwd:bundleDirectory});
       const ended = deferred();
       const row = { generation, child, ended: ended.promise, exited: false };
       children.push(row);
