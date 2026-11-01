@@ -222,6 +222,18 @@ test('goal status distinguishes suspended waiting from a rejected native review'
   'Native observation unavailable','stale observations must remain labelled unavailable');
 });
 
+test('live primary goal readback never presents a fenced task as physically stopped',()=>{
+ const status=actualStatus({progress:{found:true,task_state:'FENCED'}});
+ assert.equal(status,'Execution blocked');
+ const rendered=renderElement(jsxByTestId('client-goal-readback'),{status});
+ assert.equal(rendered.children[0],'Execution blocked');
+ assert.equal(rendered.props.title,status);
+ assert.equal(rendered.props.role,'status');
+ assert.doesNotMatch(rendered.children[0],/stopped/i);
+ assert.equal(actualStatus({progress:{found:true,task_state:'SUSPENDED'}}),'Waiting for child tasks');
+ assert.equal(actualStatus({progress:{found:true,task_state:'AMBIGUOUS'}}),'Needs reconciliation');
+});
+
 function pendingEntry(requestId=B){
  return {...entry(requestId),kind:'PREPARED_GOAL',state:'PENDING_ACTIVATION',receipt:{
   schema:'metaengine.native-coding.pending-goal-admission.v1',state:'PENDING_ACTIVATION',request_id:requestId,

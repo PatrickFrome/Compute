@@ -46,11 +46,23 @@ export function normalizeClientProjectSnapshot(value, expected) {
   const readTask = row => {
     if (!object(row) || !id(row.task_id) || (row.parent_task_id !== null && !id(row.parent_task_id))
         || !count(row.depth) || !text(row.state, 64) || !text(row.role, 64)) fail('snapshot_task_invalid');
+    // Preserve only bounded presentation fields required by Tasks/queue. The
+    // SQL projection also contains claims and private execution bindings; those
+    // must never be copied wholesale into the renderer's read model.
+    if ((Object.hasOwn(row, 'root_task_id') && row.root_task_id !== value.root_task_id)
+        || (row.objective != null && !text(row.objective, 4000))
+        || (row.agent_id != null && !text(row.agent_id, 128))
+        || (row.lease_generation != null && !count(row.lease_generation))
+        || (row.lease_expires_at != null && (!text(row.lease_expires_at, 64)
+          || !Number.isFinite(Date.parse(row.lease_expires_at))))) fail('snapshot_task_invalid');
     const repair = row.repair_obligation ?? null;
     if (repair !== null && (!['PENDING', 'RESOLVED'].includes(repair) || row.state !== 'RESULT_READY'
         || !['IMPLEMENTER', 'CRITIC'].includes(row.role))) fail('snapshot_repair_obligation_invalid');
     return Object.freeze({ task_id: row.task_id, parent_task_id: row.parent_task_id, depth: row.depth, repair_obligation: repair,
       state: row.state, role: row.role, task_seq: count(row.task_seq) ? row.task_seq : null,
+      ...(Object.hasOwn(row, 'root_task_id') ? { root_task_id: row.root_task_id } : {}),
+      objective: row.objective ?? null, agent_id: row.agent_id ?? null,
+      lease_generation: row.lease_generation ?? null, lease_expires_at: row.lease_expires_at ?? null,
       open_children: count(row.open_children) ? row.open_children : null,
       blocking_children: count(row.blocking_children) ? row.blocking_children : null,
       pending_proposals: count(row.pending_proposals) ? row.pending_proposals : null });

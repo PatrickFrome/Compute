@@ -15,7 +15,7 @@ export function ManagedProjects() {
   useEffect(() => {
     let active = true;
     const observe = () => {
-      if (active && document.visibilityState === "visible" && resource.getSnapshot().pending === null) void resource.refresh();
+      if (active && document.visibilityState === "visible") void resource.refresh();
     };
     observe();
     const timer = window.setInterval(observe, 10_000);
@@ -29,7 +29,7 @@ export function ManagedProjects() {
   const available = view.status?.state === "AVAILABLE";
   return (
     <Sec id="code-managed-projects" title="ПРОЕКТЫ ЗАДАЧ" icon={GitBranch} tone="violet"
-      right={<button type="button" onClick={() => void resource.refresh()} disabled={view.loading || view.pending !== null}
+      right={<button type="button" onClick={() => void resource.refresh()} disabled={view.loading}
         title="Обновить состояние проектов" aria-label="Обновить состояние проектов"
         className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-40">
         <RefreshCw className={`h-3.5 w-3.5 ${view.loading ? "animate-spin" : ""}`} aria-hidden />
@@ -39,7 +39,9 @@ export function ManagedProjects() {
         {view.loading ? <p role="status" className="text-[11px] text-cyan-400">Обновление состояния проектов…</p>
           : !available ? <p role="status" className="text-[11px] text-amber-400">Управление проектами сейчас недоступно. Проверьте подключение клиента и назначение задач.</p>
           : view.status?.projects.length === 0 ? <p className="text-[11px] text-zinc-500">Назначенные проекты пока отсутствуют.</p> : null}
-        {view.error ? <p role="alert" className="text-[11px] text-amber-400">
+        {view.pending?.outcomeUnknown ? <p role="alert" className="text-[11px] text-amber-400">
+          Результат операции неизвестен. Повтор заблокирован до получения подтверждения исходного запроса. Обновление только проверяет состояние.
+        </p> : view.error ? <p role="alert" className="text-[11px] text-amber-400">
           Операция не подтверждена. Проверьте состояние проекта перед повтором.
         </p> : null}
         {view.completed ? <p role="status" className="text-[11px] text-emerald-400">
@@ -53,7 +55,7 @@ export function ManagedProjects() {
               <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
                 <span className="min-w-0 break-all font-medium text-zinc-200">Задача {project.task_id}</span>
                 <span className={project.state === "READY" ? "text-emerald-400" : "text-zinc-500"}>
-                  {pending || project.in_flight ? "Операция выполняется…" : stateLabel[project.state]}
+                  {pending && view.pending?.outcomeUnknown ? "Результат неизвестен" : pending || project.in_flight ? "Ожидается подтверждение…" : stateLabel[project.state]}
                 </span>
               </div>
               <p className="break-all font-mono text-[10px] text-zinc-500">{project.repo_id} · {project.branch_name || "ветка ещё не задана"}</p>
@@ -70,7 +72,7 @@ export function ManagedProjects() {
             </div>
           );
         })}
-        {view.pending && !view.status ? <p role="status" className="text-[11px] text-cyan-400">Операция выполняется…</p> : null}
+        {view.pending && !view.pending.outcomeUnknown && !view.status ? <p role="status" className="text-[11px] text-cyan-400">Ожидается подтверждение…</p> : null}
       </div>
     </Sec>
   );

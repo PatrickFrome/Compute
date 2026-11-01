@@ -167,7 +167,7 @@ function registerPresentationIpc() {
 
   ipcMain.handle('metaengine:client:connection-status', () => Object.freeze({
     schema: 'metaengine.client.connection-status.v1', local_runtime_ready: true,
-    admin_ready: true, cloud_control_state: 'CONNECTED', authority_effect: false,
+    admin_ready: true, local_control_state: 'CONNECTED', cloud_control_state: 'DISABLED', authority_effect: false,
   }));
   ipcMain.handle('metaengine:client:work-readiness', () => fixtureWorkReadiness());
   // This isolated presentation fixture exercises the browser route, not native

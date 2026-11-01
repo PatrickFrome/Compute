@@ -5,6 +5,8 @@ import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 const { NativeSupervisorClient, NATIVE_SUPERVISOR_RUNTIME_PATH } = await import('../src/native-supervisor-client.mjs');
 import { readProjectHistoryPage, readProjectOverview } from '../../me2-ui/src/lib/client-project-history.ts';
+import { createClientProjectTasksView, readNativeProjectTaskPage, projectTaskMatchesGroup } from '../../me2-ui/src/lib/client-project-tasks.ts';
+import { normalizeClientProjectSnapshot } from '../src/client-project-continuity.mjs';
 
 const projectId = '11111111-1111-4111-8111-111111111111';
 const taskId = '22222222-2222-4222-8222-222222222222';
@@ -21,6 +23,60 @@ const history = request => ({ schema: 'metaengine.devos.project-history.v1', pro
     created_at: '2026-10-10T12:00:00.000Z', verified_evidence: false, receipt_reference_verified: true,
     device_grant: 'PRIVATE_GRANT' }], cursor: { after_seq: request.after_seq, through_seq: 20, next_seq: 20,
     has_more: false, commit_ordered: true } });
+
+// Matches the task fields emitted by own-PG project snapshots. Composition is
+// deliberate: a raw SQL-shaped fixture alone cannot catch a lossy IPC adapter.
+const taskPage = () => {
+  const root = { ...task(), root_task_id: taskId, objective: 'Implement the saved goal',
+    agent_id: 'agent_fixture-1234', lease_expires_at: '2026-11-01T12:00:00.000Z' };
+  const child = { ...root, task_id: '44444444-4444-4444-8444-444444444444', parent_task_id: taskId,
+    task_seq: 2, depth: 1, state: 'RESULT_READY', role: 'CRITIC', repair_obligation: 'RESOLVED',
+    objective: 'Review the original rejected attempt', agent_id: null, lease_generation: 0, lease_expires_at: null };
+  return { ...snapshot(), tasks: [root, child], selected_task: root, immediate_children: [child],
+    total_tasks: 2, task_cursor: { after_seq: 0, next_seq: 2, has_more: false } };
+};
+
+test('actual NativeSupervisor task bridge feeds Tasks/queue while retaining repair history and private-field exclusions', async t => {
+  let reads = 0;
+  const client = new NativeSupervisorClient({ identity: { snapshot: () => ({}), deviceHeaders: async () => ({ 'x-a2-device-signature': 'fixture' }) },
+    getState: async () => ({}), executeCommand: async () => assert.fail('task observation executed an OS command'),
+    fetchImpl: async () => { reads++; return Response.json(taskPage()); } });
+  t.after(() => client.stop());
+  const view = createClientProjectTasksView({ bridge: () => ({ projectOverview: () => client.projectSnapshot({ project_id: projectId }),
+    projectSnapshot: request => client.projectSnapshot(request) }) });
+  t.after(() => view.close());
+  await view.refresh();
+  assert.equal(view.getSnapshot().state, 'OBSERVED');
+  const page = view.getSnapshot().page;
+  assert.equal(page.tasks[0].objective, 'Implement the saved goal');
+  assert.equal(page.tasks[0].root_task_id, taskId);
+  assert.equal(page.tasks[0].agent_id, 'agent_fixture-1234');
+  assert.equal(page.tasks[0].lease_generation, 7);
+  assert.equal(page.tasks[1].repair_obligation, 'RESOLVED');
+  assert.equal(projectTaskMatchesGroup(page.tasks[1].state, 'История исправлений', page.tasks[1].repair_obligation), true);
+  assert.equal(projectTaskMatchesGroup(page.tasks[1].state, 'Завершены', page.tasks[1].repair_obligation), false);
+  assert.equal(reads, 1);
+  const normalized = normalizeClientProjectSnapshot(taskPage(), { project_id: projectId });
+  assert.equal(readNativeProjectTaskPage(normalized).tasks.length, 2);
+  for (const row of [...normalized.tasks, normalized.selected_task, ...normalized.immediate_children]) {
+    assert.equal(row.root_task_id, taskId);
+    assert.equal(Object.hasOwn(row, 'claim_id'), false);
+    assert.equal(Object.hasOwn(row, 'worktree_path'), false);
+  }
+  assert.equal(JSON.stringify(normalized).includes('PRIVATE_'), false);
+});
+
+test('project bridge rejects malformed presentation fields in every task projection', () => {
+  const changes = [{ root_task_id: requestId }, { objective: {} }, { objective: 'x'.repeat(4001) },
+    { agent_id: {} }, { agent_id: 'x'.repeat(129) }, { lease_generation: -1 }, { lease_generation: 1.5 },
+    { lease_expires_at: 'not-a-date' }, { lease_expires_at: {} }];
+  for (const field of ['tasks', 'selected_task', 'immediate_children']) for (const change of changes) {
+    const raw = taskPage();
+    if (field === 'selected_task') Object.assign(raw.selected_task, change);
+    else Object.assign(raw[field][0], change);
+    assert.throws(() => normalizeClientProjectSnapshot(raw, { project_id: projectId }), /snapshot_task_invalid/);
+  }
+});
 
 test('actual NativeSupervisor typed methods sign inherited project routes and sanitize payloads for the UI', async () => {
   const signed = [], calls = [];

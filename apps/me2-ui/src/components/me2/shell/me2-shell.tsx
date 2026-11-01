@@ -104,6 +104,8 @@ type ClientGoalProgress = {
   reconciliation_required: boolean;
   automatic_retry_allowed: false;
   authority_effect: false;
+  control_state?: "ACTIVE" | "PAUSED" | "COMPLETED" | null;
+  physical_execution_proven?: false;
   project_id?:string;project_state?:string;total_tasks?:number;last_seq?:number;observed_at?:string;source?:"OWN_PG_PROJECT_SNAPSHOT";
 };
 
@@ -556,7 +558,7 @@ function GoalComposer({ detailOpen, onDetailOpenChange, draft }: { detailOpen: b
   const labels: Record<string, string> = {
     READY: "Queued", LEASED: "Assigned", RUNNING: "Working", RESULT_READY: "Reviewing result",
     SUSPENDED: "Waiting for child tasks", COMPLETED: "Completed · proof pending", BLOCKED: "Blocked", FAILED: "Failed",
-    AMBIGUOUS: "Needs reconciliation", FENCED: "Stopped",
+    AMBIGUOUS: "Needs reconciliation", FENCED: "Execution blocked",
   };
   const status = journalEntry?.state === "FAILED" && journalEntry.last_error === "native_goal_rejected_before_dispatch"
     ? "Not started · admission rejected"
@@ -572,6 +574,23 @@ function GoalComposer({ detailOpen, onDetailOpenChange, draft }: { detailOpen: b
     : receipt?.schema==="metaengine.native-coding.pending-goal-admission.v1"?"Project awaiting Owner activation · not running"
     : nativeReceipt?"Native goal admitted · execution pending"
     : receipt ? "Queued · accepted" : "";
+  // Project control is its own observed SQL field. Task phase, admission and
+  // execution aggregate cannot fill in a missing legacy control observation.
+  const controlLabels = { ACTIVE: "Active", PAUSED: "Paused", COMPLETED: "Completed" };
+  const controlBound = progress?.schema === "metaengine.client.native-coding-goal-progress.v1"
+    && progress.source === "OWN_PG_PROJECT_SNAPSHOT" && progress.found === true
+    && progress.request_id === journalEntry?.request_id && progress.request_id === nativeReceipt?.request_id
+    && progress.project_id === nativeReceipt?.project_id && progress.task_id === nativeReceipt?.root_task_id
+    && progress.authority_effect === false && progress.automatic_retry_allowed === false
+    && progress.physical_execution_proven === false && Number.isFinite(Date.parse(progress.observed_at || ""));
+  const observedControl = controlBound && typeof progress.control_state === "string"
+    && Object.hasOwn(controlLabels, progress.control_state) ? progress.control_state : null;
+  const controlHistorical = Boolean(error || journalEntry?.project_error || journalEntry?.state === "RECONCILE_REQUIRED"
+    || progress?.reconciliation_required);
+  const projectControlText = `Project control: ${observedControl && !controlHistorical ? controlLabels[observedControl] : "Unknown"}`;
+  const projectControlDetail = observedControl
+    ? `${controlHistorical ? "Historical; last observed" : "Last observed"} ${controlLabels[observedControl]} at ${progress?.observed_at}. Pause does not prove physical stop; execution requires separate evidence.`
+    : "No confirmed project control observation. Task phase and admission do not establish project control.";
   const draftWarning = draftStorage === "UNBOUND"
     ? "Draft kept in this window only. Your current identity and workspace are not confirmed; copy the text before closing."
     : draftStorage === "UNAVAILABLE"
@@ -622,6 +641,10 @@ function GoalComposer({ detailOpen, onDetailOpenChange, draft }: { detailOpen: b
       <span className="min-w-0 max-w-[200px] truncate text-[12px] text-zinc-300" data-testid="client-goal-readback" role="status" aria-live="polite" title={status}>
         {status}
       </span>
+      {isNative && (receipt || journalEntry || error) ? <span data-testid="client-native-project-control" role="status" aria-live="polite"
+        data-control-state={controlHistorical ? "UNKNOWN" : observedControl || "UNKNOWN"}
+        title={`${projectControlText}. ${projectControlDetail}`} aria-label={`${projectControlText}. ${projectControlDetail}`}
+        className="min-w-0 max-w-[190px] truncate text-[11px] text-zinc-300">{projectControlText}</span> : null}
       {isNative || goalMode?.state === "HOLD" ? <span className="min-w-0 max-w-[200px] truncate text-[11px] text-zinc-300" data-testid="client-native-goal-mode" title={modeText.detail} aria-label={modeText.detail}>
         {modeText.label}
       </span> : readiness ? (
@@ -678,6 +701,7 @@ function GoalComposer({ detailOpen, onDetailOpenChange, draft }: { detailOpen: b
             <dt className="text-zinc-400">Request</dt><dd className="break-all font-mono">{journalEntry?.request_id || receipt?.request_id || "Unavailable"}</dd>
             {isNative?<><dt className="text-zinc-400">Project</dt><dd className="break-all font-mono" data-testid="client-native-goal-project">{pendingReceipt?.project_id||nativeReceipt?.project_id||"Awaiting admission"}</dd>
               <dt className="text-zinc-400">Observed</dt><dd data-testid="client-native-goal-progress">{progress?.schema==="metaengine.client.native-coding-goal-progress.v1"?`${progress.project_state||"Unknown"} · ${progress.total_tasks??0} tasks · sequence ${progress.last_seq??0}`:"No project execution observation"}</dd>
+              <dt className="text-zinc-400">Control</dt><dd data-testid="client-native-project-control-detail">{projectControlText}. {projectControlDetail}</dd>
               {progress?.observed_at?<><dt className="text-zinc-400">Read at</dt><dd>{progress.observed_at}</dd></>:null}
               {journalEntry?.project_error?<><dt className="text-amber-300">Observation</dt><dd className="text-amber-200">{journalEntry.project_error}; previous progress may be stale</dd></>:null}
               <dt className="text-zinc-400">Admission</dt><dd>{journalEntry?.activation_receipt?"Activation recorded · queued, not execution proof":journalEntry?.activation_input?"Activation outcome requires readback":pendingReceipt?"Pending Owner activation · zero permits · no execution":"Execution proof is separate from admission"}</dd></>

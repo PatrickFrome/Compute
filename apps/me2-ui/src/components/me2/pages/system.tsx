@@ -6,7 +6,10 @@ import {capabilityLabel} from '@/lib/client-readiness-labels';
 import {InterruptedSetupRecovery} from '@/components/me2/interrupted-setup-recovery';
 
 type Guardian={schema:'metaengine.browser-guardian.machine-bootstrap-launcher.v1';state:string;reason:string;ready:boolean;
-  guardian_service_ready?:boolean;owner_binding_proven?:boolean;device_binding_proven?:boolean;package_version?:string;source_head?:string;authority_effect:false};
+  guardian_service_ready?:boolean;owner_binding_proven?:boolean;device_binding_proven?:boolean;package_version?:string;source_head?:string;
+  observed_at:string|null;expires_at:string|null;stale:boolean;automatic_retry_allowed:false;authority_effect:false;
+  explicit_user_action_required:boolean;uac_consent_required:boolean;fixed_packaged_bootstrap:true;
+  caller_supplied_path_used:false;caller_supplied_arguments_used:false;arbitrary_shell_used:false};
 type Repository={schema:'metaengine.github-repository-connection.v1';state:string;repository:string|null;account_login:string|null;
   authenticated:boolean;repository_access_verified:boolean;can_push:boolean;authority_effect:false};
 type Chat={schema:'metaengine.github-chat-relay.v1';state:string;repository?:string;issue_number?:number;reason?:string;authority_effect?:false};
@@ -16,29 +19,76 @@ type Bridge={guardianStatus?:()=>Promise<Guardian>;activateGuardian?:()=>Promise
 const bridge=()=>(window as Window&{metaengineClient?:Bridge}).metaengineClient;
 const button='min-h-9 rounded border border-zinc-700 px-3 text-sm disabled:opacity-40';
 
+// Presentation checks the existing native observer's receipt, not the service
+// or Owner itself. An expired receipt cannot retain positive proof in the UI.
+function currentGuardian(value:Guardian|null|undefined,now=Date.now()):Guardian|null{
+  const observed=Date.parse(value?.observed_at||''),expires=Date.parse(value?.expires_at||'');
+  if(!value||value.schema!=='metaengine.browser-guardian.machine-bootstrap-launcher.v1'||value.authority_effect!==false
+    ||value.automatic_retry_allowed!==false||value.stale!==false||!Number.isFinite(observed)||!Number.isFinite(expires)
+    ||observed>now+5_000||expires<=now||expires<=observed||expires-observed>60_000
+    ||!['READY','ACTIVATION_REQUIRED','OWNER_ENROLLMENT_REQUIRED','HOLD','AMBIGUOUS','UNAVAILABLE'].includes(value.state)
+    ||value.ready!==(value.state==='READY')||value.explicit_user_action_required!==(value.state!=='READY')
+    ||value.uac_consent_required!==(value.state==='ACTIVATION_REQUIRED')||value.fixed_packaged_bootstrap!==true
+    ||value.caller_supplied_path_used!==false||value.caller_supplied_arguments_used!==false||value.arbitrary_shell_used!==false)return null;
+  if(value.state==='READY'&&!(value.guardian_service_ready===true&&value.owner_binding_proven===true&&value.device_binding_proven===true))return null;
+  if(value.state!=='READY'&&(value.owner_binding_proven===true||value.device_binding_proven===true))return null;
+  if(value.state==='ACTIVATION_REQUIRED'&&value.guardian_service_ready!==false)return null;
+  if(value.state==='OWNER_ENROLLMENT_REQUIRED'&&value.guardian_service_ready!==true)return null;
+  return value;
+}
+
 export function SystemPage(){
   const setPage=useMe2(state=>state.setPage),runtime=useClientRuntimeStatus(),work=runtime.readback?.work;
-  const [guardian,setGuardian]=useState<Guardian|null>(null),[repository,setRepository]=useState<Repository|null>(null),[chat,setChat]=useState<Chat|null>(null);
+  const [guardianReadback,setGuardian]=useState<Guardian|null>(null),[repository,setRepository]=useState<Repository|null>(null),[chat,setChat]=useState<Chat|null>(null);
+  const guardian=currentGuardian(guardianReadback);
   const [busy,setBusy]=useState<string|null>(null),[error,setError]=useState<string|null>(null);
-  const mounted=useRef(false),flight=useRef(false);
-  const read=useCallback(async()=>{
-    if(flight.current)return;flight.current=true;if(mounted.current)setBusy('read');
-    try{const native=bridge();const [g,r,c]=await Promise.allSettled([native?.guardianStatus?.(),native?.githubRepositoryStatus?.(),native?.githubChatStatus?.()]);
-      if(!mounted.current)return;
-      setGuardian(g.status==='fulfilled'&&g.value?.schema==='metaengine.browser-guardian.machine-bootstrap-launcher.v1'&&g.value.authority_effect===false?g.value:null);
-      setRepository(r.status==='fulfilled'&&r.value?.schema==='metaengine.github-repository-connection.v1'&&r.value.authority_effect===false
+  const mounted=useRef(false),flight=useRef(false),generation=useRef(0);
+  const read=useCallback(async(includeConnections=true)=>{
+    if(!mounted.current||flight.current||document.visibilityState==='hidden')return;
+    flight.current=true;const lifetime=generation.current;setBusy('read');let timedOut=false;
+    const deadline=window.setTimeout(()=>{
+      timedOut=true;if(mounted.current&&generation.current===lifetime)setGuardian(null);
+    },2_500);
+    try{const native=bridge();const [g,r,c]=await Promise.allSettled([
+      Promise.resolve().then(()=>native?.guardianStatus?.()),
+      Promise.resolve().then(()=>includeConnections?native?.githubRepositoryStatus?.():undefined),
+      Promise.resolve().then(()=>includeConnections?native?.githubChatStatus?.():undefined)]);
+      if(!mounted.current||generation.current!==lifetime||timedOut)return;
+      setGuardian(g.status==='fulfilled'?currentGuardian(g.value):null);
+      if(includeConnections){setRepository(r.status==='fulfilled'&&r.value?.schema==='metaengine.github-repository-connection.v1'&&r.value.authority_effect===false
         &&(r.value.state!=='CONNECTED'||r.value.authenticated&&r.value.repository_access_verified&&r.value.account_login&&r.value.repository)?r.value:null);
-      setChat(c.status==='fulfilled'&&c.value?.schema==='metaengine.github-chat-relay.v1'?c.value:null);
-    }finally{flight.current=false;if(mounted.current)setBusy(null);}
+      setChat(c.status==='fulfilled'&&c.value?.schema==='metaengine.github-chat-relay.v1'?c.value:null);}
+    }finally{
+      window.clearTimeout(deadline);flight.current=false;
+      // Visibility invalidates observation, not the exclusive physical slot.
+      // No newer operation can have started until this one releases that slot.
+      if(mounted.current)setBusy(null);
+    }
   },[]);
-  useEffect(()=>{mounted.current=true;void read();return()=>{mounted.current=false;};},[read]);
+  useEffect(()=>{
+    mounted.current=true;generation.current++;void read();
+    const timer=window.setInterval(()=>{void read(false);},5_000);
+    const visible=()=>{generation.current++;setGuardian(null);if(document.visibilityState!=='hidden')void read(false);};
+    document.addEventListener('visibilitychange',visible);
+    return()=>{mounted.current=false;generation.current++;window.clearInterval(timer);document.removeEventListener('visibilitychange',visible);};
+  },[read]);
+  useEffect(()=>{
+    if(!guardianReadback)return;
+    const timer=window.setTimeout(()=>{
+      if(mounted.current)setGuardian(previous=>previous===guardianReadback?null:previous);
+    },Math.max(0,Date.parse(guardianReadback.expires_at||'')-Date.now()));
+    return()=>window.clearTimeout(timer);
+  },[guardianReadback]);
   const act=async(action:'guardian'|'repository'|'chat-connect'|'chat-disconnect')=>{
-    if(flight.current)return;const native=bridge();const call=action==='guardian'?native?.activateGuardian:action==='repository'?native?.connectGithubRepository:
+    if(!mounted.current||flight.current)return;
+    if(action==='guardian'&&(runtime.readback?.connection.admin_ready!==true
+      ||!['ACTIVATION_REQUIRED','OWNER_ENROLLMENT_REQUIRED'].includes(currentGuardian(guardianReadback)?.state||'')))return;
+    const native=bridge();const call=action==='guardian'?native?.activateGuardian:action==='repository'?native?.connectGithubRepository:
       action==='chat-connect'?native?.connectGithubChat:native?.disconnectGithubChat;
     if(!call){setError('Этот клиент не предоставляет выбранную операцию.');return;}
-    flight.current=true;setBusy(action);setError(null);
-    try{await call();}catch{if(mounted.current)setError('Результат операции не подтверждён. Прочитайте состояние перед следующим действием; автоматического повтора нет.');}
-    finally{flight.current=false;if(mounted.current){setBusy(null);void read();void refreshClientRuntimeStatus();}}
+    const lifetime=++generation.current;flight.current=true;setBusy(action);setError(null);if(action==='guardian')setGuardian(null);
+    try{await call();}catch{if(mounted.current&&generation.current===lifetime)setError('Результат операции не подтверждён. Прочитайте состояние перед следующим действием; автоматического повтора нет.');}
+    finally{flight.current=false;if(mounted.current){setBusy(null);if(generation.current===lifetime){void read();void refreshClientRuntimeStatus();}}}
   };
   return <div className="mx-auto max-w-[1100px] space-y-5" data-testid="page-system">
     <header className="flex items-center justify-between gap-3"><h1 className="text-xl font-medium">Настройки и подключения</h1><button type="button" onClick={()=>{void read();void refreshClientRuntimeStatus();}} disabled={busy!==null} className={button}>Обновить состояние</button></header>

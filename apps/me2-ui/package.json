@@ -12,9 +12,9 @@
     "test:operator-observatory": "node --test ../metaengine-browser/test/client-runtime-resource.test.mjs src/lib/client-native-runtime-badge.test.mjs src/lib/client-native-runtime-badge.ui.test.mjs src/lib/operator-observatory.test.mjs src/lib/operator-observatory-resync.test.mjs src/lib/operator-observatory-resync.ui.test.mjs src/lib/client-runtime-resource.test.mjs scripts/ui-runtime-inventory.test.mjs scripts/ui-source-acceptance.test.mjs scripts/ui-ci-registration.test.mjs",
     "test:operator-observatory-resync": "node --test src/lib/operator-observatory-resync.test.mjs src/lib/operator-observatory-resync.ui.test.mjs",
     "test:operator-primary": "node --test src/lib/operator-primary-views.test.mjs src/lib/operator-primary-views.ui.test.mjs",
-    "test:goal-admission": "node --test src/lib/goal-submission-mode-observer.test.mjs src/lib/goal-submission-mode-observer.ui.test.mjs src/lib/goal-journal-readback.ui.test.mjs",
-    "test:project-history": "node --test src/lib/managed-project-history.ui.test.mjs src/lib/client-project-tasks.test.mjs src/lib/project-message-presentation.test.mjs",
-    "test:recovery": "node --test src/lib/interrupted-setup-recovery.ui.test.mjs"
+    "test:goal-admission": "node --test src/lib/goal-submission-mode-observer.test.mjs src/lib/goal-submission-mode-observer.ui.test.mjs src/lib/goal-journal-readback.ui.test.mjs src/lib/goal-control-state.ui.test.mjs",
+    "test:project-history": "node --test src/lib/managed-project-history.ui.test.mjs src/lib/client-project-tasks.test.mjs src/lib/project-message-presentation.test.mjs src/lib/managed-project-operation.ui.test.mjs",
+    "test:recovery": "node --test src/lib/interrupted-setup-recovery.ui.test.mjs src/lib/guardian-system-status.ui.test.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
