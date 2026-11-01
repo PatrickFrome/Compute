@@ -6,8 +6,13 @@
 #error Native signature tests require assertions enabled
 #endif
 #include <cassert>
+#include <cstdio>
 #include <iostream>
 #include <type_traits>
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
 
 using namespace metaengine::guardian;
 namespace {
@@ -61,6 +66,10 @@ void tests() {
 }
 }
 int main(int argc, char** argv) {
+#ifdef _WIN32
+    // Canonical bytes and raw DER must survive CRT I/O without LF translation.
+    if (_setmode(_fileno(stdin), _O_BINARY) == -1 || _setmode(_fileno(stdout), _O_BINARY) == -1) return 3;
+#endif
     if(argc==2 && std::string_view(argv[1])=="--canonical") {
         std::string input;char c;
         while(std::cin.get(c)) { if(input.size()==2048)return 2;input.push_back(c); }
