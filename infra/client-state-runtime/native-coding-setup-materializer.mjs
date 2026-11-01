@@ -10,6 +10,13 @@ const HASH=/^[a-f0-9]{64}$/,SHA=/^[a-f0-9]{40}$/;
 const identityKeys=['workspace_id','workspace_generation','worktree_id','coordination_workspace_id','task_id','claim_id','point_id',
  'claim_class','repo_id','repo_root','managed_root','worktree_path','base_sha','branch_name','agent_id','tab_id','target_id',
  'agent_generation_epoch','lease_generation'];
+const materializerDrains=new WeakMap();
+// Consumer-only lookup of the actual constructor closure. A generic job
+// callback with look-alike take/consume properties cannot acquire this origin.
+export function takeNativeSetupMaterializerDrain(runJob,scope){return materializerDrains.get(runJob)?.take(scope)??null;}
+export function consumeNativeSetupMaterializerDrain(runJob,token,scope,consumer){
+ const owner=materializerDrains.get(runJob);if(!owner)fail('original_materializer_required');return owner.consume(token,scope,consumer);
+}
 
 // Private CONSUMER of the existing Main admission and Owner custody path. The
 // selector/source pin must belong to the original signed setup operation. A
@@ -133,7 +140,7 @@ export function createNativeCodingSetupMaterializer({readAdmittedRequest,withOwn
  function assertOriginalJobDrained(scope){
   // This private service veto is checked only after native joins. A durable
   // SQL terminal/cleanup boolean cannot supply the missing native producer.
-  if(typeof scope.assertJobDrained!=='function'||scope.assertJobDrained()!==undefined)fail('original_job_not_drained');
+  if(typeof scope.assertJobResourcesDrained!=='function'||scope.assertJobResourcesDrained()!==undefined)fail('original_job_not_drained');
  }
  function takeJobDrain(scope){
   const row=completedJobs.get(scope);
@@ -150,5 +157,6 @@ export function createNativeCodingSetupMaterializer({readAdmittedRequest,withOwn
   const original=Object.freeze({scope,materialization_outcome:'UNKNOWN',automatic_retry_allowed:false,authority_effect:false});
   return Promise.resolve().then(()=>{assertOriginalJobDrained(scope);return consumer(original);});
  }
+ materializerDrains.set(runJob,{take:takeJobDrain,consume:consumeJobDrain});
  return Object.freeze(Object.defineProperties(runJob,{takeJobDrain:{value:takeJobDrain},consumeJobDrain:{value:consumeJobDrain}}));
 }

@@ -8,7 +8,7 @@ import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
-import {createNativeCodingSetupMaterializer} from './native-coding-setup-materializer.mjs';
+import {createNativeCodingSetupMaterializer,takeNativeSetupMaterializerDrain,consumeNativeSetupMaterializerDrain} from './native-coding-setup-materializer.mjs';
 import {createManagedTaskProjectSqliteJournal} from '../../apps/metaengine-browser/src/managed-task-project-sqlite-journal.mjs';
 import {createShellFreeGitExecutor} from '../../apps/metaengine-browser/src/managed-task-project-runtime.mjs';
 import {createWorkspaceReservation} from '../../apps/metaengine-browser/src/workspace-manager.mjs';
@@ -17,6 +17,12 @@ import {readNativeCodingGitProof} from '../../apps/metaengine-browser/src/native
 import {runNativePhysicalSettlementScope,markNativePhysicalSettlementUnconfirmed} from '../../apps/metaengine-browser/src/native-coding-host-settlement.mjs';
 const exec=promisify(execFile),tick=()=>new Promise(resolve=>setImmediate(resolve));
 const gate=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});return {promise,resolve};};
+
+test('consumer lookup requires the original materializer closure, not matching function properties',()=>{
+ const fake=Object.assign(async()=>({cleanup_confirmed:true}),{takeJobDrain:()=>Object.freeze({}),consumeJobDrain:(_token,_scope,consume)=>consume()});
+ const scope={};assert.equal(takeNativeSetupMaterializerDrain(fake,scope),null);
+ assert.throws(()=>consumeNativeSetupMaterializerDrain(fake,{},scope,()=>assert.fail('foreign consumer entered')),/original_materializer_required/);
+});
 
 async function fixture(t){
  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'setup-materializer-'))),repo=path.join(root,'repo'),managed=path.join(root,'managed');
@@ -37,7 +43,7 @@ async function fixture(t){
  const abort=new AbortController(),scope={operation_id:operation,custody_id:randomUUID(),input:{operation_id:operation,workspace_id:workspace},actor,
   observation:{workspace_id:workspace,repository:{repo_id:'fixture:setup',repo_root:repo,managed_root:managed}},signal:abort.signal,
   revalidate:async()=>{if(abort.signal.aborted)throw Error('fixture_cancelled');},
-  assertJobDrained:()=>{if(!jobDrained)throw Error('fixture_original_job_not_drained');}};
+  assertJobResourcesDrained:()=>{if(!jobDrained)throw Error('fixture_original_job_not_drained');}};
  const journalFile=path.join(root,'effects.sqlite');let journal=createManagedTaskProjectSqliteJournal({filePath:journalFile});
  t.after(()=>journal.close());
  const executor=createShellFreeGitExecutor();let creates=0,ownerChecks=0;
@@ -278,18 +284,18 @@ test('native drain flags and swallowed private physical HOLD cannot mint an orig
    if(result==='swallowed_hold'){try{throw markNativePhysicalSettlementUnconfirmed(Error('fixture_native_original_drain_hold'));}catch{}return;}
    return result;
   }}),worker=createNativeCodingSetupMaterializer({...f.deps,executePlan:native.executePlan});
-  let physical;const assertServiceDrained=f.scope.assertJobDrained;
+  let physical;const assertServiceDrained=f.scope.assertJobResourcesDrained;
   // Match the actual service's original closure: row.finished and local drain
   // cannot override a physical HOLD retained by this original job's scope.
-  f.scope.assertJobDrained=()=>{assertServiceDrained();if(physical.unconfirmed())throw Error('fixture_original_job_physical_hold');};
+  f.scope.assertJobResourcesDrained=()=>{assertServiceDrained();if(physical.unconfirmed())throw Error('fixture_original_job_physical_hold');};
   physical=runNativePhysicalSettlementScope(()=>worker(f.scope));
   await physical.promise.catch(()=>{});f.setJobDrained();assert.equal(physical.unconfirmed(),true);assert.equal(worker.takeJobDrain(f.scope),null);
  }
 });
 
 test('a service physical veto after take burns the token before it can invoke or retry a consumer',async t=>{
- const f=await fixture(t);let held=false,calls=0;const assertServiceDrained=f.scope.assertJobDrained;
- f.scope.assertJobDrained=()=>{assertServiceDrained();if(held)throw Error('fixture_original_job_late_physical_hold');};
+ const f=await fixture(t);let held=false,calls=0;const assertServiceDrained=f.scope.assertJobResourcesDrained;
+ f.scope.assertJobResourcesDrained=()=>{assertServiceDrained();if(held)throw Error('fixture_original_job_late_physical_hold');};
  const native=originalDrainDouble(f),worker=createNativeCodingSetupMaterializer({...f.deps,executePlan:native.executePlan});
  await worker(f.scope);f.setJobDrained();const token=worker.takeJobDrain(f.scope);assert.ok(token);
  held=true;await assert.rejects(Promise.resolve().then(()=>worker.consumeJobDrain(token,f.scope,()=>{calls++;})),/late_physical_hold/);
@@ -298,8 +304,8 @@ test('a service physical veto after take burns the token before it can invoke or
 });
 
 test('a physical veto in the consume microtask gap prevents the consumer and leaves its token burned',async t=>{
- const f=await fixture(t);let held=false,calls=0;const assertServiceDrained=f.scope.assertJobDrained;
- f.scope.assertJobDrained=()=>{assertServiceDrained();if(held)throw Error('fixture_original_job_microtask_physical_hold');};
+ const f=await fixture(t);let held=false,calls=0;const assertServiceDrained=f.scope.assertJobResourcesDrained;
+ f.scope.assertJobResourcesDrained=()=>{assertServiceDrained();if(held)throw Error('fixture_original_job_microtask_physical_hold');};
  const native=originalDrainDouble(f),worker=createNativeCodingSetupMaterializer({...f.deps,executePlan:native.executePlan});
  await worker(f.scope);f.setJobDrained();const token=worker.takeJobDrain(f.scope);assert.ok(token);
  const pending=worker.consumeJobDrain(token,f.scope,()=>{calls++;return 'fixture_unexpected_consumer';});

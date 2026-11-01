@@ -8,6 +8,7 @@ import {nativeCodingCanonicalJson as json,nativeCodingCanonicalSha256 as sha} fr
 import {createNativeCodingDeviceRequestVerifier,createNativeCodingAuthenticatedRequestContext} from './native-coding-device-request.mjs';
 import {assertNativeCodingHostRequestOpen} from './native-coding-host-request-lifetime.mjs';
 import {runNativePhysicalSettlementScope,markNativePhysicalSettlementUnconfirmed} from '../../apps/metaengine-browser/src/native-coding-host-settlement.mjs';
+import {takeNativeSetupMaterializerDrain,consumeNativeSetupMaterializerDrain} from './native-coding-setup-materializer.mjs';
 const fail=reason=>{throw Error('native_setup_'+reason);};
 const same=(a,b)=>json(a)===json(b);
 const selectors=input=>({operation_id:input.operation_id,workspace_id:input.workspace_id});
@@ -15,14 +16,34 @@ const frozenCopy=value=>{
  const freeze=current=>{if(current&&typeof current==='object'){for(const child of Object.values(current))freeze(child);Object.freeze(current);}return current;};
  return freeze(structuredClone(value));
 };
+const jobDrains=new WeakMap(),resourceMilestones=new WeakMap();
+function assertResourceMilestone(row,scope){
+ const original=resourceMilestones.get(row.resourceMilestone);
+ if(!original||original.row!==row||original.scope!==scope||!row.physicalConfirmed||scope.unconfirmed()
+  ||row.publicationScope?.unconfirmed())fail('job_cleanup_unconfirmed');
+}
+export function consumeNativeSetupJobDrain(token){
+ const owner=jobDrains.get(token);if(!owner)fail('original_job_drain_required');
+ jobDrains.delete(token); // One use, including a refused or failed publication.
+ assertResourceMilestone(owner.row,owner.scope);
+ const {request,...value}=owner.value;
+ return Object.freeze({...structuredClone(value),request});
+}
+function jobDrainToken(row,scope,value){
+ assertResourceMilestone(row,scope);
+ const token=Object.freeze({toJSON(){fail('job_drain_not_serializable');}});
+ const {request,...data}=value;
+ jobDrains.set(token,{row,scope,value:Object.freeze({...structuredClone(data),request})});return token;
+}
 // Native Host-only constructor. Default runtime-host composition remains
 // UNBOUND until Main supplies the original admission and native Owner custody
 // to the setup materializer. Constructor callbacks never grant readiness.
 export function createNativeCodingHostSetupService({sql,hostInstanceId,hostPid,pgDataDirectory,postgresIdentity,postgresContinuity,
- readRootIdentity=readDirectoryIdentity,readAdmission=readAgentResourceAdmission,readCapacityEvidence=null,runJob=null}={}){
+ readRootIdentity=readDirectoryIdentity,readAdmission=readAgentResourceAdmission,readCapacityEvidence=null,runJob=null,physicalCustody=null}={}){
  if(typeof sql?.begin!=='function'||typeof sql?.unsafe!=='function'||!path.isAbsolute(pgDataDirectory||'')
   ||postgresContinuity?.schema!=='metaengine.client-state.postgres-continuity.v1'||!Number.isSafeInteger(postgresIdentity?.pid)||postgresIdentity.pid<1||!Number.isFinite(Date.parse(postgresIdentity.started_at))
-  ||readCapacityEvidence!==null&&typeof readCapacityEvidence!=='function'||![readRootIdentity,readAdmission].every(f=>typeof f==='function')||runJob!==null&&typeof runJob!=='function')fail('dependencies_required');
+  ||readCapacityEvidence!==null&&typeof readCapacityEvidence!=='function'||![readRootIdentity,readAdmission].every(f=>typeof f==='function')
+  ||runJob!==null&&typeof runJob!=='function'||physicalCustody!==null&&typeof physicalCustody?.sealSetup!=='function')fail('dependencies_required');
  const verifier=createNativeCodingDeviceRequestVerifier({sql,hostInstanceId,hostPid}),context=createNativeCodingAuthenticatedRequestContext({verifier});
  let closed=false,custodyRevision=0;const jobs=new Map(),invocations=new Set(),reservations=new Set();
  const open=request=>{if(closed)fail('closed');assertNativeCodingHostRequestOpen(request);};
@@ -149,11 +170,14 @@ export function createNativeCodingHostSetupService({sql,hostInstanceId,hostPid,p
   // Durable ledger precedes registration; any crash in this gap leaves INTENT
   // forever read-only/HOLD, never a replayable job. Register BEFORE CLAIM/ACK.
   open(request);const row={operationId:input.operation_id,custodyId:randomUUID(),actor,input,observation,
-   abort:new AbortController(),work:null,physicalConfirmed:true};jobs.set(input.operation_id,row);custodyRevision++;
+   abort:new AbortController(),work:null,physicalConfirmed:true,resourceMilestone:null,privateScope:null,publicationScope:null,cancelTransitions:new Set()};jobs.set(input.operation_id,row);custodyRevision++;
   let claimed;
   try{claimed=await transition('CLAIM',actor,selectors(input),{custody_id:row.custodyId,host_instance_id:hostInstanceId,host_pid:hostPid},request);}
   catch(error){jobs.delete(input.operation_id);custodyRevision++;throw error;} // no job has started; durable ambiguity is retained.
   try{open(request);}catch(error){jobs.delete(input.operation_id);custodyRevision++;throw error;}
+  // Resource completion is separate from the entire SQL/publication lifetime.
+  // This scope contains the original producer and every resource join it owns;
+  // terminal SQL and the durable seal follow in a distinct publication scope.
   const scope=runNativePhysicalSettlementScope(async()=>{
    const revalidate=async()=>{
     if(closed||row.abort.signal.aborted)fail('cancelled');
@@ -165,28 +189,73 @@ export function createNativeCodingHostSetupService({sql,hostInstanceId,hostPid,p
    };
    let result={cleanup_confirmed:true,reason:'MATERIALIZATION_UNAVAILABLE'};
    if(runJob){
-    try{await revalidate();}
-    catch(error){
-     // Only this pre-entry boundary proves no producer was called. Retain the
-     // original custody/intent and publish its unused physical slot as drained.
-     // A producer rejection below never acquires this cleanup conclusion.
-     if(!scope.unconfirmed())await transition('TERMINAL',actor,selectors(input),{custody_id:row.custodyId,
-      state:row.abort.signal.aborted?'STOPPED':'HOLD',reason:row.abort.signal.aborted?'CANCELLED':'JOB_FAILED',cleanup_state:'DRAINED'});
-     throw error;
-    }
-    const privateScope=Object.freeze({operation_id:row.operationId,custody_id:row.custodyId,input:frozenCopy(input),actor:frozenCopy(actor),
-     signal:row.abort.signal,revalidate,observation:frozenCopy(observation),assertJobDrained:()=>{
-      if(!row.finished||!row.physicalConfirmed||scope.unconfirmed())fail('job_cleanup_unconfirmed');
-     }});
-    row.physicalConfirmed=false;result=await runJob(privateScope);
+    await revalidate();
+    row.privateScope=Object.freeze({operation_id:row.operationId,custody_id:row.custodyId,input:frozenCopy(input),actor:frozenCopy(actor),
+     signal:row.abort.signal,revalidate,observation:frozenCopy(observation),
+     assertJobResourcesDrained:()=>assertResourceMilestone(row,scope),
+     assertJobDrained:()=>{assertResourceMilestone(row,scope);if(!row.finished)fail('job_cleanup_unconfirmed');}});
+    row.physicalConfirmed=false;
+    row.actualJob=Promise.resolve().then(()=>runJob(row.privateScope));
+    result=await row.actualJob;
    }
-   if(scope.unconfirmed())fail('job_cleanup_unconfirmed');
-   if(result?.cleanup_confirmed!==true||!['MATERIALIZATION_UNAVAILABLE','EVIDENCE_REQUIRED'].includes(result.reason))fail('job_cleanup_unconfirmed');
-   row.physicalConfirmed=true;
-   await transition('TERMINAL',actor,selectors(input),{custody_id:row.custodyId,state:row.abort.signal.aborted?'STOPPED':'HOLD',
-    reason:row.abort.signal.aborted?'CANCELLED':result.reason,cleanup_state:'DRAINED'});
+   if(scope.unconfirmed()||result?.cleanup_confirmed!==true
+    ||!['MATERIALIZATION_UNAVAILABLE','EVIDENCE_REQUIRED'].includes(result.reason))fail('job_cleanup_unconfirmed');
+   return result;
   });
-  custodyRevision++;row.work=scope.promise.catch(()=>{}).finally(()=>{row.finished=true;if(scope.unconfirmed())row.physicalConfirmed=false;if(row.physicalConfirmed)jobs.delete(input.operation_id);custodyRevision++;});
+  row.resourceDrain=scope.promise.then(result=>{
+   if(scope.unconfirmed())fail('job_cleanup_unconfirmed');
+   row.physicalConfirmed=true;
+   if(runJob){
+    // An opaque milestone comes from this original settled promise, never
+    // from a caller boolean or a SQL terminal. No native qualification follows.
+    row.resourceMilestone=Object.freeze({});resourceMilestones.set(row.resourceMilestone,{row,scope});
+   }
+   return result;
+  });
+  custodyRevision++;row.work=row.resourceDrain.then(async result=>{
+   const sealOriginal=async operation=>{
+    if(!physicalCustody)return;
+    const token=jobDrainToken(row,scope,{operationId:row.operationId,custodyId:row.custodyId,actor,request,operation,
+     hostInstanceId,hostPid,postgres:observation.postgres,cancellation_requested:row.abort.signal.aborted,
+     schema:'metaengine.native-coding.setup-job-drain-ownership.v1',materialization_outcome:'UNKNOWN',
+     readiness:false,execution_ready:false,production_qualified:false,automatic_retry_allowed:false,authority_effect:false});
+    try{await physicalCustody.sealSetup(token);}finally{jobDrains.delete(token);}
+   };
+   const publish=async onReadback=>{
+    // Local abort may finish the native job while its original CANCEL SQL is
+    // still committing. Join those exact attempts before a fresh TERMINAL
+    // snapshot; never retry a failed/unknown write. CANCEL never awaits row.work.
+    while(row.cancelTransitions.size)await Promise.allSettled([...row.cancelTransitions]);
+    const terminal={custody_id:row.custodyId,state:row.abort.signal.aborted?'STOPPED':'HOLD',
+     reason:row.abort.signal.aborted?'CANCELLED':result.reason,cleanup_state:'DRAINED'};
+    await transition('TERMINAL',actor,selectors(input),terminal);
+    if(!runJob)return;
+    const {operation}=await transition('READ',actor,selectors(input));
+    if(!operation||operation.operation_id!==row.operationId||operation.custody_id!==row.custodyId
+     ||operation.state!==terminal.state||operation.reason!==terminal.reason||operation.cleanup_state!=='DRAINED'
+     ||!same(operation.intent,intent))fail('job_terminal_readback_changed');
+    if(onReadback)await onReadback(operation);
+   };
+   const publication=runNativePhysicalSettlementScope(async()=>{
+    const nativeToken=takeNativeSetupMaterializerDrain(runJob,row.privateScope);
+    // The one-use native closure is consumed BEFORE terminal SQL and durable
+    // publication. Its resource assertion does not wait for this row.work.
+    if(nativeToken)return consumeNativeSetupMaterializerDrain(runJob,nativeToken,row.privateScope,()=>publish(sealOriginal));
+    return publish(null); // No producer/facet/readback adoption: no seal.
+   });
+   row.publicationScope=publication;
+   try{await publication.promise;if(publication.unconfirmed())fail('job_publication_cleanup_unconfirmed');}
+   finally{if(publication.unconfirmed())row.physicalConfirmed=false;}
+  }).catch(async error=>{
+   // Only a failure before the producer's original promise was created can
+   // settle unused custody. Entered/unknown resources remain held.
+   if(runJob&&!row.actualJob&&!scope.unconfirmed())await transition('TERMINAL',actor,selectors(input),{
+    custody_id:row.custodyId,state:row.abort.signal.aborted?'STOPPED':'HOLD',
+    reason:row.abort.signal.aborted?'CANCELLED':'JOB_FAILED',cleanup_state:'DRAINED'});
+  }).catch(()=>{}).finally(()=>{
+   row.finished=true;if(scope.unconfirmed()||row.publicationScope?.unconfirmed())row.physicalConfirmed=false;
+   if(row.physicalConfirmed)jobs.delete(input.operation_id);custodyRevision++;
+  });
   // There is no production materializer in 3A; do not even briefly advertise
   // it as running/prepared. Fixture cold jobs return only lifecycle acceptance.
   if(!runJob){await row.work;return project((await transition('READ',actor,selectors(input),{},request)).operation,input);}
@@ -203,8 +272,13 @@ export function createNativeCodingHostSetupService({sql,hostInstanceId,hostPid,p
   // before SQL: a failed/lost CANCEL acknowledgement must still stop a worker
   // that is waiting solely on its cancellation signal. No SQL outcome is
   // inferred here, and a different actor/workspace cannot stop this producer.
-  if(action==='CANCEL_NATIVE_SETUP_V1')abortOwned();
-  const value=await transition(action==='CANCEL_NATIVE_SETUP_V1'?'CANCEL':'READ',actor,input,{},request);
+  let value;
+  if(action==='CANCEL_NATIVE_SETUP_V1'){
+   const row=jobs.get(input.operation_id),owned=row&&row.input.workspace_id===input.workspace_id&&same(row.actor,actor);
+   const cancellation=Promise.resolve().then(()=>transition('CANCEL',actor,input,{},request));
+   if(owned){row.cancelTransitions.add(cancellation);const done=()=>row.cancelTransitions.delete(cancellation);cancellation.then(done,done);}
+   abortOwned();value=await cancellation;
+  }else value=await transition('READ',actor,input,{},request);
   if(value.operation?.state==='CANCEL_REQUESTED')abortOwned();
   if(value.operation){const fresh=await discover(actor,input,request);if(!same(fresh.postgres,value.operation.intent.postgres))return {...project(value.operation,input),state:'HOLD',reason:'POSTGRES_CHANGED'};}
   return project(value.operation,input);

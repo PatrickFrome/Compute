@@ -16,6 +16,9 @@ The setup service supplies a recursively frozen private worker scope containing
 `observation`, cancellation `signal`, and `revalidate()`. That last function
 performs fresh current-device/repository, own-PG17, filesystem and durable
 custody checks through short SQL phases. It is not an Owner or lease proof.
+The scope also supplies `assertJobResourcesDrained()` for the original resource
+milestone and `assertJobDrained()` for the full final service lifetime. The two
+are deliberately distinct; publication never waits for its own `row.work`.
 
 ## Main producer contract — pending
 
@@ -75,6 +78,52 @@ fake materialization or a prepared result.
 Historical durable settlement/capacity release is owned by a separate workstream.
 This change neither fabricates its proof nor releases ambiguous physical history.
 
+## Compatibility of PR 1396 and PR 1402
+
+This compatibility branch merges the actual public ancestry of PR 1396 at
+`3578ef47dcd637c36d41ba6ba9f7d10c9508c898` and PR 1402 at
+`6c202b145c19dca93c9f48772b06dd7fbe8284ca`. It preserves the frozen original
+scope required by the materializer and the historical writer's consumer-only
+`consumeNativeSetupJobDrain` seam.
+
+The ordered private contract is:
+
+1. The original `row.actualJob` joins the materializer, its effect/readback/
+   journal/Owner work and all original native resource drains. The enclosing
+   resource scope must also settle without physical HOLD.
+2. `row.resourceDrain` then yields an opaque in-process resource milestone,
+   recorded privately against that exact row and scope. This is an original
+   promise milestone, not a serialized ready flag. Only now can
+   `assertJobResourcesDrained()` succeed; `assertJobDrained()` still refuses.
+3. The service's consumer-only lookup requires the actual factory-returned
+   `runJob` function identity. A wrapper or a generic callback with matching
+   `takeJobDrain`/`consumeJobDrain` properties cannot acquire the native token.
+   `takeNativeSetupMaterializerDrain` and `consumeNativeSetupMaterializerDrain`
+   expose consumption of that original closure, not an issuer.
+4. Native token consumption encloses **terminal SQL, exact committed readback,
+   service-origin token mint and `physicalCustody.sealSetup`**. Consumption burns
+   the native token before the first durable publication await. The service
+   joins the original local CANCEL SQL attempts before opening the TERMINAL
+   snapshot; it does not retry a failed or ambiguous SQL write.
+5. After exact terminal readback, the service issues one private nonserializable
+   origin token to the historical writer. `sealSetup(token)` synchronously
+   consumes it before its own durable write. A lost ACK/readback cannot recreate
+   either token or repeat the physical operation. UNKNOWN remains UNKNOWN.
+6. `row.work` includes the entire publication chain. Final shutdown/drain joins
+   it before retiring custody; `assertJobDrained()` succeeds only afterward.
+   Resource and publication physical-HOLD scopes remain independent vetoes.
+
+If the native producer is missing, the job is readback-only, or the original
+worker function identity is unavailable, lifecycle readback may still report its
+own terminal state, but **no service-origin token or SETUP seal is issued**.
+Historical capacity remains HOLD. In particular, generic `cleanup_confirmed`
+callbacks can no longer mint the historical service-origin token.
+
+The reviewed source catalog includes the exact materializer/managed-workspace
+import closure needed for these private consumer lookups. This is source
+packaging only; default `runJob` remains unbound and no native/installed
+qualification follows from importing the module.
+
 ## One-use original-job drain handoff
 
 The returned `runJob` function has two **private constructor facets**, never IPC
@@ -105,9 +154,9 @@ the same original job cannot mint another proof.
 
 Only then can `takeJobDrain(originalScope)` issue an empty frozen opaque object,
 bound through a private WeakMap to the exact original job. First it invokes the
-Host's private synchronous `assertJobDrained()` veto, which requires the
-original job callback to have finished, its physical custody to be confirmed,
-and its independent physical-HOLD scope to be clear. Before service drain or
+Host's private synchronous `assertJobResourcesDrained()` veto, which requires
+the original resource promise milestone, confirmed custody and clear resource
+and publication physical-HOLD scopes. Before that resource milestone or
 without the native producer, `takeJobDrain` returns `null`; historical release
 must remain **HOLD**. SQL `cleanup_state=DRAINED`, worktree `PROVEN` and producer
 `cleanup_confirmed` booleans cannot create the missing capability.

@@ -91,6 +91,11 @@ const REMOTE_SUPPORT_SOURCE_CLOSURE = new Set([
   'apps/metaengine-browser/src/runtime-recovery-policy.mjs',
 ]);
 const NATIVE_CODING_HOST_SOURCE_CLOSURE=new Set([
+  'apps/metaengine-browser/src/managed-task-project-command-adapter.mjs',
+  'apps/metaengine-browser/src/managed-task-project-authority-resolver.mjs',
+  'apps/metaengine-browser/src/managed-task-project-runtime.mjs',
+  'apps/metaengine-browser/src/workspace-manager.mjs',
+  'apps/metaengine-browser/src/workspace-git-hardening.mjs',
   'apps/metaengine-browser/src/native-coding-capacity-contract.mjs',
   'apps/metaengine-browser/src/native-coding-host-settlement.mjs',
   'apps/metaengine-browser/src/native-coding-setup-contract.mjs',

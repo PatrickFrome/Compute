@@ -222,13 +222,14 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
     if(publicationHost&&nativeCodingCanonicalJson(publicationHost)!==nativeCodingCanonicalJson(proof))fail('publication_host_birth_changed');
     publicationHost??=proof;assertNativeCodingHostRequestOpen(request);return proof;
   }
-  async function readCallbackPrefix({scope,permit,expected,intent=null,publicationCursor=null,request}){
+  async function readCallbackPrefix({scope,permit,expected,intent=null,publicationCursor=null,request,includeRecords=false}){
     const operator=await readNativeCodingOperatorPaths(config.state_directory,{signal:request?.signal});
     const directory=journalPath(operator,scope,permit,'');
-    const prefix=await readNativeCallbackProtectedPrefix({directory,expected,intent,publicationCursor,request});
+    const prefix=await readNativeCallbackProtectedPrefix({directory,expected,intent,publicationCursor,request,includeRecords});
     const after=await readNativeCodingOperatorPaths(config.state_directory,{signal:request?.signal});
     if(nativeCodingCanonicalJson(operator)!==nativeCodingCanonicalJson(after))fail('publication_operator_changed');
     assertNativeCodingHostRequestOpen(request);return prefix;
   }
-  return Object.freeze({readNativeScope,prepareNativeScopes,readNativeWorker,readProtectedReceipt,readCheckpointScope,readPublicationHost,readCallbackPrefix});
+  const readCallbackClosure=async options=>(await readCallbackPrefix({...options,includeRecords:true})).closure_journal;
+  return Object.freeze({readNativeScope,prepareNativeScopes,readNativeWorker,readProtectedReceipt,readCheckpointScope,readPublicationHost,readCallbackPrefix,readCallbackClosure});
 }
