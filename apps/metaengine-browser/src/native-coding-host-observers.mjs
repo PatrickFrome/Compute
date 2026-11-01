@@ -181,12 +181,38 @@ export function createNativeCodingResultStore({journalRoot,indexRoot,verifyStora
 
 export async function readNativeCodingSandboxEvidence({pin,cliPath,worktreePath,role,hostProcessId=process.pid,
   readProcess=readNativeCodingWindowsProcess,readBoot=readWindowsSandboxHostBoot,verifyStorage=verifyOwnerOnlyWindowsStorage,
-  signal,readExecutableSha256=file=>hashFile(file,512*1024*1024,false,signal)}={}) {
+  signal,readExecutableSha256=(file,{signal}={})=>hashFile(file,512*1024*1024,false,signal),
+  readLogSha256=(file,{signal}={})=>hashFile(file,16*1024*1024,true,signal)}={}) {
   if(signal?.aborted)fail('request_cancelled');
   if(!pin||!HASH.test(pin.sha256||'')||!['IMPLEMENTER','CRITIC'].includes(role))fail('sandbox_receipt_not_pinned');
-  if(typeof readExecutableSha256!=='function')fail('sandbox_image_reader_invalid');
-  const [{value,sha256},boot,host,cliSha]=await Promise.all([readNativeCodingProtectedJson(pin.path,{verifyStorage,signal}),
-    readBoot({signal}),readProcess(hostProcessId,{signal}),readExecutableSha256(cliPath)]);
+  if(typeof readExecutableSha256!=='function'||typeof readLogSha256!=='function')fail('sandbox_image_reader_invalid');
+  const controller=new AbortController(),observationSignal=controller.signal;
+  const cancel=()=>controller.abort(signal.reason);
+  signal?.addEventListener('abort',cancel,{once:true});
+  let failed=false,firstFailure;
+  const retainFailure=error=>{
+    if(!failed){failed=true;firstFailure=error;controller.abort(error);}
+    throw error;
+  };
+  const observe=read=>Promise.resolve().then(read).catch(retainFailure);
+  const join=async readers=>{
+    // Construct every promise before invoking a reader: synchronous failures
+    // must not orphan observations already started or skip their cleanup join.
+    const results=await Promise.allSettled(readers.map(observe));
+    if(signal?.aborted)fail('request_cancelled');
+    if(failed)throw firstFailure;
+    return results.map(result=>result.value);
+  };
+  try {
+  const [{value,sha256},boot,host,cliSha]=await join([
+    ()=>readNativeCodingProtectedJson(pin.path,{signal:observationSignal,
+      // Abort the outer scope immediately on either ACL failure, while the
+      // protected JSON reader retains and joins its other ACL observation.
+      verifyStorage:(...args)=>observe(()=>verifyStorage(...args))}),
+    ()=>readBoot({signal:observationSignal}),
+    ()=>readProcess(hostProcessId,{signal:observationSignal}),
+    ()=>readExecutableSha256(cliPath,{signal:observationSignal}),
+  ]);
   if(signal?.aborted)fail('request_cancelled');
   if(!HASH.test(cliSha||''))fail('sandbox_image_digest_invalid');
   const mode=role==='CRITIC'?'read-only':'workspace-write';
@@ -206,11 +232,16 @@ export async function readNativeCodingSandboxEvidence({pin,cliPath,worktreePath,
   const evaluation=evaluateCodexSandboxProbe({mode,report:value.canary,nativeProcess:value.sandbox_process,hostReadback:value.host_readback,
     completion:value.completion,hostUserSid:host.user_sid,hostBootIdentity:value.host_boot});
   if(evaluation.state!=='OBSERVED'||evaluation.boundary_observed!==true)fail('sandbox_boundary_unverified');
-  await Promise.all([['stdout_path','stdout_sha256'],['stderr_path','stderr_sha256'],['exit_path','exit_sha256']].map(async([fileKey,hashKey])=>{
-    if(!HASH.test(value.logs?.[hashKey]||'')||await hashFile(value.logs[fileKey],16*1024*1024,true,signal)!==value.logs[hashKey])fail('sandbox_log_digest_mismatch');
+  await join([['stdout_path','stdout_sha256'],['stderr_path','stderr_sha256'],['exit_path','exit_sha256']].map(([fileKey,hashKey])=>async()=>{
+    if(!HASH.test(value.logs?.[hashKey]||'')||await readLogSha256(value.logs[fileKey],{signal:observationSignal})!==value.logs[hashKey])fail('sandbox_log_digest_mismatch');
   }));
   if(signal?.aborted)fail('request_cancelled');
   return {backend:'CODEX_WINDOWS_ELEVATED',mode,evidence_sha256:sha256,outside_write_denied:true,worktree_write_denied:role==='CRITIC'};
+  } catch(error) {
+    controller.abort(error);throw error;
+  } finally {
+    signal?.removeEventListener('abort',cancel);
+  }
 }
 
 export function createNativeCodingWorkerRegistry({processController,readProcess=readNativeCodingWindowsProcess}={}) {
@@ -392,7 +423,7 @@ export function createNativeCodingHostObservers({app,resourcesPath,cliPath,ident
     async readSandbox(query) {
       const pin=pins.find(v=>(v.provider_id===undefined||v.provider_id===query.provider_id)&&(v.agent_id===undefined||v.agent_id===query.agent_id)&&v.role===query.role);
       return observe('OS_SANDBOX_CANARY_READBACK',await readNativeCodingSandboxEvidence({pin,cliPath,worktreePath:query.worktree_path,
-        role:query.role,hostProcessId:processId,readProcess,readBoot,verifyStorage}));
+        role:query.role,hostProcessId:processId,readProcess,readBoot,verifyStorage,signal:query.signal}));
     },
   });
 }

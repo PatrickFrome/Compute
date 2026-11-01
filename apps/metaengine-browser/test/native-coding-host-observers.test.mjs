@@ -282,6 +282,86 @@ test('pre-cancelled native process and sandbox reads start no external reader',a
   await assert.rejects(readNativeCodingSandboxEvidence({signal:controller.signal,readProcess:()=>assert.fail('must not read process')}),/request_cancelled/);
 });
 
+test('sandbox reader joins initial siblings after a synchronous observation failure',{timeout:5000},async t=>{
+ const f=await sandboxFixture(t),original=Error('generated_boot_observation_failure');
+ let release;const held=new Promise(resolve=>{release=resolve;}),signals=[];let ended=false;
+ const work=readNativeCodingSandboxEvidence({...f.options,readBoot:()=>{throw original;},
+  readProcess:async(_pid,{signal})=>{signals.push(signal);await held;return proc;},
+  readExecutableSha256:async(_file,{signal}={})=>{signals.push(signal);await held;return hash('fixture-cli');},
+ });work.then(()=>{ended=true;},()=>{ended=true;});
+ t.after(async()=>{release();await work.catch(()=>{});});
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(signals.length,2);assert(signals.every(signal=>signal?.aborted));assert.equal(signals[0],signals[1]);
+ assert.equal(ended,false);release();await assert.rejects(work,error=>error===original);
+});
+
+test('sandbox cancellation reaches every initial reader and joins late ACL, process and image cleanup',{timeout:5000},async t=>{
+ const f=await sandboxFixture(t),controller=new AbortController();let release,entered;
+ const held=new Promise(resolve=>{release=resolve;}),started=new Promise(resolve=>{entered=resolve;});
+ const signals=[];let ended=false,logReads=0;
+ const work=readNativeCodingSandboxEvidence({...f.options,signal:controller.signal,
+  verifyStorage:async(_target,{operation,signal})=>{signals.push(signal);if(operation==='VERIFY_FILE'){entered();await held;}return yes();},
+  readBoot:async({signal})=>{signals.push(signal);return structuredClone(f.value.host_boot);},
+  readProcess:async(_pid,{signal})=>{signals.push(signal);await held;return proc;},
+  readExecutableSha256:async(_file,{signal}={})=>{signals.push(signal);await held;return hash('fixture-cli');},
+  readLogSha256:()=>{logReads++;assert.fail('cancelled initial observations must not start log reads');},
+ });work.then(()=>{ended=true;},()=>{ended=true;});
+ t.after(async()=>{release();await work.catch(()=>{});});
+ await started;controller.abort();await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(signals.length,5);assert(signals.every(signal=>signal?.aborted));
+ assert(signals.every(signal=>signal===signals[0]));assert.notEqual(signals[0],controller.signal);
+ assert.equal(ended,false);release();await assert.rejects(work,/request_cancelled/);assert.equal(logReads,0);
+});
+
+test('sandbox ACL failure aborts siblings while retaining a held ACL observation',{timeout:5000},async t=>{
+ const f=await sandboxFixture(t),original=Error('generated_sandbox_acl_failure');let release,entered;
+ const held=new Promise(resolve=>{release=resolve;}),started=new Promise(resolve=>{entered=resolve;});
+ let heldSignal,ended=false;
+ const work=readNativeCodingSandboxEvidence({...f.options,
+  verifyStorage:async(_target,{operation,signal})=>{
+   if(operation==='VERIFY_DIRECTORY')throw original;heldSignal=signal;entered();await held;return yes();
+  },
+ });work.then(()=>{ended=true;},()=>{ended=true;});
+ t.after(async()=>{release();await work.catch(()=>{});});
+ await started;await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(heldSignal?.aborted,true);assert.equal(ended,false);
+ release();await assert.rejects(work,error=>error===original);
+});
+
+test('sandbox log failure aborts and joins both delayed log siblings',{timeout:5000},async t=>{
+ const f=await sandboxFixture(t),original=Error('generated_sandbox_log_failure');let release,entered;
+ const held=new Promise(resolve=>{release=resolve;}),started=new Promise(resolve=>{entered=resolve;}),signals=[];let ended=false;
+ const work=readNativeCodingSandboxEvidence({...f.options,readLogSha256:async(file,{signal})=>{
+  if(file===f.value.logs.stdout_path)throw original;signals.push(signal);if(signals.length===2)entered();await held;
+  return file===f.value.logs.stderr_path?f.value.logs.stderr_sha256:f.value.logs.exit_sha256;
+ }});work.then(()=>{ended=true;},()=>{ended=true;});
+ t.after(async()=>{release();await work.catch(()=>{});});
+ await Promise.race([started,work.catch(()=>{})]);await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(signals.length,2);assert(signals.every(signal=>signal?.aborted));assert.equal(ended,false);
+ release();await assert.rejects(work,error=>error===original);
+});
+
+test('sandbox log cancellation joins all late successful reads before rejecting',{timeout:5000},async t=>{
+ const f=await sandboxFixture(t),controller=new AbortController();let release,entered;
+ const held=new Promise(resolve=>{release=resolve;}),started=new Promise(resolve=>{entered=resolve;});
+ const signals=[];let ended=false;
+ const work=readNativeCodingSandboxEvidence({...f.options,signal:controller.signal,readLogSha256:async(file,{signal})=>{
+  signals.push(signal);if(signals.length===3)entered();await held;
+  const [key]=Object.entries(f.value.logs).find(([key,value])=>key.endsWith('_path')&&value===file);
+  return f.value.logs[key.replace('_path','_sha256')];
+ }});work.then(()=>{ended=true;},()=>{ended=true;});
+ t.after(async()=>{release();await work.catch(()=>{});});
+ await Promise.race([started,work.catch(()=>{})]);assert.equal(signals.length,3);
+ controller.abort();await new Promise(resolve=>setImmediate(resolve));
+ assert(signals.every(signal=>signal?.aborted));assert(signals.every(signal=>signal===signals[0]));
+ assert.equal(ended,false);release();await assert.rejects(work,/request_cancelled/);
+});
+
+test('host sandbox observer forwards the private request cancellation before any observation',async t=>{
+ const f=await image(t,{readProcess:()=>assert.fail('must not start cancelled native process observation')}),controller=new AbortController();controller.abort();
+ await assert.rejects(f.observers.readSandbox({role:'IMPLEMENTER',worktree_path:f.root,signal:controller.signal}),/request_cancelled/);
+});
+
 test('protected JSON joins the exact held ACL sibling before propagating original rejection',async t=>{
  const root=await temporary(t),file=path.join(root,'held-acl.json');await fs.writeFile(file,'{"schema":"fixture"}');
  let release,entered;const started=new Promise(r=>{entered=r;}),held=new Promise(r=>{release=r;}),original=Error('generated_original_acl_failure');
