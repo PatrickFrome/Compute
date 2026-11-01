@@ -5,7 +5,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fixedWindowsNativeReadEnvironment } from './windows-native-read-environment.mjs';
 import { protectOwnerOnlyWindowsDirectory, verifyOwnerOnlyWindowsStorage } from './private-windows-storage-acl.mjs';
-import { codexCliEnvironment, codexCliTemporaryEnvironment } from './codex-cli-runner.mjs';
+import { codexCliEnvironment, codexCliTemporaryEnvironment, snapshotCodexCliPrivateTools, codexCliPrivateEnvironment } from './codex-cli-runner.mjs';
 
 export const CODEX_SANDBOX_PROBE_SCHEMA = 'metaengine.codex-cli.sandbox-probe.v1';
 const POWERSHELL = 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe';
@@ -164,12 +164,14 @@ export function evaluateCodexSandboxProbe({ mode, report, nativeProcess, hostRea
 // termination of the entire CLI tree. It is a lifetime control, not a sandbox.
 export async function runCodexCliSandboxProbe({ cliPath, workspaceRoot, receiptDirectory, codexHome, scratchRoot, mode, processController,
   hostUserSid, readNativeProcess = readWindowsSandboxProcess, readHostBoot = readWindowsSandboxHostBoot,
-  timeoutMs = 120000, powershellPath = POWERSHELL, onProcessStarted = null } = {}) {
+  timeoutMs = 120000, powershellPath = POWERSHELL, onProcessStarted = null, privateTools = null } = {}) {
   if (process.platform !== 'win32') throw Error('codex_sandbox_probe_windows_required');
   if (!modeValid(mode) || ![cliPath, workspaceRoot, receiptDirectory, codexHome, scratchRoot, powershellPath].every(value => typeof value === 'string' && path.isAbsolute(value))
     || typeof processController?.spawn !== 'function' || typeof readNativeProcess !== 'function' || typeof readHostBoot !== 'function' || !/^S-1-5-/.test(String(hostUserSid))
     || (onProcessStarted !== null && typeof onProcessStarted !== 'function')
     || !Number.isSafeInteger(timeoutMs) || timeoutMs < 15000 || timeoutMs > 300000) throw Error('codex_sandbox_probe_configuration_invalid');
+  const tools=privateTools===null?null:snapshotCodexCliPrivateTools(privateTools,{cliExecutable:cliPath});
+  await tools?.revalidate();
   const workspace = await fs.realpath(workspaceRoot), receipts = await fs.realpath(receiptDirectory);
   const hostBoot = await readHostBoot();windowsSandboxBootIdentity(hostBoot);
   if (path.relative(receipts,workspace)==='' || isWithin(workspace, receipts) || isWithin(receipts,workspace)) throw Error('codex_sandbox_probe_outside_root_required');
@@ -202,10 +204,11 @@ export async function runCodexCliSandboxProbe({ cliPath, workspaceRoot, receiptD
   await fs.writeFile(files.outside_existing, original, { flag: 'wx' });
   await fs.writeFile(scriptPath, canaryScript(files), { flag: 'wx' });
   const cliSha = digest(await fs.readFile(cliPath));
+  if(tools&&cliSha!==tools.cliExecutableSha256)throw Error('codex_sandbox_probe_private_tools_cli_digest_mismatch');
   const args = buildCodexSandboxProbeArgs({ mode, workspaceRoot: workspace, scriptPath, powershellPath });
   // Avoid recursively provisioning the user's accumulated global Temp tree.
   // This is per-child environment only, outside source, journals and receipts.
-  const env = codexCliTemporaryEnvironment(codexCliEnvironment(home), temporaryPath);
+  const env = codexCliTemporaryEnvironment(tools?codexCliPrivateEnvironment(home,tools):codexCliEnvironment(home), temporaryPath);
   const stdoutPath = path.join(receipts, `${runId}.stdout.log`), stderrPath = path.join(receipts, `${runId}.stderr.log`), exitPath = path.join(receipts, `${runId}.exit.json`);
   let stdoutFile = null, stderrFile = null;
   const closeLogs = async () => {
@@ -217,7 +220,7 @@ export async function runCodexCliSandboxProbe({ cliPath, workspaceRoot, receiptD
   let stdoutWrites = Promise.resolve(), stderrWrites = Promise.resolve(), logWriteFailed = false;
   const deadlineAt = new Date(Date.now() + timeoutMs).toISOString();
   let handle;
-  try { handle = await processController.spawn({ executablePath: cliPath, args, cwd: workspace, env, timeoutMs, deadlineAt, runId, expectedExecutableSha256: cliSha }); }
+  try { await tools?.revalidate(); handle = await processController.spawn({ executablePath: cliPath, args, cwd: workspace, env, timeoutMs, deadlineAt, runId, expectedExecutableSha256: cliSha }); }
   catch (error) { await closeLogs(); throw error; }
   // Observe rejection immediately, but retain custody until the owned process
   // completion settles. A callback/resume failure is not process completion.
@@ -262,6 +265,7 @@ export async function runCodexCliSandboxProbe({ cliPath, workspaceRoot, receiptD
   });
   let completion;
   try {
+    await tools?.revalidate();
     await handle.resume('', { deadlineAt });
     const finished = await processFinished;
     if (!finished.ok) throw Error('codex_sandbox_probe_completion_unconfirmed');

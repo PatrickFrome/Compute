@@ -1,0 +1,75 @@
+{
+  "schema": "metaengine.private-native-tools.lock.v1",
+  "platform": "win32",
+  "arch": "x64",
+  "components": [
+    {
+      "id": "git",
+      "version": "2.56.0.windows.4",
+      "repository": "git-for-windows/git",
+      "tag": "v2.56.0.windows.4",
+      "release_id": 423939713,
+      "asset_id": 677312705,
+      "archive_name": "MinGit-2.56.0.4-64-bit.zip",
+      "archive_sha256": "e3bf78351fe777fba47ddee5950082f8a98bb0f02604fdc7ba3ee2cb68ffa877",
+      "archive_bytes": 39846926,
+      "inventory_sha256": "4e4948e91d46854ebcdaee2ecfb91a7296429bc6a7af35814e65dcdade9bb513",
+      "url": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.4/MinGit-2.56.0.4-64-bit.zip",
+      "format": "zip",
+      "entrypoint": "ucrt64/bin/git.exe",
+      "required_files": [
+        "ucrt64/bin/git.exe", "ucrt64/bin/git-remote-https.exe", "ucrt64/bin/libcurl-4.dll",
+        "ucrt64/bin/libcrypto-3-x64.dll", "ucrt64/bin/libssl-3-x64.dll", "ucrt64/bin/zlib1.dll",
+        "ucrt64/etc/ssl/certs/ca-bundle.crt", "etc/gitconfig", "usr/bin/sh.exe", "usr/bin/msys-2.0.dll",
+        "LICENSE.txt", "ucrt64/share/licenses/openssl/LICENSE", "ucrt64/share/licenses/curl/LICENSE"
+      ],
+      "notices": []
+    },
+    {
+      "id": "codex",
+      "version": "0.166.0",
+      "repository": "openai/codex",
+      "tag": "rust-v0.166.0",
+      "release_id": 428320524,
+      "asset_id": 689710836,
+      "archive_name": "codex-package-x86_64-pc-windows-msvc.tar.gz",
+      "archive_sha256": "d559bb88e74d471265857b93b7f19bc250dae527673b9191b33534478093f6bc",
+      "archive_bytes": 202589789,
+      "inventory_sha256": "e1dd7e081c14a6d4c843ac650dba13dcf38183b558b1c25f382751ced5694bba",
+      "url": "https://github.com/openai/codex/releases/download/rust-v0.166.0/codex-package-x86_64-pc-windows-msvc.tar.gz",
+      "format": "tar.gz",
+      "entrypoint": "bin/codex.exe",
+      "required_files": [
+        "bin/codex.exe", "bin/codex-exec-server.exe", "bin/codex-code-mode-host.exe", "codex-package.json",
+        "codex-path/rg.exe", "codex-resources/codex-command-runner.exe", "codex-resources/codex-windows-sandbox-setup.exe",
+        "codex-resources/voice/NOTICE.md", "codex-resources/voice/windows-crt.json"
+      ],
+      "notices": [
+        {
+          "source": "third-party/codex/LICENSE",
+          "path": "LICENSE",
+          "url": "https://raw.githubusercontent.com/openai/codex/rust-v0.166.0/LICENSE",
+          "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"
+        },
+        {
+          "source": "third-party/codex/NOTICE",
+          "path": "NOTICE",
+          "url": "https://raw.githubusercontent.com/openai/codex/rust-v0.166.0/NOTICE",
+          "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"
+        },
+        {
+          "source": "third-party/codex/ripgrep/LICENSE-MIT",
+          "path": "codex-path/licenses/LICENSE-MIT",
+          "url": "https://raw.githubusercontent.com/BurntSushi/ripgrep/15.2.0/LICENSE-MIT",
+          "sha256": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f"
+        },
+        {
+          "source": "third-party/codex/ripgrep/UNLICENSE",
+          "path": "codex-path/licenses/UNLICENSE",
+          "url": "https://raw.githubusercontent.com/BurntSushi/ripgrep/15.2.0/UNLICENSE",
+          "sha256": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c"
+        }
+      ]
+    }
+  ]
+}

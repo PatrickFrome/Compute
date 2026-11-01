@@ -13,6 +13,7 @@ import { createWorkspaceReservation } from '../src/workspace-manager.mjs';
 import { SupervisorLoopbackRpcServer } from '../src/supervisor-loopback-rpc-server.mjs';
 import { configureManagedTaskProjectRepository, MANAGED_TASK_PROJECT_REPOSITORY_CONFIG_SCHEMA } from '../src/managed-task-project-repository.mjs';
 import { managedProjectEffectKey } from '../src/managed-task-project-authority-resolver.mjs';
+import { planWorkspaceInventory } from '../src/workspace-git-hardening.mjs';
 
 const exec = promisify(execFile);
 const verified = async (_target, { operation = 'VERIFY_FILE' } = {}) => ({ owner_dacl_verified: true, operation });
@@ -174,4 +175,42 @@ test('host provisions only its validated private operator configuration before a
     const result = await rpc.command('PROJECT_CREATE', h.request);
     assert.equal(result.body.ok, true); assert.equal(host.snapshot().repository_state, 'PROVISIONED'); assert.equal(h.adds, 1);
   } finally { await rpc.stop(); await host.close(); }
+});
+
+test('private Git host shares its package capability across repository checks, fixed plans and source reads', async t => {
+  const h = await fixture(t), filename = process.platform === 'win32' ? 'git.exe' : 'git';
+  const { stdout } = await exec('git', ['--exec-path']);
+  const candidates = [path.join(stdout.trim(), filename), ...(process.env.PATH || '').split(path.delimiter).filter(Boolean).map(directory => path.join(directory, filename))];
+  let gitExecutable;
+  for (const candidate of candidates) {
+    try { if ((await fs.stat(candidate)).isFile()) { gitExecutable = await fs.realpath(candidate); break; } } catch {}
+  }
+  assert.ok(gitExecutable, 'source fixture requires an absolute Git executable');
+  h.reservation = { ...h.reservation, repo_id: 'PatrickFrome/Compute' };
+  const configuration = { schema: MANAGED_TASK_PROJECT_REPOSITORY_CONFIG_SCHEMA,
+    coordination_workspace_id: h.claim.coordination_workspace_id, repo_id: h.reservation.repo_id, repo_root: h.repo, managed_root: h.managed };
+  await configureManagedTaskProjectRepository({ userDataPath: h.userDataPath, repository: configuration, ...unitStorage });
+  const environment = { PATH: '', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null' };
+  for (const key of ['SystemRoot', 'SYSTEMROOT', 'WINDIR']) if (process.env[key]) environment[key] = process.env[key];
+  let validations = 0, revoked = false, provisions = 0;
+  const privateTools = Object.freeze({ gitExecutable, environment: Object.freeze(environment),
+    revalidate: async () => { validations++; if (revoked) throw Error('private_git_inventory_changed'); } });
+  const { gitExecutor: sourceExecutor, ...options } = h.options;
+  const host = await createManagedTaskProjectHost({ ...options, ...unitStorage, privateTools,
+    provisionRepository: async value => { assert.deepEqual(value, configuration); provisions++; } });
+  const previous = process.env.PATH;
+  try {
+    process.env.PATH = path.join(h.root, 'no-global-tools');
+    const plan = planWorkspaceInventory(h.reservation);
+    assert.ok((await host.readSourceSyncGit(plan)).stdout.includes(h.repo.split(path.sep).join('/')));
+    assert.equal((await host.executeCommand({ action: 'PROJECT_CREATE', payload: h.request })).state, 'PROVEN');
+    assert.equal(provisions, 1); assert.ok(validations >= 8);
+    revoked = true; const before = validations;
+    await assert.rejects(host.readSourceSyncGit(plan), /private_git_inventory_changed/);
+    await assert.rejects(host.executeCommand({ action: 'PROJECT_OPEN', payload: h.request }), /private_git_inventory_changed/);
+    assert.equal(validations, before + 2); assert.equal(provisions, 1);
+  } finally {
+    if (previous === undefined) delete process.env.PATH; else process.env.PATH = previous;
+    await host.close();
+  }
 });

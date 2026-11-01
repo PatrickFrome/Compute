@@ -110,25 +110,49 @@ function gitInvocationArgv(plan) {
   return ['-c', 'core.longpaths=true', ...argv];
 }
 
+// Main supplies this private capability from the verified package inventory.
+// It is never an authority field in a Git plan, project config or IPC request.
+// Snapshot the selection so a later caller mutation cannot redirect a spawn.
+export function managedProjectPrivateGitTools(privateTools = null) {
+  if (privateTools === null) return null;
+  if (!privateTools || typeof privateTools !== 'object' || Array.isArray(privateTools)
+      || typeof privateTools.gitExecutable !== 'string' || !path.isAbsolute(privateTools.gitExecutable)
+      || privateTools.gitExecutable.includes('\0') || typeof privateTools.revalidate !== 'function'
+      || !privateTools.environment || typeof privateTools.environment !== 'object' || Array.isArray(privateTools.environment))
+    throw new Error('managed_project_git_private_tools_invalid');
+  const environment = {};
+  for (const [key, value] of Object.entries(privateTools.environment)) {
+    const canonical = key.toUpperCase();
+    if (!key || /[\x00-\x1f=]/.test(key) || typeof value !== 'string' || value.includes('\0')
+        || (Object.hasOwn(environment, canonical) && environment[canonical] !== value))
+      throw new Error('managed_project_git_private_tools_environment_invalid');
+    environment[canonical] = value;
+  }
+  return Object.freeze({ gitExecutable: privateTools.gitExecutable, environment: Object.freeze(environment),
+    revalidate: privateTools.revalidate.bind(privateTools) });
+}
+
 /** Execute only the fixed argv plans emitted by workspace-git-hardening. */
-export function createShellFreeGitExecutor({ timeoutMs = 120000, spawnProcess = spawn } = {}) {
+export function createShellFreeGitExecutor({ timeoutMs = 120000, spawnProcess = spawn, privateTools = null } = {}) {
+  const tools = managedProjectPrivateGitTools(privateTools);
   const boundedTimeout = Math.max(1000, Math.min(300000, Number(timeoutMs) || 120000));
   return Object.freeze({
     async execute(plan) {
       const argv = gitInvocationArgv(plan);
+      // Source development retains the existing ambient tool selection. A
+      // packaged host instead supplies the complete verified environment,
+      // including private Git helper/CA paths; no ambient PATH is merged.
+      const env = tools ? { ...tools.environment }
+        : Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^GIT_/i.test(key)));
+      if (plan.effect.endsWith('_READ')) {
+        env.GIT_OPTIONAL_LOCKS = '0'; env.GIT_TERMINAL_PROMPT = '0';
+        env.GCM_INTERACTIVE = 'never'; env.GCM_GUI_PROMPT = '0';
+      }
+      if (tools) await tools.revalidate();
       return new Promise((resolve, reject) => {
         // The repository remains trusted: Git can execute its configured hooks.
         // On timeout/output overflow wait for close before returning a receipt.
-        // Host roots are verified with Git overrides removed. Apply the same
-        // environment fence to inventory and creation, or inherited GIT_DIR /
-        // GIT_WORK_TREE could redirect the effect away from the admitted repo.
-        const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^GIT_/i.test(key)));
-        // Even observational Git must not update index locks or enable prompts.
-        if (plan.effect.endsWith('_READ')) {
-          env.GIT_OPTIONAL_LOCKS = '0'; env.GIT_TERMINAL_PROMPT = '0';
-          env.GCM_INTERACTIVE = 'never'; env.GCM_GUI_PROMPT = '0';
-        }
-        const child = spawnProcess('git', argv, { cwd: plan.cwd, shell: false, windowsHide: true, env });
+        const child = spawnProcess(tools?.gitExecutable || 'git', argv, { cwd: plan.cwd, shell: false, windowsHide: true, env });
         const out = []; const err = []; let bytes = 0; let timer; let failure = null;
         const stop = (reason) => { if (failure) return; failure = new Error(reason); child.kill(); };
         const collect = (target, chunk) => { bytes += chunk.length; if (bytes > 8 * 1024 * 1024) { stop('managed_project_git_output_too_large'); return; } target.push(chunk); };

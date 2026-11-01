@@ -789,3 +789,60 @@ test('actual inert runner descriptor enters private custody adapter without recr
  assert.deepEqual(await fs.readFile(descriptor.attemptPath),bytes);assert.equal((await readNativeRunCallbackJournal(descriptor.directory)).records,3);
  const prior=await runner.prepare(request);assert.equal(runner.describePrepared(prior).state,'READBACK_ONLY');assert.equal(processController.spawns,0);
 });
+
+test('private tool capability rejects foreign CLI paths and case-colliding environments', async t => {
+  const f = await fixture(t);
+  const privateTools = {cliExecutable: f.executablePath, gitExecutable: process.execPath,
+    cliExecutableSha256: f.expectedExecutableSha256, gitExecutableSha256: 'a'.repeat(64),
+    environment: {PATH: path.join(f.codexHome, 'private-bin')}, revalidate: async () => {}};
+  assert.throws(() => createCodexCliRunner({...f, processController: controller(), privateTools,
+    executablePath: path.join(f.codexHome, 'foreign-codex.exe'), gitExecutable: process.execPath}), /private_tools_binding/);
+  assert.throws(() => createCodexCliRunner({...f, processController: controller(),
+    gitExecutable: process.execPath, privateTools: {...privateTools, environment: {PATH: 'first', Path: 'second'}}}), /private_tools_environment/);
+});
+
+test('private tool closure failure prevents Git probing and physical CLI launch', async t => {
+  const f = await fixture(t); const processController = controller(); let revalidations = 0;
+  const privateTools = {cliExecutable: f.executablePath, gitExecutable: process.execPath,
+    cliExecutableSha256: f.expectedExecutableSha256, gitExecutableSha256: 'a'.repeat(64),
+    environment: {PATH: ''}, revalidate: async () => {revalidations++; throw Error('fixture_private_tree_tampered');}};
+  const runner = createCodexCliRunner({...f, processController, gitExecutable: process.execPath, privateTools});
+  await assert.rejects(runner.prepare({lease: f.lease(901), role:'IMPLEMENTER', worktreePath:f.worktree, prompt:'closed bundle'}), /fixture_private_tree_tampered/);
+  assert.equal(revalidations, 1); assert.equal(processController.spawns, 0);
+});
+
+test('private Git works with a decoy-only PATH and CLI receives package closure environment', async t => {
+  const f=await fixture(t);const processController=controller();
+  const gitExecutable=(await exec(process.platform==='win32'?'where.exe':'which',['git'])).stdout.trim().split(/\r?\n/)[0];
+  const decoy=path.join(f.directory,'decoy-only-bin');await fs.mkdir(decoy);
+  await fs.writeFile(path.join(decoy,process.platform==='win32'?'git.exe':'git'),'must-never-execute',{mode:0o700});
+  const environment={PATH:decoy,...(process.platform==='win32'?{SYSTEMROOT:process.env.SystemRoot||process.env.SYSTEMROOT}:{}),
+    GIT_SSL_CAINFO:path.join(f.directory,'private-ca'),GIT_EXEC_PATH:(await exec(gitExecutable,['--exec-path'])).stdout.trim()};
+  let checks=0;
+  const privateTools={cliExecutable:f.executablePath,gitExecutable,cliExecutableSha256:f.expectedExecutableSha256,gitExecutableSha256:'a'.repeat(64),
+    environment,revalidate:async()=>{checks++;}};
+  const runner=createCodexCliRunner({...f,processController,gitExecutable,privateTools});
+  environment.PATH='mutated-decoy-after-composition';
+  const receipt=await runner.run({lease:f.lease(902),role:'IMPLEMENTER',worktreePath:f.worktree,prompt:'package-only tool paths'});
+  assert.equal(receipt.state,'RESULT_READY');assert.equal(processController.spawns,1);assert.ok(checks>=10);
+  assert.equal(processController.lastSpec.env.PATH,decoy);
+  assert.equal(processController.lastSpec.env.GIT_SSL_CAINFO,path.join(f.directory,'private-ca'));
+  assert.equal(processController.lastSpec.env.CODEX_HOME,f.codexHome);
+});
+
+test('private bundle drift before resume keeps suspended CLI joined and immutable readback available', async t => {
+  const f=await fixture(t);let drift=false,resumes=0;
+  const processController=controller({onResume:()=>{resumes++;}});
+  const gitExecutable=(await exec(process.platform==='win32'?'where.exe':'which',['git'])).stdout.trim().split(/\r?\n/)[0];
+  const privateTools={cliExecutable:f.executablePath,gitExecutable,cliExecutableSha256:f.expectedExecutableSha256,gitExecutableSha256:'a'.repeat(64),
+    environment:{PATH:'',...(process.platform==='win32'?{SYSTEMROOT:process.env.SystemRoot||process.env.SYSTEMROOT}:{})},
+    revalidate:async()=>{if(drift)throw Error('fixture_bundle_drift_before_resume');}};
+  const authorizeLease=async input=>{const permit=await f.authorizeLease(input);if(input.phase==='BEFORE_RESUME')drift=true;return permit;};
+  const runner=createCodexCliRunner({...f,authorizeLease,processController,gitExecutable,privateTools});
+  const request={lease:f.lease(903),role:'IMPLEMENTER',worktreePath:f.worktree,prompt:'physical closure drift'};
+  const receipt=await runner.run(request);
+  assert.equal(receipt.state,'AMBIGUOUS');assert.match(receipt.terminal_reason,/fixture_bundle_drift_before_resume/);
+  assert.equal(processController.spawns,1);assert.equal(resumes,0);
+  const again=await runner.run(request);assert.equal(again.prior_attempt,true);assert.equal(again.run_id,receipt.run_id);
+  assert.equal(processController.spawns,1);assert.equal(resumes,0);
+});
