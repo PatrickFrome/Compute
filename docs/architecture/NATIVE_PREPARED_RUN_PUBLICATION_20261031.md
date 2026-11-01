@@ -4,7 +4,41 @@ Status: PARTIALLY IMPLEMENTED / DEFAULT EXECUTION GATE CLOSED / NOT INSTALL QUAL
 Date: 2026-10-31.
 Subordinate to `coordination/operator-control/ROADMAP_UNIFIED_COMMAND_CONTINUITY_V1.md` and its existing audit closure register. This is not another scheduler, trust root, enrollment flow or release authority.
 
-## Current reproducible baseline
+## Latest source checkpoint — 2026-10-31 15:25 UTC
+
+Source `55cb3b34d92e7e992f33b6ee9e9478825fc4afd9` adds the private prepared
+runtime adapter and registers both SQL protections through the existing atomic
+upgrade pipeline. Joined actual AgentTools effects, original transaction
+cancellation, mandatory inert anchors, retained task identity, authenticated API
+ACL compatibility and canonical pre-provision OWNER_ONLY setup are now tested.
+The six integrated real-PG suites passed 211/211 on Linux and 211/211 on Windows.
+The existing canonical
+exporter independently restores the new empty schema and verifies catalogue/ACL
+equality plus the NEW-onboarding SQL sequence and SCRAM reconnect.
+
+Default Main/Host mounting is still closed. Presence-only migration inventory
+cannot serve as installed-schema attestation; a read-only installed-only check
+must be bound to the actual private PG incarnation. Existing release/Owner
+proofs, physical worker continuity and installed acceptance remain required.
+See the [checkpoint review](../../evidence/public/prepared-run-composition-20261031/REVIEW.md)
+for exact scopes, older Windows results and the Linux socket restriction.
+
+## Historical source checkpoint — 2026-10-31 07:28 UTC
+
+Functional source `fc216b1d40593f5bc8638d3a64de640cb3682bf6` implements the inert
+claim, original reservation/publication composition, private settlement-gated
+custody promotion and PUBLISH/AGENT Owner phase routing. Agent effects and final
+Owner recheck share the actual monitored transaction; phase failure invalidates
+the original request before its COMMIT guard. Windows focused selections passed
+111/111 real-PG and 253/253 component tests on an identical committed tree.
+
+See the [exact checkpoint review](../../evidence/public/prepared-run-composition-20261031/REVIEW.md).
+Joined actual AgentTools composition proof, default Main/runtime wiring and the
+durable pre-effect/cross-generation fences remain required. Default execution is
+still closed. The earlier checkpoints below are retained as history, not current
+publication or readiness claims.
+
+## Historical reproducible baseline
 
 - Public Draft #1392 source: `c434cb3cad724abded54f2ff4569d5382440d823`.
 - Cancellation repair: `035d3f66acb72d05c57c1656621a8e2d6cf1adac` (local, not published at this checkpoint).

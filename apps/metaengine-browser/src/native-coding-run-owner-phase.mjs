@@ -170,17 +170,18 @@ function publicationFrame(message,b){
   if(!integer(message?.cycle)||message.cycle>OWNER_READ_BUDGET[b.action])fail();
   validate(message,{...b,cycle:message.cycle},PUBLICATION_ROUND);
 }
-export function createPublicationOwnerHostPhases({binding:raw,send,signal,assertLifetime}={}){
-  const b=publicationBinding(raw);if(typeof send!=='function'||typeof assertLifetime!=='function')fail();
-  let closed=false,cycle=0,active=null,release=null;
+export function createPublicationOwnerHostPhases({binding:raw,send,signal,assertLifetime,onFailure}={}){
+  const b=publicationBinding(raw);if(typeof send!=='function'||typeof assertLifetime!=='function'||typeof onFailure!=='function')fail();
+  let closed=false,cycle=0,active=null,release=null,failed=false;
+  const invalidateOriginal=()=>{if(!failed){failed=true;try{onFailure();}finally{close();}}};
   const open=()=>{if(closed||signal?.aborted)fail();assertLifetime();};
   function close(){closed=true;active?.close();release?.reject(Error('native_publication_owner_closed'));release=null;signal?.removeEventListener('abort',close);}
-  function abortPeer(){if(!closed&&cycle){try{send(cycleFrame(b,cycle,'CYCLE_ABORT'));}catch{}}close();}
+  function abortPeer(){if(!closed&&cycle){try{send(cycleFrame(b,cycle,'CYCLE_ABORT'));}catch{}}invalidateOriginal();}
   signal?.addEventListener('abort',close,{once:true});
   function receive(message,handle){
     if(message?.schema!==PUBLICATION_OWNER_PHASE||message.request_id!==b.request_id)return false;
     try{open();publicationFrame(message,b);if(handle||!active||message.cycle!==cycle)fail();
-      if(message.phase==='CYCLE_ABORT'){if(message.sequence!==4)fail();empty(message.value);close();}
+      if(message.phase==='CYCLE_ABORT'){if(message.sequence!==4)fail();empty(message.value);invalidateOriginal();}
       else if(message.phase==='CYCLE_RELEASED'){
         if(!release||message.sequence!==4)fail();empty(message.value);
         const gate=release;release=null;gate.resolve();

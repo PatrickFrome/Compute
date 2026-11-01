@@ -80,12 +80,42 @@ function assertGitPlan(plan) {
   throw new Error('managed_project_git_plan_invalid');
 }
 
+// This is a conservative target-spelling envelope, not filesystem capability.
+// Git for Windows 2.55.0.windows.3 (52ca1113d651127f89477a8763f86ab20f645e1d)
+// setup.c:1082 checks strlen(GIT_DIR) <= PATH_MAX - 40 before reading config.
+// Its worktree child receives the supplied target spelling plus '/.git'.
+// Native testing additionally requires the physical target/.git to fit the
+// pre-config 259-byte policy; core.longpaths does not remove every Git/OS limit.
+// The repository's separate common/admin paths can still fail: those remain
+// AMBIGUOUS with no automatic replay, never a synthetic success or relocation.
+function gitInvocationArgv(plan) {
+  assertGitPlan(plan);
+  const argv = [...plan.argv];
+  if (process.platform !== 'win32') return argv;
+  if (plan.effect === 'WORKTREE_CREATE_LOCKED') {
+    const target = argv[7], relative = path.relative(plan.cwd, target);
+    if (path.parse(plan.cwd).root.toLowerCase() !== path.parse(target).root.toLowerCase() || path.isAbsolute(relative))
+      throw new Error('managed_project_windows_cross_volume_worktree_unsupported');
+    if (!relative || path.resolve(plan.cwd, relative) !== target)
+      throw new Error('managed_project_git_target_spelling_invalid');
+    // The absolute authority plan stays unchanged. Only this derived spelling
+    // is given to Git, against the same cwd, without aliases or 8.3 names.
+    const spelling = './' + relative.replaceAll('\\', '/');
+    if (Buffer.byteLength(spelling + '/.git', 'utf8') > 220 || Buffer.byteLength(target + '/.git', 'utf8') > 259)
+      throw new Error('managed_project_windows_path_requires_shorter_root');
+    argv[7] = spelling;
+  }
+  // Fixed invocation policy only; callers cannot supply arbitrary -c options.
+  // It does not persist config or qualify hooks/editors/other Windows APIs.
+  return ['-c', 'core.longpaths=true', ...argv];
+}
+
 /** Execute only the fixed argv plans emitted by workspace-git-hardening. */
 export function createShellFreeGitExecutor({ timeoutMs = 120000, spawnProcess = spawn } = {}) {
   const boundedTimeout = Math.max(1000, Math.min(300000, Number(timeoutMs) || 120000));
   return Object.freeze({
     async execute(plan) {
-      assertGitPlan(plan);
+      const argv = gitInvocationArgv(plan);
       return new Promise((resolve, reject) => {
         // The repository remains trusted: Git can execute its configured hooks.
         // On timeout/output overflow wait for close before returning a receipt.
@@ -98,7 +128,7 @@ export function createShellFreeGitExecutor({ timeoutMs = 120000, spawnProcess = 
           env.GIT_OPTIONAL_LOCKS = '0'; env.GIT_TERMINAL_PROMPT = '0';
           env.GCM_INTERACTIVE = 'never'; env.GCM_GUI_PROMPT = '0';
         }
-        const child = spawnProcess('git', plan.argv.map(String), { cwd: plan.cwd, shell: false, windowsHide: true, env });
+        const child = spawnProcess('git', argv, { cwd: plan.cwd, shell: false, windowsHide: true, env });
         const out = []; const err = []; let bytes = 0; let timer; let failure = null;
         const stop = (reason) => { if (failure) return; failure = new Error(reason); child.kill(); };
         const collect = (target, chunk) => { bytes += chunk.length; if (bytes > 8 * 1024 * 1024) { stop('managed_project_git_output_too_large'); return; } target.push(chunk); };
@@ -216,6 +246,9 @@ export function createManagedTaskProjectRuntime({ executePlan, journal, validate
     const before = await inventory(reservation);
     if (before) throw new Error('managed_project_unjournaled_worktree');
     const plan = planLockedWorkspaceMaterialization(reservation, { branch_exists: false });
+    // Refuse unsupported new effects before any reservation/write-ahead entry.
+    // Existing receipt reconciliation above remains read-only and unaffected.
+    gitInvocationArgv(plan);
     // This append is a write-ahead barrier. A persistent adapter must fsync or
     // commit it before resolving; cross-process conflicts must reject atomically.
     await journal.append(journalEntry({ idempotencyKey, reservation, state: 'RESERVED' }));

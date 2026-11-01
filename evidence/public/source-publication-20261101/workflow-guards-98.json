@@ -1,0 +1,69 @@
+{
+  "schema": "metaengine.workflow-input-source-validation.v1",
+  "source": "98d436c10553a716c42c3cc22e558c36db80f026",
+  "source_tree": "edf713b9315a240db6ca37c79a18e60c2610e054",
+  "parent": "6839e58c419e5a4c182fe52c20d3658e99f4bfbf",
+  "source_files": [
+    {
+      "path": ".github/workflows/client-checkpoint-reconciliation-qualification.yml",
+      "git_blob": "8dc6baf481fa209df4c8ccdc3772f6a5389da9eb",
+      "sha256": "c50fdfe05826e54a98397dc9a590a64f6561d4af6b5ba74f006a3cae57f46ba0"
+    },
+    {
+      "path": ".github/workflows/client-reviewed-empty-schema.yml",
+      "git_blob": "578c9afb94d34f4f05461d0cf0575d92ee9c55c9",
+      "sha256": "c9a8405027834134a76554b41c30aaabf31902cf41afde186035fca4c52de728"
+    },
+    {
+      "path": "infra/client-state-runtime/reviewed-empty-schema.test.mjs",
+      "git_blob": "1b6de59d5697c649d7db72131d0761e7356824bb",
+      "sha256": "c6b62378602ffa29504a346363ee9bf1b55ea8e3b353429fc8de0f45655c981d"
+    },
+    {
+      "path": "infra/client-state-runtime/windows-qualification-registration.test.mjs",
+      "git_blob": "2fc0be05ce52612ac330e6f42a2ecb7667a6571c",
+      "sha256": "20ffd8fee6f9563b1e710851e722574128c95e24ee9edb80e091132e8ec5d6f0"
+    }
+  ],
+  "regression_red": {
+    "tests": 60,
+    "pass": 58,
+    "fail": 2,
+    "skip": 0
+  },
+  "regression_green": {
+    "tests": 60,
+    "pass": 60,
+    "fail": 0,
+    "skip": 0
+  },
+  "committed_head_repeat": {
+    "tests": 60,
+    "pass": 60,
+    "fail": 0,
+    "skip": 0
+  },
+  "individual_omission_mutations_rejected": [
+    "pull_request_identity_trigger",
+    "push_identity_trigger",
+    "executor_source_receipt_entry"
+  ],
+  "command": "node --test --test-concurrency=1 infra/client-state-runtime/windows-qualification-registration.test.mjs infra/client-state-runtime/reviewed-empty-schema.test.mjs",
+  "environment": {
+    "platform": "linux",
+    "node": "24.22.1",
+    "github_hosted": false
+  },
+  "test_log_sha256": {
+    "workflow-input-guards-red.tap": "f37dc15bcbaafbfcc172b1d13bdf76fed97aabd51a9cfb6288bdcf0970eaae92",
+    "workflow-input-guards-green.tap": "eff1f2036f2e4f6a2aaf4220061242e53e54c5c606cc9c306070b309beecad75",
+    "workflow-input-guards-committed.tap": "2a609637dda6ea1db684e87030a499675d909d09c046b3c1ba1978a3e636c488",
+    "workflow-missing-pull_request.tap": "692bceaac00e22e211cf6fb6b90df71759eb67eeff3eeb317b935b0a22410532",
+    "workflow-missing-push.tap": "c845a07e736ad24e75820d31a0cc3193fbc3ba0253f6da2e3a082be9b5abd42c",
+    "workflow-missing-executor-receipt.tap": "86d51fe2c60018bd31cbec6433ee57b92cf181ae6fef5c38d20d50d3c84eb023"
+  },
+  "production_source_changed": false,
+  "skip_or_deadline_policy_relaxed": false,
+  "qualification_promoted": false,
+  "authority_effect": false
+}

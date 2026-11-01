@@ -1,0 +1,35 @@
+{
+  "schema": "metaengine.source-qualification-observation.v1",
+  "observed_at": "2026-10-31T07:51:26Z",
+  "functional_source": "fc216b1d40593f5bc8638d3a64de640cb3682bf6",
+  "windows_source": "fb58bc1613bc51e5393370983d014205003e1451",
+  "source_tree": "9a5b6af962fd0d5111b93cf8644913760ae445e8",
+  "full_browser": {
+    "node": "24.19.0",
+    "tests": 7698,
+    "pass": 7673,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 25,
+    "todo": 0,
+    "duration_ms": 750766.782,
+    "tap_sha256": "cd461178716260e639b6eff23868785ba8f24e16a3398fd3e7809f50a864bb86",
+    "failed_acl_close_regression_now_executed_pass": true,
+    "delayed_observer_regression_executed_pass": true,
+    "skips_are_not_pass": true,
+    "remaining_skip_categories": [
+      "Windows symlink privilege unavailable",
+      "Electron binary not supplied",
+      "selected real-PG fixtures not enabled in this Browser invocation",
+      "native consumer/helper qualification prerequisites absent",
+      "NSIS bundled template unavailable",
+      "non-Windows-only contracts",
+      "unrelated default port in use"
+    ]
+  },
+  "later_source_edits_qualified": false,
+  "installed_qualification": false,
+  "release_qualification": false,
+  "authority_effect": false,
+  "automatic_retry_allowed": false
+}

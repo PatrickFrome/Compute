@@ -7,7 +7,7 @@ function pair({action='RESERVE_EXECUTION',callback,clientSend,hostSend}={}){
  const f=generatedRunOwnerRead(),{body_sha256,...origin}=f.binding,binding={...origin,action},abort=new AbortController();
  let client,reads=0,verified=0,calls=0;const frames=[];
  const open=()=>{if(abort.signal.aborted)throw Error('parent closed');};
- const host=createPublicationOwnerHostPhases({binding,signal:abort.signal,assertLifetime:open,
+ const host=createPublicationOwnerHostPhases({binding,signal:abort.signal,assertLifetime:open,onFailure:()=>abort.abort(),
   send:m=>{frames.push(structuredClone(m));queueMicrotask(()=>client.receive(hostSend?hostSend(m):m));}});
  const scope=structuredClone(f.scope.execution);if(action==='RESERVE_EXECUTION')delete scope.reservation_id;
  client=createPublicationOwnerClientPhases({binding,scope,assertLifetime:open,
@@ -22,7 +22,7 @@ for(const [action,count] of [['RESERVE_EXECUTION',6],['PUBLISH_RUN_CALLBACK_V1',
   assert.equal(p.reads,count*3);assert.equal(p.calls,count);assert.equal(p.verified,count);
   assert.equal(p.frames.some(f=>Object.hasOwn(f,'body_sha256')),false);
   assert.deepEqual([...new Set(p.frames.map(f=>f.cycle))],Array.from({length:count},(_,i)=>i+1));
-  await assert.rejects(p.run(),/invalid/);p.host.finish();await p.client.finish();
+  await assert.rejects(p.run(),/invalid/);p.host.finish();await p.client.finish();assert.equal(p.abort.signal.aborted,false);
  });
 }
 test('publication cycle budget cannot be chosen by caller or foreign action',()=>{
@@ -81,7 +81,7 @@ for(const phase of ['LOCKED','ACK','CYCLE_RESULT'])test('malformed '+phase+' ter
 });
 test('CYCLE_RELEASED send failure terminates the original Host wait',{timeout:3000},async()=>{
  const f=generatedRunOwnerRead(),{body_sha256,...origin}=f.binding,binding={...origin,action:'AGENT_OPERATION'};let client;
- const host=createPublicationOwnerHostPhases({binding,assertLifetime(){},send:m=>queueMicrotask(()=>client.receive(m))});
+ const host=createPublicationOwnerHostPhases({binding,assertLifetime(){},onFailure(){},send:m=>queueMicrotask(()=>client.receive(m))});
  client=createPublicationOwnerClientPhases({binding,scope:f.scope.execution,assertLifetime(){},
   send:m=>{if(m.phase==='CYCLE_RELEASED')throw Error('generated send error');queueMicrotask(()=>host.receive(m));},
   callback:async tx=>{await tx.readScope();await tx.verifyOwnerRecord(f.evidence);return f.evidence;}});
@@ -89,7 +89,7 @@ test('CYCLE_RELEASED send failure terminates the original Host wait',{timeout:30
 });
 test('Host result send failure closes both peers and cannot qualify the read',{timeout:3000},async()=>{
  const f=generatedRunOwnerRead(),{body_sha256,...origin}=f.binding,binding={...origin,action:'AGENT_OPERATION'};let client;
- const host=createPublicationOwnerHostPhases({binding,assertLifetime(){},send:m=>{if(m.phase==='CYCLE_RESULT')throw Error('generated send error');queueMicrotask(()=>client.receive(m));}});
+ const host=createPublicationOwnerHostPhases({binding,assertLifetime(){},onFailure(){},send:m=>{if(m.phase==='CYCLE_RESULT')throw Error('generated send error');queueMicrotask(()=>client.receive(m));}});
  client=createPublicationOwnerClientPhases({binding,scope:f.scope.execution,assertLifetime(){},send:m=>queueMicrotask(()=>host.receive(m)),
   callback:async tx=>{await tx.readScope();await tx.verifyOwnerRecord(f.evidence);return f.evidence;}});
  await assert.rejects(host.run(f.scope,{readScope:async()=>f.scope,verifyOwner:async()=>{}}));await tick();await client.drain();await assert.rejects(client.finish());
@@ -98,7 +98,7 @@ for(const [action,count] of [['RESERVE_EXECUTION',6],['PUBLISH_RUN_CALLBACK_V1',
  const p=pair({action});for(let i=0;i<count;i++)await p.run();
  const last=p.frames.findLast(f=>f.phase==='CYCLE_RESULT');p.client.receive({...last,unexpected:true});await tick();
  assert.ok(p.frames.some(f=>f.phase==='CYCLE_ABORT'&&f.cycle===count));
- assert.throws(()=>p.host.finish());await assert.rejects(p.client.finish());
+ assert.equal(p.abort.signal.aborted,true);assert.throws(()=>p.host.finish());await assert.rejects(p.client.finish());
 });
 test('premature cycle result aborts Host immediately but retains the held native callback drain',{timeout:3000},async()=>{
  let entered,release,signal;const entry=new Promise(r=>entered=r),wait=new Promise(r=>release=r);
@@ -108,4 +108,8 @@ test('premature cycle result aborts Host immediately but retains the held native
  await assert.rejects(run);assert.equal(signal.aborted,true);
  let drained=false;p.client.drain().then(()=>drained=true);await tick();assert.equal(drained,false);
  release();await p.client.drain();assert.equal(drained,true);await assert.rejects(p.client.finish());
+});
+test('publication Host facet requires an original-request failure callback instead of a silent local-only fence',()=>{
+ const f=generatedRunOwnerRead(),{body_sha256,...origin}=f.binding,binding={...origin,action:'AGENT_OPERATION'};
+ assert.throws(()=>createPublicationOwnerHostPhases({binding,send(){},assertLifetime(){}}),/phase_invalid/);
 });

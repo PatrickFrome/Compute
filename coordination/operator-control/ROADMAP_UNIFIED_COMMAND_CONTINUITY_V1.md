@@ -4,7 +4,39 @@ Status: ACCEPTED ROADMAP / SOURCE PARTIALLY IMPLEMENTED / INSTALLED CONTINUITY U
 Date: 2026-10-18 (binding closure plan; historical checkpoints retained below)
 Scope: PatrickFrome/Compute / METAENGINE Client + own PostgreSQL + Windows Host
 
-## Latest evidence readback — 2026-10-31 (source repair, no installed acceptance)
+## Latest evidence readback — 2026-10-31 15:25 UTC (source only)
+
+Integrated source `55cb3b34d92e7e992f33b6ee9e9478825fc4afd9` registers the initial
+publication anchor and retained task fence through the existing atomic migration
+pipeline. Authenticated direct-API compatibility, canonical OWNER_ONLY setup and
+duplicate-history rollback are source-tested. The prepared runtime adapter and
+same-transaction actual AgentTools effect are implemented; default Host/Main and
+bridge activation remain closed pending installed-schema and Owner/release proof.
+Integrated real-PG selection: 211/211 on Linux and 211/211 on Windows, no skips;
+the exact Windows source/tree and terminal result were read back at 15:30 UTC.
+Earlier Windows component/native and full-suite results are separate checkpoints,
+not final installed acceptance. See the [scope-specific review](../../evidence/public/prepared-run-composition-20261031/REVIEW.md).
+Canonical export/restore is a reviewed empty-schema fixture, not an authorized
+installer. Release signing, unique package and installed continuity remain open.
+
+## Historical evidence readback — 2026-10-31 07:28 UTC (source only)
+
+Public predecessor: Draft PR #1392 at `7599ccbfb2a8cd76b7db5d6207f32aa655895097`.
+New functional checkpoint `fc216b1d40593f5bc8638d3a64de640cb3682bf6` has the same
+tree as the Windows-tested source: 111/111 real disposable-PG tests and 253/253
+component tests passed without skips. These focused selections are not full CI
+or installed acceptance. See the [composition review](../../evidence/public/prepared-run-composition-20261031/REVIEW.md)
+for exact trees, evidence hashes, prior failures and remaining gates.
+
+Inert preparation, original RESERVE publication, PUBLISH/AGENT phase routing,
+private custody promotion and same-transaction effect/Owner recheck now exist as
+source composition. Late phase failure aborts the original request before COMMIT.
+The default Main/runtime mount and bridge remain closed pending joined proof and
+durable cross-generation pre-effect fences. Release signing/placement, first-run
+materialization, a unique package and installed continuity remain unqualified.
+The accepted stage order and all historical evidence below are unchanged.
+
+## Historical evidence readback — 2026-10-31 05:18 UTC
 
 Current public source is Draft PR #1392 at
 `c434cb3cad724abded54f2ff4569d5382440d823`. The following older checkpoints are

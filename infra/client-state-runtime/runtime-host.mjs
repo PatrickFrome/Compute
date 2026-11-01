@@ -1,8 +1,11 @@
 import {createNativeCodingHostCapacity} from './native-coding-host-capacity.mjs';
 import {createNativeCodingHostSetupService} from './native-coding-host-setup-service.mjs';
-import {createNativePreparationTransactions,bindNativeCodingTransactionPool} from './native-coding-preparation-transaction.mjs';
+import {createNativePreparationTransactions,bindNativeCodingTransactionPool,bindNativeCodingPublicationTransactionPool} from './native-coding-preparation-transaction.mjs';
+import {createNativeInstalledPublicationSchemaVerifier} from './native-coding-installed-publication-schema.mjs';
+import {runNativePhysicalSettlementScope} from '../../apps/metaengine-browser/src/native-coding-host-settlement.mjs';
+import {startupFilesDigest} from './startup-source-manifest.mjs';
 import { createHash, randomUUID } from 'node:crypto';
-import { createReadStream, createWriteStream } from 'node:fs';
+import { createReadStream, createWriteStream, lstatSync, openSync, fstatSync, readSync, closeSync } from 'node:fs';
 import { lstat, mkdir, open, readFile, realpath, rename, unlink, writeFile } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import path from 'node:path';
@@ -157,7 +160,7 @@ async function acquireOwnership(stateDirectory, config) {
   catch (error) { if (error.code !== 'ENOENT') throw error; }
   const lockPath = path.join(stateDirectory, 'runtime-host-lock.json');
   const bytes = JSON.stringify({ schema: 'compute.runtime-host-lock.v1', pid: process.pid, owner_nonce: randomUUID() }) + '\n';
-  let handle;
+  let handle,owned;
   try { handle = await open(lockPath, 'wx', 0o600); }
   catch (error) {
     if (error.code !== 'EEXIST') throw failure('runtime_host_owner_lock_failed');
@@ -168,32 +171,85 @@ async function acquireOwnership(stateDirectory, config) {
     try { handle = await open(lockPath, 'wx', 0o600); }
     catch { throw failure('runtime_host_owner_reacquisition_unconfirmed'); }
   }
-  try { await handle.writeFile(bytes); await handle.sync(); }
+  try { await handle.writeFile(bytes); await handle.sync();owned=await handle.stat({bigint:true});
+    if(!owned.isFile()||owned.nlink!==1n||owned.size!==BigInt(Buffer.byteLength(bytes)))throw failure('runtime_host_owner_lock_write_failed');
+  }
   catch { throw failure('runtime_host_owner_lock_write_failed'); }
   finally { await handle.close(); }
   let released = false;
-  return async () => {
+  // Private generation assertion used by the read-only diagnostic, not a
+  // caller-supplied readiness flag. Never adopt a replaced same-path lock.
+  const assertCurrent = () => {
+    const ancestry=()=>{let ancestor=path.parse(lockPath).root;
+      for(const segment of path.relative(ancestor,lockPath).split(path.sep).filter(Boolean)){
+        ancestor=path.join(ancestor,segment);if(lstatSync(ancestor,{bigint:true}).isSymbolicLink())throw failure('runtime_host_owner_lock_changed');
+      }
+    };
+    const same=info=>info.isFile()&&!info.isSymbolicLink()&&info.nlink===1n&&info.ino===owned.ino&&info.dev===owned.dev
+      &&info.size===BigInt(Buffer.byteLength(bytes));
+    if(released)throw failure('runtime_host_owner_lock_changed');ancestry();
+    const current=openSync(lockPath,'r');
+    try{
+      const info=fstatSync(current,{bigint:true}),value=Buffer.alloc(Buffer.byteLength(bytes)+1);
+      if(!same(info)||readSync(current,value,0,value.length,0)!==value.length-1
+        ||value.subarray(0,-1).toString('utf8')!==bytes||!same(fstatSync(current,{bigint:true}))
+        ||!same(lstatSync(lockPath,{bigint:true})))throw failure('runtime_host_owner_lock_changed');
+      ancestry();
+    }finally{closeSync(current);}
+  };
+  const release = async () => {
     if (released) return;
     // Never erase a replacement lock, nor guess whether a stale PID is ours.
-    const info = await lstat(lockPath);
-    if (!info.isFile() || info.isSymbolicLink() || await readFile(lockPath, 'utf8') !== bytes) throw failure('runtime_host_owner_lock_changed');
+    assertCurrent();
     await unlink(lockPath);
     released = true;
   };
+  assertCurrent(); // The pathname still names the original wx handle, never a post-close replacement.
+  Object.defineProperty(release,'assertCurrent',{value:assertCurrent});return release;
 }
 
 async function writeStatus(stateDirectory, status) {
-  const target = path.join(stateDirectory, 'runtime-instance.json');
-  try {
-    const previous = await lstat(target);
-    if (!previous.isFile() || previous.isSymbolicLink() || previous.nlink !== 1) throw failure('runtime_host_status_path_invalid');
-  } catch (error) { if (error.code !== 'ENOENT') throw error; }
-  const temporary = path.join(stateDirectory, `.runtime-status-${randomUUID()}.json`);
-  const handle = await open(temporary, 'wx', 0o600);
-  try { await handle.writeFile(JSON.stringify(status, null, 2) + '\n'); await handle.sync(); }
-  finally { await handle.close(); }
-  try { await rename(temporary, target); }
-  catch { await unlink(temporary).catch(() => {}); throw failure('runtime_host_status_write_failed'); }
+  const target=path.join(stateDirectory,'runtime-instance.json'),payload=Buffer.from(JSON.stringify(status,null,2)+'\n','utf8');
+  const same=(a,b)=>a===null||b===null?a===b:a.info.dev===b.info.dev&&a.info.ino===b.info.ino&&a.bytes.equals(b.bytes);
+  const snapshot=async file=>{
+    let info;try{info=await lstat(file,{bigint:true});}catch(error){if(error.code==='ENOENT')return null;throw error;}
+    if(!info.isFile()||info.isSymbolicLink()||info.nlink!==1n)throw failure('runtime_host_status_path_invalid');
+    const handle=await open(file,'r');
+    try{
+      const held=await handle.stat({bigint:true}),bytes=await handle.readFile(),after=await lstat(file,{bigint:true});
+      if(held.dev!==info.dev||held.ino!==info.ino||held.nlink!==1n||after.dev!==info.dev||after.ino!==info.ino||after.nlink!==1n
+        ||!after.isFile()||after.isSymbolicLink())throw failure('runtime_host_status_path_invalid');
+      return {info,bytes};
+    }finally{await handle.close();}
+  };
+  await requireCanonicalPath(stateDirectory,'directory');
+  const directory=await lstat(stateDirectory,{bigint:true});
+  if(!directory.isDirectory()||directory.isSymbolicLink())throw failure('runtime_host_status_path_invalid');
+  const directoryCurrent=async()=>{const now=await lstat(stateDirectory,{bigint:true});return now.isDirectory()&&!now.isSymbolicLink()&&now.dev===directory.dev&&now.ino===directory.ino;};
+  const previous=await snapshot(target);
+  if(!await directoryCurrent())throw failure('runtime_host_status_write_failed');
+  const temporary=path.join(stateDirectory,`.runtime-status-${randomUUID()}.json`),handle=await open(temporary,'wx',0o600);let original;
+  try{await handle.writeFile(payload);await handle.sync();original={info:await handle.stat({bigint:true}),bytes:payload};
+    if(!original.info.isFile()||original.info.nlink!==1n||original.info.size!==BigInt(Buffer.byteLength(payload)))throw failure('runtime_host_status_write_failed');}
+  finally{await handle.close();}
+  // One synced candidate, no target unlink/rewrite or new scheduler. Retry only
+  // fixed Windows sharing-error classes, while exact directory/names/bytes are unchanged.
+  // A lost acknowledgement is accepted only by original-inode target readback.
+  const delays=[0,25,50,100,200,400];
+  for(let attempt=0;attempt<delays.length;attempt++){
+    if(delays[attempt])await new Promise(resolve=>setTimeout(resolve,delays[attempt]));
+    await requireCanonicalPath(stateDirectory,'directory');
+    if(!await directoryCurrent()||!same(await snapshot(temporary),original)||!same(await snapshot(target),previous))throw failure('runtime_host_status_write_failed');
+    let error;try{await rename(temporary,target);}catch(caught){error=caught;}
+    const pending=await snapshot(temporary),published=await snapshot(target);
+    if(!await directoryCurrent())throw failure('runtime_host_status_write_failed');
+    if(pending===null&&same(published,original))return;
+    if(process.platform!=='win32'||!error||!['EPERM','EACCES','EBUSY'].includes(error.code)||!same(pending,original)||!same(published,previous)||attempt===delays.length-1)
+      throw failure('runtime_host_status_write_failed');
+  }
+  // Unresolved writes retain their exact candidate as evidence. Never delete a
+  // replacement or infer persistence from an equal-payload different inode.
+  throw failure('runtime_host_status_write_failed');
 }
 
 export async function stageManagedDenoCache({ verified, stateDirectory }) {
@@ -337,7 +393,10 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
   let nativeCodingAuthority = null;
   let nativeCapacityService = null;
   let nativeSetupService = null,setupCleanupUnconfirmed=false;
-  let nativeCodingSql = null;
+  let nativeCodingRawSql = null,nativeCodingSql = null,nativeSchemaSql = null;
+  let nativeSchemaVerifier=null,nativeSchemaApi=null,nativeSchemaOpening=null,nativeSchemaDraining=null;
+  let schemaCleanupUnconfirmed=false,schemaPhysicalUnconfirmed=false,schemaApiEnding=false,schemaApiLost=false,schemaDrainJoined=false,schemaApiReads=0;
+  const schemaAbort=new AbortController();
   let nativeCodingSeedBinding = null;
   let nativeCodingStartup = null;
   let abortRequested = signal?.aborted === true;
@@ -349,6 +408,7 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
   const persist = update => {
     const pending = persistTail.then(async () => {
       const status = typeof update === 'function' ? update(lastStatus) : update;
+      if(status===null)return;
       await writeStatus(config.state_directory, status);
       lastStatus = status;
     });
@@ -367,6 +427,105 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
       await persist(previous => ({ ...previous, last_health_failure: null }));
     }
   };
+  const schemaStatus=state=>Object.freeze({schema:'metaengine.native-coding.installed-schema-diagnosis.v1',state,
+    execution_admitted:false,authority_effect:false});
+  const closeSchemaDiagnosis=()=>{schemaAbort.abort();try{nativeSchemaVerifier?.close();}catch{schemaCleanupUnconfirmed=true;}};
+  const reportSchemaDiagnosis=state=>persist(previous=>{
+    if(schemaAbort.signal.aborted||abortRequested||terminalPromise||runtime?.stopped===true||previous.state!=='READY')return null;
+    return {...previous,native_publication_schema:schemaStatus(state)};
+  }).catch(()=>{schemaCleanupUnconfirmed=true;throw failure('runtime_host_schema_status_write_failed');});
+  const drainSchemaDiagnosis=()=>nativeSchemaDraining??=(async()=>{
+    // Start ending the original API connection without first waiting on its
+    // own read. Owner reads retain their original reservation; no external PG
+    // termination or replacement connection is used to manufacture settlement.
+    schemaApiEnding=true;
+    const apiEnd=nativeSchemaApi?Promise.resolve().then(()=>nativeSchemaApi.end({timeout:5})):Promise.resolve();
+    const reads=(async()=>{await nativeSchemaOpening?.catch(()=>{});await nativeSchemaVerifier?.drain();})();
+    const joined=await Promise.allSettled([reads,apiEnd]);schemaDrainJoined=true;
+    if(joined.some(row=>row.status==='rejected'))schemaCleanupUnconfirmed=true;
+    if(schemaCleanupUnconfirmed)throw failure('runtime_host_schema_diagnosis_cleanup_unconfirmed');
+  })();
+  const boundedSchemaDrain=async()=>{
+    let timer;
+    try{await Promise.race([drainSchemaDiagnosis(),new Promise((_,reject)=>{
+      timer=setTimeout(()=>reject(failure('runtime_host_schema_diagnosis_cleanup_unconfirmed')),6500);
+    })]);}finally{clearTimeout(timer);}
+    // Timeout is HOLD, never success. The exact pending drain stays retained;
+    // finalize must not dispose its owner pool or release the Host lock.
+  };
+  const startSchemaDiagnosis=(postgres,descriptor,postgresContinuity)=>{
+    const instance=runtime.instanceId,postgresIdentity=JSON.stringify(runtime.postgresIdentity),sourcePin=runtime.startupManifest.source_manifest_sha256,pgStartedAt=runtime.postgresIdentity.started_at;
+    const current=()=>{
+      if(schemaAbort.signal.aborted||abortRequested||terminalPromise||runtime.stopped===true||runtime.instanceId!==instance
+        ||instance!==descriptor.instance_id||JSON.stringify(runtime.postgresIdentity)!==postgresIdentity
+        ||runtime.startupManifest.source_manifest_sha256!==sourcePin)throw failure('runtime_host_schema_lifetime_changed');
+      if(schemaApiLost)throw failure('runtime_host_schema_api_connection_changed');
+      try{release.assertCurrent();}catch{schemaCleanupUnconfirmed=true;throw failure('runtime_host_schema_ownership_changed');}
+    };
+    const observe=async()=>{
+      current();
+      const source=await (hooks.verifyBundle||verifyOfflineRuntimeBundle)({bundleDirectory:config.bundle_directory,expectedBundleDigest:config.expected_bundle_sha256});current();
+      if(source.manifest.reviewed_startup_files_sha256!==verified.manifest.reviewed_startup_files_sha256
+        ||!runtime.startupManifest.source?.files||startupFilesDigest(runtime.startupManifest.source.files)!==source.manifest.reviewed_startup_files_sha256)throw failure('runtime_host_schema_source_changed');
+      const actualEntry=await realpath(hooks.modulePath||hostEntry);current();
+      const actualExecutable=await realpath(hooks.executablePath||process.execPath);current();
+      if(canonical(actualEntry)!==canonical(source.paths.hostEntry)||canonical(actualExecutable)!==canonical(source.paths.nodeExecutable))throw failure('runtime_host_schema_source_changed');
+      const pg=await nativeSchemaSql.begin('isolation level repeatable read read only',async tx=>{
+        current();tx.addCommitGuard(current);
+        const [row]=await tx.unsafe(`select current_user::text as current_login,session_user::text as session_login,
+          pg_catalog.current_setting('server_version_num')::int as version,pg_catalog.current_setting('data_directory') as data_directory,
+          (select system_identifier::text from pg_catalog.pg_control_system()) as system_identifier,
+          pg_catalog.pg_postmaster_start_time()::text as started_at,pg_catalog.inet_server_port() as port,
+          pg_catalog.pg_postmaster_start_time()=$1::text::timestamptz as birth_matches`,[pgStartedAt]);current();
+        if(row?.current_login!=='state_owner'||row.session_login!=='state_owner'||row.birth_matches!==true)throw failure('runtime_host_schema_postgres_changed');
+        return {...row,pid:runtime.postgresIdentity.pid};
+      });current();
+      const proof=await runtimeRecoveryPostgresProof({identity:pg,pgDataDirectory:config.pg_data_directory,
+        expectedClusterSystemIdentifier:config.expected_cluster_system_identifier});current();
+      if(proof.sha256!==postgresContinuity.sha256)throw failure('runtime_host_schema_postgres_changed');
+    };
+    // Publish this exact opening before its first await. Diagnosis cannot hold
+    // provider readiness or prevent the minimum signed setup/capacity surface.
+    const lane=runNativePhysicalSettlementScope(async()=>{
+      try{
+        current();
+        if(launcherConfig.apiRoleMode!=='direct'){await reportSchemaDiagnosis('UNSUPPORTED_PROFILE');return;}
+        await reportSchemaDiagnosis('CHECKING');current();
+        nativeSchemaApi=postgres(config.database_url,{max:1,connect_timeout:10,idle_timeout:0,prepare:false,
+          onclose(){
+            if(!schemaApiEnding||schemaApiReads>0)schemaPhysicalUnconfirmed=true;
+            if(!schemaApiEnding){schemaApiLost=true;
+              try{nativeSchemaVerifier?.close();}catch{schemaCleanupUnconfirmed=true;}
+              void reportSchemaDiagnosis('RUNTIME_CONTINUITY_HOLD').catch(()=>{schemaCleanupUnconfirmed=true;});
+            }
+          }});
+        // Capture uncertainty at the original raw API read, before an error is
+        // sanitized downstream or active reads decrement ahead of delayed onclose.
+        // Intentional idle end is clean; ending an active read is not backend proof.
+        const apiReads=Object.freeze({unsafe:async(...args)=>{
+          current();schemaApiReads++;
+          try{return await nativeSchemaApi.unsafe(...args);}
+          catch(error){schemaPhysicalUnconfirmed=true;throw error;}
+          finally{schemaApiReads--;}
+        }});
+        const apiLogin=decodeURIComponent(new URL(config.database_url).username);
+        await observe();current();
+        nativeSchemaVerifier=createNativeInstalledPublicationSchemaVerifier({ownerSql:nativeSchemaSql,apiSql:apiReads,apiLogin,
+          assertCurrent:current,signal:schemaAbort.signal});
+        await nativeSchemaVerifier.attest();current();await observe();current();
+        await reportSchemaDiagnosis('MATCHED_SCHEMA_ONLY');
+      }catch(error){
+        if(error?.code==='runtime_host_schema_status_write_failed')return; // Storage failure is not a schema verdict.
+        // Fixed schema-only categories: never persist URLs, SQL, role names,
+        // catalog rows, filesystem paths or exception text.
+        const state=String(error?.message||'').startsWith('runtime_host_schema_')||String(error?.code||'').startsWith('offline_bundle_')
+          ?'RUNTIME_CONTINUITY_HOLD':'SCHEMA_HOLD';
+        await reportSchemaDiagnosis(state);
+      }
+    });
+    nativeSchemaOpening=lane.promise.finally(()=>{if(lane.unconfirmed())schemaPhysicalUnconfirmed=true;});
+    void nativeSchemaOpening.catch(()=>{});
+  };
   const drainGuardianLane=()=>guardianDrainPromise??=(async()=>{
     let timer;
     try{await Promise.race([(async()=>{await guardianOpening;await guardianTicketConsumer?.close();})(),
@@ -375,7 +534,7 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
   })();
   const finalize = outcome => {
     // Fence private ticket consumption synchronously, before any cleanup await.
-    guardianAbort.abort();
+    guardianAbort.abort();closeSchemaDiagnosis();
     void guardianTicketConsumer?.close().catch(()=>{});
     if (!terminalPromise) terminalPromise = (async () => {
       let confirmed = outcome.children_stopped === true;
@@ -385,20 +544,43 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
       // through terminalPromise, then join its cleanup before ending SQL or
       // releasing the Host lock. A failed preparation is not a live capability.
       await nativeCodingStartup?.catch(() => {});
+      try{await boundedSchemaDrain();}catch{schemaCleanupUnconfirmed=true;}
+      // Only the existing launcher's genuine owned-children stop can settle a
+      // disconnected own-PG read, after all read/API cleanup work has joined.
+      // Attached PG is not an owned child and cannot inherit that proof.
+      if(schemaPhysicalUnconfirmed&&!(schemaDrainJoined&&postgresMode==='owned'&&outcome.children_stopped===true))schemaCleanupUnconfirmed=true;
+      if(schemaCleanupUnconfirmed)confirmed=false;
       nativeCodingAuthority?.close();nativeSetupService?.close();nativeCapacityService?.close();
       await nativeCapacityService?.drain();
       try{await nativeSetupService?.drain();}catch{setupCleanupUnconfirmed=true;}
       if(setupCleanupUnconfirmed)confirmed=false;
       nativeCodingSeedBinding?.close();
       await nativeCodingSeedBinding?.drain?.();
-      if(nativeCodingSql) {await nativeCodingSql.end({timeout:5});nativeCodingSql=null;}
+      if(nativeCodingSql&&schemaDrainJoined) {
+        try{await nativeCodingSql.end({timeout:5});nativeCodingSql=null;nativeCodingRawSql=null;nativeSchemaSql=null;}
+        catch{schemaCleanupUnconfirmed=true;confirmed=false;}
+      }
       if (outcome.last_health_failure) {
         try { lastHealthFailure = normalizeRuntimeHealthFailure(outcome.last_health_failure); } catch { /* Never forward unvalidated diagnostics. */ }
       }
       try { await persist(previous => ({ ...previous, state: confirmed ? 'STOPPED' : 'FAILED', runtime_ready: false,
         reason: confirmed ? String(outcome.reason || 'runtime_ended') : 'runtime_host_cleanup_unconfirmed',
-        children_stopped: confirmed, last_health_failure: lastHealthFailure, stopped_at: new Date().toISOString() })); }
-      finally { signal?.removeEventListener('abort', onAbort); if (confirmed) await release(); }
+        children_stopped: confirmed, last_health_failure: lastHealthFailure,
+        native_publication_schema:schemaStatus(schemaCleanupUnconfirmed?'CLEANUP_HOLD':'CLOSED_SCHEMA_ONLY'),stopped_at: new Date().toISOString() })); }
+      catch(error){confirmed=false;schemaCleanupUnconfirmed=true;throw error;}
+      finally {
+        signal?.removeEventListener('abort',onAbort);
+        if(confirmed)try{await release();}catch(error){
+          // Preserve release rejection and the replacement lock; status must
+          // not remain STOPPED after ownership cleanup failed.
+          try{await persist(previous=>({...previous,state:'FAILED',runtime_ready:false,children_stopped:false,
+            reason:'runtime_host_cleanup_unconfirmed',native_publication_schema:schemaStatus('CLEANUP_HOLD')}));}catch{
+            // A second storage failure cannot replace the original ownership
+            // refusal or fabricate a terminal-success receipt. Lock stays held.
+          }
+          throw error;
+        }
+      }
       if (confirmed) await hooks.onTerminal?.({ instance_id: lastStatus.instance_id || null,
         children_stopped: true, ownership_released: true, reason: outcome.reason });
       return confirmed?outcome:{...outcome,children_stopped:false,reason:'runtime_host_cleanup_unconfirmed'};
@@ -406,7 +588,7 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
     return terminalPromise;
   };
   const stop = (reason = 'requested') => {
-    guardianAbort.abort();nativeSetupService?.close();nativeCapacityService?.close();
+    guardianAbort.abort();closeSchemaDiagnosis();nativeSetupService?.close();nativeCapacityService?.close();
     const guardianDrain=guardianTicketConsumer?.close();
     void guardianDrain?.catch(()=>{});
     if (!stopPromise) stopPromise = (async () => {
@@ -426,7 +608,7 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
     })();
     return stopPromise;
   };
-  function onAbort() { guardianAbort.abort(); abortRequested = true; if (runtime) void stop('startup_cancelled').catch(() => {}); }
+  function onAbort() { guardianAbort.abort();closeSchemaDiagnosis(); abortRequested = true; if (runtime) void stop('startup_cancelled').catch(() => {}); }
   // Lazy and private: ordinary startup opens no additional owner connection.
   // A failed/unsupported acquisition is not retried within this generation.
   async function handleGuardianTicketMessage(message,handle){
@@ -482,8 +664,10 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
       const {default:postgres}=await import('postgres');
       if(abortRequested||runtime.stopped===true||terminalPromise)throw failure('runtime_host_child_ended_during_startup');
       const preparationTransactions=createNativePreparationTransactions();
-      nativeCodingSql=bindNativeCodingTransactionPool(postgres(config.inspect_database_url,{max:2,connect_timeout:10,idle_timeout:30,prepare:false,
-        debug:preparationTransactions.debug,onclose:preparationTransactions.onclose}),preparationTransactions);
+      nativeCodingRawSql=postgres(config.inspect_database_url,{max:2,connect_timeout:10,idle_timeout:30,prepare:false,
+        debug:preparationTransactions.debug,onclose:preparationTransactions.onclose});
+      nativeCodingSql=bindNativeCodingTransactionPool(nativeCodingRawSql,preparationTransactions);
+      nativeSchemaSql=bindNativeCodingPublicationTransactionPool(nativeCodingRawSql,preparationTransactions);
       nativeSetupService=createNativeCodingHostSetupService({sql:nativeCodingSql,hostInstanceId:descriptor.instance_id,hostPid:process.pid,
         pgDataDirectory:config.pg_data_directory,postgresIdentity:runtime.postgresIdentity,postgresContinuity,
         readCapacityEvidence:input=>nativeCapacityService.readSetupAdmission(input)});
@@ -492,6 +676,7 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
         postgresIdentity:runtime.postgresIdentity,readNativeScope:native.readNativeScope,readSetupCustody:()=>nativeSetupService.readCapacityCustody()});
       nativeCodingAuthority=Object.freeze({...nativeSetupService.operations,...nativeCapacityService.operations,
         close(){nativeSetupService.close();nativeCapacityService.close();}});
+      startSchemaDiagnosis(postgres,descriptor,postgresContinuity);
       const operatorFile=path.join(config.state_directory,'native-coding-operator-v1.json');
       if(await lstat(operatorFile).catch(error=>{if(error.code==='ENOENT')return null;throw error;})) {
         await readNativeCodingOperatorPaths(config.state_directory);
@@ -562,9 +747,10 @@ export async function startManagedRuntimeHost({ configFile, signal } = {}, hooks
     if (runtime) await stop('requested');
     else {
       signal?.removeEventListener('abort', onAbort);
+      let failedStatusPersisted=false;
       try { await persist({ ...baseStatus, state: 'FAILED', last_health_failure: lastHealthFailure,
-        reason: /^[a-z0-9_]+$/.test(error.code || '') ? error.code : 'runtime_host_start_failed' }); }
-      finally { if (error.code !== 'runtime_cleanup_unconfirmed') await release(); }
+        reason: /^[a-z0-9_]+$/.test(error.code || '') ? error.code : 'runtime_host_start_failed' });failedStatusPersisted=true; }
+      finally { if (failedStatusPersisted&&error.code !== 'runtime_cleanup_unconfirmed') await release(); }
       // launchClientStateRuntime rejects only after its bounded stop has
       // completed. Cleanup uncertainty has a distinct error and retains the
       // lock above. FAILED remains the startup status; this receipt proves

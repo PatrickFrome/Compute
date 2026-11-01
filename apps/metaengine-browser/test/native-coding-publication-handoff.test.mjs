@@ -38,7 +38,7 @@ const callbackPublication=mode==='unmounted'?null:{
   if(mode==='owner-missing')throw Error('native_callback_publication_owner_custody_unbound');
   const custody={intent,revision:++revision};custodies.add(custody);return custody;
  },
- async recheck(custody,context){
+ async recheck(custody,context,dispatch){
   if(!custodies.has(custody))throw Error('generated custody mismatch');
   events.push({stage:'recheck',run:custody.intent.binding.run_id,revision:custody.revision,current:revision});
   process.send({test:'recheck',run:custody.intent.binding.run_id});
@@ -47,7 +47,7 @@ const callbackPublication=mode==='unmounted'?null:{
   if(mode==='pg-changed')throw Error('generated PG identity changed');
   if(mode==='kernel-changed')throw Error('generated kernel identity changed');
   if(context.signal.aborted)throw Error('generated request aborted');
-  custodies.delete(custody);
+  custodies.delete(custody);return dispatch();
  }
 };
 const send=(frame,callback)=>{

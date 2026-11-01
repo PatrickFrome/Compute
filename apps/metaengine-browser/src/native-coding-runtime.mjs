@@ -1,3 +1,4 @@
+import {requireNativeRunCallbackPublication} from './native-coding-run-callback-journal.mjs';
 import {nativeCapacityPrincipal} from './native-coding-capacity-contract.mjs';
 import {signNativeCodingDeviceRequest} from './native-coding-device-request.mjs';
 import {createHash} from 'node:crypto';
@@ -29,18 +30,18 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
   // Private dependency injection supports isolated adversarial tests; it is not
   // an IPC option, renderer configuration, or a way to label fixtures native.
   observers=null,issuer=null,workerRegistry=null,runnerFactory=createCodexCliRunner,
-  agentBridgeFactory=prepareNativeCodingAgentRunBridge,readServiceControl=null,readRunOwner=null,closeTimeoutMs=25000}={}) {
+  agentBridgeFactory=prepareNativeCodingAgentRunBridge,preparedCustodyFactory=null,readServiceControl=null,readRunOwner=null,closeTimeoutMs=25000}={}) {
   if(typeof identity?.snapshot!=='function'||typeof signedRequest!=='function'||!runnerOptions
-    ||typeof agentBridgeFactory!=='function'
+    ||typeof agentBridgeFactory!=='function'||preparedCustodyFactory!==null&&typeof preparedCustodyFactory!=='function'
     ||!['readScope','readLease','registerProvider','agentOperation'].every(name=>typeof ownPostgres?.[name]==='function'))fail('private_dependencies_required');
   if(!ownPostgres.ledger&&!['reserveExecution','advanceExecution','readExecution'].every(name=>typeof ownPostgres[name]==='function'))fail('private_ledger_required');
   if(!Number.isSafeInteger(closeTimeoutMs)||closeTimeoutMs<1||closeTimeoutMs>25000)fail('close_timeout_invalid');
-  const ledger=ownPostgres.ledger||{
-    reserve:scope=>ownPostgres.reserveExecution(scope),
+  const baseLedger=ownPostgres.ledger||{
+    reserve:(scope,options)=>ownPostgres.reserveExecution(scope,options),
     advance:(scope,t)=>ownPostgres.advanceExecution(scope,{...t,critic_proof_sha256:t.critic_proof_sha256??null,checkpoint_sha256:t.checkpoint_sha256??null}),
     read:scope=>ownPostgres.readExecution(scope),
   };
-  if(!['reserve','advance','read'].every(name=>typeof ledger[name]==='function'))fail('private_ledger_required');
+  if(!['reserve','advance','read'].every(name=>typeof baseLedger[name]==='function'))fail('private_ledger_required');
   const permits=permitRegistry||createNativeCodingPermitRegistry({ownPostgres,identity});
   const results=resultStore||createNativeCodingResultStore({journalRoot:runnerOptions.journalRoot,indexRoot:resultIndexRoot});
   const workers=workerRegistry||createNativeCodingWorkerRegistry({processController:processController||createCodexCliWindowsProcessController()});
@@ -56,6 +57,25 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
     const settled=()=>localOperations.delete(pending);pending.then(settled,settled);return pending;
   };
   const assertOpen=()=>{if(closed)fail('host_unavailable');};
+  // Refuse the known CLOSED default path before advertising capacity or
+  // consuming an immutable task reservation. A private synthetic bridge is
+  // solely an existing generated-test seam, never installed readiness.
+  const publicationRefusal=()=>{
+    if(agentBridgeFactory!==prepareNativeCodingAgentRunBridge)return null;
+    try{requireNativeRunCallbackPublication();}
+    catch(error){
+      if(error?.message!=='native_run_callback_directory_durability_unqualified')throw error;
+      return fence('HOLD',{reason:'NATIVE_CALLBACK_PUBLICATION_UNQUALIFIED',physical_effect_replayed:false});
+    }
+    return null;
+  };
+
+  // Private source-only composition seam, never a renderer/IPC readiness flag.
+  // Main supplies none until genuine Owner/publication qualification is complete.
+  const preparedCustody=preparedCustodyFactory===null?null:preparedCustodyFactory({ownPostgres,assertOpen});
+  if(preparedCustodyFactory!==null&&(!preparedCustody||!['bindRunner','reserve','close','drain'].every(key=>typeof preparedCustody[key]==='function')))fail('prepared_custody_invalid');
+  const ledger=preparedCustody?{reserve:(scope,options)=>preparedCustody.reserve(scope,options),
+    advance:(scope,value)=>baseLedger.advance(scope,value),read:scope=>baseLedger.read(scope)}:baseLedger;
   const descriptors=new Map(),providerFences=new Map(),scopes=new Map(),completionAttempts=new Map();
   const checkpoints=['reconcileProject','readProjectCheckpoint'].every(name=>typeof ownPostgres[name]==='function')
     ?createNativeCodingProjectCheckpointObserver({ownPostgres}):null;
@@ -113,21 +133,27 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
   }
   const executor=createNativeCodingLeaseExecutor({ledger,issuer:nativeIssuer,readBoundLease,physicalSlotBudget,
     createRunner:({authorizeLease})=>{
-      let runner=null,preparing=false;
+      let runner=null,preparedRunner=null,preparing=false;
       return Object.freeze({async prepare(request,options={}) {
       if(preparing)fail('runner_preparation_reused');preparing=true;
       assertOpen();
+      if(agentBridgeFactory===prepareNativeCodingAgentRunBridge)requireNativeRunCallbackPublication();
       const permit=await permitFor(request.lease);
       assertOpen();
       const processControl=workers.controllerFor({provider_id:permit.provider_id,agent_id:request.lease.agent_id,
         task_id:request.lease.task_id,lease_generation:request.lease.lease_generation,prompt_sha256:digest(request.prompt)});
-      const prepareAgentBridge=async details=>{
+      const prepareAgentBridge=details=>{
+       const prepare=async(takePreparedCustody,fixedDetails=details)=>{
         if(closed)fail('closed');
         const current=await permitFor(request.lease);
         if(nativeCodingEnvelopeSha256(current)!==nativeCodingEnvelopeSha256(permit)
           ||typeof source.readAgentMcpLaunchPins!=='function')fail('agent_bridge_scope_changed');
         const pins=await source.readAgentMcpLaunchPins();
-        const bridge=await agentBridgeFactory({...details,ownPostgres,permit:structuredClone(permit),pins});
+        const bridge=await agentBridgeFactory({...fixedDetails,ownPostgres,permit:structuredClone(permit),pins,
+          ...(takePreparedCustody?{takePreparedCustody}:{})});
+        // Do not hide a missing original drain behind the runtime wrapper.
+        // The adapter retains this raw candidate and attempts its cleanup.
+        if(takePreparedCustody&&(!bridge||!['close','drainCallbacks'].every(key=>typeof bridge[key]==='function')))return bridge;
         let bridgeClosePromise=null,bridgeCallbackPromise=null;
         const wrapper=Object.freeze({launch:bridge.launch,
           bindRun:proof=>{if(closed)fail('closed');return bridge.bindRun(proof);},
@@ -146,16 +172,21 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
             return bridgeCallbackPromise;
           }});
         activeBridges.add(wrapper);if(closed){await wrapper.close();fail('closed');}return wrapper;
+       };
+       if(preparedCustody&&!preparedRunner)fail('prepared_bridge_before_reservation');
+       return preparedRunner?preparedRunner.prepareBridge(details,prepare):prepare();
       };
       runner=runnerFactory({...runnerOptions,authorizeLease,processController:processControl,prepareAgentBridge});
       if(!['prepare','describePrepared','runPrepared','abandonPrepared'].every(key=>typeof runner?.[key]==='function'))fail('prepared_runner_required');
       const handle=await runner.prepare(request,options);
       if(closed||options.signal?.aborted){runner.abandonPrepared(handle);fail('closed');}
+      if(preparedCustody)try{preparedRunner=preparedCustody.bindRunner({runner,handle,permit,signal:options.signal});}
+      catch(error){runner.abandonPrepared(handle);throw error;}
       return handle;
     },
-    describePrepared(handle){if(!runner)fail('prepared_runner_unavailable');return runner.describePrepared(handle);},
-    runPrepared(handle){assertOpen();if(!runner)fail('prepared_runner_unavailable');return runner.runPrepared(handle);},
-    abandonPrepared(handle){if(!runner)fail('prepared_runner_unavailable');return runner.abandonPrepared(handle);},
+    describePrepared(handle){if(!runner)fail('prepared_runner_unavailable');return (preparedRunner||runner).describePrepared(handle);},
+    runPrepared(handle){assertOpen();if(!runner)fail('prepared_runner_unavailable');return (preparedRunner||runner).runPrepared(handle);},
+    abandonPrepared(handle){if(!runner)fail('prepared_runner_unavailable');return (preparedRunner||runner).abandonPrepared(handle);},
     });},
     async onJobAttempted({request,job_proof}) {
       const value=await post('/v1/devos/mark-running',{...binding(request.lease,job_proof.payload.provider_id),
@@ -350,7 +381,8 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
     // registry synchronously and joins every already-owned/pending spawn. A
     // late authorization cannot create a child through that closed registry.
     const poolDrain=begin(()=>pool.stop());workerDrainPromise=begin(()=>workers.close());
-    const pending=[poolDrain,workerDrainPromise,...[()=>nativeIssuer.close(),
+    const preparedFence=begin(()=>preparedCustody?.close());
+    const pending=[poolDrain,workerDrainPromise,preparedFence,...[()=>preparedCustody?.drain(),()=>nativeIssuer.close(),
       ()=>Promise.all([...activeBridges].map(bridge=>bridge.drainCallbacks())),
       ()=>poolDrain.then(()=>Promise.all([...activeBridges].map(bridge=>bridge.drainCallbacks()))),()=>refresh,()=>capacityOwner?.drain(),
       ()=>Promise.allSettled([...localOperations]),()=>checkpoints?.drain(),()=>rejections?.drain(),()=>commits?.drain(),()=>serviceHeartbeat?.drain()].map(begin)];
@@ -370,6 +402,8 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
   }
   const runtime=Object.freeze({
     async observeProviders() {
+      const refused=publicationRefusal();
+      if(refused){refreshReason=refused.reason;return {schema:'metaengine.native-coding.providers.v1',providers:[]};}
       if(!closed&&!refresh) {
         // The existing heartbeat alone initiates one bounded pass. Neither a
         // full image verifier nor slow native/PG reads hold up that heartbeat.
@@ -380,8 +414,8 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
       if(!closed){void collectCapacity();serviceHeartbeat?.observe();}
       return providerSnapshot();
     },
-    dispatchLease(lease){if(closed)return fence('STOPPED');return pool.dispatch(lease);},
-    advanceUnattemptedLease(lease){if(closed)return fence('STOPPED');return pool.advanceUnattemptedLease(lease);},
+    dispatchLease(lease){if(closed)return fence('STOPPED');return publicationRefusal()||pool.dispatch(lease);},
+    advanceUnattemptedLease(lease){if(closed)return fence('STOPPED');return publicationRefusal()||pool.advanceUnattemptedLease(lease);},
     observeProjectCheckpoints(candidates){
       if(closed)return fence('STOPPED',{reason:unavailableReason});
       if(!checkpoints){if(candidates?.length)fail('private_checkpoint_capability_required');return null;}
@@ -401,6 +435,7 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
     completeFromTrustedCommand(payload){return trackLocal(async()=>{if(closed)return fence('STOPPED',{reason:unavailableReason});const lease=payload?.lease||payload;if(!UUID.test(lease?.task_id||''))fail('completion_selector_invalid');return complete(lease,await pool.observe(lease));});},
     snapshot(){return {...pool.snapshot(),schema:'metaengine.native-coding.runtime.v1',provider_fences:providerFences.size,
       provider_refresh_running:refresh!==null,provider_refresh_reason:refreshReason,
+      publication_admission_reason:publicationRefusal()?.reason??null,
       capacity_observation:capacityObservation(),
       project_checkpoints:checkpoints?.snapshot()??null,
       project_rejections:rejections?.snapshot()??null,

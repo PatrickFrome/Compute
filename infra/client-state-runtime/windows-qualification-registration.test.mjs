@@ -130,3 +130,137 @@ test('reservation and publication cancellation retain mandatory source and real 
   'infra/client-state-runtime/native-coding-callback-publication.pg17.test.mjs'])
   assert(paths.some(pattern=>matches(file,pattern)),file+' must trigger the same Windows qualification');
 });
+
+test('prepared custody, atomic agent effects and actual monitored PG pool remain mandatory Windows cases',()=>{
+ const native=source.slice(source.indexOf('          const native=['),source.indexOf('          const componentRequired=['));
+ for(const file of ['infra/client-state-runtime/native-coding-preparation-transaction.pg17.test.mjs',
+  'infra/client-state-runtime/native-coding-initial-anchor-task-fence.pg17.test.mjs',
+  'infra/client-state-runtime/native-coding-callback-publication-api-acl.pg17.test.mjs',
+  'infra/client-state-runtime/native-coding-publication-registration.pg17.test.mjs',
+  'infra/client-state-runtime/native-coding-installed-publication-schema.pg17.test.mjs',
+  'infra/client-state-runtime/native-coding-host-schema-diagnosis.pg17.test.mjs',
+  'infra/client-state-runtime/native-coding-agent-host-tools.integration.test.mjs']){
+  assert.ok(native.includes("'"+file+"'"),file);assert.ok(paths.some(pattern=>matches(file,pattern)),file);
+ }
+ for(const name of ['original RESERVED, six actual Owner cycles and exact terminal permit a single private facet take',
+  'status-retry confirms exact status readback and retries sharing failures only on Windows',
+  'status-ack-loss confirms exact status readback and retries sharing failures only on Windows',
+  'status-persistent retains bounded storage HOLD rather than a false schema verdict or unsafe rename retry',
+  'status-temp-replaced retains bounded storage HOLD rather than a false schema verdict or unsafe rename retry',
+  'status-target-replaced retains bounded storage HOLD rather than a false schema verdict or unsafe rename retry',
+  'pre-runtime FAILED persistence failure retains ownership and emits no cleanup receipt',
+  'Host schema-only diagnosis with actual registered disposable PG17 preserves minimum service and owned cleanup',
+  'wrong original PG birth within the same millisecond is refused without changing the recovery wire',
+  'attached API client timeout with genuine driver error cannot claim server-query settlement or release Host lock',
+  'attached API client timeout with test-only sanitized ordinary-error ACK loss cannot claim server-query settlement or release Host lock',
+  'same-byte pathname replacement at wx handle close is not adopted as original Host lock',
+  'foreign physical UNKNOWN remains marked without poisoning confirmed rollback of this owner',
+  'default CLOSED publication refuses IMPLEMENTER before provider admission or lease preparation',
+  'default CLOSED publication refuses CRITIC before provider admission or lease preparation',
+  'default CLOSED publication leaves historical readback and rejection reconciliation available',
+  'default CLOSED publication also refuses private prepared adapter before claim/reserve',
+  'installed publication verifier on registered disposable PG17: read-only attest, exact transaction recheck and catalog fences',
+  'attest uses one monitored REPEATABLE READ READ ONLY and returns no transferable readiness marker',
+  'regular lost BEGIN acknowledgement requires same-reservation rollback before release',
+  'publication lost BEGIN acknowledgement requires same-reservation rollback before release',
+  'lost genuine BEGIN acknowledgement requires rollback before publication unlock/release: isolation level serializable',
+  'lost genuine BEGIN acknowledgement and ROLLBACK acknowledgement quarantine original session: isolation level serializable',
+  'registered publication schema fresh/attached/replay/rollback on disposable PG17',
+  'fresh registry applies both protections in reviewed order inside baseline transaction',
+  'canonical OWNER_ONLY schema permits NEW onboarding registry before API provisioning without granting access',
+  'authenticated API evidence cannot downgrade to OWNER_ONLY after its grant is revoked',
+  'duplicate historical generations roll back callback DDL and preserve both evidence rows',
+  'lost COMMIT ACK remains an error; installed evidence is read back and token is not replayable',
+  'authenticated direct API compatibility on actual disposable PG17',
+  'genuine authenticated provisioning permits replay without ACL mutation',
+  'attached existing direct-login predecessor upgrades with the same exact ACL',
+  'authenticated direct grant cannot be replaced by service_role grant',
+  'API role cannot delegate authenticated grant through inbound membership',
+  'one authenticated SQL evidence row cannot authorize two preflights',
+  'actual client original reservation and six direct Main reads yield one retained facet without nested IPC/drain',
+  'actual client cancel after reservation but before bridge fences original BOUND without a new claim',
+  'actual held Main Owner callback remains joined after local close until original native read returns',
+  'actual default bridge remains closed even after adapter receives original verified reservation',
+  'mandatory initial anchor and retained native task identity on actual PG17; all custody GENERATED',
+  'duplicate legacy generations reject migration atomically without deleting history',
+  'IMPLEMENTER absent anchor forbids job and ATTEMPTED without partial registration',
+  'CRITIC absent anchor forbids job and ATTEMPTED without partial registration',
+  'IMPLEMENTER inert original anchor permits signed association and W30 RUNNING',
+  'CRITIC inert original anchor permits signed association and W30 RUNNING',
+  'legacy unanchored ATTEMPTED cannot newly enter RUNNING',
+  'concurrent same task reserve keeps one durable identity and no automatic retry',
+  'new task continuation remains admissible after retained CHECKPOINTED predecessor',
+  'joined actual composition and AgentTools commit one fixed message in the same monitored Owner transaction',
+  'joined Owner after actual AgentTools SQL rolls back both message and intent without replay',
+  'joined cancellation after actual AgentTools SQL rolls back both message and intent without replay',
+  'joined effect rejection after actual AgentTools SQL rolls back both message and intent without replay',
+  'joined second effect after actual AgentTools SQL rolls back both message and intent without replay',
+  'joined cancellation retains the actual post-effect Owner callback and transaction until that original callback joins',
+  'joined effect rejects substituted context rather than adopting a matching object',
+  'joined effect rejects substituted transaction rather than adopting a matching object',
+  'joined lost COMMIT ACK retains exactly one real message and receipt but no replay ticket',
+  'actual terminal transition retires composed routing before an unused AgentTools effect ticket can run',
+  'promoted facet carries actual original publication six and effect three Owner cycles on unchanged IPC frames',
+  'actual PG17 monitored Host transactions preserve settlement, quarantine and independent scope',
+  'late Owner phase malformed before COMMIT aborts original request and rolls back actual SQL',
+  'Owner phase failure after COMMIT cannot relabel a durable effect as absent or permit replay',
+  'private transaction invocation uses exact existing tx and original context without nested begin',
+  'same-transaction Owner after generated SQL effect rolls back before any COMMIT',
+  'advance ATTEMPTED cancelled during native observation rolls back job and execution writes',
+  'advance RESULT_READY cancelled during native observation rolls back job and execution writes'])
+  assert.ok(source.includes("'"+name+"',"),name);
+});
+
+
+test('Host status fixture-only changes trigger the same mandatory Windows component lane',()=>{
+ const component=source.slice(source.indexOf('          const component=['),source.indexOf('          const native=['));
+ for(const file of ['infra/client-state-runtime/native-host-schema-diagnosis.test.mjs',
+  'infra/client-state-runtime/runtime-host-lifecycle.test.mjs']){
+  assert.ok(paths.some(pattern=>matches(file,pattern)),file+' must trigger Windows qualification');
+  assert.ok(component.includes("'"+file+"',"),file+' must run in the component lane');
+ }
+});
+
+test('exact status bytes and substituted directory alias remain mandatory named Windows cases',()=>{
+ const required=source.slice(source.indexOf('          const componentRequired=['),source.indexOf('          const nativeRequired=['));
+ for(const name of ['lock diagnosis retains canonical ancestry and refuses a newly substituted directory alias',
+  'committed status with intended U+FFFD cannot accept same-inode malformed UTF8 after lost rename acknowledgement',
+  'distinct malformed UTF8 preimage bytes cannot authorize a status rename even when both decode to U+FFFD'])
+  assert.ok(required.includes("'"+name+"',"),name+' must remain a required non-skipped case');
+ // The sole existing counterfactual baseline skip is not broadened for aliases.
+ assert.match(source,/skipped\.length!==1\|\|skipped\[0\]\.name!==baseline/);
+});
+
+test('directory alias negative runs on Windows with a real disposable junction, not a platform skip',async()=>{
+ const fixture=await readFile(new URL('./native-host-schema-diagnosis.test.mjs',import.meta.url),'utf8');
+ const name='lock diagnosis retains canonical ancestry and refuses a newly substituted directory alias';
+ const block=fixture.slice(fixture.indexOf("test('"+name),fixture.indexOf("\ntest(",fixture.indexOf("test('"+name)+1));
+ assert.ok(block.startsWith("test('"+name+"',async t=>{"));
+ assert.ok(block.includes("process.platform==='win32'?'junction':'dir'"));
+ assert.ok(block.includes('await fs.unlink(f.config.state_directory)'));
+ assert.doesNotMatch(block,/\bskip\s*:/);
+});
+
+test('managed Git target envelope and exact invocation spelling remain required Windows outcomes',()=>{
+ const component=source.slice(source.indexOf('          const component=['),source.indexOf('          const native=['));
+ const required=source.slice(source.indexOf('          const componentRequired=['),source.indexOf('          const nativeRequired=['));
+ const fixture='apps/metaengine-browser/test/managed-task-project-runtime.test.mjs';
+ assert.ok(component.includes("'"+fixture+"',"));
+ for(const file of [fixture,'apps/metaengine-browser/src/managed-task-project-runtime.mjs'])
+  assert.ok(paths.some(pattern=>matches(file,pattern)),file+' must trigger the same Windows qualification');
+ for(const name of ['validated Git plans receive only the fixed invocation-local Windows long-path option',
+  'real Git long managed paths preserve exact locked creation and readback without persistent configuration',
+  'unsupported new Windows target is refused before reservation or Git add',
+  'derived Windows spelling refuses cross-volume, malformed and UTF8-overlimit creation plans before spawn',
+  'derived target remains the same physical worktree from a nested Git executor cwd'])
+  assert.ok(required.includes("'"+name+"',"),name+' must remain a required non-skipped case');
+});
+
+test('managed Git executor bytes are retained in the qualification source receipt',()=>{
+ const start=source.indexOf('          const sourcePaths=[');
+ const end=source.indexOf('          const sources=[];',start);
+ assert.ok(start>=0&&end>start,'the actual receipt inventory must be present');
+ const inventory=source.slice(start,end);
+ const entry="'apps/metaengine-browser/src/managed-task-project-runtime.mjs'";
+ assert.equal(inventory.split(entry).length-1,1,'the executed Git implementation must be hashed exactly once');
+});

@@ -12,6 +12,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import {fork} from 'node:child_process';
 import {createHash} from 'node:crypto';
+import {prepareNativeCodingAgentRunBridge} from '../src/native-coding-agent-run-bridge.mjs';
 import {createNativeCodingRuntime} from '../src/native-coding-runtime.mjs';
 import {projectNativeRuntimeObservation} from '../src/client-native-runtime-observation.mjs';
 import {nativeCodingEnvelopeSha256} from '../src/native-coding-transport-proof.mjs';
@@ -105,6 +106,8 @@ function fixture(options={}){
         'x-a2-device-nonce':'a'.repeat(32),'x-a2-device-body-sha256':hash(text),'x-a2-device-signature':'a'.repeat(86)})},
     readServiceControl:()=>({supervisor_mode:'CONTROL',armed:true,interrupted_setup_recovery_fenced:false,runtime_control_generation:0}),
     ownPostgres,signedRequest,observers,issuer,
+    // Explicit generated bridge seam; never default native qualification.
+    agentBridgeFactory:async()=>{throw Error('generated_bridge_not_used');},
     runnerOptions:{expectedExecutableSha256:permit.artifact.cli_executable_sha256},resultStore:store,workerRegistry:options.workerRegistry||workers,
     permitRegistry:{listProviderSelectors:async()=>[{provider_id:ids.provider,agent_id:agent}],readProvider:async()=>permit},runnerFactory:options.runnerFactory||runnerFactory,
     // This generated executor fixture must not consume the real PC's transient
@@ -643,22 +646,41 @@ for(const failed of [false,true])test(`late bridge factory after runtime fence r
  assert.equal((await full).shutdown_state,failed?'DRAIN_FAILED':'DRAINED');await runtime.close();assert.equal(closes,1);assert.equal(joins,1);
 });
 
-test('actual runtime default bridge remains blocked by directory publication before custody claim or bind',async()=>{
- const base=fixture();await base.runtime.close();let custody=0,reason=null;
- const runtime=createNativeCodingRuntime({...base.args,
+for(const role of ['IMPLEMENTER','CRITIC'])test('default CLOSED publication refuses '+role+' before provider admission or lease preparation',async t=>{
+ const base=fixture({role});await base.runtime.close();base.calls.length=0;let prepared=0,custody=0;
+ const runtime=createNativeCodingRuntime({...base.args,agentBridgeFactory:role==='IMPLEMENTER'?undefined:prepareNativeCodingAgentRunBridge,
   ownPostgres:{...base.args.ownPostgres,openAgentRunCustody:async()=>{custody++;throw Error('must not claim');}},
-  observers:{...base.args.observers,readAgentMcpLaunchPins:async()=>({})},
-  // No agentBridgeFactory override: execute the actual default producer path.
-  runnerFactory:({authorizeLease,prepareAgentBridge})=>preparedRunnerTestAdapter({async run(request){
-   const authorization=await authorizeLease({phase:'BEFORE_ATTEMPT',binding:request.lease});
-   try{await prepareAgentBridge({runId:ids.run,binding:request.lease,authorization,deadlineAt:authorization.expires_at});}
-   catch(error){reason=error.message;throw error;}
-   throw Error('unqualified bridge must never be returned');
-  }},{runId:ids.run})});
- runtime.dispatchLease(base.lease);await settled({runtime});
- assert.equal(reason,'native_run_callback_directory_durability_unqualified');assert.equal(custody,0);
- assert.equal(base.calls.includes('mark-running'),false);assert.equal(base.calls.includes('resume'),false);
- assert.equal((await runtime.close()).shutdown_state,'DRAINED');
+  runnerFactory:()=>{prepared++;throw Error('must not prepare');}});
+ t.after(()=>runtime.close());
+ for(let i=0;i<3;i++){
+  assert.deepEqual((await runtime.observeProviders()).providers,[]);
+  const refused=runtime.dispatchLease(base.lease);
+  assert.equal(refused.state,'HOLD');assert.equal(refused.reason,'NATIVE_CALLBACK_PUBLICATION_UNQUALIFIED');
+  assert.equal(refused.authority_effect,false);assert.equal(refused.automatic_retry_allowed,false);
+  assert.equal(runtime.advanceUnattemptedLease(base.lease).state,'HOLD');
+  await new Promise(resolve=>setImmediate(resolve));
+ }
+ assert.equal(prepared,0);assert.equal(custody,0);assert.equal(base.runCount,0);
+ for(const effect of ['prepare-image','issue-provider','register-provider','service-heartbeat','reserve','issue-job','mark-running','runner','resume'])
+  assert.equal(base.calls.filter(x=>x===effect).length,0,effect);
+ assert.equal(runtime.snapshot().closed,false);assert.equal(runtime.snapshot().occupied_slots,0);
+ assert.equal(runtime.snapshot().publication_admission_reason,'NATIVE_CALLBACK_PUBLICATION_UNQUALIFIED');
+});
+
+test('default CLOSED publication leaves historical readback and rejection reconciliation available',async t=>{
+ const base=fixture();await base.runtime.close();base.calls.length=0;let reads=0;const rejectionEntered=Promise.withResolvers();
+ const runtime=createNativeCodingRuntime({...base.args,agentBridgeFactory:prepareNativeCodingAgentRunBridge,
+  ownPostgres:{...base.args.ownPostgres,readProjectRejection:async()=>{rejectionEntered.resolve();throw Error('generated_readback_unavailable');},readPriorExecution:async selector=>{reads++;return {
+   schema:'metaengine.native-coding.execution-readback.v1',source:'PRIVATE_RUNTIME_HOST_OWN_PG',state:'HOLD',reason:'HISTORICAL_RESERVED',
+   selector,execution_scope:null,execution:{state:'RESERVED'},receipt_sha256:null,task_state:'LEASED',task_result_summary:null,
+   readback_only:true,physical_effect_replayed:false,automatic_retry_allowed:false,authority_effect:false};}}});
+ t.after(()=>runtime.close());
+ const value=await runtime.observeLease(base.lease);assert.equal(value.state,'READBACK_ONLY');
+ assert.equal(value.result.reason,'HISTORICAL_RESERVED');assert.equal(value.result.execution.state,'RESERVED');assert.equal(reads,1);
+ assert.equal(base.calls.includes('reserve'),false);assert.equal(base.calls.includes('issue-job'),false);assert.equal(runtime.snapshot().closed,false);
+ runtime.observeProjectRejection({schema:'metaengine.native-coding.review-rejection.v1',project_id:ids.project,writer_task_id:ids.task,
+  writer_lease_generation:1,critic_task_id:ids.provider,critic_lease_generation:1,result_sha256:'a'.repeat(64),verdict:'REJECT',automatic_retry_allowed:false,authority_effect:false});
+ await rejectionEntered.promise;assert.equal(runtime.snapshot().project_rejections.repair_authorized,false);
 });
 
 test('generated runtime resource refusal still prevents a physical start',async t=>{
@@ -683,4 +705,94 @@ test('default runtime wrapper refuses a run-only test factory instead of silentl
  let legacyRuns=0;const f=fixture({runnerFactory:()=>({run:async()=>{legacyRuns++;}})});
  f.runtime.dispatchLease(f.lease);assert.equal(await settled(f),'READBACK_REQUIRED');
  assert.equal(legacyRuns,0);assert.equal(f.calls.includes('reserve'),false);assert.equal(f.calls.includes('mark-running'),false);await f.runtime.close();
+});
+
+// Private adapter integration uses generated runner/Host lifecycle doubles.
+// The original IPC/direct Main callback path has a separate joined test file;
+// neither fixture qualifies the default closed bridge or installed execution.
+async function preparedRuntimeFixture({failure=null,hold=null,entered=null}={}){
+ const {createNativeCodingPreparedCustodyAdapter}=await import('../src/native-coding-prepared-custody-adapter.mjs');
+ const base=fixture();await base.runtime.close();const events=[],token=Object.freeze({});let adapter,runStarted=false,descriptor,expectedJournal,originalDetails;
+ const facet={agentOperation:async()=>({fixture_only:true}),trackCallback:operation=>operation(),
+  fence:async()=>{events.push('facet-fence');},finish:async()=>{events.push('facet-finish');return {state:'SCOPED_REQUESTS_JOINED',all_effects_cleanup:'UNCONFIRMED'};}};
+ const ownPostgres={...base.args.ownPostgres,openAgentRunCustody(){throw Error('reclaim forbidden');},
+  ledger:{...base.args.ownPostgres.ledger,reserve(){throw Error('legacy ledger reserve forbidden');}},
+  async prepareAgentRunCustody({binding,journal}){events.push('claim');assert.equal(journal,expectedJournal);assert.equal(binding.project_id,base.permit.project_id);
+   assert.equal(binding.provider_id,base.permit.provider_id);if(failure==='held-claim'){entered.resolve();await hold.promise;}return token;},
+  async reservePreparedExecution(scope,value,owner){events.push('prepared-reserve');assert.equal(value,token);assert.equal(scope.task_id,descriptor.binding.task_id);
+   await owner({fixture_original:true});if(failure==='held-reserve'){entered.resolve();await hold.promise;}
+   if(failure==='unknown')throw Error('generated_reserve_unknown');return failure==='readback'?{state:'READBACK_ONLY'}:{state:'RESERVED',scope:{...scope,reservation_id:ids.run}};},
+  takePreparedAgentRunCustody(value){assert.equal(value,token);events.push('take');return facet;},
+  abandonPreparedAgentRunCustody:async value=>{assert.equal(value,token);events.push('abandon');},
+  withRunOwnerScope(){throw Error('nested IPC forbidden');},drainPhysical(){throw Error('global drain forbidden');}};
+ const runtime=createNativeCodingRuntime({...base.args,ownPostgres,
+  observers:{...base.args.observers,readAgentMcpLaunchPins:async()=>{events.push('pins');if(failure==='held-pins'){entered.resolve();await hold.promise;}if(failure==='pins')throw Error('generated_pins_failed');return {fixture_only:true};}},
+  permitRegistry:{...base.args.permitRegistry,readProvider:async()=>failure==='scope'&&runStarted?{...base.permit,owner_epoch:base.permit.owner_epoch+1}:base.permit},
+  preparedCustodyFactory:options=>{adapter=createNativeCodingPreparedCustodyAdapter({...options,ownerCallback:async tx=>{
+   assert.equal(tx.fixture_original,true);events.push('direct-owner');return {fixture_only:true};}});return adapter;},
+  ...(failure==='default-gate'?{agentBridgeFactory:prepareNativeCodingAgentRunBridge}:{agentBridgeFactory:async ({takePreparedCustody,...fixed})=>{
+   if(failure==='held-pins'){assert.equal(fixed.runId,ids.run);assert.equal(fixed.callbackJournal,expectedJournal);
+    assert.equal(fixed.authorization.project_id,base.permit.project_id);assert.equal(fixed.deadlineAt,descriptor.expiresAt);}
+   events.push('bridge');if(failure==='before-take')throw Error('generated_factory_failure');assert.equal(takePreparedCustody(),facet);
+   if(failure==='after-take')throw Error('generated_factory_failure');
+   if(failure==='held-bridge'){entered.resolve();await hold.promise;}
+   if(failure==='missing-drain')return {close:async()=>{events.push('raw-close');}};
+   if(failure==='missing-close')return {drainCallbacks:async()=>{events.push('raw-drain');}};
+   return {launch:{fixture_only:true},bindRun:async()=>{},close:async()=>{events.push('bridge-close');},drainCallbacks:async()=>{events.push('bridge-drain');}};}}),
+  runnerFactory:({authorizeLease,prepareAgentBridge})=>{
+   const handle=Object.freeze({});let details;
+   return {async prepare(request){
+    if(failure==='early-bridge')await prepareAgentBridge({});
+    const authorization=await authorizeLease({phase:'BEFORE_ATTEMPT'});
+    const binding=Object.freeze(Object.fromEntries(['task_id','agent_id','base_sha','lease_generation','agent_generation_epoch','role'].map(key=>[key,request.lease[key]])));
+    expectedJournal=Object.freeze({snapshot:()=>({fixture_only:true})});
+    descriptor=Object.freeze({schema:'metaengine.codex-cli.prepared-run.v1',state:'PREPARED',runId:ids.run,binding,callbackJournal:expectedJournal,
+     worktreePath:request.worktreePath,expiresAt:authorization.expires_at,sql_reservation:'NOT_ATTESTED',authority_effect:false,automatic_retry_allowed:false,production_qualified:false});
+    details={runId:ids.run,binding,callbackJournal:expectedJournal,authorization,deadlineAt:authorization.expires_at};originalDetails=details;return handle;
+   },describePrepared(value){assert.equal(value,handle);return descriptor;},abandonPrepared(){events.push('runner-fence');},
+   async runPrepared(value){assert.equal(value,handle);runStarted=true;events.push('runner');await prepareAgentBridge(details);
+    throw Error('generated_runner_has_no_native_effect');}};
+  }});
+ return {...base,runtime,events,get adapter(){return adapter;},mutateBridgeDetails(){originalDetails.runId=ids.task;originalDetails.callbackJournal={};
+  originalDetails.authorization.project_id=ids.task;originalDetails.deadlineAt=new Date(Date.now()+3600000).toISOString();}};
+}
+
+test('actual runtime private composition forwards its exact descriptor to prepared reservation and never legacy ledger reserve',async()=>{
+ const f=await preparedRuntimeFixture();f.runtime.dispatchLease(f.lease);assert.equal(await settled(f),'READBACK_REQUIRED');
+ assert.equal((await f.runtime.close()).shutdown_state,'DRAINED');for(const event of ['claim','prepared-reserve','direct-owner','take','runner'])assert.equal(f.events.filter(x=>x===event).length,1);
+ assert.ok(f.events.includes('facet-finish'));assert.equal(f.calls.includes('reserve'),false);assert.equal(f.calls.includes('mark-running'),false);
+});
+for(const failure of ['scope','pins','before-take','after-take'])test('actual runtime '+failure+' bridge preflight failure drains original prepared custody',async()=>{
+ const f=await preparedRuntimeFixture({failure});f.runtime.dispatchLease(f.lease);assert.equal(await settled(f),'READBACK_REQUIRED');
+ assert.equal((await f.runtime.close()).shutdown_state,'DRAINED');assert.equal(f.events.includes('take'),failure==='after-take');
+ assert.equal(f.events.includes('abandon'),failure!=='after-take');assert.equal(f.events.includes('facet-finish'),failure==='after-take');assert.equal(f.calls.includes('mark-running'),false);
+});
+for(const failure of ['unknown','readback','early-bridge'])test('actual runtime '+failure+' cannot reach runner or alternate reserve',async()=>{
+ const f=await preparedRuntimeFixture({failure});f.runtime.dispatchLease(f.lease);assert.equal(await settled(f),failure==='readback'?'READBACK_ONLY':'READBACK_REQUIRED');
+ assert.equal((await f.runtime.close()).shutdown_state,'DRAINED');assert.equal(f.events.includes('runner'),false);assert.equal(f.events.includes('take'),false);assert.equal(f.calls.includes('reserve'),false);
+});
+for(const failure of ['held-claim','held-reserve','held-bridge'])test('actual runtime close retains '+failure+' independently from native worker settlement',async()=>{
+ const hold=Promise.withResolvers(),entered=Promise.withResolvers(),f=await preparedRuntimeFixture({failure,hold,entered});
+ f.runtime.dispatchLease(f.lease);await entered.promise;assert.equal((await f.runtime.drainNativeWorkers()).worker_cleanup_confirmed,true);
+ let done=false;const drain=f.runtime.drainClosedWork().then(value=>{done=true;return value;});await new Promise(resolve=>setImmediate(resolve));assert.equal(done,false);
+ hold.resolve();assert.equal((await drain).shutdown_state,'DRAINED');assert.equal(f.events.includes('take'),failure==='held-bridge');assert.equal(f.calls.includes('mark-running'),false);
+});
+test('invalid private prepared factory cannot silently restore legacy reserve path',async()=>{
+ const f=fixture();await f.runtime.close();for(const value of [null,{},true])assert.throws(()=>createNativeCodingRuntime({...f.args,preparedCustodyFactory:()=>value}),/prepared_custody_invalid/);
+});
+
+test('actual runtime held pins cannot redirect the snapshotted bridge journal/authorization/deadline',async()=>{
+ const hold=Promise.withResolvers(),entered=Promise.withResolvers(),f=await preparedRuntimeFixture({failure:'held-pins',hold,entered});
+ f.runtime.dispatchLease(f.lease);await entered.promise;f.mutateBridgeDetails();hold.resolve();assert.equal(await settled(f),'READBACK_REQUIRED');
+ assert.equal((await f.runtime.close()).shutdown_state,'DRAINED');assert.ok(f.events.includes('take'));
+});
+for(const failure of ['missing-drain','missing-close'])test('actual runtime retains malformed raw bridge '+failure+' as cleanup HOLD',async()=>{
+ const f=await preparedRuntimeFixture({failure});f.runtime.dispatchLease(f.lease);assert.equal(await settled(f),'READBACK_REQUIRED');
+ assert.equal((await f.runtime.close()).shutdown_state,'DRAIN_FAILED');assert.equal(f.adapter.snapshot().cleanup_failed,true);assert.ok(f.events.includes('facet-finish'));
+});
+
+test('default CLOSED publication also refuses private prepared adapter before claim/reserve',async()=>{
+ const f=await preparedRuntimeFixture({failure:'default-gate'});
+ assert.equal(f.runtime.dispatchLease(f.lease).state,'HOLD');assert.deepEqual(f.events,[]);
+ assert.equal(f.calls.includes('reserve'),false);assert.equal((await f.runtime.close()).shutdown_state,'DRAINED');
 });

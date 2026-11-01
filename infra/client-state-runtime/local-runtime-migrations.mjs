@@ -1,3 +1,4 @@
+import {bindNativeMigrationApiIdentity} from './native-coding-migration-api-identity.mjs';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
@@ -240,6 +241,15 @@ export const LOCAL_RUNTIME_MIGRATIONS = Object.freeze([
       'destruktion_meta.native_coding_service_heartbeat_read_v2(uuid,text,bigint,uuid,text)']),
     triggers:Object.freeze([{relation:'destruktion_meta.devos_fleet_claim_h205f22',name:'aa_native_capacity_claim_guard_v2',signature:'destruktion_meta.native_coding_capacity_claim_gate_v2()'}]),
     source_url:new URL('./native-coding-capacity-v2.sql',import.meta.url),reviewed_native_capacity_upgrade:true},
+  // Ordered atomic source protections; every replay attests SQL, never a presence marker.
+  {path:'native-coding-callback-publication-v1.sql',signature:'destruktion_meta.native_coding_callback_publication_valid_v1(jsonb)',
+    signatures:Object.freeze(["destruktion_meta.native_coding_callback_publication_valid_v1(jsonb)", "destruktion_meta.native_coding_callback_publication_guard_v1()", "destruktion_meta.native_coding_callback_publication_cas_v1(uuid,bigint,uuid,jsonb,jsonb)", "destruktion_meta.native_coding_callback_publication_read_v1(uuid,bigint,uuid)", "destruktion_meta.native_coding_reserve_v1(uuid,uuid,bigint,text,text,bigint,uuid,text,text)", "destruktion_meta.native_coding_advance_v1(uuid,bigint,uuid,text,text,text,text,text,text,text)", "destruktion_meta.native_coding_read_v1(uuid,uuid,bigint)", "public.native_coding_execution_context_v1(uuid,text,uuid,bigint)"]),
+    triggers:Object.freeze([{"relation": "destruktion_meta.native_coding_execution_h205f22", "name": "native_callback_publication_guard_v1", "signature": "destruktion_meta.native_coding_callback_publication_guard_v1()"}]),
+    source_url:new URL('./native-coding-callback-publication-v1.sql',import.meta.url),reviewed_native_publication_upgrade:true},
+  {path:'native-coding-initial-anchor-task-fence-v1.sql',signature:'destruktion_meta.native_execution_task_fence_v1()',
+    signatures:Object.freeze(["destruktion_meta.native_execution_task_fence_v1()", "destruktion_meta.native_job_initial_anchor_v1()", "destruktion_meta.native_claim_task_history_v1()", "destruktion_meta.native_running_anchor_v1()"]),
+    triggers:Object.freeze([{"relation": "destruktion_meta.native_coding_execution_h205f22", "name": "aa_native_execution_task_fence_v1", "signature": "destruktion_meta.native_execution_task_fence_v1()"}, {"relation": "destruktion_meta.native_coding_job_registration_h205f22", "name": "aa_native_job_initial_anchor_v1", "signature": "destruktion_meta.native_job_initial_anchor_v1()"}, {"relation": "destruktion_meta.devos_fleet_claim_h205f22", "name": "aa_native_claim_task_history_v1", "signature": "destruktion_meta.native_claim_task_history_v1()"}, {"relation": "destruktion_meta.devos_fleet_task_h205f22", "name": "aa_native_running_anchor_v1", "signature": "destruktion_meta.native_running_anchor_v1()"}]),
+    source_url:new URL('./native-coding-initial-anchor-task-fence-v1.sql',import.meta.url),reviewed_native_publication_upgrade:true},
 ]);
 
 const REQUIRED_COLUMNS = {
@@ -346,7 +356,7 @@ async function ensureDispatchPrerequisite(tx, migration, before) {
     existing_bodies_attested: true, browser_dispatch_version: 3 };
 }
 
-export async function applyLocalRuntimeMigrations({ sql, expectedMigrationSourcesSha256 } = {}) {
+export async function applyLocalRuntimeMigrations({ sql, expectedMigrationSourcesSha256, authenticatedApiIdentity } = {}) {
   if (typeof sql?.begin !== 'function') throw new Error('local_runtime_migration_connection_required');
   const sources = await loadSources();
   const plan = sourcePlan(sources);
@@ -370,6 +380,7 @@ export async function applyLocalRuntimeMigrations({ sql, expectedMigrationSource
       pg_catalog.to_regprocedure('destruktion_meta.devos_emit_event_h205f22(uuid,text,uuid,text,text,text,bigint,text,jsonb,text)') IS NOT NULL AS event,
       pg_catalog.to_regclass('public.compute_fabric_a2_browser_supervisor_state_h205f22') IS NOT NULL AS supervisor`);
     if (!dependencies.frontier || !dependencies.event || !dependencies.supervisor) throw new Error('local_runtime_dependency_functions_missing');
+    if(authenticatedApiIdentity!==undefined)await bindNativeMigrationApiIdentity(tx,authenticatedApiIdentity);
     const receipts = [];
     for (const migration of sources) {
       const before = await inspectMigrationObjects(tx, migration);
@@ -481,6 +492,13 @@ export async function applyLocalRuntimeMigrations({ sql, expectedMigrationSource
           signature:migration.signature,signatures:migration.signatures,
           status:before.complete?'ALREADY_PRESENT_NOT_MODIFIED':'APPLIED_LOCAL_ONLY',
           existing_bodies_attested:true,native_repair_lineage_preserved:true});
+        continue;
+      }
+      if(migration.reviewed_native_publication_upgrade){
+        await tx.unsafe(migration.source);
+        if(!(await inspectMigrationObjects(tx,migration)).complete)throw Error('local_runtime_native_publication_readback_failed');
+        receipts.push({source:migration.path,source_sha256:migration.sha256,signature:migration.signature,signatures:migration.signatures,
+          status:before.complete?'ALREADY_PRESENT_NOT_MODIFIED':'APPLIED_LOCAL_ONLY',existing_bodies_attested:true,native_publication_schema_only:true});
         continue;
       }
       if (before.complete) {

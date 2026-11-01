@@ -1,6 +1,6 @@
 {
   "schema": "compute.fresh-schema-candidate.v1",
-  "reviewed_source_head": "623de3d772a22238cf41a8fc3a4216f48b9637a8",
+  "reviewed_source_head": "04af080c9cc369d5038ed672c9cd1d36a4a567e3",
   "baseline": [
     {
       "step": 1,
@@ -295,6 +295,14 @@
     {
       "path": "infra/client-state-runtime/native-coding-capacity-v2.sql",
       "sha256": "7892d0fd3594ebaa115080402ced50b99d6c54940f75533e71fe262ae14d914c"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-callback-publication-v1.sql",
+      "sha256": "f20a87dde4ba9a67066a67261ace32a83557e73b215e988520db056a0725760c"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-initial-anchor-task-fence-v1.sql",
+      "sha256": "cc834bb95da3944a6e63d727c7fd0312c224623a5c73f930b9a119a962353822"
     }
   ],
   "unresolved_dependencies": [

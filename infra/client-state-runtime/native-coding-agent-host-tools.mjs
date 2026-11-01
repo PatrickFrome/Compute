@@ -1,3 +1,4 @@
+import {assertNativeCodingHostRequestOpen} from './native-coding-host-request-lifetime.mjs';
 import {createHash} from 'node:crypto';
 import {validateNativeCodingAgentHostRequest} from '../../apps/metaengine-browser/src/native-coding-agent-host-contract.mjs';
 export {validateNativeCodingAgentHostRequest};
@@ -15,19 +16,23 @@ export function createNativeCodingAgentHostTools({sql,readNativeScope,readNative
   if(!['unsafe','begin'].every(key=>typeof sql?.[key]==='function')
       ||typeof readNativeScope!=='function'||typeof readNativeWorker!=='function')fail('private_dependencies_required');
   let closed=false;
-  const open=()=>{if(closed)fail('closed');};
+  const open=request=>{if(closed)fail('closed');assertNativeCodingHostRequestOpen(request);};
   const processOnly=p=>({pid:p?.pid,created_at:new Date(p?.created_at??p?.started_at).toISOString(),process_incarnation_id:p?.process_incarnation_id});
-  async function owner(tx){
+  async function owner(tx,request){
+    open(request);
     const roles=await tx.unsafe('select current_user::text as current_user,session_user::text as session_user');
+    open(request);
     if(roles.length!==1||roles[0].current_user!=='state_owner'||roles[0].session_user!=='state_owner')fail('state_owner_required');
   }
-  async function protectedJob(tx,value,permit=null){
+  async function protectedJob(tx,value,permit=null,request){
+    open(request);
     const b=value.binding;
     const rows=await tx.unsafe(`select j.job_envelope,j.canonical_job_envelope,j.job_envelope_sha256,p.permit,to_jsonb(e) as execution
       from destruktion_meta.native_coding_job_registration_h205f22 j
       join destruktion_meta.native_coding_operator_permit_h205f22 p using(permit_id)
       join destruktion_meta.native_coding_execution_h205f22 e using(task_id,lease_generation)
       where j.run_id=$1::uuid`,[b.run_id]);
+    open(request);
     const record=rows[0],job=record?.job_envelope,j=job?.payload,p=record?.permit;
     if(rows.length!==1||!p||permit&&!same(permit,p)||canonical(job)!==record.canonical_job_envelope||digest(job)!==record.job_envelope_sha256
       ||j?.run_id!==b.run_id||j.task_id!==b.task_id||j.lease_generation!==b.lease_generation
@@ -40,19 +45,19 @@ export function createNativeCodingAgentHostTools({sql,readNativeScope,readNative
       ||p.artifact?.cli_executable_sha256!==value.job_binding.executable_sha256)fail('protected_job_changed');
     return {job,p,execution:record.execution};
   }
-  async function bound(tx,value){
-    open();
-    await owner(tx);
+  async function bound(tx,value,request){
+    open(request);
     const b=value.binding;
     const rows=await tx.unsafe('select destruktion_meta.native_coding_agent_context_v1($1::uuid) as value',[b.run_id]);
+    open(request);
     const c=rows[0]?.value,p=c?.permit,t=c?.task;
     if(rows.length!==1||!c||c.run_id!==b.run_id||c.project_id!==b.project_id||p?.workspace_id!==b.workspace_id
       ||p.project_id!==b.project_id||p.provider_id!==b.provider_id||p.agent_id!==b.agent_id||p.role!==b.role
       ||p.agent_generation_epoch!==b.agent_generation_epoch||t?.task_id!==b.task_id
       ||Number(t.lease_generation)!==b.lease_generation||t.lease_agent_id!==b.agent_id
       ||Number(t.lease_agent_generation_epoch)!==b.agent_generation_epoch)fail('binding_changed');
-    const {job,execution}=await protectedJob(tx,value,p),j=job.payload;
-    const native=await readNativeScope(p,false,tx);
+    const {job,execution}=await protectedJob(tx,value,p,request),j=job.payload;open(request);
+    const native=await readNativeScope(p,false,tx,request);open(request);
     if(!same(native.postgres,p.postgres)||!same(native.artifact,p.artifact)||!same(native.worktree,p.worktree)
       ||native.user_sid!==p.user_sid||!same(processOnly(native.host_process),processOnly(j.host_process)))fail('host_scope_changed');
     const lease=buildNativeCodingTaskContext(t,{projectId:b.project_id,providerId:b.provider_id,
@@ -61,42 +66,62 @@ export function createNativeCodingAgentHostTools({sql,readNativeScope,readNative
     if(execution?.state!=='ATTEMPTED'||Object.keys(scope).some(key=>String(execution[key])!==String(scope[key]))
       ||j.prompt_sha256!==lease.prompt_sha256||j.goal_id!==p.goal_id||j.goal_sha256!==p.goal_sha256||j.owner_epoch!==p.owner_epoch
       ||!same(j.worktree,p.worktree)||!same(j.artifact,p.artifact)||!same(j.postgres,p.postgres))fail('execution_changed');
-    const worker=await readNativeWorker(value.job_binding.pid,{scope,permit:p,job});
+    const worker=await readNativeWorker(value.job_binding.pid,{scope,permit:p,job,request});open(request);
     if(worker.pid!==value.job_binding.pid||worker.job_id!==value.job_binding.job_id||worker.run_id!==b.run_id
       ||worker.process_incarnation_id!==value.job_binding.process_incarnation_id||worker.user_sid!==p.user_sid
       ||!same(processOnly(worker),processOnly(j.worker_process))||worker.prompt_sha256!==j.prompt_sha256)fail('worker_changed');
-    open();return c;
+    open(request);return c;
+  }
+  // Private transaction composition only: no wire action, arbitrary SQL or
+  // nested transaction. The caller owns COMMIT and physical request custody.
+  async function invokeInTransaction(tx,payload,request){
+    open(request);
+    if(typeof tx?.unsafe!=='function')fail('private_transaction_required');
+    tx.addCommitGuard?.(()=>{open(request);});
+    const value=validateNativeCodingAgentHostRequest(payload),a=value.args,run=value.binding.run_id;
+    await owner(tx,request);open(request);
+    await tx.unsafe('set local synchronous_commit=on');open(request);
+    if(value.operation==='READ_INTENT'){
+      // Historical status readback is not a grant to call a tool or launch
+      // another worker. SQL independently checks the original run/device.
+      await protectedJob(tx,value,null,request);open(request);
+      const rows=await tx.unsafe('select destruktion_meta.native_coding_agent_intent_read_v1($1::uuid,$2::uuid) as value',[run,a.request_id]);
+      open(request);
+      const result=rows[0]?.value;
+      if(rows.length!==1||result?.schema!=='metaengine.native-coding.agent-intent.v1'||result.run_id!==run
+        ||result.request_id!==a.request_id||result.readback_only!==true||result.physical_effect_replayed!==false
+        ||result.authority_effect!==false)fail('intent_readback_unconfirmed');
+      open(request);return result;
+    }
+    await bound(tx,value,request);open(request);
+    let result;
+    if(value.operation==='CHECK')result={schema:'metaengine.native-coding.agent-authorized.v1',run_id:run,authorized:true,authority_effect:false};
+    else if(value.operation==='project_overview')result=(await tx.unsafe('select destruktion_meta.native_coding_agent_overview_v1($1::uuid,$2::bigint,$3::integer) as value',[run,a.after_seq??0,a.limit??32]))[0]?.value;
+    else if(value.operation==='project_history_page')result=(await tx.unsafe('select destruktion_meta.native_coding_agent_history_v1($1::uuid,$2::bigint,$3::bigint,$4::integer) as value',[run,a.after_seq,a.through_seq??null,a.limit]))[0]?.value;
+    else if(value.operation==='agent_ack_message')result=(await tx.unsafe('select destruktion_meta.native_coding_agent_message_ack_v1($1::uuid,$2::uuid,$3::bigint) as value',[run,a.request_id,a.message_seq]))[0]?.value;
+    else if(value.operation==='agent_send_message')result=(await tx.unsafe('select destruktion_meta.native_coding_agent_message_v1($1::uuid,$2::uuid,$3::text,$4::text) as value',[run,a.request_id,a.target_agent_id,a.message]))[0]?.value;
+    else if(value.operation==='project_propose_children')result=(await tx.unsafe('select destruktion_meta.native_coding_agent_spawn_v1($1::uuid,$2::uuid,$3::jsonb) as value',[run,a.request_id,JSON.stringify(a.children)]))[0]?.value;
+    open(request);
+    if(!result||typeof result!=='object'||Array.isArray(result))fail('operation_unconfirmed');
+    // The SQL operation itself rechecks the current lease and grant. This
+    // final check also rolls a write back when Host closure races the call.
+    open(request);return result;
   }
   return Object.freeze({
-    async invoke(request){
-      const value=validateNativeCodingAgentHostRequest(request),a=value.args,run=value.binding.run_id;
-      open();
-      return sql.begin('isolation level serializable',async tx=>{
-        await tx.unsafe('set local synchronous_commit=on');
-        if(value.operation==='READ_INTENT'){
-          // Historical status readback is not a grant to call a tool or launch
-          // another worker. SQL independently checks the original run/device.
-          await owner(tx);await protectedJob(tx,value);
-          const rows=await tx.unsafe('select destruktion_meta.native_coding_agent_intent_read_v1($1::uuid,$2::uuid) as value',[run,a.request_id]);
-          const result=rows[0]?.value;
-          if(rows.length!==1||result?.schema!=='metaengine.native-coding.agent-intent.v1'||result.run_id!==run
-            ||result.request_id!==a.request_id||result.readback_only!==true||result.physical_effect_replayed!==false
-            ||result.authority_effect!==false)fail('intent_readback_unconfirmed');
-          open();return result;
-        }
-        await bound(tx,value);
-        let result;
-        if(value.operation==='CHECK')result={schema:'metaengine.native-coding.agent-authorized.v1',run_id:run,authorized:true,authority_effect:false};
-        else if(value.operation==='project_overview')result=(await tx.unsafe('select destruktion_meta.native_coding_agent_overview_v1($1::uuid,$2::bigint,$3::integer) as value',[run,a.after_seq??0,a.limit??32]))[0]?.value;
-        else if(value.operation==='project_history_page')result=(await tx.unsafe('select destruktion_meta.native_coding_agent_history_v1($1::uuid,$2::bigint,$3::bigint,$4::integer) as value',[run,a.after_seq,a.through_seq??null,a.limit]))[0]?.value;
-        else if(value.operation==='agent_ack_message')result=(await tx.unsafe('select destruktion_meta.native_coding_agent_message_ack_v1($1::uuid,$2::uuid,$3::bigint) as value',[run,a.request_id,a.message_seq]))[0]?.value;
-        else if(value.operation==='agent_send_message')result=(await tx.unsafe('select destruktion_meta.native_coding_agent_message_v1($1::uuid,$2::uuid,$3::text,$4::text) as value',[run,a.request_id,a.target_agent_id,a.message]))[0]?.value;
-        else if(value.operation==='project_propose_children')result=(await tx.unsafe('select destruktion_meta.native_coding_agent_spawn_v1($1::uuid,$2::uuid,$3::jsonb) as value',[run,a.request_id,JSON.stringify(a.children)]))[0]?.value;
-        if(!result||typeof result!=='object'||Array.isArray(result))fail('operation_unconfirmed');
-        // The SQL operation itself rechecks the current lease and grant. This
-        // final check also rolls a write back when Host closure races the call.
-        open();return result;
-      });
+    invokeInTransaction,
+    async invoke(payload,request){
+      open(request);
+      // Validate before acquiring a connection; revalidate inside the owned tx.
+      validateNativeCodingAgentHostRequest(payload);
+      try {
+        const result=await sql.begin('isolation level serializable',tx=>invokeInTransaction(tx,payload,request));
+        // Cancellation here cannot establish effect absence: COMMIT may be durable.
+        open(request);return result;
+      } catch(cause) {
+        // Preserve the original error identity and any physical-settlement mark.
+        const error=cause instanceof Error?cause:new Error('native_coding_agent_host_transaction_unconfirmed',{cause});
+        error.effect_outcome='UNKNOWN';error.automatic_retry_allowed=false;throw error;
+      }
     },close(){closed=true;},
   });
 }

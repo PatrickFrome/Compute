@@ -75,3 +75,11 @@ test('W78 CI executes only the frozen Electron official installer after input ch
   assert.match(workflow, /work\/metaengine-client-wave12-w78-20261015/);
   assert.doesNotMatch(workflow, /dangerously-allow-all-scripts|approve --all|npx install-electron/);
 });
+
+test('pinned Electron CI runs the real ASAR recovery case without a skipped or shared-profile substitute', async () => {
+  const workflow = await readFile(new URL('../../../.github/workflows/client-wave10-w62-source-r97.yml', import.meta.url), 'utf8');
+  const step = workflow.slice(workflow.indexOf('      - name: Verify actual Electron ASAR'), workflow.indexOf('      - name: Frozen UI typecheck'));
+  assert.ok(workflow.indexOf('--verify-binary') < workflow.indexOf('      - name: Verify actual Electron ASAR'));
+  for (const value of ['[guid]::NewGuid()', 'Env:METAENGINE_*', "'APPDATA'", "'LOCALAPPDATA'", "'USERPROFILE'", "'HOME'", "'TEMP'", "'TMP'", 'METAENGINE_ELECTRON_BINARY', 'node_modules/electron/dist/electron.exe', 'test/runtime-recovery-installed-binding.test.mjs', "'# pass 6'", "'# skipped 0'", 'recovery_electron_actual_case_missing']) assert.ok(step.includes(value), value);
+  assert.match(workflow, /runtime-recovery-electron\.tap/);
+});

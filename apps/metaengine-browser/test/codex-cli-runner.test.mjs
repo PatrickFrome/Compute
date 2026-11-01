@@ -767,3 +767,25 @@ for(const stop of ['cancel','expire'])for(const stage of ['worktree-pin','journa
   assert.equal(prior.automatic_retry_allowed,false);assert.equal(prior.terminal_reason,stage==='attempt-write'||stage==='attempt-pin'?'PRIOR_ATTEMPT_REQUIRES_RECONCILIATION':'RESERVATION_EXISTS');
  }
 });
+
+test('actual inert runner descriptor enters private custody adapter without recreating HEADER or claiming SQL authority',async t=>{
+ const {createNativeCodingPreparedCustodyAdapter}=await import('../src/native-coding-prepared-custody-adapter.mjs');
+ const {claimNativeRunCallbackJournal,readNativeRunCallbackJournal}=await import('../src/native-coding-run-callback-journal.mjs');
+ const f=await fixture(t),processController=controller(),request=preparedRequest(f);let bound,writer,claims=0,reserves=0;
+ const token=Object.freeze({}),runner=createCodexCliRunner({...f,processController,prepareAgentBridge:details=>bound.prepareBridge(details,async()=>{throw Error('must not open bridge');})});
+ const handle=await runner.prepare(request),a=f.permits[0],permit={...a,agent_id:request.lease.agent_id,agent_generation_epoch:request.lease.agent_generation_epoch,
+  role:request.role,revoked:false,provider_id:id(55),worktree:{path:f.worktree,base_sha:request.lease.base_sha}};
+ const adapter=createNativeCodingPreparedCustodyAdapter({assertOpen(){},ownerCallback:async()=>({fixture_only:true}),ownPostgres:{
+  async prepareAgentRunCustody({binding,journal}){claims++;assert.equal(journal,runner.describePrepared(handle).callbackJournal);
+   writer=await claimNativeRunCallbackJournal(journal,{binding,instanceId:id(400),hostPid:123});return token;},
+  async reservePreparedExecution(scope,value,owner){reserves++;assert.equal(value,token);await owner({fixture_only:true});return {state:'RESERVED',scope:{...scope,reservation_id:id(401)}};},
+  takePreparedAgentRunCustody(){throw Error('must not take');},async abandonPreparedAgentRunCustody(value){assert.equal(value,token);await writer.append({kind:'FENCE'});await writer.drain();},
+ }});
+ bound=adapter.bindRunner({runner,handle,permit});const descriptor=bound.describePrepared(handle),bytes=await fs.readFile(descriptor.attemptPath);
+ assert.equal(descriptor.callbackJournal,runner.describePrepared(handle).callbackJournal);
+ await adapter.reserve({workspace_id:a.workspace_id,task_id:request.lease.task_id,lease_generation:1,agent_id:request.lease.agent_id,
+  agent_generation_epoch:request.lease.agent_generation_epoch,target_id:`codex-cli:${permit.provider_id}`,host_incarnation:'pid:123:created_100ns:134000000000000000',scope_sha256:'a'.repeat(64)}, {prepared:descriptor});
+ bound.abandonPrepared(handle);adapter.close();await adapter.drain();assert.equal(claims,1);assert.equal(reserves,1);assert.equal(processController.spawns,0);
+ assert.deepEqual(await fs.readFile(descriptor.attemptPath),bytes);assert.equal((await readNativeRunCallbackJournal(descriptor.directory)).records,3);
+ const prior=await runner.prepare(request);assert.equal(runner.describePrepared(prior).state,'READBACK_ONLY');assert.equal(processController.spawns,0);
+});

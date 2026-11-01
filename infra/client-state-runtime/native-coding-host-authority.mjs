@@ -1,3 +1,4 @@
+import {nativeCallbackInitialPublicationAck} from '../../apps/metaengine-browser/src/native-coding-publication-handoff-contract.mjs';
 import {createNativeRunOwnerReader} from './native-coding-run-owner-read.mjs';
 import {createNativeCodingCallbackPublication} from './native-coding-callback-publication.mjs';
 import {validateCodexCliJoinedSettlement,validateCodexCliLocalOutputDrain} from '../../apps/metaengine-browser/src/codex-cli-physical-settlement.mjs';
@@ -14,8 +15,68 @@ import {createNativeCodingAgentHostTools} from './native-coding-agent-host-tools
 
 const fail=reason=>{throw new Error('native_coding_host_'+reason);};
 const callbackPublications=new WeakMap();
+const callbackPublicationCompositions=new WeakMap();
 // Private in-process reference only; not a property of the v1 IPC authority.
 export function nativeCodingCallbackPublicationFor(authority){const value=callbackPublications.get(authority);if(!value)fail('callback_publication_unbound');return value;}
+// Private composition for the actual authority, not a caller-selected publisher.
+// This remains unmounted by the default runtime until the whole pre-effect
+// schema, original ticket and prepared-journal producer are qualified together.
+export function nativeCodingCallbackPublicationCompositionFor(authority){
+ const publisher=nativeCodingCallbackPublicationFor(authority);
+ const retained=callbackPublicationCompositions.get(authority);if(retained)return retained.value;
+ let closed=false,handoffs=new WeakMap(),effects=new WeakMap();const runs=new Map(),executions=new Map();
+ const key=scope=>`${scope.workspace_id}:${scope.task_id}:${scope.lease_generation}`;
+ const open=request=>{if(closed)fail('publication_composition_closed');assertNativeCodingHostRequestOpen(request);};
+ const invalidate=()=>{closed=true;for(const row of runs.values())row.closed=true;runs.clear();executions.clear();handoffs=new WeakMap();effects=new WeakMap();};
+ const transport=Object.freeze({
+  async publish(intent,request){
+   open(request);const row=runs.get(intent?.binding?.run_id);if(!row||row.closed)fail('publication_run_unbound');
+   const capability=await row.handoff.publish(intent,request);open(request);
+   if(row.closed)fail('publication_run_closed');handoffs.set(capability,row);return capability;
+  },
+  async recheck(capability,request,dispatch){
+   open(request);const row=handoffs.get(capability);if(!row||row.closed)fail('publication_handoff_unbound');
+   handoffs.delete(capability);
+   if(dispatch!==undefined&&typeof dispatch!=='function')fail('publication_dispatch_invalid');
+   const result=await row.handoff.recheck(capability,request,dispatch?async tx=>{
+    open(request);if(effects.has(request))fail('publication_dispatch_reused');const ticket={tx,used:false};effects.set(request,ticket);
+    try{const value=await dispatch(tx);if(!ticket.used)fail('publication_fixed_effect_required');open(request);return value;}
+    finally{effects.delete(request);}
+   }:undefined);open(request);return result;
+  },
+ });
+ const operations=Object.freeze({...authority,
+  async AGENT_OPERATION(input,request,tx){
+   open(request);const ticket=effects.get(request);
+   if(!ticket||ticket.used||ticket.tx!==tx)fail('publication_effect_unbound');ticket.used=true;
+   const result=await authority.AGENT_OPERATION(input,request,tx);open(request);return result;
+  },
+  async RESERVE_EXECUTION(input,request){
+   open(request);const reserved=await authority.RESERVE_EXECUTION(input,request);open(request);
+   if(reserved.state!=='RESERVED')return reserved;
+   // Exact object and exact original request, after the first actual COMMIT.
+   // publish includes a second independent committed readback before returning.
+   const result=await publisher.publish(reserved,request);open(request);
+   const ack=nativeCallbackInitialPublicationAck(result.publication,reserved.scope,request.requestId);
+   if(runs.has(ack.run_id)||executions.has(key(reserved.scope)))fail('publication_run_reused');
+   const row={reserved,handoff:publisher.handoff(reserved),runId:ack.run_id,closed:false};
+   runs.set(ack.run_id,row);executions.set(key(reserved.scope),row);
+   return Object.freeze({...reserved,initial_callback_publication:ack});
+  },
+  async ADVANCE_EXECUTION(input,request){
+   open(request);const result=await authority.ADVANCE_EXECUTION(input,request);
+   // Only a verified durable terminal transition retires routing. Unknown
+   // transition results retain the existing route; they never permit replay.
+   if(['RESULT_READY','FAILED','AMBIGUOUS','CHECKPOINTED'].includes(result?.state)){
+    const row=executions.get(key(input.scope));if(row){row.closed=true;runs.delete(row.runId);executions.delete(key(input.scope));}
+   }
+   open(request);return result;
+  },
+  close(){authority.close();},
+ });
+ const value=Object.freeze({operations,callbackPublication:transport});
+ callbackPublicationCompositions.set(authority,{value,invalidate});return value;
+}
 const same=(a,b)=>json(a)===json(b);
 // The native Job helper records started_at with Windows' seven fractional
 // digits; signed kernel identities use the same birth rounded down to ms.
@@ -193,9 +254,10 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
       ||requireLive&&native.worktree.base_sha!==c.permit.worktree.base_sha) fail('execution_scope_changed');
     return {c,native};
   }
-  async function write(operation) {
-    open();
+  async function write(operation,request) {
+    open();assertNativeCodingHostRequestOpen(request);
     try {return await sql.begin('isolation level serializable',async tx=>{
+      tx.addCommitGuard?.(()=>{open();assertNativeCodingHostRequestOpen(request);});
       await owner(tx);await tx.unsafe('set local synchronous_commit=on');
       const result=await operation(tx);open();return result;
     });}
@@ -210,7 +272,7 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
     readCallbackPrefix,readPublicationHost,readOwnerControl:readOwnerControl??runOwnerReader?.readOwnerControl??null});
   const operations={
     ...(runOwnerReader?{READ_RUN_OWNER_CUSTODY_V1:runOwnerReader.operation}:{}),
-    AGENT_OPERATION:request=>{open();return agentTools.invoke(request);},
+    AGENT_OPERATION:(payload,request,tx)=>{open();return tx===undefined?agentTools.invoke(payload,request):agentTools.invokeInTransaction(tx,payload,request);},
     FINISH_CHECKPOINT:query=>finishCheckpoint('FINISH_CHECKPOINT',query),
     READ_FINISH_CHECKPOINT:query=>finishCheckpoint('READ_FINISH_CHECKPOINT',query),
     ...(typeof commitService?.RECONCILE_FINISH_CHECKPOINT==='function'
@@ -264,7 +326,7 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
         assertNativeCodingHostRequestOpen(request);
         await scoped(tx,scope,true,request);assertNativeCodingHostRequestOpen(request);
         return ledger(tx).reserve(scope);
-      }));
+      },request));
       let value;try{value=await physical.promise;}catch(error){throw physical.unconfirmed()?markNativePhysicalSettlementUnconfirmed(error):error;}
       if(physical.unconfirmed())throw markNativePhysicalSettlementUnconfirmed(Error('native_coding_host_reservation_physical_hold'));
       // Actual inserted result, after COMMIT; clones/readback/late return do not
@@ -374,13 +436,14 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
         return reply('READBACK_ONLY','PROTECTED_RESULT_VERIFIED',j.result_receipt_sha256);
       });
     },
-    async ADVANCE_EXECUTION({scope,transition}) {
+    async ADVANCE_EXECUTION({scope,transition},request) {
+      const check=()=>{open();assertNativeCodingHostRequestOpen(request);};check();
       if(transition?.to==='CHECKPOINTED') fail('independent_checkpoint_verifier_unbound');
       return write(async tx=>{
-        const {c,native}=await scoped(tx,scope,transition.to==='ATTEMPTED');
+        check();const {c,native}=await scoped(tx,scope,transition.to==='ATTEMPTED',request);check();
         if(transition.to==='ATTEMPTED') {
           const envelope=transition.job_proof,payload=envelope?.payload;
-          const worker=await readNativeWorker(payload?.worker_process?.pid,{scope,permit:c.permit,job:envelope});
+          const worker=await readNativeWorker(payload?.worker_process?.pid,{scope,permit:c.permit,job:envelope,request});check();
           const wanted={...expected(envelope,c,native),task_id:c.value.task_id,lease_generation:c.value.lease_generation,
             lease_expires_at:c.value.expires_at,prompt_sha256:c.value.prompt_sha256,
             worker_process:processProof(worker),job_id:worker.job_id,run_id:worker.run_id};
@@ -395,7 +458,7 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
                 and p.workspace_id=$3::uuid and (p.permit->>'project_id')::uuid=$4::uuid
                 and pt.project_id=$4::uuid and p.permit->>'role'='IMPLEMENTER'
                 and e.state in ('RESULT_READY','CHECKPOINTED')`,[subject.run_id,subject.result_sha256,c.permit.workspace_id,c.permit.project_id]);
-            const writer=writers[0];if(writers.length!==1||!writer.result_receipt)fail('critic_subject_unregistered');
+            check();const writer=writers[0];if(writers.length!==1||!writer.result_receipt)fail('critic_subject_unregistered');
             if(subject.source_head!==c.permit.worktree.base_sha||writer.result_receipt.role!=='IMPLEMENTER'||writer.result_receipt.result?.outcome!=='DONE'
               ||writer.result_receipt.git_after?.artifact_sha256!==subject.git_artifact_sha256
               ||writer.result_receipt.git_after?.head!==subject.source_head)fail('critic_subject_changed');
@@ -403,15 +466,15 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
           } else wanted.subject=null;
           verifyNativeCodingJobProof(envelope,{publicKey:key(c),expected:wanted,now:Date.now()});
           if(sha(envelope)!==transition.evidence_sha256) fail('job_digest_mismatch');
-          await tx.unsafe(`insert into destruktion_meta.native_coding_job_registration_h205f22
+          check();await tx.unsafe(`insert into destruktion_meta.native_coding_job_registration_h205f22
             (task_id,lease_generation,permit_id,run_id,job_envelope,canonical_job_envelope,job_envelope_sha256)
             values($1::uuid,$2::bigint,$3::uuid,$4::uuid,$5::text::jsonb,$5::text,$6::text)`,
-            [scope.task_id,scope.lease_generation,c.permit.permit_id,payload.run_id,json(envelope),sha(envelope)]);
+            [scope.task_id,scope.lease_generation,c.permit.permit_id,payload.run_id,json(envelope),sha(envelope)]);check();
         } else if(transition.to==='RESULT_READY') {
           const rows=await tx.unsafe(`select job_envelope from destruktion_meta.native_coding_job_registration_h205f22
             where task_id=$1::uuid and lease_generation=$2::bigint for update`,[scope.task_id,scope.lease_generation]);
-          if(rows.length!==1)fail('job_unregistered');
-          const job=rows[0].job_envelope,receipt=await readProtectedReceipt({scope,permit:c.permit,job});
+          check();if(rows.length!==1)fail('job_unregistered');
+          const job=rows[0].job_envelope,receipt=await readProtectedReceipt({scope,permit:c.permit,job,request});check();
           if(receipt?.process?.launch||receipt?.physical_settlement){validateCodexCliJoinedSettlement(receipt.physical_settlement,{proof:receipt.process});validateCodexCliLocalOutputDrain(receipt);}
           if(!same(receipt,transition.result_receipt)||receipt.schema!=='metaengine.codex-cli.run-receipt.v1'
             ||receipt.provider!=='CODEX_CLI'||receipt.trust_namespace!=='LOCAL_OPERATOR_QA'
@@ -444,14 +507,14 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
             ||receipt.git_before?.head!==job.payload.subject.source_head
             ||receipt.git_before?.artifact_sha256!==job.payload.subject.git_artifact_sha256
             ||receipt.git_before?.artifact_sha256!==receipt.git_after?.artifact_sha256))fail('critic_receipt_mismatch');
-          const changed=await tx.unsafe(`update destruktion_meta.native_coding_job_registration_h205f22
+          check();const changed=await tx.unsafe(`update destruktion_meta.native_coding_job_registration_h205f22
             set result_receipt=$3::text::jsonb,canonical_result_receipt=$3::text,result_receipt_sha256=$4::text,result_registered_at=clock_timestamp()
             where task_id=$1::uuid and lease_generation=$2::bigint and result_receipt is null returning result_receipt_sha256`,
-            [scope.task_id,scope.lease_generation,json(receipt),sha(receipt)]);
+            [scope.task_id,scope.lease_generation,json(receipt),sha(receipt)]);check();
           if(changed.length!==1||changed[0].result_receipt_sha256!==sha(receipt))fail('result_registration_unknown');
         }
-        return ledger(tx).advance(scope,transition);
-      });
+        check();const result=await ledger(tx).advance(scope,transition);check();return result;
+      },request);
     },
     async READ_PROJECT_REJECTION(selector,context) {
       const check=()=>{open();assertNativeCodingHostRequestOpen(context);};check();
@@ -534,7 +597,7 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
     ...(serviceHeartbeatOperations?Object.fromEntries(['SERVICE_HEARTBEAT','READ_SERVICE_HEARTBEAT',...['SERVICE_HEARTBEAT_V2','READ_SERVICE_HEARTBEAT_V2'].filter(x=>typeof serviceHeartbeatOperations[x]==='function')].map(action=>[action,async request=>{
       open();const result=await serviceHeartbeatOperations[action](request);open();return result;
     }])):{}),
-    close(){closed=true;runOwnerReader?.close();callbackPublication.close();agentTools.close();checkpointVerifier?.close();commitService?.close();seedOperations?.close();serviceHeartbeatOperations?.close();},
+    close(){closed=true;callbackPublicationCompositions.get(operations)?.invalidate();runOwnerReader?.close();callbackPublication.close();agentTools.close();checkpointVerifier?.close();commitService?.close();seedOperations?.close();serviceHeartbeatOperations?.close();},
   };
   Object.freeze(operations);callbackPublications.set(operations,callbackPublication.api);
   return operations;

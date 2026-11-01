@@ -20,8 +20,9 @@ for(const file of ['20261022070000_native_coding_execution_ledger_v1.sql','20261
   const spec=specs.find(s=>s.signature.startsWith(name+'('));assert.equal(spec.old_sha256,createHash('sha256').update(body).digest('hex'));
  }
 });
-test('SQL remains unregistered and default gate refuses every caller override',()=>{
- assert.equal(LOCAL_RUNTIME_MIGRATIONS.some(m=>String(m.source_url).includes('callback-publication')),false);
+test('SQL is registered in reviewed order but default gate refuses every caller override',()=>{
+ assert.deepEqual(LOCAL_RUNTIME_MIGRATIONS.slice(-2).map(m=>m.path),['native-coding-callback-publication-v1.sql','native-coding-initial-anchor-task-fence-v1.sql']);
+ assert(LOCAL_RUNTIME_MIGRATIONS.slice(-2).every(m=>m.reviewed_native_publication_upgrade===true));
  for(const value of [undefined,{},true,{directory_durable:true,pg_committed:true,send_capability:true}])assert.throws(()=>requireNativeRunCallbackPublication(value),/directory_durability_unqualified/);
 });
 test('default composition keeps Owner and publication handoff unmounted despite the additive transport contract',async()=>{

@@ -78,17 +78,17 @@ test('reserved backend guard needs no control-data privilege under restricted ro
 });
 
 
-test('fresh inventory includes every registered upgrade in order and excludes unregistered publication SQL', async () => {
+test('fresh inventory includes every registered upgrade in order and includes only the reviewed publication SQL', async () => {
   const candidate = await loadFreshSchemaCandidatePlan();
   const actual = (await loadLocalRuntimeMigrationPlan()).migrations.flatMap(row => [
     { path: row.source, sha256: row.source_sha256 },
     ...(row.upgrade_source ? [{ path: row.upgrade_source, sha256: row.upgrade_source_sha256 }] : []),
   ]);
   assert.deepEqual(candidate.upgrades.map(row => ({ path: path.basename(row.path), sha256: row.sha256 })), actual);
-  assert.equal(actual.at(-1).path, 'native-coding-capacity-v2.sql');
+  assert.equal(actual.at(-1).path, 'native-coding-initial-anchor-task-fence-v1.sql');
   assert.equal(LOCAL_RUNTIME_MIGRATIONS.filter(row => row.path === 'native-coding-capacity-v2.sql').length, 1);
-  assert.equal(candidate.upgrades.some(row => row.path.endsWith('native-coding-callback-publication-v1.sql')), false);
-  assert.equal(LOCAL_RUNTIME_MIGRATIONS.some(row => row.path === 'native-coding-callback-publication-v1.sql'), false);
+  assert.equal(candidate.upgrades.some(row => row.path.endsWith('native-coding-callback-publication-v1.sql')), true);
+  assert.equal(LOCAL_RUNTIME_MIGRATIONS.some(row => row.path === 'native-coding-callback-publication-v1.sql'), true);
 });
 
 test('actual fresh loader rejects missing, duplicate, reordered, forged and unregistered inventory before SQL access', async () => {
@@ -98,11 +98,12 @@ test('actual fresh loader rejects missing, duplicate, reordered, forged and unre
   const runtime = path.join(root, 'infra/client-state-runtime');
   const sourceRoot = new URL('../../', import.meta.url);
   const original = JSON.parse(await readFile(new URL('./fresh-schema-candidate-plan.json', import.meta.url), 'utf8'));
-  const extraPath = 'infra/client-state-runtime/native-coding-callback-publication-v1.sql';
+  const extraPath = 'infra/client-state-runtime/local-vault-compat.sql';
   const resources = new Set([...original.baseline, ...original.upgrades].map(row => row.path));
   resources.add(extraPath);
   resources.add('infra/client-state-runtime/fresh-schema-plan.mjs');
   resources.add('infra/client-state-runtime/local-runtime-migrations.mjs');
+  resources.add('infra/client-state-runtime/native-coding-migration-api-identity.mjs');
   try {
     for (const resource of resources) {
       const target = path.join(root, resource);

@@ -1,3 +1,4 @@
+import {createNativePreparationTransactions,bindNativeCodingTransactionPool} from './native-coding-preparation-transaction.mjs';
 import {markNativePhysicalSettlementUnconfirmed,nativePhysicalSettlementUnconfirmed,runNativePhysicalSettlementScope} from '../../apps/metaengine-browser/src/native-coding-host-settlement.mjs';
 import {readNativeCallbackProtectedPrefix} from './native-coding-callback-prefix.mjs';
 import {readNativeCodingProtectedJson} from '../../apps/metaengine-browser/src/native-coding-host-observers.mjs';
@@ -14,7 +15,7 @@ import net from 'node:net';
 import {spawn} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 import {randomUUID} from 'node:crypto';
-import {createNativeCodingHostAuthority,nativeCodingCallbackPublicationFor} from './native-coding-host-authority.mjs';
+import {createNativeCodingHostAuthority,nativeCodingCallbackPublicationFor,nativeCodingCallbackPublicationCompositionFor} from './native-coding-host-authority.mjs';
 import {buildNativeCodingExecutionScope,nativeCodingCanonicalSha256 as sha,nativeCodingCanonicalJson as canonical}
   from './native-coding-task-context.mjs';
 import {admissionFixture} from '../../apps/metaengine-browser/test/fixtures/native-coding-admission-fixture.mjs';
@@ -26,7 +27,7 @@ const unknown=e=>e.effect_outcome==='UNKNOWN'&&e.automatic_retry_allowed===false
 // Real SQL / casts / locks / transactions in a NEW disposable PG17 cluster.
 // Native processes, sandbox, image, and journal callbacks below are explicit
 // generated fixtures. This test claims no installed authorization or work.
-test('unregistered callback publication on actual disposable PG17; native/Owner evidence GENERATED',{
+test('callback publication on actual disposable PG17; native/Owner evidence GENERATED',{
   skip:!bin||!driver,timeout:240000,
 },async t=>{
   const base=await fs.realpath(process.env.METAENGINE_PG_TEST_BASE||os.tmpdir());
@@ -51,8 +52,12 @@ test('unregistered callback publication on actual disposable PG17; native/Owner 
     await fs.appendFile(path.join(data,'postgresql.conf'),"\nunix_socket_directories = ''\n");
     started=true;await command('pg_ctl',['-D',data,'-l',log,'-o',`-h 127.0.0.1 -p ${port}`,'-w','start']);
     const postgres=(await import(pathToFileURL(driver))).default;
-    sql=postgres({host:'127.0.0.1',port,user:'state_owner',database:'postgres',max:2,onnotice:()=>{},
+    const transactions=createNativePreparationTransactions();
+    sql=postgres({debug:transactions.debug,onclose:transactions.onclose,host:'127.0.0.1',port,user:'state_owner',database:'postgres',max:2,onnotice:()=>{},
       connect_timeout:5,idle_timeout:10,connection:{application_name:'METAENGINE_HOST_AUTHORITY_DISPOSABLE_QA',statement_timeout:18000,lock_timeout:5000}});
+    // Qualify the actual production reserved-connection facade, including its
+    // dead-backend quarantine. Raw pool queries below are setup/controller only.
+    const monitored=bindNativeCodingTransactionPool(sql,transactions);
     const [identity]=await sql.unsafe(`select current_user::text as current_user,session_user::text as session_user,
       current_setting('server_version_num')::int as version,current_setting('data_directory') as data_directory,
       (select system_identifier::text from pg_control_system()) as system_identifier`);
@@ -95,12 +100,14 @@ test('unregistered callback publication on actual disposable PG17; native/Owner 
 
     const migration=await fs.readFile(new URL('./native-coding-callback-publication-v1.sql',import.meta.url),'utf8');
     await sql.begin(tx=>tx.unsafe(migration));
+    await sql.unsafe('create table public.qa_publication_effects(id uuid primary key,value text not null)');
+    let agentToolsInstalled=false;
     async function fixture({ownerReader=true,identityOverride=null}={}) {
-      const f=admissionFixture();f.permit.postgres.system_identifier=cluster;f.permit.postgres.postmaster=structuredClone(pgNative);f.permit.postgres.data_directory_identity_sha256=await readDirectoryIdentity(data);f.provider=f.envelope({...f.payload(),proven_at:new Date().toISOString()});f.jobPayload.proven_at=new Date().toISOString();
+      const f=admissionFixture();if(agentToolsInstalled)f.permit.worktree.root_identity_sha256=sha(randomUUID());f.permit.postgres.system_identifier=cluster;f.permit.postgres.postmaster=structuredClone(pgNative);f.permit.postgres.data_directory_identity_sha256=await readDirectoryIdentity(data);f.provider=f.envelope({...f.payload(),proven_at:new Date().toISOString()});f.jobPayload.proven_at=new Date().toISOString();
       const native={artifact:structuredClone(f.permit.artifact),postgres:structuredClone(f.permit.postgres),
         worktree:structuredClone(f.permit.worktree),host_process:f.provider.payload.host_process,
         user_sid:f.permit.user_sid,sandbox:f.provider.payload.sandbox};
-      const controls={worker:null,receipt:null,ownerChanged:false,hostChanged:false,afterCommit:null,prefixRead:null},transactionReadbacks=[];
+      const controls={worker:null,receipt:null,ownerChanged:false,hostChanged:false,afterCommit:null,prefixRead:null},transactionReadbacks=[],transactionEntries=[];
       // /workspace's overlay ancestor exposes a negative signed inode here; the
       // production whole-ancestor guard correctly refuses it. Generated journal
       // fixtures use the existing canonical /tmp filesystem, not a relaxed guard.
@@ -114,24 +121,26 @@ test('unregistered callback publication on actual disposable PG17; native/Owner 
       };
       // Query instrumentation delegates EVERY statement to the actual PG
       // connection; it is not a SQL/transaction double.
-      const privateSql={unsafe:(query,args)=>sql.unsafe(query,args),begin:async(mode,callback)=>{const result=await sql.begin(mode,async tx=>{
-        const result=await callback(tx);
+      const privateSql={unsafe:(query,args)=>monitored.unsafe(query,args),begin:async(mode,callback)=>{const result=await monitored.begin(mode,async tx=>{
+        transactionEntries.push(tx);const result=await callback(tx);
         if(controls.beforeCommit)await controls.beforeCommit(tx);
         const [settings]=await tx.unsafe(`select current_setting('synchronous_commit') as synchronous_commit,
           current_setting('transaction_isolation') as isolation`);
         transactionReadbacks.push(settings);return result;
       });if(controls.afterCommit)await controls.afterCommit();return result;}};
       const authority=await createNativeCodingHostAuthority({sql:privateSql,
-        readNativeScope:async(_permit,requireLive,tx,request)=>{if(controls.nativeRead)await controls.nativeRead({requireLive,tx,request});return structuredClone(native);},readNativeWorker:async()=>structuredClone(controls.worker),
-        readProtectedReceipt:async()=>structuredClone(controls.receipt),callbackPublicationIdentity:identityOverride??hostIdentity,
+        readNativeScope:async(_permit,requireLive,tx,request)=>{if(controls.nativeRead)await controls.nativeRead({requireLive,tx,request});return structuredClone(native);},readNativeWorker:async(_pid,options)=>{if(controls.workerRead)await controls.workerRead(options);return structuredClone(controls.worker);},
+        readProtectedReceipt:async options=>{if(controls.receiptRead)await controls.receiptRead(options);return structuredClone(controls.receipt);},callbackPublicationIdentity:identityOverride??hostIdentity,
         readCallbackPrefix:readPrefix,readPublicationHost:async()=>({...hostNative,...(controls.hostChanged?{process_incarnation_id:`pid:${process.pid}:created_100ns:134000000000000003`}:{})}),
-        readOwnerControl:ownerReader?async({tx})=>({owner:{schema:'metaengine.host.owner-incarnation.v1',source:'LOCAL_HOST_OWNER',authority_effect:false,
+        readOwnerControl:ownerReader?async({tx,request})=>{if(controls.ownerRead)await controls.ownerRead({tx,request});return {owner:{schema:'metaengine.host.owner-incarnation.v1',source:'LOCAL_HOST_OWNER',authority_effect:false,
          owner_id:f.clientId,device_id:f.permit.device_id,project_id:f.permit.project_id,...native.host_process,epoch:f.permit.owner_epoch,
          ...(controls.ownerMarker?{fixture_classification:'STAGING'}:{}),generation:controls.ownerChanged?2:1,source_sha:f.permit.artifact.source_sha,device_key_fingerprint_sha256:f.identity.key_fingerprint_sha256,
-         observed_at:controls.sealedObservedAt??new Date().toISOString()},observed_at:controls.readObservedAt??new Date().toISOString(),control:{...(await tx.unsafe('select public.devos_environment_state_v1($1::uuid) as value',[f.workspaceId]))[0].value,revision:controls.controlRevision??0}}):null});
+         observed_at:controls.sealedObservedAt??new Date().toISOString()},observed_at:controls.readObservedAt??new Date().toISOString(),control:{...(await tx.unsafe('select public.devos_environment_state_v1($1::uuid) as value',[f.workspaceId]))[0].value,revision:controls.controlRevision??0}};}:null});
       authorities.push(authority);
       await sql.unsafe(`insert into public.compute_fabric_a2_browser_device_h205f22(device_id,client_id,profile,public_jwk,key_fingerprint_sha256)
         values($1::uuid,$2::text,$3::text,$4::jsonb,$5::text)`,[f.permit.device_id,f.clientId,f.identity.profile,sql.json(f.jwk),f.identity.key_fingerprint_sha256]);
+      if(agentToolsInstalled){const pairing=randomUUID();await sql.unsafe('insert into public.compute_fabric_a2_chat_bridge_remote_pairing_h205f22(token_hash) values($1)',[pairing]);
+        await sql.unsafe('update public.compute_fabric_a2_browser_device_h205f22 set enrollment_pairing_token_hash=$1 where device_id=$2',[pairing,f.permit.device_id]);}
       await sql.unsafe(`insert into destruktion_meta.native_coding_operator_permit_h205f22
         (permit_id,workspace_id,client_id,device_id,admin_grant_epoch,provider_id,agent_id,agent_generation_epoch,permit,operator_record_sha256)
         values($1::uuid,$2::uuid,$3::text,$4::uuid,1,$5::uuid,$6::text,1,$7::jsonb,$8::text)`,
@@ -196,11 +205,39 @@ test('unregistered callback publication on actual disposable PG17; native/Owner 
        const handle=await createNativeRunCallbackJournal({directory:runDirectory,runId,binding});
        writer=await claimNativeRunCallbackJournal(handle,{binding:runBinding,instanceId:hostIdentity.hostInstanceId,hostPid:hostIdentity.hostPid});return writer;
       }
-      return {f,native,controls,authority,query,register,prepare,attempted,ready,transactionReadbacks,request,abort,runDirectory,reserve,journal,
+      return {f,native,controls,authority,query,register,prepare,attempted,ready,transactionReadbacks,transactionEntries,request,abort,runDirectory,reserve,journal,
        publish:value=>nativeCodingCallbackPublicationFor(authority).publish(value,request),read:value=>nativeCodingCallbackPublicationFor(authority).read(value,request),
        append:event=>writer.append(event??{kind:'INTENT',request_id:randomUUID(),request_sha256:'a'.repeat(64),operation:'CHECK',job_binding_sha256:'b'.repeat(64)})};
     }
     async function subtest(name,callback){await t.test(name,async child=>{await callback(child);passed++;});}
+
+    await subtest('actual original reserve composition commits and independently reads the inert initial anchor before returning',async()=>{
+      const x=await fixture(),p=await x.prepare();await x.journal();
+      const composition=nativeCodingCallbackPublicationCompositionFor(x.authority);
+      assert.equal(nativeCodingCallbackPublicationCompositionFor(x.authority),composition);
+      assert.throws(()=>nativeCodingCallbackPublicationCompositionFor({...x.authority}),/unbound/);
+      const r=await composition.operations.RESERVE_EXECUTION({scope:p.scope},x.request);
+      assert.equal(r.state,'RESERVED');assert.equal(r.initial_callback_publication.run_id,x.f.jobPayload.run_id);
+      assert.equal(r.initial_callback_publication.request_id,x.request.requestId);
+      assert.equal(r.initial_callback_publication.execution_ready,false);
+      const [stored]=await sql.unsafe('select callback_publication as value from destruktion_meta.native_coding_execution_h205f22 where task_id=$1 and lease_generation=$2',[r.scope.task_id,r.scope.lease_generation]);
+      assert.equal(sha(stored.value.root),r.initial_callback_publication.root_sha256);assert.equal(stored.value.cursor.record_count,2);
+      const prior=await composition.operations.RESERVE_EXECUTION({scope:p.scope},x.request);
+      assert.equal(prior.state,'READBACK_ONLY');assert.equal(Object.hasOwn(prior,'initial_callback_publication'),false);
+    });
+    await subtest('original reserve composition without inert prefix leaves durable RESERVED but never returns a success or remints custody',async()=>{
+      const x=await fixture(),p=await x.prepare(),composition=nativeCodingCallbackPublicationCompositionFor(x.authority);
+      await assert.rejects(composition.operations.RESERVE_EXECUTION({scope:p.scope},x.request));
+      const r=await composition.operations.RESERVE_EXECUTION({scope:p.scope},x.request);
+      assert.equal(r.state,'READBACK_ONLY');assert.equal(r.execution.state,'RESERVED');assert.equal(Object.hasOwn(r,'initial_callback_publication'),false);
+    });
+    await subtest('initial publication cannot accept an already active intent prefix',async()=>{
+      const x=await fixture(),p=await x.prepare();await x.journal();await x.append();
+      const composition=nativeCodingCallbackPublicationCompositionFor(x.authority);
+      await assert.rejects(composition.operations.RESERVE_EXECUTION({scope:p.scope},x.request));
+      const [row]=await sql.unsafe('select state,callback_publication from destruktion_meta.native_coding_execution_h205f22 where task_id=$1',[p.scope.task_id]);
+      assert.equal(row.state,'RESERVED');assert.equal(row.callback_publication,null);
+    });
 
     await subtest('old immutable Owner seal accepts a separate fresh current observation',async()=>{
       const x=await fixture(),r=await x.reserve();await x.journal();
@@ -240,6 +277,42 @@ test('unregistered callback publication on actual disposable PG17; native/Owner 
       assert.equal(observed.request,x.request);
       const rows=await sql.unsafe('select task_id from destruktion_meta.native_coding_execution_h205f22 where task_id=$1',[prepared.scope.task_id]);
       assert.equal(rows.length,0);
+    });
+    async function advanceFixture(target){
+      const x=await fixture(),reserved=await x.reserve();
+      if(target==='RESULT_READY')await x.authority.ADVANCE_EXECUTION({scope:reserved.scope,transition:x.attempted()});
+      const abort=new AbortController(),request={...x.request,action:'ADVANCE_EXECUTION',requestId:randomUUID(),signal:abort.signal};
+      const input={scope:reserved.scope,transition:target==='ATTEMPTED'?x.attempted():x.ready()};
+      const stored=async()=>{const [row]=await sql.unsafe(`select e.state,j.run_id,j.result_receipt,j.result_receipt_sha256,j.result_registered_at
+       from destruktion_meta.native_coding_execution_h205f22 e left join destruktion_meta.native_coding_job_registration_h205f22 j using(task_id,lease_generation)
+       where e.task_id=$1`,[reserved.scope.task_id]);return row;};
+      return{x,reserved,abort,request,input,stored};
+    }
+    await subtest('advance cancellation fixture positively commits a valid RESULT_READY when its original request stays open',async()=>{
+      const q=await advanceFixture('RESULT_READY');await q.x.authority.ADVANCE_EXECUTION(q.input,q.request);
+      assert.equal((await q.stored()).state,'RESULT_READY');
+    });
+    for(const target of ['ATTEMPTED','RESULT_READY'])for(const reason of ['cancelled','deadline'])
+     await subtest('advance '+target+' '+reason+' during native observation rolls back job and execution writes',async()=>{
+      const q=await advanceFixture(target),before=await q.stored();let observed,outcome;
+      q.x.controls.nativeRead=value=>{observed=value.request;if(reason==='cancelled')q.abort.abort();else q.request.deadlineAt=Date.now()-1;};
+      try{await q.x.authority.ADVANCE_EXECUTION(q.input,q.request);}catch(error){outcome=error;}
+      assert.deepEqual(await q.stored(),before,'cancellation must not commit a new execution/registration state');
+      assert.equal(observed,q.request);assert.ok(unknown(outcome));
+    });
+    for(const [target,hook] of [['ATTEMPTED','workerRead'],['RESULT_READY','receiptRead']])
+     await subtest('advance '+target+' cancellation joins its held protected read before rollback',async()=>{
+      const q=await advanceFixture(target),before=await q.stored();let enter,release,observed;
+      const entered=new Promise(r=>enter=r),held=new Promise(r=>release=r);
+      q.x.controls[hook]=async value=>{observed=value.request;enter();await held;};
+      let done=false,outcome;const operation=q.x.authority.ADVANCE_EXECUTION(q.input,q.request).catch(error=>{outcome=error;}).finally(()=>done=true);
+      await entered;q.abort.abort();await new Promise(r=>setImmediate(r));assert.equal(done,false);release();await operation;
+      assert.deepEqual(await q.stored(),before);assert.equal(observed,q.request);assert.ok(unknown(outcome));
+    });
+    for(const target of ['ATTEMPTED','RESULT_READY'])await subtest('already cancelled '+target+' advance starts no new transaction',async()=>{
+      const q=await advanceFixture(target),before=q.x.transactionReadbacks.length;q.abort.abort();
+      await assert.rejects(q.x.authority.ADVANCE_EXECUTION(q.input,q.request),/request_cancelled/);
+      assert.equal(q.x.transactionReadbacks.length,before);
     });
     await subtest('all publication native reads retain the original request and their actual PG transaction',async()=>{
       const x=await fixture(),r=await x.reserve();await x.journal();const reads=[];
@@ -362,7 +435,7 @@ test('unregistered callback publication on actual disposable PG17; native/Owner 
       const prefix=await readNativeCallbackProtectedPrefix({directory:x.runDirectory,expected:before.cursor,
         readProtectedJson:(file,options)=>readNativeCodingProtectedJson(file,{...options,verifyStorage:async()=>({owner_dacl_verified:true})})});
       const next={...before,cursor:{revision:1,record_count:prefix.record_count,intent_count:prefix.intent_count,head_sha256:prefix.head_sha256,dispatch_fenced:false}};
-      let calls=0;const apply=()=>sql.begin('isolation level serializable',async tx=>{calls++;await tx.unsafe('set local synchronous_commit=on');return tx.unsafe('select destruktion_meta.native_coding_callback_publication_cas_v1($1,$2,$3,$4,$5)',[r.scope.task_id,1,r.scope.reservation_id,sql.json(before),sql.json(next)]);});
+      let calls=0;const apply=()=>monitored.begin('isolation level serializable',async tx=>{calls++;await tx.unsafe('set local synchronous_commit=on');return tx.unsafe('select destruktion_meta.native_coding_callback_publication_cas_v1($1,$2,$3,$4,$5)',[r.scope.task_id,1,r.scope.reservation_id,sql.json(before),sql.json(next)]);});
       const outcomes=await Promise.allSettled([apply(),apply()]);assert.equal(outcomes.filter(x=>x.status==='fulfilled').length,1);
       assert.equal(outcomes.find(x=>x.status==='rejected').reason.code,'40001');assert.equal(calls,2);
       const [stored]=await sql.unsafe('select callback_publication as v from destruktion_meta.native_coding_execution_h205f22 where task_id=$1',[r.scope.task_id]);assert.deepEqual(stored.v,next);
@@ -493,18 +566,59 @@ test('unregistered callback publication on actual disposable PG17; native/Owner 
       await assert.rejects(x.read(r),/readback_hold/);await x.append();await assert.rejects(x.publish(r),/custody_hold/);
       const again=await x.authority.RESERVE_EXECUTION({scope:r.scope},x.request);assert.equal(again.state,'READBACK_ONLY');await assert.rejects(x.publish(again),/fresh_reservation_required/);
     });
-    async function handoffFixture(){
-      const x=await fixture(),reservation=await x.reserve();await x.journal();await x.publish(reservation);
+    async function handoffFixture({composed=false}={}){
+      const x=await fixture();let reservation,composition=null;
+      if(composed){const p=await x.prepare();await x.journal();composition=nativeCodingCallbackPublicationCompositionFor(x.authority);
+       reservation=await composition.operations.RESERVE_EXECUTION({scope:p.scope},x.request);
+      }else{reservation=await x.reserve();await x.journal();await x.publish(reservation);}
       await x.authority.ADVANCE_EXECUTION({scope:reservation.scope,transition:x.attempted()});
-      const api=nativeCodingCallbackPublicationFor(x.authority),handoff=api.handoff(reservation),p=x.attempted().job_proof.payload;
+      const api=nativeCodingCallbackPublicationFor(x.authority),handoff=composition?.callbackPublication??api.handoff(reservation),p=x.attempted().job_proof.payload;
       const intent=()=>({binding:Object.fromEntries(['run_id','workspace_id','project_id','task_id','lease_generation','agent_id','agent_generation_epoch','provider_id','role'].map(k=>[k,p[k]])),
         request_id:randomUUID(),request_sha256:'a'.repeat(64),operation:'CHECK',
         job_binding_sha256:sha({job_id:p.job_id,pid:p.worker_process.pid,process_incarnation_id:p.worker_process.process_incarnation_id,executable_sha256:p.artifact.cli_executable_sha256})});
       const publish=async i=>{const {binding,...record}=i;await x.append({kind:'INTENT',...record});
         return handoff.publish(i,{...x.request,action:'PUBLISH_RUN_CALLBACK_V1',requestId:randomUUID(),requestDigest:'c'.repeat(64)});};
       const context=i=>({...x.request,action:'AGENT_OPERATION',requestId:i.request_id,requestDigest:i.request_sha256});
-      return {x,reservation,api,handoff,intent,publish,context};
+      return {x,reservation,api,handoff,intent,publish,context,composition};
     }
+    await subtest('original reserve composition retains actual private routing for later intent publication and one-shot recheck',async()=>{
+      const q=await handoffFixture({composed:true}),intent=q.intent(),capability=await q.publish(intent);
+      assert.throws(()=>q.api.handoff(q.reservation),/fresh_reservation_required/,'serialized projection is not original custody');
+      await assert.rejects(q.handoff.recheck(structuredClone(capability),q.context(intent)),/handoff_unbound/);
+      await q.handoff.recheck(capability,q.context(intent));await assert.rejects(q.handoff.recheck(capability,q.context(intent)),/handoff_unbound/);
+      await assert.rejects(q.handoff.publish({...intent,binding:{...intent.binding,run_id:randomUUID()}},{...q.context(intent),action:'PUBLISH_RUN_CALLBACK_V1'}),/run_unbound/);
+    });
+    await subtest('closing the original authority fences its composed routing and retained handoff',async()=>{
+      const q=await handoffFixture({composed:true}),intent=q.intent(),capability=await q.publish(intent);q.x.authority.close();
+      await assert.rejects(q.handoff.recheck(capability,q.context(intent)),/closed/);
+      await assert.rejects(q.handoff.publish(intent,{...q.context(intent),action:'PUBLISH_RUN_CALLBACK_V1'}),/closed/);
+    });
+    await subtest('fixed effect continuation shares the actual recheck transaction and returns only after the final Owner snapshot',async()=>{
+      const q=await handoffFixture(),intent={...q.intent(),operation:'agent_send_message'},capability=await q.publish(intent),id=randomUUID(),reads=[];
+      const context=q.context(intent);q.x.controls.nativeRead=value=>{assert.equal(value.request,context);reads.push(value.tx);};let effectTx;
+      const result=await q.handoff.recheck(capability,context,async tx=>{
+       effectTx=tx;assert.equal(reads.length,2);await tx.unsafe('insert into public.qa_publication_effects values($1,$2)',[id,'generated effect, not a live agent']);return {stored:true,authority_effect:false};
+      });
+      assert.deepEqual(result,{stored:true,authority_effect:false});assert.equal(reads.length,3);assert.ok(reads.every(tx=>tx===effectTx));
+      assert.equal((await sql.unsafe('select count(*)::int as n from public.qa_publication_effects where id=$1',[id]))[0].n,1);
+    });
+    for(const change of ['Owner','cancellation','effect rejection'])await subtest('same-transaction '+change+' after generated SQL effect rolls back before any COMMIT',async()=>{
+      const q=await handoffFixture(),intent={...q.intent(),operation:'agent_send_message'},capability=await q.publish(intent),id=randomUUID(),context=q.context(intent);
+      await assert.rejects(q.handoff.recheck(capability,context,async tx=>{
+       await tx.unsafe('insert into public.qa_publication_effects values($1,$2)',[id,'must roll back']);
+       if(change==='Owner')q.x.controls.ownerChanged=true;
+       else if(change==='cancellation')q.x.abort.abort();else throw Error('generated effect rejection');
+       return {stored:true,authority_effect:false};
+      }),/handoff_hold/);
+      assert.equal((await sql.unsafe('select count(*)::int as n from public.qa_publication_effects where id=$1',[id]))[0].n,0);
+      await assert.rejects(q.handoff.recheck(capability,context),/handoff_unbound/);
+    });
+    await subtest('composed AGENT effect cannot be called outside its actual one-shot transaction continuation',async()=>{
+      const q=await handoffFixture({composed:true}),intent=q.intent(),capability=await q.publish(intent),context=q.context(intent);
+      await assert.rejects(q.composition.operations.AGENT_OPERATION({},context,{}),/effect_unbound/);
+      await q.handoff.recheck(capability,context);
+      await assert.rejects(q.composition.operations.AGENT_OPERATION({},context,{}),/effect_unbound/);
+    });
     await subtest('real PG handoff is exact private custody; clones and a second consume cannot authorize',async()=>{
       const q=await handoffFixture(),intent=q.intent(),capability=await q.publish(intent);
       assert.throws(()=>q.api.handoff(structuredClone(q.reservation)),/fresh_reservation_required/);
@@ -554,7 +668,140 @@ test('unregistered callback publication on actual disposable PG17; native/Owner 
       await q.x.append({kind:'CALLER',request_id:a.request_id,request_sha256:a.request_sha256,outcome:'UNKNOWN'});
       await assert.rejects(q.handoff.recheck(cap,q.context(a)),/handoff_hold/);
     });
-    await crashRestart();assert.equal(passed,66);
+    // Install the genuine AgentTools dependencies only for the joined lane.
+    // Earlier publication tests deliberately exercise the smaller schema. No
+    // native_coding_agent_context_v1/auth/fence stub replaces these functions.
+    await sql.unsafe(`alter table public.compute_fabric_a2_browser_device_h205f22 add column enrollment_pairing_token_hash text;
+      create table public.compute_fabric_a2_chat_bridge_remote_pairing_h205f22(token_hash text primary key,active boolean default true)`);
+    const goal=await fs.readFile(new URL('20260929211500_client_v1_goal_progress_reconciliation_v1.sql',migrations),'utf8');
+    await sql.unsafe(goal.slice(goal.indexOf('create table if not exists destruktion_meta.client_v1_goal_request_h205f22'),goal.indexOf('alter table destruktion_meta.client_v1_goal_request_h205f22')));
+    const resultProof=await fs.readFile(new URL('20260929224500_client_v1_agent_origin_result_proof_v1.sql',migrations),'utf8');
+    await sql.unsafe(resultProof.slice(0,resultProof.indexOf('-- Keep the existing Client progress contract')));
+    await sql.unsafe(project.slice(projectEnd));
+    for(const name of ['20261012130000_project_verifier_reference_transport_v1.sql','20261025070000_native_coding_project_continuation_v1.sql',
+      '20261025080000_native_coding_worktree_lease_admission_v1.sql','20261025090000_native_coding_agent_project_tools_v1.sql'])
+      await sql.unsafe(await fs.readFile(new URL(name,migrations),'utf8'));
+    const markStart=bootstrap.indexOf('create or replace function public.devos_fleet_mark_running_v1(');
+    const markEnd=bootstrap.indexOf('end $$;',markStart)+7;
+    assert.ok(markStart>0&&markEnd>markStart);await sql.unsafe(bootstrap.slice(markStart,markEnd));
+    // The joined path must also satisfy the additive mandatory anchor and
+    // retained-task fence; isolated SQL and JS greens are not their composition.
+    const taskFenceSql=await fs.readFile(new URL('./native-coding-initial-anchor-task-fence-v1.sql',import.meta.url),'utf8');
+    await sql.begin(tx=>tx.unsafe(taskFenceSql));
+    agentToolsInstalled=true;
+
+    async function joinedAgentFixture(){
+      const q=await handoffFixture({composed:true}),p=q.x.f.permit,job=q.x.attempted().job_proof.payload;
+      const [running]=await sql.unsafe('select public.devos_fleet_mark_running_v1($1,$2,1,$3,$4,1,$5::jsonb) as value',
+        [q.reservation.scope.task_id,p.agent_id,q.x.f.binding.tab_id,q.x.f.binding.target_id,
+          sql.json({schema:'metaengine.native-coding.mark-running.v1',job_proof_sha256:sha(q.x.attempted().job_proof),authority_effect:false})]);
+      assert.equal(running.value.state,'RUNNING');assert.equal(running.value.task_id,q.reservation.scope.task_id);
+      const [current]=await sql.unsafe(`select t.state,c.state as claim_state,e.state as execution_state
+        from destruktion_meta.devos_fleet_task_h205f22 t join destruktion_meta.devos_fleet_claim_h205f22 c using(task_id,lease_generation)
+        join destruktion_meta.native_coding_execution_h205f22 e using(task_id,lease_generation) where t.task_id=$1`,[q.reservation.scope.task_id]);
+      assert.deepEqual(current,{state:'RUNNING',claim_state:'ACTIVE',execution_state:'ATTEMPTED'});
+      const [fence]=await sql.unsafe('select state,writer_task_id,writer_lease_generation from destruktion_meta.native_coding_worktree_fence_h205f22 where root_identity_sha256=$1',[p.worktree.root_identity_sha256]);
+      assert.equal(fence.state,'HELD');assert.equal(fence.writer_task_id,q.reservation.scope.task_id);assert.equal(Number(fence.writer_lease_generation),1);
+      const peer={...structuredClone(p),permit_id:randomUUID(),provider_id:randomUUID(),agent_id:'agent_joined-peer-'+randomUUID().slice(0,8),
+        worktree:{...p.worktree,path:p.worktree.path+'-peer',root_identity_sha256:sha(randomUUID())}},peerTask=randomUUID();
+      await sql.unsafe(`insert into destruktion_meta.native_coding_operator_permit_h205f22
+        (permit_id,workspace_id,client_id,device_id,admin_grant_epoch,provider_id,agent_id,agent_generation_epoch,permit,operator_record_sha256)
+        values($1,$2,$3,$4,1,$5,$6,1,$7,$8)`,[peer.permit_id,p.workspace_id,q.x.f.clientId,p.device_id,peer.provider_id,peer.agent_id,sql.json(peer),peer.record_sha256]);
+      const spec={objective:'Receive one generated joined SQL message',native_coding:{permit_id:peer.permit_id,goal_id:p.goal_id,goal_sha256:p.goal_sha256,project_id:p.project_id}};
+      await sql.unsafe(`insert into destruktion_meta.devos_fleet_task_h205f22(task_id,workspace_id,point_id,role,base_sha,task_spec,task_spec_sha256,idempotency_key)
+        values($1::uuid,$2::uuid,'joined.peer','IMPLEMENTER',$3::text,$4::jsonb,$5::text,$1::text)`,[peerTask,p.workspace_id,p.worktree.base_sha,sql.json(spec),sha(spec)]);
+      await sql.unsafe('insert into destruktion_meta.project_task_h205f22(task_id,project_id,task_seq,root_task_id,parent_task_id,depth) values($1,$2,1,$3,$3,1)',
+        [peerTask,p.project_id,q.reservation.scope.task_id]);
+      const payload={operation:'agent_send_message',binding:q.intent().binding,
+        job_binding:{job_id:job.job_id,pid:job.worker_process.pid,process_incarnation_id:job.worker_process.process_incarnation_id,executable_sha256:p.artifact.cli_executable_sha256},
+        args:{request_id:randomUUID(),target_agent_id:peer.agent_id,message:'Generated joined real-PG message; no native process was launched.'}};
+      const frame={schema:'metaengine.native-coding.host-ipc.request.v1',instance_id:q.x.request.instanceId,host_pid:q.x.request.hostPid,
+        request_id:randomUUID(),action:'AGENT_OPERATION',payload};
+      const intent={binding:payload.binding,request_id:frame.request_id,request_sha256:sha(frame),operation:payload.operation,job_binding_sha256:sha(payload.job_binding)};
+      const {binding,...record}=intent;await q.x.append({kind:'INTENT',...record});
+      const publicationFrame={...frame,request_id:randomUUID(),action:'PUBLISH_RUN_CALLBACK_V1',payload:intent};
+      const publicationContext={...q.x.request,action:publicationFrame.action,requestId:publicationFrame.request_id,requestDigest:sha(publicationFrame)};
+      const capability=await q.handoff.publish(intent,publicationContext),context=q.context(intent);
+      const invoke=tx=>q.composition.operations.AGENT_OPERATION(payload,context,tx);
+      const stored=async()=>({intents:[...await sql.unsafe('select receipt from destruktion_meta.native_coding_agent_intent_h205f22 where run_id=$1 and request_id=$2',[job.run_id,payload.args.request_id])],
+        events:[...await sql.unsafe("select content from destruktion_meta.project_event_h205f22 where project_id=$1 and event_type='NATIVE_AGENT_MESSAGE' and content->>'request_id'=$2",[p.project_id,payload.args.request_id])]});
+      return {...q,payload,frame,intent,capability,context,invoke,stored,peerTask};
+    }
+    await subtest('joined actual composition and AgentTools commit one fixed message in the same monitored Owner transaction',async()=>{
+      const q=await joinedAgentFixture(),native=[],owners=[],before=q.x.transactionEntries.length;
+      q.x.controls.nativeRead=observation=>{assert.equal(observation.request,q.context);native.push(observation);};
+      q.x.controls.ownerRead=observation=>{assert.equal(observation.request,q.context);owners.push(observation);};
+      await assert.rejects(q.composition.operations.AGENT_OPERATION(q.payload,q.context,{}),/effect_unbound/);
+      await assert.rejects(q.handoff.recheck(structuredClone(q.capability),q.context,q.invoke),/handoff_unbound/);
+      let effectTx,inside,physical;
+      const result=await q.handoff.recheck(q.capability,q.context,async tx=>{
+        effectTx=tx;assert.equal(owners.length,2);assert.equal(typeof tx.addCommitGuard,'function');
+        const value=await q.invoke(tx);
+        inside=(await tx.unsafe('select count(*)::int as n from destruktion_meta.native_coding_agent_intent_h205f22 where run_id=$1 and request_id=$2',[q.payload.binding.run_id,q.payload.args.request_id]))[0].n;
+        physical=(await tx.unsafe("select pg_backend_pid() as pid,pg_current_xact_id()::text as xid,current_setting('transaction_isolation') as isolation,current_setting('synchronous_commit') as synchronous_commit"))[0];
+        return value;
+      });
+      assert.equal(inside,1);assert.equal(result.stored,true);assert.equal(result.recipient_task_id,q.peerTask);
+      assert.equal(owners.length,3);assert.equal(native.length,4);assert.equal(native.filter(x=>x.requireLive===false).length,1,'actual AgentTools bound() performed its own native check');
+      assert.ok([...owners,...native].every(x=>x.tx===effectTx));assert.equal(q.x.transactionEntries.length-before,1,'no nested AgentTools begin');
+      assert.equal(q.x.transactionEntries.at(-1),effectTx);assert.equal(physical.isolation,'serializable');assert.equal(physical.synchronous_commit,'on');assert.ok(physical.pid>0&&/^\d+$/.test(physical.xid));
+      const read=await q.stored();assert.equal(read.intents.length,1);assert.deepEqual(read.intents[0].receipt,result);assert.equal(read.events.length,1);assert.equal(read.events[0].content.message,q.payload.args.message);
+      await assert.rejects(q.handoff.recheck(q.capability,q.context,q.invoke),/handoff_unbound/);
+      await assert.rejects(q.composition.operations.AGENT_OPERATION(q.payload,q.context,effectTx),/effect_unbound/);assert.deepEqual(await q.stored(),read);
+    });
+    for(const change of ['Owner','cancellation','effect rejection','second effect'])await subtest('joined '+change+' after actual AgentTools SQL rolls back both message and intent without replay',async()=>{
+      const q=await joinedAgentFixture();let returned=false;
+      await assert.rejects(q.handoff.recheck(q.capability,q.context,async tx=>{
+        const result=await q.invoke(tx);returned=true;assert.equal(result.stored,true);
+        assert.equal((await tx.unsafe('select count(*)::int as n from destruktion_meta.native_coding_agent_intent_h205f22 where run_id=$1',[q.payload.binding.run_id]))[0].n,1);
+        if(change==='Owner')q.x.controls.ownerChanged=true;
+        else if(change==='cancellation')q.x.abort.abort();else if(change==='second effect')await q.invoke(tx);else throw Error('generated post-effect rejection');
+        return result;
+      }),/handoff_hold/);
+      assert.equal(returned,true);assert.deepEqual(await q.stored(),{intents:[],events:[]});
+      await assert.rejects(q.handoff.recheck(q.capability,q.context,q.invoke),change==='cancellation'?/native_coding_host_request_cancelled/:/handoff_unbound/);
+      await assert.rejects(q.handoff.recheck(q.capability,{...q.context,signal:new AbortController().signal},q.invoke),/handoff_unbound/,'fresh signal cannot revive consumed custody');
+    });
+    await subtest('joined cancellation retains the actual post-effect Owner callback and transaction until that original callback joins',async()=>{
+      const q=await joinedAgentFixture();let enter,release,reads=0,done=false,effectTx;
+      const entered=new Promise(resolve=>{enter=resolve;}),held=new Promise(resolve=>{release=resolve;});
+      q.x.controls.ownerRead=async observation=>{
+        assert.equal(observation.request,q.context);if(++reads===3){assert.equal(observation.tx,effectTx);enter();await held;}
+      };
+      const operation=q.handoff.recheck(q.capability,q.context,async tx=>{effectTx=tx;const value=await q.invoke(tx);assert.equal(value.stored,true);return value;});
+      const checked=assert.rejects(operation,/handoff_hold/).finally(()=>{done=true;});
+      try{
+        await Promise.race([entered,operation.then(()=>{throw Error('joined_owner_callback_not_entered');})]);
+        q.x.abort.abort();await new Promise(resolve=>setImmediate(resolve));assert.equal(done,false);
+        assert.deepEqual(await q.stored(),{intents:[],events:[]},'uncommitted fixed effect is not visible on the independent connection');
+      }finally{release();await checked;}
+      assert.equal(reads,3);assert.deepEqual(await q.stored(),{intents:[],events:[]});
+      await assert.rejects(q.handoff.recheck(q.capability,q.context,q.invoke),/native_coding_host_request_cancelled/);
+      await assert.rejects(q.handoff.recheck(q.capability,{...q.context,signal:new AbortController().signal},q.invoke),/handoff_unbound/);
+    });
+    for(const change of ['context','transaction'])await subtest('joined effect rejects substituted '+change+' rather than adopting a matching object',async()=>{
+      const q=await joinedAgentFixture();let entered=false;
+      await assert.rejects(q.handoff.recheck(q.capability,q.context,async tx=>{entered=true;
+        return q.composition.operations.AGENT_OPERATION(q.payload,change==='context'?{...q.context}:q.context,change==='transaction'?{...tx}:tx);
+      }),/handoff_hold/);
+      assert.equal(entered,true);assert.deepEqual(await q.stored(),{intents:[],events:[]});
+    });
+    await subtest('joined lost COMMIT ACK retains exactly one real message and receipt but no replay ticket',async()=>{
+      const q=await joinedAgentFixture();q.x.controls.afterCommit=()=>{throw Error('generated joined commit ACK loss');};
+      await assert.rejects(q.handoff.recheck(q.capability,q.context,q.invoke),/handoff_hold/);q.x.controls.afterCommit=null;
+      const rows=await q.stored();assert.equal(rows.intents.length,1);assert.equal(rows.events.length,1);assert.equal(rows.intents[0].receipt.stored,true);
+      const read=(await sql.unsafe('select destruktion_meta.native_coding_agent_intent_read_v1($1,$2) as value',[q.payload.binding.run_id,q.payload.args.request_id]))[0].value;
+      assert.equal(read.found,true);assert.equal(read.readback_only,true);assert.equal(read.physical_effect_replayed,false);assert.deepEqual(read.receipt,rows.intents[0].receipt);
+      await assert.rejects(q.handoff.recheck(q.capability,q.context,q.invoke),/handoff_unbound/);assert.deepEqual(await q.stored(),rows);
+    });
+    await subtest('actual terminal transition retires composed routing before an unused AgentTools effect ticket can run',async()=>{
+      const q=await joinedAgentFixture();
+      await q.composition.operations.ADVANCE_EXECUTION({scope:q.reservation.scope,transition:q.x.ready()}, {...q.context,action:'ADVANCE_EXECUTION',requestId:randomUUID()});
+      await assert.rejects(q.handoff.recheck(q.capability,q.context,q.invoke),/handoff_unbound/);
+      await assert.rejects(q.handoff.publish(q.intent,{...q.context,action:'PUBLISH_RUN_CALLBACK_V1',requestId:randomUUID()}),/run_unbound/);
+      assert.deepEqual(await q.stored(),{intents:[],events:[]});
+    });
+    await crashRestart();assert.equal(passed,95);
     await fs.writeFile(path.join(directory,'receipt.json'),JSON.stringify({schema:'metaengine.native-callback-publication.disposable-qa.v1',state:'PASS',
      postgres_system_identifier:cluster,postgres_version_num:identity.version,subtests:passed,
      native_and_owner_classification:'GENERATED_FIXTURES',publication_gate:'CLOSED',send_capability:false,authority_effect:false}));

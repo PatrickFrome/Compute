@@ -225,12 +225,14 @@ export function createNativeCodingHostIpcServer({instanceId,operations,send=proc
         request_sha256:requestDigest,body_sha256:message.payload.headers['x-a2-device-body-sha256']},
       signal:row.abort.signal,send:frame=>{json(frame);send(frame,error=>{if(error)row.abort.abort();});},
     });
-    // RESERVE owns its original read-only Owner facet. Normal readback-only
-    // operations need no cycles; an actual publisher must consume all six.
+    // Actual publication/recheck stays on the same original physical ticket.
+    // Counterfactual and readback-only operations need no cycles; a genuine
+    // producer must consume its fixed six/six/three Owner read budget.
     // No extra request, signed-body fiction, or dispatch authority is created.
-    if(message.action==='RESERVE_EXECUTION')row.ownerPhases=createPublicationOwnerHostPhases({
+    const publicationOwnerRead=message.action==='RESERVE_EXECUTION'||publishing||!!handoff;
+    if(publicationOwnerRead)row.ownerPhases=createPublicationOwnerHostPhases({
       binding:{instance_id:instanceId,host_pid:hostPid,request_id:message.request_id,action:message.action,request_sha256:requestDigest},
-      signal:row.abort.signal,
+      signal:row.abort.signal,onFailure:()=>{row.abort.abort();},
       assertLifetime:()=>{if(closed||row.abort.signal.aborted||performance.now()>=row.expiresMono)invalid('SERVER_CLOSED');},
       send:frame=>{json(frame);send(frame,error=>{if(error)row.abort.abort();});},
     });
@@ -243,16 +245,31 @@ export function createNativeCodingHostIpcServer({instanceId,operations,send=proc
       // must not create unbounded parallel work or authorize a second write.
     },Math.max(1,row.expiresMono-performance.now()));
     const context=Object.freeze({signal:row.abort.signal,deadlineAt:row.deadlineAt,instanceId,hostPid,requestId:message.request_id,action:message.action,
-      requestDigest,...(row.ownerPhases?{[message.action===RUN_OWNER_READ||message.action==='RESERVE_EXECUTION'?'runOwnerPhases':message.action==='ACTIVATE_PREPARED_GOAL_V1'?'pendingActivationPhases':'pendingOwnerPhases']:row.ownerPhases,...(message.action==='RESERVE_EXECUTION'?{}:{bodyDigest:message.payload.headers['x-a2-device-body-sha256']})}: {})});
+      requestDigest,...(row.ownerPhases?{[message.action===RUN_OWNER_READ||publicationOwnerRead?'runOwnerPhases':message.action==='ACTIVATE_PREPARED_GOAL_V1'?'pendingActivationPhases':'pendingOwnerPhases']:row.ownerPhases,...(publicationOwnerRead?{}:{bodyDigest:message.payload.headers['x-a2-device-body-sha256']})}: {})});
     const assertDispatch=()=>{if(closed||row.abort.signal.aborted||process.connected!==true||performance.now()>=row.expiresMono)invalid('SERVER_CLOSED');};
     const physical=runNativePhysicalSettlementScope(async()=>{
       assertDispatch();
       if(publishing){
         const custody=await callbackPublication.publish(Object.freeze(structuredClone(message.payload)),context);
         assertDispatch();if(!custody||typeof custody!=='object')invalid('OPERATION_FAILED');
+        if(row.ownerPhases.started())row.ownerPhases.finish();
         row.publicationCustody=custody;return nativeCallbackPublicationAck(row.intent);
       }
-      if(handoff){await callbackPublication.recheck(handoff.publicationCustody,context);assertDispatch();}
+      if(handoff){
+        let effect=null;
+        try{
+          const value=await callbackPublication.recheck(handoff.publicationCustody,context,tx=>{
+            assertDispatch();if(effect)invalid('OPERATION_FAILED');
+            // Only this fixed original AGENT payload may execute. The genuine
+            // producer supplies its already-owned transaction and awaits it.
+            effect=Promise.resolve().then(()=>{assertDispatch();return operations[message.action](Object.freeze(structuredClone(message.payload)),context,tx);});
+            effect.catch(()=>{});return effect;
+          });
+          if(!effect)invalid('OPERATION_FAILED');const result=await effect;assertDispatch();
+          if(json(value)!==json(result))invalid('OPERATION_FAILED');
+          if(row.ownerPhases.started())row.ownerPhases.finish();return value;
+        }finally{if(effect)await effect.catch(()=>{});}
+      }
       const value=await operations[message.action](Object.freeze(structuredClone(message.payload)),context);
       if(message.action==='RESERVE_EXECUTION'&&row.ownerPhases.started()){row.ownerPhases.finish();assertDispatch();}
       return value;

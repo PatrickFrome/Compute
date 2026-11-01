@@ -158,3 +158,12 @@ test('real failure IPC is finite; legacy missing nonce remains compatible and pr
     assert.equal(JSON.parse(stderr.trim()).reason === 'runtime_host_launch_nonce_invalid', value === 'invalid');
   }
 });
+
+
+test('pre-runtime FAILED persistence failure retains ownership and emits no cleanup receipt',async t=>{
+ const f=await fixture(t);let receipts=0;
+ await assert.rejects(startManagedRuntimeHost({configFile:f.configFile},{...f.hooks,
+  launchRuntime:async()=>{await unlink(f.status);await mkdir(f.status);throw Object.assign(Error('generated launch failure'),{code:'generated_launch_failure'});},
+  onTerminal(){receipts++;}}),/status_path_invalid/);
+ assert.equal(receipts,0);assert.ok((await readFile(f.lock)).length>0);
+});

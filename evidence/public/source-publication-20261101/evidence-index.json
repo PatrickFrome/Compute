@@ -1,0 +1,39 @@
+{
+  "schema": "metaengine.public-source-evidence-index.v1",
+  "reviewed_source": "98d436c10553a716c42c3cc22e558c36db80f026",
+  "self_hash_excluded": true,
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 6476,
+      "sha256": "707a6890d92acb490eef5fb51bab24224ff9b6d5885a5145e32c12a08ff64927"
+    },
+    {
+      "path": "canonical-empty-schema-manifest-6839.json",
+      "bytes": 27913,
+      "sha256": "d00c7c3a8eda1b92c69a5eeea15f20e8b0fcee57e15b41b1013d8d97496b9758"
+    },
+    {
+      "path": "schema-input-comparison-98.json",
+      "bytes": 890,
+      "sha256": "a6b0aa398a03428de78eafe26f94ade564bf1dffb7c8112e92deae4119b0baf0"
+    },
+    {
+      "path": "source-inventory-98.json",
+      "bytes": 23429,
+      "sha256": "e0c5ec2788cbdf710c1ceb824d409e2c26085e6097e81af9aed660d1261a65f2"
+    },
+    {
+      "path": "windows-source-6839.json",
+      "bytes": 2962,
+      "sha256": "77fd20a3e71fd1df242e3845e229b7ff7586283d72ccdb1e1e87a5943bd53d9f"
+    },
+    {
+      "path": "workflow-guards-98.json",
+      "bytes": 2736,
+      "sha256": "e9c99471a4693058dd5ddc38f3ab73b80ec30a8b9ea92f6bae4b732618486c4d"
+    }
+  ],
+  "qualification_promoted": false,
+  "authority_effect": false
+}

@@ -22,7 +22,7 @@ async function fixture(t){
     archivePath:path.join(root,'postgresql-17-snapshot.dump'),
   });
   const params={intent,journalDirectory:root,sourceDataDirectory:source,
-    pgBinDir:process.env.LOCAL_STATE_TEST_PG_BIN_DIR||root,
+    pgBinDir:process.env.METAENGINE_PG_TEST_BIN||process.env.LOCAL_STATE_TEST_PG_BIN_DIR||root,
     expectedPgDumpSha256:'0'.repeat(64),
     sourcePort:55555,
     connectionEnv:{PGHOST:'127.0.0.1',PGPORT:'55555',
@@ -59,7 +59,7 @@ test('production PGDATA path is forbidden even when a matching fake intent exist
 });
 test('invalid digest never crosses backup barrier',{skip:process.platform!=='win32'},async t=>{
   const {root,intent,params}=await fixture(t);
-  if(!process.env.LOCAL_STATE_TEST_PG_BIN_DIR){
+  if(!process.env.METAENGINE_PG_TEST_BIN&&!process.env.LOCAL_STATE_TEST_PG_BIN_DIR){
     t.skip('physical PostgreSQL binary path unavailable');return;
   }
   await assert.rejects(executeDisposableOneShotPg17Dump(params),
@@ -69,7 +69,7 @@ test('invalid digest never crosses backup barrier',{skip:process.platform!=='win
 });
 test('connection must not be silently retargeted',{skip:process.platform!=='win32'},async t=>{
   const {root,intent,params}=await fixture(t);
-  if(!process.env.LOCAL_STATE_TEST_PG_BIN_DIR){
+  if(!process.env.METAENGINE_PG_TEST_BIN&&!process.env.LOCAL_STATE_TEST_PG_BIN_DIR){
     t.skip('physical PostgreSQL binary path unavailable');return;
   }
   // Passing binary trust first is necessary to reach the connection gate.

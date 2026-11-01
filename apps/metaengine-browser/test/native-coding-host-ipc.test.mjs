@@ -74,11 +74,15 @@ const mode=process.env.METAENGINE_IPC_TEST_MODE;let calls=0,protocolErrors=[];
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const operations={
  READ_SCOPE:async (value,context)=>{const n=++calls;
-  if(mode==='acl-rejection-held')return readNativeCodingProtectedJson(${JSON.stringify(path.join(root,'private-fixture.json'))},{signal:context.signal,verifyStorage:(_target,{operation,signal})=>{
+  if(['acl-rejection-held','acl-rejection-held-delayed','acl-rejection-before-start'].includes(mode)){
+   if(mode==='acl-rejection-held-delayed')await delay(1200);
+   const file=${JSON.stringify(path.join(root,'private-fixture.json'))}+(mode==='acl-rejection-before-start'?'.missing':'');
+   return readNativeCodingProtectedJson(file,{signal:context.signal,verifyStorage:(_target,{operation,signal})=>{
    if(operation==='VERIFY_DIRECTORY')return Promise.reject(Error('generated_directory_denied'));
    return new Promise(resolve=>{const release=m=>{if(m?.schema==='test.release-acl'){process.off('message',release);resolve({owner_dacl_verified:true});}};
-    process.on('message',release);signal.addEventListener('abort',()=>process.send({schema:'test.acl-aborted'}),{once:true});process.send({schema:'test.acl-started'});});
+    process.on('message',release);signal.addEventListener('abort',()=>process.send({schema:'test.acl-aborted'}),{once:true});process.send({schema:'test.acl-started',signal_aborted:signal.aborted});});
   }});
+  }
 if(mode==='request-context')return {bindings:[],has_signal:context.signal instanceof AbortSignal,aborted:context.signal.aborted,deadline_at:context.deadlineAt,remaining_ms:context.deadlineAt-Date.now()};if(mode==='delayed-read')await delay(80);
   if(mode==='paged-scope'){
    const all=Array.from({length:160},(_,i)=>({permit_id:'00000000-0000-4000-8000-'+String(i+1).padStart(12,'0'),permit:{padding:'x'.repeat(3000)}}));
@@ -972,12 +976,50 @@ test('underlying bridge counterfactual (publication unqualified) bindRun CHECK a
  assert.equal(value.all_effects_cleanup,'UNCONFIRMED');assert.deepEqual(await readNativeRunCallbackJournal(run.directory),value);
 });
 
-test('actual Host close aborts protected ACL observation before joining it; no pre-stop callback cycle',async t=>{
- const f=await setup(t,'acl-rejection-held',{timeoutMs:1000,serverTimeoutMs:1000});
- const event=schema=>new Promise(resolve=>{const listener=m=>{if(m?.schema===schema){f.child.off('message',listener);resolve();}};f.child.on('message',listener);});
- const started=event('test.acl-started'),aborted=event('test.acl-aborted'),read=f.client.readScope();read.catch(()=>{});await started;
- assert.equal((await f.stats()).snapshot.inflight,1);let drained=false;const physical=f.client.drainPhysical().then(()=>{drained=true;});
- f.child.send({schema:'test.close-server'});await aborted;await assert.rejects(read);assert.equal(drained,false);
+// This is a causal shutdown test, not a request-timeout test. Canonical file
+// checks can finish before the ACL observer starts (or reject without starting
+// it). Never wait forever for an event that such a read cannot produce.
+function protectedAclReadFixture(f){
+ const started=messageOnce(f.child,'test.acl-started'),aborted=messageOnce(f.child,'test.acl-aborted');
+ let readSettled=false,abortObserved=false,startObserved=false;
+ started.then(()=>{startObserved=true;},()=>{});aborted.then(()=>{abortObserved=true;},()=>{});
+ const began=performance.now(),read=f.client.readScope();read.then(()=>{readSettled=true;},()=>{readSettled=true;});
+ const ready=Promise.race([started,read.then(
+  ()=>{throw Error('fixture_acl_read_resolved_before_observer_start');},
+  cause=>{throw Error('fixture_acl_read_rejected_before_observer_start: '+(cause.reason||cause.name),{cause});},
+ )]);ready.catch(()=>{});
+ return {read,ready,aborted,began,get readSettled(){return readSettled;},get abortObserved(){return abortObserved;},get startObserved(){return startObserved;}};
+}
+for(const delayed of [false,true])test('actual Host close aborts protected ACL observation before joining it; no pre-stop callback cycle'+(delayed?' (observer delayed past former 1s request boundary)':''),{timeout:15000},async t=>{
+ // Generous FIXTURE-ONLY deadlines ensure explicit close, not a competing
+ // request timer, is the abort cause. Production deadlines remain unchanged.
+ const f=await setup(t,delayed?'acl-rejection-held-delayed':'acl-rejection-held',{timeoutMs:30000,serverTimeoutMs:30000});
+ const observed=protectedAclReadFixture(f),started=await observed.ready;
+ if(delayed)assert.ok(performance.now()-observed.began>=1000,'delayed observer must cross the old request deadline before starting');
+ assert.equal(started.signal_aborted,false,'observer must start with a live request');
+ assert.equal((await f.stats()).snapshot.inflight,1);assert.equal(f.client.snapshot().physical_inflight,1);
+ let drained=false;const physical=f.client.drainPhysical().then(value=>{drained=true;return value;});physical.catch(()=>{});
+ assert.equal(observed.readSettled,false,'read must remain pending until explicit Host close');
+ assert.equal(observed.abortObserved,false,'a request timeout must not substitute for Host close');assert.equal(drained,false);
+ f.child.send({schema:'test.close-server'});await observed.aborted;
+ await assert.rejects(observed.read,error=>error.reason==='SERVER_CLOSED');assert.equal(observed.abortObserved,true);assert.equal(drained,false);
+ assert.equal(f.client.snapshot().physical_inflight,1);
  assert.equal((await f.stats()).snapshot.inflight,1,'original native observation still owned after public close');
- f.child.send({schema:'test.release-acl'});await physical;assert.equal((await f.stats()).snapshot.inflight,0);
+ f.child.send({schema:'test.release-acl'});assert.equal((await physical).cleanup_confirmed,true);assert.equal((await f.stats()).snapshot.inflight,0);
+ assert.equal(f.client.snapshot().physical_inflight,0);
+});
+
+test('ACL close fixture reports an actual early canonical failure instead of waiting for observer start',{timeout:15000},async t=>{
+ const f=await setup(t,'acl-rejection-before-start',{timeoutMs:30000,serverTimeoutMs:30000}),observed=protectedAclReadFixture(f);
+ await assert.rejects(observed.ready,error=>error.message==='fixture_acl_read_rejected_before_observer_start: OPERATION_FAILED'
+  &&error.cause?.reason==='OPERATION_FAILED');
+ assert.equal(observed.readSettled,true);assert.equal(observed.startObserved,false);assert.equal(observed.abortObserved,false);
+ await f.client.drainPhysical();assert.equal((await f.stats()).snapshot.inflight,0);
+});
+
+test('ACL close fixture reports early read success without silently treating it as observer start',{timeout:15000},async t=>{
+ const f=await setup(t,'normal',{timeoutMs:30000,serverTimeoutMs:30000}),observed=protectedAclReadFixture(f);
+ await assert.rejects(observed.ready,/^Error: fixture_acl_read_resolved_before_observer_start$/);
+ assert.equal(observed.readSettled,true);assert.equal(observed.startObserved,false);assert.equal(observed.abortObserved,false);
+ await f.client.drainPhysical();assert.equal((await f.stats()).snapshot.inflight,0);
 });

@@ -122,6 +122,7 @@ export function createNativeCodingCallbackPublication({sql,scoped,owner,open:aut
  // from the write callback result or manufacture physical settlement from it.
  async function readback(row,request,value,intent=null){
   const physical=runNativePhysicalSettlementScope(()=>sql.begin('isolation level serializable',async tx=>{
+   tx.addCommitGuard?.(()=>{open(request);});
    const observation=await observe(tx,row,request,intent,intent?value.cursor:null);
    const current=await stored(tx,row);
    if(!value||!current||!same(current.root,value.root)||!same(current.cursor,value.cursor))fail('readback_hold');
@@ -147,8 +148,10 @@ export function createNativeCodingCallbackPublication({sql,scoped,owner,open:aut
    row.busy=true;
    try{
     const physical=runNativePhysicalSettlementScope(()=>sql.begin('isolation level serializable',async tx=>{
+     tx.addCommitGuard?.(()=>{open(request);});
      await owner(tx);await tx.unsafe('set local synchronous_commit=on');
      const observation=await observe(tx,row,request,intent),p=observation.prefix;
+     if(!row.expected&&(p.record_count!==2||p.intent_count!==0||p.dispatch_fenced!==false))fail('initial_prefix_not_inert');
      const expected=await associated(tx,row,row.expected,await stored(tx,row));
      await intentJob(tx,row,expected,intent);
      if(row.expected&&p.record_count<=row.expected.cursor.record_count)fail('no_new_prefix');
@@ -186,23 +189,28 @@ export function createNativeCodingCallbackPublication({sql,scoped,owner,open:aut
      // The correlated wire ACK is not this identity and cannot be readopted.
      const capability=Object.freeze({});handoffs.set(capability,{row,intent,publication:result.publication,used:false});return capability;
     },
-    async recheck(capability,request){
+    async recheck(capability,request,execute){
      const bound=handoffs.get(capability);
      if(!bound||bound.row!==row||bound.used)fail('handoff_unbound');bound.used=true;
+     if(execute!==undefined&&typeof execute!=='function')fail('handoff_dispatch_invalid');
      dependencies();open(request);
      if(request.action!=='AGENT_OPERATION'||request.requestId!==bound.intent.request_id||request.requestDigest!==bound.intent.request_sha256
       ||row.held||row.busy)fail('handoff_hold');
      row.busy=true;
      try{
       const physical=runNativePhysicalSettlementScope(()=>sql.begin('isolation level serializable',async tx=>{
+       tx.addCommitGuard?.(()=>{open(request);});
        const observed=await observe(tx,row,request,bound.intent,bound.publication.cursor);
        const current=await associated(tx,row,row.expected,await stored(tx,row));
        if(!same(observed.root,bound.publication.root)||!same(current.root,bound.publication.root)
         ||current.cursor.revision<bound.publication.cursor.revision)fail('handoff_anchor_changed');
-       await intentJob(tx,row,current,bound.intent);
-       const after=await snapshot(tx,row,request);if(!same(observed.snapshot,stable(after)))fail('handoff_lineage_changed');open(request);
+       await intentJob(tx,row,current,bound.intent);open(request);
+       // The fixed AGENT effect is inside this SAME transaction, between the
+       // before/after Owner fences. No nested SQL begin or caller JSON proof.
+       const effect=execute?await execute(tx):undefined;open(request);
+       const after=await snapshot(tx,row,request);if(!same(observed.snapshot,stable(after)))fail('handoff_lineage_changed');open(request);return effect;
       }));
-      await joinedPhysical(physical);open(request);
+      const result=await joinedPhysical(physical);open(request);return result;
      }catch(error){row.held=true;const safe=Error('native_callback_publication_handoff_hold');
       throw nativePhysicalSettlementUnconfirmed(error)?markNativePhysicalSettlementUnconfirmed(safe):safe;
      }finally{row.busy=false;}

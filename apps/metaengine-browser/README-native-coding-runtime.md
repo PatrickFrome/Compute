@@ -97,3 +97,41 @@ The existing W30 queue retains work while current physical resources are busy.
 Permit/device/sandbox checks, independent Critic and ambiguous-effect custody
 remain required. A large generated roster is not proof of installed model work
 or automatic creation of new independently sandboxed worktrees.
+
+## Prepared callback custody (source-only, not mounted)
+
+The optional **private** `preparedCustodyFactory` injection composes
+`createNativeCodingPreparedCustodyAdapter` with the runtime's original runner,
+permit and ledger boundary. Main does not supply it by default; the production
+bridge's `requireNativeRunCallbackPublication` gate remains closed. This seam
+is not an IPC option, readiness flag or substitute for native qualification.
+
+The adapter registers the exact runner handle and frozen descriptor, derives
+its MCP binding from the same captured permit, and passes the original journal
+to `prepareAgentRunCustody`. Its only reservation path is
+`reservePreparedExecution(scope, token, directOwnerCallback)`. The callback must
+be `createLoadedNativeRunOwnerCallback` on that original ticket, never the
+standalone `readLoadedNativeRunOwner` diagnostic or a global physical drain.
+The existing client owns the fixed Owner cycles, actual send/callback joins,
+COMMIT/readback ACK and exact terminal validation.
+
+After reservation, bridge preflight receives a private single-use
+`takePreparedCustody` closure. The current default bridge does not consume it:
+it still refuses at the unqualified publication gate. A future qualified
+composition must consume this original custody rather than reopen the journal.
+All claim/reserve/preflight work is retained before bridge registration. Quit,
+cancellation, UNKNOWN/readback and preflight failure fence the original local
+preparation and abandon its token or join its transferred facet. Callback drain
+is separate from native worker settlement; an adapter drain reports only
+`local_work_joined` and `physical_settlement: NOT_ATTESTED`.
+
+Focused checks (use the disposable-profile runner):
+
+```sh
+node scripts/run-isolated-tests.mjs test/native-coding-prepared-custody-adapter.test.mjs test/native-coding-prepared-custody-ipc.test.mjs test/native-coding-runtime.test.mjs
+```
+
+These tests include generated lifecycle/Owner/SQL fixtures. Even the joined
+real IPC/journal tests do not establish genuine Windows Owner observations,
+directory durability, mandatory PG/cross-generation anchors or release proof.
+Those remain prerequisites to mounting this path in Main and Host.
