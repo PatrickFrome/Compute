@@ -18,7 +18,7 @@ public:
         auto observed=state_.load(std::memory_order_acquire);
         for (;;) {
             if ((observed & 1U) != 0) return false;
-            if (observed > std::numeric_limits<std::uint64_t>::max()-2) {
+            if (observed > (std::numeric_limits<std::uint64_t>::max)()-2) {
                 state_.fetch_or(1U,std::memory_order_acq_rel);return false;
             }
             // This CAS and stop's fetch_or form the total admission order. An
