@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import vm from 'node:vm';
 import {samePhysicalWorkspacePath,parseWorktreePorcelainZ} from '../src/workspace-git-hardening.mjs';
-const source=await fs.readFile(new URL('../src/managed-task-project-runtime.mjs',import.meta.url),'utf8');
+const source=await fs.readFile(new URL('../src/managed-task-project-runtime-core.mjs',import.meta.url),'utf8');
 const start=source.indexOf('  async function inventory('),end=source.indexOf('  async function create(',start);assert.ok(start>0&&end>start);
 const reservation={workspace_id:'workspace',task_id:'task',lease_generation:3,worktree_path:path.resolve('/fixture/Managed/Task')};
 const recordPath=reservation.worktree_path.toUpperCase();
