@@ -15,6 +15,9 @@ specified in
 [`GUARDIAN_FRESH_MAIN_NONCYCLIC_AUTHORITY_20261101.md`](GUARDIAN_FRESH_MAIN_NONCYCLIC_AUTHORITY_20261101.md).
 First setup UI is an installation grant; project/task admission comes afterwards.
 RootSession and the new `.node` observer are not first-launch prerequisites.
+The implemented pre-UAC observation phase and its remaining live-installer
+integration are described in
+[`GUARDIAN_PRE_UAC_ORIGINAL_USER_CHECKPOINT_20261101.md`](GUARDIAN_PRE_UAC_ORIGINAL_USER_CHECKPOINT_20261101.md).
 
 Fresh bootstrap implementation owner: cloud thread
 `01a194c2-5ed5-740b-8ed2-2283dfc0700e`. This stream provides the first-Main/root/

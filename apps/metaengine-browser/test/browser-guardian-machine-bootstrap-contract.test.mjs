@@ -7,7 +7,7 @@ const source = read('native/browser-guardian-scm/browser-guardian-machine-bootst
 const build = read('scripts/build-guardian-machine-bootstrap.ps1');
 const producer = read('../../.github/workflows/browser-windows-package-smoke.yml');
 
-test('machine bootstrap has only explicit no-arg UAC or --install embedded-asset boundaries', () => {
+test('machine bootstrap preserves fixed install boundaries and isolates origin observation', () => {
   assert.match(build, /requireAdministrator/);
   assert.match(build, /\/MT/);
   assert.match(build, /201 RCDATA/);
@@ -17,7 +17,14 @@ test('machine bootstrap has only explicit no-arg UAC or --install embedded-asset
   assert.match(source, /argc == 2[^\n]+L"--install"/);
   assert.match(source, /CheckTokenMembership/);
   // Reject API invocations, rather than harmless API names in explanatory text.
-  assert.doesNotMatch(source, /\b(?:ShellExecute(?:Ex)?[AW]?|CreateProcess\w*|WinHttp\w*|URLDownload\w*|std::system)\s*\(|\bargv\[2\]/);
+  assert.doesNotMatch(source, /\b(?:ShellExecute(?:Ex)?[AW]?|CreateProcess\w*|WinHttp\w*|URLDownload\w*|std::system)\s*\(/);
+  const originRoute = source.slice(source.indexOf('if (argc == 3'), source.indexOf('if (argc == 1)'));
+  assert.match(originRoute, /L"--observe-install-origin"/);
+  assert.match(originRoute, /observeBootstrapOrigin\(argv\[2\]\)/);
+  assert.match(originRoute, /return 2;/);
+  assert.doesNotMatch(originRoute, /return installEmbedded\(|StartServiceW\(|applyConfiguration\(/);
+  assert.equal((source.match(/argv\[2\]/g) || []).length, 1);
+  assert.match(build, /level=''asInvoker''/);
 });
 
 test('all embedded bytes are digest-checked before durable machine effects', () => {

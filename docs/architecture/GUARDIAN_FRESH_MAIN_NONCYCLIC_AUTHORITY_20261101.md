@@ -6,6 +6,11 @@ Reviewed source: `3f86445a819c5b011ea300598ee0e8f4f3b86280`, tree
 thread `01a194c2-5ed5-740b-8ed2-2283dfc0700e`. This specifies its interfaces to
 native custody without duplicating its installer/PG implementation.
 
+The next implemented observation phase is recorded in
+[`GUARDIAN_PRE_UAC_ORIGINAL_USER_CHECKPOINT_20261101.md`](GUARDIAN_PRE_UAC_ORIGINAL_USER_CHECKPOINT_20261101.md).
+It captures original native user identity and implements a bounded kernel link;
+live NSIS integration, qualified UAC/SCM handoff and first Main remain missing.
+
 The original installation transaction may authorize the fixed verified setup UI,
 fresh infrastructure setup and bounded first enrollment. It does not grant a
 project, task, agent or worker effect. Those require the existing independent

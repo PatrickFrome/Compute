@@ -5,6 +5,9 @@ on:
     paths:
       - 'apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-owner-enrollment-store.*'
       - 'apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-owner-enrollment-observer.*'
+      - 'apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-original-install-user.*'
+      - 'apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-install-origin-*'
+      - 'apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-machine-bootstrap.cpp'
       - 'apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-connected-peer*'
       - 'apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-installed-namespace.*'
       - 'apps/metaengine-browser/native/third_party/node-api-24.0.0/**'
@@ -13,11 +16,17 @@ on:
       - 'apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-scm-service.cpp'
       - 'apps/metaengine-browser/scripts/build-guardian-native-staging.ps1'
       - 'apps/metaengine-browser/scripts/build-guardian-native-peer.ps1'
+      - 'apps/metaengine-browser/scripts/build-guardian-machine-bootstrap.ps1'
       - 'apps/metaengine-browser/src/guardian-connected-peer-native.mjs'
       - 'apps/metaengine-browser/src/runtime-recovery-process-adapter.mjs'
       - 'apps/metaengine-browser/test/browser-guardian-connected-peer*.test.mjs'
       - 'apps/metaengine-browser/test/native/browser-guardian-connected-peer-probe.cpp'
       - 'apps/metaengine-browser/test/native/guardian-peer-napi-synthetic/**'
+      - 'apps/metaengine-browser/test/browser-guardian-install-origin-wire.test.mjs'
+      - 'apps/metaengine-browser/test/browser-guardian-original-install-user-native.test.mjs'
+      - 'apps/metaengine-browser/test/browser-guardian-install-origin-link-native.test.mjs'
+      - 'apps/metaengine-browser/test/native/browser-guardian-install-origin-*.cpp'
+      - 'apps/metaengine-browser/test/native/browser-guardian-original-install-user-probe.cpp'
       - 'apps/metaengine-browser/test/runtime-recovery-connected-peer.test.mjs'
       - 'apps/metaengine-browser/test/native/browser-guardian-owner-enrollment-store-runtime-probe.cpp'
       - 'apps/metaengine-browser/test/native/browser-guardian-installed-namespace-probe.cpp'
@@ -46,7 +55,7 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Exercise actual N-API ownership and cancellation with synthetic core
+      - name: Exercise N-API synthetic core and production install-origin framing
         working-directory: apps/metaengine-browser
         shell: bash
         env:
@@ -55,7 +64,7 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
           command -v c++
-          node ./scripts/run-isolated-tests.mjs test/browser-guardian-connected-peer-napi.test.mjs
+          node ./scripts/run-isolated-tests.mjs test/browser-guardian-connected-peer-napi.test.mjs test/browser-guardian-install-origin-wire.test.mjs
           test -z "$(git status --porcelain --untracked-files=all)"
 
   native-owner-enrollment-runtime:
@@ -139,12 +148,24 @@ jobs:
           & ./apps/metaengine-browser/scripts/build-guardian-native-staging.ps1 -OutputDir (Join-Path $env:RUNNER_TEMP 'metaengine-guardian-root-session-build')
           if ($LASTEXITCODE -ne 0) { throw "guardian_root_session_build_exit_$LASTEXITCODE" }
 
-      - name: Exercise original connected-pipe mechanics and recovery quit fence
+      - name: Compile MSVC bootstrap and source-only install-origin coordinator without installation
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $staging = Join-Path $env:RUNNER_TEMP 'metaengine-guardian-root-session-build'
+          $out = Join-Path $env:RUNNER_TEMP 'metaengine-guardian-bootstrap-build'
+          # Compile only: never execute the requireAdministrator inner or install entry.
+          & ./apps/metaengine-browser/scripts/build-guardian-machine-bootstrap.ps1 -StagingDir $staging -OutputDir $out
+          if ($LASTEXITCODE -ne 0) { throw "guardian_machine_bootstrap_build_exit_$LASTEXITCODE" }
+
+      - name: Exercise connected-pipe, install-origin, and recovery mechanics without installation
         shell: powershell
         working-directory: apps/metaengine-browser
         run: |
           $ErrorActionPreference = 'Stop'
-          node ./scripts/run-isolated-tests.mjs test/browser-guardian-connected-peer-native.test.mjs test/runtime-recovery-connected-peer.test.mjs
+          # Native harnesses require explicit SKIP for ineligible interactive positives.
+          # These mechanics do not exercise UAC, service installation, or credentials.
+          node ./scripts/run-isolated-tests.mjs test/browser-guardian-connected-peer-native.test.mjs test/runtime-recovery-connected-peer.test.mjs test/browser-guardian-install-origin-wire.test.mjs test/browser-guardian-original-install-user-native.test.mjs test/browser-guardian-install-origin-link-native.test.mjs
           if ($LASTEXITCODE -ne 0) { throw "guardian_connected_peer_mechanics_exit_$LASTEXITCODE" }
 
       - name: Compile and refresh native peer artifact using pinned build-host headers

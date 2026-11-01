@@ -64,7 +64,11 @@ constexpr wchar_t kBootstrapSlotIdW[] = L"$slotId";
   $exeName = 'METAENGINE-Guardian-Bootstrap-' + [string]$manifest.package_version + '-x64.exe'
   $exe = Join-Path $out $exeName
   $source = Join-Path $root 'native\browser-guardian-scm\browser-guardian-machine-bootstrap.cpp'
-  $command = 'call "{0}" >nul && rc.exe /nologo /fo bootstrap.res guardian-bootstrap.rc && cl.exe /nologo /std:c++20 /EHsc /MT /W4 /WX /DUNICODE /D_UNICODE /I"{1}" "{2}" bootstrap.res /Fe:"{3}" /link advapi32.lib bcrypt.lib shell32.lib ole32.lib /MANIFEST:EMBED /MANIFESTUAC:"level=''requireAdministrator'' uiAccess=''false''"' -f $vcvars,$temp,$source,$exe
+  $native = Split-Path $source -Parent
+  $originSource = Join-Path $native 'browser-guardian-original-install-user.cpp'
+  $originLink = Join-Path $native 'browser-guardian-install-origin-link.cpp'
+  $observer = Join-Path $native 'browser-guardian-owner-enrollment-observer.cpp'
+  $command = 'call "{0}" >nul && rc.exe /nologo /fo bootstrap.res guardian-bootstrap.rc && cl.exe /nologo /std:c++20 /EHsc /MT /W4 /WX /DUNICODE /D_UNICODE /I"{1}" "{2}" "{4}" "{5}" "{6}" bootstrap.res /Fe:"{3}" /link advapi32.lib bcrypt.lib shell32.lib ole32.lib /MANIFEST:EMBED /MANIFESTUAC:"level=''requireAdministrator'' uiAccess=''false''"' -f $vcvars,$temp,$source,$exe,$originSource,$originLink,$observer
   Push-Location $temp
   try { & $env:ComSpec /d /s /c $command; if ($LASTEXITCODE -ne 0) { throw "bootstrap_compile_exit_$LASTEXITCODE" } }
   finally { Pop-Location }
@@ -85,5 +89,33 @@ constexpr wchar_t kBootstrapSlotIdW[] = L"$slotId";
     authority_effect=$false
   }
   [System.IO.File]::WriteAllText((Join-Path $out 'guardian-machine-bootstrap-binding.json'), ($binding | ConvertTo-Json -Depth 4), $utf8)
+  # Preserve the existing requireAdministrator inner name/resources/binding v1.
+  # The separate asInvoker entry genuinely captures its OWN user before any UAC;
+  # asInvoker invoked from an elevated caller still refuses that context.
+  $coordinatorName = 'METAENGINE-Guardian-Install-Origin-' + [string]$manifest.package_version + '-x64.exe'
+  $coordinatorExe = Join-Path $out $coordinatorName
+  $coordinatorSource = Join-Path $native 'browser-guardian-install-origin-coordinator.cpp'
+  $outerCommand = 'call "{0}" >nul && cl.exe /nologo /std:c++20 /EHsc /MT /W4 /WX /DUNICODE /D_UNICODE "{1}" "{2}" "{3}" "{4}" /Fe:"{5}" /link advapi32.lib bcrypt.lib /MANIFEST:EMBED /MANIFESTUAC:"level=''asInvoker'' uiAccess=''false''"' -f $vcvars,$coordinatorSource,$originSource,$originLink,$observer,$coordinatorExe
+  Push-Location $temp
+  try { & $env:ComSpec /d /s /c $outerCommand; if ($LASTEXITCODE -ne 0) { throw "origin_coordinator_compile_exit_$LASTEXITCODE" } }
+  finally { Pop-Location }
+  $originBinding = [ordered]@{
+    schema='metaengine.browser-guardian.install-origin-staging.v1'
+    source_head=$sourceHead
+    package_version=[string]$manifest.package_version
+    name=$coordinatorName
+    sha256=(Get-Sha256 $coordinatorExe)
+    bytes=[int64](Get-Item $coordinatorExe).Length
+    execution_level='asInvoker'
+    existing_elevated_bootstrap_name=$exeName
+    existing_elevated_bootstrap_sha256=(Get-Sha256 $exe)
+    original_user_producer_implemented=$true
+    uac_dispatch_implemented=$false
+    scm_custody_transfer_implemented=$false
+    release_qualification='UNAVAILABLE'
+    source_only=$true
+    authority_effect=$false
+  }
+  [System.IO.File]::WriteAllText((Join-Path $out 'guardian-install-origin-staging.json'), ($originBinding | ConvertTo-Json -Depth 4), $utf8)
   Write-Output ($binding | ConvertTo-Json -Depth 4 -Compress)
 } finally { Remove-Item $temp -Recurse -Force -ErrorAction SilentlyContinue }
