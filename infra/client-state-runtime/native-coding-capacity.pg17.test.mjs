@@ -117,7 +117,7 @@ test('native capacity v2 uses existing own-PG admission and preserves v1 source 
    const state=found.counts.unresolved_slots?'HOLD':'CURRENT',c={schema:'metaengine.native-coding.capacity-census.v1',host_instance_id:e.host_instance_id,host_pid:e.host_pid,
     principal_sha256:hash(['metaengine.native-coding.capacity-principal.v1',f.profile.device_id,f.profile.client_id,'1',f.profile.device_key_fingerprint_sha256].join('\n')),
     postgres_scope_sha256:e.postgres_scope_sha256,generation:e.generation,owned_tasks_sha256:sha(e.owned_tasks),observed_at:e.observed_at,expires_at:e.expires_at,
-    ...found,complete:true,state,automatic_retry_allowed:false,authority_effect:false};
+    census_sha256:found.census_sha256,counts:found.counts,complete:true,state,automatic_retry_allowed:false,authority_effect:false};
    const tasks=e.owned_tasks.length+found.counts.task_slots-found.counts.represented_tasks;
    input.capacity={census:c,projection:{schema:'metaengine.native-coding.capacity-projection.v1',configured_ceiling:input.runtime.physical_slot_budget,
     resource_ceiling:input.runtime.physical_slot_budget,occupied_task_slots:tasks,occupied_setup_slots:found.counts.setup_slots,unresolved_slots:found.counts.unresolved_slots,
@@ -248,7 +248,7 @@ test('native capacity v2 uses existing own-PG admission and preserves v1 source 
    const state=async()=>(await sql.unsafe('select state from public.compute_fabric_a2_browser_supervisor_state_h205f22 where workspace_id=$1',[profile.workspace_id]))[0].state;
    return{hostInstance,hostPid,capacityGeneration:0,generated,profile,agents,providers,nativeDescriptors,publisherIdentity,publisherCapability,seed,browserState,serviceInput,signed,write,publish,read,permitFor,lease,seedPeer,state,verifier,publicationControl};
   }
-  async function hostCapacity(f,{readHook=async()=>{},custody=()=>({closed:false,revision:0,jobs:[]}),clock={},birthChange=x=>x,queryHook=async()=>{},nativeChange=x=>x,startupPid=999}={}){
+  async function hostCapacity(f,{readHook=async()=>{},custody=()=>({closed:false,revision:0,jobs:[]}),clock={},birthChange=x=>x,queryHook=async()=>{},nativeChange=x=>x,startupPid=999,physicalCustody=null}={}){
    let reads=0;
    const native=async()=>{await readHook(++reads);const [pg]=await sql.unsafe(`select pg_postmaster_start_time() as started_at`);
     return nativeChange({host_process:f.serviceInput().host_process,postgres:{system_identifier:cluster,
@@ -256,7 +256,7 @@ test('native capacity v2 uses existing own-PG admission and preserves v1 source 
      data_directory_identity_sha256:f.profile.postgres.data_directory_identity_sha256},user_sid:f.profile.user_sid});};
    const [birth]=await sql.unsafe(`select to_char(pg_postmaster_start_time() at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as started_at`);
    const observed={unsafe:(...args)=>sql.unsafe(...args),begin:(mode,fn)=>sql.begin(mode,tx=>fn({unsafe:async(q,args)=>{const rows=await tx.unsafe(q,args);await queryHook(q,rows);return rows;}}))};
-   const service=createNativeCodingHostCapacity({sql:observed,hostInstanceId:f.hostInstance,hostPid:f.hostPid,postgresIdentity:{pid:startupPid,system_identifier:cluster,started_at:birthChange(birth.started_at)},readNativeScope:native,readSetupCustody:custody,...clock});
+   const service=createNativeCodingHostCapacity({sql:observed,hostInstanceId:f.hostInstance,hostPid:f.hostPid,postgresIdentity:{pid:startupPid,system_identifier:cluster,started_at:birthChange(birth.started_at)},readNativeScope:native,readSetupCustody:custody,physicalCustody,...clock});
    const read=(input={owned_tasks:[]})=>service.operations.READ_NATIVE_CAPACITY_V1(f.signed(input,{},'READ_NATIVE_CAPACITY_V1'));
    return {service,read,reads:()=>reads};
   }
@@ -777,6 +777,63 @@ test('native capacity v2 uses existing own-PG admission and preserves v1 source 
    assert.equal(row.prosecdef,true);assert.deepEqual(row.proconfig,['search_path=pg_catalog, public, destruktion_meta']);
    await assert.rejects(api.unsafe('select capacity_evidence from destruktion_meta.native_coding_service_heartbeat_h205f22'),/permission denied/);
    await sql.begin(tx=>tx.unsafe(capacitySql));
+  });
+  // These intentionally generated private cache rows exercise SQL accounting
+  // and observation binding only; they do not qualify physical cleanup.
+  await sql.begin(async tx=>tx.unsafe(await fs.readFile(new URL('./native-coding-physical-custody-v1.sql',import.meta.url),'utf8')));
+  const cacheResolution=async(tx,actor,e,row,change={})=>{
+   const r={device_id:actor.device_id,client_id:actor.client_id,admin_grant_epoch:actor.admin_grant_epoch,
+    device_key_fingerprint_sha256:actor.key_fingerprint_sha256,host_instance_id:e.host_instance_id,generation:e.generation,
+    observed_at:e.observed_at,postgres_scope_sha256:e.postgres_scope_sha256,kind:row.kind,key:row.key,durable_sha256:row.durable_sha256,
+    proof_sha256:'a'.repeat(64),...change};
+   await tx.unsafe(`insert into destruktion_meta.native_coding_physical_resolution_h205f22
+    (device_id,client_id,admin_grant_epoch,device_key_fingerprint_sha256,host_instance_id,generation,observed_at,postgres_scope_sha256,kind,key,durable_sha256,proof_sha256)
+    values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,Object.values(r));
+  };
+  await t.test('independent resolution count must conserve every historical row and match actual private cache',async()=>{
+   const f=await fixture();try{
+    const record=await setupInput(f);await setup(f,record,await evidence(f));
+    for(const result of [1,true,-1,NaN]){
+     const h=await hostCapacity(f,{physicalCustody:{verifyObservation:async()=>result}});
+     try{await assert.rejects(h.read(),result===1?/census_incomplete/:/resolution_count_invalid/);}
+     finally{h.service.close();await h.service.drain();}
+    }
+    const [row]=await rows(f);const h=await hostCapacity(f,{physicalCustody:{async verifyObservation({tx,actor,evidence:e}){
+     await cacheResolution(tx,actor,e,row);return 0;
+    }}});
+    try{await assert.rejects(h.read(),/census_incomplete/);}
+    finally{h.service.close();await h.service.drain();}
+   }finally{f.verifier.close();}
+  });
+  for(const mutation of ['device','client','epoch','key','Host','generation','observed','PG','kind','durable'])await t.test('private resolution cannot cross '+mutation+' binding',async()=>{
+   const f=await fixture();let h;try{
+    const record=await setupInput(f);await setup(f,record,await evidence(f));const [row]=await rows(f);
+    h=await hostCapacity(f,{physicalCustody:{async verifyObservation({tx,actor,evidence:e}){
+     const change=({device:{device_id:randomUUID()},client:{client_id:'generated-foreign-client'},epoch:{admin_grant_epoch:2},key:{device_key_fingerprint_sha256:'b'.repeat(64)},
+      Host:{host_instance_id:randomUUID()},generation:{generation:e.generation+1},observed:{observed_at:new Date(Date.parse(e.observed_at)+1).toISOString()},
+      PG:{postgres_scope_sha256:'b'.repeat(64)},kind:{kind:'TASK'},durable:{durable_sha256:'b'.repeat(64)}})[mutation];
+     await cacheResolution(tx,actor,e,row,change);return 1;
+    }}});
+    await assert.rejects(h.read(),['kind','durable'].includes(mutation)?/physical_witness_changed/:/census_incomplete/);
+   }finally{h?.service.close();await h?.service.drain();f.verifier.close();}
+  });
+  await t.test('2048 independently accounted historical resolutions keep public evidence bounded and preserve history',async()=>{
+   const f=await fixture();let h;try{
+    await sql.unsafe(`insert into destruktion_meta.native_coding_setup_operation_h205f22(operation_id,intent,state,cleanup_state)
+     select gen_random_uuid(),jsonb_build_object('actor',jsonb_build_object('device_id',$1::text,'client_id',$2::text,'admin_grant_epoch',1),'host_instance_id',$3::text,'host_pid',$4::integer),'STOPPED','DRAINED' from generate_series(1,2048)`,
+     [f.profile.device_id,f.profile.client_id,f.hostInstance,f.hostPid]);
+    h=await hostCapacity(f,{physicalCustody:{async verifyObservation({tx,actor,evidence:e}){
+     const inserted=await tx.unsafe(`insert into destruktion_meta.native_coding_physical_resolution_h205f22
+      (device_id,client_id,admin_grant_epoch,device_key_fingerprint_sha256,host_instance_id,generation,observed_at,postgres_scope_sha256,kind,key,durable_sha256,proof_sha256)
+      select $1::uuid,$2::text,$3::bigint,$4::text,$5::uuid,$6::bigint,$7::timestamptz,$8::text,r->>'kind',r->>'key',r->>'durable_sha256',$9::text
+      from destruktion_meta.native_coding_capacity_rows_v1($1::uuid,$2::text) r returning 1`,
+      [actor.device_id,actor.client_id,actor.admin_grant_epoch,actor.key_fingerprint_sha256,e.host_instance_id,e.generation,e.observed_at,e.postgres_scope_sha256,'a'.repeat(64)]);
+     return inserted.length;
+    }}});
+    const result=await h.read();assert.equal(result.state,'CURRENT');assert.equal(result.counts.setup_slots,0);assert.equal(result.complete,true);
+    assert.ok(Buffer.byteLength(canonical(result))<4096);assert.equal(Object.hasOwn(result,'resolved_count'),false);
+    assert.equal((await rows(f)).length,2048,'original historical rows remain retained');
+   }finally{h?.service.close();await h?.service.drain();f.verifier.close();}
   });
   await t.test('actual same-cluster PostgreSQL restart invalidates cached evidence without changing system identifier',async()=>{
    const f=await fixture();try{

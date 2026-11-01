@@ -51,6 +51,8 @@ on:
       - 'apps/metaengine-browser/test/fixtures/autonomous-project-*.mjs'
       - 'apps/metaengine-browser/test/fixtures/browser-parent-suspension-fixture.mjs'
       - 'infra/client-state-runtime/native-coding-*.mjs'
+      - 'infra/client-state-runtime/test/fixtures/native-coding-physical-task-fixture.mjs'
+      - 'infra/client-state-runtime/test/run-physical-custody-pg17.mjs'
       - 'infra/client-state-runtime/test/native-workspace-preparation-fixture.mjs'
       - 'infra/client-state-runtime/test/pending-owner-phase-fixture.mjs'
       - 'infra/client-state-runtime/native-coding-*.sql'
@@ -194,6 +196,8 @@ jobs:
           // Use the installed Git launcher verified by checkout; internal toolchain directories changed in Git 2.56.
           const executable=await fs.realpath('C:/Program Files/Git/bin/git.exe');assert.ok((await fs.stat(executable)).isFile());
           const component=[
+            'infra/client-state-runtime/native-coding-physical-task.test.mjs',
+            'infra/client-state-runtime/native-coding-physical-ipc.test.mjs',
             'apps/metaengine-browser/test/codex-cli-sandbox-probe.test.mjs',
             'apps/metaengine-browser/test/codex-cli-sandbox-probe-lifetime.test.mjs',
             'apps/metaengine-browser/test/client-native-runtime-observation.test.mjs',
@@ -257,6 +261,8 @@ jobs:
             'apps/metaengine-browser/test/browser-parent-suspension-cycle.test.mjs',
           ];
           const native=[
+            'infra/client-state-runtime/native-coding-physical-custody.pg17.test.mjs',
+            'infra/client-state-runtime/native-coding-physical-restart.pg17.test.mjs',
             'infra/client-state-runtime/native-coding-workspace-preparation.pg17.test.mjs',
             'infra/client-state-runtime/native-coding-pending-goal.pg17.test.mjs',
             'infra/client-state-runtime/host-owner-preseal-w74.pg17.test.mjs',
@@ -276,6 +282,14 @@ jobs:
             'infra/client-state-runtime/browser-parent-message-wake.pg17.test.mjs',
           ];
           const componentRequired=[
+            'full generated TASK joins original reserve, anchored callbacks and helper/local-output closure without changing receipts',
+            'caller UNKNOWN remains UNKNOWN while independently joined physical settlement verifies',
+            'fenced UNSENT with no dispatched request is structurally distinct from an actual terminal',
+            'physical TASK verifier independently checks exact permit hash',
+            'actual Host IPC waits for original durable request before effect and durable terminal before releasing capacity',
+            'actual Host IPC retains HOLD if terminal persistence is uncertain',
+            'durable request failure cannot dispatch an effect or reconstruct an original ticket',
+            'caller timeout stays UNKNOWN while original delayed producer still joins terminal and prevents late dispatch',
             'validated Git plans receive only the fixed invocation-local Windows long-path option',
             'real Git long managed paths preserve exact locked creation and readback without persistent configuration',
             'unsupported new Windows target is refused before reservation or Git add',
@@ -348,6 +362,31 @@ jobs:
             'existing cycle suspends parent and child with one slot, then exact completion and restored receipts unwind without Send replay',
           ];
           const nativeRequired=[
+            'physical custody registration pins all private history/cache relations and guards',
+            'physical custody PG17 preserves immutable receipts and rejects weakened schema or unowned writes',
+            'original request and terminal persist exactly once; full history cannot be rewritten or truncated',
+            'SETUP and TASK closures and run fences are append-only; only private observation cache is removable',
+            'API identity cannot read or modify physical custody',
+            'every replay rejects partial, changed function/table/trigger/index/ACL/RLS schema rather than repairing it',
+            'physical SETUP/TASK closure survives genuine PG restart and rotated Host without releasing incomplete history',
+            'producer requires the original request digest and scope before creating a closure',
+            'SQL DRAINED, a held terminal and changed durable setup do not become settlement',
+            'independent consumer rejects forged digest/Host/original scope, truncated closure and wrong kind',
+            'TASK producer joins actual original reserve/callback terminal with anchored helper and callback closure; UNKNOWN does not replay',
+            'TASK producer refuses missing actual terminal and omitted original dispatch despite a complete helper/local journal',
+            'lost fence COMMIT ACK reads the exact committed fence and seals proof without dispatch replay',
+            'proof failure after a durable fence permits proof-only recovery on the same Host without changing the fence',
+            'SETTLED original RESULT_READY survives a post-fence proof failure for later proof-only collection',
+            'an existing fence with another original Host is refused and its retained history is never overwritten',
+            'a dispatch with an older SERIALIZABLE snapshot cannot pass a newly committed run fence after waiting on its lock',
+            'close fences new producers; drain joins the original pending ticket and exact terminal SQL after close',
+            'a physically held original terminal prevents successful service drain after close',
+            'lost terminal COMMIT acknowledgement retains UNKNOWN without replay; committed bytes remain independently readable',
+            'new Host prepareClosures finishes only original settled RESULT_READY proofs and reuses the unchanged original fence',
+            'new Host independently verifies the original full SETUP closure after same-cluster restart',
+            'new Host independently verifies durable TASK closure, full callback terminals and protected helper bytes after restart',
+            'missing/held terminal, forged or truncated closures, changed rows and lineage remain occupied after restart',
+            'new concurrent setup occupancy is retained while only the exact historical closure resolves',
             'Host schema-only diagnosis with actual registered disposable PG17 preserves minimum service and owned cleanup',
             'valid schema diagnosis does not delay provider return or admit execution, and normal stop owns API before owner pool',
             'partial installed schema remains SCHEMA_HOLD without repair or removing minimum Host service',
@@ -582,6 +621,15 @@ jobs:
           await runSuite('native-pg17',native,nativeRequired,await createSuiteEnvironment('native-pg17',true),false);
           stage='SOURCE_READBACK';
           const sourcePaths=[
+            'infra/client-state-runtime/native-coding-physical-custody.mjs',
+            'infra/client-state-runtime/native-coding-physical-custody-v1.sql',
+            'infra/client-state-runtime/native-coding-host-capacity.mjs',
+            'infra/client-state-runtime/native-coding-capacity-v2.sql',
+            'infra/client-state-runtime/native-coding-host-setup-service.mjs',
+            'infra/client-state-runtime/test/fixtures/native-coding-physical-task-fixture.mjs',
+            'infra/client-state-runtime/test/run-physical-custody-pg17.mjs',
+            'apps/metaengine-browser/src/native-coding-run-callback-journal.mjs',
+            'infra/client-state-runtime/package.json',
             'apps/metaengine-browser/src/managed-task-project-runtime.mjs',
             'infra/client-state-runtime/runtime-host.mjs',
             'infra/client-state-runtime/native-coding-installed-publication-schema.mjs',

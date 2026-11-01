@@ -14,7 +14,7 @@ const selectors=input=>({operation_id:input.operation_id,workspace_id:input.work
 // Native Host-only constructor. runJob is intentionally UNBOUND in production
 // Phase3A. Private fixture callbacks exercise custody, never grant readiness.
 export function createNativeCodingHostSetupService({sql,hostInstanceId,hostPid,pgDataDirectory,postgresIdentity,postgresContinuity,
- readRootIdentity=readDirectoryIdentity,readAdmission=readAgentResourceAdmission,readCapacityEvidence=null,runJob=null}={}){
+ readRootIdentity=readDirectoryIdentity,readAdmission=readAgentResourceAdmission,readCapacityEvidence=null,runJob=null,physicalCustody=null}={}){
  if(typeof sql?.begin!=='function'||typeof sql?.unsafe!=='function'||!path.isAbsolute(pgDataDirectory||'')
   ||postgresContinuity?.schema!=='metaengine.client-state.postgres-continuity.v1'||!Number.isSafeInteger(postgresIdentity?.pid)||postgresIdentity.pid<1||!Number.isFinite(Date.parse(postgresIdentity.started_at))
   ||readCapacityEvidence!==null&&typeof readCapacityEvidence!=='function'||![readRootIdentity,readAdmission].every(f=>typeof f==='function')||runJob!==null&&typeof runJob!=='function')fail('dependencies_required');
@@ -165,6 +165,10 @@ export function createNativeCodingHostSetupService({sql,hostInstanceId,hostPid,p
    row.physicalConfirmed=true;
    await transition('TERMINAL',actor,selectors(input),{custody_id:row.custodyId,state:row.abort.signal.aborted?'STOPPED':'HOLD',
     reason:row.abort.signal.aborted?'CANCELLED':result.reason,cleanup_state:'DRAINED'});
+   // A distinct producer joins the original BEGIN with the actual job drain
+   // and an independent committed terminal read; BEGIN's IPC terminal alone
+   // cannot release asynchronous setup occupancy.
+   if(physicalCustody)await physicalCustody.sealSetup({operationId:row.operationId,custodyId:row.custodyId,actor,request});
   });
   custodyRevision++;row.work=scope.promise.catch(()=>{}).finally(()=>{row.finished=true;if(scope.unconfirmed())row.physicalConfirmed=false;if(row.physicalConfirmed)jobs.delete(input.operation_id);custodyRevision++;});
   // There is no production materializer in 3A; do not even briefly advertise

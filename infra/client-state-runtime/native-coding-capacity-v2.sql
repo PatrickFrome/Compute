@@ -1,6 +1,6 @@
 -- New additive source. Attest exact complete replay; never repair a partial or widened installation.
 do $review$
-declare expected jsonb:='[{"signature":"destruktion_meta.native_coding_capacity_lock_v1(uuid,text)","args":["p_device","p_client"],"return_type":"void","setof":false,"definer":false,"sha256":"32a2fe4283f742b13842e0719e1851501d89ea30f45e11757b9d2efe41b0360c"},{"signature":"destruktion_meta.native_coding_capacity_effect_fence_v1(uuid,text)","args":["p_device","p_client"],"return_type":"void","setof":false,"definer":false,"sha256":"ae5ed2e4a2d18f1fe8577b4a457d6d28a29709ac4604dcc4b9ecde8d7235f510"},{"signature":"destruktion_meta.native_coding_capacity_rows_v1(uuid,text)","args":["p_device","p_client"],"return_type":"jsonb","setof":true,"definer":false,"sha256":"82788907bde21ce3c0bb96ab0adfe52cf9b1cd3648c9368103872ee98bfa6104"},{"signature":"destruktion_meta.native_coding_capacity_evidence_v1(uuid,text,bigint,jsonb)","args":["p_device","p_client","p_epoch","p_evidence"],"return_type":"void","setof":false,"definer":false,"sha256":"35e5797bf013392a6892b5a84fc351d11c5b1fc62ea68fc19df7e53bc4384747"},{"signature":"destruktion_meta.native_coding_capacity_counts_v1(uuid,text,bigint,jsonb)","args":["p_device","p_client","p_epoch","p_evidence"],"return_type":"jsonb","setof":false,"definer":false,"sha256":"ff71b8844d5e33ba020f8d141cbef252686f60cc8436e3b49ecac0c6f0585e1c"},{"signature":"destruktion_meta.native_coding_capacity_census_v1(uuid,text,bigint,jsonb)","args":["p_device","p_client","p_epoch","p_evidence"],"return_type":"jsonb","setof":false,"definer":false,"sha256":"e814c4daa3d40e6e35890b61d71b793dd8d167c2a8edd70212e4a9402e4f1ac6"},{"signature":"destruktion_meta.native_coding_setup_operation_v2(text,jsonb,jsonb,jsonb,jsonb,bigint)","args":["p_action","p_actor","p_input","p_value","p_evidence","p_ceiling"],"return_type":"jsonb","setof":false,"definer":false,"sha256":"da9e2445b05112c9927a57fc1e7aa42845cea2fbc72a9d56837918db0fd5e68e"},{"signature":"destruktion_meta.native_coding_capacity_claim_gate_v2()","args":[],"return_type":"trigger","setof":false,"definer":true,"sha256":"2cbee313c0689061b29dadfdd4b70a7df354ed570277648ae5b807b7ffa12c0c"},{"signature":"destruktion_meta.native_coding_capacity_snapshot_v1(uuid,text,bigint,uuid,integer,jsonb,jsonb)","args":["p_device","p_client","p_epoch","p_host_instance","p_host_pid","p_input","p_evidence"],"return_type":"void","setof":false,"definer":false,"sha256":"96e601363a59c363dbef44c36cf0c312d902908379148aa5669f076eb5ea4151"},{"signature":"destruktion_meta.native_coding_service_heartbeat_v2(uuid,text,bigint,uuid,integer,jsonb,text,jsonb,jsonb)","args":["p_device","p_client","p_epoch","p_host_instance","p_host_pid","p_body","p_canonical_body","p_headers","p_capacity_evidence"],"return_type":"jsonb","setof":false,"definer":false,"sha256":"b9abe41c127c49e9c89f16bf53346d80b9b8a4a4658d4373ba8bcef8f51decd5"},{"signature":"destruktion_meta.native_coding_service_heartbeat_read_v2(uuid,text,bigint,uuid,text)","args":["p_device","p_client","p_epoch","p_workspace","p_body_sha256"],"return_type":"jsonb","setof":false,"definer":false,"sha256":"fb8a6ee8ccba89baf724c7cc1f67b2848ff4d849f4c5e6d3426b5e4ba968d449"}]'::jsonb;spec jsonb;f record;n integer;column_exists boolean;tr record;
+declare expected jsonb:='[{"signature":"destruktion_meta.native_coding_capacity_lock_v1(uuid,text)","args":["p_device","p_client"],"return_type":"void","setof":false,"definer":false,"sha256":"32a2fe4283f742b13842e0719e1851501d89ea30f45e11757b9d2efe41b0360c"},{"signature":"destruktion_meta.native_coding_capacity_effect_fence_v1(uuid,text)","args":["p_device","p_client"],"return_type":"void","setof":false,"definer":false,"sha256":"ae5ed2e4a2d18f1fe8577b4a457d6d28a29709ac4604dcc4b9ecde8d7235f510"},{"signature":"destruktion_meta.native_coding_capacity_rows_v1(uuid,text)","args":["p_device","p_client"],"return_type":"jsonb","setof":true,"definer":false,"sha256":"82788907bde21ce3c0bb96ab0adfe52cf9b1cd3648c9368103872ee98bfa6104"},{"signature":"destruktion_meta.native_coding_capacity_evidence_v1(uuid,text,bigint,jsonb)","args":["p_device","p_client","p_epoch","p_evidence"],"return_type":"void","setof":false,"definer":false,"sha256":"35e5797bf013392a6892b5a84fc351d11c5b1fc62ea68fc19df7e53bc4384747"},{"signature":"destruktion_meta.native_coding_capacity_counts_v1(uuid,text,bigint,jsonb)","args":["p_device","p_client","p_epoch","p_evidence"],"return_type":"jsonb","setof":false,"definer":false,"sha256":"5b011d37fe46ebcf755a54b2d254c68e41bae0fc6cdd9e2bafdec4ccacf2fdb9"},{"signature":"destruktion_meta.native_coding_capacity_census_v1(uuid,text,bigint,jsonb)","args":["p_device","p_client","p_epoch","p_evidence"],"return_type":"jsonb","setof":false,"definer":false,"sha256":"e814c4daa3d40e6e35890b61d71b793dd8d167c2a8edd70212e4a9402e4f1ac6"},{"signature":"destruktion_meta.native_coding_setup_operation_v2(text,jsonb,jsonb,jsonb,jsonb,bigint)","args":["p_action","p_actor","p_input","p_value","p_evidence","p_ceiling"],"return_type":"jsonb","setof":false,"definer":false,"sha256":"da9e2445b05112c9927a57fc1e7aa42845cea2fbc72a9d56837918db0fd5e68e"},{"signature":"destruktion_meta.native_coding_capacity_claim_gate_v2()","args":[],"return_type":"trigger","setof":false,"definer":true,"sha256":"2cbee313c0689061b29dadfdd4b70a7df354ed570277648ae5b807b7ffa12c0c"},{"signature":"destruktion_meta.native_coding_capacity_snapshot_v1(uuid,text,bigint,uuid,integer,jsonb,jsonb)","args":["p_device","p_client","p_epoch","p_host_instance","p_host_pid","p_input","p_evidence"],"return_type":"void","setof":false,"definer":false,"sha256":"96e601363a59c363dbef44c36cf0c312d902908379148aa5669f076eb5ea4151"},{"signature":"destruktion_meta.native_coding_service_heartbeat_v2(uuid,text,bigint,uuid,integer,jsonb,text,jsonb,jsonb)","args":["p_device","p_client","p_epoch","p_host_instance","p_host_pid","p_body","p_canonical_body","p_headers","p_capacity_evidence"],"return_type":"jsonb","setof":false,"definer":false,"sha256":"b9abe41c127c49e9c89f16bf53346d80b9b8a4a4658d4373ba8bcef8f51decd5"},{"signature":"destruktion_meta.native_coding_service_heartbeat_read_v2(uuid,text,bigint,uuid,text)","args":["p_device","p_client","p_epoch","p_workspace","p_body_sha256"],"return_type":"jsonb","setof":false,"definer":false,"sha256":"fb8a6ee8ccba89baf724c7cc1f67b2848ff4d849f4c5e6d3426b5e4ba968d449"}]'::jsonb;spec jsonb;f record;n integer;column_exists boolean;tr record;
 begin
  if current_user<>'state_owner' or session_user<>'state_owner' then raise exception 'native_capacity_migration_owner_required';end if;
  if exists(select 1 from pg_class c where c.oid='destruktion_meta.native_coding_service_heartbeat_h205f22'::regclass
@@ -22,7 +22,12 @@ begin
    or coalesce(to_jsonb(f.proargnames),'[]'::jsonb) is distinct from spec->'args'
    or f.proconfig is distinct from array['search_path=pg_catalog, public, destruktion_meta']::text[]
    or exists(select 1 from aclexplode(coalesce(f.proacl,acldefault('f',f.proowner))) a where a.grantee<>f.proowner)
-   or encode(extensions.digest(convert_to(replace(f.prosrc,E'\r\n',E'\n'),'UTF8'),'sha256'),'hex')<>spec->>'sha256'
+   -- Reviewed upgrade of this exact original count body only. Every other
+   -- function/catalog/ACL boundary remains byte-exact. Arbitrary old bodies
+   -- cannot use this allowance to repair or widen a partial installation.
+   or not (encode(extensions.digest(convert_to(replace(f.prosrc,E'\r\n',E'\n'),'UTF8'),'sha256'),'hex')=spec->>'sha256'
+    or spec->>'signature'='destruktion_meta.native_coding_capacity_counts_v1(uuid,text,bigint,jsonb)'
+     and encode(extensions.digest(convert_to(replace(f.prosrc,E'\r\n',E'\n'),'UTF8'),'sha256'),'hex')='ff71b8844d5e33ba020f8d141cbef252686f60cc8436e3b49ecac0c6f0585e1c')
   then raise exception 'native_capacity_function_requires_review:%',spec->>'signature';end if;
  end loop;
  if exists(select 1 from pg_attribute a where a.attrelid='destruktion_meta.native_coding_service_heartbeat_h205f22'::regclass and a.attname='capacity_evidence'
@@ -184,14 +189,27 @@ end $$;
 
 create or replace function destruktion_meta.native_coding_capacity_counts_v1(p_device uuid,p_client text,p_epoch bigint,p_evidence jsonb)
 returns jsonb language plpgsql security invoker set search_path=pg_catalog,public,destruktion_meta as $$
-declare rows jsonb;row jsonb;owned boolean;known boolean;task_count bigint:=0;setup_count bigint:=0;claims bigint:=0;represented bigint:=0;unresolved bigint:=0;
+declare rows jsonb;row jsonb;verified jsonb:='[]'::jsonb;owned boolean;known boolean;task_count bigint:=0;setup_count bigint:=0;claims bigint:=0;represented bigint:=0;unresolved bigint:=0;resolved_count bigint:=0;
 begin
  perform destruktion_meta.native_coding_capacity_evidence_v1(p_device,p_client,p_epoch,p_evidence);
  select coalesce(jsonb_agg(r order by r->>'kind',r->>'key'),'[]'::jsonb) into rows from destruktion_meta.native_coding_capacity_rows_v1(p_device,p_client) r;
+ -- Independent Host verification writes this private cache in the same
+ -- observation transaction. SQL only matches it; SQL terminal state is not
+ -- a verifier. Absence of the additive custody schema resolves no history.
+ if to_regclass('destruktion_meta.native_coding_physical_resolution_h205f22') is not null then
+  execute $cache$select coalesce(jsonb_agg(jsonb_build_object('kind',r.kind,'key',r.key,'durable_sha256',r.durable_sha256,'proof_sha256',r.proof_sha256)
+    order by r.kind,r.key),'[]'::jsonb)
+   from destruktion_meta.native_coding_physical_resolution_h205f22 r
+   where r.device_id=$1 and r.client_id=$2 and r.admin_grant_epoch=$3 and r.device_key_fingerprint_sha256=$4
+    and r.host_instance_id=$5 and r.generation=$6 and r.observed_at=$7 and r.postgres_scope_sha256=$8$cache$
+   into verified using p_device,p_client,p_epoch,p_evidence->>'device_key_fingerprint_sha256',
+    (p_evidence->>'host_instance_id')::uuid,(p_evidence->>'generation')::bigint,(p_evidence->>'observed_at')::timestamptz,p_evidence->>'postgres_scope_sha256';
+ end if;
  for row in select value from jsonb_array_elements(rows) loop
   -- Only the fixed private Host may supply independently verified witnesses.
   -- Match exact unchanged row; an SQL terminal bit is deliberately irrelevant.
-  if exists(select 1 from jsonb_array_elements(p_evidence->'resolved') r where r->>'kind'=row->>'kind' and r->>'key'=row->>'key' and r->>'durable_sha256'=row->>'durable_sha256') then continue;end if;
+  if exists(select 1 from jsonb_array_elements((p_evidence->'resolved')||verified) r where r->>'kind'=row->>'kind' and r->>'key'=row->>'key' and r->>'durable_sha256'=row->>'durable_sha256')
+  then resolved_count:=resolved_count+1;continue;end if;
   if row->>'kind'='SETUP' then
    setup_count:=setup_count+1;
    known:=coalesce(row->>'client_id'=p_client and row->>'host_instance_id'=p_evidence->>'host_instance_id' and row->'host_pid'=p_evidence->'host_pid'
@@ -211,10 +229,12 @@ begin
   if not known then unresolved:=unresolved+1;end if;
  end loop;
  -- Foreign/changed proof selectors cannot manufacture absence.
- if exists(select 1 from jsonb_array_elements(p_evidence->'resolved') r where not exists(select 1 from jsonb_array_elements(rows) x
+ if exists(select 1 from jsonb_array_elements((p_evidence->'resolved')||verified) r where not exists(select 1 from jsonb_array_elements(rows) x
    where x->>'kind'=r->>'kind' and x->>'key'=r->>'key' and x->>'durable_sha256'=r->>'durable_sha256'))
  then raise exception 'native_capacity_physical_witness_changed' using errcode='55000';end if;
- return jsonb_build_object('census_sha256',encode(extensions.digest(convert_to(jsonb_build_object('rows',rows,'resolved',p_evidence->'resolved','owned_setup',p_evidence->'owned_setup')::text,'UTF8'),'sha256'),'hex'),
+ return jsonb_build_object('resolved_count',resolved_count,
+  'census_sha256',encode(extensions.digest(convert_to((jsonb_build_object('rows',rows,'resolved',p_evidence->'resolved','owned_setup',p_evidence->'owned_setup')
+    ||case when verified='[]'::jsonb then '{}'::jsonb else jsonb_build_object('verified_resolutions',verified) end)::text,'UTF8'),'sha256'),'hex'),
   'counts',jsonb_build_object('task_slots',task_count,'setup_slots',setup_count,'unrepresented_claims',claims,'represented_tasks',represented,'unresolved_slots',unresolved));
 end $$;
 

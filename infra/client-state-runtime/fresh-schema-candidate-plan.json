@@ -294,7 +294,7 @@
     },
     {
       "path": "infra/client-state-runtime/native-coding-capacity-v2.sql",
-      "sha256": "7892d0fd3594ebaa115080402ced50b99d6c54940f75533e71fe262ae14d914c"
+      "sha256": "1963eb11879d1436f69c8c92cc53799d659f96389daae2b500fe06e68080a133"
     },
     {
       "path": "infra/client-state-runtime/native-coding-callback-publication-v1.sql",
@@ -303,6 +303,10 @@
     {
       "path": "infra/client-state-runtime/native-coding-initial-anchor-task-fence-v1.sql",
       "sha256": "cc834bb95da3944a6e63d727c7fd0312c224623a5c73f930b9a119a962353822"
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-physical-custody-v1.sql",
+      "sha256": "ed33431c256ae8f40e14bd4363f2156dd1967ff06a391f15ca35c192451bc643"
     }
   ],
   "unresolved_dependencies": [
