@@ -12,6 +12,8 @@ import {drainManagedRuntimeBindings} from '../src/managed-runtime-drain.mjs';
 import {SupervisorLoopbackRpcServer} from '../src/supervisor-loopback-rpc-server.mjs';
 import {createBrowserParentSuspensionTransport} from '../src/browser-parent-suspension-transport.mjs';
 import {createBrowserParentSuspensionMutationGate} from '../src/browser-parent-suspension-mutation-gate.mjs';
+import {validateNativeCodingInstalledPathScope} from '../src/native-coding-operator-paths.mjs';
+import {createLoadedNativeRunOwnerCallback} from '../src/native-coding-run-owner-main.mjs';
 
 const turn=()=>new Promise(resolve=>setImmediate(resolve));
 function deferred(){let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};}
@@ -76,17 +78,29 @@ async function mainFixture({pause=null,cleanupFailure=null,realMount=false}={}){
     drainManagedRuntimeBindings,drainManagedRuntimeWorkers,createNativeHostScopeCleanup,drainNativeHostScopeCleanups,nativeHostScopeCleanupHeld,nativeHostScopeCleanupHold};
   const context=vm.createContext(scope);vm.runInContext(declarations+composition+destroy+recoverySource+'\nnativeSupervisor=fixtureSupervisor;',context);
   if(realMount){
-    const summary={instance_id:'11111111-1111-4111-8111-111111111111',pid:42,status_file:'/fixture/runtime/status.json'};
+    const stateDirectory=path.resolve('generated-initialization','private','runtime');
+    const resourcesPath=path.resolve('generated-initialization','installed','resources');
+    const summary={instance_id:'11111111-1111-4111-8111-111111111111',pid:42,status_file:path.join(stateDirectory,'status.json')};
+    // Generated owned layout only: the actual shared placement validator runs
+    // before the held Host scope. No installed payload, ACL or release proof.
+    const operator={schema:'metaengine.native-coding.operator-paths.v1',
+      cli_executable:path.join(resourcesPath,'client-state-runtime','runtime','codex','codex.exe'),
+      git_executable:path.join(resourcesPath,'client-state-runtime','runtime','git','bin','git.exe'),
+      codex_home:path.join(stateDirectory,'codex-home'),journal_root:path.join(stateDirectory,'journal'),
+      worker_temp_root:path.join(stateDirectory,'worker-temp'),result_index_root:path.join(stateDirectory,'results'),
+      sandbox_receipts:{IMPLEMENTER:{path:path.join(stateDirectory,'sandbox','implementer.json'),sha256:'a'.repeat(64)},
+        CRITIC:{path:path.join(stateDirectory,'sandbox','critic.json'),sha256:'b'.repeat(64)}}};
     let capClosed=false;const capability={snapshot:()=>({instance_id:summary.instance_id,host_pid:42,closed:capClosed}),
       readScope:async()=>{events.push('scope.read');await wait('mount-scope');throw Error('generated stopped Host');},
       drainPhysical:async()=>({schema:'metaengine.native-coding.physical-drain.v1',cleanup_confirmed:true}),close:()=>{capClosed=true;events.push('capability.close');}};
-    Object.assign(scope,{readOwnedLocalRuntimeHostSummary:()=>summary,readOwnedLocalRuntimeHostRecoveryObservation:async()=>({
+    Object.assign(scope,{path,process:{resourcesPath},validateNativeCodingInstalledPathScope,createLoadedNativeRunOwnerCallback,
+      readOwnedLocalRuntimeHostSummary:()=>summary,readOwnedLocalRuntimeHostRecoveryObservation:async()=>({
       schema:'metaengine.browser.runtime-host-generation.v1',ever_ready:true,stopping:false,exited:false,transport_failed:false,terminal_rejected:false,
       terminal:null,instance_id:summary.instance_id,host_pid:42,launch_nonce:'fixture-birth'}),
-      createOwnedNativeCodingHostCapability:()=>capability,prepareNativeWorkspaceFromStage:async()=>null,readNativeCodingOperatorPaths:async()=>({}),
+      createOwnedNativeCodingHostCapability:()=>capability,prepareNativeWorkspaceFromStage:async()=>null,readNativeCodingOperatorPaths:async()=>operator,
       stopOwnedLocalRuntimeHost:async()=>{events.push('HOST_STOP');gate.resolve();return{cleanup_confirmed:true};},
       createNativeCodingRuntime:()=>{counts.mount++;throw Error('late runtime construction forbidden');}});
-    scope.path.dirname=()=>'/fixture/runtime';scope.fs.lstat=async()=>({});
+    scope.fs.lstat=async()=>({});
     vm.runInContext(main.slice(main.indexOf('function assertNativeCodingRuntimeMountOpen('),main.indexOf('function createNativeGoalRouter(')),context);
   }
   const state=()=>vm.runInContext('({host:managedTaskProjectHost,project:autonomousProjectRuntime,rpc:supervisorLoopbackRpc,relay:githubChatRelay,recovery:interruptedSetupRecovery,closing:managedTaskProjectHostClosing,drain:managedTaskProjectHostDrainPending,pending:nativeRuntimeInitializations.size})',context);

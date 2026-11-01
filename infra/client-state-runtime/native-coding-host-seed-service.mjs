@@ -119,11 +119,10 @@ export async function createNativeCodingHostSeedService({sql,stateDirectory,read
  const operator=await readOperator(stateDirectory),pins=operator.value;
  if(!exact(pins,['schema','profile_id','profile_sha256'])||pins.schema!=='metaengine.native-coding.seed-operator.v1'
   ||!UUID.test(pins.profile_id||'')||!HASH.test(pins.profile_sha256||''))fail('operator_invalid');
- // Cold immutable-byte qualification belongs to private capability startup,
- // before any signed request or physical-observation freshness window.
- await readNativeScope.prepare?.();
+ // Historical service discovery binds only the original protected profile.
+ // Current tool/image preparation and mutable journal setup belong to a new
+ // authenticated SEED_GOAL attempt, never READ_SEED/LIST_SEEDS recovery.
  const directory=path.join(stateDirectory,'native-coding-seed-intents-v1');
- await fs.mkdir(directory,{recursive:true,mode:0o700});await protectStorage(directory);await verifyStorage(directory,{operation:'VERIFY_DIRECTORY'});
  async function unchanged(requestContext){open();assertNativeCodingHostRequestOpen(requestContext);
   const now=await readOperator(stateDirectory,{signal:requestContext?.signal});
   assertNativeCodingHostRequestOpen(requestContext);
@@ -162,60 +161,84 @@ export async function createNativeCodingHostSeedService({sql,stateDirectory,read
    ||value.readback_only!==true||value.physical_effect_replayed!==false||value.authority_effect!==false)fail('readback_unverified');
   return structuredClone(value);
  }
- async function read(input){
-  await profile(false);
+ async function read(input,requestContext){
+  await profile(false,requestContext);
   const rows=await sql.unsafe('select destruktion_meta.native_coding_seed_read_v1($1::uuid,$2::uuid) as value',[pins.profile_id,input.request_id]);
+  open();assertNativeCodingHostRequestOpen(requestContext);
   if(rows.length!==1)fail('readback_unavailable');return readback(rows[0].value,input);
  }
- async function readSeedResult(input){
-  const admission=await read(input);
+ async function readSeedResult(input,requestContext){
+  const admission=await read(input,requestContext);
   if(admission)return {state:'READBACK_ONLY',admission,...flags};
-  const intent=await saved(path.join(directory,input.request_id+'.json'));
+  const intent=await saved(path.join(directory,input.request_id+'.json'),requestContext);
   if(!intent)return {state:'READBACK_ONLY',admission:null,...flags};
   if(intent.schema!=='metaengine.native-coding.seed-intent.v1'||intent.profile_id!==pins.profile_id
    ||intent.profile_sha256!==pins.profile_sha256||!same(intent.body,input)||intent.body_sha256!==digest(json(input)))fail('intent_changed');
   const semanticFile=path.join(directory,'body-'+digest(json({profile_id:pins.profile_id,objective:input.objective}))+'.json');
-  if(await saved(semanticFile))return {state:'READBACK_ONLY',admission:null,...flags};
+  if(await saved(semanticFile,requestContext))return {state:'READBACK_ONLY',admission:null,...flags};
   // The intent is fsynced after its semantic fence. That fence is removed
   // only after a committed admission, or before SQL dispatch on observation
   // failure. Read PG again AFTER observing absence: a racing committed seed
   // must be returned as admitted, never mislabelled as a rejected request.
-  const after=await read(input);
+  const after=await read(input,requestContext);
   if(after)return {state:'READBACK_ONLY',admission:after,...flags};
-  if(await saved(semanticFile))return {state:'READBACK_ONLY',admission:null,...flags};
-  await unchanged();
+  if(await saved(semanticFile,requestContext))return {state:'READBACK_ONLY',admission:null,...flags};
+  await unchanged(requestContext);
   const rejection={schema:'metaengine.native-coding.seed-rejection.v1',state:'REJECTED_BEFORE_DISPATCH',
    ...input,profile_id:pins.profile_id,profile_sha256:pins.profile_sha256,body_sha256:intent.body_sha256,
    admission_absent:true,semantic_fence_absent:true,automatic_retry_allowed:false,authority_effect:false};
   const rejectionFile=path.join(directory,'rejected-'+input.request_id+'.json');
-  try{await durable(rejectionFile,rejection);}catch(error){if(error.code!=='EEXIST')throw error;}
-  if(!same(await saved(rejectionFile),rejection))fail('rejection_changed');
+  // Preserve and validate an earlier rejection receipt if it exists, but a
+  // historical READ never creates another durable record or changes a fence.
+  const recorded=await saved(rejectionFile,requestContext);
+  if(recorded&&!same(recorded,rejection))fail('rejection_changed');
   return {state:'REJECTED_BEFORE_DISPATCH',admission:null,rejection,...flags};
  }
  const observation=(p,requestContext)=>observeNativeCodingSeedProfile({profile:p,profileSha256:pins.profile_sha256,
   readNativeScope,revalidate:()=>profile(true,requestContext),requestContext});
- async function saved(file){try{return(await readProtectedJson(file,{maximumBytes:16384})).value;}catch(e){if(e.code==='ENOENT')return null;throw e;}}
+ async function saved(file,requestContext){
+  open();assertNativeCodingHostRequestOpen(requestContext);
+  try{
+   const value=(await readProtectedJson(file,{maximumBytes:16384,signal:requestContext?.signal})).value;
+   open();assertNativeCodingHostRequestOpen(requestContext);return value;
+  }catch(e){if(e.code==='ENOENT'){open();assertNativeCodingHostRequestOpen(requestContext);return null;}throw e;}
+ }
+ async function prepareExecution(requestContext){
+  open();assertNativeCodingHostRequestOpen(requestContext);
+  await readNativeScope.prepare?.();
+  open();assertNativeCodingHostRequestOpen(requestContext);
+  // Preparation may be slow. Recheck the original authenticated device and
+  // active protected profile before creating anything in its private journal.
+  await profile(true,requestContext);
+  await fs.mkdir(directory,{recursive:true,mode:0o700});
+  open();assertNativeCodingHostRequestOpen(requestContext);
+  await protectStorage(directory);
+  open();assertNativeCodingHostRequestOpen(requestContext);
+  await verifyStorage(directory,{operation:'VERIFY_DIRECTORY'});
+  open();assertNativeCodingHostRequestOpen(requestContext);await unchanged(requestContext);
+ }
  async function seed(raw,requestContext){
   assertNativeCodingHostRequestOpen(requestContext);
   const input=request(raw);await profile(false,requestContext);
   assertNativeCodingHostRequestOpen(requestContext);
   const file=path.join(directory,input.request_id+'.json');
-  const prior=await saved(file);
+  const prior=await saved(file,requestContext);
   if(prior){
    if(prior.schema!=='metaengine.native-coding.seed-intent.v1'||prior.profile_id!==pins.profile_id||!same(prior.body,input))fail('request_collision');
-   return readSeedResult(input);
+   return readSeedResult(input,requestContext);
   }
-  const p=await profile(true,requestContext);
-  assertNativeCodingHostRequestOpen(requestContext);
   const semantic=digest(json({profile_id:pins.profile_id,objective:input.objective}));
   const semanticFile=path.join(directory,'body-'+semantic+'.json');
-  const unresolved=await saved(semanticFile);
+  const unresolved=await saved(semanticFile,requestContext);
   if(unresolved){
    if(unresolved.schema!=='metaengine.native-coding.seed-body-fence.v1'||unresolved.profile_id!==pins.profile_id
     ||unresolved.objective!==input.objective||!UUID.test(unresolved.request_id||''))fail('body_fence_invalid');
    const original={request_id:unresolved.request_id,objective:input.objective};
-   return {state:'READBACK_REQUIRED',original_request_id:original.request_id,admission:await read(original),...flags};
+   return {state:'READBACK_REQUIRED',original_request_id:original.request_id,admission:await read(original,requestContext),...flags};
   }
+  const p=await profile(true,requestContext);
+  await prepareExecution(requestContext);
+  assertNativeCodingHostRequestOpen(requestContext);
   await durable(semanticFile,{schema:'metaengine.native-coding.seed-body-fence.v1',profile_id:pins.profile_id,...input});
   await verifyStorage(semanticFile,{operation:'VERIFY_FILE'});
   await durable(file,{schema:'metaengine.native-coding.seed-intent.v1',profile_id:pins.profile_id,profile_sha256:pins.profile_sha256,body:input,
@@ -256,14 +279,15 @@ export async function createNativeCodingHostSeedService({sql,stateDirectory,read
    await fs.unlink(semanticFile);return {state:'ADMITTED',admission:value,...flags};
   }catch{
    // No second write, including after a lost transaction COMMIT acknowledgement.
-   let admission=null;try{admission=await read(input);}catch{}
+   let admission=null;try{admission=await read(input,requestContext);}catch{}
    return {state:admission?'READBACK_ONLY':'READBACK_REQUIRED',admission,...flags};
   }
  }
- return Object.freeze({SEED_GOAL:seed,READ_SEED:async raw=>readSeedResult(request(raw)),
-  async LIST_SEEDS(raw={}){
+ return Object.freeze({SEED_GOAL:seed,READ_SEED:async(raw,requestContext)=>readSeedResult(request(raw),requestContext),
+  async LIST_SEEDS(raw={},requestContext){
    if(!exact(raw,['after_seq','limit'])||!Number.isSafeInteger(raw.after_seq)||raw.after_seq<0||!Number.isSafeInteger(raw.limit)||raw.limit<1||raw.limit>16)fail('page_invalid');
-   const p=await profile(false);const rows=await sql.unsafe('select destruktion_meta.native_coding_seed_list_v1($1::uuid,$2::bigint,$3::integer) as value',[pins.profile_id,raw.after_seq,raw.limit]);
+   const p=await profile(false,requestContext);const rows=await sql.unsafe('select destruktion_meta.native_coding_seed_list_v1($1::uuid,$2::bigint,$3::integer) as value',[pins.profile_id,raw.after_seq,raw.limit]);
+   open();assertNativeCodingHostRequestOpen(requestContext);
    const v=rows[0]?.value;if(rows.length!==1||v?.schema!=='metaengine.native-coding.seed-catalog.v1'||!Array.isArray(v.entries)
     ||v.entries.length>raw.limit||Buffer.byteLength(json(v))>65536||v.authority_effect!==false||v.automatic_retry_allowed!==false)fail('catalog_invalid');return {...v,coordination_mode:p.schema==='metaengine.native-coding.seed-profile.v2'&&p.coordination_mode==='CHAT_LED'?'CHAT_LED':'CLI_LED'};
   },close(){closed=true;}});

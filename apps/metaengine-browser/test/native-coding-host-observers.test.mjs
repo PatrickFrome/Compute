@@ -82,6 +82,30 @@ test('current kernel image mismatch fences previously qualified bytes',async t=>
   await assert.rejects(f.observers.readInstalledImage(),/guard_changed/);
 });
 
+test('worktree observer strips external Git overrides then restores fixed private config policy',async t=>{
+ const calls=[],f=await image(t,{runGit:async(executable,args,options)=>{
+  assert.equal(executable,process.execPath);calls.push(options.env);
+  if(args.includes('--show-toplevel'))return {stdout:path.join(f.root,'worktree')};
+  if(args.includes('--absolute-git-dir'))return {stdout:path.join(f.root,'metadata')};
+  if(args.includes('HEAD'))return {stdout:'a'.repeat(40)};
+  throw Error('generated_unexpected_git');
+ }});
+ const worktree=path.join(f.root,'worktree'),metadata=path.join(f.root,'metadata');
+ await fs.mkdir(worktree);await fs.mkdir(metadata);
+ await fs.writeFile(path.join(worktree,'.git'),'gitdir: '+metadata);await fs.writeFile(path.join(metadata,'locked'),'generated');
+ const original=process.env;t.after(()=>{process.env=original;});
+ process.env={PATH:'generated-ambient-path',GIT_CONFIG_GLOBAL:'C:\\Program Files\\Git\\etc\\gitconfig',
+  GIT_CONFIG_NOSYSTEM:'0',git_config_system:'generated-hostile-system-config',GIT_CONFIG_COUNT:'1',
+  GIT_CONFIG_KEY_0:'core.hooksPath',GIT_CONFIG_VALUE_0:'generated-hostile-hooks',GIT_ASKPASS:'generated-hostile-askpass',GIT_EXEC_PATH:'generated-hostile-helpers'};
+ const result=await f.observers.readWorktree({worktree_path:worktree});assert.equal(result.value.base_sha,'a'.repeat(40));
+ assert.equal(calls.length,3);
+ for(const env of calls){
+  assert.equal(env.GIT_CONFIG_NOSYSTEM,'1');assert.equal(env.GIT_CONFIG_GLOBAL,process.platform==='win32'?'NUL':'/dev/null');
+  assert.equal(env.GIT_TERMINAL_PROMPT,'0');
+  for(const name of ['git_config_system','GIT_CONFIG_COUNT','GIT_CONFIG_KEY_0','GIT_CONFIG_VALUE_0','GIT_ASKPASS','GIT_EXEC_PATH'])assert.equal(Object.hasOwn(env,name),false,name);
+ }
+});
+
 test('protected JSON requires affirmative ACL readback and hashes exact physical bytes',async t=>{
   const root=await temporary(t),file=path.join(root,'private.json'),bytes='{"schema":"fixture"}\n';await fs.writeFile(file,bytes);
   const calls=[];const result=await readNativeCodingProtectedJson(file,{verifyStorage:async(p,{operation})=>{calls.push([p,operation]);return yes();}});

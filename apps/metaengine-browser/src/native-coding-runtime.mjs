@@ -14,6 +14,7 @@ import {buildNativeCodingExecutionScope} from './native-coding-task-context.mjs'
 import {createNativeCodingProjectCheckpointObserver,createNativeCodingProjectRejectionObserver} from './native-coding-project-checkpoints.mjs';
 import {createNativeCodingProjectCommitObserver} from './native-coding-project-commits.mjs';
 import {prepareNativeCodingAgentRunBridge} from './native-coding-agent-run-bridge.mjs';
+import {createNativeCodingPreparedCustodyAdapter} from './native-coding-prepared-custody-adapter.mjs';
 import {createNativeCodingServiceHeartbeatPublisher,createNativeCodingServiceHeartbeatPublisherV2} from './native-coding-service-heartbeat-publisher.mjs';
 
 import {defaultNativePhysicalSlotBudget} from './agent-resource-admission.mjs';
@@ -30,7 +31,8 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
   // Private dependency injection supports isolated adversarial tests; it is not
   // an IPC option, renderer configuration, or a way to label fixtures native.
   observers=null,issuer=null,workerRegistry=null,runnerFactory=createCodexCliRunner,
-  agentBridgeFactory=prepareNativeCodingAgentRunBridge,preparedCustodyFactory=null,readServiceControl=null,readRunOwner=null,closeTimeoutMs=25000}={}) {
+  agentBridgeFactory=prepareNativeCodingAgentRunBridge,preparedCustodyFactory=createNativeCodingPreparedCustodyAdapter,
+  readPreparedRunOwner=null,readServiceControl=null,readRunOwner=null,closeTimeoutMs=25000}={}) {
   if(typeof identity?.snapshot!=='function'||typeof signedRequest!=='function'||!runnerOptions
     ||typeof agentBridgeFactory!=='function'||preparedCustodyFactory!==null&&typeof preparedCustodyFactory!=='function'
     ||!['readScope','readLease','registerProvider','agentOperation'].every(name=>typeof ownPostgres?.[name]==='function'))fail('private_dependencies_required');
@@ -70,9 +72,12 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
     return null;
   };
 
-  // Private source-only composition seam, never a renderer/IPC readiness flag.
-  // Main supplies none until genuine Owner/publication qualification is complete.
-  const preparedCustody=preparedCustodyFactory===null?null:preparedCustodyFactory({ownPostgres,assertOpen});
+  // The production path always reserves and hands off the original prepared
+  // custody. Main supplies the direct W74 callback for that same transaction,
+  // separately from its standalone diagnostic read. This wiring does not open
+  // the publication gate. Null is an explicit generated-bridge test seam only.
+  if(agentBridgeFactory===prepareNativeCodingAgentRunBridge&&preparedCustodyFactory===null)fail('prepared_custody_required');
+  const preparedCustody=preparedCustodyFactory===null?null:preparedCustodyFactory({ownPostgres,assertOpen,ownerCallback:readPreparedRunOwner});
   if(preparedCustodyFactory!==null&&(!preparedCustody||!['bindRunner','reserve','close','drain'].every(key=>typeof preparedCustody[key]==='function')))fail('prepared_custody_invalid');
   const ledger=preparedCustody?{reserve:(scope,options)=>preparedCustody.reserve(scope,options),
     advance:(scope,value)=>baseLedger.advance(scope,value),read:scope=>baseLedger.read(scope)}:baseLedger;

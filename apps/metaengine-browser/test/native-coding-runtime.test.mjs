@@ -50,6 +50,8 @@ function fixture(options={}){
     read:async scope=>{readCount++;calls.push('read');return options.readback?.({scope,receipt,executionState})||{state:executionState};}};
   const ownPostgres={ledger,agentOperation:async()=>{throw Error('fixture_no_agent_tool_invocation');},readScope:async()=>{},readLease:async()=>({schema:'metaengine.native-coding.own-pg-lease.v1',
       source:'PRIVATE_RUNTIME_HOST_OWN_PG',observed_at:new Date().toISOString(),value:{...lease},task_prompt:options.badPrompt?'changed in transit':prompt}),
+    prepareAgentRunCustody(){throw Error('fixture_no_prepared_claim');},reservePreparedExecution(){throw Error('fixture_no_prepared_reserve');},
+    takePreparedAgentRunCustody(){throw Error('fixture_no_prepared_take');},abandonPreparedAgentRunCustody(){throw Error('fixture_no_prepared_abandon');},
     onUnavailable:options.onUnavailable||((listener)=>{hostListeners.add(listener);return()=>hostListeners.delete(listener);}),
     snapshot:()=>({instance_id:ids.run,host_pid:123}),
     serviceHeartbeat:async packet=>{calls.push('service-heartbeat');return {schema:'metaengine.native-coding.service-heartbeat-ack.v1',accepted:true,
@@ -108,6 +110,7 @@ function fixture(options={}){
     ownPostgres,signedRequest,observers,issuer,
     // Explicit generated bridge seam; never default native qualification.
     agentBridgeFactory:async()=>{throw Error('generated_bridge_not_used');},
+    preparedCustodyFactory:null,readPreparedRunOwner:async()=>{throw Error('fixture_no_native_owner');},
     runnerOptions:{expectedExecutableSha256:permit.artifact.cli_executable_sha256},resultStore:store,workerRegistry:options.workerRegistry||workers,
     permitRegistry:{listProviderSelectors:async()=>[{provider_id:ids.provider,agent_id:agent}],readProvider:async()=>permit},runnerFactory:options.runnerFactory||runnerFactory,
     // This generated executor fixture must not consume the real PC's transient
@@ -648,7 +651,7 @@ for(const failed of [false,true])test(`late bridge factory after runtime fence r
 
 for(const role of ['IMPLEMENTER','CRITIC'])test('default CLOSED publication refuses '+role+' before provider admission or lease preparation',async t=>{
  const base=fixture({role});await base.runtime.close();base.calls.length=0;let prepared=0,custody=0;
- const runtime=createNativeCodingRuntime({...base.args,agentBridgeFactory:role==='IMPLEMENTER'?undefined:prepareNativeCodingAgentRunBridge,
+ const runtime=createNativeCodingRuntime({...base.args,preparedCustodyFactory:undefined,agentBridgeFactory:role==='IMPLEMENTER'?undefined:prepareNativeCodingAgentRunBridge,
   ownPostgres:{...base.args.ownPostgres,openAgentRunCustody:async()=>{custody++;throw Error('must not claim');}},
   runnerFactory:()=>{prepared++;throw Error('must not prepare');}});
  t.after(()=>runtime.close());
@@ -669,7 +672,7 @@ for(const role of ['IMPLEMENTER','CRITIC'])test('default CLOSED publication refu
 
 test('default CLOSED publication leaves historical readback and rejection reconciliation available',async t=>{
  const base=fixture();await base.runtime.close();base.calls.length=0;let reads=0;const rejectionEntered=Promise.withResolvers();
- const runtime=createNativeCodingRuntime({...base.args,agentBridgeFactory:prepareNativeCodingAgentRunBridge,
+ const runtime=createNativeCodingRuntime({...base.args,preparedCustodyFactory:undefined,agentBridgeFactory:prepareNativeCodingAgentRunBridge,
   ownPostgres:{...base.args.ownPostgres,readProjectRejection:async()=>{rejectionEntered.resolve();throw Error('generated_readback_unavailable');},readPriorExecution:async selector=>{reads++;return {
    schema:'metaengine.native-coding.execution-readback.v1',source:'PRIVATE_RUNTIME_HOST_OWN_PG',state:'HOLD',reason:'HISTORICAL_RESERVED',
    selector,execution_scope:null,execution:{state:'RESERVED'},receipt_sha256:null,task_state:'LEASED',task_result_summary:null,
@@ -710,7 +713,7 @@ test('default runtime wrapper refuses a run-only test factory instead of silentl
 // Private adapter integration uses generated runner/Host lifecycle doubles.
 // The original IPC/direct Main callback path has a separate joined test file;
 // neither fixture qualifies the default closed bridge or installed execution.
-async function preparedRuntimeFixture({failure=null,hold=null,entered=null}={}){
+async function preparedRuntimeFixture({failure=null,hold=null,entered=null,defaultAdapter=false}={}){
  const {createNativeCodingPreparedCustodyAdapter}=await import('../src/native-coding-prepared-custody-adapter.mjs');
  const base=fixture();await base.runtime.close();const events=[],token=Object.freeze({});let adapter,runStarted=false,descriptor,expectedJournal,originalDetails;
  const facet={agentOperation:async()=>({fixture_only:true}),trackCallback:operation=>operation(),
@@ -728,7 +731,8 @@ async function preparedRuntimeFixture({failure=null,hold=null,entered=null}={}){
  const runtime=createNativeCodingRuntime({...base.args,ownPostgres,
   observers:{...base.args.observers,readAgentMcpLaunchPins:async()=>{events.push('pins');if(failure==='held-pins'){entered.resolve();await hold.promise;}if(failure==='pins')throw Error('generated_pins_failed');return {fixture_only:true};}},
   permitRegistry:{...base.args.permitRegistry,readProvider:async()=>failure==='scope'&&runStarted?{...base.permit,owner_epoch:base.permit.owner_epoch+1}:base.permit},
-  preparedCustodyFactory:options=>{adapter=createNativeCodingPreparedCustodyAdapter({...options,ownerCallback:async tx=>{
+  readPreparedRunOwner:async tx=>{assert.equal(tx.fixture_original,true);events.push('direct-owner');return {fixture_only:true};},
+  preparedCustodyFactory:defaultAdapter?undefined:options=>{adapter=createNativeCodingPreparedCustodyAdapter({...options,ownerCallback:async tx=>{
    assert.equal(tx.fixture_original,true);events.push('direct-owner');return {fixture_only:true};}});return adapter;},
   ...(failure==='default-gate'?{agentBridgeFactory:prepareNativeCodingAgentRunBridge}:{agentBridgeFactory:async ({takePreparedCustody,...fixed})=>{
    if(failure==='held-pins'){assert.equal(fixed.runId,ids.run);assert.equal(fixed.callbackJournal,expectedJournal);
@@ -762,6 +766,12 @@ test('actual runtime private composition forwards its exact descriptor to prepar
  assert.equal((await f.runtime.close()).shutdown_state,'DRAINED');for(const event of ['claim','prepared-reserve','direct-owner','take','runner'])assert.equal(f.events.filter(x=>x===event).length,1);
  assert.ok(f.events.includes('facet-finish'));assert.equal(f.calls.includes('reserve'),false);assert.equal(f.calls.includes('mark-running'),false);
 });
+test('runtime default composes the original prepared Host custody and direct Owner callback without a factory override',async()=>{
+ const f=await preparedRuntimeFixture({defaultAdapter:true});f.runtime.dispatchLease(f.lease);assert.equal(await settled(f),'READBACK_REQUIRED');
+ assert.equal((await f.runtime.close()).shutdown_state,'DRAINED');
+ for(const event of ['claim','prepared-reserve','direct-owner','take','runner'])assert.equal(f.events.filter(x=>x===event).length,1,event);
+ assert.ok(f.events.includes('facet-finish'));assert.equal(f.calls.includes('reserve'),false);assert.equal(f.calls.includes('mark-running'),false);
+});
 for(const failure of ['scope','pins','before-take','after-take'])test('actual runtime '+failure+' bridge preflight failure drains original prepared custody',async()=>{
  const f=await preparedRuntimeFixture({failure});f.runtime.dispatchLease(f.lease);assert.equal(await settled(f),'READBACK_REQUIRED');
  assert.equal((await f.runtime.close()).shutdown_state,'DRAINED');assert.equal(f.events.includes('take'),failure==='after-take');
@@ -779,6 +789,13 @@ for(const failure of ['held-claim','held-reserve','held-bridge'])test('actual ru
 });
 test('invalid private prepared factory cannot silently restore legacy reserve path',async()=>{
  const f=fixture();await f.runtime.close();for(const value of [null,{},true])assert.throws(()=>createNativeCodingRuntime({...f.args,preparedCustodyFactory:()=>value}),/prepared_custody_invalid/);
+});
+test('production bridge cannot select legacy custody or omit its original transaction Owner reader',async()=>{
+ const f=fixture();await f.runtime.close();
+ assert.throws(()=>createNativeCodingRuntime({...f.args,agentBridgeFactory:prepareNativeCodingAgentRunBridge}),/prepared_custody_required/);
+ assert.throws(()=>createNativeCodingRuntime({...f.args,agentBridgeFactory:prepareNativeCodingAgentRunBridge,
+  preparedCustodyFactory:undefined,readPreparedRunOwner:null}),/prepared_custody_dependencies_required/);
+ assert.equal(f.calls.includes('reserve'),false);assert.equal(f.calls.includes('mark-running'),false);
 });
 
 test('actual runtime held pins cannot redirect the snapshotted bridge journal/authorization/deadline',async()=>{

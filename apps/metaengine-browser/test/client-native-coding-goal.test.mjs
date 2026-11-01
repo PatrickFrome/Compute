@@ -6,10 +6,14 @@ import assert from 'node:assert/strict';
 import {createHash,randomUUID} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
+import path from 'node:path';
+import {validateNativeCodingInstalledPathScope} from '../src/native-coding-operator-paths.mjs';
+import {createLoadedNativeRunOwnerCallback} from '../src/native-coding-run-owner-main.mjs';
 import {ClientGoalJournal} from '../src/client-goal-journal.mjs';
 import {createClientNativeCodingGoalRouter,normalizeNativeCodingSeedResult,normalizeNativeCodingGoalProgress,readClientGoalSubmissionMode} from '../src/client-native-coding-goal.mjs';
 import {drainManagedRuntimeBindings} from '../src/managed-runtime-drain.mjs';
 import {NativeCodingHostIpcError} from '../src/native-coding-host-ipc-client.mjs';
+import {signNativeCodingDeviceRequest} from '../src/native-coding-device-request.mjs';
 
 const hash=s=>createHash('sha256').update(s).digest('hex');
 function fixture(){
@@ -144,7 +148,7 @@ test('lost acknowledgement reconciles committed admission by READ_SEED and still
     projectSnapshot:async()=>f.snapshot,onAdmitted:async()=>{checks++;if(!mounted){mounts++;mounted=true;}}});
   await assert.rejects(()=>router.submit({request_id:f.input.request_id,goal:f.input.objective}),/submit_requires_reconciliation/);
   assert.equal(f.journal.latest().receipt.root_task_id,f.receipt.root_task_id);assert.equal(f.journal.latest().state,'RUNNING');
-  await router.refresh(f.journal.latest());assert.equal(mounts,1);assert.equal(checks,2);assert.deepEqual(calls,['SEED_GOAL','READ_SEED','READ_SEED']);
+  await router.refresh(f.journal.latest());assert.equal(mounts,1);assert.equal(checks,1);assert.deepEqual(calls,['SEED_GOAL','READ_SEED','READ_SEED']);
 });
 
 test('runtime mount or project observation failure preserves committed admission, without execution claim',async()=>{
@@ -155,41 +159,43 @@ test('runtime mount or project observation failure preserves committed admission
   assert.equal(f.journal.latest().project_error,'Native project observation unavailable');
 });
 
-test('a transient native mount failure is retried by verified READ_SEED without another seed',async()=>{
+test('readonly READ_SEED preserves admission after a mount failure without retrying execution mounting',async()=>{
   const f=fixture(),calls=[];let attempts=0,mounted=false;
   const router=createClientNativeCodingGoalRouter({journal:f.journal,request:async op=>{calls.push(op);return f.result;},
     projectSnapshot:async()=>f.snapshot,onAdmitted:async()=>{attempts++;if(attempts===1)throw Error('transient mount');mounted=true;}});
   await router.submit({request_id:f.input.request_id,goal:f.input.objective});
   assert.equal(mounted,false);assert.equal(f.journal.latest().receipt.root_task_id,f.receipt.root_task_id);
   await router.refresh(f.journal.latest());
-  assert.equal(mounted,true);assert.equal(attempts,2);assert.deepEqual(calls,['SEED_GOAL','READ_SEED']);
+  assert.equal(mounted,false);assert.equal(attempts,1);assert.deepEqual(calls,['SEED_GOAL','READ_SEED']);
   assert.equal(f.journal.latest().receipt.project_id,f.receipt.project_id);assert.equal(f.journal.latest().automatic_retry_allowed,false);
 });
 
-test('a restored admitted journal still ensures the actual native mount using readonly seed recovery',async()=>{
+test('a restored admitted journal observes original history without mounting execution',async()=>{
   const f=fixture();await f.journal.begin({request_id:f.input.request_id,goal:f.input.objective,kind:'NATIVE_CODING'});
   await f.journal.recordNativeAdmission(f.receipt);
   const restored=new ClientGoalJournal(f.storage);await restored.load();const calls=[];let mounts=0;
   const router=createClientNativeCodingGoalRouter({journal:restored,request:async op=>{calls.push(op);return f.result;},
     projectSnapshot:async()=>f.snapshot,onAdmitted:async()=>{mounts++;}});
-  await router.refresh(restored.latest());assert.equal(mounts,1);assert.deepEqual(calls,['READ_SEED']);
+  await router.refresh(restored.latest());assert.equal(mounts,0);assert.deepEqual(calls,['READ_SEED']);
   assert.equal(restored.latest().receipt.root_task_id,f.receipt.root_task_id);
 });
 
-test('concurrent readonly refreshes sharing a journal join one mount attempt and a later refresh rechecks it',async()=>{
-  const f=fixture();await f.journal.begin({request_id:f.input.request_id,goal:f.input.objective,kind:'NATIVE_CODING'});
-  await f.journal.recordNativeAdmission(f.receipt);
+test('concurrent readonly refreshes never join the pending mount owned by an explicit submission',async()=>{
+  const f=fixture();
   let release,entered;const waiting=new Promise(resolve=>{release=resolve;}),started=new Promise(resolve=>{entered=resolve;});
-  let attempts=0;const calls=[];
-  const options={journal:f.journal,request:async op=>{calls.push(op);return f.result;},projectSnapshot:async()=>f.snapshot,
+  let attempts=0,snapshots=0;const calls=[];
+  const options={journal:f.journal,request:async op=>{calls.push(op);return f.result;},projectSnapshot:async()=>{snapshots++;return f.snapshot;},
     onAdmitted:async()=>{attempts++;entered();await waiting;}};
-  const a=createClientNativeCodingGoalRouter(options).refresh(f.journal.latest());
-  const observed=await Promise.race([started.then(()=>true),a.then(()=>false)]);
-  assert.equal(observed,true,'an existing receipt must not skip mount verification');
-  const b=createClientNativeCodingGoalRouter(options).refresh(f.journal.latest());
-  await new Promise(resolve=>setImmediate(resolve));assert.equal(attempts,1);
-  release();await Promise.all([a,b]);await createClientNativeCodingGoalRouter(options).refresh(f.journal.latest());
-  assert.equal(attempts,2);assert.deepEqual(calls,['READ_SEED','READ_SEED','READ_SEED']);
+  let submitted=false;const admission=createClientNativeCodingGoalRouter(options).submit({request_id:f.input.request_id,goal:f.input.objective}).then(value=>{submitted=true;return value;});
+  await started;
+  try{
+    const a=createClientNativeCodingGoalRouter(options).refresh(f.journal.latest());
+    const b=createClientNativeCodingGoalRouter(options).refresh(f.journal.latest());
+    await Promise.all([a,b]);assert.equal(submitted,false);assert.equal(snapshots,2);assert.equal(attempts,1);
+    await assert.rejects(createClientNativeCodingGoalRouter(options).submit({request_id:randomUUID(),goal:'new work while pending'}),/operation_pending/);
+  }finally{release();await admission;}
+  await createClientNativeCodingGoalRouter(options).refresh(f.journal.latest());
+  assert.equal(attempts,1);assert.deepEqual(calls,['SEED_GOAL','READ_SEED','READ_SEED','READ_SEED']);
 });
 
 async function mainMountFixture(){
@@ -197,7 +203,8 @@ async function mainMountFixture(){
   let start=main.indexOf('function assertNativeCodingRuntimeMountOpen(');
   if(start<0)start=main.indexOf('function createNativeGoalRouter(');
   const source=main.slice(start,main.indexOf('async function readNativeGoalSubmissionMode('));
-  const summary={state:'READY',instance_id:randomUUID(),pid:42,status_file:'C:/private/runtime/status.json'};
+  const stateDirectory=path.resolve('generated-private','runtime'),resourcesPath=path.resolve('generated-install','resources');
+  const summary={state:'READY',instance_id:randomUUID(),pid:42,status_file:path.join(stateDirectory,'status.json')};
   const generation={schema:'metaengine.browser.runtime-host-generation.v1',instance_id:summary.instance_id,host_pid:42,
     launch_nonce:randomUUID(),ever_ready:true,stopping:false,exited:false,transport_failed:false,terminal_rejected:false,terminal:null};
   const counts={init:0,construct:0,capability:0,capabilityClosed:0,runtimeClosed:0,bind:0};
@@ -215,13 +222,18 @@ async function mainMountFixture(){
     managedTaskProjectHost:null,supervisorLoopbackRpc:null,drainManagedRuntimeBindings,drainManagedRuntimeWorkers,createNativeHostScopeCleanup,drainNativeHostScopeCleanups,nativeHostScopeCleanupHeld,nativeHostScopeCleanupHold,managedTaskProjectHostDrainHeld:false,nativeHostQuitShutdownPromise:null,pendingOwnerInitializationsByBarrier:new Map(),nativeSetupRouteInitializationsByBarrier:new Map(),nativeDraftScopeInitializationsByBarrier:new Map(),
     readOwnedLocalRuntimeHostSummary:()=>summary,readOwnedLocalRuntimeHostRecoveryObservation:async()=>({...generation}),
     createOwnedNativeCodingHostCapability:()=>{counts.capability++;capClosed=false;return capability;},
-    ensureSupervisorIdentity:()=>({snapshot:()=>({device_id:'device',client_id:'client'})}),
+    ensureSupervisorIdentity:()=>({snapshot:()=>({device_id:'device',client_id:'client'}),readLoadedRunOwnerW74:async()=>{throw Error('fixture_no_native_owner');}}),
     prepareNativeWorkspaceFromStage:async()=>null,
-    readNativeCodingOperatorPaths:async()=>({}),resolveNativeCodingSandboxPin:()=>({}),
+    readNativeCodingOperatorPaths:async()=>({schema:'metaengine.native-coding.operator-paths.v1',
+      cli_executable:path.join(resourcesPath,'client-state-runtime','runtime','codex','codex.exe'),
+      git_executable:path.join(resourcesPath,'client-state-runtime','runtime','git','bin','git.exe'),
+      ...Object.fromEntries(['codex_home','journal_root','worker_temp_root','result_index_root'].map(key=>[key,path.join(stateDirectory,key)])),
+      sandbox_receipts:Object.fromEntries(['IMPLEMENTER','CRITIC'].map(role=>[role,{path:path.join(stateDirectory,role+'.json'),sha256:'a'.repeat(64)}]))}),
+    validateNativeCodingInstalledPathScope,createLoadedNativeRunOwnerCallback,resolveNativeCodingSandboxPin:()=>({}),
     createNativeCodingRuntime:options=>{assert.equal(options.capacityOwner,scope.nativeCodingCapacityOwner);counts.construct++;return runtime;},
     readAgentResourceAdmission:()=>({physical_start_allowed:true}),
-    fs:{lstat:async()=>({isFile:()=>true})},path:{dirname:()=> 'C:/private/runtime',join:(...parts)=>parts.join('/')},
-    app:{},process:{resourcesPath:'C:/fixture/resources'},globalThis:{},
+    fs:{lstat:async()=>({isFile:()=>true})},path,
+    app:{},process:{resourcesPath},globalThis:{},
     initNativeSupervisor:async()=>{counts.init++;},recordStartupSubsystemDegraded:()=>{},
     createClientNativeCodingGoalRouter:options=>options,Error,Promise,Set};
   const closeSource=main.slice(main.indexOf('function closeManagedTaskProjectHost()'),main.indexOf('async function startInstalledRuntimeRecovery()'));
@@ -249,7 +261,7 @@ for(const state of ['absent','closed','unbound'])test(`actual main callback cann
   assert.equal(f.counts.construct,0);
 });
 
-test('startup and readonly remount use the same pending narrow mount and verify its open binding on every observation',async()=>{
+test('startup and explicit admission share the pending narrow mount and verify its open binding',async()=>{
   const f=await mainMountFixture(),release=f.deferScope();
   assert.equal(typeof f.context.ensureNativeCodingRuntimeMounted,'function');
   const startup=f.context.ensureNativeCodingRuntimeMounted();
@@ -293,19 +305,22 @@ test('a binding failure closes local candidates and never leaves a published sti
   assert.equal(f.scope.nativeRuntimeInitializations.size,0);
 });
 
-test('actual main transient scope failure recovers on READ_SEED with one goal effect and one bound runtime',async()=>{
+test('actual Main scope failure permits READ_SEED history before startup mounts its runtime',async()=>{
   const f=fixture(),main=await mainMountFixture(),calls=[];main.failScopeOnce();
   const router=createClientNativeCodingGoalRouter({journal:f.journal,request:async op=>{calls.push(op);return f.result;},
     projectSnapshot:async()=>f.snapshot,onAdmitted:main.onAdmitted});
   await router.submit({request_id:f.input.request_id,goal:f.input.objective});
   assert.equal(main.scope.nativeCodingRuntime,null);assert.equal(main.counts.capabilityClosed,1);
   await router.refresh(f.journal.latest());
+  assert.equal(main.scope.nativeCodingRuntime,null);assert.equal(main.counts.construct,0);assert.equal(main.counts.bind,0);
+  assert.equal(main.counts.capabilityClosed,1);assert.equal(f.journal.latest().progress.task_state,'RUNNING');
+  await main.context.ensureNativeCodingRuntimeMounted();
   assert.equal(main.scope.nativeCodingRuntime,main.runtime);assert.equal(main.bound,main.runtime);
   assert.equal(main.counts.construct,1);assert.equal(main.counts.bind,1);assert.equal(main.counts.init,0);
   assert.deepEqual(calls,['SEED_GOAL','READ_SEED']);assert.equal(f.journal.latest().receipt.root_task_id,f.receipt.root_task_id);
 });
 
-test('a completed parallel drain rejects the old mount and the next READ_SEED uses the new barrier without reseeding',async()=>{
+test('a completed parallel drain rejects old execution mounting while READ_SEED observes original history',async()=>{
   const f=fixture(),main=await mainMountFixture(),calls=[],release=main.deferScope();
   const router=createClientNativeCodingGoalRouter({journal:f.journal,request:async op=>{calls.push(op);return f.result;},
     projectSnapshot:async()=>f.snapshot,onAdmitted:main.onAdmitted});
@@ -315,11 +330,14 @@ test('a completed parallel drain rejects the old mount and the next READ_SEED us
   main.scope.managedTaskProjectHostDrainPending=false;release();await submitted;
   assert.equal(main.counts.construct,0);assert.equal(main.counts.bind,0);assert.equal(main.counts.capabilityClosed,1);
   await router.refresh(f.journal.latest());
+  assert.equal(main.scope.nativeCodingRuntime,null);assert.equal(main.counts.construct,0);assert.equal(main.counts.bind,0);
+  assert.equal(main.counts.capabilityClosed,1);assert.equal(f.journal.latest().progress.task_state,'RUNNING');
+  await main.context.ensureNativeCodingRuntimeMounted();
   assert.equal(main.scope.nativeCodingRuntime,main.runtime);assert.equal(main.counts.construct,1);assert.equal(main.counts.bind,1);
   assert.deepEqual(calls,['SEED_GOAL','READ_SEED']);assert.equal(f.journal.latest().receipt.project_id,f.receipt.project_id);
 });
 
-test('readonly admission before Supervisor startup remains bounded and does not wait on its own drain accounting',async()=>{
+test('explicit admission before Supervisor startup remains bounded without waiting on its own drain accounting',async()=>{
   const f=await mainMountFixture();f.scope.nativeSupervisor=null;
   let finish;const startup=new Promise(resolve=>{finish=resolve;});f.scope.nativeRuntimeInitializations.add(startup);
   await assert.rejects(()=>f.onAdmitted(),/native_coding_runtime_mount_supervisor_unavailable/);
@@ -574,7 +592,7 @@ test('actual mount distinguishes absent Host from unavailable protected permits'
 test('actual main consumes explicit preparation before permits; unknown blocks mount and releases capability',async()=>{
  for(const failure of [null,'native_workspace_preparation_outcome_unknown','native_workspace_preparation_workspace_authorization_required']){
   const f=await mainMountFixture();let calls=0;
-  f.scope.prepareNativeWorkspaceFromStage=async options=>{calls++;assert.equal(options.capability,f.capability);assert.equal(options.stateDirectory,'C:/private/runtime');options.assertOpen();if(failure)throw Error(failure);return {state:'PREPARED'};};
+  f.scope.prepareNativeWorkspaceFromStage=async options=>{calls++;assert.equal(options.capability,f.capability);assert.equal(options.stateDirectory,path.dirname(f.summary.status_file));options.assertOpen();if(failure)throw Error(failure);return {state:'PREPARED'};};
   if(failure){await assert.rejects(f.onAdmitted(),new RegExp(failure));assert.equal(f.counts.construct,0);assert.equal(f.counts.capabilityClosed,1);}
   else{await f.onAdmitted();assert.equal(f.counts.construct,1);}
   assert.equal(calls,1);
@@ -618,4 +636,116 @@ test('mount caller UNKNOWN cannot retire original capability before physical set
  f.scope.shutdownRequested=true;f.scope.stopOwnedLocalRuntimeHost=async()=>{stops++;physical=true;return{cleanup_confirmed:true};};
  assert.equal((await f.close()).cleanup_confirmed,true);assert.equal(stops,1);assert.equal(f.counts.capabilityClosed,1);
  assert.equal(f.scope.nativeCodingRuntimeMountCustody,null);assert.equal(f.scope.nativeCodingHostCapability,null);
+});
+
+for(const failure of ['missing-cli','missing-git','stale-canary','changed-artifact'])test('saved native history ignores execution mount failure '+failure,async()=>{
+ const f=fixture();await f.journal.begin({request_id:f.input.request_id,goal:f.input.objective,kind:'NATIVE_CODING'});
+ await f.journal.recordNativeAdmission(f.receipt);const original=structuredClone(f.journal.latest().receipt),calls=[];let mounts=0;
+ const router=createClientNativeCodingGoalRouter({journal:f.journal,
+  request:async operation=>{calls.push(operation);assert.equal(operation,'READ_SEED');return {...f.result,state:'READBACK_ONLY'};},
+  projectSnapshot:async()=>f.snapshot,onAdmitted:async()=>{mounts++;throw Error(failure);}});
+ const observed=await router.refresh(f.journal.latest());
+ assert.equal(mounts,0);assert.deepEqual(calls,['READ_SEED']);assert.deepEqual(observed.receipt,original);
+ assert.equal(observed.progress.task_state,'RUNNING');assert.equal(observed.progress.physical_execution_proven,false);
+ assert.equal(observed.automatic_retry_allowed,false);assert.equal(observed.execution_proof,null);
+});
+
+test('saved native history does not wait for a callback that would never finish mounting execution',async()=>{
+ const f=fixture();await f.journal.begin({request_id:f.input.request_id,goal:f.input.objective,kind:'NATIVE_CODING'});
+ await f.journal.recordNativeAdmission(f.receipt);
+ const entered=Promise.withResolvers(),release=Promise.withResolvers();let snapshots=0;
+ const router=createClientNativeCodingGoalRouter({journal:f.journal,request:async()=>({...f.result,state:'READBACK_ONLY'}),
+  projectSnapshot:async()=>{snapshots++;return f.snapshot;},onAdmitted:async()=>{entered.resolve();await release.promise;}});
+ const pending=router.refresh(f.journal.latest());
+ try{
+  const result=await Promise.race([pending.then(value=>({value})),entered.promise.then(()=>({blocked:true}))]);
+  assert.equal(result.blocked,undefined,'readonly history must not enter or await execution mounting');
+  assert.equal(result.value.progress.task_state,'RUNNING');assert.equal(snapshots,1);
+ }finally{release.resolve();await pending;}
+});
+
+// Actual Main request routing and canonical device envelope, with generated
+// identity/Host SQL results. No keys, native proof, executable or installed DB.
+async function readonlyMainFixture(f,{unavailable='missing-cli',failure=null,unknown=false}={}){
+ const main=await readFile(new URL('../src/main.mjs',import.meta.url),'utf8');
+ const start=main.indexOf('function createNativeGoalRouter('),end=main.indexOf('function continuePreparedGoalOwnerCustody(',start);
+ assert.ok(start>=0&&end>start);
+ const device={enrolled:true,device_id:randomUUID(),client_id:randomUUID(),key_fingerprint_sha256:'a'.repeat(64)};
+ const summary={instance_id:randomUUID(),pid:314,status_file:path.resolve('generated-private-readonly','status.json')};
+ const calls=[],counts={mount:0,scope:0,seed:0,reserve:0,worker:0,close:0,project:0},signed=[];
+ const identity={snapshot:()=>({...device}),async deviceHeaders(method,route,text){
+  assert.equal(method,'POST');assert.equal(route,'/private/native-coding/read-seed');
+  signed.push(JSON.parse(text));calls.push('sign:READ_SEED');
+  const headers={'content-type':'application/json','x-a2-chat-bridge-client':device.client_id,
+   'x-a2-device-profile':'A2_DEVICE_HTTP_SIGNATURE_V1','x-a2-device-id':device.device_id,
+   'x-a2-device-timestamp':new Date().toISOString(),'x-a2-device-nonce':'a'.repeat(32),
+   'x-a2-device-body-sha256':hash(text),'x-a2-device-signature':'a'.repeat(86)};
+  if(failure==='identity-change')device.key_fingerprint_sha256='b'.repeat(64);
+  return headers;
+ }};
+ const scope={createClientNativeCodingGoalRouter,signNativeCodingDeviceRequest,nativeCodingHostCapability:null,
+  readOwnedLocalRuntimeHostSummary:()=>summary,ensureSupervisorIdentity:()=>identity,
+  createOwnedNativeCodingHostCapability:input=>{
+   assert.equal(input,summary);let closed=false;
+   return {snapshot:()=>({instance_id:summary.instance_id,host_pid:summary.pid,closed}),
+    readScope(){counts.scope++;throw Error('full execution scope forbidden');},
+    seedGoal(){counts.seed++;throw Error('seed replay forbidden');},
+    reserveExecution(){counts.reserve++;throw Error('reserve forbidden');},
+    async readSeed(request){
+     assert.equal(closed,false);assert.equal(request.body.operation,'READ_SEED');
+     assert.equal(request.body.host_instance_id,summary.instance_id);assert.equal(request.body.host_pid,summary.pid);
+     assert.deepEqual(request.body.input,f.input);assert.equal(request.headers['x-a2-device-id'],device.device_id);
+     assert.equal(request.headers['x-a2-chat-bridge-client'],device.client_id);calls.push('read:READ_SEED');
+     if(failure==='host-acl')throw new NativeCodingHostIpcError('OPERATION_FAILED');
+     return {...f.result,state:unknown?'READBACK_REQUIRED':'READBACK_ONLY',...(unknown?{admission:null}:{})};
+    },close(){assert.equal(closed,false);closed=true;counts.close++;calls.push('close');}};
+  },
+  nativeSupervisor:{async projectSnapshot(request){
+   counts.project++;calls.push('project');assert.deepEqual(request,{project_id:f.receipt.project_id,task_after_seq:0,limit:1});
+   if(failure==='project-acl')throw new NativeCodingHostIpcError('OPERATION_FAILED');return f.snapshot;
+  }},
+  ensureNativeCodingRuntimeMounted:async()=>{counts.mount++;throw Error(unavailable);},
+  recordStartupSubsystemDegraded:()=>{},Error};
+ const context=vm.createContext(scope);vm.runInContext(main.slice(start,end),context);
+ return {router:context.createNativeGoalRouter(f.journal),calls,counts,signed};
+}
+
+for(const unavailable of ['missing-cli','missing-git','stale-canary','changed-artifact'])
+ test('actual Main authenticates saved receipt/project reads without '+unavailable+' execution setup',async()=>{
+  const f=fixture();await f.journal.begin({request_id:f.input.request_id,goal:f.input.objective,kind:'NATIVE_CODING'});
+  await f.journal.recordNativeAdmission(f.receipt);const original=structuredClone(f.journal.latest().receipt);
+  const restored=new ClientGoalJournal(f.storage);await restored.load();f.journal=restored;
+  const main=await readonlyMainFixture(f,{unavailable}),observed=await main.router.refresh(restored.latest());
+  assert.deepEqual(main.calls,['sign:READ_SEED','read:READ_SEED','close','project']);
+  assert.deepEqual(main.signed[0].input,f.input);assert.equal(main.signed[0].operation,'READ_SEED');
+  assert.equal(main.counts.close,1);assert.equal(main.counts.mount,0);assert.equal(main.counts.scope,0);
+  assert.equal(main.counts.seed,0);assert.equal(main.counts.reserve,0);assert.equal(main.counts.worker,0);
+  assert.deepEqual(observed.receipt,original);assert.equal(hash(JSON.stringify(observed.receipt)),hash(JSON.stringify(original)));
+  assert.equal(observed.progress.task_state,'RUNNING');assert.equal(observed.automatic_retry_allowed,false);
+  assert.equal(observed.progress.physical_execution_proven,false);assert.equal(observed.execution_proof,null);
+ });
+
+for(const failure of ['identity-change','host-acl','project-acl'])test('readonly Main preserves authentication/ACL refusal '+failure,async()=>{
+ const f=fixture();await f.journal.begin({request_id:f.input.request_id,goal:f.input.objective,kind:'NATIVE_CODING'});
+ await f.journal.recordNativeAdmission(f.receipt);const original=structuredClone(f.journal.latest().receipt);
+ const main=await readonlyMainFixture(f,{failure});
+ if(failure==='project-acl')await main.router.refresh(f.journal.latest());
+ else await assert.rejects(main.router.refresh(f.journal.latest()));
+ assert.equal(main.counts.close,1);assert.equal(main.counts.mount,0);assert.equal(main.counts.scope,0);
+ assert.equal(main.counts.seed,0);assert.equal(main.counts.reserve,0);assert.equal(main.counts.project,failure==='project-acl'?1:0);
+ assert.deepEqual(f.journal.latest().receipt,original);assert.equal(f.journal.latest().progress,null);
+ assert.equal(f.journal.latest().execution_proof,null);assert.equal(f.journal.latest().automatic_retry_allowed,false);
+ assert.match(f.journal.latest().project_error,/Native (goal|project) observation unavailable/);
+});
+
+test('readonly Main keeps an UNKNOWN native request fenced with its original receipt and no execution effects',async()=>{
+ const f=fixture();await f.journal.begin({request_id:f.input.request_id,goal:f.input.objective,kind:'NATIVE_CODING'});
+ await f.journal.recordNativeAdmission(f.receipt);const original=structuredClone(f.journal.latest().receipt);
+ const main=await readonlyMainFixture(f,{unknown:true}),observed=await main.router.refresh(f.journal.latest());
+ assert.deepEqual(main.calls,['sign:READ_SEED','read:READ_SEED','close']);assert.equal(main.counts.mount,0);
+ assert.equal(main.counts.scope,0);assert.equal(main.counts.seed,0);assert.equal(main.counts.reserve,0);assert.equal(main.counts.project,0);
+ assert.equal(observed.state,'RECONCILE_REQUIRED');assert.equal(observed.automatic_retry_allowed,false);
+ assert.deepEqual(observed.receipt,original);assert.equal(observed.execution_proof,null);
+ await assert.rejects(main.router.submit({request_id:randomUUID(),goal:'cannot replay uncertain work'}),/previous_request_requires_readback/);
+ assert.deepEqual(main.calls,['sign:READ_SEED','read:READ_SEED','close']);
 });

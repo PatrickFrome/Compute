@@ -21,6 +21,8 @@ async function fixture({checkpoint=false,historical=false}={}) {
   const pool=createSingleConnectionPool(async(text,args=[])=>{
     if(text.startsWith('select current_user'))return[{current_user:controls.role,session_user:controls.session}];
     if(text.startsWith('set local '))return[];
+    if(text.includes('protected historical own-PG context'))return[{context:{...f.f.context(),permit:p,device:b.device,
+      postgres_system_identifier:physical.pgRow.system_identifier}}];
     if(text.includes('pg_control_system'))return[physical.pgRow];
     if(text.includes('native_coding_admission_context_v1'))return[{context:{...f.f.context(),permit:p,device:b.device}}];
     if(text.startsWith('select to_jsonb(t)'))return[{task:structuredClone(b.task)}];
@@ -116,7 +118,7 @@ test('checkpoint reconciliation passes its max:1 transaction through both verifi
 
 test('prior execution readback remains repeatable-read-only with max:1 and performs no writes',async t=>{
   const x=await fixture({historical:true});t.after(()=>x.authority.close());changeHostBirth(x.host);
-  const result=await withoutNestedBorrow(x,()=>x.authority.READ_PRIOR_EXECUTION({selector:x.selector}),2);
+  const result=await withoutNestedBorrow(x,()=>x.authority.READ_PRIOR_EXECUTION({selector:x.selector}),3);
   assert.equal(result.state,'READBACK_ONLY');assert.equal(result.physical_effect_replayed,false);
   assert.equal(result.automatic_retry_allowed,false);assert.equal(result.authority_effect,false);
   assert.equal(result.execution_scope.host_incarnation,x.scope.host_incarnation);
