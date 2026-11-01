@@ -104,6 +104,7 @@ export function inventoryUiRuntime(directory) {
         assert.ok(sameStat(before, after) && BigInt(bytes.length) === after.size, 'me2_ui_runtime_file_changed_during_read');
         row.size_bytes = bytes.length;
         row.sha256 = sha256(bytes);
+        record.sha256 = row.sha256;
         sizeBytes += bytes.length;
         assert.ok(Number.isSafeInteger(sizeBytes), 'me2_ui_runtime_size_invalid');
         entries.push(row);
@@ -113,6 +114,22 @@ export function inventoryUiRuntime(directory) {
     observed.push(record);
   }
   walk(root, '.', new Set());
+  // File times can alias a same-size rewrite. Reopen each original target once
+  // and compare to its first digest, never a refreshed expected inventory.
+  for (const record of observed) {
+    if (!record.targetStat.isFile()) continue;
+    unchanged(record);
+    const fd = openSync(record.real, 'r');
+    try {
+      const before = fstatSync(fd, { bigint: true });
+      assert.ok(before.isFile() && sameStat(record.targetStat, before), 'me2_ui_runtime_tree_changed_during_read');
+      const bytes = readFileSync(fd);
+      const after = fstatSync(fd, { bigint: true });
+      assert.ok(sameStat(before, after) && BigInt(bytes.length) === after.size, 'me2_ui_runtime_tree_changed_during_read');
+      assert.equal(sha256(bytes), record.sha256, 'me2_ui_runtime_tree_changed_during_read: content mismatch');
+    } finally { closeSync(fd); }
+    unchanged(record);
+  }
   // Also detect a previously read file being replaced while later files were
   // read. A readonly filesystem remains the stronger runtime write guard.
   for (const record of observed) unchanged(record);

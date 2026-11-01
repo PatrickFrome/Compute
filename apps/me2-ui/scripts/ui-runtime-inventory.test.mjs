@@ -166,6 +166,73 @@ test('a mutation of an earlier file during a later read is caught by the final s
   }
 });
 
+test('the final sweep rejects earlier content even when file-time observations alias', t => {
+  const { bundle } = fixture(t);
+  const earlier = fs.realpathSync(path.join(bundle, 'me2-ui-manifest.json'));
+  const later = fs.realpathSync(path.join(bundle, 'server.js'));
+  const beforeBytes = '{"source":"AAAA"}';
+  const afterBytes = '{"source":"BBBB"}';
+  const originals = {
+    readFileSync: fs.readFileSync, lstatSync: fs.lstatSync, statSync: fs.statSync, fstatSync: fs.fstatSync,
+  };
+  const before = originals.statSync(earlier, { bigint: true });
+  const laterStat = originals.statSync(later, { bigint: true });
+  const sameFile = (a, b) => a.dev === b.dev && a.ino === b.ino;
+  const readOrder = [];
+  const earlierReads = [];
+  const aliased = { lstatSync: 0, statSync: 0, fstatSync: 0 };
+  let mutated = false;
+  assert.equal(BigInt(Buffer.byteLength(afterBytes)), before.size);
+  try {
+    // Source-only metadata-alias model, not a native Windows observation.
+    // Mask only the earlier file's mtimeNs/ctimeNs, including reopened-fd
+    // observations; all bytes and other identity/stat fields stay real.
+    for (const method of Object.keys(aliased)) {
+      fs[method] = function (...args) {
+        const stat = originals[method].apply(this, args);
+        if (mutated && typeof stat.mtimeNs === 'bigint' && sameFile(stat, before)) {
+          stat.mtimeNs = before.mtimeNs;
+          stat.ctimeNs = before.ctimeNs;
+          aliased[method]++;
+        }
+        return stat;
+      };
+    }
+    fs.readFileSync = function (fd, ...args) {
+      const bytes = originals.readFileSync.call(this, fd, ...args);
+      if (typeof fd === 'number') {
+        const stat = originals.fstatSync(fd, { bigint: true });
+        if (sameFile(stat, before)) {
+          readOrder.push('earlier');
+          earlierReads.push(bytes.toString());
+        } else if (sameFile(stat, laterStat)) {
+          readOrder.push('later');
+          if (!mutated) {
+            assert.deepEqual(readOrder, ['earlier', 'later']);
+            const writer = fs.openSync(earlier, 'r+');
+            try {
+              fs.writeFileSync(writer, afterBytes);
+              fs.fsyncSync(writer);
+            } finally { fs.closeSync(writer); }
+            mutated = true;
+          }
+        }
+      }
+      return bytes;
+    };
+    syncBuiltinESMExports();
+    assert.throws(() => inventoryUiRuntime(bundle), /me2_ui_runtime_tree_changed_during_read: content mismatch/);
+    assert.equal(mutated, true, 'the durable earlier-file rewrite must fire during the later fd read');
+    assert.deepEqual(readOrder, ['earlier', 'later', 'earlier']);
+    assert.deepEqual(earlierReads, [beforeBytes, afterBytes], 'the final fd read must observe the changed bytes');
+    assert.equal(originals.readFileSync(earlier, 'utf8'), afterBytes);
+    for (const method of Object.keys(aliased)) assert.ok(aliased[method] > 0, method + ' must observe aliased file times');
+  } finally {
+    Object.assign(fs, originals);
+    syncBuiltinESMExports();
+  }
+});
+
 test('the original expected inventory must keep its own digest', t => {
   const { bundle } = fixture(t);
   const before = inventoryUiRuntime(bundle);
