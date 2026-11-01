@@ -39,7 +39,7 @@ const bin=process.env.METAENGINE_PG_TEST_BIN,driver=process.env.METAENGINE_PG_TE
 const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});return{promise,resolve};};
 const tick=()=>new Promise(r=>setImmediate(r));
 async function bounded(promise,label){let timer;try{return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('combined_setup_'+label+'_deadline')),7000);})]);}finally{clearTimeout(timer);}}
-test('predescriptor setup uses actual current ADMIN/repository/PG authority without native execution readiness',{skip:!bin||!driver,timeout:180000},async t=>{
+test('predescriptor setup uses actual current ADMIN/repository/PG authority without native execution readiness',{skip:!bin||!driver,timeout:600000},async t=>{
  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'native-setup-pg-'))),data=path.join(root,'data');
  const listener=net.createServer();await new Promise((r,j)=>{listener.once('error',j);listener.listen(0,'127.0.0.1',r);});const port=listener.address().port;await new Promise(r=>listener.close(r));
  const command=(name,args)=>new Promise((resolve,reject)=>{const child=spawn(path.join(bin,name+(process.platform==='win32'?'.exe':'')),args,{stdio:'ignore',windowsHide:true,shell:false});
@@ -589,21 +589,29 @@ process.send({test:'ready'});
     client?.close();const exit=child.exitCode!==null||child.signalCode!==null?Promise.resolve():new Promise(resolve=>child.once('exit',resolve));if(child.connected)child.send({test:'stop'});else child.kill();await exit;
    }
   });
-  await t.test('BEGIN then removed protected repository config and missing descriptors stays HOLD, never silent Browser',async()=>{
+  // This case performs several real cold Windows PowerShell ACL reads, each
+  // independently bounded by the production adapter. The parent fixture budget
+  // must cover their sum; no production authorization deadline is extended.
+  await t.test('BEGIN then removed protected repository config and missing descriptors stays HOLD, never silent Browser',{timeout:480000},async routeTest=>{
+   const phaseStart=Date.now(),phase=name=>routeTest.diagnostic('SETUP_ROUTE_PHASE_'+name+':'+(Date.now()-phaseStart));
+   phase('BEGIN');
    const f=await fixture();execFileSync('git',['init','--initial-branch=fixture',f.repo],{stdio:'ignore'});
    execFileSync('git',['-C',f.repo,'-c','user.name=Fixture','-c','user.email=fixture@example.invalid','-c','commit.gpgsign=false','commit','--allow-empty','-m','TEST fixture'],{stdio:'ignore'});
    // chmod does not provision a Windows owner-only DACL on this generated directory.
    if(process.platform==='win32')assert.equal((await protectOwnerOnlyWindowsDirectory(f.managedRoot)).owner_dacl_verified,true);
    else await fs.chmod(f.managedRoot,0o700);
+   phase('MANAGED_ROOT_PROTECTED');
    await configureManagedTaskProjectRepository({userDataPath:f.directory,repository:{schema:'metaengine.devos.managed-project-repository-config.v1',coordination_workspace_id:f.workspace,repo_id:'fixture:setup',repo_root:f.repo,managed_root:f.managedRoot}});
+   phase('REPOSITORY_CONFIGURED');
    const readNativeSetupRoute=async()=>readClientNativeSetupRoute({repository:await readManagedTaskProjectRepository({userDataPath:f.directory}),identity:f.identity,
     capability:{snapshot:()=>f.host,readNativeSetupRoute:packet=>f.service.operations.READ_NATIVE_SETUP_ROUTE_V1(packet)}});
    const mode=()=>readClientGoalSubmissionMode({readSummary:()=>({status_file:path.join(f.directory,'status.json')}),readNativeSetupRoute});
-   assert.equal((await mode()).kind,'BROWSER');const input=await f.input();await f.call('BEGIN_NATIVE_SETUP_V1',input);assert.equal((await mode()).state,'HOLD');
+   assert.equal((await mode()).kind,'BROWSER');phase('INITIAL_ROUTE_READ');
+   const input=await f.input();await f.call('BEGIN_NATIVE_SETUP_V1',input);assert.equal((await mode()).state,'HOLD');phase('INTENT_ROUTE_READ');
    await fs.unlink(path.join(f.directory,MANAGED_TASK_PROJECT_DIRECTORY_NAME,'repository.json'));assert.equal((await mode()).state,'HOLD');
    assert.equal((await readNativeSetupRoute()).scope_resolved,false);
    await raw.unsafe('update public.compute_fabric_a2_browser_device_h205f22 set active=false where device_id=$1',[f.d.device_id]);
-   assert.equal((await mode()).reason,'NATIVE_SETUP_ROUTE_UNAVAILABLE');
+   assert.equal((await mode()).reason,'NATIVE_SETUP_ROUTE_UNAVAILABLE');phase('COMPLETE');
   });
   await t.test('route absence is current-device/workspace scoped; grant/key/Host rotation does not erase retained intent',async()=>{
    const f=await fixture(),g=await fixture(),input=await f.input(),route=workspace_id=>f.call('READ_NATIVE_SETUP_ROUTE_V1',{workspace_id});

@@ -333,6 +333,9 @@ test('actual Windows TAP gate rejects unknown or duplicate skips and never skips
  const tap=(names,required='required')=>['TAP version 13',...names.map((name,i)=>`ok ${i+1} - ${name} # SKIP`),
   `ok ${names.length+1} - ${required}`,`1..${names.length+1}`,`# tests ${names.length+1}`,'# suites 0','# pass 1','# fail 0','# cancelled 0',`# skipped ${names.length}`,'# todo 0'].join('\n');
  assert.equal(inspect(tap([baseline,windowsNonApplicable]),['required'],true).bad.length,0);
+ const diagnostic=inspect(tap([baseline,windowsNonApplicable])+'\n# SETUP_ROUTE_PHASE_BEGIN:123\n# SETUP_ROUTE_PHASE_SECRET:123\n# SETUP_ROUTE_PHASE_BEGIN:C:/private/path',['required'],true);
+ assert.ok(diagnostic.tap.includes('# SETUP_ROUTE_PHASE_BEGIN:123'));
+ assert.equal(diagnostic.tap.includes('SECRET'),false);assert.equal(diagnostic.tap.includes('C:/private/path'),false);
  for(const names of [[baseline],[baseline,baseline],[baseline,'unknown'],[baseline,windowsNonApplicable,'unknown']])
   assert.ok(inspect(tap(names),['required'],true).bad.includes('current_component_case_skipped'));
  assert.ok(inspect(tap([baseline,windowsNonApplicable]),[windowsNonApplicable],true).bad.some(v=>v.startsWith('required_case_missing_')));

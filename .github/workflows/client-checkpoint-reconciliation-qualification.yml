@@ -598,6 +598,8 @@ jobs:
                 if(failure&&!diagnosticFields.has('failure')){diagnosticFields.add('failure');sanitized.push(diagnosticIndent+'# failure_type '+failure[1]);}
                 continue;
               }
+              // Closed, path-free test phase IDs diagnose cumulative cold ACL startup.
+              if(/^\s*# SETUP_ROUTE_PHASE_(?:BEGIN|MANAGED_ROOT_PROTECTED|REPOSITORY_CONFIGURED|INITIAL_ROUTE_READ|INTENT_ROUTE_READ|COMPLETE):[0-9]{1,6}$/.test(line)){sanitized.push(line);continue;}
               const sub=/^(\s*)# Subtest: (.*)$/.exec(line);if(sub){sanitized.push(sub[1]+'# Subtest: '+publicName(sub[2]));continue;}
               if(/^\s*1\.\.[0-9]+$/.test(line)){sanitized.push(line);continue;}
               const summary=/^# (tests|suites|pass|fail|cancelled|skipped|todo) ([0-9]+)$/.exec(line);
