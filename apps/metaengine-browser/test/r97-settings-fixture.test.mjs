@@ -93,6 +93,39 @@ test('R97 settings routes and section probes match current semantic UI, not reti
   assert.match(harness, /state'\) === 'UNAVAILABLE'.+data-admin-ready'\) === 'false'/);
 });
 
+test('R97 settings wait requires unavailable Guardian proof and disabled actions, not a stale native reason', async () => {
+  const source = await readFile(new URL('./me2-r85-visual-evidence.mjs', import.meta.url), 'utf8');
+  const start = source.indexOf("markPhase('OPEN_SETTINGS');");
+  const match = /await waitFor\(shellView\.webContents, `([\s\S]*?)`\);/.exec(source.slice(start));
+  assert.ok(start >= 0 && match, 'execute the actual OPEN_SETTINGS wait expression');
+  const ids = ['native-work-readiness','github-repository-connection','github-chat-control','guardian-runtime-status'];
+  const valid = { sections: ids, repository: 'NOT_CONFIGURED', chat: 'NOT_PAIRED',
+    guardian: 'UNAVAILABLE · Нет текущего подтверждения',
+    proof: 'Служба: не подтверждена · Owner: не подтверждён · device: не подтверждён',
+    guardianDisabled: true, revokeDisabled: true };
+  const ready = state => vm.runInNewContext(match[1], {document: {
+    querySelector(selector) {
+      const id = /^\[data-testid="([^"]+)"\]/.exec(selector)?.[1];
+      if (!state.sections.includes(id)) return null;
+      if (selector.endsWith(' button')) return {disabled: state.guardianDisabled};
+      if (selector.endsWith(' [role=status]')) return {textContent: id === ids[1] ? state.repository : id === ids[2] ? state.chat : state.guardian};
+      return {textContent: state.proof};
+    },
+    querySelectorAll() { return [{disabled:true},{disabled:state.revokeDisabled}]; },
+  }});
+  assert.equal(ready(valid), true);
+  for (const change of [...ids.map(id => state => {state.sections = state.sections.filter(value => value !== id);}),
+    state => {state.repository = 'CONNECTED';}, state => {state.chat = 'ACTIVE';},
+    state => {state.guardian = 'HOLD · GUARDIAN_OBSERVATION_NOT_YET_AVAILABLE';},
+    state => {state.proof = state.proof.replace('Служба: не подтверждена','Служба: доступна');},
+    state => {state.proof = state.proof.replace('Owner: не подтверждён','Owner: подтверждён');},
+    state => {state.proof = state.proof.replace('device: не подтверждён','device: подтверждён');},
+    state => {state.guardianDisabled = false;}, state => {state.revokeDisabled = false;}]) {
+    const changed = structuredClone(valid); change(changed);
+    assert.equal(ready(changed), false, String(change));
+  }
+});
+
 test('R97 current palette probes retain the full font, contrast, icon and screenshot gates', async () => {
   const harness = await readFile(new URL('./me2-r85-visual-evidence.mjs', import.meta.url), 'utf8');
   assert.match(harness, /querySelectorAll\('\[cmdk-item\], \[cmdk-group-heading\], \[role=dialog\] \[role=status\]'\)/);

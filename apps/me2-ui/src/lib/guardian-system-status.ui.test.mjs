@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import vm from 'node:vm';
 import {clock, deferred, element, flush, harness, loadUi} from './ui-reliability-harness.mjs';
 import {createBrowserGuardianStatusObserver} from '../../../metaengine-browser/src/browser-guardian-status-observer.mjs';
 
@@ -93,6 +95,50 @@ test('settings accepts the existing native Guardian observer output without manu
   f=fixture(()=>observer.observe({force:true}));f.mount();await flush();
   assert.match(f.text(),/READY/);assert.match(f.text(),/"подтверждён"/);
   assert.equal(f.mutations(),0);f.ui.unmount();
+});
+
+test('actual R97 absent-profile IPC satisfies the actual settings wait only as unavailable with actions held',async t=>{
+  const source=await readFile(new URL('../../../metaengine-browser/test/me2-r85-visual-evidence.mjs',import.meta.url),'utf8');
+  const start=source.indexOf('function registerPresentationIpc() {'),end=source.indexOf('\nasync function waitFor(',start);
+  assert.ok(start>=0&&end>start);
+  const handlers=new Map();
+  vm.runInNewContext(source.slice(start,end)+'\nregisterPresentationIpc();',{
+    ipcMain:{handle(channel,handler){assert.equal(handlers.has(channel),false);handlers.set(channel,handler);}},
+  });
+  const invoke=channel=>{assert.ok(handlers.has(channel),channel);return handlers.get(channel)();};
+  const readGuardian=()=>invoke('metaengine:client:guardian-status');
+  const absent=readGuardian();
+  assert.equal(absent.state,'HOLD');assert.equal(absent.reason,'GUARDIAN_OBSERVATION_NOT_YET_AVAILABLE');
+  assert.equal(absent.stale,true);assert.equal(absent.observed_at,null);assert.equal(absent.expires_at,null);
+  assert.equal(absent.guardian_service_ready,false);assert.equal(absent.owner_binding_proven,false);assert.equal(absent.device_binding_proven,false);
+  for(const channel of ['activate-guardian','github-repository-connect','github-chat-connect','github-chat-disconnect']){
+    assert.equal(handlers.has('metaengine:client:'+channel),false,'presentation fixture has no mutation endpoint');
+  }
+  const f=fixture(readGuardian);t.after(()=>f.ui.unmount());
+  f.api.githubRepositoryStatus=()=>invoke('metaengine:client:github-repository-status');
+  f.api.githubChatStatus=()=>invoke('metaengine:client:github-chat-status');
+  f.mount();await flush();
+  const nodes=node=>!node||typeof node!=='object'?[]:[node,...(node.children??[]).flat(Infinity).flatMap(nodes)];
+  const text=node=>node===null||node===undefined?'':typeof node==='object'?(node.children??[]).flat(Infinity).map(text).join(''):String(node);
+  const queryAll=selector=>{
+    const match=/^\[data-testid="([^"]+)"\](?: (\[role=status\]|button))?$/.exec(selector);
+    assert.ok(match,'supported actual R97 settings selector: '+selector);
+    const section=element(f.ui.render(),match[1]);
+    const found=!section?[]:!match[2]?[section]:nodes(section).filter(node=>match[2]==='button'?node.tag==='button':node.props?.role==='status');
+    return found.map(node=>({textContent:text(node),disabled:node.props?.disabled}));
+  };
+  const document={querySelector:selector=>queryAll(selector)[0]??null,querySelectorAll:queryAll};
+  const opened=source.indexOf("markPhase('OPEN_SETTINGS');");
+  const wait=/await waitFor\(shellView\.webContents, `([\s\S]*?)`\);/.exec(source.slice(opened));
+  assert.ok(opened>=0&&wait,'execute the visual harness predicate against the shipped component');
+  assert.equal(document.querySelector('[data-testid="guardian-runtime-status"] [role=status]').textContent,'UNAVAILABLE · Нет текущего подтверждения');
+  assert.match(document.querySelector('[data-testid="guardian-runtime-status"]').textContent,/Служба: не подтверждена · Owner: не подтверждён · device: не подтверждён/);
+  assert.equal(f.button().props.disabled,true);
+  assert.equal(vm.runInNewContext(wait[1],{document}),true,'actual absent-profile renderer must satisfy the R97 negative-state wait');
+  f.button().props.onClick();await flush();await f.time.advance(15_000);
+  assert.equal(f.mutations(),0,'stale proof cannot dispatch or retry activation');
+  assert.equal(vm.runInNewContext(wait[1],{document}),true,'read-only polling cannot promote the unchanged stale receipt');
+  assert.equal(readGuardian().stale,true);assert.equal(readGuardian().observed_at,null);assert.equal(readGuardian().expires_at,null);
 });
 
 test('a retained activation callback cannot dispatch after its Guardian receipt expires',async()=>{

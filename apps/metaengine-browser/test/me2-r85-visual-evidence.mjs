@@ -636,7 +636,15 @@ async function main() {
       `document.querySelector('[data-testid="settings-button"]')?.click(); true`,
     );
     await waitFor(shellView.webContents, "document.querySelector('[data-testid=page-outlet]')?.getAttribute('data-page') === 'system'");
-    await waitFor(shellView.webContents, `['native-work-readiness','github-repository-connection','github-chat-control','guardian-runtime-status'].every(id => Boolean(document.querySelector('[data-testid="'+id+'"]'))) && document.querySelector('[data-testid="github-repository-connection"] [role=status]')?.textContent === 'NOT_CONFIGURED' && document.querySelector('[data-testid="github-chat-control"] [role=status]')?.textContent === 'NOT_PAIRED' && document.querySelector('[data-testid="guardian-runtime-status"] [role=status]')?.textContent.includes('GUARDIAN_OBSERVATION_NOT_YET_AVAILABLE')`);
+    // The absent-profile receipt is deliberately stale. The renderer must
+    // show no current proof, not repeat its historical native HOLD reason.
+    await waitFor(shellView.webContents, `['native-work-readiness','github-repository-connection','github-chat-control','guardian-runtime-status'].every(id => Boolean(document.querySelector('[data-testid="'+id+'"]')))
+      && document.querySelector('[data-testid="github-repository-connection"] [role=status]')?.textContent === 'NOT_CONFIGURED'
+      && document.querySelector('[data-testid="github-chat-control"] [role=status]')?.textContent === 'NOT_PAIRED'
+      && document.querySelector('[data-testid="guardian-runtime-status"] [role=status]')?.textContent === 'UNAVAILABLE · Нет текущего подтверждения'
+      && document.querySelector('[data-testid="guardian-runtime-status"]')?.textContent.includes('Служба: не подтверждена · Owner: не подтверждён · device: не подтверждён')
+      && document.querySelector('[data-testid="guardian-runtime-status"] button')?.disabled === true
+      && document.querySelectorAll('[data-testid="github-chat-control"] button')[1]?.disabled === true`);
     const settingsCapture = await capture(shellView, 'r97-settings-advanced-surface-1440x960');
     if (settingsCapture.metrics.primary != null || settingsCapture.metrics.rail != null) {
       throw new Error('r97_visual_main_rail_persisted_inside_settings');
