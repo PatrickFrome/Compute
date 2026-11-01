@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { readMainPrivateNativeTools } from './private-native-tools.mjs';
 
 import { createWorkspaceReservation, recordWorkspaceMaterializationReadback } from './workspace-manager.mjs';
 import { planLockedWorkspaceMaterialization, planWorkspaceInventory, verifyWorkspaceInventory, parseWorktreePorcelainZ, samePhysicalWorkspacePath } from './workspace-git-hardening.mjs';
@@ -115,36 +116,72 @@ function gitInvocationArgv(plan) {
 // Snapshot the selection so a later caller mutation cannot redirect a spawn.
 export function managedProjectPrivateGitTools(privateTools = null) {
   if (privateTools === null) return null;
-  if (!privateTools || typeof privateTools !== 'object' || Array.isArray(privateTools)
-      || typeof privateTools.gitExecutable !== 'string' || !path.isAbsolute(privateTools.gitExecutable)
-      || privateTools.gitExecutable.includes('\0') || typeof privateTools.revalidate !== 'function'
-      || !privateTools.environment || typeof privateTools.environment !== 'object' || Array.isArray(privateTools.environment))
+  if (!privateTools || typeof privateTools !== 'object' || Array.isArray(privateTools))
     throw new Error('managed_project_git_private_tools_invalid');
+  const { gitExecutable, environment: originalEnvironment, revalidate: originalRevalidate } = privateTools;
+  if (typeof gitExecutable !== 'string' || !path.isAbsolute(gitExecutable)
+      || gitExecutable.includes('\0') || typeof originalRevalidate !== 'function'
+      || !originalEnvironment || typeof originalEnvironment !== 'object' || Array.isArray(originalEnvironment))
+    throw new Error('managed_project_git_private_tools_invalid');
+  const entries = Object.entries(originalEnvironment);
   const environment = {};
-  for (const [key, value] of Object.entries(privateTools.environment)) {
+  for (const [key, value] of entries) {
     const canonical = key.toUpperCase();
     if (!key || /[\x00-\x1f=]/.test(key) || typeof value !== 'string' || value.includes('\0')
         || (Object.hasOwn(environment, canonical) && environment[canonical] !== value))
       throw new Error('managed_project_git_private_tools_environment_invalid');
     environment[canonical] = value;
   }
-  return Object.freeze({ gitExecutable: privateTools.gitExecutable, environment: Object.freeze(environment),
-    revalidate: privateTools.revalidate.bind(privateTools) });
+  const assertSelection = () => {
+    if (privateTools.gitExecutable !== gitExecutable || privateTools.environment !== originalEnvironment
+        || privateTools.revalidate !== originalRevalidate || Object.keys(originalEnvironment).length !== entries.length
+        || entries.some(([key, value]) => !Object.hasOwn(originalEnvironment, key) || originalEnvironment[key] !== value))
+      throw new Error('managed_project_git_private_tools_changed');
+  };
+  let invalid = false;
+  return Object.freeze({ gitExecutable, environment: Object.freeze(environment),
+    async revalidate() {
+      if (invalid) throw new Error('managed_project_git_private_tools_invalidated');
+      try {
+        assertSelection();
+        await originalRevalidate.call(privateTools);
+        // A sibling observation may have permanently invalidated the same
+        // selection while this exact revalidation was still in flight.
+        if (invalid) throw new Error('managed_project_git_private_tools_invalidated');
+        assertSelection();
+      } catch (error) { invalid = true; throw error; }
+    },
+  });
+}
+
+// A native supplied capability remains a composition/test seam. Omission in
+// Electron Main selects the actual package context, never an ambient fallback
+// after a package or capability failure.
+export async function resolveManagedProjectPrivateGitTools(privateTools = null) {
+  return managedProjectPrivateGitTools(privateTools === null ? await readMainPrivateNativeTools() : privateTools);
 }
 
 /** Execute only the fixed argv plans emitted by workspace-git-hardening. */
 export function createShellFreeGitExecutor({ timeoutMs = 120000, spawnProcess = spawn, privateTools = null } = {}) {
-  const tools = managedProjectPrivateGitTools(privateTools);
+  const suppliedTools = managedProjectPrivateGitTools(privateTools);
+  let toolsPromise;
   const boundedTimeout = Math.max(1000, Math.min(300000, Number(timeoutMs) || 120000));
   return Object.freeze({
     async execute(plan) {
       const argv = gitInvocationArgv(plan);
-      // Source development retains the existing ambient tool selection. A
-      // packaged host instead supplies the complete verified environment,
-      // including private Git helper/CA paths; no ambient PATH is merged.
+      const cwd = plan.cwd;
+      const readOnly = plan.effect.endsWith('_READ');
+      // Keep one selection promise for this executor, including rejection.
+      // Neither a failed load nor a failed revalidation selects ambient Git.
+      toolsPromise ??= suppliedTools === null
+        ? resolveManagedProjectPrivateGitTools()
+        : Promise.resolve(suppliedTools);
+      const tools = await toolsPromise;
+      // Non-Electron retains its prior selection pending its separate installed
+      // Host binding. Packaged Main keeps the full private helper/CA policy.
       const env = tools ? { ...tools.environment }
         : Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^GIT_/i.test(key)));
-      if (plan.effect.endsWith('_READ')) {
+      if (readOnly) {
         env.GIT_OPTIONAL_LOCKS = '0'; env.GIT_TERMINAL_PROMPT = '0';
         env.GCM_INTERACTIVE = 'never'; env.GCM_GUI_PROMPT = '0';
       }
@@ -152,7 +189,7 @@ export function createShellFreeGitExecutor({ timeoutMs = 120000, spawnProcess = 
       return new Promise((resolve, reject) => {
         // The repository remains trusted: Git can execute its configured hooks.
         // On timeout/output overflow wait for close before returning a receipt.
-        const child = spawnProcess(tools?.gitExecutable || 'git', argv, { cwd: plan.cwd, shell: false, windowsHide: true, env });
+        const child = spawnProcess(tools?.gitExecutable || 'git', argv, { cwd, shell: false, windowsHide: true, env });
         const out = []; const err = []; let bytes = 0; let timer; let failure = null;
         const stop = (reason) => { if (failure) return; failure = new Error(reason); child.kill(); };
         const collect = (target, chunk) => { bytes += chunk.length; if (bytes > 8 * 1024 * 1024) { stop('managed_project_git_output_too_large'); return; } target.push(chunk); };

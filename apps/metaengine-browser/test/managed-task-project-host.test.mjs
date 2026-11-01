@@ -207,8 +207,12 @@ test('private Git host shares its package capability across repository checks, f
     assert.equal(provisions, 1); assert.ok(validations >= 8);
     revoked = true; const before = validations;
     await assert.rejects(host.readSourceSyncGit(plan), /private_git_inventory_changed/);
-    await assert.rejects(host.executeCommand({ action: 'PROJECT_OPEN', payload: h.request }), /private_git_inventory_changed/);
-    assert.equal(validations, before + 2); assert.equal(provisions, 1);
+    await assert.rejects(host.executeCommand({ action: 'PROJECT_OPEN', payload: h.request }), /managed_project_git_private_tools_invalidated/);
+    // Original failure permanently fences this selection, even if a supplied
+    // observer later reports recovery. It cannot become a new capability.
+    revoked = false;
+    await assert.rejects(host.readSourceSyncGit(plan), /managed_project_git_private_tools_invalidated/);
+    assert.equal(validations, before + 1); assert.equal(provisions, 1);
   } finally {
     if (previous === undefined) delete process.env.PATH; else process.env.PATH = previous;
     await host.close();

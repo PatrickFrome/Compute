@@ -175,3 +175,15 @@ export async function readPackagedPrivateNativeTools({app,resourcesPath}={}) {
   const packageDoc=JSON.parse(await archiveFs.readFile(path.join(app.getAppPath(),'package.json'),'utf8'));
   return resolvePrivateNativeTools({toolsRoot:path.join(resourcesPath,'private-native-tools'),binding:packageDoc.metaenginePrivateNativeTools});
 }
+
+// Default composition for Electron Main only. No caller supplies the app,
+// packaged decision or resource path. Non-Electron calls retain their prior
+// behavior; this does not identify an installed Node Host as development or
+// establish its missing installed-context binding.
+export async function readMainPrivateNativeTools() {
+  if(!process.versions.electron)return null;
+  if(process.type!=='browser')fail('main_process_required');
+  const {app}=await import('electron');
+  if(typeof app?.isPackaged!=='boolean')fail('main_context_invalid');
+  return readPackagedPrivateNativeTools({app,resourcesPath:process.resourcesPath});
+}

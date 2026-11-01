@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createManagedTaskProjectCommandAdapter, MANAGED_PROJECT_COMMAND_ACTIONS } from './managed-task-project-command-adapter.mjs';
 import { createManagedTaskProjectSqliteJournal } from './managed-task-project-sqlite-journal.mjs';
-import { createShellFreeGitExecutor, managedProjectPrivateGitTools } from './managed-task-project-runtime.mjs';
+import { createShellFreeGitExecutor, resolveManagedProjectPrivateGitTools } from './managed-task-project-runtime.mjs';
 import { protectOwnerOnlyWindowsDirectory, verifyOwnerOnlyWindowsStorage } from './private-windows-storage-acl.mjs';
 import { prepareManagedTaskProjectStorage, verifyManagedProjectPrivateFile } from './managed-task-project-storage.mjs';
 import { readManagedTaskProjectRepository } from './managed-task-project-repository.mjs';
@@ -22,9 +22,10 @@ export async function createManagedTaskProjectHost({
   provisionRepository = null,
   platform = process.platform, protectStorage = protectOwnerOnlyWindowsDirectory,
   verifyStorage = verifyOwnerOnlyWindowsStorage, createJournal = createManagedTaskProjectSqliteJournal,
-  privateTools = null, gitExecutor = createShellFreeGitExecutor({ privateTools }),
+  privateTools = null, gitExecutor = null,
 } = {}) {
-  privateTools = managedProjectPrivateGitTools(privateTools);
+  privateTools = await resolveManagedProjectPrivateGitTools(privateTools);
+  if (gitExecutor === null) gitExecutor = createShellFreeGitExecutor({ privateTools });
   for (const [name, value] of Object.entries({ executeCommand, resolveProjectBinding, reserveBinding, finalizeBinding, protectStorage, verifyStorage, createJournal })) {
     if (typeof value !== 'function') fail(`${name}_required`);
   }
