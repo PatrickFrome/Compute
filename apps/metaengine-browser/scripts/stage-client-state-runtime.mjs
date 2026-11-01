@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
+import { mkdir, lstat, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -61,6 +61,19 @@ export async function unpackRuntimeArchive(archive, destination, { postgresOnly 
   await execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, timeout: 180000, maxBuffer: 1024 * 1024 });
 }
 
+// The strict private-tool extractor owns only its child. Its fixed build parent
+// must exist even on a clean checkout, before any archive acquisition begins.
+export async function preparePrivateToolsStagingParent(repositoryRoot) {
+  const root=await realpath(repositoryRoot),appRoot=path.join(root,'apps/metaengine-browser');
+  if(await realpath(appRoot)!==appRoot)throw Error('runtime_build_native_parent_alias');
+  const parent=path.join(appRoot,'native-dist');
+  try{await mkdir(parent,{mode:0o700});}catch(error){if(error.code!=='EEXIST')throw error;}
+  const info=await lstat(parent);
+  if(!info.isDirectory()||info.isSymbolicLink()||await realpath(parent)!==parent)
+    throw Error('runtime_build_native_parent_alias');
+  return parent;
+}
+
 export async function stageClientStateRuntime({ repositoryRoot = path.resolve(here, '../../..'), workDirectory, outputDirectory, archiveDirectory } = {}) {
   if (process.platform !== 'win32') throw new Error('runtime_build_windows_x64_required');
   const root = await realpath(repositoryRoot);
@@ -71,6 +84,7 @@ export async function stageClientStateRuntime({ repositoryRoot = path.resolve(he
   const { privateNativeToolsBinding, resolvePrivateNativeTools } = await import('../src/private-native-tools-core.mjs');
   const privateToolsRoot = path.join(root, 'apps/metaengine-browser/native-dist/private-native-tools');
   if (!await stat(privateToolsRoot).catch(error => { if (error.code === 'ENOENT') return null; throw error; })) {
+    await preparePrivateToolsStagingParent(root);
     const toolArchives = path.join(root, 'apps/metaengine-browser/native-cache/private-tools');
     await mkdir(toolArchives, { recursive: true });
     await acquirePrivateNativeToolArchives({ archiveDirectory: toolArchives });

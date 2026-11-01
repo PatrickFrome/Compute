@@ -83,7 +83,7 @@ function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion)
   classification:'SOURCE_ONLY_NO_CURRENT_PACKAGE',
   branch:'work/integrate-streams-20261101',
   source_parent:'ea405d926568508eac53ebb408e941c94faeadcf',
-  package_version:'0.7.0-dev.2309832227245.1',
+  package_version:'0.7.0-dev.2457446823794.1',
   historical_package_version:'0.7.0-dev.202610152359.1',
   package_build_authorized:false,
   package_version_reuse_authorized:false,
@@ -528,15 +528,26 @@ function assertCurrentSourceCandidate(candidate, observedVersion, parentVersion)
   "production_ready": false,
   "promotion_authorized": false,
   "authority_effect": false
-}
-]);
- const successor=manifest.current_package_transition;
- assert.deepEqual(successor,{
+},
+{
   "schema": "metaengine.client.package-version-successor.v1",
   "source_parent": "1cf6bb5a895452aff54bea0cff5e7ec0f78a1d0a",
   "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
   "prior_version": "0.7.0-dev.2257027431866.1",
   "distinct_version": "0.7.0-dev.2309832227245.1",
+  "preceding_version_burned": true,
+  "production_ready": false,
+  "promotion_authorized": false,
+  "authority_effect": false
+}
+]);
+ const successor=manifest.current_package_transition;
+ assert.deepEqual(successor,{
+  "schema": "metaengine.client.package-version-successor.v1",
+  "source_parent": "ba060afef14f6692abf78151ec0ac93388492292",
+  "baseline_source_parent": "ea405d926568508eac53ebb408e941c94faeadcf",
+  "prior_version": "0.7.0-dev.2309832227245.1",
+  "distinct_version": "0.7.0-dev.2457446823794.1",
   "preceding_version_burned": true,
   "production_ready": false,
   "promotion_authorized": false,

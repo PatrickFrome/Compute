@@ -1,3 +1,9 @@
+Prepared source package identity is `0.7.0-dev.2457446823794.1`.
+
+2026-11-01: Previous attempt `0.7.0-dev.2309832227245.1` reserved artifact 13103954936 in run 41358637734 at `ba060afef14f6692abf78151ec0ac93388492292`, then failed before creating an installer because the runtime staging caller had not created its fixed native-dist parent. This successor repairs that preparation order. The normal CI producer must still verify and reserve this distinct version. Unsigned test package only; internal Guardian trust and unresolved first-Owner/policy gates remain unchanged. No installation result is claimed.
+
+Historical predecessor notes:
+
 Prepared source package identity is `0.7.0-dev.2309832227245.1`.
 
 2026-11-01: User requested an unsigned test installer from integrated source. This version is deterministically proposed from `1cf6bb5a895452aff54bea0cff5e7ec0f78a1d0a` above consumed predecessor `0.7.0-dev.2257027431866.1` (reservation artifact 12857849402, run 40783415257). Remote uniqueness and reservation remain the ordinary CI producer's responsibility; no absence of reservations is inferred. Windows publisher signing is deferred. Guardian's release checks, first Owner and applied sandbox-policy qualification remain unresolved and are not bypassed. No installation on the user's PC is authorized by this source note.
