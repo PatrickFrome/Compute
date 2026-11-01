@@ -1,3 +1,6 @@
 package-lock.json text eol=lf
+# These upstream bytes are hash-pinned by the native peer builder. Preserve the
+# original files even when a Windows checkout enables core.autocrlf.
+native/third_party/node-api-24.0.0/*.h -text
 # Preserve the exact hash-pinned upstream license, including its original indent.
-native/third_party/node-api-24.0.0/LICENSE whitespace=-space-before-tab
+native/third_party/node-api-24.0.0/LICENSE -text whitespace=-space-before-tab
