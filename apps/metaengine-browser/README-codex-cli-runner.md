@@ -152,6 +152,61 @@ await handle.completion;    // exit_code, reason, tree_cleanup_confirmed
 await handle.terminate(reason);
 ```
 
+The effective-policy producer uses a separate, explicitly bound transport:
+
+```js
+const handle = await processController.spawn({
+  ...spec, launch, // launch was sealed with these same fields before spawn
+  inputProtocol: 'EFFECTIVE_POLICY_ACK_V1', policyNonce: hostNonce,
+  promptSha256: originalPromptSha256,
+});
+const policyBytes = await handle.bootstrap({ deadlineAt });
+// The private policy consumer checks ORIGINAL bytes, full schema, allowlists,
+// applied mode/configuration and bindings before it creates an ACK.
+const ackBytes = await privatePolicyConsumer(policyBytes);
+await handle.acceptPolicy(ackBytes, originalPrompt);
+const terminal = await handle.completion;
+```
+
+This is a transport contract for integration with the producer/consumer owners.
+The runner's existing policy selection and CLI argv/environment are unchanged;
+the producer's exact supported invocation must be supplied by its owner before
+production wiring. No CLI flag is inferred from the presence of this API.
+
+`inputProtocol` and the Host's 64-character lowercase hexadecimal nonce are
+included in the canonical `launch.v3` request hash. The original prompt digest,
+prepared attempt, request identity and absolute deadline retain their original
+scope. A `launch.v2` remains readable and uses only the legacy one-shot `resume`;
+it cannot call `bootstrap`. A phased launch cannot call `resume`. The prepared
+helper's manifest protocol is `REQUEST_BOUND_POLICY_STDIO_V3`; old runtime bytes
+cannot silently act as a phased helper.
+
+`bootstrap` resumes the already authorized, owned Job with empty, open stdin. It
+returns exactly one original UTF-8 JSONL record, excluding LF, up to 65536 bytes.
+Transport checks only the reserved type `metaengine.effective_policy.v1`, the
+bound nonce and a UUIDv7 `context_id`. Full policy decisions belong to the
+private consumer. A malformed, repeated, oversized, unexpected or incomplete
+record refuses the exchange; policy records never enter ordinary task output.
+
+`acceptPolicy` takes one UTF-8 ACK Buffer (at most 512 bytes including LF) with
+exactly `type: 'metaengine.effective_policy.accept.v1'`, the same `nonce` and
+`context_id`, plus the unchanged original prompt string. It serializes the ACK
+canonically and sends it once. Only a native notification after the actual pipe
+write permits one prompt command. That notification confirms pipe delivery; it
+does not claim that the CLI validated its contents. The producer must validate
+the ACK before reading the prompt or initiating model work, as defined by its
+own implementation. The helper checks the original prompt hash again, writes
+it once, then closes worker stdin.
+
+Cancellation fences all phases synchronously. Unknown ACK/prompt delivery is
+never retransmitted and cannot create a joined settlement; its pending phase
+rejects only after the original helper closes. Native timeout enforcement stays
+active during policy wait, ACK and blocked prompt writes. The controller's
+fallback kill allows an additional bounded 11 seconds for native exit,
+accounting and pipe joins; this does not extend worker execution. Policy
+rejection must use the same owned handle's `terminate` and await `completion`.
+Historical receipts do not establish successful phased execution.
+
 The opaque `proof.job_id` is a host-generated UUID, with
 `process_tree_control:'WINDOWS_JOB_OBJECT'` and `job_bound_before_resume:true` as
 separate facts. The host should wrap `spawn` to retain the actual handle in its

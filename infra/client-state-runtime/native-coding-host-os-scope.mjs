@@ -151,6 +151,7 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
     const unchanged=()=>joinNativeCodingHostReads([host.exe_path,path.join(resources,'app.asar'),operator.cli_executable].map(file=>image.read(file)));
     if(!includeSandbox){await unchanged();assertNativeCodingHostRequestOpen(context);return {...base,artifact,worktree};}
     const sandbox=await readNativeCodingSandboxEvidence({pin:resolveNativeCodingSandboxPin(operator,permit),cliPath:operator.cli_executable,
+      codexHome:operator.codex_home,scratchRoot:operator.worker_temp_root,
       worktreePath:permit.worktree.path,role:permit.role,hostProcessId:parentPid,signal:context?.signal,
       ...(boot?{readBoot:async()=>boot,readProcess:async pid=>{
         if(pid!==parentPid)fail('scope_batch_process_mismatch');return host;

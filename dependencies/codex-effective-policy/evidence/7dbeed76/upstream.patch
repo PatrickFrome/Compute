@@ -1,0 +1,612 @@
+diff --git a/codex-rs/app-server-client/src/lib.rs b/codex-rs/app-server-client/src/lib.rs
+index 3ef8a7b..f813e56 100644
+--- a/codex-rs/app-server-client/src/lib.rs
++++ b/codex-rs/app-server-client/src/lib.rs
+@@ -1,3 +1,4 @@
++// METAENGINE modification to pinned OpenAI Codex: effective-policy admission, 2026-11-01.
+ //! Shared in-process app-server client facade for CLI surfaces.
+ //!
+ //! This crate wraps [`codex_app_server::in_process`] behind a single async API
+@@ -27,6 +28,8 @@ use std::io::Result as IoResult;
+ use std::sync::Arc;
+ use std::time::Duration;
+ 
++pub use codex_app_server::MetaenginePolicyGuard;
++pub use codex_app_server::MetaenginePolicyMode;
+ pub use codex_app_server::app_server_control_socket_path;
+ pub use codex_app_server::in_process::DEFAULT_IN_PROCESS_CHANNEL_CAPACITY;
+ pub use codex_app_server::in_process::EmbeddedNetworkPolicy;
+@@ -194,6 +197,8 @@ where
+ 
+ #[derive(Clone)]
+ pub struct InProcessClientStartArgs {
++    /// Optional one-shot policy guard for a fresh local exec thread.
++    pub metaengine_policy_guard: Option<codex_app_server::MetaenginePolicyGuard>,
+     /// Resolved argv0 dispatch paths used by command execution internals.
+     pub arg0_paths: Arg0DispatchPaths,
+     /// Shared config used to initialize app-server runtime.
+@@ -265,6 +270,7 @@ impl InProcessClientStartArgs {
+     fn into_runtime_start_args(self) -> InProcessStartArgs {
+         let initialize = self.initialize_params();
+         InProcessStartArgs {
++            metaengine_policy_guard: self.metaengine_policy_guard,
+             arg0_paths: self.arg0_paths,
+             config: self.config,
+             cli_overrides: self.cli_overrides,
+@@ -876,6 +882,7 @@ mod tests {
+             .await
+             .expect("state db should initialize for in-process test");
+         let client = InProcessAppServerClient::start(InProcessClientStartArgs {
++            metaengine_policy_guard: None,
+             arg0_paths: Arg0DispatchPaths::default(),
+             config,
+             cli_overrides: Vec::new(),
+@@ -2092,6 +2099,7 @@ mod tests {
+         );
+ 
+         let runtime_args = InProcessClientStartArgs {
++            metaengine_policy_guard: None,
+             arg0_paths: Arg0DispatchPaths::default(),
+             config: config.clone(),
+             cli_overrides: Vec::new(),
+diff --git a/codex-rs/app-server/src/config_manager.rs b/codex-rs/app-server/src/config_manager.rs
+index 2467d4d..67f1893 100644
+--- a/codex-rs/app-server/src/config_manager.rs
++++ b/codex-rs/app-server/src/config_manager.rs
+@@ -1,3 +1,4 @@
++// METAENGINE modification to pinned OpenAI Codex: effective-policy admission, 2026-11-01.
+ use codex_arg0::Arg0DispatchPaths;
+ use codex_cloud_config::cloud_config_bundle_loader;
+ use codex_config::CloudConfigBundleLoader;
+@@ -42,6 +43,7 @@ pub(crate) struct ModelProviderRequirementsChanged;
+ /// Shared app-server entry point for loading effective Codex configuration.
+ #[derive(Clone)]
+ pub(crate) struct ConfigManager {
++    metaengine_policy_guard: Option<crate::MetaenginePolicyGuard>,
+     codex_home: PathBuf,
+     cli_overrides: Arc<RwLock<Vec<(String, TomlValue)>>>,
+     runtime_feature_enablement: Arc<RwLock<BTreeMap<String, bool>>>,
+@@ -81,6 +83,7 @@ impl ConfigManager {
+     ) -> Self {
+         let network_policy = codex_http_client::NetworkPolicyController::default();
+         Self {
++            metaengine_policy_guard: None,
+             codex_home,
+             cli_overrides: Arc::new(RwLock::new(cli_overrides)),
+             runtime_feature_enablement: Arc::new(RwLock::new(BTreeMap::new())),
+@@ -96,6 +99,27 @@ impl ConfigManager {
+         }
+     }
+ 
++    pub(crate) fn with_metaengine_policy_guard(
++        mut self,
++        guard: Option<crate::MetaenginePolicyGuard>,
++    ) -> Self {
++        self.metaengine_policy_guard = guard;
++        self
++    }
++
++    pub(crate) async fn admit_metaengine_thread(
++        &self,
++        config: &Config,
++        harness: &ConfigOverrides,
++    ) -> anyhow::Result<()> {
++        if let Some(guard) = &self.metaengine_policy_guard {
++            guard
++                .admit(config, &self.loader_overrides, self.strict_config, harness)
++                .await?;
++        }
++        Ok(())
++    }
++
+     pub(crate) fn codex_home(&self) -> &Path {
+         self.codex_home.as_path()
+     }
+diff --git a/codex-rs/app-server/src/in_process.rs b/codex-rs/app-server/src/in_process.rs
+index b467a33..f872a7a 100644
+--- a/codex-rs/app-server/src/in_process.rs
++++ b/codex-rs/app-server/src/in_process.rs
+@@ -1,3 +1,4 @@
++// METAENGINE modification to pinned OpenAI Codex: effective-policy admission, 2026-11-01.
+ //! In-process app-server runtime host for local embedders.
+ //!
+ //! This module runs the existing [`MessageProcessor`] and outbound routing logic
+@@ -135,6 +136,8 @@ fn server_notification_requires_delivery(notification: &ServerNotification) -> b
+ /// websocket transports normally assemble before `MessageProcessor` starts.
+ #[derive(Clone)]
+ pub struct InProcessStartArgs {
++    /// Optional one-shot policy guard for a fresh local exec thread.
++    pub metaengine_policy_guard: Option<crate::MetaenginePolicyGuard>,
+     /// Resolved argv0 dispatch paths used by command execution internals.
+     pub arg0_paths: Arg0DispatchPaths,
+     /// Shared base config used to initialize core components.
+@@ -434,7 +437,8 @@ async fn start_uninitialized(mut args: InProcessStartArgs) -> IoResult<InProcess
+         args.arg0_paths.clone(),
+         args.thread_config_loader,
+     )
+-    .with_embedded_network_policy(args.embedded_network_policy);
++    .with_embedded_network_policy(args.embedded_network_policy)
++    .with_metaengine_policy_guard(args.metaengine_policy_guard);
+     let auth_manager = bootstrap::configure(
+         &config_manager,
+         &mut args.config,
+@@ -863,6 +867,7 @@ mod tests {
+             .await
+             .expect("state db should initialize for in-process test");
+         let args = InProcessStartArgs {
++            metaengine_policy_guard: None,
+             arg0_paths: Arg0DispatchPaths::default(),
+             config,
+             cli_overrides: Vec::new(),
+diff --git a/codex-rs/app-server/src/lib.rs b/codex-rs/app-server/src/lib.rs
+index ae748d4..63c93e8 100644
+--- a/codex-rs/app-server/src/lib.rs
++++ b/codex-rs/app-server/src/lib.rs
+@@ -1,3 +1,4 @@
++// METAENGINE modification to pinned OpenAI Codex: effective-policy admission, 2026-11-01.
+ #![recursion_limit = "256"]
+ #![deny(clippy::print_stdout, clippy::print_stderr)]
+ 
+@@ -102,6 +103,10 @@ mod code_mode_host;
+ mod codex_home_metrics;
+ mod command_exec;
+ mod config_layer;
++mod metaengine_effective_policy;
++mod metaengine_effective_policy_projection;
++pub use metaengine_effective_policy::MetaenginePolicyGuard;
++pub use metaengine_effective_policy::MetaenginePolicyMode;
+ mod config_manager;
+ mod config_manager_service;
+ mod connection_cleanup;
+diff --git a/codex-rs/app-server/src/request_processors/thread_processor.rs b/codex-rs/app-server/src/request_processors/thread_processor.rs
+index 9679a31..c3a11d2 100644
+--- a/codex-rs/app-server/src/request_processors/thread_processor.rs
++++ b/codex-rs/app-server/src/request_processors/thread_processor.rs
+@@ -1,3 +1,4 @@
++// METAENGINE modification to pinned OpenAI Codex: effective-policy admission, 2026-11-01.
+ #[path = "daemon_continuation.rs"]
+ mod daemon_continuation;
+ 
+@@ -1338,6 +1339,7 @@ impl ThreadRequestProcessor {
+     ) -> Result<(), JSONRPCErrorError> {
+         let thread_start_started_at = std::time::Instant::now();
+         let requested_cwd = typesafe_overrides.cwd.clone();
++        let policy_harness_overrides = typesafe_overrides.clone();
+         let mut config = config_manager
+             .load_with_overrides(config_overrides.clone(), typesafe_overrides.clone())
+             .await
+@@ -1467,6 +1469,14 @@ impl ThreadRequestProcessor {
+         if !selected_capability_roots.is_empty() {
+             thread_extension_init.insert(selected_capability_roots);
+         }
++        // METAENGINE: this is the final resolved object, after the trust reload.
++        // Fail before thread startup can prewarm a model connection.
++        config_manager
++            .admit_metaengine_thread(&config, &policy_harness_overrides)
++            .await
++            .map_err(|_| {
++                invalid_request("METAENGINE effective policy barrier did not admit thread")
++            })?;
+         let mut start_options = StartThreadOptions::new(config);
+         let reserved_thread_id = if start_options.config.ephemeral {
+             None
+diff --git a/codex-rs/app-server/tests/suite/conversation_summary.rs b/codex-rs/app-server/tests/suite/conversation_summary.rs
+index 5c55734..2a749fc 100644
+--- a/codex-rs/app-server/tests/suite/conversation_summary.rs
++++ b/codex-rs/app-server/tests/suite/conversation_summary.rs
+@@ -1,3 +1,4 @@
++// METAENGINE modification to pinned OpenAI Codex: effective-policy admission, 2026-11-01.
+ use anyhow::Result;
+ use app_test_support::MockResponsesConfig;
+ use app_test_support::TestAppServer;
+@@ -157,6 +158,7 @@ async fn get_conversation_summary_by_thread_id_reads_pathless_store_thread() ->
+         .build()
+         .await?;
+     let client = in_process::start(InProcessStartArgs {
++        metaengine_policy_guard: None,
+         arg0_paths: Arg0DispatchPaths::default(),
+         config: Arc::new(config),
+         cli_overrides: Vec::new(),
+diff --git a/codex-rs/app-server/tests/suite/v2/account_system_proxy_tests.rs b/codex-rs/app-server/tests/suite/v2/account_system_proxy_tests.rs
+index f55e7ad..2a459a9 100644
+--- a/codex-rs/app-server/tests/suite/v2/account_system_proxy_tests.rs
++++ b/codex-rs/app-server/tests/suite/v2/account_system_proxy_tests.rs
+@@ -1,3 +1,4 @@
++// METAENGINE modification to pinned OpenAI Codex: effective-policy admission, 2026-11-01.
+ //! Browser login must finish enterprise bootstrap when only the system proxy can reach it.
+ 
+ use anyhow::Context;
+@@ -181,6 +182,7 @@ async fn browser_login_bootstraps_through_system_proxy() -> Result<()> {
+         .await?;
+     assert!(!config.respect_system_proxy);
+     let mut client = in_process::start(InProcessStartArgs {
++        metaengine_policy_guard: None,
+         arg0_paths: Arg0DispatchPaths::default(),
+         config: Arc::new(config),
+         cli_overrides: Vec::new(),
+diff --git a/codex-rs/app-server/tests/suite/v2/mcp_resource.rs b/codex-rs/app-server/tests/suite/v2/mcp_resource.rs
+index f3b87e7..33b17a9 100644
+--- a/codex-rs/app-server/tests/suite/v2/mcp_resource.rs
++++ b/codex-rs/app-server/tests/suite/v2/mcp_resource.rs
+@@ -1,3 +1,4 @@
++// METAENGINE modification to pinned OpenAI Codex: effective-policy admission, 2026-11-01.
+ use std::path::Path;
+ use std::pin::pin;
+ use std::sync::Arc;
+@@ -1210,6 +1211,7 @@ async fn start_resource_in_process_client(
+         config.http_client_factory(),
+     ));
+     Ok(in_process::start(InProcessStartArgs {
++        metaengine_policy_guard: None,
+         arg0_paths: Arg0DispatchPaths::default(),
+         config: Arc::new(config),
+         cli_overrides,
+diff --git a/codex-rs/app-server/tests/suite/v2/model_provider_enforcement_tests.rs b/codex-rs/app-server/tests/suite/v2/model_provider_enforcement_tests.rs
+index 15bd32e..8344e56 100644
+--- a/codex-rs/app-server/tests/suite/v2/model_provider_enforcement_tests.rs
++++ b/codex-rs/app-server/tests/suite/v2/model_provider_enforcement_tests.rs
+@@ -1,3 +1,4 @@
++// METAENGINE modification to pinned OpenAI Codex: effective-policy admission, 2026-11-01.
+ //! Verifies provider requirements at app-server input and queue admission boundaries.
+ 
+ use anyhow::Result;
+@@ -315,6 +316,7 @@ async fn malformed_system_defaults_do_not_block_existing_thread_turn() -> Result
+             .await?,
+     );
+     let mut client = in_process::start(InProcessStartArgs {
++        metaengine_policy_guard: None,
+         arg0_paths: Arg0DispatchPaths::default(),
+         config,
+         cli_overrides: Vec::new(),
+diff --git a/codex-rs/app-server/tests/suite/v2/remote_thread_store.rs b/codex-rs/app-server/tests/suite/v2/remote_thread_store.rs
+index ee43a62..ee88a11 100644
+--- a/codex-rs/app-server/tests/suite/v2/remote_thread_store.rs
++++ b/codex-rs/app-server/tests/suite/v2/remote_thread_store.rs
+@@ -1,3 +1,4 @@
++// METAENGINE modification to pinned OpenAI Codex: effective-policy admission, 2026-11-01.
+ //! Regression coverage for app-server thread operations backed by a non-local
+ //! `ThreadStore`.
+ //!
+@@ -527,6 +528,7 @@ async fn start_in_process_client(
+     loader_overrides: LoaderOverrides,
+ ) -> std::io::Result<InProcessClientHandle> {
+     in_process::start(InProcessStartArgs {
++        metaengine_policy_guard: None,
+         arg0_paths: Arg0DispatchPaths::default(),
+         config,
+         cli_overrides: Vec::new(),
+diff --git a/codex-rs/app-server/tests/suite/v2/thread_read.rs b/codex-rs/app-server/tests/suite/v2/thread_read.rs
+index f8cc0ec..3392bd6 100644
+--- a/codex-rs/app-server/tests/suite/v2/thread_read.rs
++++ b/codex-rs/app-server/tests/suite/v2/thread_read.rs
+@@ -1,3 +1,4 @@
++// METAENGINE modification to pinned OpenAI Codex: effective-policy admission, 2026-11-01.
+ use anyhow::Result;
+ use app_test_support::MockResponsesConfig;
+ use app_test_support::TestAppServer;
+@@ -855,6 +856,7 @@ async fn thread_turns_list_reads_store_history_without_rollout_path() -> Result<
+         .build()
+         .await?;
+     let client = in_process::start(InProcessStartArgs {
++        metaengine_policy_guard: None,
+         arg0_paths: Arg0DispatchPaths::default(),
+         config: Arc::new(config),
+         cli_overrides: Vec::new(),
+@@ -926,6 +928,7 @@ async fn thread_read_loaded_include_turns_reads_store_history_without_rollout_pa
+         .build()
+         .await?;
+     let client = in_process::start(InProcessStartArgs {
++        metaengine_policy_guard: None,
+         arg0_paths: Arg0DispatchPaths::default(),
+         config: Arc::new(config),
+         cli_overrides: Vec::new(),
+@@ -1035,6 +1038,7 @@ async fn thread_list_includes_store_thread_without_rollout_path() -> Result<()>
+         .build()
+         .await?;
+     let client = in_process::start(InProcessStartArgs {
++        metaengine_policy_guard: None,
+         arg0_paths: Arg0DispatchPaths::default(),
+         config: Arc::new(config),
+         cli_overrides: Vec::new(),
+diff --git a/codex-rs/app-server/tests/suite/v2/thread_unarchive.rs b/codex-rs/app-server/tests/suite/v2/thread_unarchive.rs
+index fcc328d..bfa4198 100644
+--- a/codex-rs/app-server/tests/suite/v2/thread_unarchive.rs
++++ b/codex-rs/app-server/tests/suite/v2/thread_unarchive.rs
+@@ -1,3 +1,4 @@
++// METAENGINE modification to pinned OpenAI Codex: effective-policy admission, 2026-11-01.
+ use anyhow::Result;
+ use app_test_support::MockResponsesConfig;
+ use app_test_support::TestAppServer;
+@@ -291,6 +292,7 @@ async fn thread_unarchive_preserves_pathless_store_metadata() -> Result<()> {
+         .build()
+         .await?;
+     let client = in_process::start(InProcessStartArgs {
++        metaengine_policy_guard: None,
+         arg0_paths: Arg0DispatchPaths::default(),
+         config: Arc::new(config),
+         cli_overrides: Vec::new(),
+diff --git a/codex-rs/app-server/tests/suite/v2/turn_cost_otel.rs b/codex-rs/app-server/tests/suite/v2/turn_cost_otel.rs
+index f9a06f2..562bcc2 100644
+--- a/codex-rs/app-server/tests/suite/v2/turn_cost_otel.rs
++++ b/codex-rs/app-server/tests/suite/v2/turn_cost_otel.rs
+@@ -1,3 +1,4 @@
++// METAENGINE modification to pinned OpenAI Codex: effective-policy admission, 2026-11-01.
+ //! Exercises the best-effort SiWC cost happy path through real app-server startup and OTLP.
+ //! The public in-process transport permits advancing the production timer without test-only hooks.
+ 
+@@ -142,6 +143,7 @@ metrics_exporter = {{ otlp-http = {{ endpoint = "{}/metrics", protocol = "json"
+         EnvironmentManager::default_for_tests()
+     };
+     let mut client = in_process::start(InProcessStartArgs {
++        metaengine_policy_guard: None,
+         arg0_paths: Arg0DispatchPaths::default(),
+         config,
+         cli_overrides: Vec::new(),
+diff --git a/codex-rs/exec/src/cli.rs b/codex-rs/exec/src/cli.rs
+index 0ef0be6..9849fcb 100644
+--- a/codex-rs/exec/src/cli.rs
++++ b/codex-rs/exec/src/cli.rs
+@@ -1,3 +1,4 @@
++// METAENGINE modification to pinned OpenAI Codex: effective-policy admission, 2026-11-01.
+ use clap::Args;
+ use clap::FromArgMatches;
+ use clap::Parser;
+@@ -40,6 +41,21 @@ pub struct Cli {
+     #[arg(long = "ignore-user-config", global = true, default_value_t = false)]
+     pub ignore_user_config: bool,
+ 
++    /// METAENGINE: emit final thread policy and require a matching stdin acceptance before startup.
++    #[arg(
++        long = "metaengine-effective-policy",
++        value_name = "NONCE",
++        requires = "json"
++    )]
++    pub metaengine_effective_policy: Option<String>,
++
++    /// METAENGINE: inspect the exact final thread config and stop before thread/model creation.
++    #[arg(
++        long = "metaengine-policy-only",
++        requires = "metaengine_effective_policy"
++    )]
++    pub metaengine_policy_only: bool,
++
+     /// Do not load user or project execpolicy `.rules` files.
+     #[arg(long = "ignore-rules", global = true, default_value_t = false)]
+     pub ignore_rules: bool,
+diff --git a/codex-rs/exec/src/lib.rs b/codex-rs/exec/src/lib.rs
+index 4cffddd..4ddaa7e 100644
+--- a/codex-rs/exec/src/lib.rs
++++ b/codex-rs/exec/src/lib.rs
+@@ -1,3 +1,4 @@
++// METAENGINE modification to pinned OpenAI Codex: effective-policy admission, 2026-11-01.
+ // - In the default output mode, it is paramount that the only thing written to
+ //   stdout is the final message (if any).
+ // - In --json mode, stdout must be valid JSONL, one event per line.
+@@ -213,6 +214,7 @@ impl RequestIdSequencer {
+ }
+ 
+ struct ExecRunArgs {
++    metaengine_policy_guard: Option<codex_app_server_client::MetaenginePolicyGuard>,
+     in_process_start_args: InProcessClientStartArgs,
+     state_db: Option<StateDbHandle>,
+     command: Option<ExecCommand>,
+@@ -269,6 +271,8 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
+         skip_git_repo_check,
+         ephemeral,
+         ignore_user_config,
++        metaengine_effective_policy,
++        metaengine_policy_only,
+         ignore_rules,
+         color,
+         last_message_file,
+@@ -294,6 +298,28 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
+         worktree,
+     } = shared;
+ 
++    let metaengine_policy_guard = metaengine_effective_policy.map(|nonce| {
++        anyhow::ensure!(ignore_user_config && !worktree && !oss && command.is_none() && images.is_empty()
++            && prompt.as_deref().is_none_or(|value| value == "-"),
++            "METAENGINE policy mode requires fresh local exec, --ignore-user-config, and stdin prompt");
++        codex_app_server_client::MetaenginePolicyGuard::new(nonce, if metaengine_policy_only {
++            codex_app_server_client::MetaenginePolicyMode::Inspect
++        } else { codex_app_server_client::MetaenginePolicyMode::Execute })
++    }).transpose()?;
++
++    // Select the execution environment once, before cloud/bootstrap work. A
++    // remote environment would invalidate the producer's local-backend scope.
++    let metaengine_environment = if metaengine_policy_guard.is_some() {
++        let prepared = EnvironmentManager::prepare_from_env().await?;
++        anyhow::ensure!(
++            !prepared.default_environment_is_remote(),
++            "METAENGINE policy requires a local execution environment"
++        );
++        Some(prepared)
++    } else {
++        None
++    };
++
+     if worktree {
+         if ignore_user_config {
+             anyhow::bail!("--worktree cannot be combined with --ignore-user-config");
+@@ -695,7 +721,12 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
+         codex_config::allowed_symlinked_codex_home(&config.config_layer_stack, &config.codex_home),
+     );
+     let state_db = codex_core::init_state_db(&config).await;
+-    let environment_manager = if run_loader_overrides.ignore_user_config {
++    let environment_manager = if let Some(prepared) = metaengine_environment {
++        prepared.build(
++            Some(local_runtime_paths),
++            embedded_network_policy.bind(config.http_client_factory()),
++        )?
++    } else if run_loader_overrides.ignore_user_config {
+         EnvironmentManager::from_env(
+             Some(local_runtime_paths),
+             embedded_network_policy.bind(config.http_client_factory()),
+@@ -709,7 +740,14 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
+         )
+         .await?
+     };
++    if metaengine_policy_guard.is_some() {
++        anyhow::ensure!(
++            environment_manager.default_environment_id() == Some("local"),
++            "METAENGINE policy requires an enabled local execution environment"
++        );
++    }
+     let in_process_start_args = InProcessClientStartArgs {
++        metaengine_policy_guard: metaengine_policy_guard.clone(),
+         arg0_paths,
+         config: std::sync::Arc::new(config.clone()),
+         cli_overrides: run_cli_overrides,
+@@ -732,6 +770,7 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
+         channel_capacity: DEFAULT_IN_PROCESS_CHANNEL_CAPACITY,
+     };
+     run_exec_session(ExecRunArgs {
++        metaengine_policy_guard,
+         in_process_start_args,
+         state_db,
+         command,
+@@ -832,6 +871,7 @@ async fn load_bootstrap_config_or_exit(
+ 
+ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
+     let ExecRunArgs {
++        metaengine_policy_guard,
+         in_process_start_args,
+         state_db,
+         command,
+@@ -881,7 +921,16 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
+     let default_approval_policy = config.permissions.approval_policy.value();
+     let default_effort = config.model_reasoning_effort.clone();
+ 
+-    let (initial_operation, prompt_summary) = match (command.as_ref(), prompt, images) {
++    // The policy barrier owns the first stdin frame; no prompt is read before it.
++    let deferred_prompt = metaengine_policy_guard.as_ref().map(|_| prompt.clone());
++    let (mut initial_operation, mut prompt_summary) = match (command.as_ref(), prompt, images) {
++        (None, _, _) if metaengine_policy_guard.is_some() => (
++            InitialOperation::UserTurn {
++                items: Vec::new(),
++                output_schema: load_output_schema(output_schema_path.clone()),
++            },
++            String::new(),
++        ),
+         (Some(ExecCommand::Review(review_cli)), _, _) => {
+             let review_request = build_review_request(review_cli)?;
+             let summary = codex_core::review_prompts::user_facing_hint(&review_request.target);
+@@ -1089,14 +1138,37 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
+         .map_err(anyhow::Error::msg)?;
+         (session_configured.thread_id, session_configured)
+     } else {
+-        let response = start_thread(&client, &mut request_ids, &config, &thread_source)
+-            .await
+-            .map_err(anyhow::Error::msg)?;
++        let response = match start_thread(&client, &mut request_ids, &config, &thread_source).await
++        {
++            Ok(response) => response,
++            Err(_)
++                if metaengine_policy_guard.as_ref().is_some_and(
++                    codex_app_server_client::MetaenginePolicyGuard::inspection_completed,
++                ) =>
++            {
++                client.shutdown().await?;
++                return Ok(());
++            }
++            Err(error) => {
++                client.shutdown().await?;
++                return Err(anyhow::Error::msg(error));
++            }
++        };
+         let session_configured = session_configured_from_thread_start_response(&response, &config)
+             .map_err(anyhow::Error::msg)?;
+         (session_configured.thread_id, session_configured)
+     };
+ 
++    if let Some(prompt) = deferred_prompt {
++        prompt_summary = resolve_root_prompt(prompt);
++        if let InitialOperation::UserTurn { items, .. } = &mut initial_operation {
++            items.push(UserInput::Text {
++                text: prompt_summary.clone(),
++                text_elements: Vec::new(),
++            });
++        }
++    }
++
+     if let Some(worktree) = managed_worktree.as_ref() {
+         worktree
+             .manager
+@@ -1161,16 +1233,23 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
+                         responsesapi_client_metadata: None,
+                         additional_context: None,
+                         environments: None,
+-                        cwd: Some(default_cwd),
++                        // A gated run retains the final admitted thread configuration.
++                        cwd: metaengine_policy_guard.is_none().then_some(default_cwd),
+                         runtime_workspace_roots: None,
+-                        approval_policy: Some(default_approval_policy.into()),
++                        approval_policy: metaengine_policy_guard
++                            .is_none()
++                            .then_some(default_approval_policy.into()),
+                         approvals_reviewer: None,
+                         sandbox_policy: None,
+                         permissions: None,
+                         model: None,
+                         service_tier: None,
+                         service_tier_for_turn: None,
+-                        effort: default_effort,
++                        effort: if metaengine_policy_guard.is_none() {
++                            default_effort
++                        } else {
++                            None
++                        },
+                         summary: None,
+                         personality: None,
+                         output_schema,
+diff --git a/codex-rs/exec/src/worktree.rs b/codex-rs/exec/src/worktree.rs
+index 05771cc..74c794a 100644
+--- a/codex-rs/exec/src/worktree.rs
++++ b/codex-rs/exec/src/worktree.rs
+@@ -1,3 +1,4 @@
++// METAENGINE modification to pinned OpenAI Codex: effective-policy admission, 2026-11-01.
+ //! Resolves managed fork sources through the existing name/ID lookup before final configuration.
+ //! The temporary app-server never starts a thread or executes a turn.
+ 
+@@ -28,6 +29,7 @@ pub(super) async fn fork_source(
+     )
+     .await?;
+     let client = InProcessAppServerClient::start(InProcessClientStartArgs {
++        metaengine_policy_guard: None,
+         arg0_paths: arg0_paths.clone(),
+         config: std::sync::Arc::new(config.clone()),
+         cli_overrides: cli_overrides.to_vec(),
+diff --git a/codex-rs/tui/src/lib.rs b/codex-rs/tui/src/lib.rs
+index a32dee4..ab282c2 100644
+--- a/codex-rs/tui/src/lib.rs
++++ b/codex-rs/tui/src/lib.rs
+@@ -1,3 +1,4 @@
++// METAENGINE modification to pinned OpenAI Codex: effective-policy admission, 2026-11-01.
+ // Forbid accidental stdout/stderr writes in the *library* portion of the TUI.
+ // The standalone `codex-tui` binary prints a short help message before the
+ // alternate‑screen mode starts; that file opts‑out locally via `allow`.
+@@ -695,6 +696,7 @@ where
+         })
+         .collect();
+     let client = start_client(InProcessClientStartArgs {
++        metaengine_policy_guard: None,
+         arg0_paths,
+         config: Arc::new(config),
+         cli_overrides: cli_kv_overrides,
+diff --git a/codex-rs/tui/src/onboarding/auth.rs b/codex-rs/tui/src/onboarding/auth.rs
+index 9ad8291..8c4f9ca 100644
+--- a/codex-rs/tui/src/onboarding/auth.rs
++++ b/codex-rs/tui/src/onboarding/auth.rs
+@@ -1,3 +1,4 @@
++// METAENGINE modification to pinned OpenAI Codex: effective-policy admission, 2026-11-01.
+ //! Authentication step UI and state transitions used by onboarding.
+ //!
+ //! This module owns the auth-step state machine (ChatGPT login/device-code/API
+@@ -1134,6 +1135,7 @@ mod tests {
+             .unwrap();
+         let mut auth_config = config.auth_config();
+         let client = InProcessAppServerClient::start(InProcessClientStartArgs {
++            metaengine_policy_guard: None,
+             arg0_paths: Arg0DispatchPaths::default(),
+             config: Arc::new(config),
+             cli_overrides: Vec::new(),

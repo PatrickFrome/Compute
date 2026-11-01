@@ -197,6 +197,7 @@ export const SOURCE_CHECK_FILES = Object.freeze([
   "src/local-provider-upgrade-admission.mjs",
   "src/codex-cli-result-schema.mjs",
   "src/codex-cli-runner.mjs",
+  "src/codex-cli-execution-policy.mjs",
   "src/codex-cli-windows-process-controller.mjs",
   "src/codex-cli-physical-settlement.mjs",
   "src/native-coding-run-callback-journal.mjs",

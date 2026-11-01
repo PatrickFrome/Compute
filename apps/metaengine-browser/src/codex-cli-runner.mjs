@@ -9,6 +9,8 @@ import { StringDecoder } from 'node:string_decoder';
 import { CODEX_CLI_RUN_RECEIPT_SCHEMA, codexCliResultSchema, validateCodexCliResult } from './codex-cli-result-schema.mjs';
 import { protectOwnerOnlyWindowsDirectory, verifyOwnerOnlyWindowsStorage } from './private-windows-storage-acl.mjs';
 import {isNativeCodingAgentMcpLaunch} from './native-coding-agent-mcp-launch.mjs';
+import {codexCliPermissionOverrides,captureCodexCliPhysicalScope,codexCliInvocationFingerprint} from './codex-cli-execution-policy.mjs';
+import {readDirectoryIdentity} from './native-coding-fs-identity.mjs';
 
 const SHA = /^[a-f0-9]{64}$/; const HEAD = /^[a-f0-9]{40}$/;
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
@@ -46,8 +48,7 @@ export function buildCodexCliArgv({ role, worktreePath, schemaPath, resultPath, 
   if (!['IMPLEMENTER', 'CRITIC'].includes(role)) throw fail('role_invalid');
   for (const value of [worktreePath, schemaPath, resultPath]) if (!path.isAbsolute(value || '')) throw fail('argv_absolute_path_required');
   if (model !== null && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(model)) throw fail('model_invalid');
-  return ['-a', 'never', '--no-daemon', '-c', 'windows.sandbox="elevated"',
-    '-c', 'sandbox_workspace_write.writable_roots=[]', '-c', 'sandbox_workspace_write.network_access=false',
+  return ['-a', 'never', '--no-daemon', ...codexCliPermissionOverrides(role === 'CRITIC' ? 'read-only' : 'workspace-write'),
     'exec', '--ignore-user-config',
     '--sandbox', role === 'CRITIC' ? 'read-only' : 'workspace-write', '--json', '--color', 'never',
     ...(model ? ['--model', model] : []), '--output-schema', schemaPath, '--output-last-message', resultPath,
@@ -219,6 +220,15 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
     if (row.fenced || row.signal?.aborted) throw fail('prepared_run_cancelled');
     if (Math.min(Date.parse(row.permit.expires_at), row.effectiveExpiry ?? Infinity) <= Date.now()) throw fail('prepared_lease_expired');
   };
+  const captureScope = (root,role,signal) => captureCodexCliPhysicalScope({cliPath:executablePath,codexHome,
+    scratchRoot:workerTempRoot,workspaceRoot:root,mode:role==='CRITIC'?'read-only':'workspace-write',
+    environment:env,allowMissingScratchRoot:true,verifyStorage:verifyTemporaryStorage,signal});
+  const verifyExecutionScope = async row => {
+    checkOpen(row);
+    const current=await captureScope(row.root,row.role,row.signal);
+    if(JSON.stringify(current)!==JSON.stringify(row.executionScope))throw fail('execution_scope_changed');
+    checkOpen(row);
+  };
   const prepare = async (input, { signal } = {}) => {
       const request = structuredClone(input);
       const role = request?.role; const binding = leaseBinding(request?.lease, role);
@@ -232,6 +242,9 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
         if (Date.parse(permit.expires_at) <= Date.now()) throw fail('prepared_lease_expired');
       };
       if (await executableDigest(executablePath) !== expectedExecutableSha256) throw fail('executable_digest_mismatch');
+      checkPreparationOpen();
+      const executionScope=await captureScope(root,role,signal);
+      checkPreparationOpen();
       const before = await gitProof(root, env,gitExecutable);
       if (before.head !== binding.base_sha) throw fail('base_head_mismatch');
       let subject = null;
@@ -265,6 +278,7 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
         ...binding, run_id: runId, prompt_sha256:hash(request.prompt), permit_id: permit.permit_id, owner_epoch: permit.owner_epoch, user_sid: permit.user_sid,
         workspace_id: permit.workspace_id, project_id: permit.project_id, worktree_path: root,
         executable_sha256: expectedExecutableSha256, sandbox_mode: role === 'CRITIC' ? 'read-only' : 'workspace-write',
+        execution_scope:executionScope,
         // Legacy local attempt label only: no own-PG RESERVED acceptance is asserted.
         started_at: startedAt, state: 'RESERVED', git_before: before, subject_run_id: subject?.run_id || null,
         subject_result_sha256: subject?.result_sha256 || null, automatic_retry_allowed: false, production_qualified: false,
@@ -288,7 +302,7 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
       const abort = new AbortController();
       const row = { state: 'PREPARED', request, binding, role, root, gitDir, permit, before, subject,
         directory, schemaPath, resultPath, runId, receipt, callbackJournal, pins, attemptPath, attemptSha256,
-        abort, signal: signal ? AbortSignal.any([signal, abort.signal]) : abort.signal, fenced: false };
+        executionScope,abort, signal: signal ? AbortSignal.any([signal, abort.signal]) : abort.signal, fenced: false };
       await verifyPins(pins); checkOpen(row);
       return remember(row);
   };
@@ -311,6 +325,7 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
   };
   const verifyPrepared = async row => {
     checkOpen(row); await verifyPins(row.pins);
+    await verifyExecutionScope(row);
     if (hash(await boundedRead(row.attemptPath, 65536)) !== row.attemptSha256) throw fail('prepared_attempt_changed');
     const current = await managedWorktree(row.root);
     if (current.gitDir !== row.gitDir) throw fail('prepared_worktree_changed');
@@ -382,6 +397,7 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
       try {
         // Never grant the CLI sandbox write access to the shared Windows Temp,
         // journal, auth directory, or any repository-controlled temp location.
+        await verifyExecutionScope(row);
         let newTempRoot = false;
         try { await fs.mkdir(workerTempRoot, { mode: 0o700 }); newTempRoot = true; }
         catch (error) { if (error.code !== 'EEXIST') throw error; }
@@ -389,11 +405,30 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
           || (await fs.lstat(workerTempRoot)).isSymbolicLink()) throw fail('temporary_root_alias');
         if (newTempRoot) await protectTemporaryStorage(workerTempRoot);
         else await verifyTemporaryStorage(workerTempRoot, { operation: 'VERIFY_DIRECTORY' });
+        const currentScope=await captureScope(root,role,signal);
+        // Only this invocation's successful exclusive mkdir may replace the
+        // prepared absence descriptor. An unexpected pre-existing root fails.
+        const missingScratch=row.executionScope.scratch.exists===false;
+        if(missingScratch&&newTempRoot
+          &&await readDirectoryIdentity(row.executionScope.scratch.parent_path)!==row.executionScope.scratch.parent_identity_sha256)
+          throw fail('execution_scope_changed');
+        const expectedScope=missingScratch&&newTempRoot
+          ?{...row.executionScope,scratch:currentScope.scratch}:row.executionScope;
+        if(JSON.stringify(currentScope)!==JSON.stringify(expectedScope))throw fail('execution_scope_changed');
+        row.executionScope=currentScope;receipt.execution_scope=currentScope;
         const temporaryPath = path.join(workerTempRoot, runId); await fs.mkdir(temporaryPath, { mode: 0o700 });
         const temporaryEvidence = await protectTemporaryStorage(temporaryPath);
         if (temporaryEvidence?.owner_dacl_verified !== true) throw fail('temporary_storage_unverified');
         receipt.temporary_path = temporaryPath;
+        receipt.temporary_identity_sha256 = await readDirectoryIdentity(temporaryPath);
         receipt.temporary_storage_evidence_sha256 = hash(JSON.stringify(temporaryEvidence));
+        row.pins.push(...await pinParents(temporaryPath));
+        const verifyLaunchScope=async()=>{
+          await verifyExecutionScope(row);
+          if((await verifyTemporaryStorage(temporaryPath,{operation:'VERIFY_DIRECTORY',signal}))?.owner_dacl_verified!==true)
+            throw fail('temporary_storage_unverified');
+          await verifyPins(row.pins);checkOpen(row);
+        };
         const deadlineAt = new Date(Math.min(Date.now() + timeoutMs, Date.parse(permit.expires_at))).toISOString();
         receipt.execution_deadline = deadlineAt;
         await durableJson(schemaPath, codexCliResultSchema(role, subject?.result_sha256));
@@ -410,13 +445,15 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
         signal?.addEventListener('abort', onAbort, { once: true });
         if (signal?.aborted) throw fail('cancelled_before_spawn');
         const spec={executablePath,expectedExecutableSha256,args,cwd:root,env:launchEnvironment,timeoutMs,deadlineAt,runId,binding,promptSha256:receipt.prompt_sha256};
-        checkOpen(row); await verifyPins(row.pins);
+        await verifyLaunchScope();
+        receipt.invocation_sha256=codexCliInvocationFingerprint(spec);
+        receipt.invocation_binding='INTENDED_ONLY';
         launch=createCodexCliLaunch(spec);
         // An interrupted/failed spawn retains this one request forever. The
         // existing exclusive lease directory prevents a later launch/replay.
         await durableJson(path.join(directory,'launch.json'),launch,true);
         receipt.launch_identity=codexCliLaunchIdentity(launch);
-        await verifyPins(row.pins); checkOpen(row);
+        await verifyLaunchScope();
         handle = await processController.spawn({...spec,launch});
         handle.stdout.on('data', data => output('stdout', data)); handle.stderr.on('data', data => output('stderr', data));
         const proof = handle.proof;
@@ -432,6 +469,7 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
           temporary_storage_evidence_sha256: receipt.temporary_storage_evidence_sha256 }), binding, root);
         if (recheck.permit_id !== permit.permit_id || recheck.owner_epoch !== permit.owner_epoch || abortReason || signal?.aborted) throw fail('lease_changed_before_resume');
         await agentBridge?.bindRun(structuredClone(proof));
+        await verifyLaunchScope();
         if(abortReason||signal?.aborted)throw fail('cancelled_before_resume');
         receipt.state = 'EXECUTION_STARTED';
         receipt.execution_deadline = new Date(Math.min(Date.parse(deadlineAt), Date.parse(recheck.expires_at))).toISOString();
