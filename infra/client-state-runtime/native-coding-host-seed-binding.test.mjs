@@ -167,6 +167,47 @@ test('real seed service retries a corrected initial profile but never replaces m
  assert.equal(f.seen.created,3);
 });
 
+test('authenticated historical seed reads survive absent current tools without creating private write state',async t=>{
+ let operator,profile,profileSha,saved,prepares=0,mutations=0;
+ const f=await fixture(t,{createService:options=>{
+  options.readNativeScope.prepare=async()=>{prepares++;throw Error('generated_current_cli_and_git_missing');};
+  return createNativeCodingHostSeedService({...options,readOperator:async()=>structuredClone(operator),
+   protectStorage:async()=>{mutations++;throw Error('history_must_not_protect_or_create_write_storage');},
+   verifyStorage:async()=>{mutations++;throw Error('history_must_not_prepare_write_storage');}});
+ }});
+ profile={profile_id:randomUUID(),device_id:f.device.device_id,client_id:f.device.client_id,
+  device_key_fingerprint_sha256:f.device.key_fingerprint_sha256,admin_grant_epoch:3,
+  trust_namespace:'LOCAL_OPERATOR_QA',agents:[{},{}],production_qualified:false,automatic_retry_allowed:false,authority_effect:false};
+ profileSha=hash(json(profile));operator={value:{schema:'metaengine.native-coding.seed-operator.v1',profile_id:profile.profile_id,profile_sha256:profileSha},
+  sha256:hash('generated-protected-profile-operator')};
+ const packet=await f.request('READ_SEED'),input=packet.body.input;
+ const receipt={schema:'metaengine.native-coding.goal-admission.v1',state:'ADMITTED',...input,profile_id:profile.profile_id,profile_sha256:profileSha,
+  workspace_id:randomUUID(),project_id:randomUUID(),root_task_id:randomUUID(),goal_id:randomUUID(),goal_sha256:'a'.repeat(64),
+  task_spec_sha256:'b'.repeat(64),permit_ids:[randomUUID(),randomUUID()],physical_execution_proven:false,global_actuation_granted:false,
+  production_qualified:false,automatic_retry_allowed:false,authority_effect:false};
+ saved={schema:'metaengine.native-coding.seed-readback.v1',profile_id:profile.profile_id,request_id:input.request_id,body:input,
+  canonical_body_text:json(input),body_sha256:hash(json(input)),receipt,canonical_receipt:json(receipt),receipt_sha256:hash(json(receipt)),
+  readback_only:true,physical_effect_replayed:false,authority_effect:false};
+ f.setLookup(async query=>{
+  if(query.includes('from public.compute_fabric_a2_browser_device_h205f22'))return[structuredClone(f.device)];
+  if(query.startsWith('select current_user'))return[{current_user:'state_owner',session_user:'state_owner'}];
+  if(query.includes('native_coding_seed_profile_v1'))return[{value:{schema:'metaengine.native-coding.seed-profile-readback.v1',profile,
+   canonical_profile:json(profile),profile_sha256:profileSha}}];
+  if(query.includes('native_coding_seed_read_v1'))return[{value:structuredClone(saved)}];
+  if(query.includes('native_coding_seed_list_v1'))return[{value:catalog}];
+  throw Error('Unexpected historical fixture query');
+ });
+ const first=await f.binding.operations.READ_SEED(packet);assert.deepEqual(first.admission,saved);
+ assert.deepEqual(await f.binding.operations.LIST_SEEDS(await f.request()),{...catalog,coordination_mode:'CLI_LED'});
+ assert.equal(prepares,0);assert.equal(mutations,0);
+ assert.deepEqual((await fs.readdir(f.stateDirectory)).filter(name=>name!=='test-identity.json'),[]);
+ await assert.rejects(f.binding.operations.SEED_GOAL(await f.request('SEED_GOAL')),/generated_current_cli_and_git_missing/);
+ assert.equal(prepares,1);assert.equal(mutations,0);
+ f.device.admitted=false;
+ await assert.rejects(f.binding.operations.READ_SEED(await f.request('READ_SEED')),/current_device_unavailable/);
+ assert.equal(prepares,1);assert.equal(mutations,0);
+});
+
 test('private IPC cancellation context reaches the authenticated seed operation unchanged',async t=>{
  let received;
  const f=await fixture(t,{createService:(options,service)=>({...service(options),SEED_GOAL:async(_input,context)=>{received=context;return {state:'READBACK_REQUIRED'};}})});

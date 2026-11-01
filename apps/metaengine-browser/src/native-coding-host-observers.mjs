@@ -373,6 +373,9 @@ export function createNativeCodingHostObservers({app,resourcesPath,cliPath,ident
     async readWorktree(query) {
       const root=await canonical(query.worktree_path,'directory');
       const env=Object.fromEntries(Object.entries(process.env).filter(([key])=>!/^GIT_/i.test(key)));
+      // Override ambient Git configuration only after removing every external
+      // GIT_* spelling. The packaged Git config must not consult another install.
+      Object.assign(env,{GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:process.platform==='win32'?'NUL':'/dev/null',GIT_TERMINAL_PROMPT:'0'});
       const git=async args=>(await runGit(gitExecutable,['--no-pager','-c','core.fsmonitor=false','-c','core.hooksPath=',...args],
         {cwd:root,env,shell:false,windowsHide:true,timeout:15000,maxBuffer:8192})).stdout.trim();
       if(!same(await git(['rev-parse','--show-toplevel']),root))fail('worktree_root_mismatch');

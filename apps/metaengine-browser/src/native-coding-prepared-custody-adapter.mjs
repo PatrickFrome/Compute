@@ -6,8 +6,8 @@ const same=(a,b)=>canonical(a)===canonical(b);
 const leaseKeys=['task_id','agent_id','base_sha','lease_generation','agent_generation_epoch','role'];
 const runnerMethods=['describePrepared','runPrepared','abandonPrepared'];
 
-// Private source composition only. The default Main/Host and bridge remain
-// unmounted/closed. A descriptor is NOT publication evidence: the original IPC
+// Private Main/runtime composition. Default publication remains CLOSED even
+// when this adapter is wired. A descriptor is NOT evidence: the original IPC
 // client still owns its six Owner phases, COMMIT/readback/ACK/terminal checks.
 // No SQL, IPC fallback, retry, scheduler, directory proof or trust promotion.
 export function createNativeCodingPreparedCustodyAdapter({ownPostgres,ownerCallback,assertOpen}={}){

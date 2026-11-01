@@ -35,6 +35,27 @@ export function validateNativeCodingOperatorPaths(value){
   return Object.freeze(value);
 }
 
+// Placement refusal for installed Main/Host composition, not proof of release,
+// ACLs, native custody, completed onboarding or user login. The installer owns
+// payload inventory and private-state production; an old protected descriptor
+// alone cannot adopt an external executable or a previous user profile.
+export function validateNativeCodingInstalledPathScope(value,{resourcesPath,stateDirectory}={}){
+  const fail=reason=>{throw Error('native_coding_installed_path_scope_'+reason);};
+  if(![resourcesPath,stateDirectory].every(root=>typeof root==='string'&&path.isAbsolute(root)&&!root.includes('\0')))fail('roots_invalid');
+  const resources=path.resolve(resourcesPath),state=path.resolve(stateDirectory),bundle=path.join(resources,'client-state-runtime');
+  const inside=(root,target)=>{
+    const relative=path.relative(root,path.resolve(target));
+    return relative!==''&&relative!=='..'&&!relative.startsWith('..'+path.sep)&&!path.isAbsolute(relative);
+  };
+  if(path.relative(resources,state)===''||inside(resources,state)||inside(state,resources))fail('roots_overlap');
+  validateNativeCodingOperatorPaths(value);
+  for(const key of ['cli_executable','git_executable'])if(!inside(bundle,value[key]))fail('tool_not_owned');
+  for(const key of ['codex_home','journal_root','worker_temp_root','result_index_root'])if(!inside(state,value[key]))fail('state_not_owned');
+  for(const pin of [...Object.values(value.sandbox_receipts),...(value.provider_sandbox_receipts||[])])
+    if(!inside(state,pin.path))fail('state_not_owned');
+  return value;
+}
+
 export function resolveNativeCodingSandboxPin(operator,provider){
   if(operator.provider_sandbox_receipts){
     const rows=operator.provider_sandbox_receipts.filter(pin=>pin.provider_id===provider.provider_id
