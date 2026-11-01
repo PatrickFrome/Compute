@@ -173,6 +173,9 @@ $type = $assembly.GetType('MetaengineCodexJob', $true, $false)
 $types = [Type[]]@([string], [string[]], [string], [string], [uint32], [string], [string], [string], [string], [string], [string])
 $method = $type.GetMethod('Run', [Reflection.BindingFlags]'Public,Static', $null, $types, $null)
 if ($null -eq $method -or $method.ReturnType -ne [void]) { throw 'codex_job_runtime_entrypoint_invalid' }
+$policyTypes = [Type[]]@([string], [string[]], [string], [string], [uint32], [string], [string], [string], [string], [string], [string], [string], [string])
+$policyMethod = $type.GetMethod('RunPolicy', [Reflection.BindingFlags]'Public,Static', $null, $policyTypes, $null)
+if ($null -eq $policyMethod -or $policyMethod.ReturnType -ne [void]) { throw 'codex_job_runtime_policy_entrypoint_invalid' }
 $proof = [ordered]@{
   assembly_sha256 = Get-Digest ([string]$request.assembly_path)
   compiler_executable_sha256 = Get-Digest $compiler

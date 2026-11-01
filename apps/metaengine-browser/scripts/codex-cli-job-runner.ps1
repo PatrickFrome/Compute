@@ -7,6 +7,7 @@ Add-Type -TypeDefinition @'
 using System;
 using System.IO;
 using System.Text;
+using System.Collections.Concurrent;
 using System.Threading.Tasks;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
@@ -70,6 +71,60 @@ public static class MetaengineCodexJob {
     return Task.Run(()=> { try { using(var input=new FileStream(new SafeFileHandle(handle,false),FileAccess.Write)) input.Write(prompt,0,prompt.Length); }
       finally { CloseChecked(ref handle,"input_pipe_close_failed"); } });
   }
+  sealed class InputPart {
+    public byte[] bytes; public string context; public bool prompt;
+  }
+  // One owner retains the pipe through bootstrap and ACK, then closes it only
+  // after the original prompt or cancellation. The watchdog never waits for a
+  // blocked pipe write before terminating the exact native Job.
+  sealed class PolicyInputWriter {
+    readonly BlockingCollection<InputPart> parts=new BlockingCollection<InputPart>(1);
+    public readonly Task task; public volatile bool AckWritten,PromptWritten;
+    public PolicyInputWriter(IntPtr handle,string requestId,string requestSha,string nonce) {
+      task=Task.Run(()=> {
+        bool promptWritten=false;
+        try { using(var input=new FileStream(new SafeFileHandle(handle,false),FileAccess.Write)) {
+          foreach(InputPart part in parts.GetConsumingEnumerable()) {
+            input.Write(part.bytes,0,part.bytes.Length); input.Flush();
+            if(part.prompt) { promptWritten=true; break; }
+            AckWritten=true;
+            Emit("{\"type\":\"policy_ack_written\",\"request_id\":"+Escape(requestId)+",\"request_sha256\":"+Escape(requestSha)+",\"nonce\":"+Escape(nonce)+",\"context_id\":"+Escape(part.context)+"}");
+          }
+        }} finally { CloseChecked(ref handle,"input_pipe_close_failed"); }
+        if(promptWritten) {
+          PromptWritten=true;
+          Emit("{\"type\":\"prompt_written\",\"request_id\":"+Escape(requestId)+",\"request_sha256\":"+Escape(requestSha)+"}");
+        }
+      });
+    }
+    public void Write(byte[] bytes,string context,bool prompt) {
+      if(task.IsCompleted || !parts.TryAdd(new InputPart {bytes=bytes,context=context,prompt=prompt})) throw new InvalidOperationException("codex_job_input_phase_busy");
+    }
+    public void Complete() { parts.CompleteAdding(); }
+    public void Dispose() { parts.Dispose(); }
+  }
+  static byte[] Prompt(string encoded,string promptSha) {
+    if(encoded.Length>87384) throw new InvalidOperationException("codex_job_prompt_too_large");
+    byte[] prompt=Convert.FromBase64String(encoded);
+    if(prompt.Length>65536 || Convert.ToBase64String(prompt)!=encoded) throw new InvalidOperationException("codex_job_prompt_too_large_or_invalid");
+    using(var sha=System.Security.Cryptography.SHA256.Create()) {
+      if(BitConverter.ToString(sha.ComputeHash(prompt)).Replace("-","").ToLowerInvariant()!=promptSha) throw new InvalidOperationException("codex_job_prompt_changed");
+    }
+    return prompt;
+  }
+  static byte[] PolicyAck(string encoded,string nonce,out string context) {
+    if(encoded.Length>684) throw new InvalidOperationException("codex_job_ack_size_invalid");
+    byte[] bytes=Convert.FromBase64String(encoded);
+    if(bytes.Length<1 || bytes.Length>512 || Convert.ToBase64String(bytes)!=encoded) throw new InvalidOperationException("codex_job_ack_size_invalid");
+    string text=new UTF8Encoding(false,true).GetString(bytes);
+    // Canonical transport ACK is built by the owning JS consumer. Policy
+    // allowlists and the security decision remain exclusively with that owner.
+    string prefix="{\"type\":\"metaengine.effective_policy.accept.v1\",\"nonce\":\""+nonce+"\",\"context_id\":\"";
+    if(!text.StartsWith(prefix,StringComparison.Ordinal) || !text.EndsWith("\"}\n",StringComparison.Ordinal)) throw new InvalidOperationException("codex_job_ack_binding_invalid");
+    context=text.Substring(prefix.Length,text.Length-prefix.Length-3);
+    if(!System.Text.RegularExpressions.Regex.IsMatch(context,"\\A[a-f0-9]{8}-[a-f0-9]{4}-7[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\\z")) throw new InvalidOperationException("codex_job_ack_context_invalid");
+    return bytes;
+  }
   static string Identity(uint pid,long birth) { return "{\"pid\":"+pid+",\"created_at\":"+Escape(DateTime.FromFileTimeUtc(birth).ToString("o"))+",\"process_incarnation_id\":"+Escape("pid:"+pid+":created_100ns:"+birth)+"}"; }
   static string Terminal(string type,string launch,string helper,string runId,ProcessInfo process,long birth,uint code,string reason,bool neverResumed,string cancellationId,Accounting a) {
     return "{\"schema\":\"metaengine.codex-cli.native-terminal.v2\",\"type\":"+Escape(type)+",\"launch\":"+launch+",\"helper_process\":"+helper+
@@ -79,6 +134,14 @@ public static class MetaengineCodexJob {
       ",\"job_accounting\":{\"active_processes\":"+a.active+",\"total_processes\":"+a.total+",\"total_terminated_processes\":"+a.terminated+"}}";
   }
   public static void Run(string exe,string[] args,string cwd,string runId,uint timeout,string expectedSha,string absoluteDeadlineMs,string requestId,string requestSha,string bindingSha,string promptSha) {
+    RunCore(exe,args,cwd,runId,timeout,expectedSha,absoluteDeadlineMs,requestId,requestSha,bindingSha,promptSha,null,null);
+  }
+  public static void RunPolicy(string exe,string[] args,string cwd,string runId,uint timeout,string expectedSha,string absoluteDeadlineMs,string requestId,string requestSha,string bindingSha,string promptSha,string inputProtocol,string policyNonce) {
+    if(inputProtocol!="EFFECTIVE_POLICY_ACK_V1" || !System.Text.RegularExpressions.Regex.IsMatch(policyNonce??"","\\A[a-f0-9]{64}\\z")) throw new InvalidOperationException("codex_job_policy_protocol_invalid");
+    RunCore(exe,args,cwd,runId,timeout,expectedSha,absoluteDeadlineMs,requestId,requestSha,bindingSha,promptSha,inputProtocol,policyNonce);
+  }
+  static void RunCore(string exe,string[] args,string cwd,string runId,uint timeout,string expectedSha,string absoluteDeadlineMs,string requestId,string requestSha,string bindingSha,string promptSha,string inputProtocol,string policyNonce) {
+    bool policyMode=inputProtocol=="EFFECTIVE_POLICY_ACK_V1";
     IntPtr job=IntPtr.Zero,stdinRead=IntPtr.Zero,stdinWrite=IntPtr.Zero,stdoutRead=IntPtr.Zero,stdoutWrite=IntPtr.Zero,stderrRead=IntPtr.Zero,stderrWrite=IntPtr.Zero;
     var process=new ProcessInfo(); bool assigned=false;
     long helperBirth,helperExit,helperKernel,helperUser;
@@ -168,10 +231,11 @@ public static class MetaengineCodexJob {
         Emit(Terminal("suspended_cancelled",launch,helperIdentity,runId,process,birth,cancelledCode,cancel[2],true,cancel[1],cancelledAccounting));
         return;
       }
-      if(resume==null || !resume.StartsWith("RESUME ")) throw new InvalidOperationException("codex_job_resume_not_authorized");
-      string expectedResume="RESUME "+requestId+" "+requestSha+" ";
+      if(resume==null || resume.Length>90000) throw new InvalidOperationException("codex_job_resume_not_authorized");
+      string expectedResume=(policyMode?"BOOTSTRAP ":"RESUME ")+requestId+" "+requestSha+" ";
       if(!resume.StartsWith(expectedResume,StringComparison.Ordinal)) throw new InvalidOperationException("codex_job_resume_request_changed");
       string resumeBody=resume.Substring(expectedResume.Length); int separator=resumeBody.IndexOf(' ');
+      if(policyMode) { if(separator!=-1) throw new InvalidOperationException("codex_job_bootstrap_has_input"); separator=resumeBody.Length; }
       if(separator<1) throw new InvalidOperationException("codex_job_resume_deadline_missing");
       DateTime deadline=DateTime.UtcNow.AddMilliseconds(timeout);
       DateTime resumeDeadline=DateTimeOffset.FromUnixTimeMilliseconds(long.Parse(resumeBody.Substring(0,separator),System.Globalization.CultureInfo.InvariantCulture)).UtcDateTime;
@@ -181,19 +245,31 @@ public static class MetaengineCodexJob {
         if(originalDeadline<deadline) deadline=originalDeadline;
       }
       if(DateTime.UtcNow>=deadline) throw new InvalidOperationException("codex_job_deadline_expired_before_resume");
-      byte[] prompt=Convert.FromBase64String(resumeBody.Substring(separator+1));
-      if(prompt.Length>65536) throw new InvalidOperationException("codex_job_prompt_too_large");
-      using(var sha=System.Security.Cryptography.SHA256.Create()) {
-        if(BitConverter.ToString(sha.ComputeHash(prompt)).Replace("-","").ToLowerInvariant()!=promptSha) throw new InvalidOperationException("codex_job_prompt_changed");
-      }
+      byte[] prompt=policyMode?null:Prompt(resumeBody.Substring(separator+1),promptSha);
       Require(ResumeThread(process.thread)!=0xffffffff,"resume_failed");
       Emit("{\"type\":\"resumed\",\"request_id\":"+Escape(requestId)+",\"request_sha256\":"+Escape(requestSha)+"}");
       var outTask=Pump(stdoutRead,"stdout"); stdoutRead=IntPtr.Zero; var errTask=Pump(stderrRead,"stderr"); stderrRead=IntPtr.Zero;
-      var inputTask=WriteInput(stdinWrite,prompt); stdinWrite=IntPtr.Zero;
-      var control=Task.Run(()=>Console.In.ReadLine()); string reason=null;
+      PolicyInputWriter policyInput=policyMode?new PolicyInputWriter(stdinWrite,requestId,requestSha,policyNonce):null;
+      var inputTask=policyMode?policyInput.task:WriteInput(stdinWrite,prompt); stdinWrite=IntPtr.Zero;
+      var control=Task.Run(()=>Console.In.ReadLine()); string reason=null; bool invalidControl=false; int inputPhase=0;
       while(WaitForSingleObject(process.process,100)==0x102) {
         if(DateTime.UtcNow>=deadline) { reason="TIMEOUT"; break; }
-        if(control.IsCompleted) { reason="CANCELLED"; break; }
+        if(inputTask.IsFaulted) { invalidControl=true; reason="CANCELLED"; break; }
+        if(control.IsCompleted) {
+          string command=control.GetAwaiter().GetResult();
+          if(!policyMode || command==null || command.StartsWith("CANCEL ",StringComparison.Ordinal)) { reason="CANCELLED"; break; }
+          try {
+            if(command.Length>90000) throw new InvalidOperationException("codex_job_control_too_large");
+            string ackPrefix="POLICY_ACK "+requestId+" "+requestSha+" ",promptPrefix="PROMPT "+requestId+" "+requestSha+" ";
+            if(inputPhase==0 && command.StartsWith(ackPrefix,StringComparison.Ordinal)) {
+              string context; byte[] ack=PolicyAck(command.Substring(ackPrefix.Length),policyNonce,out context);
+              policyInput.Write(ack,context,false); inputPhase=1;
+            } else if(inputPhase==1 && policyInput.AckWritten && command.StartsWith(promptPrefix,StringComparison.Ordinal)) {
+              policyInput.Write(Prompt(command.Substring(promptPrefix.Length),promptSha),null,true); inputPhase=2;
+            } else throw new InvalidOperationException("codex_job_input_phase_invalid");
+          } catch { invalidControl=true; reason="CANCELLED"; break; }
+          control=Task.Run(()=>Console.In.ReadLine());
+        }
       }
       if(reason!=null) Require(TerminateJobObject(job,124),"termination_failed");
       Require(WaitForSingleObject(process.process,5000)==0,"exit_wait_failed");
@@ -206,9 +282,12 @@ public static class MetaengineCodexJob {
         empty=accounting.active==0; if(!empty) System.Threading.Thread.Sleep(20);
       } while(!empty && DateTime.UtcNow<cleanupDeadline);
       Require(empty && accounting.total>=1 && accounting.terminated<=accounting.total,"accounting_not_empty");
+      if(policyInput!=null) policyInput.Complete();
       // Killing the exact job closes every child-owned pipe end BEFORE joining
       // readers/writer. Never wait for stdin consumption before terminating it.
       Require(Task.WaitAll(new[]{outTask,errTask,inputTask},5000),"pipe_drain_unconfirmed");
+      if(policyInput!=null) policyInput.Dispose();
+      if(invalidControl || policyMode && reason==null && !policyInput.PromptWritten) throw new InvalidOperationException("codex_job_input_phase_unconfirmed");
       CloseChecked(ref process.thread,"thread_close_failed"); CloseChecked(ref process.process,"process_close_failed");
       CloseChecked(ref job,"job_close_failed");
       // Candidate only: the parent still has to join this original helper close.
@@ -226,21 +305,29 @@ try {
   $line = [Console]::In.ReadLine()
   if ($null -eq $line -or $line.Length -gt 180000) { throw 'codex_job_envelope_invalid' }
   $envelope = $line | ConvertFrom-Json
-  if ($envelope.schema -cne 'metaengine.codex-cli.launch.v2' -or $envelope.request_sha256 -cnotmatch '^[a-f0-9]{64}$') { throw 'codex_job_envelope_invalid' }
+  if (($envelope.schema -cne 'metaengine.codex-cli.launch.v2' -and $envelope.schema -cne 'metaengine.codex-cli.launch.v3') -or $envelope.request_sha256 -cnotmatch '^[a-f0-9]{64}$') { throw 'codex_job_envelope_invalid' }
   $bytes = [Convert]::FromBase64String([string]$envelope.body_b64)
   if ($bytes.Length -lt 1 -or $bytes.Length -gt 131072 -or [Convert]::ToBase64String($bytes) -cne $envelope.body_b64) { throw 'codex_job_body_invalid' }
   $sha = [Security.Cryptography.SHA256]::Create()
   try { $actual = [BitConverter]::ToString($sha.ComputeHash($bytes)).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() }
   if ($actual -cne $envelope.request_sha256) { throw 'codex_job_body_changed' }
   $request = ([Text.UTF8Encoding]::new($false,$true)).GetString($bytes) | ConvertFrom-Json
-  if ($request.schema -cne 'metaengine.codex-cli.launch.v2' -or $request.request_id -cnotmatch '^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$' -or
+  if ($request.schema -cne $envelope.schema -or $request.request_id -cnotmatch '^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$' -or
     $request.run_id -cnotmatch '^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$' -or
     $request.expected_sha256 -cnotmatch '^[a-f0-9]{64}$' -or $request.binding_sha256 -cnotmatch '^[a-f0-9]{64}$' -or
     $request.prompt_sha256 -cnotmatch '^[a-f0-9]{64}$') { throw 'codex_job_request_invalid' }
   if ([int]$request.timeout_ms -lt 100 -or [int]$request.timeout_ms -gt 1800000) { throw 'codex_job_timeout_invalid' }
-  [MetaengineCodexJob]::Run([string]$request.executable_path,[string[]]$request.args,[string]$request.cwd,
-    [string]$request.run_id,[uint32]$request.timeout_ms,[string]$request.expected_sha256,[string]$request.deadline_ms,
-    [string]$request.request_id,[string]$envelope.request_sha256,[string]$request.binding_sha256,[string]$request.prompt_sha256)
+  if ($request.schema -ceq 'metaengine.codex-cli.launch.v3') {
+    if ($request.input_protocol -cne 'EFFECTIVE_POLICY_ACK_V1' -or $request.policy_nonce -cnotmatch '^[a-f0-9]{64}$') { throw 'codex_job_policy_protocol_invalid' }
+    [MetaengineCodexJob]::RunPolicy([string]$request.executable_path,[string[]]$request.args,[string]$request.cwd,
+      [string]$request.run_id,[uint32]$request.timeout_ms,[string]$request.expected_sha256,[string]$request.deadline_ms,
+      [string]$request.request_id,[string]$envelope.request_sha256,[string]$request.binding_sha256,[string]$request.prompt_sha256,
+      [string]$request.input_protocol,[string]$request.policy_nonce)
+  } else {
+    [MetaengineCodexJob]::Run([string]$request.executable_path,[string[]]$request.args,[string]$request.cwd,
+      [string]$request.run_id,[uint32]$request.timeout_ms,[string]$request.expected_sha256,[string]$request.deadline_ms,
+      [string]$request.request_id,[string]$envelope.request_sha256,[string]$request.binding_sha256,[string]$request.prompt_sha256)
+  }
 } catch {
   # A controlled error is reported without command text, prompt, env or credential values.
   [Console]::Out.WriteLine('{"type":"error","reason":"NATIVE_JOB_FAILED"}')
