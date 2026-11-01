@@ -36,10 +36,6 @@ test('actual pinned private Windows Git/Codex start without inherited tools and 
       await tools.revalidate();
       assert.match((await run(tools.gitExecutable,['--version'],options)).stdout,/git version 2\.56\.0\.windows\.4/);
       assert.match((await run(tools.cliExecutable,['--version'],options)).stdout,/0\.166\.0/);
-      // MinGit's optional GCM is Framework-based; a successful Git version
-      // alone does not qualify this shipped dependency. Version is read-only.
-      const gcm=await run(path.join(toolsRoot,'git','ucrt64','bin','git-credential-manager.exe'),['--version'],options);
-      assert.match(gcm.stdout+gcm.stderr,/2\.9\.1/);
       const repo=path.join(root,'repo');await fs.mkdir(repo);
       await run(tools.gitExecutable,['init','--quiet',repo],options);
       const repoOptions={...options,cwd:repo};
@@ -64,4 +60,26 @@ test('actual pinned private Windows Git/Codex start without inherited tools and 
       for(const key of Object.keys(process.env))if(key.toUpperCase()==='PATH')delete process.env[key];
       Object.assign(process.env,inherited);
     }
+  });
+
+// Separate opt-in qualification: GCM is shipped but is not required for the
+// core fixed Git operations above. Enabling this test grants no client
+// readiness or authentication authority, and --version does not prove a
+// clean image's CLR provenance or authenticated Git operations.
+test('optional bundled GCM Windows loader starts without inherited tools',
+  {skip:process.platform!=='win32'||process.arch!=='x64'||!process.env.METAENGINE_PRIVATE_TOOL_TEST_ARCHIVES
+    ||process.env.METAENGINE_QUALIFY_OPTIONAL_GCM!=='1'},async t=>{
+    const root=await fs.mkdtemp(path.join(os.tmpdir(),'me-optional-gcm-win-'));
+    t.after(()=>fs.rm(root,{recursive:true,force:true,maxRetries:3,retryDelay:100}));
+    const toolsRoot=path.join(root,'tools');
+    await stagePrivateNativeTools({archiveDirectory:path.resolve(process.env.METAENGINE_PRIVATE_TOOL_TEST_ARCHIVES),outputDirectory:toolsRoot});
+    const manifestBytes=await fs.readFile(path.join(toolsRoot,'manifest.json'));
+    await assertPrivateNativeToolsManifestPins(JSON.parse(manifestBytes));
+    const tools=await resolvePrivateNativeTools({toolsRoot,binding:privateNativeToolsBinding(manifestBytes)});
+    const privateTemp=path.join(root,'temp');await fs.mkdir(privateTemp);
+    const env={...tools.environment,TEMP:privateTemp,TMP:privateTemp,USERPROFILE:privateTemp,LOCALAPPDATA:privateTemp,APPDATA:privateTemp};
+    await tools.revalidate();
+    const result=await run(path.join(toolsRoot,'git','ucrt64','bin','git-credential-manager.exe'),['--version'],
+      {env,cwd:root,shell:false,windowsHide:true,timeout:30000,maxBuffer:1024*1024});
+    assert.match(result.stdout+result.stderr,/2\.9\.1/);
   });

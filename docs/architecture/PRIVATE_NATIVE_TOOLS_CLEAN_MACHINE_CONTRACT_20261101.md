@@ -169,6 +169,50 @@ MinGit's optional GCM 2.9.1 targets .NET Framework 4.7.2 (its managed imports
 include mscoree.dll). It is not an app-local self-contained CLR. Preserve
 GIT_CONFIG_NOSYSTEM=1 and GIT_CONFIG_GLOBAL=NUL: the shipped etc/gitconfig
 otherwise includes Program Files Git configs and credential.helper=manager.
-The Windows startup test also checks GCM --version without login or credential
-creation. The OS baseline/CLR, helper/voice loading and actual sandbox bootstrap
+A separate opt-in Windows test checks GCM --version without login or credential
+creation; it does not gate the core tool startup test. The OS baseline/CLR, helper/voice loading and actual sandbox bootstrap
 remain Windows qualification requirements.
+
+## GCM usage and inbox CLR classification (follow-up qualification)
+
+Checkpoint `3fb3a9b2ec65b0b8fe476104dd917ada75c461cb` and all 425 dependency
+file rows remain preserved. No loader, startup code, OS security, credentials,
+package payload or dependency pin is changed by this classification.
+
+GCM is not required for core METAENGINE startup, but existing use is not wholly
+manual: `main.mjs:3711` installs the GitHub connection observer and
+`github-repository-connection.mjs:216` calls connect after app.whenReady. The
+legacy reader only selects a preexisting Program Files Git helper (`:74-85`),
+not this private ucrt64 GCM. Missing/failed GCM returns null, falls back to
+Electron safeStorage (`:113-128`), and without credentials reports
+CREDENTIAL_UNAVAILABLE (`:172-192`). Main does not await the observer as a core
+startup gate. Its automatic failure is caught. No actual credentials were read
+for this audit, and no helper was executed.
+
+Managed fixed Git operations, repository verification and native Git proofs
+are local worktree/status/rev-parse/remote-get-url/diff operations. Their private
+environment disables system/global Git config; they do not require GCM.
+Therefore no mandatory .NET redistributable is introduced solely for this
+optional component. Existing external GCM 'get' is a credential-helper call;
+its internals must not be described as guaranteed read-only/token-refresh-free.
+
+Microsoft documents .NET Framework 4.7.2 as inbox on Windows 10 1803/1809,
+4.8 on Windows 10 1903 onward and Windows 11 21H2, and 4.8.1 on Windows 11
+22H2 onward. Later Framework4 versions are in-place updates supporting earlier
+Framework4 targets. Thus an unmodified stock Windows11 or Windows10>=1803
+image supplies the required CLR without a separately preinstalled developer
+runtime. This does not prove the environment of a real installation.
+Source: https://learn.microsoft.com/en-us/dotnet/framework/install/versions-and-dependencies
+
+No explicit METAENGINE minimum Windows release/build was found in the reviewed
+README/package/NSIS configuration. Upstream Git only states Windows10+ for x64:
+https://gitforwindows.org/requirements.html . 'Windows10+' alone does not
+guarantee Framework4.7.2 on early Windows10 releases, and modified/deprovisioned
+images are not established by the stock-image table. This uncertainty remains
+limited to the optional GCM function; it does not become an installation gate.
+
+The optional test is selected only with METAENGINE_QUALIFY_OPTIONAL_GCM=1 on
+Windows and actual pinned archives. Neither its --version result nor a hosted
+runner's existing .NET qualifies clean-image provenance or Git authentication.
+Those remain unconfirmed until a genuine OS-image-bound optional-function drill.
+The core no-global-tools test remains independent of GCM availability.
