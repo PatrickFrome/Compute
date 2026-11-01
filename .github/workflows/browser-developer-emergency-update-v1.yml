@@ -99,7 +99,7 @@ jobs:
           $buildScript = (Resolve-Path './scripts/build-guardian-native-staging.ps1').Path
           Push-Location $env:RUNNER_TEMP
           try {
-            & $buildScript -OutputDir $out | Out-Host
+            & $buildScript -UnlinkedTestBuild -OutputDir $out | Out-Host
           } finally {
             Pop-Location
           }

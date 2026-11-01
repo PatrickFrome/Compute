@@ -1,10 +1,17 @@
 param(
+  $CryptoBuild,
+  [switch]$UnlinkedTestBuild,
   [string]$OutputDir = (Join-Path (Split-Path $PSScriptRoot -Parent) 'native-dist\guardian'),
   [string]$VcVarsPath = $env:ME2_VCVARS_PATH
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+Import-Module (Join-Path $PSScriptRoot 'guardian-static-crypto.psm1')
+if ([bool]$CryptoBuild -eq [bool]$UnlinkedTestBuild) { throw 'guardian_native_requires_fresh_crypto_or_explicit_unlinked_test' }
+$crypto = $null
+if ($CryptoBuild) { $crypto = Get-GuardianCryptoLink $CryptoBuild }
+
 function Get-Sha256([string]$Path) {
   $stream = [IO.File]::OpenRead($Path)
   $hash = [Security.Cryptography.SHA256]::Create()
@@ -48,16 +55,28 @@ $configurator = Join-Path $resolvedOut 'METAENGINEBrowserGuardianConfigure.exe'
 # Keep them with the disposable staging outputs, never in the reviewed source.
 Push-Location $resolvedOut
 try {
-$serviceCmd = 'call "{0}" >nul && cl.exe /nologo /std:c++20 /EHsc /MT /W4 /WX /DUNICODE /D_UNICODE "{1}" "{2}" "{3}" "{4}" "{5}" "{6}" "{7}" /Fe:"{8}" /link advapi32.lib bcrypt.lib shell32.lib ole32.lib userenv.lib wtsapi32.lib winhttp.lib' -f $vcvars,$serviceSource,$actuatorSource,$namespaceSource,$ownerObserverSource,$ownerStoreSource,$ownerReconcilerSource,$ticketClientSource,$service
+$cryptoCompile = ''; $cryptoLink = ''
+if ($crypto) {
+  $serviceMap = Join-Path $resolvedOut 'service.map'
+  $cryptoCompile = $crypto.Compile; $cryptoLink = $crypto.Link + (' /MAP:"{0}"' -f $serviceMap)
+}
+foreach ($path in @($vcvars,$serviceSource,$actuatorSource,$namespaceSource,$ownerObserverSource,$ownerStoreSource,$ownerReconcilerSource,$ticketClientSource,$service,$configuratorSource,$configurator)) { Assert-GuardianCommandPath $path }
+$serviceCmd = 'call "{0}" >nul && set CL=&& set _CL_=&& set LINK=&& set _LINK_=&& cl.exe /nologo /std:c++20 /EHsc /MT /W4 /WX /DUNICODE /D_UNICODE {9} "{1}" "{2}" "{3}" "{4}" "{5}" "{6}" "{7}" /Fe:"{8}" /link advapi32.lib bcrypt.lib shell32.lib ole32.lib userenv.lib wtsapi32.lib winhttp.lib {10}' -f $vcvars,$serviceSource,$actuatorSource,$namespaceSource,$ownerObserverSource,$ownerStoreSource,$ownerReconcilerSource,$ticketClientSource,$service,$cryptoCompile,$cryptoLink
 & $env:ComSpec /d /s /c $serviceCmd
 if ($LASTEXITCODE -ne 0) { throw "guardian_service_compile_exit_$LASTEXITCODE" }
-$configCmd = 'call "{0}" >nul && cl.exe /nologo /std:c++20 /EHsc /MT /W4 /WX /DUNICODE /D_UNICODE "{1}" /Fe:"{2}" /link advapi32.lib shell32.lib ole32.lib' -f $vcvars,$configuratorSource,$configurator
+$configCmd = 'call "{0}" >nul && set CL=&& set _CL_=&& set LINK=&& set _LINK_=&& cl.exe /nologo /std:c++20 /EHsc /MT /W4 /WX /DUNICODE /D_UNICODE "{1}" /Fe:"{2}" /link advapi32.lib shell32.lib ole32.lib' -f $vcvars,$configuratorSource,$configurator
 & $env:ComSpec /d /s /c $configCmd
 if ($LASTEXITCODE -ne 0) { throw "guardian_configurator_compile_exit_$LASTEXITCODE" }
 } finally {
   Pop-Location
 }
 
+$peImports = @()
+if ($crypto) {
+  $peImports = @(Assert-GuardianStaticPe $service $vcvars (Join-Path $crypto.EvidenceDirectory 'service-pe') -MapPath $serviceMap)
+  Remove-Item -LiteralPath $serviceMap
+  $null = Get-GuardianCryptoLink $CryptoBuild
+}
 $actuatorContractRaw = (& $service --update-actuator-contract-json | Out-String).Trim()
 if ($LASTEXITCODE -ne 0) { throw "guardian_update_actuator_contract_exit_$LASTEXITCODE" }
 $actuatorContract = $actuatorContractRaw | ConvertFrom-Json
@@ -114,7 +133,10 @@ foreach ($item in @(
 
 $manifest = [ordered]@{
   schema = 'metaengine.browser.guardian-native-staging-manifest.v1'
-  version = '1.1.0'
+  version = '1.2.0'
+  static_crypto = $(if ($crypto) { $crypto.Binding } else { $null })
+  unlinked_test_build = [bool]$UnlinkedTestBuild
+  service_pe_imports = $peImports
   source_head = $sourceHead
   package_version = $packageVersion
   staging_root = 'resources/guardian-native'
@@ -165,3 +187,10 @@ foreach ($row in @($readback.binaries)) {
   if ((Get-Sha256 $binary) -ne [string]$row.sha256) { throw "guardian_staging_binary_readback_mismatch:$($row.name)" }
 }
 Write-Host ($readback | ConvertTo-Json -Depth 6 -Compress)
+
+if ($CryptoBuild) {
+  Copy-GuardianCryptoNotices $CryptoBuild $resolvedOut
+  Register-GuardianNativeOutput $CryptoBuild 'service' $service
+  Register-GuardianNativeOutput $CryptoBuild 'configurator' $configurator
+  Register-GuardianNativeOutput $CryptoBuild 'staging-manifest' $manifestPath
+}

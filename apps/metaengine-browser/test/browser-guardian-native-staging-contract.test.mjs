@@ -93,7 +93,7 @@ test('electron-builder owns the single Guardian native staging build boundary', 
   const parsed = spawnSync(process.execPath, ['--check', hookPath], { encoding: 'utf8' });
   assert.equal(parsed.status, 0, parsed.stderr || parsed.stdout);
   assert.match(hook, /electronPlatformName\s*!==\s*'win32'/);
-  assert.match(hook, /build-guardian-native-staging\.ps1/);
+  assert.match(hook, /build-guardian-native-package\.ps1/);
   assert.match(hook, /guardian_native_staging_windows_toolchain_required/);
   assert.match(hook, /guardian_native_staging_build_failed/);
   assert.doesNotMatch(hook, /ME2_GUARDIAN_NATIVE_REUSE_DIR|reuseVerifiedNativeStaging/,

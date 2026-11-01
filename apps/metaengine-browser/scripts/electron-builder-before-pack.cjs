@@ -4,6 +4,8 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const { execFileSync, spawnSync } = require('node:child_process');
 const path = require('node:path');
+const os = require('node:os');
+const { verifyStagedGuardianRuntime } = require('./guardian-native-package-verification.cjs');
 const { buildDevOSSourceSnapshot } = require('./devos-source-snapshot-builder.cjs');
 const { buildOfflineRuntimeBinding } = require('./offline-runtime-package-binding.cjs');
 const { localBuildSelected, captureLocalBuildIdentity } = require('./local-build-identity.cjs');
@@ -241,7 +243,12 @@ async function metaengineGuardianNativeBeforePack(context) {
     head: trustRoot.build_sha,
     ref: process.env.GITHUB_REF || null,
   });
-  const buildScript = path.join(__dirname, 'build-guardian-native-staging.ps1');
+  const buildScript = path.join(__dirname, 'build-guardian-native-package.ps1');
+  const cryptoSource = process.env.ME2_GUARDIAN_CRYPTO_SOURCE_DIR;
+  if (!cryptoSource || !path.isAbsolute(cryptoSource)) throw new Error('guardian_authenticated_crypto_source_required');
+  const cryptoOutput = process.env.ME2_GUARDIAN_CRYPTO_OUTPUT_DIR
+    || fs.mkdtempSync(path.join(os.tmpdir(), 'guardian-package-crypto-'));
+  if (!path.isAbsolute(cryptoOutput)) throw new Error('guardian_crypto_output_must_be_absolute');
   const daemonBuildScript = path.join(__dirname, 'build-me2-daemon-staging.ps1');
   const powershell = process.env.SystemRoot
     ? path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
@@ -249,7 +256,8 @@ async function metaengineGuardianNativeBeforePack(context) {
 
   const result = spawnSync(
     powershell,
-    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', buildScript],
+    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', buildScript,
+      '-SourceDir', cryptoSource, '-CryptoOutputDir', cryptoOutput],
     { cwd: appRoot, stdio: 'inherit', windowsHide: true },
   );
 
@@ -258,23 +266,10 @@ async function metaengineGuardianNativeBeforePack(context) {
     throw new Error(`guardian_native_staging_build_failed:${result.status}`);
   }
 
-  // Build-host-only Node-API headers are vendored and hash pinned. The client
-  // receives the native artifact; no end-user compiler, node.exe or PATH lookup.
-  const peerResult = spawnSync(powershell, [
-    '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',
-    path.join(__dirname, 'build-guardian-native-peer.ps1'),
-  ], { cwd: appRoot, stdio: 'inherit', windowsHide: true });
-  if (peerResult.error) throw peerResult.error;
-  if (peerResult.status !== 0) throw new Error(`guardian_native_peer_build_failed:${peerResult.status}`);
-
-  const bootstrapResult = spawnSync(powershell, [
-    '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',
-    path.join(__dirname, 'build-guardian-machine-bootstrap.ps1'),
-    '-StagingDir', path.join(appRoot, 'native-dist/guardian'),
-    '-OutputDir', path.join(appRoot, 'native-dist/guardian-bootstrap'),
-  ], { cwd: appRoot, stdio: 'inherit', windowsHide: true });
-  if (bootstrapResult.error) throw bootstrapResult.error;
-  if (bootstrapResult.status !== 0) throw new Error(`guardian_machine_bootstrap_build_failed:${bootstrapResult.status}`);
+  // The single PowerShell invocation built service, peer and embedding bootstrap
+  // from one fresh producer context. Recheck the exact staged bytes before pack.
+  verifyStagedGuardianRuntime({ directory: path.join(appRoot, 'native-dist'),
+    sourceHead: trustRoot.build_sha, packageVersion });
 
   const bootstrapBindingPath = path.join(appRoot, 'native-dist', 'guardian-bootstrap', 'guardian-machine-bootstrap-binding.json');
   let bootstrapBinding;

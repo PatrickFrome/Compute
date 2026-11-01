@@ -5,9 +5,6 @@
 #include "browser-guardian-installed-namespace.hpp"
 #include "browser-guardian-release-signature.hpp"
 
-#ifdef METAENGINE_GUARDIAN_RELEASE_SIGNATURE_LINKED
-#error This probe verifies the default unlinked release-signature deny behavior.
-#endif
 
 #include <aclapi.h>
 #include <bcrypt.h>
@@ -343,6 +340,7 @@ int main() {
         std::cout << "{\"name\":\"retained_package_oracle\",\"state\":\"OBSERVED\",\"sha256\":\""
             << bytesSha256(bytes) << "\",\"bytes\":" << bytes.size() << "}\n";
     });
+#ifndef METAENGINE_GUARDIAN_RELEASE_SIGNATURE_LINKED
     run("default_release_signature_build_unavailable", [](Fixture& fixture) {
         auto held = captured(fixture);
         require(!held->releaseSignatureBound(), "unsigned_fixture_already_signature_bound");
@@ -351,6 +349,48 @@ int main() {
         require(held->authenticityReason() == "RELEASE_SIGNATURE_BUILD_UNAVAILABLE", "unlinked_signature_build_reason_incorrect");
         require(held->recheck(), "signature_unavailable_destroyed_mechanical_custody");
     });
+#else
+    run("linked_missing_envelope_rejected", [](Fixture& fixture) {
+        auto held = captured(fixture);
+        require(!GuardianInstalledNamespaceTest::bindRetainedReleaseSignature(*held), "missing_envelope_accepted");
+        require(held->authenticityReason() == "RELEASE_ENVELOPE_NOT_RETAINED", "linked_missing_reason");
+        require(!held->releaseSignatureBound() && held->recheck(), "missing_envelope_changed_custody");
+    });
+    const std::string canonical =
+        "{\"schema\":\"metaengine.browser.installed-release-manifest.v2\",\"source_sha\":\"" + std::string(40, 'a')
+        + "\",\"package_version\":\"0.7.0-dev.12345.1\",\"exe_name\":\"METAENGINE Browser Test.exe\",\"exe_sha256\":\"" + std::string(64, 'b')
+        + "\",\"signer_thumbprint\":\"" + std::string(40, 'c') + "\",\"installer_sha256\":\"" + std::string(64, 'd')
+        + "\",\"slsa_bundle_sha256\":\"" + std::string(64, 'e') + "\",\"slsa_evidence_sha256\":\"" + std::string(64, 'f')
+        + "\",\"package_code_sha256\":\"" + std::string(64, '0') + "\"}";
+    const auto envelope = [&](const std::string& signature) {
+        return "{\"schema\":\"metaengine.browser.installed-release-envelope.v2\",\"manifest\":" + canonical
+            + ",\"signature_base64\":\"" + signature + "\"}";
+    };
+    const auto refuse = [&](Fixture& fixture, const std::string& bytes, const char* reason) {
+        fixture.file(fixture.root + L"\\metaengine-installed-release-proof.v2.json", bytes);
+        auto held = captured(fixture);
+        require(!GuardianInstalledNamespaceTest::bindRetainedReleaseSignature(*held), "invalid_signature_accepted");
+        require(held->authenticityReason() == reason, "linked_signature_reason:" + held->authenticityReason());
+        require(!held->releaseSignatureBound() && held->recheck(), "signature_rejection_changed_custody");
+    };
+    run("linked_noncanonical_envelope_rejected", [&](Fixture& fixture) {
+        refuse(fixture, envelope(std::string(86, 'A') + "==") + "\n", "RELEASE_ENVELOPE_NONCANONICAL");
+    });
+    run("linked_noncanonical_base64_rejected", [&](Fixture& fixture) {
+        refuse(fixture, envelope(std::string(85, 'A') + "B=="), "RELEASE_SIGNATURE_ENCODING_INVALID");
+    });
+    run("linked_invalid_base64_rejected", [&](Fixture& fixture) {
+        refuse(fixture, envelope(std::string(85, 'A') + "?=="), "RELEASE_SIGNATURE_ENCODING_INVALID");
+    });
+    run("linked_canonical_zero_signature_rejected", [&](Fixture& fixture) {
+        refuse(fixture, envelope(std::string(86, 'A') + "=="), "RELEASE_SIGNATURE_INVALID");
+    });
+    run("linked_rfc_signature_is_not_production_root", [&](Fixture& fixture) {
+        // Public RFC8032 signature only; no signing key and no alternate root.
+        refuse(fixture, envelope("5VZDAMNgrHKQhuLMgG6CioSHfx645dl02HPgZSJJAVVfuIIVkKM7rMYeOXAc+bRr0lv18FlbviRlUUFDjnoQCw=="),
+            "RELEASE_SIGNATURE_INVALID");
+    });
+#endif
     run("unicode_package_binding_refused", [](Fixture& fixture) {
         // NTFS preserves these different UTF-16 names; ECMAScript toLowerCase
         // folds the first to the second. CREATE_NEW must succeed for BOTH.

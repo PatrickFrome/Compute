@@ -1,10 +1,17 @@
 param(
+  $CryptoBuild,
+  [switch]$UnlinkedTestBuild,
   [Parameter(Mandatory=$true)][string]$StagingDir,
   [Parameter(Mandatory=$true)][string]$OutputDir,
   [string]$VcVarsPath = $env:ME2_VCVARS_PATH
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+Import-Module (Join-Path $PSScriptRoot 'guardian-static-crypto.psm1')
+if ([bool]$CryptoBuild -eq [bool]$UnlinkedTestBuild) { throw 'guardian_native_requires_fresh_crypto_or_explicit_unlinked_test' }
+$crypto = $null
+if ($CryptoBuild) { $crypto = Get-GuardianCryptoLink $CryptoBuild }
+
 function Get-Sha256([string]$Path) {
   $stream = [IO.File]::OpenRead($Path)
   $hash = [Security.Cryptography.SHA256]::Create()
@@ -24,6 +31,13 @@ foreach ($asset in @($service,$configure)) {
   $row = @($manifest.binaries | Where-Object { $_.name -eq (Split-Path $asset -Leaf) })
   if ($row.Count -ne 1 -or (Get-Sha256 $asset) -ne $row[0].sha256 `
       -or (Get-Item $asset).Length -ne $row[0].size) { throw 'bootstrap_staging_asset_drift' }
+}
+$head = (git -C $root rev-parse HEAD).Trim()
+if ($manifest.source_head -cne $head -or $manifest.unlinked_test_build -ne [bool]$UnlinkedTestBuild) { throw 'bootstrap_staging_source_or_mode_mismatch' }
+if ($CryptoBuild) {
+  Assert-GuardianNativeOutput $CryptoBuild 'service' $service
+  Assert-GuardianNativeOutput $CryptoBuild 'configurator' $configure
+  Assert-GuardianNativeOutput $CryptoBuild 'staging-manifest' $manifestPath
 }
 $serviceSha = Get-Sha256 $service
 $configSha = Get-Sha256 $configure
@@ -68,12 +82,15 @@ constexpr wchar_t kBootstrapSlotIdW[] = L"$slotId";
   $originSource = Join-Path $native 'browser-guardian-original-install-user.cpp'
   $originLink = Join-Path $native 'browser-guardian-install-origin-link.cpp'
   $observer = Join-Path $native 'browser-guardian-owner-enrollment-observer.cpp'
-  $command = 'call "{0}" >nul && rc.exe /nologo /fo bootstrap.res guardian-bootstrap.rc && cl.exe /nologo /std:c++20 /EHsc /MT /W4 /WX /DUNICODE /D_UNICODE /I"{1}" "{2}" "{4}" "{5}" "{6}" bootstrap.res /Fe:"{3}" /link advapi32.lib bcrypt.lib shell32.lib ole32.lib /MANIFEST:EMBED /MANIFESTUAC:"level=''requireAdministrator'' uiAccess=''false''"' -f $vcvars,$temp,$source,$exe,$originSource,$originLink,$observer
+  foreach ($path in @($vcvars,$temp,$source,$exe,$originSource,$originLink,$observer,$service,$configure,$manifestPath)) { Assert-GuardianCommandPath $path }
+  $command = 'call "{0}" >nul && set CL=&& set _CL_=&& set LINK=&& set _LINK_=&& rc.exe /nologo /fo bootstrap.res guardian-bootstrap.rc && cl.exe /nologo /std:c++20 /EHsc /MT /W4 /WX /DUNICODE /D_UNICODE /I"{1}" "{2}" "{4}" "{5}" "{6}" bootstrap.res /Fe:"{3}" /link advapi32.lib bcrypt.lib shell32.lib ole32.lib /MANIFEST:EMBED /MANIFESTUAC:"level=''requireAdministrator'' uiAccess=''false''"' -f $vcvars,$temp,$source,$exe,$originSource,$originLink,$observer
   Push-Location $temp
   try { & $env:ComSpec /d /s /c $command; if ($LASTEXITCODE -ne 0) { throw "bootstrap_compile_exit_$LASTEXITCODE" } }
   finally { Pop-Location }
   $binding = [ordered]@{
     schema='metaengine.browser-guardian.machine-bootstrap-binding.v1'
+    static_crypto=$(if ($crypto) { $crypto.Binding } else { $null })
+    unlinked_test_build=[bool]$UnlinkedTestBuild
     source_head=$sourceHead
     package_version=[string]$manifest.package_version
     slot_id=$slotId
@@ -95,7 +112,7 @@ constexpr wchar_t kBootstrapSlotIdW[] = L"$slotId";
   $coordinatorName = 'METAENGINE-Guardian-Install-Origin-' + [string]$manifest.package_version + '-x64.exe'
   $coordinatorExe = Join-Path $out $coordinatorName
   $coordinatorSource = Join-Path $native 'browser-guardian-install-origin-coordinator.cpp'
-  $outerCommand = 'call "{0}" >nul && cl.exe /nologo /std:c++20 /EHsc /MT /W4 /WX /DUNICODE /D_UNICODE "{1}" "{2}" "{3}" "{4}" /Fe:"{5}" /link advapi32.lib bcrypt.lib /MANIFEST:EMBED /MANIFESTUAC:"level=''asInvoker'' uiAccess=''false''"' -f $vcvars,$coordinatorSource,$originSource,$originLink,$observer,$coordinatorExe
+  $outerCommand = 'call "{0}" >nul && set CL=&& set _CL_=&& set LINK=&& set _LINK_=&& cl.exe /nologo /std:c++20 /EHsc /MT /W4 /WX /DUNICODE /D_UNICODE "{1}" "{2}" "{3}" "{4}" /Fe:"{5}" /link advapi32.lib bcrypt.lib /MANIFEST:EMBED /MANIFESTUAC:"level=''asInvoker'' uiAccess=''false''"' -f $vcvars,$coordinatorSource,$originSource,$originLink,$observer,$coordinatorExe
   Push-Location $temp
   try { & $env:ComSpec /d /s /c $outerCommand; if ($LASTEXITCODE -ne 0) { throw "origin_coordinator_compile_exit_$LASTEXITCODE" } }
   finally { Pop-Location }
@@ -117,5 +134,11 @@ constexpr wchar_t kBootstrapSlotIdW[] = L"$slotId";
     authority_effect=$false
   }
   [System.IO.File]::WriteAllText((Join-Path $out 'guardian-install-origin-staging.json'), ($originBinding | ConvertTo-Json -Depth 4), $utf8)
+  if ($CryptoBuild) {
+    Assert-GuardianNativeOutput $CryptoBuild 'service' $service
+    Assert-GuardianNativeOutput $CryptoBuild 'configurator' $configure
+    Assert-GuardianNativeOutput $CryptoBuild 'staging-manifest' $manifestPath
+    Register-GuardianNativeOutput $CryptoBuild 'bootstrap' $exe
+  }
   Write-Output ($binding | ConvertTo-Json -Depth 4 -Compress)
 } finally { Remove-Item $temp -Recurse -Force -ErrorAction SilentlyContinue }
