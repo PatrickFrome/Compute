@@ -338,3 +338,15 @@ test('actual Windows TAP gate rejects unknown or duplicate skips and never skips
  assert.ok(inspect(tap([baseline,windowsNonApplicable]),[windowsNonApplicable],true).bad.some(v=>v.startsWith('required_case_missing_')));
  assert.ok(inspect(tap([baseline,windowsNonApplicable]),[],false).bad.includes('native_case_skipped'));
 });
+
+
+test('native setup gate requires actual integrated origin producer cases instead of retired callback-only names',async()=>{
+ const required=source.slice(source.indexOf('          const nativeRequired=['),source.indexOf('          const baseline='));
+ const tests=await readFile(new URL('./native-coding-setup.pg17.test.mjs',import.meta.url),'utf8');
+ for(const name of ['actual Git materializer publishes one origin token after resource milestone and terminal readback while full job drain waits',
+  'unconfirmed native resources or lost terminal ACK/readback prevent origin publication and cannot replay Git']){
+  assert.equal(required.split("'"+name+"'").length-1,1);assert.ok(tests.includes("t.test('"+name+"'"));
+ }
+ for(const old of ['actual joined setup job issues one opaque one-use ownership token only after cancellation and committed terminal readback',
+  'unconfirmed job owner or missing committed terminal readback cannot issue setup job-drain ownership'])assert.equal(required.includes(old),false);
+});

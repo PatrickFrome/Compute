@@ -419,8 +419,6 @@ jobs:
             'predescriptor setup uses actual current ADMIN/repository/PG authority without native execution readiness',
             'no operator descriptor is needed for genuine current repo/PG/root discovery; BEGIN is unavailable not prepared',
             'default setup with no actual materializer cannot issue job-drain ownership or publish a SETUP closure',
-            'actual joined setup job issues one opaque one-use ownership token only after cancellation and committed terminal readback',
-            'unconfirmed job owner or missing committed terminal readback cannot issue setup job-drain ownership',
             'setup ownership publication cannot swallow a physical uncertainty mark or turn it into a clean drain',
             'unconsumed setup job ownership expires after its original publication attempt and cannot be readopted',
             'admission counts pending custody handoffs and retires drained jobs without limiting durable operation history',
