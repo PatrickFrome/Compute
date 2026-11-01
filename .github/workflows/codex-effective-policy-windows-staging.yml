@@ -1,0 +1,147 @@
+name: Patched Codex Windows RELEASE staging (not qualification)
+
+on:
+  push:
+    branches: [work/codex-effective-policy-windows-staging-20261101]
+    paths:
+      - dependencies/codex-effective-policy/**
+      - .github/workflows/codex-effective-policy-windows-staging.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  staging:
+    runs-on: windows-2025
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      GIT_CONFIG_NOSYSTEM: '1'
+      GIT_CONFIG_GLOBAL: NUL
+      GIT_CONFIG_COUNT: '3'
+      GIT_CONFIG_KEY_0: core.autocrlf
+      GIT_CONFIG_VALUE_0: 'false'
+      GIT_CONFIG_KEY_1: core.eol
+      GIT_CONFIG_VALUE_1: lf
+      GIT_CONFIG_KEY_2: core.longpaths
+      GIT_CONFIG_VALUE_2: 'true'
+      GIT_TERMINAL_PROMPT: '0'
+      RUSTUP_HOME: ${{ runner.temp }}/codex-${{ github.run_id }}-${{ github.run_attempt }}/rustup
+      CARGO_HOME: ${{ runner.temp }}/codex-${{ github.run_id }}-${{ github.run_attempt }}/cargo
+      CARGO_TARGET_DIR: ${{ runner.temp }}/codex-${{ github.run_id }}-${{ github.run_attempt }}/target
+      CARGO_INCREMENTAL: '0'
+      RUSTUP_TOOLCHAIN: 1.95.0
+      LIBSQLITE3_FLAGS: SQLITE_DISABLE_INTRINSIC
+      STABLE_GIT_COMMIT: 3b01b36fa5eb96ba82a776bd3c2fc57f8969181f
+    steps:
+      - name: Require fresh build directories
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($p in @($env:RUSTUP_HOME, $env:CARGO_HOME, $env:CARGO_TARGET_DIR)) {
+            if (Test-Path $p) { throw 'Build directory already exists' }
+          }
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          set-safe-directory: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.21.0
+      - name: Source tests and exact upstream preparation
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node --test dependencies/codex-effective-policy/test/windows-staging.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Staging source tests failed' }
+          node dependencies/codex-effective-policy/prepare.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Preparation failed' }
+          node dependencies/codex-effective-policy/prepare.mjs --check
+          if ($LASTEXITCODE -ne 0) { throw 'Source check failed' }
+          node --test dependencies/codex-effective-policy/test/prepare.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Preparation tests failed' }
+      # This exact upstream action revision installs 1.95.0; it has no toolchain input.
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582
+        with:
+          targets: x86_64-pc-windows-msvc
+      - name: Use pinned upstream MSVC environment recipe (not setup-ci)
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./.codex-effective-policy-build/source/.github/actions/setup-msvc-env/setup-msvc-env.ps1 -Target x86_64-pc-windows-msvc
+      - name: Verify pinned upstream V8 release inputs
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = Join-Path $env:GITHUB_WORKSPACE '.codex-effective-policy-build/source'
+          $dir = Join-Path $env:GITHUB_WORKSPACE '.codex-effective-policy-build/v8'
+          New-Item -ItemType Directory $dir -ErrorAction Stop | Out-Null
+          $base = 'https://github.com/openai/codex/releases/download/rusty-v8-v150.4.0'
+          $manifest = 'rusty_v8_ptrcomp_sandbox_release_x86_64-pc-windows-msvc.sha256'
+          $names = @('rusty_v8_ptrcomp_sandbox_release_x86_64-pc-windows-msvc.lib.gz', 'src_binding_ptrcomp_sandbox_release_x86_64-pc-windows-msvc.rs')
+          $trusted = Get-Content (Join-Path $source 'third_party/v8/rusty_v8_150_4_0_release_manifests.sha256')
+          $entries = @($trusted | Where-Object { $_ -match ('^[a-f0-9]{64}  ' + [regex]::Escape($manifest) + '$') })
+          if ($entries.Count -ne 1 -or $entries[0].Substring(0,64) -cne 'a4d6221dddb4b5724b23411eaac47caf6095489fbf9d126f65b33cef96a0a8ef') { throw 'Untrusted V8 manifest' }
+          curl.exe --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --connect-timeout 30 --max-time 120 --max-filesize 65536 --retry 2 "$base/$manifest" -o "$dir/$manifest"
+          if ($LASTEXITCODE -ne 0) { throw 'V8 manifest download failed' }
+          if ((Get-FileHash "$dir/$manifest" -Algorithm SHA256).Hash.ToLowerInvariant() -cne $entries[0].Substring(0,64)) { throw 'V8 manifest bytes mismatch' }
+          # Hash original bytes BEFORE parsing CRLF, as in upstream setup-rusty-v8.
+          $lines = @(Get-Content "$dir/$manifest")
+          if ($lines.Count -ne 2) { throw 'V8 manifest entry count' }
+          foreach ($name in $names) {
+            $entry = @($lines | Where-Object { $_ -match ('^[a-f0-9]{64}  ' + [regex]::Escape($name) + '$') })
+            if ($entry.Count -ne 1) { throw 'V8 missing/duplicate/foreign entry' }
+            curl.exe --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --connect-timeout 30 --max-time 600 --max-filesize 1073741824 --retry 2 "$base/$name" -o "$dir/$name"
+            if ($LASTEXITCODE -ne 0) { throw 'V8 input download failed' }
+            if ((Get-FileHash "$dir/$name" -Algorithm SHA256).Hash.ToLowerInvariant() -cne $entry[0].Substring(0,64)) { throw 'V8 input bytes mismatch' }
+          }
+          "RUSTY_V8_ARCHIVE=$dir/$($names[0])" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "RUSTY_V8_SRC_BINDING_PATH=$dir/$($names[1])" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Record source and toolchain before release build
+        run: |
+          node dependencies/codex-effective-policy/windows-staging.mjs record
+          if ($LASTEXITCODE -ne 0) { throw 'Build identity failed' }
+      - name: Build patched root CLI (upstream cwd preserves static CRT and stack flags)
+        working-directory: .codex-effective-policy-build/source/codex-rs
+        run: |
+          cargo +1.95.0 build --locked --release --target x86_64-pc-windows-msvc -p codex-cli --bin codex
+          if ($LASTEXITCODE -ne 0) { throw 'Release root CLI build failed' }
+      - name: Validate PE and unchanged inputs before probes
+        run: |
+          node dependencies/codex-effective-policy/windows-staging.mjs inspect
+          if ($LASTEXITCODE -ne 0) { throw 'PE or build input validation failed' }
+      - name: Existing no-model and exact-prompt loopback probes
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path $env:CARGO_TARGET_DIR 'x86_64-pc-windows-msvc/release/codex.exe'
+          $private = Join-Path $env:GITHUB_WORKSPACE '.codex-effective-policy-build/windows-run'
+          # Each unchanged probe creates fresh owned CODEX_HOME and an allowlisted child env.
+          # Capture only its bounded JSON stdout; raw fixture logs remain private, never uploaded.
+          $out = & node dependencies/codex-effective-policy/test/no-model-probe.mjs --binary $exe --kind cli --evidence-root "$private/fixtures"
+          if ($LASTEXITCODE -ne 0) { throw 'No-model barrier failed' }
+          if ([Text.Encoding]::UTF8.GetByteCount(($out -join "`n")) -gt 65536) { throw 'Probe summary exceeds bound' }
+          [IO.File]::WriteAllText("$private/no-model.json", ($out -join "`n"), [Text.UTF8Encoding]::new($false))
+          $out = & node dependencies/codex-effective-policy/test/root-prompt-transport-probe.mjs --binary $exe --evidence-root "$private/fixtures"
+          if ($LASTEXITCODE -ne 0) { throw 'Prompt transport failed' }
+          if ([Text.Encoding]::UTF8.GetByteCount(($out -join "`n")) -gt 65536) { throw 'Probe summary exceeds bound' }
+          [IO.File]::WriteAllText("$private/prompt.json", ($out -join "`n"), [Text.UTF8Encoding]::new($false))
+      - name: Revalidate source, image and observations; stage allowlist
+        run: |
+          node dependencies/codex-effective-policy/windows-staging.mjs stage
+          if ($LASTEXITCODE -ne 0) { throw 'Staging validation failed' }
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        id: upload
+        with:
+          name: STAGING-codex-windows-x64-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .codex-effective-policy-build/staging/*
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 14
+          compression-level: 0
+      - name: Record immutable staging archive identity (not signing or admission)
+        env:
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+          ARCHIVE_SHA256: ${{ steps.upload.outputs.artifact-digest }}
+        run: |
+          if ($env:ARTIFACT_ID -notmatch '^\d+$' -or $env:ARCHIVE_SHA256 -notmatch '^[a-f0-9]{64}$') { throw 'Missing upload identity' }
+          "STAGING artifact ID: $env:ARTIFACT_ID; archive SHA256: $env:ARCHIVE_SHA256 (NOT the codex.exe SHA256 in receipt.json). No signing, package-lock, runtime or installation qualification. A changed policy overlay requires a new build and review." | Out-File $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
