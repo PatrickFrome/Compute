@@ -43,6 +43,15 @@ test('origin link probe covers native pending cancellation and exact bounded mes
   assert.doesNotMatch(source, /\b(?:ShellExecute\w*|CreateService\w*|StartService\w*|ControlService|AdjustTokenPrivileges|LogonUser\w*|CryptProtectData|CreateProcess\w*)\s*\(/);
 });
 
+test('invalid hello oracle distinguishes oversized I/O refusal from complete malformed frames', () => {
+  const hello = source.slice(source.indexOf('void rejectHello('), source.indexOf('class ReplyFixture'));
+  assert.match(hello, /const bool oversized = bytes\.size\(\) > frame\.size\(\);/);
+  assert.match(hello, /oversized \? "INSTALL_ORIGIN_HELLO_IO_UNCONFIRMED" : "INSTALL_ORIGIN_HELLO_INVALID"/);
+  assert.match(hello, /number\(json, "win32_error"\) == \(oversized \? ERROR_MORE_DATA : ERROR_INVALID_DATA\)/);
+  assert.match(hello, /field\(json, "kernel_binding"\) == "UNPROVEN"/);
+  assert.match(hello, /require\(!observer\.result,/);
+});
+
 function compilerEnvironment() {
   const available = spawnSync('cl.exe', ['/nologo', '/?'], {encoding:'utf8'});
   if (!available.error) return process.env;
@@ -57,7 +66,7 @@ function compilerEnvironment() {
 test('actual Windows original-origin pipe transcript refuses forged frames and joins cancellation', {
   skip: process.platform !== 'win32' ? 'requires actual Windows pipe/token/process APIs; crossbuild is separate evidence' : false,
   timeout:240_000,
-}, () => {
+}, t => {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'guardian-install-origin-link-'));
   try {
     const binary = path.join(temporary, 'guardian-install-origin-link-probe.exe');
@@ -70,6 +79,12 @@ test('actual Windows original-origin pipe transcript refuses forged frames and j
     const result = spawnSync(binary, [], {encoding:'utf8', timeout:90_000});
     assert.ifError(result.error);
     const rows = result.stdout.trim().split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line));
+    // Emit only fixed case names/states, never token/process snapshots. Keep
+    // ineligible-origin skips visible even when a different native case fails.
+    for (const name of cases) {
+      const row = rows.find(item => item.name === name);
+      t.diagnostic(`${name}: ${row?.state ?? 'NOT_REPORTED'}`);
+    }
     assert.equal(result.status, 0, JSON.stringify(rows.filter(row => row.state === 'FAIL')) + result.stderr);
     const summary = rows.find(row => row.name === 'summary');
     assert.ok(summary, 'native summary missing');
