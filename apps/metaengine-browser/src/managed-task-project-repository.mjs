@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 import { protectOwnerOnlyWindowsDirectory, verifyOwnerOnlyWindowsStorage } from './private-windows-storage-acl.mjs';
 import { MANAGED_TASK_PROJECT_DIRECTORY_NAME, assertManagedProjectPhysicalDirectory,
   assertManagedProjectPrivateReceipt, prepareManagedTaskProjectStorage, verifyManagedProjectPrivateFile } from './managed-task-project-storage.mjs';
-import { managedProjectPrivateGitTools } from './managed-task-project-runtime.mjs';
+import { managedProjectPrivateGitTools, resolveManagedProjectPrivateGitTools } from './managed-task-project-runtime.mjs';
 
 export const MANAGED_TASK_PROJECT_REPOSITORY_CONFIG_SCHEMA = 'metaengine.devos.managed-project-repository-config.v1';
 const FILE_NAME = 'repository.json';
@@ -49,7 +49,9 @@ async function verifyRepository(value, { runGit = exec, privateTools = null } = 
  * is observable; malformed, aliased, broadened or changing files fail closed. */
 export async function readManagedTaskProjectRepository({ userDataPath, platform = process.platform,
   verifyStorage = verifyOwnerOnlyWindowsStorage, runGit = exec, privateTools = null } = {}) {
-  const tools = managedProjectPrivateGitTools(privateTools);
+  // Snapshot an explicit native selection before the first filesystem await.
+  // Only default Main discovery is deferred until a config actually exists.
+  const suppliedTools = managedProjectPrivateGitTools(privateTools);
   await assertManagedProjectPhysicalDirectory(userDataPath);
   const filePath = path.join(userDataPath, MANAGED_TASK_PROJECT_DIRECTORY_NAME, FILE_NAME);
   const initial = await fs.lstat(filePath).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
@@ -63,7 +65,10 @@ export async function readManagedTaskProjectRepository({ userDataPath, platform 
   if (before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs || bytes.length !== before.size) fail('configuration_changed');
   let parsed;
   try { parsed = JSON.parse(bytes.toString('utf8')); } catch { fail('configuration_invalid'); }
-  return verifyRepository(configuration(parsed), { runGit, privateTools: tools });
+  const selected = configuration(parsed);
+  // Missing configuration remains a read-only absence, not tool admission.
+  const tools = suppliedTools === null ? await resolveManagedProjectPrivateGitTools() : suppliedTools;
+  return verifyRepository(selected, { runGit, privateTools: tools });
 }
 
 /** The CLI supplies explicit paths chosen by the operator. Configuration is an
@@ -72,8 +77,8 @@ export async function readManagedTaskProjectRepository({ userDataPath, platform 
  * This helper neither provisions DB authority nor admits a task. */
 export async function configureManagedTaskProjectRepository({ userDataPath, repository, platform = process.platform,
   protectStorage = protectOwnerOnlyWindowsDirectory, verifyStorage = verifyOwnerOnlyWindowsStorage, runGit = exec, privateTools = null } = {}) {
-  const tools = managedProjectPrivateGitTools(privateTools);
   const expected = configuration(repository);
+  const tools = await resolveManagedProjectPrivateGitTools(privateTools);
   const directory = await prepareManagedTaskProjectStorage({ userDataPath, platform, protectStorage, verifyStorage });
   const previous = await readManagedTaskProjectRepository({ userDataPath, platform, verifyStorage, runGit, privateTools: tools });
   if (previous && JSON.stringify(previous) !== JSON.stringify(expected)) fail('configuration_conflict');

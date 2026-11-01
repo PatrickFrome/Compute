@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { managedProjectPrivateGitTools, resolveManagedProjectPrivateGitTools } from './managed-task-project-runtime.mjs';
 import candidateModule from './candidate-capsule.cjs';
 import { verificationCanonical as canonical, verificationDigest as digest } from './development-verification-sqlite-journal.mjs';
 
@@ -28,11 +29,17 @@ function same(a, b) { return canonical(a) === canonical(b); }
 function processAlive(pid) {
   try { process.kill(pid, 0); return true; } catch (error) { return error?.code !== 'ESRCH'; }
 }
-function git(repoRoot, args, maxBuffer = 2 * 1024 * 1024, input) {
-  const env = { PATH: process.env.PATH, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null', GIT_TERMINAL_PROMPT: '0', GIT_NO_REPLACE_OBJECTS: '1' };
-  if (process.env.SystemRoot) env.SystemRoot = process.env.SystemRoot;
+async function git(tools, repoRoot, args, maxBuffer = 2 * 1024 * 1024, input) {
+  const env = tools ? { ...tools.environment } : {
+    PATH: process.env.PATH, GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
+  };
+  if (!tools && process.env.SystemRoot) env.SystemRoot = process.env.SystemRoot;
+  env.GIT_TERMINAL_PROMPT = '0'; env.GIT_NO_REPLACE_OBJECTS = '1';
+  env.GCM_INTERACTIVE = 'never'; env.GCM_GUI_PROMPT = '0';
+  if (tools) await tools.revalidate();
   try {
-    return execFileSync('git', ['-c', 'core.fsmonitor=false', '-C', repoRoot, ...args], {
+    return execFileSync(tools?.gitExecutable || 'git', ['-c', 'core.fsmonitor=false', '-C', repoRoot, ...args], {
       input, maxBuffer, timeout: 30000, windowsHide: true, env, shell: false, stdio: ['pipe', 'pipe', 'pipe'],
     });
   } catch { fail('git_read_failed'); }
@@ -128,7 +135,8 @@ export class DevelopmentVerificationRuntime {
   #options;
   #ownerToken = crypto.randomBytes(16).toString('hex');
   #clock;
-  constructor({ repoRoot, repository, sourcePaths, editablePrefixes, snapshotRoot, catalog, executor, journal, clock = () => Date.now(), outputLimitBytes = 1024 * 1024 } = {}) {
+  #privateToolsPromise = null;
+  constructor({ repoRoot, repository, sourcePaths, editablePrefixes, snapshotRoot, catalog, executor, journal, clock = () => Date.now(), outputLimitBytes = 1024 * 1024, privateTools = null } = {}) {
     if (typeof repoRoot !== 'string' || !path.isAbsolute(repoRoot) || typeof snapshotRoot !== 'string' || !path.isAbsolute(snapshotRoot) ||
         !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository || '') ||
         !Array.isArray(sourcePaths) || !sourcePaths.length || sourcePaths.length > 20000 ||
@@ -141,7 +149,8 @@ export class DevelopmentVerificationRuntime {
     const prefixes = editablePrefixes.map(prefix => `${normalizedPath(String(prefix).replace(/\/$/, ''))}/`).sort();
     bounded(outputLimitBytes, 1024, 16 * 1024 * 1024, 'output_limit');
     this.#options = { repoRoot: path.resolve(repoRoot), repository, sourcePaths: paths, editablePrefixes: prefixes,
-      snapshotRoot: path.resolve(snapshotRoot), catalog: normalizeCatalog(catalog), executor, journal, outputLimitBytes };
+      snapshotRoot: path.resolve(snapshotRoot), catalog: normalizeCatalog(catalog), executor, journal, outputLimitBytes,
+      privateTools: managedProjectPrivateGitTools(privateTools) };
     this.#clock = clock;
   }
   #at() { return new Date(this.#clock()).toISOString(); }
@@ -174,12 +183,16 @@ export class DevelopmentVerificationRuntime {
     const relative = path.relative(options.repoRoot, options.snapshotRoot);
     if (!relative || !relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative)) fail('snapshot_root_inside_repository');
   }
-  #readSource(sourceHead) {
+  async #readSource(sourceHead) {
     const options = this.#options;
-    const current = git(options.repoRoot, ['rev-parse', '--verify', 'HEAD']).toString('ascii').trim();
+    // One original capability spans the complete begin/inventory/blob/end
+    // observation. Retain a rejected selection promise as well as a successful one.
+    this.#privateToolsPromise ??= resolveManagedProjectPrivateGitTools(options.privateTools);
+    const tools = await this.#privateToolsPromise;
+    const current = (await git(tools, options.repoRoot, ['rev-parse', '--verify', 'HEAD'])).toString('ascii').trim();
     if (!SHA40.test(sourceHead) || current !== sourceHead) fail('source_head_changed');
     let inventory;
-    try { inventory = new TextDecoder('utf-8', { fatal: true }).decode(git(options.repoRoot, ['ls-tree', '-rz', '--full-tree', sourceHead])); }
+    try { inventory = new TextDecoder('utf-8', { fatal: true }).decode(await git(tools, options.repoRoot, ['ls-tree', '-rz', '--full-tree', sourceHead])); }
     catch { fail('source_inventory_invalid'); }
     const rows = inventory.split('\0').filter(Boolean);
     const wanted = new Set(options.sourcePaths);
@@ -193,7 +206,7 @@ export class DevelopmentVerificationRuntime {
       selected.push({ path: match[4], mode: match[1], oid: match[3] });
     }
     if (selected.length !== wanted.size) fail('source_path_missing');
-    const objects = git(options.repoRoot, ['cat-file', '--batch'], MAX_SOURCE_BYTES + selected.length * 128, selected.map(row => `${row.oid}\n`).join(''));
+    const objects = await git(tools, options.repoRoot, ['cat-file', '--batch'], MAX_SOURCE_BYTES + selected.length * 128, selected.map(row => `${row.oid}\n`).join(''));
     let offset = 0;
     let bytes = 0;
     const files = selected.map(row => {
@@ -209,7 +222,7 @@ export class DevelopmentVerificationRuntime {
       offset = newline + length + 2;
       return { path: row.path, mode: row.mode, bytes: content };
     });
-    if (offset !== objects.length || git(options.repoRoot, ['rev-parse', '--verify', 'HEAD']).toString('ascii').trim() !== sourceHead) fail('source_head_changed');
+    if (offset !== objects.length || (await git(tools, options.repoRoot, ['rev-parse', '--verify', 'HEAD'])).toString('ascii').trim() !== sourceHead) fail('source_head_changed');
     return files;
   }
   async #snapshot(runId, sourceFiles, edits) {
@@ -289,7 +302,7 @@ export class DevelopmentVerificationRuntime {
       let state = 'FAILED';
       let reason = null;
       try {
-        snapshot = await this.#snapshot(runId, this.#readSource(capsule.source.head), normalizedEdits);
+        snapshot = await this.#snapshot(runId, await this.#readSource(capsule.source.head), normalizedEdits);
         session = await options.executor.createSession({ session_key: sessionKey, snapshot_dir: snapshot.root,
           snapshot_digest: snapshot.output_manifest_digest, output_limit_bytes: options.outputLimitBytes });
         this.#append(events, 'SESSION', { session_id: session?.session_id });
