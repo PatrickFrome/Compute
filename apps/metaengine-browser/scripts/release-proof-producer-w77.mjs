@@ -216,18 +216,39 @@ async function requireIndependentGhCli() {
 
 // The W68 consumer signs/verifies domain || JSON.stringify(manifest), in this
 // exact property order. NO key-sorted or user-provided JSON serializer.
-export function serializeReleaseManifestW77(manifest) {
-  if (!exact(manifest, fields) || manifest.schema !== INSTALLED_RELEASE_MANIFEST_W68) reject('manifest_schema');
-  if (!valid(manifest.source_sha, sha40)) reject('source_sha');
-  if (!valid(manifest.package_version, versionPattern) ||
-      RESERVED_PACKAGE_IDENTITIES_W68.includes(manifest.package_version)) reject('reserved_or_invalid_version');
-  if (manifest.exe_name !== 'METAENGINE Browser Test.exe' &&
-      manifest.exe_name !== 'METAENGINE-Browser.exe') reject('exe_name');
-  for (const field of ['exe_sha256','installer_sha256','slsa_bundle_sha256','slsa_evidence_sha256','package_code_sha256']) {
-    if (!valid(manifest[field], sha256)) reject(field);
+// Snapshot only declared own DATA properties before checking any value.
+// Getters can return one SHA during validation and another for the signed
+// bytes. Hidden or Symbol properties must not silently evade the wire schema.
+function snapshotReleaseManifestW77(manifest) {
+  if (!object(manifest) || ![Object.prototype, null].includes(Object.getPrototypeOf(manifest))) {
+    reject('manifest_shape');
   }
-  if (!valid(manifest.signer_thumbprint, thumb)) reject('signer_thumbprint');
-  const ordered = Object.fromEntries(fields.map(key => [key, manifest[key]]));
+  const descriptors = Object.getOwnPropertyDescriptors(manifest);
+  if (Reflect.ownKeys(descriptors).length !== fields.length ||
+      fields.some(key => !Object.hasOwn(descriptors, key) ||
+        !Object.hasOwn(descriptors[key], 'value') || descriptors[key].enumerable !== true)) {
+    reject('manifest_shape');
+  }
+  return Object.fromEntries(fields.map(key => [key, descriptors[key].value]));
+}
+
+function validatedReleaseManifestW77(manifest) {
+  const ordered = snapshotReleaseManifestW77(manifest);
+  if (ordered.schema !== INSTALLED_RELEASE_MANIFEST_W68) reject('manifest_schema');
+  if (!valid(ordered.source_sha, sha40)) reject('source_sha');
+  if (!valid(ordered.package_version, versionPattern) ||
+      RESERVED_PACKAGE_IDENTITIES_W68.includes(ordered.package_version)) reject('reserved_or_invalid_version');
+  if (ordered.exe_name !== 'METAENGINE Browser Test.exe' &&
+      ordered.exe_name !== 'METAENGINE-Browser.exe') reject('exe_name');
+  for (const field of ['exe_sha256','installer_sha256','slsa_bundle_sha256','slsa_evidence_sha256','package_code_sha256']) {
+    if (!valid(ordered[field], sha256)) reject(field);
+  }
+  if (!valid(ordered.signer_thumbprint, thumb)) reject('signer_thumbprint');
+  return ordered;
+}
+
+export function serializeReleaseManifestW77(manifest) {
+  const ordered = validatedReleaseManifestW77(manifest);
   return Buffer.concat([
     Buffer.from(INSTALLED_RELEASE_SIGNATURE_DOMAIN_W68, 'utf8'),
     Buffer.from(JSON.stringify(ordered), 'utf8'),
@@ -319,14 +340,14 @@ export function validateExistingProducerReceiptW77({ receipt, sourceSha, version
 }
 
 export function createExternalReleaseProofHandoffW77(manifest) {
-  serializeReleaseManifestW77(manifest);
+  const stable = validatedReleaseManifestW77(manifest);
   return Object.freeze({
     schema: RELEASE_PROOF_HANDOFF_SCHEMA_W77,
-    source_sha: manifest.source_sha,
-    package_version: manifest.package_version,
-    prepackage_exe_sha256: manifest.exe_sha256,
-    final_installer_sha256: manifest.installer_sha256,
-    package_code_sha256: manifest.package_code_sha256,
+    source_sha: stable.source_sha,
+    package_version: stable.package_version,
+    prepackage_exe_sha256: stable.exe_sha256,
+    final_installer_sha256: stable.installer_sha256,
+    package_code_sha256: stable.package_code_sha256,
     detached_sidecar_files: Object.freeze(Object.values(RELEASE_PROOF_FILES_W77)),
     installer_bytes_are_immutable: true,
     never_embed_installer_self_digest: true,
@@ -614,6 +635,64 @@ export async function createReleaseRootSigningRequestW77(prepared) {
     payload_presence: state.payloadPresence,
     release_root_signing_available: false, production_sidecars_emitted: false,
     installed_placement_verified: false, release_authorized: false, authority_effect: false });
+}
+
+// Source-only parser for a possible external protected-signing result.
+// This does NOT authenticate the caller, custody, invocation, replay, or the
+// Ed25519 signature. A separate approved signer interface and retained
+// execution evidence must precede ANY production envelope or installation.
+const releaseSignResultFieldsW77 = Object.freeze([
+  'schema','operation','request_sha256','signing_input_sha256',
+  'public_key_spki_sha256','signature_algorithm','signature_base64',
+  'invocation_id','implementation_revision','release_authorized','authority_effect',
+]);
+export function parseUntrustedReleaseSignerResultW77(rawBytes) {
+  if (!Buffer.isBuffer(rawBytes) || rawBytes.length < 1 || rawBytes.length > 4096) {
+    reject('sign_result_wire');
+  }
+  const wire = rawBytes.toString('utf8');
+  if (!Buffer.from(wire,'utf8').equals(rawBytes)) reject('sign_result_wire');
+  let result;
+  try { result = JSON.parse(wire); } catch { reject('sign_result_json'); }
+  // JSON.parse alone accepts duplicate keys. Exact byte canonicalization and
+  // key order reject duplicates, hidden extra fields, BOM and added whitespace.
+  if (!object(result) || Object.keys(result).join('\0') !== releaseSignResultFieldsW77.join('\0') ||
+      JSON.stringify(result) !== wire) reject('sign_result_wire');
+  if (result.schema !== 'metaengine.browser.release-proof-sign-result-w77.v1' ||
+      result.operation !== 'sign_installed_release_manifest_v2' ||
+      !valid(result.request_sha256, sha256) ||
+      !valid(result.signing_input_sha256, sha256) ||
+      !valid(result.public_key_spki_sha256, sha256) ||
+      result.signature_algorithm !== 'Ed25519' ||
+      result.release_authorized !== false || result.authority_effect !== false) {
+    reject('sign_result_fields');
+  }
+  if (typeof result.invocation_id !== 'string' ||
+      result.invocation_id.length < 1 || result.invocation_id.length > 256 ||
+      !result.invocation_id.trim() || /[\u0000-\u001f\u007f]/.test(result.invocation_id) ||
+      !valid(result.implementation_revision, /^(?:[a-f0-9]{40}|sha256:[a-f0-9]{64})$/) ||
+      !valid(result.signature_base64, /^[A-Za-z0-9+/]{86}==$/)) {
+    reject('sign_result_identity_or_signature');
+  }
+  const signature = Buffer.from(result.signature_base64, 'base64');
+  if (signature.length !== 64 || signature.toString('base64') !== result.signature_base64) {
+    reject('sign_result_signature_encoding');
+  }
+  return Object.freeze({
+    classification: 'SOURCE_PARSE_ONLY',
+    request_sha256: result.request_sha256,
+    signing_input_sha256: result.signing_input_sha256,
+    public_key_spki_sha256: result.public_key_spki_sha256,
+    signature_base64: result.signature_base64,
+    signature_bytes_sha256: digest(signature),
+    invocation_id: result.invocation_id,
+    implementation_revision: result.implementation_revision,
+    cryptographic_signature_verified: false,
+    signer_invocation_authenticated: false,
+    installed_placement_verified: false,
+    release_authorized: false,
+    authority_effect: false,
+  });
 }
 
 // Read-only operator entrypoint. Uses the SAME public key file packaged by the
