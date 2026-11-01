@@ -59,5 +59,6 @@ test('same Package Smoke producer packages and physically qualifies the companio
   assert.match(producer, /browser-guardian-machine-bootstrap-physical\.ps1/);
   assert.match(producer, /resources\\guardian-bootstrap/);
   assert.match(producer, /guardian-machine-bootstrap-physical-proof\.json/);
-  assert.match(read('scripts/electron-builder-before-pack.cjs'), /build-guardian-machine-bootstrap\.ps1/);
+  assert.match(read('scripts/electron-builder-before-pack.cjs'), /build-guardian-native-package\.ps1/);
+  assert.match(read('scripts/build-guardian-native-package.ps1'), /build-guardian-machine-bootstrap\.ps1/);
 });

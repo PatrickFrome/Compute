@@ -1,0 +1,53 @@
+{
+  "schema": "metaengine.guardian-openssl-source-lock.v1",
+  "qualification_status": "candidate_requires_windows_and_existing_verifier_qualification",
+  "openssl": {
+    "version": "3.5.9",
+    "source_date_epoch": 1790690724,
+    "release_commit": "45e844fa2a14ec92d146bd8f5778ac130b6625fb",
+    "tag_object": "d0ca66a1abe52545f14eca635c648932fcde5615",
+    "archive": {
+      "filename": "openssl-3.5.9.tar.gz",
+      "url": "https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz",
+      "sha256": "603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a",
+      "size_bytes": 53279637,
+      "root_directory": "openssl-3.5.9"
+    },
+    "signature": {
+      "filename": "openssl-3.5.9.tar.gz.asc",
+      "url": "https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz.asc",
+      "sha256": "bdccf2057a7c4ae377b40e832cb8c632ae8b532d4fb64cc7b843066eee748f89",
+      "size_bytes": 931
+    },
+    "signing_primary_fingerprint": "B146647E45A7B33947AB226B2A2C87D161692D40",
+    "signing_subkey_fingerprint": "C46ED3F2CBEFDA1FDAADA44264ED7B1DCCE71CB2",
+    "official_downloads_url": "https://openssl-library.org/source/",
+    "official_certificate_url": "https://openssl-library.org/source/pubkeys.asc",
+    "license_path": "LICENSE.txt",
+    "root_notice_present": false
+  },
+  "nasm": {
+    "version": "3.02",
+    "release_commit": "4a56d66ed9626d5a3ded5414c9d8b7f1a48ce065",
+    "tag_object": "8f1fb545a582c55c69607f457b4d1e71c19b2ecf",
+    "archive": {
+      "filename": "nasm-3.02-source.tar.gz",
+      "url": "https://codeload.github.com/netwide-assembler/nasm/tar.gz/4a56d66ed9626d5a3ded5414c9d8b7f1a48ce065",
+      "sha256": "77ad39a2c82908b6b39ebc7cf0368a510fa1cf3d427b682055eb6357a985b1ee",
+      "size_bytes": 1721803,
+      "root_directory": "nasm-4a56d66ed9626d5a3ded5414c9d8b7f1a48ce065"
+    },
+    "license_path": "LICENSE"
+  },
+  "configure_args": [
+    "VC-WIN64A",
+    "--release",
+    "no-shared",
+    "no-module",
+    "no-dso",
+    "no-engine",
+    "no-autoload-config",
+    "no-legacy",
+    "ASFLAGS=--reproducible"
+  ]
+}

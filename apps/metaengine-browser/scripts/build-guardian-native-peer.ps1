@@ -1,4 +1,6 @@
 param(
+  $CryptoBuild,
+  [switch]$UnlinkedTestBuild,
   [string]$NodeHeadersPath,
   [string]$OutputDir = (Join-Path (Split-Path $PSScriptRoot -Parent) 'native-dist\guardian-peer'),
   [string]$VcVarsPath = $env:ME2_VCVARS_PATH
@@ -6,6 +8,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+Import-Module (Join-Path $PSScriptRoot 'guardian-static-crypto.psm1')
+if ([bool]$CryptoBuild -eq [bool]$UnlinkedTestBuild) { throw 'guardian_native_requires_fresh_crypto_or_explicit_unlinked_test' }
+$crypto = $null
+if ($CryptoBuild) { $crypto = Get-GuardianCryptoLink $CryptoBuild }
+
 function Sha256([string]$Path) {
   return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
@@ -96,15 +103,23 @@ try {
   foreach ($buildPath in @($vcvars, $headers, $sourceDir, $sources[0], $sources[1], $sources[2], $stagedBinary, $imports)) {
     AssertCmdPath $buildPath
   }
-  # No METAENGINE_GUARDIAN_RELEASE_SIGNATURE_LINKED definition: the reviewed
-  # static crypto producer is a separate dependency, never a runtime override.
-  $command = 'call "{0}" >nul && cl.exe /nologo /std:c++20 /EHsc /MT /W4 /WX /LD /DUNICODE /D_UNICODE /I"{1}" /I"{2}" "{3}" "{4}" "{5}" /Fe:"{6}" /link advapi32.lib bcrypt.lib shell32.lib ole32.lib && dumpbin.exe /nologo /imports "{6}" > "{7}"' -f $vcvars,$headers,$sourceDir,$sources[0],$sources[1],$sources[2],$stagedBinary,$imports
+  $cryptoCompile = ''; $cryptoLink = ''
+  if ($crypto) {
+    $peerMap = Join-Path $stage 'peer.map'
+    $cryptoCompile = $crypto.Compile; $cryptoLink = $crypto.Link + (' /MAP:"{0}"' -f $peerMap)
+  }
+  $command = 'call "{0}" >nul && set CL=&& set _CL_=&& set LINK=&& set _LINK_=&& cl.exe /nologo /std:c++20 /EHsc /MT /W4 /WX /LD /DUNICODE /D_UNICODE {8} /I"{1}" /I"{2}" "{3}" "{4}" "{5}" /Fe:"{6}" /link advapi32.lib bcrypt.lib shell32.lib ole32.lib {9} && dumpbin.exe /nologo /imports "{6}" > "{7}"' -f $vcvars,$headers,$sourceDir,$sources[0],$sources[1],$sources[2],$stagedBinary,$imports,$cryptoCompile,$cryptoLink
   Push-Location $stage
   try {
     & $env:ComSpec /d /s /c $command
     if ($LASTEXITCODE -ne 0) { throw "guardian_peer_compile_exit_$LASTEXITCODE" }
   } finally { Pop-Location }
   CheckHeaders
+  $peImports = @()
+  if ($crypto) {
+    $peImports = @(Assert-GuardianStaticPe $stagedBinary $vcvars (Join-Path $crypto.EvidenceDirectory 'peer-pe') -MapPath $peerMap)
+    $null = Get-GuardianCryptoLink $CryptoBuild
+  }
   if (-not (Test-Path -LiteralPath $stagedBinary -PathType Leaf)) { throw 'guardian_peer_native_binary_missing' }
   $importText = Get-Content -LiteralPath $imports -Raw
   if ($importText -match '(?im)^\s*(?:node\.(?:dll|exe)|libcrypto[^\s]*\.dll|libssl[^\s]*\.dll|vcruntime[^\s]*\.dll|msvcp[^\s]*\.dll|concrt[^\s]*\.dll)\s*$') {
@@ -117,6 +132,9 @@ try {
     schema = 'metaengine.browser-guardian.peer-native-staging-manifest.v1'
     source_head = $head
     name = 'guardian-connected-peer.node'
+    static_crypto = $(if ($crypto) { $crypto.Binding } else { $null })
+    unlinked_test_build = [bool]$UnlinkedTestBuild
+    pe_imports = $peImports
     napi_version = 9
     node_headers_version = '24.0.0'
     node_headers_archive_sha256 = '4605ee37eef345568f43de8c1843f3f7a243865654c1e942c50584de6bd59bb5'
@@ -141,6 +159,10 @@ try {
   Copy-Item -LiteralPath $provenance -Destination (Join-Path $out 'node-api-header-provenance.json') -Force -ErrorAction Stop
   [IO.File]::WriteAllText($manifestPath, (($manifest | ConvertTo-Json -Depth 5) + "`n"), [Text.UTF8Encoding]::new($false))
   if ((Sha256 $target) -cne $manifest.sha256) { throw 'guardian_peer_output_readback_mismatch' }
+  if ($CryptoBuild) {
+    Register-GuardianNativeOutput $CryptoBuild 'peer' $target
+    Register-GuardianNativeOutput $CryptoBuild 'peer-manifest' $manifestPath
+  }
   Write-Output ($manifest | ConvertTo-Json -Depth 5 -Compress)
 } finally {
   Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue

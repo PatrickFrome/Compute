@@ -8,6 +8,16 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(here, '..');
 const workflowPath = path.resolve(appRoot, '..', '..', '.github', 'workflows', 'browser-windows-package-smoke.yml');
 
+test('crypto runner paths are bound at the actual packaging step, not unavailable job context', () => {
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const windows = workflow.split('  windows-nsis-package-smoke:')[1].split('  slsa-provenance-verify:')[0];
+  const header = windows.split('\n    steps:')[0];
+  assert.doesNotMatch(header, /\$\{\{\s*runner\./);
+  const build = windows.split('- name: Build exact-head unsigned NSIS package through native staging hook')[1].split('\n      - name:')[0];
+  assert.match(build, /env:[\s\S]*ME2_GUARDIAN_CRYPTO_SOURCE_DIR:\s*\$\{\{ runner\.temp \}\}\/guardian-openssl-source/);
+  assert.match(build, /env:[\s\S]*ME2_GUARDIAN_CRYPTO_OUTPUT_DIR:\s*\$\{\{ runner\.temp \}\}\/guardian-openssl-build/);
+});
+
 test('Package Smoke reserves one source/version before dependency install or physical packaging', () => {
   const workflow = fs.readFileSync(workflowPath, 'utf8');
 
@@ -23,7 +33,13 @@ test('Package Smoke reserves one source/version before dependency install or phy
   assert.match(workflow, /cancel-in-progress: false/);
   assert.doesNotMatch(workflow, /^concurrency:/m);
   assert.doesNotMatch(workflow, /browser-windows-package-smoke-\$\{\{ github\.ref \}\}/);
-  assert.match(workflow, /windows-nsis-package-smoke:[\s\S]*?timeout-minutes:\s*60/);
+  // The same job now runs the fresh static crypto producer and its upstream tests.
+  assert.match(workflow, /windows-nsis-package-smoke:[\s\S]*?timeout-minutes:\s*120/);
+  assert.match(workflow, /ME2_GUARDIAN_CRYPTO_SOURCE_DIR:/);
+  assert.match(workflow, /ME2_GUARDIAN_CRYPTO_OUTPUT_DIR:/);
+  const acquire = workflow.indexOf('- name: Acquire authenticated crypto source before reserving a package identity');
+  assert.ok(acquire > 0 && acquire < workflow.indexOf('  windows-nsis-package-smoke:'));
+  assert.match(workflow.slice(acquire, workflow.indexOf('  windows-nsis-package-smoke:')), /acquire-guardian-openssl-source\.py/);
   assert.match(workflow, /slsa-provenance-verify:[\s\S]*?timeout-minutes:\s*10/);
 
   const guard = workflow.indexOf('- name: Refuse duplicate source/version physical build');

@@ -51,7 +51,7 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           $outDir = Join-Path $env:RUNNER_TEMP 'w75-guardian-native-staging'
-          & ./apps/metaengine-browser/scripts/build-guardian-native-staging.ps1 -OutputDir $outDir
+          & ./apps/metaengine-browser/scripts/build-guardian-native-staging.ps1 -UnlinkedTestBuild -OutputDir $outDir
           if ($LASTEXITCODE -ne 0) { throw "guardian_native_build_exit_$LASTEXITCODE" }
           $exe = Join-Path $outDir 'METAENGINEBrowserGuardian.exe'
           $manifest = Join-Path $outDir 'guardian-native-manifest.json'

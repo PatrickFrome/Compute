@@ -147,7 +147,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          & ./apps/metaengine-browser/scripts/build-guardian-native-staging.ps1 -OutputDir (Join-Path $env:RUNNER_TEMP 'metaengine-guardian-root-session-build')
+          & ./apps/metaengine-browser/scripts/build-guardian-native-staging.ps1 -UnlinkedTestBuild -OutputDir (Join-Path $env:RUNNER_TEMP 'metaengine-guardian-root-session-build')
           if ($LASTEXITCODE -ne 0) { throw "guardian_root_session_build_exit_$LASTEXITCODE" }
 
       - name: Compile MSVC bootstrap and source-only install-origin coordinator without installation
@@ -157,7 +157,7 @@ jobs:
           $staging = Join-Path $env:RUNNER_TEMP 'metaengine-guardian-root-session-build'
           $out = Join-Path $env:RUNNER_TEMP 'metaengine-guardian-bootstrap-build'
           # Compile only: never execute the requireAdministrator inner or install entry.
-          & ./apps/metaengine-browser/scripts/build-guardian-machine-bootstrap.ps1 -StagingDir $staging -OutputDir $out
+          & ./apps/metaengine-browser/scripts/build-guardian-machine-bootstrap.ps1 -UnlinkedTestBuild -StagingDir $staging -OutputDir $out
           if ($LASTEXITCODE -ne 0) { throw "guardian_machine_bootstrap_build_exit_$LASTEXITCODE" }
 
       - name: Exercise connected-pipe, install-origin, and recovery mechanics without installation
@@ -175,9 +175,9 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $out = Join-Path $env:RUNNER_TEMP 'metaengine-guardian-peer-build'
-          & ./apps/metaengine-browser/scripts/build-guardian-native-peer.ps1 -OutputDir $out
+          & ./apps/metaengine-browser/scripts/build-guardian-native-peer.ps1 -UnlinkedTestBuild -OutputDir $out
           if ($LASTEXITCODE -ne 0) { throw "guardian_peer_build_exit_$LASTEXITCODE" }
-          & ./apps/metaengine-browser/scripts/build-guardian-native-peer.ps1 -OutputDir $out
+          & ./apps/metaengine-browser/scripts/build-guardian-native-peer.ps1 -UnlinkedTestBuild -OutputDir $out
           if ($LASTEXITCODE -ne 0) { throw "guardian_peer_refresh_exit_$LASTEXITCODE" }
           "GUARDIAN_PEER_BUILD_HOST_SMOKE_BINARY=$(Join-Path $out 'guardian-connected-peer.node')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 

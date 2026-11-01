@@ -4,3 +4,6 @@ package-lock.json text eol=lf
 native/third_party/node-api-24.0.0/*.h -text
 # Preserve the exact hash-pinned upstream license, including its original indent.
 native/third_party/node-api-24.0.0/LICENSE -text whitespace=-space-before-tab
+
+# Linux acquisition and Windows reauthentication must hash the same lock bytes.
+native/openssl/guardian-openssl-source-lock.json -text

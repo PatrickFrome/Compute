@@ -47,7 +47,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $outDir = Join-Path $env:RUNNER_TEMP 'metaengine-guardian-scm-recovery'
-          & ./scripts/build-guardian-native-staging.ps1 -OutputDir $outDir
+          & ./scripts/build-guardian-native-staging.ps1 -UnlinkedTestBuild -OutputDir $outDir
           if ($LASTEXITCODE -ne 0) { throw "guardian_staging_build_exit_$LASTEXITCODE" }
           $service = Join-Path $outDir 'METAENGINEBrowserGuardian.exe'
           $configure = Join-Path $outDir 'METAENGINEBrowserGuardianConfigure.exe'

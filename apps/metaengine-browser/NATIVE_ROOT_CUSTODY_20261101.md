@@ -75,8 +75,9 @@ The native session calls `bindRetainedReleaseSignature` after capture and native
 owner rechecks. The build contract is the compile-only
 `METAENGINE_GUARDIAN_RELEASE_SIGNATURE_LINKED` definition plus linkage of the
 existing `browser-guardian-release-signature.cpp` and the crypto/build stream's
-reviewed static OpenSSL dependency. This patch does not set that definition or
-change its trust root. The default build reports
+reviewed static OpenSSL dependency. The integrated package builder now sets that definition only with its fresh
+authenticated static producer context (see `native/openssl/INTEGRATION.md`).
+It does not change the trust root. Explicit unlinked mechanics builds report
 `RELEASE_SIGNATURE_BUILD_UNAVAILABLE` and cannot manufacture a verified result.
 
 When linked, the consumer reads the fixed W77 envelope through its retained

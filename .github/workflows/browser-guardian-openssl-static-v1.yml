@@ -1,0 +1,298 @@
+name: METAENGINE Browser Guardian Static OpenSSL V1
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/native/openssl/**'
+      - 'apps/metaengine-browser/scripts/*guardian*'
+      - 'apps/metaengine-browser/test/*guardian*'
+      - 'apps/metaengine-browser/test/native/browser-guardian-installed-namespace-probe.cpp'
+      - 'apps/metaengine-browser/scripts/electron-builder-before-pack.cjs'
+      - 'apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-release-signature.cpp'
+      - 'apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-release-signature.hpp'
+      - 'apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-release-signature-test.cpp'
+      - 'apps/metaengine-browser/scripts/acquire-guardian-openssl-source.py'
+      - 'apps/metaengine-browser/scripts/build-guardian-openssl-static.ps1'
+      - 'apps/metaengine-browser/scripts/build-guardian-nasm-static.ps1'
+      - 'apps/metaengine-browser/scripts/extract-guardian-pinned-source.py'
+      - 'apps/metaengine-browser/test/test_guardian_openssl_source.py'
+      - 'apps/metaengine-browser/test/test_guardian_pinned_source_extract.py'
+      - 'apps/metaengine-browser/test/browser-guardian-release-signature.test.mjs'
+      - 'apps/metaengine-browser/scripts/release-proof-producer-w77.mjs'
+      - 'apps/metaengine-browser/src/client-package-identity-w68.mjs'
+      - 'apps/metaengine-browser/src/installed-executable-provenance-w68.mjs'
+      - 'apps/metaengine-browser/src/installed-package-code-w68.mjs'
+      - 'apps/metaengine-browser/build/emergency-maintenance-public-key.pem'
+      - '.github/workflows/browser-guardian-openssl-static-v1.yml'
+  workflow_dispatch:
+    inputs:
+      openssl_signing_certificate_b64:
+        description: 'Base64 of the PUBLIC official OpenSSL release signing certificate; checked against the reviewed fingerprint pin'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  source-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Set up Node for packaging byte-binding tests
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+
+      - name: Exercise staged-byte binding and namespace source contracts
+        run: node --test apps/metaengine-browser/test/guardian-native-package-verification.test.mjs apps/metaengine-browser/test/browser-guardian-installed-namespace-native.test.mjs
+
+      - name: Run offline source acquisition and extraction adversarial tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f apps/metaengine-browser/test/test_guardian_openssl_source.py
+          test -f apps/metaengine-browser/test/test_guardian_pinned_source_extract.py
+          python3 -m unittest discover -s apps/metaengine-browser/test -p 'test_guardian_*.py' -v
+
+      - name: Prove source checkout unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git status --porcelain --untracked-files=all)"
+
+  windows-script-contract:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ((git rev-parse HEAD).Trim() -ne $env:EXPECTED_HEAD) { throw 'guardian_openssl_source_head_mismatch' }
+
+      - name: Parse Windows dependency build scripts without execution
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($relative in @(
+            'apps/metaengine-browser/scripts/build-guardian-openssl-static.ps1',
+            'apps/metaengine-browser/scripts/build-guardian-nasm-static.ps1',
+            'apps/metaengine-browser/scripts/guardian-static-crypto.psm1',
+            'apps/metaengine-browser/scripts/build-guardian-native-package.ps1',
+            'apps/metaengine-browser/scripts/build-guardian-native-staging.ps1',
+            'apps/metaengine-browser/scripts/build-guardian-native-peer.ps1',
+            'apps/metaengine-browser/scripts/build-guardian-machine-bootstrap.ps1',
+            'apps/metaengine-browser/scripts/test-guardian-linked-namespace.ps1'
+          )) {
+            $scriptPath = (Resolve-Path -LiteralPath $relative).Path
+            $tokens = $null
+            $parseErrors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$parseErrors) | Out-Null
+            if (@($parseErrors).Count -ne 0) {
+              throw "guardian_openssl_powershell_parse_failed:${relative}:$($parseErrors | Out-String)"
+            }
+          }
+
+      - name: Reject forged contexts and implicit unlinked consumer builds
+        shell: pwsh
+        run: |
+          & ./apps/metaengine-browser/test/guardian-static-crypto-context.test.ps1
+
+      - name: Run offline acquisition and extraction tests on Windows
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($relative in @(
+            'apps/metaengine-browser/test/test_guardian_openssl_source.py',
+            'apps/metaengine-browser/test/test_guardian_pinned_source_extract.py'
+          )) {
+            if (-not (Test-Path -LiteralPath $relative -PathType Leaf)) { throw "guardian_openssl_test_file_missing:$relative" }
+          }
+          python.exe -B -m unittest discover -s apps/metaengine-browser/test -p 'test_guardian_*.py' -v
+          if ($LASTEXITCODE -ne 0) { throw "guardian_openssl_windows_source_contract_exit_$LASTEXITCODE" }
+
+      - name: Prove source checkout unchanged
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ((git rev-parse HEAD).Trim() -ne $env:EXPECTED_HEAD) { throw 'guardian_openssl_source_head_mismatch' }
+          if ((git status --porcelain --untracked-files=all | Out-String).Trim()) { throw 'guardian_openssl_source_checkout_modified' }
+
+  acquire-source:
+    if: github.event_name == 'workflow_dispatch'
+    needs: [source-contract, windows-script-contract]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Decode supplied public release certificate outside source checkout
+        shell: bash
+        env:
+          OPENSSL_SIGNING_CERTIFICATE_B64: ${{ inputs.openssl_signing_certificate_b64 }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+
+          encoded = os.environ['OPENSSL_SIGNING_CERTIFICATE_B64'].strip()
+          if not encoded or len(encoded) > 262144:
+              raise SystemExit('openssl_public_certificate_input_size_invalid')
+          certificate = base64.b64decode(encoded, validate=True)
+          if not certificate or len(certificate) > 131072:
+              raise SystemExit('openssl_public_certificate_size_invalid')
+          target = Path(os.environ['RUNNER_TEMP']) / 'openssl-release-signers.asc'
+          target.write_bytes(certificate)
+          PY
+
+      - name: Acquire pinned source and verify hashes and detached release signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 apps/metaengine-browser/scripts/acquire-guardian-openssl-source.py \
+            --certificate-file "$RUNNER_TEMP/openssl-release-signers.asc" \
+            --output-dir "$RUNNER_TEMP/guardian-openssl-source"
+
+      - name: Prove source checkout unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git status --porcelain --untracked-files=all)"
+
+      - name: Preserve authenticated source handoff
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
+        with:
+          name: guardian-openssl-source-${{ github.sha }}
+          path: ${{ runner.temp }}/guardian-openssl-source/
+          if-no-files-found: error
+          retention-days: 7
+
+  windows-static-build:
+    if: github.event_name == 'workflow_dispatch'
+    needs: acquire-source
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up build-host Node for linked consumer qualification
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+
+      - name: Prove exact candidate head
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ((git rev-parse HEAD).Trim() -ne $env:EXPECTED_HEAD) { throw 'guardian_openssl_source_head_mismatch' }
+
+      - name: Download authenticated source from this workflow run
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: guardian-openssl-source-${{ github.sha }}
+          path: ${{ runner.temp }}/guardian-openssl-source
+
+      - name: Build authenticated static crypto and actual native consumers without installation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./apps/metaengine-browser/scripts/build-guardian-native-package.ps1 -TestLinkedNamespace `
+            -SourceDir (Join-Path $env:RUNNER_TEMP 'guardian-openssl-source') `
+            -CryptoOutputDir (Join-Path $env:RUNNER_TEMP 'guardian-openssl-build') `
+            -OutputRoot (Join-Path $env:RUNNER_TEMP 'guardian-native-package')
+          if ($LASTEXITCODE -ne 0) { throw "guardian_openssl_static_build_exit_$LASTEXITCODE" }
+
+      - name: Exercise the actual linked peer exports without opening the production pipe
+        shell: bash
+        env:
+          GUARDIAN_PEER_BUILD_HOST_SMOKE_BINARY: ${{ runner.temp }}/guardian-native-package/guardian-peer/guardian-connected-peer.node
+        run: |
+          set -euo pipefail
+          node <<'NODE' | tee "$RUNNER_TEMP/guardian-openssl-build/evidence/linked-peer-smoke.txt"
+          const assert = require('node:assert/strict');
+          const addon = require(process.env.GUARDIAN_PEER_BUILD_HOST_SMOKE_BINARY);
+          assert.deepEqual(Object.keys(addon).sort(), ['cancelPendingGuardianPeerObservations', 'openGuardianConnectedPeer']);
+          assert.throws(() => addon.openGuardianConnectedPeer({}), /arguments_forbidden/);
+          assert.throws(() => addon.cancelPendingGuardianPeerObservations({}), /arguments_forbidden/);
+          assert.equal(addon.cancelPendingGuardianPeerObservations(), undefined);
+          console.log('LINKED_WINDOWS_BUILD_HOST_NAPI_EXPORTS=PASS; ELECTRON_AND_LAUNCH=UNQUALIFIED');
+          NODE
+
+      - name: Prove dependency and native test scope from build evidence
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $proofPath = Join-Path $env:RUNNER_TEMP 'guardian-openssl-build/openssl-static-build-proof.json'
+          if (-not (Test-Path -LiteralPath $proofPath -PathType Leaf)) { throw 'guardian_openssl_build_proof_missing' }
+          $proof = Get-Content -LiteralPath $proofPath -Raw | ConvertFrom-Json
+          foreach ($field in @('native_verifier_production_library_built', 'native_verifier_test_executable_linked', 'native_verifier_tests_passed')) {
+            if ($proof.$field -ne $true) { throw "guardian_native_verifier_evidence_missing:$field" }
+          }
+          if ($proof.production_qualified -ne $false) { throw 'guardian_openssl_production_qualification_unproven' }
+          if ($proof.native_verifier_linked -ne $false) { throw 'guardian_native_verifier_linkage_unavailable' }
+
+      - name: Prove source checkout unchanged
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ((git rev-parse HEAD).Trim() -ne $env:EXPECTED_HEAD) { throw 'guardian_openssl_source_head_mismatch' }
+          if ((git status --porcelain --untracked-files=all | Out-String).Trim()) { throw 'guardian_openssl_source_checkout_modified' }
+
+      - name: Preserve static dependency and signature build evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
+        with:
+          name: guardian-openssl-windows-static-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/guardian-native-package/
+            ${{ runner.temp }}/guardian-openssl-build/artifacts/openssl-static/
+            ${{ runner.temp }}/guardian-openssl-build/artifacts/guardian-signature/
+            ${{ runner.temp }}/guardian-openssl-build/evidence/
+            ${{ runner.temp }}/guardian-openssl-build/openssl-static-build-proof.json
+          if-no-files-found: warn
+          retention-days: 30
