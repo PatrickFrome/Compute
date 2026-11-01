@@ -6,6 +6,7 @@
 
 #include <bcrypt.h>
 #include <array>
+#include <cstring>
 #include <mutex>
 #include <utility>
 
@@ -26,6 +27,48 @@ struct Handle {
     Handle& operator=(const Handle&) = delete;
     bool valid() const { return value && value != INVALID_HANDLE_VALUE; }
     void reset(HANDLE next = nullptr) { if (valid()) CloseHandle(value); value = next; }
+};
+// Retain the actual image FILE_ID_INFO, not a mutable process path/JSON name.
+// A nonsharing read-only handle rejects ordinary replacement/writes during
+// the original process lifetime. Path reopening also detects a changed route.
+// This is identity custody only: it is NOT release/signature/code admission.
+bool fileIdentity(HANDLE file, FILE_ID_INFO* out) {
+    FILE_ATTRIBUTE_TAG_INFO attrs{};
+    return file != nullptr && file != INVALID_HANDLE_VALUE &&
+        GetFileType(file) == FILE_TYPE_DISK &&
+        GetFileInformationByHandleEx(file, FileAttributeTagInfo, &attrs, sizeof(attrs)) &&
+        (attrs.FileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY)) == 0 &&
+        GetFileInformationByHandleEx(file, FileIdInfo, out, sizeof(*out));
+}
+bool sameIdentity(const FILE_ID_INFO& left, const FILE_ID_INFO& right) {
+    return left.VolumeSerialNumber == right.VolumeSerialNumber &&
+        std::memcmp(left.FileId.Identifier, right.FileId.Identifier, sizeof(left.FileId.Identifier)) == 0;
+}
+struct ImageCustody {
+    Handle file;
+    FILE_ID_INFO identity{};
+    std::wstring path;
+
+    bool capture(std::wstring image_path) {
+        if (file.valid() || image_path.empty()) return false;
+        Handle held(CreateFileW(image_path.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ, nullptr,
+            OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+        FILE_ID_INFO readback{};
+        if (!held.valid() || !fileIdentity(held.value, &readback)) return false;
+        path = std::move(image_path);
+        identity = readback;
+        file.reset(std::exchange(held.value, nullptr));
+        return recheck();
+    }
+    bool recheck() const {
+        if (!file.valid() || path.empty()) return false;
+        Handle current(CreateFileW(path.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ, nullptr,
+            OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+        FILE_ID_INFO original_id{}, current_id{};
+        return current.valid() && fileIdentity(file.value, &original_id) &&
+            fileIdentity(current.value, &current_id) &&
+            sameIdentity(identity, original_id) && sameIdentity(identity, current_id);
+    }
 };
 std::uint64_t ticks(FILETIME time) {
     ULARGE_INTEGER out{}; out.LowPart = time.dwLowDateTime; out.HighPart = time.dwHighDateTime; return out.QuadPart;
@@ -60,6 +103,8 @@ struct GuardianInstallOriginLink::State {
     Handle client_pipe;
     std::unique_ptr<OwnerEnrollmentPipe> server_pipe;
     Handle bootstrap_process;
+    ImageCustody coordinator_payload;
+    ImageCustody bootstrap_payload;
     std::unique_ptr<GuardianOriginalInstallUser> origin;
     detail::InstallOriginFence fence;
     InstallOriginChallenge challenge{};
@@ -145,7 +190,8 @@ struct GuardianInstallOriginLink::State {
             return fail(lifetime == WAIT_OBJECT_0 ? "ORIGINAL_BOOTSTRAP_PROCESS_EXITED" : "ORIGINAL_BOOTSTRAP_PROCESS_UNAVAILABLE",
                 observed_error);
         }
-        if (!origin || !origin->recheck()) return fail("ORIGINAL_COORDINATOR_SCOPE_UNAVAILABLE", ERROR_ACCESS_DENIED);
+        if (!origin || !origin->recheck() || !coordinator_payload.recheck() || !bootstrap_payload.recheck())
+            return fail("ORIGINAL_COORDINATOR_OR_PAYLOAD_SCOPE_UNAVAILABLE", ERROR_ACCESS_DENIED);
         if (!active()) return fail("ORIGINAL_BOOTSTRAP_PIPE_WAIT_CANCELLED", ERROR_OPERATION_ABORTED);
         return true;
     }
@@ -159,7 +205,8 @@ struct GuardianInstallOriginLink::State {
             client == GetCurrentProcessId() && GetNamedPipeServerProcessId(pipe, &server) && server == bootstrap_pid &&
             GetProcessId(bootstrap_process.value) == bootstrap_pid && WaitForSingleObject(bootstrap_process.value, 0) == WAIT_TIMEOUT &&
             GetProcessTimes(bootstrap_process.value, &born, &exited, &kernel, &user) && ticks(born) == bootstrap_birth &&
-            image(bootstrap_process.value) == bootstrap_image && origin && origin->recheck();
+            image(bootstrap_process.value) == bootstrap_image && origin && origin->recheck() &&
+            coordinator_payload.recheck() && bootstrap_payload.recheck();
     }
 };
 
@@ -171,6 +218,9 @@ std::unique_ptr<GuardianInstallOriginLink> GuardianInstallOriginLink::captureCoo
     out->state_->is_coordinator = true;
     out->state_->origin = GuardianOriginalInstallUser::captureCurrentBeforeElevation();
     if (!out->state_->origin->recheck()) { out->state_->fail("TARGET_USER_BINDING_REQUIRED", ERROR_ACCESS_DENIED); return out; }
+    if (!out->state_->coordinator_payload.capture(image(out->state_->origin->retainedProcess()))) {
+        out->state_->fail("ORIGINAL_COORDINATOR_IMAGE_FILE_UNPROVEN", ERROR_ACCESS_DENIED); return out;
+    }
     const auto random_status = BCryptGenRandom(nullptr, out->state_->challenge.data(),
         static_cast<ULONG>(out->state_->challenge.size()), BCRYPT_USE_SYSTEM_PREFERRED_RNG);
     if (random_status < 0) { out->state_->fail("INSTALL_ORIGIN_CHALLENGE_UNAVAILABLE", ERROR_GEN_FAILURE); return out; }
@@ -187,6 +237,8 @@ bool GuardianInstallOriginLink::requestElevation() {
     if (!state_->is_coordinator || state_->attempted || !state_->active() || !state_->origin || !state_->origin->recheck()) {
         return state_->fail("TARGET_USER_BINDING_REQUIRED", ERROR_ACCESS_DENIED);
     }
+    if (!state_->coordinator_payload.recheck())
+        return state_->fail("ORIGINAL_COORDINATOR_IMAGE_FILE_CHANGED", ERROR_ACCESS_DENIED);
     state_->attempted = true;
     // The inspected existing W77 producer has no real protected-root signer or
     // authenticated final-artifact placement. There is no genuine native release
@@ -203,6 +255,8 @@ bool GuardianInstallOriginLink::connectOriginalBootstrap(HANDLE original_bootstr
     if (!state_->is_coordinator || state_->connection_attempted || state_->client_pipe.valid() || !state_->active() || !state_->origin || !state_->origin->recheck())
         return state_->fail("ORIGINAL_COORDINATOR_SCOPE_UNAVAILABLE", ERROR_ACCESS_DENIED);
     state_->connection_attempted = true;
+    if (!state_->coordinator_payload.recheck())
+        return state_->fail("ORIGINAL_COORDINATOR_IMAGE_FILE_CHANGED", ERROR_ACCESS_DENIED);
     HANDLE duplicate = nullptr;
     if (!DuplicateHandle(GetCurrentProcess(), original_bootstrap_process, GetCurrentProcess(), &duplicate, 0, FALSE, DUPLICATE_SAME_ACCESS))
         return state_->fail("ORIGINAL_BOOTSTRAP_HANDLE_UNAVAILABLE");
@@ -213,6 +267,8 @@ bool GuardianInstallOriginLink::connectOriginalBootstrap(HANDLE original_bootstr
         (state_->bootstrap_birth = ticks(born)) <= 116444736000000000ULL ||
         (state_->bootstrap_image = image(duplicate)).empty() || WaitForSingleObject(duplicate, 0) != WAIT_TIMEOUT)
         return state_->fail("ORIGINAL_BOOTSTRAP_PROCESS_UNAVAILABLE");
+    if (!state_->bootstrap_payload.capture(state_->bootstrap_image))
+        return state_->fail("ORIGINAL_BOOTSTRAP_IMAGE_FILE_UNPROVEN", ERROR_ACCESS_DENIED);
     const std::wstring pipe_name = std::wstring(kPrefix) + state_->routing_id;
     // Only initial absence/busy may be polled, on this same route and retained
     // process. This deadline does NOT bound later I/O or terminal IRP joining.
@@ -316,10 +372,14 @@ bool GuardianInstallOriginLink::listenAsBootstrap(std::wstring_view generated_li
     if (!detail::matchesInstallOriginFrame(hello, InstallOriginRole::Coordinator, state_->challenge) ||
         !state_->fence.markMessageComplete()) return state_->fail("INSTALL_ORIGIN_HELLO_INVALID", ERROR_INVALID_DATA);
     state_->origin = GuardianOriginalInstallUser::captureOriginalPipeClient(state_->server_pipe->handle());
-    if (!state_->origin->recheck() || !state_->fence.markPeerBound())
+    if (!state_->origin->recheck() ||
+        !state_->coordinator_payload.capture(image(state_->origin->retainedProcess())) ||
+        !state_->bootstrap_payload.capture(image(GetCurrentProcess())) ||
+        !state_->fence.markPeerBound())
         return state_->fail("ORIGINAL_PRE_UAC_CLIENT_UNPROVEN", ERROR_ACCESS_DENIED);
     auto reply = detail::makeInstallOriginFrame(InstallOriginRole::Bootstrap, state_->challenge);
-    if (!state_->packet(state_->server_pipe->handle(), &reply, true) || !state_->origin->recheck() || !state_->fence.claimOnce())
+    if (!state_->packet(state_->server_pipe->handle(), &reply, true) || !state_->origin->recheck() ||
+        !state_->coordinator_payload.recheck() || !state_->bootstrap_payload.recheck() || !state_->fence.claimOnce())
         return state_->fail("INSTALL_ORIGIN_REPLY_OR_POSTCHECK_FAILED");
     state_->kernel_bound = true;
     state_->reason = "KERNEL_BOUND_RELEASE_UNQUALIFIED";
@@ -329,7 +389,8 @@ bool GuardianInstallOriginLink::listenAsBootstrap(std::wstring_view generated_li
 
 bool GuardianInstallOriginLink::waitForOriginalCoordinatorClose() {
     std::lock_guard<std::mutex> lock(state_->mutex);
-    if (state_->is_coordinator || !state_->kernel_bound || !state_->active() || !state_->server_pipe || !state_->origin || !state_->origin->recheck())
+    if (state_->is_coordinator || !state_->kernel_bound || !state_->active() || !state_->server_pipe || !state_->origin ||
+        !state_->origin->recheck() || !state_->coordinator_payload.recheck() || !state_->bootstrap_payload.recheck())
         return state_->fail("ORIGINAL_COORDINATOR_SCOPE_UNAVAILABLE", ERROR_ACCESS_DENIED);
     // Keep original process/token/pipe custody while the coordinator performs
     // its after-reply checks. EOF is terminal transport observation, never an
@@ -362,6 +423,8 @@ void GuardianInstallOriginLink::close() noexcept {
     state_->kernel_bound = false;
     state_->client_pipe.reset();
     state_->server_pipe.reset();
+    state_->bootstrap_payload.file.reset();
+    state_->coordinator_payload.file.reset();
     state_->bootstrap_process.reset();
     if (state_->origin) state_->origin->close();
     state_->reason = "INSTALL_ORIGIN_CLOSED";
@@ -371,8 +434,12 @@ std::string GuardianInstallOriginLink::snapshotJson() const {
     std::lock_guard<std::mutex> lock(state_->mutex);
     const bool active = state_->active();
     const auto reason = active || state_->closed ? state_->reason : "INSTALL_ORIGIN_CANCELLED";
+    const bool coordinator_file = active && state_->coordinator_payload.recheck();
+    const bool bootstrap_file = active && state_->bootstrap_payload.recheck();
     return "{\"schema\":\"metaengine.browser-guardian.install-origin-link.v1\",\"state\":\"HOLD\",\"reason\":\"" + reason +
-        "\",\"kernel_binding\":\"" + (active && state_->kernel_bound ? "EXACT" : "UNPROVEN") +
+        "\",\"original_path_file_id\":\"" + (coordinator_file ? "HELD_SOURCE_ONLY" : "UNPROVEN") +
+        "\",\"bootstrap_path_file_id\":\"" + (bootstrap_file ? "HELD_SOURCE_ONLY" : "UNPROVEN") +
+        "\",\"kernel_binding\":\"" + (active && state_->kernel_bound && coordinator_file && bootstrap_file ? "EXACT" : "UNPROVEN") +
         "\",\"purpose\":\"INSTALL_ORIGIN_OBSERVATION_ONLY_V1\",\"release_binding\":\"UNQUALIFIED\",\"uac_requested\":false,"
         "\"main_launch_implemented\":false,\"scm_transfer_implemented\":false,\"authority_effect\":false,\"win32_error\":" +
         std::to_string(state_->error) + ",\"original_user\":" + (state_->origin ? state_->origin->snapshotJson() : "null") + "}";
