@@ -40,7 +40,7 @@ async function image(t,overrides={}){
     readProcess:async()=>native,
     readPackage:async()=>({version:'unit-fixture',metaengineClientStateRuntime:{bundle_sha256:'a'.repeat(64),source_head_sha:'b'.repeat(40),package_version:'unit-fixture'}}),
     verifyResources:async()=>{verifications++;},...overrides};
-  return {root,resources,bundle,exe,asar,cli,observers:createNativeCodingHostObservers(options),get verifications(){return verifications;},
+  return {root,resources,bundle,exe,asar,cli,options,observers:createNativeCodingHostObservers(options),get verifications(){return verifications;},
     changeNative:v=>{native=v;}};
 }
 
@@ -52,6 +52,42 @@ test('image qualification happens once before issuer timestamps and every observ
   assert.equal(f.verifications,1);assert.equal(a.source,'INSTALLED_IMAGE_NATIVE_VERIFIER');
   assert.equal(a.value.installed_exe_sha256,hash('exe'));assert.deepEqual(a.value,b.value);
   assert(Date.parse(b.observed_at)>=Date.now()-1000);
+});
+
+test('private tool tree drift permanently fences a prepared installed image',async t=>{
+  const f=await image(t);let drift=false,checks=0;
+  const privateTools={cliExecutable:f.cli,gitExecutable:process.execPath,cliExecutableSha256:hash('cli'),gitExecutableSha256:'a'.repeat(64),
+    environment:{PATH:''},revalidate:async()=>{checks++;if(drift)throw Error('fixture_private_tools_drift');}};
+  const observers=createNativeCodingHostObservers({...f.options,privateTools});
+  await observers.prepareInstalledImage();await observers.readInstalledImage();assert.ok(checks>=3);
+  drift=true;await assert.rejects(observers.readInstalledImage(),/fixture_private_tools_drift/);
+  drift=false;await assert.rejects(observers.prepareInstalledImage(),/invalidated/);
+});
+
+test('private tool digest and selection must match the physically observed CLI',async t=>{
+  const f=await image(t);
+  const privateTools={cliExecutable:f.cli,gitExecutable:process.execPath,cliExecutableSha256:'a'.repeat(64),gitExecutableSha256:'b'.repeat(64),
+    environment:{PATH:''},revalidate:async()=>{}};
+  assert.throws(()=>createNativeCodingHostObservers({...f.options,privateTools,cliPath:path.join(f.root,'foreign.exe')}),/private_tools_binding/);
+  const observers=createNativeCodingHostObservers({...f.options,privateTools});
+  await assert.rejects(observers.prepareInstalledImage(),/private_tools_cli_digest_mismatch/);
+  await assert.rejects(observers.prepareInstalledImage(),/invalidated/);
+});
+
+test('private worktree read uses captured package Git environment and rejects drift before spawn',async t=>{
+  const f=await image(t);const calls=[];let drift=false;
+  const environment={PATH:'package-only-bin',GIT_EXEC_PATH:'package-only-libexec',GIT_SSL_CAINFO:'package-only-ca'};
+  const privateTools={cliExecutable:f.cli,gitExecutable:process.execPath,cliExecutableSha256:hash('cli'),gitExecutableSha256:'a'.repeat(64),
+    environment,revalidate:async()=>{if(drift)throw Error('fixture_private_tree_missing');}};
+  const observers=createNativeCodingHostObservers({...f.options,privateTools,runGit:async(file,args,options)=>{
+    calls.push({file,args,options});throw Error('fixture_stop_after_capture');
+  }});
+  environment.PATH='mutable-decoy';
+  await assert.rejects(observers.readWorktree({worktree_path:f.root}),/fixture_stop_after_capture/);
+  assert.equal(calls[0].file,process.execPath);assert.equal(calls[0].options.env.PATH,'package-only-bin');
+  assert.equal(calls[0].options.env.GIT_EXEC_PATH,'package-only-libexec');assert.equal(calls[0].options.shell,false);
+  drift=true;await assert.rejects(observers.readWorktree({worktree_path:f.root}),/fixture_private_tree_missing/);
+  assert.equal(calls.length,1);
 });
 
 for(const mutation of ['file-bytes','added-entry','deleted-entry','file-replaced'])test(`physical image guard permanently fences ${mutation}`,async t=>{

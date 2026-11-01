@@ -4,11 +4,12 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import vm from 'node:vm';
 import {PassThrough} from 'node:stream';
+import {snapshotCodexCliPrivateTools,codexCliPrivateEnvironment} from '../src/codex-cli-runner.mjs';
 const source=await fs.readFile(new URL('../src/codex-cli-sandbox-probe.mjs',import.meta.url),'utf8');
 const start=source.indexOf('export async function runCodexCliSandboxProbe(');
 assert.ok(start>0);
 function fixture({failOpen=0,failSpawn=false,failResume=false,failSync=false,failTerminate=false,holdSync=false,failWrite=false,overflow=false,emitReport=false,pathApi=path}={}){
- const handles=[],events=[];let opens=0,finish,finishSync;
+ const handles=[],events=[],specs=[];let opens=0,finish,finishSync;
  const syncGate=new Promise(resolve=>{finishSync=resolve;});
  const completion=new Promise(resolve=>{finish=resolve;});
  const handle={proof:{fixture_only:true},stdout:new PassThrough(),stderr:new PassThrough(),completion,
@@ -23,11 +24,45 @@ function fixture({failOpen=0,failSpawn=false,failResume=false,failSync=false,fai
   canaryScript:()=> 'fixture-only',windowsSandboxBootIdentity:()=> 'fixture',protectOwnerOnlyWindowsDirectory:async()=>({owner_dacl_verified:true}),
   verifyOwnerOnlyWindowsStorage:async()=>({owner_dacl_verified:true}),digest:()=> 'a'.repeat(64),buildCodexSandboxProbeArgs:()=>[],
   codexCliTemporaryEnvironment:v=>v,codexCliEnvironment:()=>({}),POWERSHELL:'/fixture/powershell',
+  snapshotCodexCliPrivateTools,codexCliPrivateEnvironment,
   readWindowsSandboxProcess:async()=>({}),readWindowsSandboxHostBoot:async()=>({}),
  });
- return {handles,events,finish,finishSync,run:extra=>run({cliPath:'/fixture/cli',workspaceRoot:'/fixture/work',receiptDirectory:'/fixture/receipts',
-  codexHome:'/fixture/auth',scratchRoot:'/fixture/scratch',mode:'read-only',hostUserSid:'S-1-5-21-1',processController:{spawn:async()=>{events.push('spawn');if(failSpawn)throw Error('generated_spawn_failure');return handle;}},...extra})};
+ return {handles,events,specs,finish,finishSync,run:extra=>run({cliPath:'/fixture/cli',workspaceRoot:'/fixture/work',receiptDirectory:'/fixture/receipts',
+  codexHome:'/fixture/auth',scratchRoot:'/fixture/scratch',mode:'read-only',hostUserSid:'S-1-5-21-1',processController:{spawn:async spec=>{events.push('spawn');specs.push(spec);if(failSpawn)throw Error('generated_spawn_failure');return handle;}},...extra})};
 }
+
+test('probe private bundle rejection happens before files, logs or process effects',async()=>{
+ const f=fixture();let checks=0;
+ const privateTools={cliExecutable:'/fixture/cli',gitExecutable:'/fixture/git',cliExecutableSha256:'a'.repeat(64),gitExecutableSha256:'b'.repeat(64),
+  environment:{PATH:'package-only'},revalidate:async()=>{checks++;throw Error('fixture_bundle_missing');}};
+ await assert.rejects(f.run({privateTools}),/fixture_bundle_missing/);
+ assert.equal(checks,1);assert.equal(f.events.length,0);
+ await assert.rejects(f.run({privateTools:{...privateTools,cliExecutable:'/fixture/foreign-cli'}}),/private_tools_binding/);
+ assert.equal(f.events.length,0);
+});
+
+test('probe preserves package-only helper paths and rechecks closure immediately before spawn',async()=>{
+ const f=fixture();let checks=0;
+ const environment={PATH:'package-only',GIT_EXEC_PATH:'private-libexec',GIT_SSL_CAINFO:'private-ca'};
+ const privateTools={cliExecutable:'/fixture/cli',gitExecutable:'/fixture/git',cliExecutableSha256:'a'.repeat(64),gitExecutableSha256:'b'.repeat(64),
+  environment,revalidate:async()=>{checks++;}};
+ const result=f.run({privateTools});
+ environment.PATH='decoy-after-selection';
+ await new Promise(resolve=>setImmediate(resolve));assert.equal(f.specs.length,1);
+ assert.equal(f.specs[0].env.PATH,'package-only');assert.equal(f.specs[0].env.GIT_EXEC_PATH,'private-libexec');
+ assert.equal(f.specs[0].env.CODEX_HOME,'/fixture/auth');assert.equal(checks,3);
+ f.finish({fixture_only:true});await result;
+});
+
+test('probe bundle drift before resume terminates and joins its suspended worker',async()=>{
+ const f=fixture();let drift=false,settled=false;
+ const privateTools={cliExecutable:'/fixture/cli',gitExecutable:'/fixture/git',cliExecutableSha256:'a'.repeat(64),gitExecutableSha256:'b'.repeat(64),
+  environment:{PATH:'package-only'},revalidate:async()=>{if(drift)throw Error('fixture_bundle_drift');}};
+ const result=f.run({privateTools,onProcessStarted:()=>{drift=true;}}).then(()=>{settled=true;return null;},error=>{settled=true;return error;});
+ await new Promise(resolve=>setImmediate(resolve));assert.equal(f.events.includes('resume'),false);assert.equal(f.events.includes('terminate'),true);
+ assert.equal(settled,false);assert.ok(f.handles.every(h=>!h.closed));
+ f.finish({fixture_only:true});assert.match((await result).message,/process_unconfirmed/);assert.ok(f.handles.every(h=>h.closed));
+});
 test('probe refuses absent explicit home or scratch selection before creating files or spawning',async()=>{
  for(const extra of [{codexHome:undefined},{scratchRoot:undefined},{codexHome:'relative'},{scratchRoot:'relative'}]){
   const f=fixture();await assert.rejects(f.run(extra),/configuration_invalid/);

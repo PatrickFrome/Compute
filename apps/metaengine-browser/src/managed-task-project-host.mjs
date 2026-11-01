@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createManagedTaskProjectCommandAdapter, MANAGED_PROJECT_COMMAND_ACTIONS } from './managed-task-project-command-adapter.mjs';
 import { createManagedTaskProjectSqliteJournal } from './managed-task-project-sqlite-journal.mjs';
-import { createShellFreeGitExecutor } from './managed-task-project-runtime.mjs';
+import { createShellFreeGitExecutor, managedProjectPrivateGitTools } from './managed-task-project-runtime.mjs';
 import { protectOwnerOnlyWindowsDirectory, verifyOwnerOnlyWindowsStorage } from './private-windows-storage-acl.mjs';
 import { prepareManagedTaskProjectStorage, verifyManagedProjectPrivateFile } from './managed-task-project-storage.mjs';
 import { readManagedTaskProjectRepository } from './managed-task-project-repository.mjs';
@@ -22,8 +22,9 @@ export async function createManagedTaskProjectHost({
   provisionRepository = null,
   platform = process.platform, protectStorage = protectOwnerOnlyWindowsDirectory,
   verifyStorage = verifyOwnerOnlyWindowsStorage, createJournal = createManagedTaskProjectSqliteJournal,
-  gitExecutor = createShellFreeGitExecutor(),
+  privateTools = null, gitExecutor = createShellFreeGitExecutor({ privateTools }),
 } = {}) {
+  privateTools = managedProjectPrivateGitTools(privateTools);
   for (const [name, value] of Object.entries({ executeCommand, resolveProjectBinding, reserveBinding, finalizeBinding, protectStorage, verifyStorage, createJournal })) {
     if (typeof value !== 'function') fail(`${name}_required`);
   }
@@ -55,7 +56,7 @@ export async function createManagedTaskProjectHost({
         fail('source_sync_read_denied');
       // The current private repository configuration is the path authority.
       // Never execute a page-supplied cwd or even another managed project.
-      const config = await readManagedTaskProjectRepository({ userDataPath, platform, verifyStorage });
+      const config = await readManagedTaskProjectRepository({ userDataPath, platform, verifyStorage, privateTools });
       if (config?.repo_id !== 'PatrickFrome/Compute') fail('source_sync_repository_unbound');
       const samePath = (a, b) => platform === 'win32'
         ? path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase()
@@ -81,7 +82,7 @@ export async function createManagedTaskProjectHost({
       const effect = Promise.resolve().then(async () => {
         let configuration = null;
         if (provisionRepository) {
-          configuration = await readManagedTaskProjectRepository({ userDataPath, platform, verifyStorage });
+          configuration = await readManagedTaskProjectRepository({ userDataPath, platform, verifyStorage, privateTools });
           repositoryState = configuration ? 'CONFIGURED' : 'NOT_CONFIGURED';
           if (configuration && configuration.coordination_workspace_id !== identity.coordination_workspace_id) fail('repository_workspace_mismatch');
           if (configuration) { await provisionRepository(configuration); repositoryState = 'PROVISIONED'; }

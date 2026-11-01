@@ -11,6 +11,7 @@ import {readDirectoryIdentity} from './native-coding-fs-identity.mjs';
 import {verifyOwnerOnlyWindowsStorage,protectOwnerOnlyWindowsDirectory} from './private-windows-storage-acl.mjs';
 import {verifyInstalledClientStateResources} from './local-runtime-host-controller.mjs';
 import {readWindowsSandboxHostBoot,windowsSandboxBootIdentity,evaluateCodexSandboxProbe} from './codex-cli-sandbox-probe.mjs';
+import {snapshotCodexCliPrivateTools} from './codex-cli-runner.mjs';
 
 // Electron's normal fs treats app.asar as a virtual directory. Image identity,
 // inventories and hashes require the physical archive file. Failure to load the
@@ -289,20 +290,26 @@ export function createNativeCodingWorkerRegistry({processController,readProcess=
 export function createNativeCodingHostObservers({app,resourcesPath,cliPath,identity,ownPostgres,permitRegistry,
   sandboxReceipts=[],gitExecutable,readNativeWorker,readCriticSubject,readProcess=readNativeCodingWindowsProcess,
   readBoot=readWindowsSandboxHostBoot,verifyStorage=verifyOwnerOnlyWindowsStorage,
-  verifyResources=verifyInstalledClientStateResources,readPackage=null,runGit=run,processId=process.pid}={}) {
+  verifyResources=verifyInstalledClientStateResources,readPackage=null,runGit=run,processId=process.pid,privateTools=null}={}) {
   if(!app||app.isPackaged!==true||typeof app.getAppPath!=='function'||typeof app.getPath!=='function'
     ||!identity||typeof identity.snapshot!=='function'||typeof ownPostgres?.readScope!=='function'
     ||typeof ownPostgres?.readLease!=='function'||typeof permitRegistry?.readProvider!=='function'
     ||typeof readNativeWorker!=='function'||typeof readCriticSubject!=='function'
     ||!path.isAbsolute(gitExecutable||''))fail('private_dependencies_required');
+  const tools=privateTools===null?null:snapshotCodexCliPrivateTools(privateTools,{cliExecutable:cliPath,gitExecutable});
   let preparedImage=null,preparingImage=null,imageInvalidated=false;
+  const checkTools=async()=>{
+    if(imageInvalidated)fail('image_preparation_invalidated');
+    try{await tools?.revalidate();}catch(error){imageInvalidated=true;throw error;}
+  };
   const imagePaths=async()=>({exe:await canonical(app.getPath('exe'),'file'),asar:await canonical(app.getAppPath(),'file'),
     cli:await canonical(cliPath,'file'),bundle:await canonical(path.join(resourcesPath,'client-state-runtime'),'directory')});
   const prepareInstalledImage=async()=>{
     if(imageInvalidated)fail('image_preparation_invalidated');
-    if(preparedImage)return;
+    if(preparedImage){await checkTools();return;}
     if(preparingImage)return preparingImage;
     preparingImage=(async()=>{
+      await checkTools();
       const paths=await imagePaths();if(!paths.asar.toLowerCase().endsWith('app.asar'))fail('installed_asar_required');
       const before=await imageInventory(paths);
       const pkg=readPackage?await readPackage():JSON.parse(await archiveFs.readFile(path.join(paths.asar,'package.json'),'utf8'));
@@ -311,6 +318,8 @@ export function createNativeCodingHostObservers({app,resourcesPath,cliPath,ident
       const verifiedResources=await verifyResources({bundleDirectory:paths.bundle,expectedBundleDigest:binding.bundle_sha256});
       const [installed_exe_sha256,installed_asar_sha256,cli_executable_sha256]=await Promise.all([
         hashFile(paths.exe),hashFile(paths.asar),hashFile(paths.cli,512*1024*1024)]);
+      if(tools&&cli_executable_sha256!==tools.cliExecutableSha256)fail('private_tools_cli_digest_mismatch');
+      await checkTools();
       if(before!==await imageInventory(paths))fail('installed_image_changed_during_preparation');
       preparedImage={paths,inventory:before,verifiedResources,artifact:{installed_exe_sha256,installed_asar_sha256,
         runtime_bundle_sha256:binding.bundle_sha256,source_sha:binding.source_head_sha,cli_executable_sha256}};
@@ -334,6 +343,7 @@ export function createNativeCodingHostObservers({app,resourcesPath,cliPath,ident
   return Object.freeze({readPermit,readNativeWorker,readCriticSubject,prepareInstalledImage,
     async readAgentMcpLaunchPins(){
       if(imageInvalidated||!preparedImage)fail('installed_image_not_prepared');
+      await checkTools();
       const paths=await imagePaths(),verified=preparedImage.verifiedResources;
       const nodeExecutable=path.join(paths.bundle,'runtime','node','node.exe');
       const node=verified?.manifest?.files?.find(file=>file.path==='runtime/node/node.exe');
@@ -347,6 +357,7 @@ export function createNativeCodingHostObservers({app,resourcesPath,cliPath,ident
         if(!bytes.length||bytes.length>256*1024)fail('agent_bridge_source_budget');bridgeSha256[key]=digest(bytes);
       }
       if(preparedImage.inventory!==await imageInventory(paths))fail('agent_bridge_image_changed');
+      await checkTools();
       return Object.freeze({nodeExecutable,nodeSha256:node.sha256,
         entrypointPath:path.join(resourcesPath,'native-coding','agent-mcp',files.entrypoint),bridgeSha256:Object.freeze(bridgeSha256)});
     },
@@ -354,6 +365,7 @@ export function createNativeCodingHostObservers({app,resourcesPath,cliPath,ident
     async readInstalledImage() {
       if(imageInvalidated||!preparedImage)fail('installed_image_not_prepared');
       try{
+        await checkTools();
         const paths=await imagePaths(),native=await readProcess(processId);
         if(Object.keys(paths).some(k=>paths[k]!==preparedImage.paths[k])||!same(native.exe_path,paths.exe)
           ||preparedImage.inventory!==await imageInventory(paths))fail('installed_image_guard_changed');
@@ -372,9 +384,12 @@ export function createNativeCodingHostObservers({app,resourcesPath,cliPath,ident
     },
     async readWorktree(query) {
       const root=await canonical(query.worktree_path,'directory');
-      const env=Object.fromEntries(Object.entries(process.env).filter(([key])=>!/^GIT_/i.test(key)));
-      const git=async args=>(await runGit(gitExecutable,['--no-pager','-c','core.fsmonitor=false','-c','core.hooksPath=',...args],
-        {cwd:root,env,shell:false,windowsHide:true,timeout:15000,maxBuffer:8192})).stdout.trim();
+      const env=tools?{...tools.environment}:Object.fromEntries(Object.entries(process.env).filter(([key])=>!/^GIT_/i.test(key)));
+      const git=async args=>{
+        await checkTools();
+        return (await runGit(gitExecutable,['--no-pager','-c','core.fsmonitor=false','-c','core.hooksPath=',...args],
+          {cwd:root,env,shell:false,windowsHide:true,timeout:15000,maxBuffer:8192})).stdout.trim();
+      };
       if(!same(await git(['rev-parse','--show-toplevel']),root))fail('worktree_root_mismatch');
       const gitDir=await canonical(await git(['rev-parse','--absolute-git-dir']),'directory');
       if(!(await fs.lstat(path.join(root,'.git'))).isFile()||!(await fs.lstat(path.join(gitDir,'locked'))).isFile())fail('locked_worktree_required');
@@ -390,9 +405,11 @@ export function createNativeCodingHostObservers({app,resourcesPath,cliPath,ident
       return observe('W30_OWN_PG_LIVE_LEASE',value.value);
     },
     async readSandbox(query) {
+      await checkTools();
       const pin=pins.find(v=>(v.provider_id===undefined||v.provider_id===query.provider_id)&&(v.agent_id===undefined||v.agent_id===query.agent_id)&&v.role===query.role);
-      return observe('OS_SANDBOX_CANARY_READBACK',await readNativeCodingSandboxEvidence({pin,cliPath,worktreePath:query.worktree_path,
-        role:query.role,hostProcessId:processId,readProcess,readBoot,verifyStorage}));
+      const evidence=await readNativeCodingSandboxEvidence({pin,cliPath,worktreePath:query.worktree_path,
+        role:query.role,hostProcessId:processId,readProcess,readBoot,verifyStorage});
+      await checkTools();return observe('OS_SANDBOX_CANARY_READBACK',evidence);
     },
   });
 }

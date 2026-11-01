@@ -18,6 +18,38 @@ const inside = (root, target) => { const rel = path.relative(root, target); retu
 const samePath = (a, b) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
 const overlap = (a, b) => samePath(a, b) || inside(a, b) || inside(b, a);
 
+// This capability is supplied by native composition after package verification.
+// Capture its fields once so later mutation cannot redirect a prepared worker.
+export function snapshotCodexCliPrivateTools(value, {cliExecutable,gitExecutable,expectedExecutableSha256} = {}) {
+  if (!value || ![value.cliExecutable,value.gitExecutable].every(file=>typeof file==='string'&&path.isAbsolute(file)&&!file.includes('\0'))
+    || !SHA.test(value.cliExecutableSha256||'') || !SHA.test(value.gitExecutableSha256||'')
+    || typeof value.revalidate!=='function' || !value.environment || typeof value.environment!=='object'
+    || Array.isArray(value.environment)
+    || cliExecutable!==undefined&&!samePath(cliExecutable,value.cliExecutable)
+    || gitExecutable!==undefined&&!samePath(gitExecutable,value.gitExecutable)
+    || expectedExecutableSha256!==undefined&&expectedExecutableSha256!==value.cliExecutableSha256) throw fail('private_tools_binding_invalid');
+  const environment={};
+  for (const [key,text] of Object.entries(value.environment)) {
+    const name=key.toUpperCase();
+    if (!/^[A-Z_][A-Z_0-9()]*$/.test(name)||typeof text!=='string'||text.includes('\0')||Object.hasOwn(environment,name))
+      throw fail('private_tools_environment_invalid');
+    environment[name]=text;
+  }
+  if (!Object.hasOwn(environment,'PATH')) throw fail('private_tools_environment_invalid');
+  const revalidate=value.revalidate;
+  return Object.freeze({cliExecutable:value.cliExecutable,gitExecutable:value.gitExecutable,
+    cliExecutableSha256:value.cliExecutableSha256,gitExecutableSha256:value.gitExecutableSha256,
+    environment:Object.freeze(environment),revalidate:()=>revalidate()});
+}
+
+export function codexCliPrivateEnvironment(codexHome, tools) {
+  if (!path.isAbsolute(codexHome||'')) throw fail('auth_home_absolute_required');
+  // Preserve package-owned helper/CA/config paths. Ambient process.env never
+  // participates in this branch; only explicit per-worker home/temp are added.
+  return {...tools.environment,CODEX_HOME:codexHome,NO_COLOR:'1',GIT_TERMINAL_PROMPT:'0',GIT_CONFIG_NOSYSTEM:'1',
+    GIT_CONFIG_GLOBAL:process.platform==='win32'?'NUL':'/dev/null',GIT_PAGER:'cat'};
+}
+
 export function codexCliEnvironment(codexHome, source = process.env) {
   if (!path.isAbsolute(codexHome || '')) throw fail('auth_home_absolute_required');
   const allowed = new Set(['PATH', 'PATHEXT', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'USERPROFILE',
@@ -73,7 +105,8 @@ async function executableDigest(file) {
   return digest.digest('hex');
 }
 
-async function git(cwd, args, env, executable='git') {
+async function git(cwd, args, env, executable='git', revalidate=null) {
+  await revalidate?.();
   return new Promise((resolve, reject) => {
     const child = spawn(executable, ['--no-pager', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=', ...args], {
       cwd, env, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
@@ -87,10 +120,10 @@ async function git(cwd, args, env, executable='git') {
   });
 }
 
-async function gitProof(root, env, gitExecutable) {
-  const head = (await git(root, ['rev-parse', 'HEAD'], env,gitExecutable)).toString().trim();
+async function gitProof(root, env, gitExecutable, revalidate=null) {
+  const head = (await git(root, ['rev-parse', 'HEAD'], env,gitExecutable,revalidate)).toString().trim();
   if (!HEAD.test(head)) throw fail('git_head_invalid');
-  const status = await git(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--no-renames'], env,gitExecutable);
+  const status = await git(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--no-renames'], env,gitExecutable,revalidate);
   const rows = status.toString('utf8').split('\0').filter(Boolean);
   if (rows.length > 128) throw fail('changed_file_budget_exceeded');
   const files = []; let total = 0;
@@ -111,7 +144,7 @@ async function gitProof(root, env, gitExecutable) {
     } catch (error) { if (error.code !== 'ENOENT') throw error; }
     files.push({ path: relative.replaceAll('\\', '/'), status: row.slice(0, 2), sha256: bytes === null ? null : hash(bytes), bytes: bytes?.length ?? 0 });
   }
-  const diff = await git(root, ['diff', '--no-ext-diff', '--no-textconv', '--binary', 'HEAD', '--'], env,gitExecutable);
+  const diff = await git(root, ['diff', '--no-ext-diff', '--no-textconv', '--binary', 'HEAD', '--'], env,gitExecutable,revalidate);
   return { head, status_sha256: hash(status), diff_sha256: hash(diff), changed_files: files,
     artifact_sha256: hash(JSON.stringify({ head, files, diff_sha256: hash(diff) })), clean: rows.length === 0 };
 }
@@ -165,7 +198,7 @@ async function verifyPins(pins) {
  */
 export function createCodexCliRunner({ executablePath, expectedExecutableSha256, codexHome, journalRoot,
   workerTempRoot, protectTemporaryStorage = protectOwnerOnlyWindowsDirectory, verifyTemporaryStorage = verifyOwnerOnlyWindowsStorage,
-  authorizeLease, processController, prepareAgentBridge=null, gitExecutable='git',model = null, timeoutMs = 600000, maxOutputBytes = 8 * 1024 * 1024 } = {}) {
+  authorizeLease, processController, prepareAgentBridge=null, gitExecutable='git',privateTools=null,model = null, timeoutMs = 600000, maxOutputBytes = 8 * 1024 * 1024 } = {}) {
   if (![executablePath, codexHome, journalRoot, workerTempRoot].every(value => path.isAbsolute(value || ''))
     || !SHA.test(expectedExecutableSha256 || '') || typeof authorizeLease !== 'function'
     || typeof processController?.spawn !== 'function' || prepareAgentBridge!==null&&typeof prepareAgentBridge!=='function'
@@ -173,7 +206,8 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
     || typeof protectTemporaryStorage !== 'function' || typeof verifyTemporaryStorage !== 'function'
     || [journalRoot, codexHome, path.dirname(executablePath)].some(root => overlap(root, workerTempRoot))
     || !Number.isSafeInteger(maxOutputBytes) || maxOutputBytes < 1024 || maxOutputBytes > 16 * 1024 * 1024) throw fail('composition_invalid');
-  const env = codexCliEnvironment(codexHome);
+  const tools=privateTools===null?null:snapshotCodexCliPrivateTools(privateTools,{cliExecutable:executablePath,gitExecutable,expectedExecutableSha256});
+  const env = tools?codexCliPrivateEnvironment(codexHome,tools):codexCliEnvironment(codexHome);
   const keyOf = binding => hash(JSON.stringify({ task_id: binding.task_id, lease_generation: binding.lease_generation, role: binding.role }));
   const inspect = async binding => {
     const directory = path.join(journalRoot, keyOf(binding));
@@ -203,13 +237,14 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
   };
   const readback = result => remember({ state: 'READBACK_ONLY', result: structuredClone(result), abort: new AbortController() });
   const managedWorktree = async requested => {
+      await tools?.revalidate();
       const root = await fs.realpath(requested);
       if (!samePath(root, requested) || (await fs.lstat(root)).isSymbolicLink()) throw fail('worktree_path_invalid');
       if (inside(root, path.resolve(journalRoot)) || samePath(root, journalRoot)) throw fail('journal_inside_workspace');
       if (overlap(root, workerTempRoot)) throw fail('temporary_root_overlaps_workspace');
-      const gitTop = (await git(root, ['rev-parse', '--show-toplevel'], env,gitExecutable)).toString().trim();
+      const gitTop = (await git(root, ['rev-parse', '--show-toplevel'], env,gitExecutable,tools?.revalidate)).toString().trim();
       if (!samePath(gitTop, root) || !(await fs.lstat(path.join(root, '.git'))).isFile()) throw fail('managed_worktree_required');
-      const gitDir = (await git(root, ['rev-parse', '--absolute-git-dir'], env,gitExecutable)).toString().trim();
+      const gitDir = (await git(root, ['rev-parse', '--absolute-git-dir'], env,gitExecutable,tools?.revalidate)).toString().trim();
       if (!(await fs.lstat(path.join(gitDir, 'locked'))).isFile()) throw fail('locked_worktree_required');
       try { await fs.lstat(path.join(root, '.codex', 'config.toml')); throw fail('project_config_not_permitted'); }
       catch (error) { if (error.code !== 'ENOENT') throw error; }
@@ -225,6 +260,8 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
       if (typeof request.prompt !== 'string' || !request.prompt.trim() || Buffer.byteLength(request.prompt) > 32000) throw fail('prompt_invalid');
       const prior = await inspect(binding); if (prior) return readback({ ...prior, replayed: false, prior_attempt: true });
       if (signal?.aborted) throw fail('cancelled_before_attempt');
+      await tools?.revalidate();
+      if (signal?.aborted) throw fail('cancelled_before_attempt');
       const { root, gitDir } = await managedWorktree(request.worktreePath);
       const permit = structuredClone(authorized(await authorizeLease({ phase: 'BEFORE_ATTEMPT', binding, worktreePath: root }), binding, root));
       const checkPreparationOpen = () => {
@@ -232,7 +269,7 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
         if (Date.parse(permit.expires_at) <= Date.now()) throw fail('prepared_lease_expired');
       };
       if (await executableDigest(executablePath) !== expectedExecutableSha256) throw fail('executable_digest_mismatch');
-      const before = await gitProof(root, env,gitExecutable);
+      const before = await gitProof(root, env,gitExecutable,tools?.revalidate);
       if (before.head !== binding.base_sha) throw fail('base_head_mismatch');
       let subject = null;
       if (role === 'IMPLEMENTER' && !before.clean) throw fail('writer_worktree_dirty');
@@ -310,12 +347,13 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
     return Object.freeze({ state: 'FENCED', physical_settlement: 'NOT_ATTESTED', authority_effect: false });
   };
   const verifyPrepared = async row => {
+    await tools?.revalidate();
     checkOpen(row); await verifyPins(row.pins);
     if (hash(await boundedRead(row.attemptPath, 65536)) !== row.attemptSha256) throw fail('prepared_attempt_changed');
     const current = await managedWorktree(row.root);
     if (current.gitDir !== row.gitDir) throw fail('prepared_worktree_changed');
     if (await executableDigest(executablePath) !== expectedExecutableSha256) throw fail('executable_digest_mismatch');
-    if ((await gitProof(row.root, env, gitExecutable)).artifact_sha256 !== row.before.artifact_sha256) throw fail('prepared_worktree_changed');
+    if ((await gitProof(row.root, env, gitExecutable,tools?.revalidate)).artifact_sha256 !== row.before.artifact_sha256) throw fail('prepared_worktree_changed');
     if (row.subject) {
       const subject = await inspect({ ...row.request.subject, role: 'IMPLEMENTER' });
       if (hash(JSON.stringify(subject)) !== hash(JSON.stringify(row.subject))) throw fail('prepared_subject_changed');
@@ -417,6 +455,7 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
         await durableJson(path.join(directory,'launch.json'),launch,true);
         receipt.launch_identity=codexCliLaunchIdentity(launch);
         await verifyPins(row.pins); checkOpen(row);
+        await tools?.revalidate(); checkOpen(row);
         handle = await processController.spawn({...spec,launch});
         handle.stdout.on('data', data => output('stdout', data)); handle.stderr.on('data', data => output('stderr', data));
         const proof = handle.proof;
@@ -436,6 +475,7 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
         receipt.state = 'EXECUTION_STARTED';
         receipt.execution_deadline = new Date(Math.min(Date.parse(deadlineAt), Date.parse(recheck.expires_at))).toISOString();
         await durableJson(path.join(directory, 'execution-started.json'), receipt, true);
+        await tools?.revalidate(); checkOpen(row);
         await handle.resume(request.prompt, { deadlineAt: receipt.execution_deadline });
         processResult = await handle.completion;
         validateCodexCliJoinedSettlement(processResult?.joined_settlement,{proof:receipt.process,launch});
@@ -443,7 +483,7 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
         try { if (pending.trim()) parseLine(pending); } catch { eventError ||= 'JSONL_INVALID'; }
         await writes;
         receipt.thread_id = threadId; receipt.event_count = eventCount; receipt.process_result = processResult;
-        const after = await gitProof(root, env,gitExecutable); receipt.git_after = after;
+        const after = await gitProof(root, env,gitExecutable,tools?.revalidate); receipt.git_after = after;
         const finalPermit = authorized(await authorizeLease({ phase: 'AFTER_EXECUTION', binding, worktreePath: root,
           process: receipt.process, run_id: runId, git_after: after }), binding, root);
         if (finalPermit.permit_id !== permit.permit_id || finalPermit.owner_epoch !== permit.owner_epoch) throw fail('lease_changed_after_execution');
@@ -459,7 +499,7 @@ export function createCodexCliRunner({ executablePath, expectedExecutableSha256,
         await writes;
         receipt.state = 'AMBIGUOUS'; receipt.terminal_reason = abortReason || eventError || String(error?.message || 'RUN_FAILED').slice(0, 160);
         receipt.process_result = processResult;
-        try { receipt.git_after = await gitProof(root, env,gitExecutable); } catch { receipt.git_after = null; }
+        try { receipt.git_after = await gitProof(root, env,gitExecutable,tools?.revalidate); } catch { receipt.git_after = null; }
       } finally {
         clearTimeout(timer); signal?.removeEventListener('abort', onAbort);
         try{await closeBridge();bridgeDrained=true;}catch{
