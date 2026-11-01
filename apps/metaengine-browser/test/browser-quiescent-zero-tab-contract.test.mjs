@@ -61,6 +61,7 @@ test('convergence product head contains no temporary patch authority and package
     { from: 'native-dist/codex-cli/codex-cli-job-runner.ps1', to: 'native-coding/codex-cli-job-runner.ps1' },
     { from: 'client-state-runtime-dist', to: 'client-state-runtime', filter: ['**/*'] },
     { from: 'native-dist/guardian', to: 'guardian-native', filter: ['**/*'] },
+    { from: 'native-dist/guardian-peer', to: 'guardian-peer', filter: ['**/*'] },
     { from: 'native-dist/guardian-bootstrap', to: 'guardian-bootstrap', filter: ['**/*'] },
     { from: 'devos-source-snapshot', to: 'devos-source-snapshot', filter: ['**/*'] },
     {
