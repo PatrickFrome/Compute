@@ -6,20 +6,22 @@ import { promisify } from 'node:util';
 import { fixedWindowsNativeReadEnvironment } from './windows-native-read-environment.mjs';
 import { protectOwnerOnlyWindowsDirectory, verifyOwnerOnlyWindowsStorage } from './private-windows-storage-acl.mjs';
 import { codexCliEnvironment, codexCliTemporaryEnvironment } from './codex-cli-runner.mjs';
+import {codexCliPermissionOverrides,captureCodexCliPhysicalScope,codexCliInvocationFingerprint} from './codex-cli-execution-policy.mjs';
+import {readDirectoryIdentity} from './native-coding-fs-identity.mjs';
 
-export const CODEX_SANDBOX_PROBE_SCHEMA = 'metaengine.codex-cli.sandbox-probe.v1';
+export const CODEX_SANDBOX_PROBE_SCHEMA = 'metaengine.codex-cli.sandbox-probe.v2';
 const POWERSHELL = 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe';
 const execFileAsync = promisify(execFile);
 const digest = value => createHash('sha256').update(value).digest('hex');
 const modeValid = mode => ['workspace-write', 'read-only'].includes(mode);
 const isWithin = (root, file) => { const rel = path.relative(root, file); return rel !== '' && rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel); };
 
-// These overrides match exec's explicit legacy --sandbox mode. The sandbox
-// command has no --ignore-user-config, so inherited writable roots are reset.
+// Share explicit permission overrides with exec. The CLI still exposes different
+// config-loading selectors for sandbox and exec: a boundary observation alone
+// cannot attest configuration equivalence or authorize execution.
 export function buildCodexSandboxProbeArgs({ mode, workspaceRoot, scriptPath, powershellPath = POWERSHELL }) {
   if (!modeValid(mode) || ![workspaceRoot, scriptPath, powershellPath].every(value => path.isAbsolute(value))) throw Error('codex_sandbox_probe_arguments_invalid');
-  return ['-a', 'never', '-c', 'windows.sandbox="elevated"', '-c', `sandbox_mode="${mode}"`,
-    '-c', 'sandbox_workspace_write.writable_roots=[]', '-c', 'sandbox_workspace_write.network_access=false',
+  return ['-a', 'never', '--no-daemon', ...codexCliPermissionOverrides(mode),
     'sandbox', '--include-managed-config', '--permission-profile', mode === 'workspace-write' ? ':workspace' : ':read-only',
     '-C', workspaceRoot, '--', powershellPath, '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath];
 }
@@ -206,6 +208,16 @@ export async function runCodexCliSandboxProbe({ cliPath, workspaceRoot, receiptD
   // Avoid recursively provisioning the user's accumulated global Temp tree.
   // This is per-child environment only, outside source, journals and receipts.
   const env = codexCliTemporaryEnvironment(codexCliEnvironment(home), temporaryPath);
+  const captureScope=()=>captureCodexCliPhysicalScope({cliPath,codexHome:home,scratchRoot:scratchParent,workspaceRoot:workspace,mode,environment:env});
+  const executionScope=await captureScope();
+  if(executionScope.cli.sha256!==cliSha)throw Error('codex_sandbox_probe_cli_changed');
+  const temporaryIdentity=await readDirectoryIdentity(temporaryPath);
+  const verifyScope=async({beforeSandboxSetup=true}={})=>{
+    if(JSON.stringify(await captureScope())!==JSON.stringify(executionScope))throw Error('codex_sandbox_probe_execution_scope_changed');
+    if(await readDirectoryIdentity(temporaryPath)!==temporaryIdentity)throw Error('codex_sandbox_probe_temporary_scope_changed');
+    if(beforeSandboxSetup&&(await verifyOwnerOnlyWindowsStorage(temporaryPath,{operation:'VERIFY_DIRECTORY'}))?.owner_dacl_verified!==true)
+      throw Error('codex_sandbox_probe_temporary_storage_unverified');
+  };
   const stdoutPath = path.join(receipts, `${runId}.stdout.log`), stderrPath = path.join(receipts, `${runId}.stderr.log`), exitPath = path.join(receipts, `${runId}.exit.json`);
   let stdoutFile = null, stderrFile = null;
   const closeLogs = async () => {
@@ -217,7 +229,7 @@ export async function runCodexCliSandboxProbe({ cliPath, workspaceRoot, receiptD
   let stdoutWrites = Promise.resolve(), stderrWrites = Promise.resolve(), logWriteFailed = false;
   const deadlineAt = new Date(Date.now() + timeoutMs).toISOString();
   let handle;
-  try { handle = await processController.spawn({ executablePath: cliPath, args, cwd: workspace, env, timeoutMs, deadlineAt, runId, expectedExecutableSha256: cliSha }); }
+  try { await verifyScope();handle = await processController.spawn({ executablePath: cliPath, args, cwd: workspace, env, timeoutMs, deadlineAt, runId, expectedExecutableSha256: cliSha }); }
   catch (error) { await closeLogs(); throw error; }
   // Observe rejection immediately, but retain custody until the owned process
   // completion settles. A callback/resume failure is not process completion.
@@ -262,6 +274,7 @@ export async function runCodexCliSandboxProbe({ cliPath, workspaceRoot, receiptD
   });
   let completion;
   try {
+    await verifyScope();
     await handle.resume('', { deadlineAt });
     const finished = await processFinished;
     if (!finished.ok) throw Error('codex_sandbox_probe_completion_unconfirmed');
@@ -295,10 +308,16 @@ export async function runCodexCliSandboxProbe({ cliPath, workspaceRoot, receiptD
     :evaluateCodexSandboxProbe({ mode, report, nativeProcess, hostReadback, completion, hostUserSid, hostBootIdentity:hostBoot });
   if (outputLimitExceeded) observation = Object.freeze({ state: 'BLOCKED', reason: 'SANDBOX_PROBE_OUTPUT_LIMIT', boundary_observed: false, execution_authorized: false, authority_effect: false });
   if (logWriteFailed) observation = Object.freeze({ state: 'BLOCKED', reason: 'SANDBOX_PROBE_LOG_WRITE_FAILED', boundary_observed: false, execution_authorized: false, authority_effect: false });
+  try{await verifyScope({beforeSandboxSetup:false});}catch{
+    observation=Object.freeze({state:'BLOCKED',reason:'SANDBOX_EXECUTION_SCOPE_CHANGED',boundary_observed:false,execution_authorized:false,authority_effect:false});
+  }
   const evidence = { schema: CODEX_SANDBOX_PROBE_SCHEMA, run_id: runId, observed_at: new Date().toISOString(), ...observation,
     cli_path: await fs.realpath(cliPath), cli_sha256: cliSha, workspace_path: workspace, host_user_sid: hostUserSid,
     codex_home_path:home,temporary_root:scratchParent,
     temporary_path: temporaryPath, temporary_owner_dacl_verified_before_sandbox_setup: scratchAcl.owner_dacl_verified === true,
+    execution_scope:executionScope,invocation_sha256:codexCliInvocationFingerprint({args,env,cwd:workspace}),
+    invocation_binding:'INTENDED_ONLY',
+    temporary_identity_sha256:temporaryIdentity,
     host_boot: hostBoot, execution_deadline: deadlineAt,
     logs: { stdout_path: stdoutPath, stdout_sha256: digest(await fs.readFile(stdoutPath)), stderr_path: stderrPath,
       stderr_sha256: digest(await fs.readFile(stderrPath)), exit_path: exitPath, exit_sha256: digest(await fs.readFile(exitPath)) },

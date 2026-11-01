@@ -12,7 +12,7 @@ const root = new URL('../../../', import.meta.url), browser = new URL('apps/meta
 const workflow = readFileSync(new URL('.github/workflows/client-live-mechanics-recovery-v1.yml', root), 'utf8').replace(/\r\n/g, '\n');
 const self = 'test/live-mechanics-native-probe-workflow.test.mjs';
 const observation = '../../.github/browser-ci-resource-observation.mjs';
-const files = ['test/codex-cli-runner.test.mjs', 'test/codex-cli-sandbox-probe.test.mjs',
+const files = ['test/codex-cli-runner.test.mjs', 'test/codex-cli-execution-policy.test.mjs', 'test/codex-cli-sandbox-probe.test.mjs',
   'test/native-coding-host-observers.test.mjs', 'test/windows-local-computer-executor.test.mjs',
   'test/codex-cli-windows-output-order.test.mjs', 'test/codex-cli-windows-job-birth-physical.test.mjs'];
 const fullGate = "        if: ${{ !cancelled() && steps.qualification_prerequisites.outcome == 'success' }}";
@@ -30,7 +30,7 @@ function assertProbeAndFull(source) {
   assert.match(probe, /^        timeout-minutes: 10$/m);
   assert.match(probe, /^          node --test --test-concurrency=1 \\$/m);
   const targets = [...probe.matchAll(/^ {12}(test\/[^\s]+\.test\.mjs)(?: \\)?$/gm)].map(match => match[1]);
-  assert.deepEqual(targets, files, 'all six complete native-bearing files must run serially');
+  assert.deepEqual(targets, files, 'all reviewed complete native-bearing files must run serially');
   assert.match(full, /^        timeout-minutes: 20$/m);
   assert.match(full, /^          node --test --test-concurrency=4 'test\/\*\.test\.mjs'$/m);
   assert.ok(full.includes(fullGate), 'a failed/timed-out probe must not suppress the full suite after successful prerequisites');

@@ -46,6 +46,7 @@ export function createNativeCodingRuntime({identity,ownPostgres,signedRequest,ob
   const results=resultStore||createNativeCodingResultStore({journalRoot:runnerOptions.journalRoot,indexRoot:resultIndexRoot});
   const workers=workerRegistry||createNativeCodingWorkerRegistry({processController:processController||createCodexCliWindowsProcessController()});
   const source=observers||createNativeCodingHostObservers({...observerOptions,identity,ownPostgres,permitRegistry:permits,
+    codexHome:runnerOptions.codexHome,workerTempRoot:runnerOptions.workerTempRoot,
     readNativeWorker:query=>workers.readNativeWorker(query),readCriticSubject:query=>results.readCriticSubject(query)});
   const nativeIssuer=issuer||createNativeCodingHostIssuer({identity,...source});
   const activeBridges=new Set();
