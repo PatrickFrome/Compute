@@ -4,7 +4,7 @@ import {readClientNativeSetupRoute,readLoadedClientNativeSetupRoute} from './cli
 import {createNativeHostScopeCleanup,drainNativeHostScopeCleanups,nativeHostScopeCleanupHeld,nativeHostScopeCleanupHold} from './native-host-scope-cleanup.mjs';
 import {createPreparedActivationRouter,readPreparedActivationProfilePin} from './client-prepared-goal-activation.mjs';
 import {readWindowsKernelProcessW60} from './host-native-owner-producers-w60.mjs';
-import {readLoadedNativeRunOwner} from './native-coding-run-owner-main.mjs';
+import {createLoadedNativeRunOwnerCallback,readLoadedNativeRunOwner} from './native-coding-run-owner-main.mjs';
 import {readVerifiedInstalledExecutableW68} from './installed-executable-provenance-w68.mjs';
 import {prepareNativeWorkspaceFromStage} from './native-coding-workspace-preparation.mjs';
 import { RsiVerifiedSkillDispatch } from './rsi-verified-skill-dispatch.mjs';
@@ -105,7 +105,7 @@ import {stopOwnedLocalRuntimeHost,readOwnedLocalRuntimeHostSummary,createOwnedNa
 import {persistentLocalProviderBootstrap} from './local-state-provider-bootstrap.mjs';
 import {createInstalledRuntimeRecoveryBindingReader} from './runtime-recovery-installed-binding.mjs';
 import {createRuntimeRecoveryMainController} from './runtime-recovery-main.mjs';
-import {readNativeCodingOperatorPaths,resolveNativeCodingSandboxPin} from './native-coding-operator-paths.mjs';
+import {readNativeCodingOperatorPaths,resolveNativeCodingSandboxPin,validateNativeCodingInstalledPathScope} from './native-coding-operator-paths.mjs';
 import {createNativeCodingCapacityOwner} from './native-coding-capacity-owner.mjs';
 import {createNativeCodingRuntime} from './native-coding-runtime.mjs';
 import {drainManagedRuntimeBindings,drainManagedRuntimeWorkers} from './managed-runtime-drain.mjs';
@@ -920,6 +920,7 @@ function ensureNativeCodingRuntimeMounted() {
     const present=await fs.lstat(path.join(directory,'native-coding-operator-v1.json')).catch(error=>{if(error.code==='ENOENT')return null;throw error;});
     assertOpen(summary);if(!present){recordMountFailure('OPERATOR_CONFIGURATION_MISSING');return null;}
     const operator=await readNativeCodingOperatorPaths(directory);assertOpen(summary);
+    validateNativeCodingInstalledPathScope(operator,{resourcesPath:process.resourcesPath,stateDirectory:directory});
     const capability=createOwnedNativeCodingHostCapability(summary);let candidate=null,bindingAttempted=false;
     const custody={capability,runtime:null,failed:false,cleaned:false};nativeCodingRuntimeMountCustody=custody;
     try{
@@ -935,6 +936,11 @@ function ensureNativeCodingRuntimeMounted() {
       if(permits.length===0||hashes.length!==1)throw Error('native_coding_protected_permits_required');
       const sandboxReceipts=permits.map(permit=>({...resolveNativeCodingSandboxPin(operator,permit),provider_id:permit.provider_id,agent_id:permit.agent_id,role:permit.role}));
       candidate=createNativeCodingRuntime({identity,ownPostgres:capability,capacityOwner:nativeCodingCapacityOwner,
+        // Fresh W74/W68/kernel reads stay on the original RESERVE/PUBLISH/AGENT
+        // ticket. The standalone reader below is diagnostic only; invoking it
+        // from an Owner phase would recursively wait on that same Host scope.
+        // Wiring custody does not qualify loaded code or open publication.
+        readPreparedRunOwner:createLoadedNativeRunOwnerCallback({identity,capability,app,assertOpen:()=>assertOpen(summary)}),
         readRunOwner:async execution=>{
           // Classify before signing/dispatch. This shares the runtime's original
           // Phase1B maps; runtime custody alone owns capability.close().
@@ -1000,7 +1006,8 @@ function ensureNativeCodingRuntimeMounted() {
   nativeCodingRuntimeMountPromise=pending;nativeRuntimeInitializations.add(pending);
   const settled=()=>{nativeRuntimeInitializations.delete(pending);if(nativeCodingRuntimeMountPromise===pending)nativeCodingRuntimeMountPromise=null;};
   pending.then(settled,error=>{
-    recordMountFailure(error?.message==='native_coding_protected_permits_required'?'PROTECTED_PERMITS_UNAVAILABLE':'SETUP_READBACK_FAILED');
+    recordMountFailure(error?.message==='native_coding_protected_permits_required'?'PROTECTED_PERMITS_UNAVAILABLE':
+      error?.message?.startsWith('native_coding_installed_path_scope_')?'INSTALLED_DEPENDENCY_SCOPE_UNBOUND':'SETUP_READBACK_FAILED');
     settled();
   });return pending;
 }

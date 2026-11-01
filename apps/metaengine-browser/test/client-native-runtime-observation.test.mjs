@@ -51,6 +51,8 @@ test('supervisor-supplied native observations cannot substitute for owned runtim
 test('mount diagnostic is a fixed historical projection, never raw errors or supervisor data',()=>{
  const attempt={reason:'OPERATOR_CONFIGURATION_MISSING',attempted_at:new Date(options.now-86400000).toISOString()};
  assert.deepEqual(project(null,{...options,mountAttempt:attempt}).last_mount_attempt,attempt);
+ const ownedScope={...attempt,reason:'INSTALLED_DEPENDENCY_SCOPE_UNBOUND'};
+ assert.deepEqual(project(null,{...options,mountAttempt:ownedScope}).last_mount_attempt,ownedScope);
  for(const a of [{...attempt,reason:'/private/secret'}, {...attempt,secret:'hidden'}, {...attempt,attempted_at:new Date(options.now+5001).toISOString()}])
   assert.equal(project(null,{...options,mountAttempt:a}).last_mount_attempt,null);
  assert.equal(project(snapshot(),{...options,mountAttempt:attempt}).last_mount_attempt,null);

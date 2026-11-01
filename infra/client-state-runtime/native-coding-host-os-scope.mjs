@@ -7,11 +7,12 @@ import path from 'node:path';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {readDirectoryIdentity} from './native-coding-fs-identity.mjs';
+import {verifyOwnerOnlyWindowsStorage} from '../../apps/metaengine-browser/src/private-windows-storage-acl.mjs';
 import {nativeCodingCanonicalJson} from './native-coding-task-context.mjs';
 import {readNativeCodingGitProof} from '../../apps/metaengine-browser/src/native-coding-git-proof.mjs';
 import {readNativeCodingWindowsProcess,readNativeCodingProtectedJson,readNativeCodingSandboxEvidence}
   from '../../apps/metaengine-browser/src/native-coding-host-observers.mjs';
-import {readNativeCodingOperatorPaths,resolveNativeCodingSandboxPin} from '../../apps/metaengine-browser/src/native-coding-operator-paths.mjs';
+import {readNativeCodingOperatorPaths,resolveNativeCodingSandboxPin,validateNativeCodingInstalledPathScope} from '../../apps/metaengine-browser/src/native-coding-operator-paths.mjs';
 import {readWindowsSandboxHostBoot} from '../../apps/metaengine-browser/src/codex-cli-sandbox-probe.mjs';
 export {readNativeCodingOperatorPaths};
 import {assertNativeCodingHostRequestOpen,joinNativeCodingHostReads} from './native-coding-host-request-lifetime.mjs';
@@ -68,8 +69,15 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
   if(!config||typeof sql?.unsafe!=='function'||!Number.isSafeInteger(parentPid)||parentPid<1) fail('private_dependencies_required');
   const image=createNativeCodingHostImageGuard();
   const resources=path.dirname(config.bundle_directory),expectedExe=path.join(path.dirname(resources),'METAENGINE Browser Test.exe');
+  // Path placement is a refusal boundary only; original native/image/SQL
+  // proof still supplies authority. Revalidate every freshly read descriptor,
+  // including callback final readback; no old operator is adopted or cached.
+  async function readInstalledOperator(options){
+    return validateNativeCodingInstalledPathScope(await readNativeCodingOperatorPaths(config.state_directory,options),
+      {resourcesPath:resources,stateDirectory:config.state_directory});
+  }
   async function prepareNativeScopes(){
-    const operator=await readNativeCodingOperatorPaths(config.state_directory);
+    const operator=await readInstalledOperator();
     await image.prepare([expectedExe,path.join(resources,'app.asar'),operator.cli_executable]);
   }
   async function postgres(reader=sql,context) {
@@ -84,6 +92,7 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
         ||!samePath(row.data_directory,config.pg_data_directory)||!samePath(before[1],config.pg_data_directory)
         ||row.system_identifier!==config.expected_cluster_system_identifier
         ||path.basename(native.exe_path).toLowerCase()!=='postgres.exe'
+        ||!samePath(native.exe_path,path.join(config.bundle_directory,'runtime','postgresql','bin','postgres.exe'))
         ||Math.abs(Date.parse(native.created_at)-Number(before[2])*1000)>1000) fail('postgres_incarnation_unverified');
     const data_directory_identity_sha256=await readDirectoryIdentity(config.pg_data_directory);
     if((await fs.readFile(path.join(config.pg_data_directory,'postmaster.pid'),'utf8')).split(/\r?\n/).slice(0,4).join('\n')!==before.slice(0,4).join('\n')) fail('postgres_changed');
@@ -95,7 +104,7 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
     const [pg,host]=await joinNativeCodingHostReads([postgres(reader,context),readNativeCodingWindowsProcess(parentPid,{signal:context?.signal})]);
     assertNativeCodingHostRequestOpen(context);
     if(permit===null) return {postgres:pg,host_process:publicProcess(host),user_sid:host.user_sid};
-    const operator=await readNativeCodingOperatorPaths(config.state_directory,{signal:context?.signal});
+    const operator=await readInstalledOperator({signal:context?.signal});
     return readScopeWithCommon(permit,includeSandbox,{pg,host,operator},context);
   }
   // One explicit observation cohort shares only its common physical reads.
@@ -106,7 +115,7 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
     assertNativeCodingHostRequestOpen(context);
     if(!Array.isArray(permits)||permits.length<1||permits.some(p=>!p||typeof p!=='object'))fail('scope_batch_invalid');
     const [pg,host,operator,boot]=await joinNativeCodingHostReads([postgres(reader,context),readNativeCodingWindowsProcess(parentPid,{signal:context?.signal}),
-      readNativeCodingOperatorPaths(config.state_directory,{signal:context?.signal}),includeSandbox?readWindowsSandboxHostBoot({signal:context?.signal}):null]);
+      readInstalledOperator({signal:context?.signal}),includeSandbox?readWindowsSandboxHostBoot({signal:context?.signal}):null]);
     assertNativeCodingHostRequestOpen(context);
     const common={pg,host,operator,boot},results=new Array(permits.length);let cursor=0,failed=false;
     await joinNativeCodingHostReads(Array.from({length:Math.min(4,permits.length)},async()=>{
@@ -142,6 +151,7 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
     const unchanged=()=>joinNativeCodingHostReads([host.exe_path,path.join(resources,'app.asar'),operator.cli_executable].map(file=>image.read(file)));
     if(!includeSandbox){await unchanged();assertNativeCodingHostRequestOpen(context);return {...base,artifact,worktree};}
     const sandbox=await readNativeCodingSandboxEvidence({pin:resolveNativeCodingSandboxPin(operator,permit),cliPath:operator.cli_executable,
+      codexHome:operator.codex_home,scratchRoot:operator.worker_temp_root,
       worktreePath:permit.worktree.path,role:permit.role,hostProcessId:parentPid,signal:context?.signal,
       ...(boot?{readBoot:async()=>boot,readProcess:async pid=>{
         if(pid!==parentPid)fail('scope_batch_process_mismatch');return host;
@@ -157,7 +167,7 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
   async function readCheckpointScope(permit,reader=sql,context=undefined) {
     assertNativeCodingHostRequestOpen(context);
     const current=await readNativeScope(permit,false,reader,context);
-    const operator=await readNativeCodingOperatorPaths(config.state_directory,{signal:context?.signal});
+    const operator=await readInstalledOperator({signal:context?.signal});
     assertNativeCodingHostRequestOpen(context);
     const env={SystemRoot:process.env.SystemRoot,PATH:path.dirname(operator.git_executable),
       GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'NUL',GIT_TERMINAL_PROMPT:'0'};
@@ -171,7 +181,7 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
     return path.join(operator.journal_root,key,name);
   }
   async function readNativeWorker(pid,{scope,permit,job}) {
-    const operator=await readNativeCodingOperatorPaths(config.state_directory),worker=await readNativeCodingWindowsProcess(pid);
+    const operator=await readInstalledOperator(),worker=await readNativeCodingWindowsProcess(pid);
     if(!samePath(worker.exe_path,operator.cli_executable)||await fileHash(worker.exe_path)!==permit.artifact.cli_executable_sha256) fail('worker_executable_mismatch');
     const {value:receipt}=await readNativeCodingProtectedJson(journalPath(operator,scope,permit,'process.json'));
     if(receipt.task_id!==scope.task_id||receipt.lease_generation!==scope.lease_generation||receipt.agent_id!==scope.agent_id
@@ -197,18 +207,61 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
       if(helperAfter.process_incarnation_id!==observedHelper.process_incarnation_id||helperAfter.user_sid!==observedHelper.user_sid||!samePath(helperAfter.exe_path,observedHelper.exe_path))fail('worker_helper_changed');}
     return {...worker,job_id:receipt.process.job_id,run_id:receipt.run_id,prompt_sha256:receipt.prompt_sha256};
   }
-  async function readProtectedReceipt({scope,permit}) {
-    const operator=await readNativeCodingOperatorPaths(config.state_directory);
-    const receipt=(await readNativeCodingProtectedJson(journalPath(operator,scope,permit,'receipt.json'))).value;
-    const result=await readNativeCodingProtectedJson(journalPath(operator,scope,permit,'result.json'),{maximumBytes:128*1024});
+  async function readProtectedReceipt({scope:rawScope,permit:rawPermit,job:rawJob,request}={}) {
+    // Read original protected history without requiring today's executable,
+    // auth home or canary placement. This reader never adopts a run for launch,
+    // creates metadata, verifies current acceptance or releases physical custody.
+    // The private caller still verifies the registered canonical receipt/job.
+    const scope=structuredClone(rawScope),permit=structuredClone(rawPermit),job=structuredClone(rawJob);
+    const open=()=>assertNativeCodingHostRequestOpen(request);open();
+    if(!scope||!permit||!['IMPLEMENTER','CRITIC'].includes(permit.role)
+      ||!Number.isSafeInteger(scope.lease_generation)||scope.lease_generation<1
+      ||!/^[a-f0-9-]{36}$/.test(scope.task_id||''))fail('retained_receipt_selector_invalid');
+    const origin=await readDirectoryIdentity(config.state_directory);open();
+    // The raw v1 reader still proves protected configuration and shape. Only
+    // installed execution readers additionally impose the current layout.
+    const options={signal:request?.signal},operator=await readNativeCodingOperatorPaths(config.state_directory,options);open();
+    const fixed=nativeCodingCanonicalJson(operator),directory=journalPath(operator,scope,permit,'');
+    const roots=async()=>{
+      open();
+      const result=await joinNativeCodingHostReads([
+        readDirectoryIdentity(config.state_directory),readDirectoryIdentity(operator.journal_root),readDirectoryIdentity(directory),
+        verifyOwnerOnlyWindowsStorage(operator.journal_root,{operation:'VERIFY_DIRECTORY',...options}),
+        verifyOwnerOnlyWindowsStorage(directory,{operation:'VERIFY_DIRECTORY',...options}),
+      ]);open();
+      if(result.slice(0,3).some(value=>!/^[a-f0-9]{64}$/.test(value||''))
+        ||result.slice(3).some(value=>value?.owner_dacl_verified!==true))fail('retained_journal_unverified');
+      if(result[0]!==origin)fail('retained_journal_changed');return result.slice(0,3);
+    };
+    const before=await roots();
+    const read=async(name,extra={})=>{open();const value=await readNativeCodingProtectedJson(path.join(directory,name),{...options,...extra});open();return value;};
+    const receipt=(await read('receipt.json')).value;
+    const selected=(keys,source)=>keys.some(key=>Object.hasOwn(source,key)&&receipt?.[key]!==source[key]);
+    if(!receipt||selected(['task_id','lease_generation','agent_id','agent_generation_epoch','workspace_id'],scope)
+      ||selected(['role','permit_id','owner_epoch','user_sid','workspace_id','project_id','agent_id','agent_generation_epoch'],permit)
+      ||permit.worktree&&(receipt.worktree_path!==permit.worktree.path||receipt.base_sha!==permit.worktree.base_sha)
+      ||permit.artifact?.cli_executable_sha256!==undefined&&receipt.executable_sha256!==permit.artifact.cli_executable_sha256
+      ||scope.target_id!==undefined&&scope.target_id!==`codex-cli:${permit.provider_id}`)fail('retained_receipt_binding_changed');
+    if(job!==undefined){
+      const p=job?.payload;
+      if(!p||p.run_id!==receipt.run_id||selected(['prompt_sha256','task_id','lease_generation','agent_id','agent_generation_epoch',
+        'workspace_id','project_id','permit_id','owner_epoch','user_sid','role','base_sha'],p)
+        ||p.job_id!==undefined&&receipt.process?.job_id!==p.job_id
+        ||p.worker_process&&['pid','process_incarnation_id'].some(key=>receipt.process?.[key]!==p.worker_process[key])
+        ||p.host_process&&scope.host_incarnation!==p.host_process.process_incarnation_id)fail('retained_receipt_binding_changed');
+    }
+    const result=await read('result.json',{maximumBytes:128*1024});
     if(receipt.process?.launch||receipt.physical_settlement){
-      const launch=(await readNativeCodingProtectedJson(journalPath(operator,scope,permit,'launch.json'))).value;
-      const processReceipt=(await readNativeCodingProtectedJson(journalPath(operator,scope,permit,'process.json'))).value;
+      const launch=(await read('launch.json')).value;
+      const processReceipt=(await read('process.json')).value;
       // This validates the existing protected producer chain, not a historical
       // release capability. The capacity producer deliberately still resolves none.
       validateCodexCliProtectedSettlement(receipt,{launch,processReceipt});
     }
     if(result.sha256!==receipt.result_sha256||nativeCodingCanonicalJson(result.value)!==nativeCodingCanonicalJson(receipt.result)) fail('result_bytes_mismatch');
+    const after=await readNativeCodingOperatorPaths(config.state_directory,options);open();
+    if(fixed!==nativeCodingCanonicalJson(after)||nativeCodingCanonicalJson(before)!==nativeCodingCanonicalJson(await roots()))fail('retained_journal_changed');
+    open();
     return receipt;
   }
   Object.defineProperty(readNativeScope,'prepare',{value:prepareNativeScopes});
@@ -223,10 +276,10 @@ export function createNativeCodingHostOsScope({config,sql,parentPid=process.ppid
     publicationHost??=proof;assertNativeCodingHostRequestOpen(request);return proof;
   }
   async function readCallbackPrefix({scope,permit,expected,intent=null,publicationCursor=null,request}){
-    const operator=await readNativeCodingOperatorPaths(config.state_directory,{signal:request?.signal});
+    const operator=await readInstalledOperator({signal:request?.signal});
     const directory=journalPath(operator,scope,permit,'');
     const prefix=await readNativeCallbackProtectedPrefix({directory,expected,intent,publicationCursor,request});
-    const after=await readNativeCodingOperatorPaths(config.state_directory,{signal:request?.signal});
+    const after=await readInstalledOperator({signal:request?.signal});
     if(nativeCodingCanonicalJson(operator)!==nativeCodingCanonicalJson(after))fail('publication_operator_changed');
     assertNativeCodingHostRequestOpen(request);return prefix;
   }

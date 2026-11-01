@@ -15,7 +15,7 @@ import {generatedRunOwnerRead} from './fixtures/native-run-owner-read.mjs';
 const id=()=>randomUUID(),tick=()=>new Promise(resolve=>setImmediate(resolve));
 // Actual IPC client/server, adapter, direct Main callback, and filesystem
 // journal. SQL/publication/Owner data are GENERATED fixtures, not native trust.
-async function fixture(t,{mode='normal',ownerHold=null,claimHold=null,bridge='generated'}={}){
+async function fixture(t,{mode='normal',ownerHold=null,claimHold=null,bridge='generated',ownerFailure=null,changeAt=2}={}){
  const f=generatedRunOwnerRead(),scope={...f.scope.execution};delete scope.reservation_id;
  const runId=id(),instanceId=id(),expiry=new Date(Date.now()+60000).toISOString(),root=await fs.mkdtemp(path.join(await fs.realpath(os.tmpdir()),'prepared-adapter-ipc-'));
  const directory=path.join(root,'run');await fs.mkdir(directory);
@@ -34,6 +34,7 @@ operations.RESERVE_EXECUTION=async(input,ctx)=>{
  process.send({test:'reserved'});
  if(mode==='readback')return {state:'READBACK_ONLY',execution:null,automatic_retry_allowed:false,authority_effect:false};
  for(let i=0;i<6;i++)await ctx.runOwnerPhases.run(f.scope,{readScope:async()=>f.scope,verifyOwner:async()=>{}});
+ process.send({test:'generated-reservation-effect'});
  if(mode==='unknown')throw Error('generated_unknown');
  return {state:'RESERVED',scope:f.scope.execution,execution:{...f.scope.execution,state:'RESERVED'},automatic_retry_allowed:false,authority_effect:false,
  initial_callback_publication:nativeCallbackInitialPublicationAck({schema:'metaengine.native-coding.callback-publication.v1',job_sha256:null,
@@ -49,11 +50,21 @@ process.on('disconnect',()=>process.exit(0));process.send({test:'ready'});
  const child=fork(script,[],{stdio:['ignore','ignore','ignore','ipc'],windowsHide:true}),messages=[];child.on('message',m=>messages.push(m));
  const until=async predicate=>{for(let i=0;i<1000;i++){const found=messages.find(predicate);if(found)return found;await sleep(5);}throw Error('generated_host_event_missing');};
  await until(m=>m.test==='ready');const client=createNativeCodingHostIpcClient({child,instanceId,hostPid:child.pid,timeoutMs:3000});
- let ownerCalls=0,opens=0,takes=0,runs=0,retainedTake;const ownerEntered=Promise.withResolvers(),claimEntered=Promise.withResolvers();
+ let ownerCalls=0,opens=0,takes=0,runs=0,retainedTake,mountOpen=true;const ownerEntered=Promise.withResolvers(),claimEntered=Promise.withResolvers();
+ const device={enrolled:true,device_id:'generated-device',client_id:'generated-client',key_fingerprint_sha256:'a'.repeat(64)},hostOverride={};
  const ownPostgres={...client,async prepareAgentRunCustody(options){const token=await client.prepareAgentRunCustody(options);claimEntered.resolve();await claimHold;return token;},reserveExecution(){throw Error('legacy reserve forbidden');},withRunOwnerScope(){throw Error('nested IPC forbidden');},drainPhysical(){throw Error('global drain forbidden');},
+  snapshot:()=>({...client.snapshot(),...hostOverride}),
   openAgentRunCustody(){opens++;throw Error('reclaim forbidden');},takePreparedAgentRunCustody(token){takes++;return client.takePreparedAgentRunCustody(token);}};
- const direct=createLoadedNativeRunOwnerCallback({capability:ownPostgres,assertOpen(){},identity:{snapshot:()=>({enrolled:true,device_id:'generated-device',client_id:'generated-client',key_fingerprint_sha256:'a'.repeat(64)}),
+ const direct=createLoadedNativeRunOwnerCallback({capability:ownPostgres,assertOpen(){if(!mountOpen)throw Error('generated_mount_revoked');},identity:{snapshot:()=>({...device}),
   async readLoadedRunOwnerW74({scope,signal,assertLifetime}){ownerCalls++;assert.equal(signal,scope.signal);assertLifetime();ownerEntered.resolve();await ownerHold;
+   if(ownerCalls===changeAt){
+    if(ownerFailure==='device-change')device.key_fingerprint_sha256='b'.repeat(64);
+    if(ownerFailure==='host-change')hostOverride.instance_id=id();
+    if(ownerFailure==='mount-revocation')mountOpen=false;
+   }
+   assertLifetime();
+   if(ownerFailure==='missing')return null;
+   if(ownerFailure==='forged-ready')return {...f.evidence,source:{...f.evidence.source,loaded_runtime_code_attested:true}};
    await scope.readScope();await scope.verifyOwnerRecord(f.evidence);assertLifetime();return f.evidence;}}});
  const adapter=createNativeCodingPreparedCustodyAdapter({ownPostgres,ownerCallback:direct,assertOpen(){}}),abort=new AbortController();
  const descriptor=Object.freeze({schema:'metaengine.codex-cli.prepared-run.v1',state:'PREPARED',runId,binding,callbackJournal:journal,
@@ -67,7 +78,7 @@ process.on('disconnect',()=>process.exit(0));process.send({test:'ready'});
  bound=adapter.bindRunner({runner,handle,permit,signal:abort.signal});
  t.after(async()=>{adapter.close();client.close();if(child.exitCode===null){const exited=new Promise(resolve=>child.once('exit',resolve));child.kill();await exited;}
   await adapter.drain().catch(()=>{});await client.drainPhysical({wait:false}).catch(()=>{});await fs.rm(root,{recursive:true,force:true});});
- return {adapter,bound,handle,descriptor,scope,abort,child,client,directory,until,ownerEntered,claimEntered,
+ return {adapter,bound,handle,descriptor,scope,abort,child,client,directory,until,messages,ownerEntered,claimEntered,
   reserve:()=>adapter.reserve(scope,{prepared:descriptor}),run:()=>bound.runPrepared(handle),get ownerCalls(){return ownerCalls;},get opens(){return opens;},get takes(){return takes;},get runs(){return runs;},
   get retainedTake(){return retainedTake;}};
 }
@@ -78,6 +89,19 @@ test('actual client original reservation and six direct Main reads yield one ret
  await f.run();f.adapter.close();await f.adapter.drain();assert.equal(f.takes,1);assert.equal(f.opens,0);
  assert.throws(()=>f.retainedTake(),/closed|fenced|consumed/);assert.deepEqual(await kinds(f),['HEADER','BOUND','FENCE','CALLBACKS_JOINED','CANDIDATE']);
  assert.equal((await readNativeRunCallbackJournal(f.directory)).all_effects_cleanup,'UNCONFIRMED');
+});
+for(const ownerFailure of ['missing','forged-ready'])test('actual original IPC refuses '+ownerFailure+' Owner before reservation effect or prepared handoff',async t=>{
+ const f=await fixture(t,{ownerFailure});await assert.rejects(f.reserve());f.adapter.close();await f.adapter.drain();
+ assert.equal(f.ownerCalls,1);assert.equal(f.takes,0);assert.equal(f.runs,0);assert.equal(f.opens,0);
+ assert.equal(f.messages.some(m=>m.test==='generated-reservation-effect'),false);
+ assert.deepEqual(await kinds(f),['HEADER','BOUND','FENCE']);await assert.rejects(f.reserve());
+});
+for(const ownerFailure of ['device-change','host-change','mount-revocation'])for(const changeAt of [2,6])
+test('actual original IPC fences '+ownerFailure+' on Owner cycle '+changeAt+' before reservation effect',async t=>{
+ const f=await fixture(t,{ownerFailure,changeAt});await assert.rejects(f.reserve());f.adapter.close();await f.adapter.drain();
+ assert.equal(f.ownerCalls,changeAt);assert.equal(f.takes,0);assert.equal(f.runs,0);assert.equal(f.opens,0);
+ assert.equal(f.messages.some(m=>m.test==='generated-reservation-effect'),false);
+ assert.deepEqual(await kinds(f),['HEADER','BOUND','FENCE']);
 });
 for(const mode of ['readback','unknown'])test('actual client '+mode+' cannot reach runner/bridge or replay original reserve',async t=>{
  const f=await fixture(t,{mode});if(mode==='unknown')await assert.rejects(f.reserve());else assert.equal((await f.reserve()).state,'READBACK_ONLY');

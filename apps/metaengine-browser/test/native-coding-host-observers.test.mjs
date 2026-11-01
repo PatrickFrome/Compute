@@ -5,6 +5,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
+import {captureCodexCliPhysicalScope} from '../src/codex-cli-execution-policy.mjs';
 import {createNativeCodingHostObservers,createNativeCodingPermitRegistry,createNativeCodingWorkerRegistry,
   createNativeCodingResultStore,readNativeCodingProtectedJson,readNativeCodingWindowsProcess,
   readNativeCodingSandboxEvidence} from '../src/native-coding-host-observers.mjs';
@@ -80,6 +81,30 @@ test('a failed full verifier is fenced without silently attesting a later retry'
 test('current kernel image mismatch fences previously qualified bytes',async t=>{
   const f=await image(t);await f.observers.prepareInstalledImage();f.changeNative({...proc,exe_path:f.cli});
   await assert.rejects(f.observers.readInstalledImage(),/guard_changed/);
+});
+
+test('worktree observer strips external Git overrides then restores fixed private config policy',async t=>{
+ const calls=[],f=await image(t,{runGit:async(executable,args,options)=>{
+  assert.equal(executable,process.execPath);calls.push(options.env);
+  if(args.includes('--show-toplevel'))return {stdout:path.join(f.root,'worktree')};
+  if(args.includes('--absolute-git-dir'))return {stdout:path.join(f.root,'metadata')};
+  if(args.includes('HEAD'))return {stdout:'a'.repeat(40)};
+  throw Error('generated_unexpected_git');
+ }});
+ const worktree=path.join(f.root,'worktree'),metadata=path.join(f.root,'metadata');
+ await fs.mkdir(worktree);await fs.mkdir(metadata);
+ await fs.writeFile(path.join(worktree,'.git'),'gitdir: '+metadata);await fs.writeFile(path.join(metadata,'locked'),'generated');
+ const original=process.env;t.after(()=>{process.env=original;});
+ process.env={PATH:'generated-ambient-path',GIT_CONFIG_GLOBAL:'C:\\Program Files\\Git\\etc\\gitconfig',
+  GIT_CONFIG_NOSYSTEM:'0',git_config_system:'generated-hostile-system-config',GIT_CONFIG_COUNT:'1',
+  GIT_CONFIG_KEY_0:'core.hooksPath',GIT_CONFIG_VALUE_0:'generated-hostile-hooks',GIT_ASKPASS:'generated-hostile-askpass',GIT_EXEC_PATH:'generated-hostile-helpers'};
+ const result=await f.observers.readWorktree({worktree_path:worktree});assert.equal(result.value.base_sha,'a'.repeat(40));
+ assert.equal(calls.length,3);
+ for(const env of calls){
+  assert.equal(env.GIT_CONFIG_NOSYSTEM,'1');assert.equal(env.GIT_CONFIG_GLOBAL,process.platform==='win32'?'NUL':'/dev/null');
+  assert.equal(env.GIT_TERMINAL_PROMPT,'0');
+  for(const name of ['git_config_system','GIT_CONFIG_COUNT','GIT_CONFIG_KEY_0','GIT_CONFIG_VALUE_0','GIT_ASKPASS','GIT_EXEC_PATH'])assert.equal(Object.hasOwn(env,name),false,name);
+ }
 });
 
 test('protected JSON requires affirmative ACL readback and hashes exact physical bytes',async t=>{
@@ -220,11 +245,15 @@ test('independent Critic subject resolves only exact immutable author receipt, p
 });
 
 async function sandboxFixture(t){
-  const root=await temporary(t),cliPath=path.join(root,'codex.exe'),receiptPath=path.join(root,'receipt.json');await fs.writeFile(cliPath,'fixture-cli');
+  const root=await temporary(t),cliPath=path.join(root,'codex.exe'),receiptPath=path.join(root,'receipt.json'),
+    worktreePath=path.join(root,'worktree'),codexHome=path.join(root,'home'),scratchRoot=path.join(root,'scratch');
+  for(const directory of [worktreePath,codexHome,scratchRoot])await fs.mkdir(directory);
+  await fs.writeFile(cliPath,'fixture-cli');
   const denied={outcome:'ERROR',access_denied:true,error_type:'System.UnauthorizedAccessException'},written={outcome:'WRITTEN',access_denied:false};
   const canary={schema:'metaengine.codex-cli.sandbox-canary.v1',mode:'workspace-write',pid:124,started_at:'2026-10-22T04:00:00.123Z',user_sid:'S-1-5-21-111-1002',
     inside_append:written,inside_create:written,outside_append:denied,outside_create:denied};
-  const value={state:'OBSERVED',reason:null,boundary_observed:true,sandbox_backend:'CODEX_WINDOWS_ELEVATED',execution_authorized:false,schema:'metaengine.codex-cli.sandbox-probe.v1',mode:'workspace-write',workspace_path:root,cli_path:cliPath,cli_sha256:hash('fixture-cli'),
+  const value={state:'OBSERVED',reason:null,boundary_observed:true,sandbox_backend:'CODEX_WINDOWS_ELEVATED',execution_authorized:false,schema:'metaengine.codex-cli.sandbox-probe.v2',mode:'workspace-write',workspace_path:worktreePath,cli_path:cliPath,cli_sha256:hash('fixture-cli'),
+    codex_home_path:codexHome,temporary_root:scratchRoot,
     model_called:false,authority_effect:false,host_boot:{schema:'metaengine.windows.kernel-boot.v1',kernel_boot_id:29,
       system_process:{pid:4,created_at:'2026-10-22T03:00:00.000Z',created_100ns:String(BigInt(Date.parse('2026-10-22T03:00:00.000Z'))*10000n+116444736000000000n)},
       last_boot_at:'2026-10-22T03:00:00.000Z',os_version:'10.0.19045'},canary,
@@ -234,30 +263,106 @@ async function sandboxFixture(t){
   for(const [name,content] of [['stdout',JSON.stringify(canary)+'\n'],['stderr',''],['exit',JSON.stringify(value.completion)+'\n']]){
     const file=path.join(root,`${name}.log`);await fs.writeFile(file,content);value.logs[`${name}_path`]=file;value.logs[`${name}_sha256`]=hash(content);
   }
+  const captureScope=()=>captureCodexCliPhysicalScope({cliPath,codexHome,scratchRoot,workspaceRoot:worktreePath,mode:'workspace-write',verifyStorage:yes});
+  value.execution_scope=structuredClone(await captureScope());
   const save=async()=>{const text=JSON.stringify(value);await fs.writeFile(receiptPath,text);return {path:receiptPath,sha256:hash(text)};};
-  const options={pin:await save(),cliPath,worktreePath:root,role:'IMPLEMENTER',readProcess:async()=>proc,
-    readBoot:async()=>structuredClone(value.host_boot),verifyStorage:yes};return {value,options,save};
+  const options={pin:await save(),cliPath,worktreePath,codexHome,scratchRoot,role:'IMPLEMENTER',readProcess:async()=>proc,
+    readBoot:async()=>structuredClone(value.host_boot),verifyStorage:yes};return {root,value,options,save,captureScope};
 }
 test('prepared sandbox image reader preserves exact bytes and invalidates a changed executable',async t=>{
   const {createNativeCodingHostImageGuard}=await import('../../../infra/client-state-runtime/native-coding-host-os-scope.mjs');
   const f=await sandboxFixture(t),guard=createNativeCodingHostImageGuard();
   await guard.prepare([f.options.cliPath]);
   const options={...f.options,readExecutableSha256:file=>guard.read(file)};
-  assert.equal((await readNativeCodingSandboxEvidence(options)).mode,'workspace-write');
+  await assert.rejects(readNativeCodingSandboxEvidence(options),/sandbox_configuration_equivalence_unverified/);
   await fs.writeFile(f.options.cliPath,'changed-cli');
   await assert.rejects(readNativeCodingSandboxEvidence(options),/image_preparation_invalidated/);
   await assert.rejects(readNativeCodingSandboxEvidence({...f.options,readExecutableSha256:async()=>null}),/image_digest_invalid/);
   await assert.rejects(readNativeCodingSandboxEvidence({...f.options,readExecutableSha256:async()=> 'f'.repeat(64)}),/scope_mismatch/);
 });
 test('sandbox reader binds exact CLI, worktree, current boot and raw logs including empty stderr',async t=>{
-  const f=await sandboxFixture(t);assert.equal((await readNativeCodingSandboxEvidence(f.options)).mode,'workspace-write');
+  const f=await sandboxFixture(t);await assert.rejects(readNativeCodingSandboxEvidence(f.options),/sandbox_configuration_equivalence_unverified/);
   await assert.rejects(readNativeCodingSandboxEvidence({...f.options,worktreePath:path.join(f.options.worktreePath,'elsewhere')}),/scope_mismatch/);
   await assert.rejects(readNativeCodingSandboxEvidence({...f.options,role:'CRITIC'}),/scope_mismatch/);
-  assert.equal((await readNativeCodingSandboxEvidence({...f.options,readBoot:async()=>({...f.value.host_boot,last_boot_at:'2026-10-23T03:00:00.000Z'})})).mode,'workspace-write');
+  await assert.rejects(readNativeCodingSandboxEvidence({...f.options,readBoot:async()=>({...f.value.host_boot,last_boot_at:'2026-10-23T03:00:00.000Z'})}),/sandbox_configuration_equivalence_unverified/);
   await assert.rejects(readNativeCodingSandboxEvidence({...f.options,readBoot:async()=>({...f.value.host_boot,kernel_boot_id:30})}),/scope_mismatch/);
   const old=f.value.host_boot;f.value.host_boot={last_boot_at:old.last_boot_at};await assert.rejects(readNativeCodingSandboxEvidence({...f.options,pin:await f.save()}),/scope_mismatch/);
   f.value.host_boot=old;f.options.pin=await f.save();
   await fs.writeFile(f.value.logs.stdout_path,'tampered');await assert.rejects(readNativeCodingSandboxEvidence(f.options),/log_digest_mismatch/);
+});
+
+test('historical v1 sandbox receipts remain HOLD even with copied current scope and public proof flags',async t=>{
+ const f=await sandboxFixture(t);f.value.schema='metaengine.codex-cli.sandbox-probe.v1';
+ delete f.value.execution_scope;
+ await assert.rejects(readNativeCodingSandboxEvidence({...f.options,pin:await f.save()}),/historical_sandbox_receipt_hold/);
+ f.value.execution_scope={...await f.captureScope(),configuration_attestation:'VERIFIED'};
+ f.value.configuration_equivalence_verified=true;
+ await assert.rejects(readNativeCodingSandboxEvidence({...f.options,pin:await f.save()}),/historical_sandbox_receipt_hold/);
+});
+
+test('matching v2 local configuration sources cannot qualify genuine effective configuration',async t=>{
+ const f=await sandboxFixture(t),scope=await f.captureScope();
+ assert.deepEqual(scope,f.value.execution_scope);assert.equal(scope.configuration_attestation,'UNAVAILABLE');
+ assert.equal(scope.local_configuration.exhaustive,false);assert.equal(scope.configuration_semantics.equivalent,false);
+ assert.equal(path.dirname(f.options.codexHome),f.root);assert.equal(path.dirname(f.options.scratchRoot),f.root);
+ assert.notEqual(f.options.worktreePath,f.root);
+ await assert.rejects(readNativeCodingSandboxEvidence(f.options),/sandbox_configuration_equivalence_unverified/);
+});
+
+for(const [name,mutate]of [
+ ['home',f=>{f.value.execution_scope.home.path=f.options.scratchRoot;}],
+ ['scratch',f=>{f.value.execution_scope.scratch.path=f.options.codexHome;}],
+ ['workspace',f=>{f.value.execution_scope.workspace.path=f.options.codexHome;}],
+ ['CLI',f=>{f.value.execution_scope.cli.path=f.value.logs.stdout_path;}],
+ ['local configuration digest',f=>{f.value.execution_scope.local_configuration.sha256='0'.repeat(64);}],
+ ['operator choices',f=>{f.value.execution_scope.operator_choices_sha256='0'.repeat(64);}],
+ ['permission overrides',f=>{f.value.execution_scope.permission_overrides.push('-c','sandbox_workspace_write.network_access=true');}],
+ ['configuration semantics',f=>{f.value.execution_scope.configuration_semantics.equivalent=true;}],
+ ['public VERIFIED attestation',f=>{f.value.execution_scope.configuration_attestation='VERIFIED';}],
+])test('v2 sandbox consumer rejects repinned tampered '+name,async t=>{
+ const f=await sandboxFixture(t);mutate(f);
+ await assert.rejects(readNativeCodingSandboxEvidence({...f.options,pin:await f.save()}),/sandbox_execution_scope_mismatch/);
+});
+
+for(const argument of ['codexHome','scratchRoot','worktreePath'])test('same-named '+argument+' replacement invalidates v2 sandbox evidence',async t=>{
+ const f=await sandboxFixture(t),target=f.options[argument];
+ await fs.rename(target,target+'-retired');await fs.mkdir(target);
+ await assert.rejects(readNativeCodingSandboxEvidence(f.options),/sandbox_execution_scope_mismatch/);
+});
+
+test('same-byte CLI replacement invalidates v2 physical scope after its byte digest still matches',async t=>{
+ const f=await sandboxFixture(t);await fs.rename(f.options.cliPath,f.options.cliPath+'.retired');await fs.writeFile(f.options.cliPath,'fixture-cli');
+ await assert.rejects(readNativeCodingSandboxEvidence(f.options),/sandbox_execution_scope_mismatch/);
+});
+
+for(const argument of ['codexHome','scratchRoot'])test('v2 sandbox consumer requires explicit '+argument+' and rejects changed protected choices',async t=>{
+ const f=await sandboxFixture(t);
+ await assert.rejects(readNativeCodingSandboxEvidence({...f.options,[argument]:undefined}),/scope_arguments_invalid|auth_home_absolute_required/);
+ const other=path.join(f.root,'other-'+argument);await fs.mkdir(other);
+ await assert.rejects(readNativeCodingSandboxEvidence({...f.options,[argument]:other}),/sandbox_execution_scope_mismatch/);
+ await fs.rename(f.options[argument],f.options[argument]+'-absent');
+ await assert.rejects(readNativeCodingSandboxEvidence(f.options),{code:'ENOENT'});
+});
+
+test('v2 sandbox consumer rejects newly broadened home ACL after receipt validation',async t=>{
+ const f=await sandboxFixture(t);
+ await assert.rejects(readNativeCodingSandboxEvidence({...f.options,verifyStorage:async target=>({owner_dacl_verified:target!==f.options.codexHome})}),/storage_unverified/);
+});
+
+for(const location of ['home','project','ancestor'])test('new '+location+' configuration source invalidates a pinned v2 sandbox receipt',async t=>{
+ const f=await sandboxFixture(t),directory=location==='home'?f.options.codexHome:path.join(location==='project'?f.options.worktreePath:f.root,'.codex');
+ await fs.mkdir(directory,{recursive:true});await fs.writeFile(path.join(directory,'config.toml'),'model="source-added-after-probe"\n');
+ await assert.rejects(readNativeCodingSandboxEvidence(f.options),/sandbox_execution_scope_mismatch/);
+});
+
+test('changed and removed home configuration bytes invalidate a pinned v2 sandbox receipt',async t=>{
+ const f=await sandboxFixture(t),file=path.join(f.options.codexHome,'config.toml');await fs.writeFile(file,'model="before"\n');
+ f.value.execution_scope=structuredClone(await f.captureScope());f.options.pin=await f.save();
+ await assert.rejects(readNativeCodingSandboxEvidence(f.options),/sandbox_configuration_equivalence_unverified/);
+ await fs.writeFile(file,'model="changed-after-probe"\n');
+ await assert.rejects(readNativeCodingSandboxEvidence(f.options),/sandbox_execution_scope_mismatch/);
+ await fs.unlink(file);
+ await assert.rejects(readNativeCodingSandboxEvidence(f.options),/sandbox_execution_scope_mismatch/);
 });
 
 test('native Windows process inventory independently reads this test process without executing a model',{skip:process.platform!=='win32',timeout:20000},async()=>{
@@ -280,6 +385,86 @@ test('pre-cancelled native process and sandbox reads start no external reader',a
   const controller=new AbortController();controller.abort();
   await assert.rejects(readNativeCodingWindowsProcess(1,{signal:controller.signal,exec:()=>assert.fail('must not spawn')}),/request_cancelled/);
   await assert.rejects(readNativeCodingSandboxEvidence({signal:controller.signal,readProcess:()=>assert.fail('must not read process')}),/request_cancelled/);
+});
+
+test('sandbox reader joins initial siblings after a synchronous observation failure',{timeout:5000},async t=>{
+ const f=await sandboxFixture(t),original=Error('generated_boot_observation_failure');
+ let release;const held=new Promise(resolve=>{release=resolve;}),signals=[];let ended=false;
+ const work=readNativeCodingSandboxEvidence({...f.options,readBoot:()=>{throw original;},
+  readProcess:async(_pid,{signal})=>{signals.push(signal);await held;return proc;},
+  readExecutableSha256:async(_file,{signal}={})=>{signals.push(signal);await held;return hash('fixture-cli');},
+ });work.then(()=>{ended=true;},()=>{ended=true;});
+ t.after(async()=>{release();await work.catch(()=>{});});
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(signals.length,2);assert(signals.every(signal=>signal?.aborted));assert.equal(signals[0],signals[1]);
+ assert.equal(ended,false);release();await assert.rejects(work,error=>error===original);
+});
+
+test('sandbox cancellation reaches every initial reader and joins late ACL, process and image cleanup',{timeout:5000},async t=>{
+ const f=await sandboxFixture(t),controller=new AbortController();let release,entered;
+ const held=new Promise(resolve=>{release=resolve;}),started=new Promise(resolve=>{entered=resolve;});
+ const signals=[];let ended=false,logReads=0;
+ const work=readNativeCodingSandboxEvidence({...f.options,signal:controller.signal,
+  verifyStorage:async(_target,{operation,signal})=>{signals.push(signal);if(operation==='VERIFY_FILE'){entered();await held;}return yes();},
+  readBoot:async({signal})=>{signals.push(signal);return structuredClone(f.value.host_boot);},
+  readProcess:async(_pid,{signal})=>{signals.push(signal);await held;return proc;},
+  readExecutableSha256:async(_file,{signal}={})=>{signals.push(signal);await held;return hash('fixture-cli');},
+  readLogSha256:()=>{logReads++;assert.fail('cancelled initial observations must not start log reads');},
+ });work.then(()=>{ended=true;},()=>{ended=true;});
+ t.after(async()=>{release();await work.catch(()=>{});});
+ await started;controller.abort();await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(signals.length,5);assert(signals.every(signal=>signal?.aborted));
+ assert(signals.every(signal=>signal===signals[0]));assert.notEqual(signals[0],controller.signal);
+ assert.equal(ended,false);release();await assert.rejects(work,/request_cancelled/);assert.equal(logReads,0);
+});
+
+test('sandbox ACL failure aborts siblings while retaining a held ACL observation',{timeout:5000},async t=>{
+ const f=await sandboxFixture(t),original=Error('generated_sandbox_acl_failure');let release,entered;
+ const held=new Promise(resolve=>{release=resolve;}),started=new Promise(resolve=>{entered=resolve;});
+ let heldSignal,ended=false;
+ const work=readNativeCodingSandboxEvidence({...f.options,
+  verifyStorage:async(_target,{operation,signal})=>{
+   if(operation==='VERIFY_DIRECTORY')throw original;heldSignal=signal;entered();await held;return yes();
+  },
+ });work.then(()=>{ended=true;},()=>{ended=true;});
+ t.after(async()=>{release();await work.catch(()=>{});});
+ await started;await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(heldSignal?.aborted,true);assert.equal(ended,false);
+ release();await assert.rejects(work,error=>error===original);
+});
+
+test('sandbox log failure aborts and joins both delayed log siblings',{timeout:5000},async t=>{
+ const f=await sandboxFixture(t),original=Error('generated_sandbox_log_failure');let release,entered;
+ const held=new Promise(resolve=>{release=resolve;}),started=new Promise(resolve=>{entered=resolve;}),signals=[];let ended=false;
+ const work=readNativeCodingSandboxEvidence({...f.options,readLogSha256:async(file,{signal})=>{
+  if(file===f.value.logs.stdout_path)throw original;signals.push(signal);if(signals.length===2)entered();await held;
+  return file===f.value.logs.stderr_path?f.value.logs.stderr_sha256:f.value.logs.exit_sha256;
+ }});work.then(()=>{ended=true;},()=>{ended=true;});
+ t.after(async()=>{release();await work.catch(()=>{});});
+ await Promise.race([started,work.catch(()=>{})]);await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(signals.length,2);assert(signals.every(signal=>signal?.aborted));assert.equal(ended,false);
+ release();await assert.rejects(work,error=>error===original);
+});
+
+test('sandbox log cancellation joins all late successful reads before rejecting',{timeout:5000},async t=>{
+ const f=await sandboxFixture(t),controller=new AbortController();let release,entered;
+ const held=new Promise(resolve=>{release=resolve;}),started=new Promise(resolve=>{entered=resolve;});
+ const signals=[];let ended=false;
+ const work=readNativeCodingSandboxEvidence({...f.options,signal:controller.signal,readLogSha256:async(file,{signal})=>{
+  signals.push(signal);if(signals.length===3)entered();await held;
+  const [key]=Object.entries(f.value.logs).find(([key,value])=>key.endsWith('_path')&&value===file);
+  return f.value.logs[key.replace('_path','_sha256')];
+ }});work.then(()=>{ended=true;},()=>{ended=true;});
+ t.after(async()=>{release();await work.catch(()=>{});});
+ await Promise.race([started,work.catch(()=>{})]);assert.equal(signals.length,3);
+ controller.abort();await new Promise(resolve=>setImmediate(resolve));
+ assert(signals.every(signal=>signal?.aborted));assert(signals.every(signal=>signal===signals[0]));
+ assert.equal(ended,false);release();await assert.rejects(work,/request_cancelled/);
+});
+
+test('host sandbox observer forwards the private request cancellation before any observation',async t=>{
+ const f=await image(t,{readProcess:()=>assert.fail('must not start cancelled native process observation')}),controller=new AbortController();controller.abort();
+ await assert.rejects(f.observers.readSandbox({role:'IMPLEMENTER',worktree_path:f.root,signal:controller.signal}),/request_cancelled/);
 });
 
 test('protected JSON joins the exact held ACL sibling before propagating original rejection',async t=>{

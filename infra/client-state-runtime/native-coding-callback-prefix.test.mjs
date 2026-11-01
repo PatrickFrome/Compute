@@ -9,6 +9,8 @@ import {nativeCodingCanonicalSha256 as sha,nativeCodingCanonicalJson} from './na
 import {readNativeCodingProtectedJson} from '../../apps/metaengine-browser/src/native-coding-host-observers.mjs';
 import {createNativeRunCallbackJournal,claimNativeRunCallbackJournal} from '../../apps/metaengine-browser/src/native-coding-run-callback-journal.mjs';
 import {assertNativeCodingHostRequestOpen} from './native-coding-host-request-lifetime.mjs';
+import {validateNativeCodingInstalledPathScope} from '../../apps/metaengine-browser/src/native-coding-operator-paths.mjs';
+import {generatedInstalledOperator,installedOperatorReaderSource} from './test/native-coding-installed-operator-fixture.mjs';
 // Actual filesystem bytes and parser, GENERATED owner-DACL witness. No Windows
 // ACL, directory-flush, storage hardware or native process qualification.
 const read=(file,options)=>readNativeCodingProtectedJson(file,{...options,verifyStorage:async()=>({owner_dacl_verified:true})});
@@ -81,15 +83,23 @@ test('default OS method derives path from protected operator; exact original Hos
  const source=await fs.readFile(new URL('./native-coding-host-os-scope.mjs',import.meta.url),'utf8');
  const helper=source.slice(source.indexOf('  function journalPath('),source.indexOf('  async function readNativeWorker'));
  const body=source.slice(source.indexOf('  let publicationHost='),source.indexOf('  return Object.freeze({readNativeScope'));
- const operator={journal_root:path.resolve('/fixture/protected')},scope={task_id:randomUUID(),lease_generation:7},permit={role:'CRITIC'},calls=[];
+ const resources=path.resolve('generated-host-install/resources'),config={state_directory:path.resolve('generated-host-state')};
+ const operator=generatedInstalledOperator({resources,stateDirectory:config.state_directory}),scope={task_id:randomUUID(),lease_generation:7},permit={role:'CRITIC'},calls=[];
  let native={pid:process.pid,created_at:new Date().toISOString(),process_incarnation_id:`pid:${process.pid}:created_100ns:134000000000000001`,exe_path:process.execPath};
  let onRead=null;
- const readers=new Function('path','createHash','config','readNativeCodingOperatorPaths','readNativeCallbackProtectedPrefix','assertNativeCodingHostRequestOpen','readNativeCodingWindowsProcess','samePath','publicProcess','nativeCodingCanonicalJson','fail',helper+body+'return {readPublicationHost,readCallbackPrefix};')
-  (path,createHash,{state_directory:'/fixture/state'},async()=>structuredClone(operator),async input=>{calls.push(input);await onRead?.();return {structural_only:true};},
-   assertNativeCodingHostRequestOpen,async()=>structuredClone(native),(a,b)=>a===b,p=>({pid:p.pid,created_at:p.created_at,process_incarnation_id:p.process_incarnation_id}),nativeCodingCanonicalJson,reason=>{throw Error(reason);});
+ const readers=new Function('path','createHash','config','readNativeCodingOperatorPaths','readNativeCallbackProtectedPrefix','assertNativeCodingHostRequestOpen','readNativeCodingWindowsProcess','samePath','publicProcess','nativeCodingCanonicalJson','fail','resources','validateNativeCodingInstalledPathScope',installedOperatorReaderSource(source)+helper+body+'return {readPublicationHost,readCallbackPrefix};')
+  (path,createHash,config,async()=>structuredClone(operator),async input=>{calls.push(input);await onRead?.();return {structural_only:true};},
+   assertNativeCodingHostRequestOpen,async()=>structuredClone(native),(a,b)=>a===b,p=>({pid:p.pid,created_at:p.created_at,process_incarnation_id:p.process_incarnation_id}),nativeCodingCanonicalJson,reason=>{throw Error(reason);},resources,validateNativeCodingInstalledPathScope);
  await readers.readCallbackPrefix({scope,permit,expected:null,request:{},directory:'/caller/forged'});
  assert.equal(calls[0].directory,path.join(operator.journal_root,createHash('sha256').update(JSON.stringify({...scope,role:'CRITIC'})).digest('hex')));
  await readers.readPublicationHost({});native.process_incarnation_id=`pid:${process.pid}:created_100ns:134000000000000002`;
  await assert.rejects(readers.readPublicationHost({}),/publication_host_birth_changed/);
- onRead=()=>{operator.journal_root='/fixture/changed';};await assert.rejects(readers.readCallbackPrefix({scope,permit,request:{}}),/publication_operator_changed/);
+ onRead=()=>{operator.journal_root=path.join(config.state_directory,'changed-journal');};await assert.rejects(readers.readCallbackPrefix({scope,permit,request:{}}),/publication_operator_changed/);
+ const before=calls.length;
+ onRead=()=>{operator.journal_root=path.resolve('unowned-old-profile/journal');};
+ await assert.rejects(readers.readCallbackPrefix({scope,permit,request:{}}),/installed_path_scope_state_not_owned/);
+ assert.equal(calls.length,before+1,'final reread must validate the newly protected descriptor');
+ onRead=null;
+ await assert.rejects(readers.readCallbackPrefix({scope,permit,request:{}}),/installed_path_scope_state_not_owned/);
+ assert.equal(calls.length,before+1,'unowned initial descriptor cannot reach protected prefix files');
 });

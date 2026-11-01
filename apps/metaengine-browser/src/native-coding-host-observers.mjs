@@ -11,6 +11,8 @@ import {readDirectoryIdentity} from './native-coding-fs-identity.mjs';
 import {verifyOwnerOnlyWindowsStorage,protectOwnerOnlyWindowsDirectory} from './private-windows-storage-acl.mjs';
 import {verifyInstalledClientStateResources} from './local-runtime-host-controller.mjs';
 import {readWindowsSandboxHostBoot,windowsSandboxBootIdentity,evaluateCodexSandboxProbe} from './codex-cli-sandbox-probe.mjs';
+import {captureCodexCliPhysicalScope} from './codex-cli-execution-policy.mjs';
+import {codexCliEnvironment} from './codex-cli-runner.mjs';
 
 // Electron's normal fs treats app.asar as a virtual directory. Image identity,
 // inventories and hashes require the physical archive file. Failure to load the
@@ -179,18 +181,44 @@ export function createNativeCodingResultStore({journalRoot,indexRoot,verifyStora
   });
 }
 
-export async function readNativeCodingSandboxEvidence({pin,cliPath,worktreePath,role,hostProcessId=process.pid,
+export async function readNativeCodingSandboxEvidence({pin,cliPath,worktreePath,codexHome,scratchRoot,role,hostProcessId=process.pid,
   readProcess=readNativeCodingWindowsProcess,readBoot=readWindowsSandboxHostBoot,verifyStorage=verifyOwnerOnlyWindowsStorage,
-  signal,readExecutableSha256=file=>hashFile(file,512*1024*1024,false,signal)}={}) {
+  signal,readExecutableSha256=(file,{signal}={})=>hashFile(file,512*1024*1024,false,signal),
+  readLogSha256=(file,{signal}={})=>hashFile(file,16*1024*1024,true,signal)}={}) {
   if(signal?.aborted)fail('request_cancelled');
   if(!pin||!HASH.test(pin.sha256||'')||!['IMPLEMENTER','CRITIC'].includes(role))fail('sandbox_receipt_not_pinned');
-  if(typeof readExecutableSha256!=='function')fail('sandbox_image_reader_invalid');
-  const [{value,sha256},boot,host,cliSha]=await Promise.all([readNativeCodingProtectedJson(pin.path,{verifyStorage,signal}),
-    readBoot({signal}),readProcess(hostProcessId,{signal}),readExecutableSha256(cliPath)]);
+  if(typeof readExecutableSha256!=='function'||typeof readLogSha256!=='function')fail('sandbox_image_reader_invalid');
+  const controller=new AbortController(),observationSignal=controller.signal;
+  const cancel=()=>controller.abort(signal.reason);
+  signal?.addEventListener('abort',cancel,{once:true});
+  let failed=false,firstFailure;
+  const retainFailure=error=>{
+    if(!failed){failed=true;firstFailure=error;controller.abort(error);}
+    throw error;
+  };
+  const observe=read=>Promise.resolve().then(read).catch(retainFailure);
+  const join=async readers=>{
+    // Construct every promise before invoking a reader: synchronous failures
+    // must not orphan observations already started or skip their cleanup join.
+    const results=await Promise.allSettled(readers.map(observe));
+    if(signal?.aborted)fail('request_cancelled');
+    if(failed)throw firstFailure;
+    return results.map(result=>result.value);
+  };
+  try {
+  const [{value,sha256},boot,host,cliSha]=await join([
+    ()=>readNativeCodingProtectedJson(pin.path,{signal:observationSignal,
+      // Abort the outer scope immediately on either ACL failure, while the
+      // protected JSON reader retains and joins its other ACL observation.
+      verifyStorage:(...args)=>observe(()=>verifyStorage(...args))}),
+    ()=>readBoot({signal:observationSignal}),
+    ()=>readProcess(hostProcessId,{signal:observationSignal}),
+    ()=>readExecutableSha256(cliPath,{signal:observationSignal}),
+  ]);
   if(signal?.aborted)fail('request_cancelled');
   if(!HASH.test(cliSha||''))fail('sandbox_image_digest_invalid');
   const mode=role==='CRITIC'?'read-only':'workspace-write';
-  if(sha256!==pin.sha256||value.schema!=='metaengine.codex-cli.sandbox-probe.v1'||value.mode!==mode
+  if(sha256!==pin.sha256||!['metaengine.codex-cli.sandbox-probe.v1','metaengine.codex-cli.sandbox-probe.v2'].includes(value.schema)||value.mode!==mode
     ||!same(value.workspace_path||'',worktreePath)||value.cli_sha256!==cliSha
     ||!same(value.cli_path||'',cliPath)||value.model_called!==false||value.authority_effect!==false
     ||!value.host_boot?.system_process)fail('sandbox_receipt_scope_mismatch');
@@ -206,11 +234,27 @@ export async function readNativeCodingSandboxEvidence({pin,cliPath,worktreePath,
   const evaluation=evaluateCodexSandboxProbe({mode,report:value.canary,nativeProcess:value.sandbox_process,hostReadback:value.host_readback,
     completion:value.completion,hostUserSid:host.user_sid,hostBootIdentity:value.host_boot});
   if(evaluation.state!=='OBSERVED'||evaluation.boundary_observed!==true)fail('sandbox_boundary_unverified');
-  await Promise.all([['stdout_path','stdout_sha256'],['stderr_path','stderr_sha256'],['exit_path','exit_sha256']].map(async([fileKey,hashKey])=>{
-    if(!HASH.test(value.logs?.[hashKey]||'')||await hashFile(value.logs[fileKey],16*1024*1024,true,signal)!==value.logs[hashKey])fail('sandbox_log_digest_mismatch');
+  await join([['stdout_path','stdout_sha256'],['stderr_path','stderr_sha256'],['exit_path','exit_sha256']].map(([fileKey,hashKey])=>async()=>{
+    if(!HASH.test(value.logs?.[hashKey]||'')||await readLogSha256(value.logs[fileKey],{signal:observationSignal})!==value.logs[hashKey])fail('sandbox_log_digest_mismatch');
   }));
   if(signal?.aborted)fail('request_cancelled');
+  // Existing protected pins do not upgrade a historical canary's scope. Keep
+  // its bytes usable for diagnostics, never as current execution evidence.
+  if(value.schema==='metaengine.codex-cli.sandbox-probe.v1')fail('historical_sandbox_receipt_hold');
+  const scope=await captureCodexCliPhysicalScope({cliPath,codexHome,scratchRoot,workspaceRoot:worktreePath,mode,
+    environment:codexCliEnvironment(codexHome),verifyStorage,signal:observationSignal});
+  if(JSON.stringify(scope)!==JSON.stringify(value.execution_scope))fail('sandbox_execution_scope_mismatch');
+  // Local source hashes cannot attest cloud/managed resolution, nor equate
+  // sandbox's --include-managed-config with exec's --ignore-user-config.
+  // Only a future genuine CLI-produced effective-policy observation can close
+  // this boundary; receipt flags or injected JSON cannot qualify it.
+  if(scope.configuration_attestation==='UNAVAILABLE')fail('sandbox_configuration_equivalence_unverified');
   return {backend:'CODEX_WINDOWS_ELEVATED',mode,evidence_sha256:sha256,outside_write_denied:true,worktree_write_denied:role==='CRITIC'};
+  } catch(error) {
+    controller.abort(error);throw error;
+  } finally {
+    signal?.removeEventListener('abort',cancel);
+  }
 }
 
 export function createNativeCodingWorkerRegistry({processController,readProcess=readNativeCodingWindowsProcess}={}) {
@@ -287,6 +331,7 @@ export function createNativeCodingWorkerRegistry({processController,readProcess=
 
 /** These closures are native main/Host capabilities, never renderer parameters. */
 export function createNativeCodingHostObservers({app,resourcesPath,cliPath,identity,ownPostgres,permitRegistry,
+  codexHome,workerTempRoot,
   sandboxReceipts=[],gitExecutable,readNativeWorker,readCriticSubject,readProcess=readNativeCodingWindowsProcess,
   readBoot=readWindowsSandboxHostBoot,verifyStorage=verifyOwnerOnlyWindowsStorage,
   verifyResources=verifyInstalledClientStateResources,readPackage=null,runGit=run,processId=process.pid}={}) {
@@ -373,6 +418,9 @@ export function createNativeCodingHostObservers({app,resourcesPath,cliPath,ident
     async readWorktree(query) {
       const root=await canonical(query.worktree_path,'directory');
       const env=Object.fromEntries(Object.entries(process.env).filter(([key])=>!/^GIT_/i.test(key)));
+      // Override ambient Git configuration only after removing every external
+      // GIT_* spelling. The packaged Git config must not consult another install.
+      Object.assign(env,{GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:process.platform==='win32'?'NUL':'/dev/null',GIT_TERMINAL_PROMPT:'0'});
       const git=async args=>(await runGit(gitExecutable,['--no-pager','-c','core.fsmonitor=false','-c','core.hooksPath=',...args],
         {cwd:root,env,shell:false,windowsHide:true,timeout:15000,maxBuffer:8192})).stdout.trim();
       if(!same(await git(['rev-parse','--show-toplevel']),root))fail('worktree_root_mismatch');
@@ -392,7 +440,7 @@ export function createNativeCodingHostObservers({app,resourcesPath,cliPath,ident
     async readSandbox(query) {
       const pin=pins.find(v=>(v.provider_id===undefined||v.provider_id===query.provider_id)&&(v.agent_id===undefined||v.agent_id===query.agent_id)&&v.role===query.role);
       return observe('OS_SANDBOX_CANARY_READBACK',await readNativeCodingSandboxEvidence({pin,cliPath,worktreePath:query.worktree_path,
-        role:query.role,hostProcessId:processId,readProcess,readBoot,verifyStorage}));
+        codexHome,scratchRoot:workerTempRoot,role:query.role,hostProcessId:processId,readProcess,readBoot,verifyStorage,signal:query.signal}));
     },
   });
 }
