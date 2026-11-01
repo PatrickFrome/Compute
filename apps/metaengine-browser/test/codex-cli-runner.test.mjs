@@ -142,6 +142,25 @@ test('physical changed bytes and native job binding are recorded; repeat lease n
   assert.equal((await runner.run(request)).prior_attempt, true); assert.equal(processController.spawns, 1);
 });
 
+test('runner rejects invalid UTF-8 Git paths before preparation without dispatch',{skip:process.platform==='win32'},async t=>{
+ const f=await fixture(t),processController=controller(),runner=createCodexCliRunner({...f,processController});
+ const file=Buffer.concat([Buffer.from(f.worktree+path.sep+'invalid-'),Buffer.from([0xff])]);
+ await fs.writeFile(file,'changed bytes');
+ await assert.rejects(runner.prepare({lease:f.lease(301),role:'IMPLEMENTER',worktreePath:f.worktree,prompt:'x'}),
+  {code:'ERR_ENCODING_INVALID_ENCODED_DATA'});
+ assert.equal(processController.spawns,0);
+});
+
+test('runner fences a completed job whose Git artifact contains invalid UTF-8 paths',{skip:process.platform==='win32'},async t=>{
+ const f=await fixture(t),file=Buffer.concat([Buffer.from(f.worktree+path.sep+'invalid-'),Buffer.from([0xff])]);
+ const processController=controller({onResume:async()=>{await fs.writeFile(file,'actual output bytes');}});
+ const runner=createCodexCliRunner({...f,processController});
+ const receipt=await runner.run({lease:f.lease(302),role:'IMPLEMENTER',worktreePath:f.worktree,prompt:'x'});
+ assert.equal(processController.spawns,1);assert.equal(receipt.state,'AMBIGUOUS');
+ assert.equal(receipt.git_after,null);assert.equal(receipt.production_qualified,false);
+ assert.equal(receipt.useful_work_verified,false);
+});
+
 test('native permit rejection occurs before spawning or reserving the model job', async t => {
   const f = await fixture(t); const processController = controller();
   const runner = createCodexCliRunner({ ...f, processController, authorizeLease: async () => ({ authorized: true }) });
