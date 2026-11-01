@@ -3,6 +3,7 @@
 export const RESERVED_PACKAGE_IDENTITIES_W68 = Object.freeze([
   '0.7.0-dev.37781000062.1',
   '0.7.0-dev.842024784850.1',
+  '0.7.0-dev.2257027431866.1', // artifact 12857849402, run 40783415257; consumed
 ]);
 export function inspectUnfrozenPackageIdentityW68({ version, sourceSha } = {}) {
   const recognized = /^0\.7\.0-dev\.[1-9][0-9]*\.1$/.test(version || '');

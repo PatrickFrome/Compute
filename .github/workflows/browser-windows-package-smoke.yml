@@ -561,7 +561,8 @@ jobs:
           git diff --exit-code HEAD -- .
 
       - name: Build exact-head unsigned NSIS package through native staging hook
-        timeout-minutes: 20
+        # Actual authenticated static crypto qualification takes about 35 minutes.
+        timeout-minutes: 90
         working-directory: apps/metaengine-browser
         shell: powershell
         env:

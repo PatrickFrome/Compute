@@ -14,6 +14,7 @@ test('crypto runner paths are bound at the actual packaging step, not unavailabl
   const header = windows.split('\n    steps:')[0];
   assert.doesNotMatch(header, /\$\{\{\s*runner\./);
   const build = windows.split('- name: Build exact-head unsigned NSIS package through native staging hook')[1].split('\n      - name:')[0];
+  assert.match(build,/timeout-minutes:\s*90/,'authenticated static crypto and upstream tests exceed the former 20-minute package step');
   assert.match(build, /env:[\s\S]*ME2_GUARDIAN_CRYPTO_SOURCE_DIR:\s*\$\{\{ runner\.temp \}\}\/guardian-openssl-source/);
   assert.match(build, /env:[\s\S]*ME2_GUARDIAN_CRYPTO_OUTPUT_DIR:\s*\$\{\{ runner\.temp \}\}\/guardian-openssl-build/);
 });

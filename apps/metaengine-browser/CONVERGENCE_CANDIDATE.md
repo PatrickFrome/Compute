@@ -1,3 +1,9 @@
+Prepared source package identity is `0.7.0-dev.2309832227245.1`.
+
+2026-11-01: User requested an unsigned test installer from integrated source. This version is deterministically proposed from `1cf6bb5a895452aff54bea0cff5e7ec0f78a1d0a` above consumed predecessor `0.7.0-dev.2257027431866.1` (reservation artifact 12857849402, run 40783415257). Remote uniqueness and reservation remain the ordinary CI producer's responsibility; no absence of reservations is inferred. Windows publisher signing is deferred. Guardian's release checks, first Owner and applied sandbox-policy qualification remain unresolved and are not bypassed. No installation on the user's PC is authorized by this source note.
+
+Historical predecessor notes, retained without rewriting their evidence:
+
 Prepared source package identity is `0.7.0-dev.2257027431866.1`.
 
 Physical package-version reservation is pending. This is a source-only successor of `88eb062b09bd456d430bd0da37cb21baaddcee6d`, not a built, signed, installed-qualified or production-ready package. The supported read-only planner observation at 2026-10-26T12:14:11.149Z concerned the earlier proposed identity `0.7.0-dev.1359740117434.1`, with exclusive consumed-version floor `0.7.0-dev.1269944506140.1`. That historical observation found no reservation for the earlier identity; it is not evidence of reservation or readiness for the current prepared identity `0.7.0-dev.2257027431866.1`. It does not reserve either version. The ordinary producer must independently recheck the current final versioned source and publish its immutable reservation before a physical build.
