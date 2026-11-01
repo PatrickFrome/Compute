@@ -9,8 +9,22 @@
 #include "browser-guardian-owner-enrollment-observer.hpp"
 #include "browser-guardian-owner-enrollment-store.hpp"
 #include "browser-guardian-update-actuator.hpp"
+#include "browser-guardian-pipe-io-lifetime.hpp"
+
+namespace metaengine::guardian {
+// Sole production constructor for the revocation context. Never exported via
+// JSON, the pipe protocol, environment/configuration or an optional callback.
+class GuardianScmEffectOwner final {
+public:
+    const GuardianEffectAdmission& context() const noexcept { return context_; }
+    void requestStop() noexcept { context_.stop(); }
+private:
+    GuardianEffectAdmission context_;
+};
+}
 
 namespace {
+metaengine::guardian::GuardianScmEffectOwner g_effect_owner;
 
 constexpr wchar_t kServiceName[] = L"METAENGINEBrowserGuardian";
 constexpr wchar_t kServiceDisplayName[] = L"METAENGINE Browser Guardian";
@@ -79,6 +93,7 @@ DWORD WINAPI serviceControlHandler(
     switch (control) {
         case SERVICE_CONTROL_STOP:
         case SERVICE_CONTROL_SHUTDOWN:
+            g_effect_owner.requestStop(); // Linearize refusal BEFORE status/event publication.
             if (g_status.dwCurrentState == SERVICE_RUNNING) {
                 reportStatus(SERVICE_STOP_PENDING, NO_ERROR, 5'000);
                 if (g_stop_event != nullptr) SetEvent(g_stop_event);
@@ -95,13 +110,15 @@ DWORD WINAPI serviceControlHandler(
 bool waitOverlapped(HANDLE pipe, OVERLAPPED* operation) {
     HANDLE handles[] = {g_stop_event, operation->hEvent};
     const DWORD wait = WaitForMultipleObjects(2, handles, FALSE, INFINITE);
-    if (wait == WAIT_OBJECT_0) {
-        CancelIoEx(pipe, operation);
+    if (wait != WAIT_OBJECT_0 + 1) {
+        metaengine::guardian::cancelAndJoinGuardianPipeIo(pipe, operation);
         return false;
     }
-    if (wait != WAIT_OBJECT_0 + 1) return false;
     DWORD transferred = 0;
-    return GetOverlappedResult(pipe, operation, &transferred, FALSE) != FALSE;
+    const bool completed = GetOverlappedResult(pipe, operation, &transferred, FALSE) != FALSE;
+    if (!completed && !HasOverlappedIoCompleted(operation))
+        metaengine::guardian::cancelAndJoinGuardianPipeIo(pipe, operation);
+    return completed;
 }
 
 bool connectPipe(metaengine::guardian::OwnerEnrollmentPipe* pipe) {
@@ -136,10 +153,12 @@ bool readRequest(HANDLE pipe, std::string* output) {
     } else if (GetLastError() == ERROR_IO_PENDING) {
         HANDLE handles[] = {g_stop_event, event};
         const DWORD wait = WaitForMultipleObjects(2, handles, FALSE, INFINITE);
-        if (wait == WAIT_OBJECT_0) {
-            CancelIoEx(pipe, &operation);
-        } else if (wait == WAIT_OBJECT_0 + 1) {
+        if (wait == WAIT_OBJECT_0 + 1) {
             ok = GetOverlappedResult(pipe, &operation, &read, FALSE) != FALSE;
+            if (!ok && !HasOverlappedIoCompleted(&operation))
+                metaengine::guardian::cancelAndJoinGuardianPipeIo(pipe, &operation);
+        } else {
+            metaengine::guardian::cancelAndJoinGuardianPipeIo(pipe, &operation);
         }
     }
     CloseHandle(event);
@@ -162,10 +181,12 @@ bool writeResponse(HANDLE pipe, const std::string& response) {
     } else if (GetLastError() == ERROR_IO_PENDING) {
         HANDLE handles[] = {g_stop_event, event};
         const DWORD wait = WaitForMultipleObjects(2, handles, FALSE, INFINITE);
-        if (wait == WAIT_OBJECT_0) {
-            CancelIoEx(pipe, &operation);
-        } else if (wait == WAIT_OBJECT_0 + 1) {
+        if (wait == WAIT_OBJECT_0 + 1) {
             ok = GetOverlappedResult(pipe, &operation, &written, FALSE) != FALSE;
+            if (!ok && !HasOverlappedIoCompleted(&operation))
+                metaengine::guardian::cancelAndJoinGuardianPipeIo(pipe, &operation);
+        } else {
+            metaengine::guardian::cancelAndJoinGuardianPipeIo(pipe, &operation);
         }
     }
     CloseHandle(event);
@@ -196,7 +217,7 @@ DWORD WINAPI updateActuatorWorker(LPVOID /*context*/) {
             const OwnerEnrollmentObservation client = pipe.observeClientIdentity(true);
             const OwnerEnrollmentStore store(browserGuardianOwnerEnrollmentStoreDefaultRoot());
             const OwnerEnrollmentStoreResult owner = store.read();
-            result = handleGuardianUpdateActuatorRequest(request, client, owner);
+            result = handleGuardianUpdateActuatorRequest(request, client, owner, &g_effect_owner.context());
         }
         const std::string response = serializeGuardianUpdateActuatorResult(result);
         writeResponse(pipe.handle(), response);
@@ -230,8 +251,16 @@ void WINAPI serviceMain(DWORD /*argc*/, LPWSTR* /*argv*/) {
 
     const DWORD wait_result = WaitForSingleObject(g_stop_event, INFINITE);
     const DWORD wait_error = wait_result == WAIT_FAILED ? GetLastError() : NO_ERROR;
+    g_effect_owner.requestStop();
     SetEvent(g_stop_event);
-    WaitForSingleObject(g_worker_thread, 5'000);
+    // A timeout is not worker exit. In particular a cancelled overlapped
+    // operation still owns its stack buffers/event until physical completion.
+    for (;;) {
+        const DWORD workerWait = WaitForSingleObject(g_worker_thread, 5'000);
+        if (workerWait == WAIT_OBJECT_0) break;
+        reportStatus(SERVICE_STOP_PENDING, wait_error, 5'000);
+        if (workerWait != WAIT_TIMEOUT) Sleep(5'000);
+    }
     CloseHandle(g_worker_thread);
     g_worker_thread = nullptr;
     CloseHandle(g_stop_event);
