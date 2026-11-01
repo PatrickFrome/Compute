@@ -3,6 +3,7 @@ import test from 'node:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import {
   parseEmptySchemaArguments, assertEmptySchemaOptions, assertNewEmptySchemaOutputDirectory,
@@ -12,7 +13,7 @@ import {
   inspectCanonicalEmptySchema, runEmptySchemaCommand,
   emptySchemaPostgresStartOptions, classifyEmptySchemaPostmasterStartLog,
   prepareEmptySchemaPostmasterLogObservation,
-  EMPTY_SCHEMA_INPUT_PATHS,
+  EMPTY_SCHEMA_INPUT_PATHS, EMPTY_SCHEMA_EXPORTER_PATHS,
 } from './canonical-empty-schema-contract.mjs';
 import { assertPublishableEmptySchemaEvidence, emptySchemaFailureReceipt } from './export-reviewed-empty-schema.mjs';
 
@@ -213,6 +214,101 @@ async function gitFixture(temporary) {
     inputPaths:['module/plan.sql'],exporterPaths:['module/exporter.mjs']};
   return {repository,args,git,writeTree};
 }
+
+const exporterEntry = 'infra/client-state-runtime/export-reviewed-empty-schema.mjs';
+const exporterDependencies = [
+  'infra/client-state-runtime/db-api-grants.mjs',
+  'infra/client-state-runtime/attached-postgres-onboarding.mjs',
+  'infra/client-state-runtime/offline-runtime-bundle.mjs',
+];
+
+// Source-only inventory guard: read local literal imports without evaluating
+// modules. Computed driver/WASM imports and cached ESM bytes are not attested.
+async function staticLocalModuleClosure(entry,repository) {
+  const visited=new Set();
+  const visit=async file=>{
+    if(visited.has(file))return;
+    visited.add(file);
+    const source=await fs.readFile(file,'utf8');
+    const patterns=[
+      /^[ \t]*import\b(?!\s*[.(])\s*[^;]*?\bfrom\s*['"](\.[^'"\r\n]+)['"]/gm,
+      /^[ \t]*import\b\s*['"](\.[^'"\r\n]+)['"]/gm,
+      /^[ \t]*export\b\s*(?:\*[^;]*?|\{[^}]*\}\s*)\bfrom\s*['"](\.[^'"\r\n]+)['"]/gm,
+      /\bimport\s*\(\s*['"](\.[^'"\r\n]+)['"]\s*\)/g,
+    ];
+    for(const pattern of patterns)for(const match of source.matchAll(pattern)) {
+      const dependency=path.resolve(path.dirname(file),match[1]);
+      const relative=path.relative(repository,dependency);
+      assert.ok(!path.isAbsolute(relative)&&relative!=='..'&&!relative.startsWith('..'+path.sep),'local exporter dependency must stay in the repository');
+      await visit(dependency);
+    }
+  };
+  await visit(path.resolve(repository,entry));
+  return [...visited].map(file=>path.relative(repository,file).replaceAll('\\','/')).sort();
+}
+
+function assertModuleClosureBound(closure,bound) {
+  assert.deepEqual(closure.filter(file=>!bound.has(file)),[],
+    'every static local exporter dependency must have an exact source binding');
+}
+
+test('static module inventory guard detects omitted transitive imports without evaluating source', async () => {
+  await withDirectory(async repository=>{
+    const modules={
+      'entry.mjs':"import {\n value\n} from './direct.mjs';\nimport './side-effect.mjs';\nimport{compact}from './compact.mjs';\nimport\n{newline} from './newline.mjs';\nexport{reexported}from './reexport-compact.mjs';\nthrow new Error('must not evaluate');\n",
+      'direct.mjs':"export\n{value} from './transitive.mjs';\n",
+      'transitive.mjs':'export const value=1;\n',
+      'side-effect.mjs':"await import('./dynamic.mjs');\n",
+      'dynamic.mjs':"export * from './entry.mjs';\n",
+      'compact.mjs':'export const compact=1;\n',
+      'newline.mjs':'export const newline=1;\n',
+      'reexport-compact.mjs':'export const reexported=1;\n',
+    };
+    for(const [file,source] of Object.entries(modules))await fs.writeFile(path.join(repository,file),source);
+    const closure=await staticLocalModuleClosure('entry.mjs',repository);
+    assert.deepEqual(closure,Object.keys(modules).sort());
+    const bound=new Set(Object.keys(modules).filter(file=>file!=='transitive.mjs'));
+    assert.throws(()=>assertModuleClosureBound(closure,bound),/every static local exporter dependency/);
+    bound.add('transitive.mjs');assertModuleClosureBound(closure,bound);
+  });
+});
+
+test('canonical exporter module inventory covers its complete static local dependency closure', async () => {
+  const repository = fileURLToPath(new URL('../../',import.meta.url));
+  const closure = await staticLocalModuleClosure(exporterEntry,repository);
+  const bound = new Set([...EMPTY_SCHEMA_INPUT_PATHS,...EMPTY_SCHEMA_EXPORTER_PATHS]);
+  assertModuleClosureBound(closure,bound);
+});
+
+test('canonical exporter binding rejects substituted executable dependencies on disk', async t => {
+  await withDirectory(async temporary=>{
+    const {repository,args,git}=await gitFixture(temporary);
+    // Real dependency source bytes in a disposable Git repository. Never import
+    // the substituted files or mistake this disk check for loaded-code custody.
+    const resources=[...new Set([...EMPTY_SCHEMA_EXPORTER_PATHS,...exporterDependencies])];
+    const originals=new Map();
+    for(const resource of resources) {
+      const bytes=await fs.readFile(new URL('../../'+resource,import.meta.url));
+      const target=path.join(repository,resource);
+      await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,bytes);
+      originals.set(resource,bytes);
+    }
+    await git(['add','--','module',...resources]);
+    const exporterSourceHead=await git(['commit-tree',await git(['write-tree']),'-p',args.exporterSourceHead], 'canonical exporter fixture\n');
+    await git(['update-ref','HEAD',exporterSourceHead]);
+    const {exporterPaths,...defaultArgs}=args;
+    const binding={...defaultArgs,exporterSourceHead};
+    await validateEmptySchemaSourceBinding(binding);
+    for(const resource of exporterDependencies)await t.test(resource,async()=>{
+      const target=path.join(repository,resource),original=originals.get(resource);
+      try {
+        await fs.writeFile(target,Buffer.concat([original,Buffer.from('\nthrow new Error("substituted exporter dependency");\n')]));
+        await assert.rejects(validateEmptySchemaSourceBinding(binding),/empty_schema_working_source_changed/);
+      } finally { await fs.writeFile(target,original); }
+    });
+    await validateEmptySchemaSourceBinding(binding);
+  });
+});
 
 test('separate source/exporter commits require equal schema Git blobs plus actual file bytes', async () => {
   await withDirectory(async temporary=>{
@@ -620,15 +716,16 @@ test('all native fresh-schema fixture starts share Windows-safe empty socket opt
   assert.doesNotMatch(source,/archiveOperation\?emptySchemaPostgresStartOptions/);
 });
 
-test('bound migration API identity changes trigger both canonical export review events',async()=>{
-  const input='infra/client-state-runtime/native-coding-migration-api-identity.mjs';
-  assert.ok(EMPTY_SCHEMA_INPUT_PATHS.includes(input),'the authenticated migration identity is an actual schema input');
+test('bound exporter dependency and migration identity changes trigger both canonical export review events',async()=>{
+  const identity='infra/client-state-runtime/native-coding-migration-api-identity.mjs';
+  assert.ok(EMPTY_SCHEMA_INPUT_PATHS.includes(identity),'the authenticated migration identity is an actual schema input');
   const workflow=await fs.readFile(new URL('../../.github/workflows/client-reviewed-empty-schema.yml',import.meta.url),'utf8');
   for(const [event,next] of [['pull_request','push'],['push','workflow_dispatch']]){
     const start=workflow.indexOf('  '+event+':');
     const end=workflow.indexOf('  '+next+':',start);
     assert.ok(start>=0&&end>start,'the original event boundary must be present');
     const paths=[...workflow.slice(start,end).matchAll(/^\s+- '([^']+)'$/gm)].map(match=>match[1]);
-    assert.equal(paths.filter(value=>value===input).length,1,event+' must retain the exact schema input trigger');
+    for(const input of [identity,...exporterDependencies])
+      assert.equal(paths.filter(value=>value===input).length,1,event+' must retain the exact bound module trigger: '+input);
   }
 });
