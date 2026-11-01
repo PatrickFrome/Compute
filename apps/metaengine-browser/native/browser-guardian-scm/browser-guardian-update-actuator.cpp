@@ -1173,31 +1173,34 @@ GuardianUpdateActuatorResult handleGuardianUpdateActuatorRequest(
     if (localAppData.empty()) return baseResult("NO_EFFECT_PROVEN", "OWNER_LOCALAPPDATA_UNAVAILABLE", GetLastError());
     const std::wstring machineRoot = browserGuardianOwnerEnrollmentStoreDefaultRoot();
     if (machineRoot.empty() || !directoryExact(machineRoot)) return baseResult("NO_EFFECT_PROVEN", "GUARDIAN_MACHINE_ROOT_UNAVAILABLE", ERROR_PATH_NOT_FOUND);
-    if (!admission->admit()) return stopped();
-    if (!createSecureDirectory(join(machineRoot, kCandidateDir))) {
-        return baseResult("NO_EFFECT_PROVEN", "GUARDIAN_UPDATE_STATE_ROOT_UNAVAILABLE", ERROR_PATH_NOT_FOUND);
-    }
-    if (!admission->admit()) return stopped();
-    if (!createSecureDirectory(join(machineRoot, kEffectsDir))) {
-        return baseResult("NO_EFFECT_PROVEN", "GUARDIAN_UPDATE_STATE_ROOT_UNAVAILABLE", GetLastError());
-    }
-
     const std::wstring digestDir(request.installer_sha256.begin(), request.installer_sha256.end());
     const std::wstring intakeDir = join(join(join(localAppData, kIntakeRelative), digestDir), L"");
     const std::wstring intakeInstaller = join(intakeDir, kCandidateName);
     const std::wstring intakeManifest = join(intakeDir, kManifestName);
     const std::wstring candidateDir = join(join(machineRoot, kCandidateDir), digestDir);
-    if (!admission->admit()) return stopped();
-    if (!createSecureDirectory(candidateDir)) return baseResult("NO_EFFECT_PROVEN", "CANDIDATE_MACHINE_SLOT_UNAVAILABLE", GetLastError());
     const std::wstring stagedInstaller = join(candidateDir, kCandidateName);
     const std::wstring effectPath = effectRecordPath(machineRoot, request.effect_id);
     const std::wstring installedExe = join(localAppData, kInstalledRelative);
 
     if (request.operation == "OBSERVE") {
+        // An admitted readback may settle a previously-owned attempt after
+        // stop. It must neither create staging slots nor require another new
+        // effect admission merely to inspect/persist that attempt's outcome.
         GuardianUpdateActuatorResult out = observeEffect(request, effectPath, installedExe);
         attachOwnerProof(&out, client, owner);
         return out;
     }
+
+    if (!admission->admit()) return stopped();
+    if (!createSecureDirectory(join(machineRoot, kCandidateDir))) {
+        return baseResult("NO_EFFECT_PROVEN", "GUARDIAN_UPDATE_STATE_ROOT_UNAVAILABLE", GetLastError());
+    }
+    if (!admission->admit()) return stopped();
+    if (!createSecureDirectory(join(machineRoot, kEffectsDir))) {
+        return baseResult("NO_EFFECT_PROVEN", "GUARDIAN_UPDATE_STATE_ROOT_UNAVAILABLE", GetLastError());
+    }
+    if (!admission->admit()) return stopped();
+    if (!createSecureDirectory(candidateDir)) return baseResult("NO_EFFECT_PROVEN", "CANDIDATE_MACHINE_SLOT_UNAVAILABLE", GetLastError());
 
     std::string manifestSha;
     if (!hashFile(intakeManifest, &manifestSha, kMaxManifestBytes) || manifestSha != request.manifest_sha256) {

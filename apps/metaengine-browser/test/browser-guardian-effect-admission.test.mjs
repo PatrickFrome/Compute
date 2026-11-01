@@ -12,7 +12,10 @@ test('portable actual atomic primitive distinguishes both deterministic stop/adm
 },()=>assert.equal(execFileSync(model,[],{encoding:'utf8',timeout:15000,maxBuffer:8192}),
  'guardian_effect_admission_model=PASS; fixture_only=true; windows_effect_execution=UNQUALIFIED\n'));
 test('SCM owns original context and closes it before publishing stop',()=>{
- assert.match(service,/g_effect_owner\.requestStop\(\);[^\n]*\n\s*if \(g_status/);
+ const stop=service.slice(service.indexOf('case SERVICE_CONTROL_STOP:'),service.indexOf('case SERVICE_CONTROL_INTERROGATE:'));
+ assert.ok(stop.indexOf('g_effect_owner.requestStop();')<stop.indexOf('lock(g_status_mutex)'));
+ assert.ok(stop.indexOf('lock(g_status_mutex)')<stop.indexOf('reportStatusLocked(SERVICE_STOP_PENDING'));
+ assert.ok(stop.indexOf('reportStatusLocked(SERVICE_STOP_PENDING')<stop.indexOf('SetEvent(g_stop_event)'));
  assert.match(service,/handleGuardianUpdateActuatorRequest\(request, client, owner, &g_effect_owner.context\(\)\)/);
  assert.match(header,/const GuardianEffectAdmission\* admission = nullptr/);
  assert.match(actuator,/admission == nullptr \|\| !admission->admit\(\)/);

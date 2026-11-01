@@ -5,6 +5,12 @@ on:
     paths:
       - 'apps/metaengine-browser/native/browser-guardian-scm/**'
       - 'apps/metaengine-browser/test/browser-guardian-scm-host-contract.test.mjs'
+      - 'apps/metaengine-browser/test/browser-guardian-scm-io-runtime.ps1'
+      - 'apps/metaengine-browser/test/native/browser-guardian-scm-io-runtime-probe.cpp'
+      - 'apps/metaengine-browser/test/native/browser-guardian-scm-status-runtime-probe.cpp'
+      - 'apps/metaengine-browser/test/native/browser-guardian-pipe-io-lifetime-runtime.cpp'
+      - 'apps/metaengine-browser/test/native/browser-guardian-scm-child-ownership-runtime-probe.cpp'
+      - 'apps/metaengine-browser/test/browser-guardian-scm-status-runtime.test.mjs'
       - '.github/workflows/browser-guardian-scm-host-v1.yml'
   workflow_dispatch:
 
@@ -79,6 +85,35 @@ jobs:
           }
           if ($row.service_installation_implemented -ne $false) { throw 'guardian_service_install_authority_unexpected' }
 
+      - name: Prove actual named-pipe lifetime and SCM status ordering
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outRoot = Join-Path $env:RUNNER_TEMP "metaengine-guardian-scm-runtime-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          if (Test-Path -LiteralPath $outRoot) { throw 'guardian_runtime_output_preexists' }
+          New-Item -ItemType Directory -Path $outRoot | Out-Null
+          "GUARDIAN_IO_PROOF_DIR=$outRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $failures = @()
+          foreach ($probe in @('PipeIo', 'Status', 'Lifetime', 'ChildOwnership')) {
+            try {
+              $requireOwnership = ($probe -eq 'ChildOwnership')
+              & ./test/browser-guardian-scm-io-runtime.ps1 -Probe $probe -OutputDir (Join-Path $outRoot $probe) -ExpectedHead $env:EXPECTED_HEAD -RequireOwnedChildJoin:$requireOwnership
+            } catch { $failures += "$probe`:$($_.Exception.Message)"; Write-Host $_ }
+          }
+          if ($failures.Count) { throw ($failures -join "`n") }
+
+      - name: Upload named-pipe runtime evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: guardian-scm-io-runtime-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ env.GUARDIAN_IO_PROOF_DIR }}/**/guardian-scm-*-runtime-evidence.json
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Prove real Windows SCM lifecycle
         shell: powershell
         run: |
@@ -145,4 +180,4 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/native/browser-guardian-scm apps/metaengine-browser/test/browser-guardian-scm-host-contract.test.mjs .github/workflows/browser-guardian-scm-host-v1.yml)"
+          test -z "$(git status --porcelain -- apps/metaengine-browser/native/browser-guardian-scm apps/metaengine-browser/test .github/workflows/browser-guardian-scm-host-v1.yml)"
