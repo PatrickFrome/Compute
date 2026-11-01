@@ -126,6 +126,18 @@ test('real CLI refuses Linux without staging (pure tests remain portable)', {ski
   const result = spawnSync(process.execPath, [path.join(here, 'windows-staging.mjs'), 'record'], {encoding: 'utf8', env: {PATH: process.env.PATH}, timeout: 10000});
   assert.equal(result.status, 1); assert.match(result.stderr, /STAGING_FAILED/);
 });
+test('build homes use runner-time environment, not unavailable job-level runner context', async () => {
+  const text = await fs.readFile(path.join(repo, '.github/workflows/codex-effective-policy-windows-staging.yml'), 'utf8');
+  const jobEnv = /^    env:\n([\s\S]*?)^    steps:/m.exec(text);
+  assert.ok(jobEnv, 'job environment boundary missing');
+  assert.doesNotMatch(jobEnv[1], /\$\{\{\s*(?:runner|env|steps|job)\b/, 'these contexts are unavailable in jobs.<job_id>.env');
+  const init = /- name: Initialize fresh build directories\n([\s\S]*?)\n      - uses: actions\/checkout@/.exec(text)?.[1];
+  assert.ok(init, 'fresh runtime directories must precede checkout/toolchain');
+  for (const name of ['RUNNER_TEMP', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_ENV']) assert.ok(init.includes(`$env:${name}`));
+  for (const [name, folder] of [['RUSTUP_HOME', 'rustup'], ['CARGO_HOME', 'cargo'], ['CARGO_TARGET_DIR', 'target']]) assert.ok(init.includes(`${name} = '${folder}'`));
+  assert.match(init, /if \(Test-Path -LiteralPath \$root\) \{ throw 'Build root already exists' \}/);
+  assert.match(init, /Out-File \$env:GITHUB_ENV -Encoding utf8 -Append/);
+});
 test('workflow source pins, least privilege, exact release cwd and success-only allowlisted upload', async () => {
   const text = await fs.readFile(path.join(repo, '.github/workflows/codex-effective-policy-windows-staging.yml'), 'utf8');
   assert.match(text, /permissions:\n  contents: read\n/); assert.equal((text.match(/permissions:/g) ?? []).length, 1);
