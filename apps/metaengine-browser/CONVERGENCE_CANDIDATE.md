@@ -1,3 +1,11 @@
+Prepared source package identity is `0.7.0-dev.2656093458019.1`.
+
+2026-11-01: Consumed predecessor `0.7.0-dev.2529132193489.1`, run 41363033904, reservation 13106520643, passed exact staged fresh-PG17 and authenticated attached-upgrade checks. Physical packaging then stopped before producing an EXE: Windows PowerShell 5.1 advanced parameter binding evaluated the package script's PSScriptRoot-based default before script scope was available. The beforePack caller now passes the exact output root; all three native build scripts resolve omitted defaults in their bodies. A separate real Windows prefix regression reproduced the old package error and accepted the corrected prefix without running builds or changing the installed client. Full Windows packaging remains pending on this distinct identity; prior PG checks do not qualify the changed source.
+
+The clean-PC plus data-preserving upgrade acceptance requirement remains open. Fresh-only restrictions, internal Guardian release trust, first-Owner genesis and applied-policy blockers are not bypassed. Windows publisher signing remains deferred for this test build only. No installer or installed readiness is claimed.
+
+Historical predecessor notes:
+
 Prepared source package identity is `0.7.0-dev.2529132193489.1`.
 
 2026-11-01: Previous version `0.7.0-dev.2457446823794.1` was consumed by run 41359882719 at `c5bb36cbdfbd9980ecd6681b46aaf96eb1d806d5`, reservation artifact 13105160114. Its attached PostgreSQL test incorrectly used fresh onboarding after provisioning an existing direct API login. This successor tests authenticated upgrade with the same credentials and additionally rejects unauthenticated replay against existing grants. Local real PostgreSQL 17 replay passed; full Windows bundled qualification is still required. The ordinary producer must independently check and reserve this new identity.

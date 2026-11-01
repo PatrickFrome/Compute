@@ -276,7 +276,8 @@ async function metaengineGuardianNativeBeforePack(context) {
   const result = spawnSync(
     powershell,
     ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', buildScript,
-      '-SourceDir', cryptoSource, '-CryptoOutputDir', cryptoOutput],
+      '-SourceDir', cryptoSource, '-CryptoOutputDir', cryptoOutput,
+      '-OutputRoot', path.join(appRoot, 'native-dist')],
     { cwd: appRoot, stdio: 'inherit', windowsHide: true },
   );
 
