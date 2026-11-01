@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 from pathlib import Path
 import tempfile
+import subprocess
 import unittest
 from unittest import mock
 
@@ -17,6 +18,25 @@ class PublicCertificateTests(unittest.TestCase):
         self.assertEqual(len(data), 6043)
         self.assertEqual(hashlib.sha256(data).hexdigest(), certificate.BUNDLED_SHA256)
         self.assertNotIn(b'PRIVATE KEY', data)
+
+    def test_autocrlf_checkout_preserves_pinned_certificate_bytes(self):
+        root = Path(__file__).resolve().parents[3]
+        relative = certificate.BUNDLED.relative_to(root)
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory)
+            def git(*args):
+                return subprocess.run(['git', '-C', directory, *args], check=True,
+                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            git('init', '--quiet')
+            git('config', 'core.autocrlf', 'true')
+            (checkout / '.gitattributes').write_bytes((root / '.gitattributes').read_bytes())
+            target = checkout / relative
+            target.parent.mkdir(parents=True)
+            target.write_bytes(certificate.BUNDLED.read_bytes())
+            git('add', '.gitattributes', relative.as_posix())
+            target.unlink()
+            git('checkout-index', '--force', '--', relative.as_posix())
+            self.assertEqual(hashlib.sha256(target.read_bytes()).hexdigest(), certificate.BUNDLED_SHA256)
 
     def test_explicit_public_input_preserves_exact_bytes(self):
         data = certificate.public_certificate()

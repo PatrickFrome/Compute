@@ -26,3 +26,6 @@ evidence/audits/metaengine-20261028-terminal-goal-health/live-artifact-observati
 evidence/audits/metaengine-20261028-postgres-health-contract/live-artifact-observation.json text eol=lf
 
 evidence/audits/metaengine-20261029-native-seed-admission/live-artifact-observation.json text eol=lf
+
+# Preserve the exact authenticated public certificate bytes on Windows.
+/apps/metaengine-browser/native/openssl/openssl-release-public-certificate.asc -text
