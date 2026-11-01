@@ -142,5 +142,27 @@ OpenSSL build metadata uses the pinned release-signature creation timestamp
 this alone does not remove every MSVC/PE reproducibility source.
 NASM gets its supported `--reproducible` option for generated COFF objects and
 inherited `NASMENV` is cleared. NASM's own binary still embeds its MSVC
-`__DATE__`; upstream has no `SOURCE_DATE_EPOCH` support. That and remaining
-MSVC/PE timestamps/path data require a separate reproducibility comparison.
+`__DATE__`; upstream has no `SOURCE_DATE_EPOCH` support. This and remaining
+MSVC/PE timestamp/path variation are limitations and possible future
+improvements, not added installation blockers.
+
+## Existing artifact acceptance boundary
+
+The inspected release/installer gates on native base `e6c72339` do not require
+an independent byte-identical rebuild. In fact,
+`scripts/installer-provenance.mjs` specifies building exactly once and
+downstream verification of the same immutable bytes, and
+`.github/workflows/metaengine-browser-fast-autorelease.yml` requires
+`target_build_count == 1`. The native staging verifier checks exact source,
+size and SHA256, while the release evidence gate requires terminal success
+of the independent exact-SHA Windows/source/physical workflows. Relevant
+signatures and attestations remain required. Older generic operator-ZIP
+reproducibility checks belong to a different pipeline.
+
+Accordingly `bit_identical_reproducibility_verified:false` is informational.
+This qualification lane does not require it to become true, does not rebuild
+an installer to establish acceptance and does not weaken existing gates.
+The priorities remain official hash/signature source authentication, actual
+Windows upstream/native tests and PE imports, verified source/build
+provenance, and immutable artifact hashes. Compare independent builds only
+when evaluating or claiming the separate bit-reproducibility property.
