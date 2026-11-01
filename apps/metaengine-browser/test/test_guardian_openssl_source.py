@@ -119,9 +119,10 @@ class SignatureIdentityTests(unittest.TestCase):
     def test_private_key_input_cannot_be_retained_as_public_certificate(self):
         imported = mock.Mock(returncode=0, stdout='', stderr='')
         private = mock.Mock(returncode=0, stdout='sec:-:4096:1:64ED7B1DCCE71CB2:1:0::::::::\n', stderr='')
-        with mock.patch.object(source.subprocess, 'run', side_effect=[imported, private]):
-            with self.assertRaisesRegex(source.AcquisitionError, 'public_keys_only'):
-                source.import_certificate(Path('/unused-home'), Path('/unused-input'), PRIMARY, SUBKEY)
+        with tempfile.TemporaryDirectory() as temp:
+            with mock.patch.object(source.subprocess, 'run', side_effect=[imported, private]):
+                with self.assertRaisesRegex(source.AcquisitionError, 'public_keys_only'):
+                    source.import_certificate(Path(temp) / 'home', Path(temp) / 'certificate.asc', PRIMARY, SUBKEY)
 
 
 class DownloadIntegrityTests(unittest.TestCase):
