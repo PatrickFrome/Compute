@@ -233,11 +233,12 @@ test('actual production GH verifier command pins repo, workflow, source, issuer,
   for (const term of [
     'PatrickFrome/Compute',
     'PatrickFrome/Compute/.github/workflows/browser-windows-package-smoke.yml',
-    '--source-digest','--source-ref','refs/heads/physical/build-slsa-provenance-v1',
+    '--signer-digest','--source-digest','--source-ref','refs/heads/physical/build-slsa-provenance-v1',
     '--cert-oidc-issuer','https://token.actions.githubusercontent.com',
     '--deny-self-hosted-runners','--predicate-type','https://slsa.dev/provenance/v1',
   ]) assert.ok(args.includes(term), term);
   assert.equal(args[args.indexOf('--source-digest')+1],SHA);
+  assert.equal(args[args.indexOf('--signer-digest')+1],SHA);
   assert.throws(()=>buildPinnedGhVerifyArgsW77({
     installer:'relative.exe',bundle:path.resolve('bundle.json'),sourceSha:SHA,
   }),/gh_cli_arguments/);

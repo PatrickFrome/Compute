@@ -43,8 +43,13 @@ An app.asar-only hash would still leave these runtime inputs unbound.
    rewritten to contain its own digest or a circular sidecar.
 4. W77's existing independently verified-input preflight requires that exact
    inventory at the candidate root and checks it against the observed packaged
-   tree, including a final path/identity fence after the GH/AuthentiCode reads.
-   It returns the inventory bytes and digest but still cannot sign or install.
+   tree. Its operator CLI now reads the exact successful producer and artifact
+   ID from GitHub before and after verification, matches the server archive
+   digest and size, and uses the existing streaming ZIP verifier to compare
+   every extracted file byte and the complete membership. Retained file/tree
+   identities and archive bytes are rechecked after the GH/AuthentiCode reads.
+   It returns the inventory bytes and digest and can form an exact signing
+   request for the existing protected signer, but cannot sign or install.
 5. The existing release manifest gains `package_code_sha256`. Envelope schema,
    manifest schema and signature domain move to **v2**, and its fixed sibling
    filename becomes `metaengine-installed-release-proof.v2.json`. The inventory
@@ -86,9 +91,20 @@ authorize executing it. There are no extension or directory exclusions.
 - `EXTERNAL_SIDECAR_INSTALLED_PLACEMENT_UNPROVEN`: ordinary packaging produces
   data, not authenticated installed placement. The NSIS installer remains
   immutable and has not been executed here.
-- `IMMUTABLE_VERIFIED_GH_ARTIFACT_BYTES_HANDOFF_NOT_WIRED`: retaining the inventory
-  as an artifact is not independent proof of its relationship to an extracted
-  final installer. Existing release custody must validate that handoff.
+- `IMMUTABLE_VERIFIED_GH_ARTIFACT_HANDOFF_RUNTIME_NOT_QUALIFIED`: the source
+  implementation now connects live artifact ID/digest/run binding, complete
+  archive byte readback and the actual GH verifier. It still needs a real
+  Windows execution with the canonical artifact and Authenticode-signed EXE.
+  The ordinary package workflow remains intentionally unsigned. The current
+  Linux audit environment has `gh 2.46.0`, without `gh attestation`; it cannot
+  supply this physical qualification.
+- `PACKAGED_CODEX_CLI_AND_GIT_ROLE_BINDINGS_NOT_DECLARED`: the current packaged
+  Codex job manifest describes its precompiled process helper, not delivery of
+  the Codex CLI, Git and their dependencies. A protected operator path is not a
+  self-contained payload contract. The package owner must supply canonical
+  package-relative executable/dependency bindings, authenticated by the same
+  inventory/release chain; release custody must verify the actual selected
+  paths against them. No target global tool can satisfy this missing contract.
 - On-disk equality is not proof of already-loaded code, prevention of future
   filesystem writes, or authentication of a self-reporting JavaScript process.
   W68 still acquires its root through `app.asar/package.json` and executes its
@@ -122,3 +138,33 @@ physical-ASAR access, case-variant entrypoint and candidate-artifact-root issues
 No npm/bun bulk audit request, package-manager installation, native machine install,
 publication, or protected signing action is part of these checks. Windows
 physical packaging and native loaded-image qualification remain unexecuted.
+
+Clean-machine acceptance is mandatory. Before creating a signing request, W77
+now refuses an inventory missing any of the existing canonical Browser,
+Guardian/service-configurator/bootstrap, offline runtime, bundled Node/Deno or
+PostgreSQL 17 executable/catalog/library roles. This is a source payload-presence
+guard over the already byte-verified inventory; it cannot prove installation,
+automatic authorization, loaded dependencies or service/database health. Its
+output explicitly retains the unresolved CLI/Git delivery roles and
+`clean_machine_installation_qualified: false`. Node/`gh` in the W77 operator CLI
+are release-custody tools only and are never target-PC prerequisites. The
+installer must verify the same existing signed chain with its own packaged
+verifier and approved Windows primitives on the clean target.
+The payload guard's missing-export RED was followed by **98/98** source cases;
+the full updated adjacent set passed **507/507** on Linux / Node v24.19.0.
+Neither count is clean-Windows installation or automatic enrollment evidence.
+
+The follow-up artifact handoff implementation starts at published source
+`0e43a569ad52134bee65dea3182ee9a4c4bbc56f` (tree
+`897948a6e65c980f560f97b71abaca96c91e4069`). Its current source-test evidence and
+the concrete external interfaces are documented in
+[the W77 signer/placement contract](audits/release-proof-existing-signer-placement-contract-w77.md).
+Follow-up Linux / Node v24.19.0 verification passed **409/409**, including
+**110** new artifact/request/CLI boundary cases and the existing W68/W77,
+installer, archive/sidecar and SLSA suites. The new interface first failed its
+missing-export test, then passed after implementation. The adjacent stale
+prepared-identity document was corrected without changing package/lock or
+making a reservation claim; its topology suite went from **5/6** to **6/6**.
+Workflow YAML/wiring, changed source syntax and `git diff --check` passed.
+These are source/staging checks; the earlier counts above retain their original
+scope, and no Windows/GH production verification is implied by the new counts.
