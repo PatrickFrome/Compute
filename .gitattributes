@@ -29,3 +29,9 @@ evidence/audits/metaengine-20261029-native-seed-admission/live-artifact-observat
 
 # Preserve the exact authenticated public certificate bytes on Windows.
 /apps/metaengine-browser/native/openssl/openssl-release-public-certificate.asc -text
+
+# These upstream license/notice bytes are SHA-256 pinned in the private tools lock.
+/apps/metaengine-browser/build/third-party/codex/LICENSE -text
+/apps/metaengine-browser/build/third-party/codex/NOTICE -text
+/apps/metaengine-browser/build/third-party/codex/ripgrep/LICENSE-MIT -text
+/apps/metaengine-browser/build/third-party/codex/ripgrep/UNLICENSE -text

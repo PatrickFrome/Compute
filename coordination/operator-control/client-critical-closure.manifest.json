@@ -192,7 +192,7 @@
     }
   ],
   "current_tree_blobs": {
-    ".gitattributes": "775d667419c9fb600c14cd9bf18ef1c80ed0ef7a",
+    ".gitattributes": "7432d8fd218ab381fa831952a474538961207ba1",
     ".github/CLIENT_CI_TRAIN_W82.md": "696349d7424522a87e3cb2ce350532c87c269092",
     ".github/browser-ci-resource-observation.mjs": "2f08876c2e5dc850b60709aac7df1577c7561226",
     ".github/client-c5-reference-source-identity.test.mjs": "41c1e2edd6801c8e310b826549c2403090856bed",
@@ -858,8 +858,8 @@
     "apps/metaengine-browser/test/persistent-local-provider-boot.test.mjs": "667d6b7a8d54b4d761437b45f7621604faeb88c8",
     "apps/metaengine-browser/test/preinstall-continuity-20261027.md": "d3d3d417ae0d9a90c207052e11fc4bd10f7c3b5b",
     "apps/metaengine-browser/test/private-native-tools-main-composition.test.mjs": "38de926b4e1eed62940e7137d636f247c9908798",
-    "apps/metaengine-browser/test/private-native-tools-windows.test.mjs": "bc8809e3ce3d40bac128e52233883e3d00d0bd09",
-    "apps/metaengine-browser/test/private-native-tools.test.mjs": "59c0fca524d0ea0e4fa150265190578c4e718500",
+    "apps/metaengine-browser/test/private-native-tools-windows.test.mjs": "f5d1ddea07304ba9bdddb971177211aebea9de66",
+    "apps/metaengine-browser/test/private-native-tools.test.mjs": "15c7a2954fedd5bd87593bc1cd8456c2104cd659",
     "apps/metaengine-browser/test/private-tool-tar.test.mjs": "b2b93b94426a6b38f651775de5673390134e9c8f",
     "apps/metaengine-browser/test/private-tool-zip.test.mjs": "e8247025fa28c7527e1140388bc58736330f94ab",
     "apps/metaengine-browser/test/private-windows-storage-acl.test.mjs": "5e35b8e640dd8aade38ed0c0e5aebe3abb62a712",
@@ -940,7 +940,7 @@
     "apps/metaengine-browser/test/self-update-transaction-cas.generated.test.mjs": "b475ed9922fa869ff1cbd7ad83ae14a07476b8d0",
     "apps/metaengine-browser/test/source-check-runner.test.mjs": "f6f70d0d2b2c8f4f7c88b93bedc22f356102f709",
     "apps/metaengine-browser/test/source-sync-fixture-diagnostics-w63.mjs": "91d92be41a4add219e2538673d62665369e62a75",
-    "apps/metaengine-browser/test/stage-private-native-tools.test.mjs": "9bb8dbb5015cda4a42d1713ee7748e46f6a1b607",
+    "apps/metaengine-browser/test/stage-private-native-tools.test.mjs": "2d4ab9dd6c81c049fe7c96f7c0131b4bddba4d7c",
     "apps/metaengine-browser/test/startup-independence-diagnostic.test.mjs": "8a76c29090db4beffd9596e2f52efed8e65cbfc4",
     "apps/metaengine-browser/test/supervisor-bootstrap-ambiguity-repair-r4.test.mjs": "74d55ad5924f1c9a5f7ab8fe60ac0e8abedd3c48",
     "apps/metaengine-browser/test/supervisor-device-identity-concurrency.test.mjs": "77e71a4e6e2d2b8870b6d9c5d3885fe45161580a",

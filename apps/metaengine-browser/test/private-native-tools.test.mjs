@@ -7,7 +7,7 @@ import {createHash} from 'node:crypto';
 import {resolvePrivateNativeTools,privateNativeToolsBinding,validatePrivateNativeToolsManifest,PRIVATE_NATIVE_TOOL_REQUIRED_FILES} from '../src/private-native-tools.mjs';
 const sha=b=>createHash('sha256').update(b).digest('hex');
 async function fixture(t){
-  const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-private-tools-'));
+  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-private-tools-')));
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
   const components=[];
   for(const [id,entrypoint]of [['git','ucrt64/bin/git.exe'],['codex','bin/codex.exe']]){

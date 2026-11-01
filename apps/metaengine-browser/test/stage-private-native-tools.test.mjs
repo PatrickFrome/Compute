@@ -4,11 +4,12 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {readPrivateNativeToolsLock,stagePrivateNativeTools,acquirePrivateNativeToolArchives,assertPrivateNativeToolsManifestPins} from '../scripts/stage-private-native-tools.mjs';
 
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
-const scratch=async t=>{const dir=await fs.mkdtemp(path.join(os.tmpdir(),'private-tools-producer-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));return dir;};
+const scratch=async t=>{const dir=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'private-tools-producer-')));t.after(()=>fs.rm(dir,{recursive:true,force:true}));return dir;};
 
 test('official full distributions and notices are pinned; standalone Codex EXE is insufficient',async()=>{
   const lock=await readPrivateNativeToolsLock();
@@ -22,6 +23,23 @@ test('official full distributions and notices are pinned; standalone Codex EXE i
   const build=fileURLToPath(new URL('../build/',import.meta.url));
   for(const row of lock.components)for(const notice of row.notices)
     assert.equal(hash(await fs.readFile(path.join(build,notice.source))),notice.sha256);
+});
+
+test('real autocrlf checkout retains exact pinned license and notice bytes',async t=>{
+  const directory=await scratch(t),lock=await readPrivateNativeToolsLock();
+  const git=(...args)=>execFileSync('git',['-C',directory,...args],{stdio:['ignore','pipe','pipe']});
+  git('init','--quiet');git('config','core.autocrlf','true');
+  await fs.writeFile(path.join(directory,'.gitattributes'),await fs.readFile(new URL('../../../.gitattributes',import.meta.url)));
+  const entries=[];
+  for(const component of lock.components)for(const notice of component.notices){
+    const relative='apps/metaengine-browser/build/'+notice.source,target=path.join(directory,relative);
+    await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,await fs.readFile(new URL('../build/'+notice.source,import.meta.url)));
+    entries.push({relative,target,expected:notice.sha256});
+  }
+  git('add','--','.gitattributes',...entries.map(row=>row.relative));
+  for(const row of entries)await fs.unlink(row.target);
+  git('checkout-index','--force','--',...entries.map(row=>row.relative));
+  for(const row of entries)assert.equal(hash(await fs.readFile(row.target)),row.expected,row.relative);
 });
 
 test('missing archives cannot create a partial staging directory',async t=>{

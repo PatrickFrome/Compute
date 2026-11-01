@@ -16,7 +16,7 @@ const run=promisify(execFile);
 // a signer/loaded-image chain, or claim a clean operating-system image.
 test('actual pinned private Windows Git/Codex start without inherited tools and fixed Git plans work',
   {skip:process.platform!=='win32'||process.arch!=='x64'||!process.env.METAENGINE_PRIVATE_TOOL_TEST_ARCHIVES},async t=>{
-    const root=await fs.mkdtemp(path.join(os.tmpdir(),'me-private-tools-win-'));
+    const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'me-private-tools-win-')));
     t.after(()=>fs.rm(root,{recursive:true,force:true,maxRetries:3,retryDelay:100}));
     const toolsRoot=path.join(root,'tools');
     await stagePrivateNativeTools({archiveDirectory:path.resolve(process.env.METAENGINE_PRIVATE_TOOL_TEST_ARCHIVES),outputDirectory:toolsRoot});
@@ -69,7 +69,7 @@ test('actual pinned private Windows Git/Codex start without inherited tools and 
 test('optional bundled GCM Windows loader starts without inherited tools',
   {skip:process.platform!=='win32'||process.arch!=='x64'||!process.env.METAENGINE_PRIVATE_TOOL_TEST_ARCHIVES
     ||process.env.METAENGINE_QUALIFY_OPTIONAL_GCM!=='1'},async t=>{
-    const root=await fs.mkdtemp(path.join(os.tmpdir(),'me-optional-gcm-win-'));
+    const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'me-optional-gcm-win-')));
     t.after(()=>fs.rm(root,{recursive:true,force:true,maxRetries:3,retryDelay:100}));
     const toolsRoot=path.join(root,'tools');
     await stagePrivateNativeTools({archiveDirectory:path.resolve(process.env.METAENGINE_PRIVATE_TOOL_TEST_ARCHIVES),outputDirectory:toolsRoot});
