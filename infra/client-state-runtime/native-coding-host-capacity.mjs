@@ -14,9 +14,9 @@ export function nativeCapacityPostgresBirth(value){
  return new Date(Date.parse(m[1]+m[3])).toISOString().slice(0,19)+'.'+(m[2]||'').padEnd(6,'0')+'Z';
 }
 // Default Host composition supplies its existing OS reader and setup registry.
-// This service observes custody; it cannot allocate work or mark any SQL row
-// physically resolved. In particular PROTECTED_RESULT_VERIFIED is NOT a joined
-// helper/request/digest terminal witness under the current receipt contract.
+// This service observes custody; it cannot allocate work. No existing private
+// native/Owner fullscope producer is qualified here. Persisted graphs, SQL
+// terminal state, hashes and injected callbacks never release history.
 export function createNativeCodingHostCapacity({sql,hostInstanceId,hostPid,postgresIdentity,readNativeScope,readSetupCustody,
  now=Date.now,monotonic=()=>performance.now()}={}){
  if(!postgresIdentity?.system_identifier||!Number.isSafeInteger(postgresIdentity.pid)||postgresIdentity.pid<1||typeof sql?.begin!=='function'||typeof sql?.unsafe!=='function'||![readNativeScope,readSetupCustody,now,monotonic].every(x=>typeof x==='function'))fail('dependencies_required');
@@ -80,6 +80,8 @@ export function createNativeCodingHostCapacity({sql,hostInstanceId,hostPid,postg
    const second=await snapshot(actor,custody);fresh();
    if(!same(first,second)||!same(native,afterNative)||!same(custody,readSetupCustody()))fail('collection_changed');
    const counted=await sql.begin('isolation level serializable',async tx=>{
+    // No authentic fullscope producer is available. Historical resolutions
+    // remain empty; opaque ownership cannot be replaced with caller functions.
     const values=await tx.unsafe('select destruktion_meta.native_coding_capacity_census_v1($1::uuid,$2::text,$3::bigint,$4::text::jsonb) as value',
      [actor.device_id,actor.client_id,actor.admin_grant_epoch,json(evidence)]);
     if(values.length!==1)fail('census_missing');return values[0].value;
@@ -90,6 +92,8 @@ export function createNativeCodingHostCapacity({sql,hostInstanceId,hostPid,postg
    if(!same(final,first)||!same(custody,readSetupCustody()))fail('collection_changed');
    const finalNative=await readNativeScope(null,false,sql,request);fresh();
    if(!same(native,finalNative)||!same(custody,readSetupCustody()))fail('physical_scope_changed_during_count');
+   // Keep the original full-row invariant: no graph/hash/SQL terminal can
+   // remove history before genuine private fullscope qualification exists.
    if(counted.counts.task_slots+counted.counts.setup_slots!==Number(first.row_count))fail('census_incomplete');
    const complete=true;
    const value=validateNativeCapacityCensus({schema:NATIVE_CAPACITY_CENSUS_SCHEMA,host_instance_id:hostInstanceId,host_pid:hostPid,

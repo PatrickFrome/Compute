@@ -406,8 +406,8 @@ test('native Host reviewed source catalog admits the exact ACL implementation an
   assert(plan.some(row=>row.path==='infra/client-state-runtime/native-coding-pending-owner-custody.mjs'));
   for(const name of ['native-coding-pending-activation.mjs','native-coding-pending-activation-profile.mjs'])assert(plan.some(row=>row.path==='infra/client-state-runtime/'+name),name);
   assert(plan.some(row=>row.path==='infra/client-state-runtime/native-coding-preparation-transaction.mjs'));
-  for(const name of ['native-coding-callback-publication.mjs','native-coding-callback-prefix.mjs'])assert(plan.some(row=>row.path==='infra/client-state-runtime/'+name),name);
-  for(const name of ['native-coding-callback-publication-v1.sql','native-coding-initial-anchor-task-fence-v1.sql'])assert(plan.some(row=>row.path==='infra/client-state-runtime/'+name),'reviewed registered SQL is shipped');
+  for(const name of ['native-coding-callback-publication.mjs','native-coding-callback-prefix.mjs','native-coding-physical-custody.mjs','native-coding-setup-job-drain.mjs'])assert(plan.some(row=>row.path==='infra/client-state-runtime/'+name),name);
+  for(const name of ['native-coding-callback-publication-v1.sql','native-coding-initial-anchor-task-fence-v1.sql','native-coding-physical-custody-v1.sql'])assert(plan.some(row=>row.path==='infra/client-state-runtime/'+name),'reviewed registered SQL is shipped');
   for(const name of ['native-coding-windows-process-observer.mjs','codex-cli-physical-settlement.mjs','native-coding-host-settlement.mjs','native-coding-pending-owner-phase.mjs','native-coding-pending-activation-phase.mjs','native-coding-workspace-preparation.mjs','windows-native-read-environment.mjs','private-windows-storage-acl.mjs','native-coding-task-context.mjs','native-coding-run-owner-phase.mjs','native-coding-publication-handoff-contract.mjs','native-coding-run-callback-journal.mjs','native-coding-agent-host-contract.mjs',
     'native-coding-agent-mcp-broker.mjs','native-coding-agent-mcp-launch.mjs','native-coding-agent-mcp-entry.mjs','native-coding-agent-mcp-stdio.mjs'])
     assert(plan.some(row=>row.path==='apps/metaengine-browser/src/'+name),name);
