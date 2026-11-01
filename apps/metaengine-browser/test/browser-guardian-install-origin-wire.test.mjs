@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {fileURLToPath} from 'node:url';
+import { captureVcvarsEnvironment } from './helpers/msvc-environment.mjs';
 
 const source = fileURLToPath(new URL('./native/browser-guardian-install-origin-wire-tests.cpp', import.meta.url));
 const cases = [
@@ -26,12 +27,7 @@ function msvcEnvironment() {
     'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath'], {encoding:'utf8'}).trim();
   assert.ok(installation, 'portable production C++ test requires the build-host MSVC compiler');
   const vcvars = path.join(installation, 'VC', 'Auxiliary', 'Build', 'vcvars64.bat');
-  assert.ok(fs.existsSync(vcvars));
-  assert.doesNotMatch(vcvars, /[%"&|<>\r\n]/);
-  const result = execFileSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', `call "${vcvars}" >nul && set`], {encoding:'utf8'});
-  return Object.fromEntries(result.split(/\r?\n/).filter(line => line.indexOf('=') > 0).map(line => {
-    const split = line.indexOf('='); return [line.slice(0, split), line.slice(split + 1)];
-  }));
+  return captureVcvarsEnvironment(vcvars);
 }
 
 test('actual production portable framing and terminal cancellation refuse replay and caller identity claims', {

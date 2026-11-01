@@ -25,6 +25,8 @@ on:
       - 'apps/metaengine-browser/test/browser-guardian-install-origin-wire.test.mjs'
       - 'apps/metaengine-browser/test/browser-guardian-original-install-user-native.test.mjs'
       - 'apps/metaengine-browser/test/browser-guardian-install-origin-link-native.test.mjs'
+      - 'apps/metaengine-browser/test/browser-guardian-msvc-environment.test.mjs'
+      - 'apps/metaengine-browser/test/helpers/msvc-environment.mjs'
       - 'apps/metaengine-browser/test/native/browser-guardian-install-origin-*.cpp'
       - 'apps/metaengine-browser/test/native/browser-guardian-original-install-user-probe.cpp'
       - 'apps/metaengine-browser/test/runtime-recovery-connected-peer.test.mjs'
@@ -64,7 +66,7 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
           command -v c++
-          node ./scripts/run-isolated-tests.mjs test/browser-guardian-connected-peer-napi.test.mjs test/browser-guardian-install-origin-wire.test.mjs
+          node ./scripts/run-isolated-tests.mjs test/browser-guardian-msvc-environment.test.mjs test/browser-guardian-connected-peer-napi.test.mjs test/browser-guardian-install-origin-wire.test.mjs
           test -z "$(git status --porcelain --untracked-files=all)"
 
   native-owner-enrollment-runtime:
@@ -165,7 +167,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           # Native harnesses require explicit SKIP for ineligible interactive positives.
           # These mechanics do not exercise UAC, service installation, or credentials.
-          node ./scripts/run-isolated-tests.mjs test/browser-guardian-connected-peer-native.test.mjs test/runtime-recovery-connected-peer.test.mjs test/browser-guardian-install-origin-wire.test.mjs test/browser-guardian-original-install-user-native.test.mjs test/browser-guardian-install-origin-link-native.test.mjs
+          node ./scripts/run-isolated-tests.mjs test/browser-guardian-msvc-environment.test.mjs test/browser-guardian-connected-peer-native.test.mjs test/browser-guardian-installed-namespace-native.test.mjs test/runtime-recovery-connected-peer.test.mjs test/browser-guardian-install-origin-wire.test.mjs test/browser-guardian-original-install-user-native.test.mjs test/browser-guardian-install-origin-link-native.test.mjs
           if ($LASTEXITCODE -ne 0) { throw "guardian_connected_peer_mechanics_exit_$LASTEXITCODE" }
 
       - name: Compile and refresh native peer artifact using pinned build-host headers

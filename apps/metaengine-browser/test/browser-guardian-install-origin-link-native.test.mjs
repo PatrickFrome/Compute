@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {fileURLToPath} from 'node:url';
+import { captureVcvarsEnvironment } from './helpers/msvc-environment.mjs';
 
 const directory = fileURLToPath(new URL('../native/browser-guardian-scm/', import.meta.url));
 const probe = fileURLToPath(new URL('./native/browser-guardian-install-origin-link-probe.cpp', import.meta.url));
@@ -50,11 +51,7 @@ function compilerEnvironment() {
   const install = execFileSync(vswhere, ['-latest', '-products', '*', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath'], {encoding:'utf8'}).trim();
   assert.ok(install, 'actual Windows origin-link tests require MSVC');
   const vcvars = path.join(install, 'VC', 'Auxiliary', 'Build', 'vcvars64.bat');
-  assert.ok(fs.existsSync(vcvars)); assert.doesNotMatch(vcvars, /[%"&|<>\r\n]/);
-  const output = execFileSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', `call "${vcvars}" >nul && set`], {encoding:'utf8'});
-  return Object.fromEntries(output.split(/\r?\n/).filter(line => line.indexOf('=') > 0).map(line => {
-    const at = line.indexOf('='); return [line.slice(0, at), line.slice(at + 1)];
-  }));
+  return captureVcvarsEnvironment(vcvars);
 }
 
 test('actual Windows original-origin pipe transcript refuses forged frames and joins cancellation', {
