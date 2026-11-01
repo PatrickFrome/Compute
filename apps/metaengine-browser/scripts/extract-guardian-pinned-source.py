@@ -2,16 +2,19 @@
 """Extract a hash-pinned source archive into a new disposable directory."""
 import argparse
 import hashlib
+import io
 import json
 import os
 from pathlib import Path, PurePosixPath
 import re
 import shutil
+import stat
 import tarfile
 import tempfile
 
 
 WINDOWS_DEVICE = re.compile(r"^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$", re.I)
+MAX_ARCHIVE_BYTES = 128 * 1024**2
 
 
 def extract_source(archive, output_dir, expected_sha256, expected_size, root_directory):
@@ -22,15 +25,27 @@ def extract_source(archive, output_dir, expected_sha256, expected_size, root_dir
         raise ValueError("source_root_invalid")
     if output_dir.exists():
         raise ValueError("source_destination_exists")
-    if archive.stat().st_size != expected_size:
-        raise ValueError("source_size_mismatch")
+    if type(expected_size) is not int or not 0 < expected_size <= MAX_ARCHIVE_BYTES:
+        raise ValueError("source_size_invalid")
+    # The caller can rename or rewrite this file. Copy a bounded immutable
+    # private bytes object, then hash and parse only that object. A retained
+    # descriptor alone would still expose concurrent in-place writes to tar.
     with archive.open("rb") as stream:
-        if hashlib.file_digest(stream, "sha256").hexdigest() != expected_sha256:
-            raise ValueError("source_digest_mismatch")
+        opened = os.fstat(stream.fileno())
+        if not stat.S_ISREG(opened.st_mode):
+            raise ValueError("source_file_type_invalid")
+        if opened.st_size != expected_size:
+            raise ValueError("source_size_mismatch")
+        snapshot = stream.read(expected_size + 1)
+    if len(snapshot) != expected_size:
+        raise ValueError("source_size_mismatch")
+    snapshot_sha256 = hashlib.sha256(snapshot).hexdigest()
+    if snapshot_sha256 != expected_sha256:
+        raise ValueError("source_digest_mismatch")
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     temporary = Path(tempfile.mkdtemp(prefix=".guardian-source-", dir=output_dir.parent))
     try:
-        with tarfile.open(archive, "r:gz") as source:
+        with io.BytesIO(snapshot) as pinned_stream, tarfile.open(fileobj=pinned_stream, mode="r:gz") as source:
             members = source.getmembers()
             if not members or len(members) > 200000:
                 raise ValueError("source_member_count_invalid")
@@ -63,7 +78,7 @@ def extract_source(archive, output_dir, expected_sha256, expected_size, root_dir
                         shutil.copyfileobj(src, dst)
         os.rename(temporary, output_dir)
         return {"root": str((output_dir / root_directory).resolve()), "members": len(members),
-                "expanded_bytes": total, "sha256": expected_sha256}
+                "expanded_bytes": total, "sha256": snapshot_sha256}
     finally:
         if temporary.exists():
             shutil.rmtree(temporary)

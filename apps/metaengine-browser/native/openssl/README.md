@@ -42,6 +42,12 @@ with upstream Perl generators and MSVC `/MT`, then runs OpenSSL `nmake` and
 `nmake test`. No installer or `nmake install` is invoked. Archive extraction
 checks content hashes and rejects traversal, links, duplicate Windows names
 and special entries before writing any member.
+The extractor reads at most the pinned size plus one byte into a private
+immutable snapshot, with a 128 MiB archive limit. It checks that snapshot's
+size and SHA256, then parses only those same bytes. Renaming or rewriting
+the caller's archive after verification cannot change the extracted source;
+mutation during the snapshot read must still produce the pinned digest or
+fail before creating the extraction directory.
 Node 24 or newer is required for the existing project tests. `-NodePath` can
 select an installed executable; a hosted runner's existing tool cache is used
 when its default PATH points to an older Node. No runtime is downloaded, and
