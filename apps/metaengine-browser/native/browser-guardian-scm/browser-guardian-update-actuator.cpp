@@ -1,6 +1,8 @@
 #include "browser-guardian-update-actuator.hpp"
 #include "browser-guardian-enrollment-ticket-client.hpp"
 #include "browser-guardian-owner-enrollment-reconciler.hpp"
+#include "browser-guardian-native-root-session.hpp"
+#include "browser-guardian-installed-namespace.hpp"
 
 #include <bcrypt.h>
 #include <sddl.h>
@@ -57,6 +59,10 @@ constexpr char kContractJson[] =
     "\"caller_supplied_path_allowed\":false,"
     "\"caller_supplied_url_allowed\":false,"
     "\"caller_supplied_shell_allowed\":false,"
+    "\"native_session_producer_mounted\":true,"
+    "\"retained_installed_namespace_observation\":true,"
+    "\"native_main_launch_implemented\":false,"
+    "\"loaded_runtime_code_attested\":false,"
     "\"fixed_silent_installer_arguments\":[\"/S\"],"
     "\"machine_secure_candidate_copy_required\":true,"
     "\"installer_sha256_readback_required\":true,"
@@ -1273,6 +1279,193 @@ GuardianUpdateActuatorResult handleGuardianUpdateActuatorRequest(
     return launch;
 }
 
+struct GuardianNativeRootSession::State {
+    OwnerEnrollmentObservation client;
+    OwnerEnrollmentDurableRecord owner;
+    ScopedHandle client_process;
+    ScopedHandle user_token;
+    LUID logon_id{};  // Native logon identity; not a fabricated owner epoch.
+    ScopedHandle owner_file;
+    std::vector<ScopedHandle> owner_ancestors;
+    std::unique_ptr<GuardianInstalledNamespace> installed;
+    std::string reason = "NATIVE_ROOT_NOT_HELD";
+
+    static bool tokenLogonId(HANDLE token, LUID* out) {
+        TOKEN_STATISTICS stats{};
+        DWORD written = 0;
+        if (!out || !GetTokenInformation(token, TokenStatistics, &stats, sizeof(stats), &written) ||
+            written != sizeof(stats) || stats.TokenType != TokenPrimary) return false;
+        *out = stats.AuthenticationId;
+        return out->LowPart != 0 || out->HighPart != 0;
+    }
+
+    bool sameTuple(const OwnerEnrollmentObservation& observed, const OwnerEnrollmentStoreResult& durable) const {
+        return client.client_pid == observed.client_pid && client.client_creation_time_100ns == observed.client_creation_time_100ns &&
+            client.session_id == observed.session_id && _wcsicmp(client.user_sid.c_str(), observed.user_sid.c_str()) == 0 &&
+            owner.expected_owner_sid == durable.record.expected_owner_sid &&
+            owner.enrollment_evidence_sha256 == durable.record.enrollment_evidence_sha256 &&
+            owner.device_key_fingerprint_sha256 == durable.record.device_key_fingerprint_sha256;
+    }
+
+    static bool pathHandleExact(HANDLE handle, const std::wstring& expected, bool directory) {
+        FILE_ATTRIBUTE_TAG_INFO tag{};
+        BY_HANDLE_FILE_INFORMATION info{};
+        if (!GetFileInformationByHandleEx(handle, FileAttributeTagInfo, &tag, sizeof(tag)) ||
+            (tag.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0 ||
+            ((tag.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) != directory ||
+            !GetFileInformationByHandle(handle, &info) || (!directory && info.nNumberOfLinks != 1)) return false;
+        const DWORD required = GetFinalPathNameByHandleW(handle, nullptr, 0, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+        if (required == 0) return false;
+        std::wstring actual(required, L'\0');
+        const DWORD written = GetFinalPathNameByHandleW(handle, actual.data(), required, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+        if (written == 0 || written >= required) return false;
+        actual.resize(written);
+        if (actual.starts_with(L"\\\\?\\")) actual.erase(0, 4);
+        return _wcsicmp(actual.c_str(), expected.c_str()) == 0;
+    }
+
+    bool retainOwnerRecord(const OwnerEnrollmentStore& store) {
+        const std::wstring file = store.recordPath();
+        if (file.size() < 4 || file[1] != L':' || file[2] != L'\\' || file.find(L':', 2) != std::wstring::npos) return false;
+        for (std::size_t end = 3;;) {
+            const std::wstring component = file.substr(0, end);
+            ScopedHandle handle(CreateFileW(component.c_str(), FILE_READ_ATTRIBUTES | READ_CONTROL,
+                FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr));
+            if (!handle.valid() || !pathHandleExact(handle.get(), component, true)) return false;
+            owner_ancestors.push_back(std::move(handle));
+            const auto next = file.find(L'\\', end + 1);
+            if (next == std::wstring::npos) break;
+            end = next;
+        }
+        owner_file.reset(CreateFileW(file.c_str(), GENERIC_READ | READ_CONTROL, FILE_SHARE_READ, nullptr,
+            OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+        return owner_file.valid() && pathHandleExact(owner_file.get(), file, false);
+    }
+
+    bool originalProcessExact() const {
+        if (!client_process.valid() || !user_token.valid() || WaitForSingleObject(client_process.get(), 0) != WAIT_TIMEOUT ||
+            GetProcessId(client_process.get()) != client.client_pid) return false;
+        FILETIME creation{}, exit{}, kernel{}, user{};
+        if (!GetProcessTimes(client_process.get(), &creation, &exit, &kernel, &user) ||
+            fileTimeValue(creation) != client.client_creation_time_100ns) return false;
+        HANDLE raw = nullptr;
+        if (!OpenProcessToken(client_process.get(), TOKEN_QUERY, &raw)) return false;
+        ScopedHandle processToken(raw);
+        HANDLE currentRaw = nullptr;
+        if (!WTSQueryUserToken(client.session_id, &currentRaw)) return false;
+        ScopedHandle currentWtsToken(currentRaw);
+        for (HANDLE token : {processToken.get(), user_token.get(), currentWtsToken.get()}) {
+            LUID current{};
+            if (!tokenLogonId(token, &current) || current.LowPart != logon_id.LowPart || current.HighPart != logon_id.HighPart) return false;
+            DWORD session = 0, written = 0, required = 0;
+            if (!GetTokenInformation(token, TokenSessionId, &session, sizeof(session), &written) ||
+                written != sizeof(session) || session != client.session_id) return false;
+            GetTokenInformation(token, TokenUser, nullptr, 0, &required);
+            if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || required == 0) return false;
+            std::vector<unsigned char> bytes(required);
+            if (!GetTokenInformation(token, TokenUser, bytes.data(), required, &required)) return false;
+            LPWSTR rawSid = nullptr;
+            if (!ConvertSidToStringSidW(reinterpret_cast<TOKEN_USER*>(bytes.data())->User.Sid, &rawSid)) return false;
+            const bool exact = rawSid && _wcsicmp(rawSid, owner.expected_owner_sid.c_str()) == 0;
+            if (rawSid) LocalFree(rawSid);
+            if (!exact) return false;
+        }
+        return true;
+    }
+
+    bool recheck() {
+        if (!installed || !originalProcessExact()) { reason = "NATIVE_ROOT_OWNER_INCARNATION_UNPROVEN"; return false; }
+        const OwnerEnrollmentStore store(browserGuardianOwnerEnrollmentStoreDefaultRoot());
+        // read() validates the protected record again while the ORIGINAL record
+        // and ancestor handles stay retained. No SID/device/epoch from JSON.
+        const auto durable = store.read();
+        if (!owner_file.valid() || !pathHandleExact(owner_file.get(), store.recordPath(), false) ||
+            !ownerAndClientExact(client, durable) || !sameTuple(client, durable)) {
+            reason = "NATIVE_ROOT_DURABLE_OWNER_DRIFT"; return false;
+        }
+        if (!installed->recheck()) { reason = installed->reason(); return false; }
+        reason = "NATIVE_ROOT_NAMESPACE_HELD_AUTHENTICITY_UNQUALIFIED";
+        return true;
+    }
+};
+
+GuardianNativeRootSession::GuardianNativeRootSession(const GuardianEffectAdmission& admission, HANDLE stopEvent)
+    : admission_(admission), stop_event_(stopEvent) {}
+GuardianNativeRootSession::~GuardianNativeRootSession() = default;
+
+GuardianUpdateActuatorResult GuardianNativeRootSession::handleReadRequest(
+    const std::string& wire, OwnerEnrollmentPipe& pipe) {
+    // This is the mounted producer. There is no overload accepting observations
+    // or a success-shaped result as authority; read both sources here.
+    const auto client = pipe.observeClientIdentity(true);
+    const OwnerEnrollmentStore store(browserGuardianOwnerEnrollmentStoreDefaultRoot());
+    const auto owner = store.read();
+
+    // Cheap original-handle liveness can revoke a stale scope; hashing the
+    // entire namespace must not be triggerable by an unauthenticated request.
+    if (state_ && WaitForSingleObject(state_->client_process.get(), 0) != WAIT_TIMEOUT) state_.reset();
+    UpdateRequest update;
+    if (parseUpdate(wire, &update) && update.operation == "DISPATCH" && ownerAndClientExact(client, owner) &&
+        deviceProofExact(update.public_jwk_x, update.public_jwk_y, update.signature, updateMaterial(update), owner)) {
+        // The existing installer owns its own journal/permission. A read-only
+        // namespace lease must be released before it can replace code. This is
+        // NOT a MAIN launch, and never consumes an installer ticket as one.
+        state_.reset();
+    }
+    auto out = handleGuardianUpdateActuatorRequest(wire, client, owner, &admission_);
+    ProbeRequest probe;
+    if (!parseProbe(wire, &probe) || out.state != "OWNER_BOUND" || !out.owner_binding_proven || !out.device_binding_proven) return out;
+    if (admission_.stopped()) { state_.reset(); out.native_root_custody_reason = "NATIVE_ROOT_SERVICE_STOPPED"; return out; }
+    // First enrollment is not enough: the retained record must be independently
+    // read from the same protected store after its create-if-absent transaction.
+    const auto durable = store.read();
+    if (!ownerAndClientExact(client, durable) ||
+        !deviceProofExact(probe.public_jwk_x, probe.public_jwk_y, probe.signature, probeMaterial(probe), durable)) {
+        out.native_root_custody_reason = "NATIVE_ROOT_OWNER_READBACK_UNPROVEN"; return out;
+    }
+    if (state_ && !state_->sameTuple(client, durable)) state_.reset();
+    if (state_ && !state_->recheck()) {
+        out.native_root_custody_reason = state_->reason;
+        state_.reset();
+        return out;
+    }
+    if (!state_) {
+        auto candidate = std::make_unique<State>();
+        candidate->client = client;
+        candidate->owner = durable.record;
+        candidate->user_token = exactOwnerToken(client, durable);
+        if (!candidate->user_token.valid() || !State::tokenLogonId(candidate->user_token.get(), &candidate->logon_id)) {
+            out.native_root_custody_reason = "NATIVE_ROOT_EXACT_WTS_TOKEN_UNAVAILABLE"; return out;
+        }
+        if (!exactProcessStillRunning(client.client_pid, client.client_creation_time_100ns, &candidate->client_process) ||
+            !candidate->originalProcessExact()) { out.native_root_custody_reason = "NATIVE_ROOT_ORIGINAL_PROCESS_UNPROVEN"; return out; }
+        if (!candidate->retainOwnerRecord(store)) { out.native_root_custody_reason = "NATIVE_ROOT_ORIGINAL_OWNER_RECORD_UNPROVEN"; return out; }
+        const std::wstring localAppData = localAppDataFor(candidate->user_token.get());
+        if (localAppData.empty()) { out.native_root_custody_reason = "NATIVE_ROOT_LOCALAPPDATA_UNAVAILABLE"; return out; }
+        candidate->installed = GuardianInstalledNamespace::capture(join(localAppData, kInstalledRelative), stop_event_);
+        if (!candidate->recheck()) { out.native_root_custody_reason = candidate->reason; return out; }
+        candidate->installed->bindRetainedReleaseSignature();
+        if (candidate->installed->reason() != "INSTALLED_NAMESPACE_HANDLES_RETAINED") {
+            out.native_root_custody_reason = candidate->installed->reason(); return out;
+        }
+        state_ = std::move(candidate);
+    }
+    if (admission_.stopped()) { state_.reset(); out.native_root_custody_reason = "NATIVE_ROOT_SERVICE_STOPPED"; return out; }
+    // These are observations of a live, native-owned scope, not a transferable
+    // capability. No JSON field below is ever read by this producer.
+    if (!state_->originalProcessExact()) {
+        state_.reset(); out.native_root_custody_reason = "NATIVE_ROOT_OWNER_POSTCHECK_FAILED"; return out;
+    }
+    out.native_root_custody_held = true;
+    out.native_root_custody_reason = state_->reason;
+    out.retained_namespace_sha256 = state_->installed->namespaceSha256();
+    out.retained_executable_sha256 = state_->installed->executableSha256();
+    out.retained_namespace_file_count = state_->installed->fileCount();
+    out.retained_release_signature_bound = state_->installed->releaseSignatureBound();
+    out.native_root_authenticity_reason = state_->installed->authenticityReason();
+    return out;
+}
+
 std::string serializeGuardianUpdateActuatorResult(const GuardianUpdateActuatorResult& result) {
     return std::string("{\"schema\":\"metaengine.browser-guardian.update-actuator-result.v1\",")
         + "\"state\":\"" + jsonEscape(result.state) + "\","
@@ -1295,6 +1488,15 @@ std::string serializeGuardianUpdateActuatorResult(const GuardianUpdateActuatorRe
         + "\"effect_absent_proven\":" + (result.effect_absent_proven ? "true" : "false") + ","
         + "\"exact_ready_binding\":" + (result.exact_ready_binding ? "true" : "false") + ","
         + "\"physical_dispatch_performed\":" + (result.physical_dispatch_performed ? "true" : "false") + ","
+        + "\"native_root_custody_held\":" + (result.native_root_custody_held ? "true" : "false") + ","
+        + "\"native_root_custody_reason\":\"" + jsonEscape(result.native_root_custody_reason) + "\","
+        + "\"retained_namespace_sha256\":\"" + jsonEscape(result.retained_namespace_sha256) + "\","
+        + "\"retained_executable_sha256\":\"" + jsonEscape(result.retained_executable_sha256) + "\","
+        + "\"retained_namespace_file_count\":" + std::to_string(result.retained_namespace_file_count) + ","
+        + "\"retained_release_signature_bound\":" + (result.retained_release_signature_bound ? "true" : "false") + ","
+        + "\"native_root_authenticity_reason\":\"" + jsonEscape(result.native_root_authenticity_reason) + "\","
+        + "\"native_main_launch_implemented\":false,"
+        + "\"loaded_runtime_code_attested\":false,"
         + "\"automatic_retry_allowed\":false,"
         + "\"caller_supplied_path_used\":false,"
         + "\"caller_supplied_url_used\":false,"

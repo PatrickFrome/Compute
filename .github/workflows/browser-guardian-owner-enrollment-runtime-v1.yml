@@ -4,7 +4,24 @@ on:
   pull_request:
     paths:
       - 'apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-owner-enrollment-store.*'
+      - 'apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-owner-enrollment-observer.*'
+      - 'apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-connected-peer*'
+      - 'apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-installed-namespace.*'
+      - 'apps/metaengine-browser/native/third_party/node-api-24.0.0/**'
+      - 'apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-native-root-session.hpp'
+      - 'apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-update-actuator.*'
+      - 'apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-scm-service.cpp'
+      - 'apps/metaengine-browser/scripts/build-guardian-native-staging.ps1'
+      - 'apps/metaengine-browser/scripts/build-guardian-native-peer.ps1'
+      - 'apps/metaengine-browser/src/guardian-connected-peer-native.mjs'
+      - 'apps/metaengine-browser/src/runtime-recovery-process-adapter.mjs'
+      - 'apps/metaengine-browser/test/browser-guardian-connected-peer*.test.mjs'
+      - 'apps/metaengine-browser/test/native/browser-guardian-connected-peer-probe.cpp'
+      - 'apps/metaengine-browser/test/native/guardian-peer-napi-synthetic/**'
+      - 'apps/metaengine-browser/test/runtime-recovery-connected-peer.test.mjs'
       - 'apps/metaengine-browser/test/native/browser-guardian-owner-enrollment-store-runtime-probe.cpp'
+      - 'apps/metaengine-browser/test/native/browser-guardian-installed-namespace-probe.cpp'
+      - 'apps/metaengine-browser/test/browser-guardian-installed-namespace-native.test.mjs'
       - 'apps/metaengine-browser/test/browser-guardian-owner-enrollment-store-runtime.ps1'
       - '.github/workflows/browser-guardian-owner-enrollment-runtime-v1.yml'
   workflow_dispatch:
@@ -13,9 +30,37 @@ permissions:
   contents: read
 
 jobs:
+  native-peer-napi-lifetime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up build-host Node for explicit synthetic core
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Exercise actual N-API ownership and cancellation with synthetic core
+        working-directory: apps/metaengine-browser
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          command -v c++
+          node ./scripts/run-isolated-tests.mjs test/browser-guardian-connected-peer-napi.test.mjs
+          test -z "$(git status --porcelain --untracked-files=all)"
+
   native-owner-enrollment-runtime:
     runs-on: windows-2025
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout exact candidate head
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -31,6 +76,11 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Set up build-host Node for mechanics tests
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
 
       - name: Compile exact-head durable-store runtime probe
         shell: powershell
@@ -61,6 +111,68 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           & ./apps/metaengine-browser/test/browser-guardian-owner-enrollment-store-runtime.ps1 -ProbeExe $env:OWNER_ENROLLMENT_RUNTIME_PROBE
+
+      - name: Compile and exercise retained installed namespace mechanics
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vsRoot = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
+          if (-not $vsRoot) { throw 'visual_studio_cpp_toolchain_missing' }
+          $vcvars = Join-Path $vsRoot 'VC\Auxiliary\Build\vcvars64.bat'
+          $sourceDir = (Resolve-Path 'apps/metaengine-browser/native/browser-guardian-scm').Path
+          $namespace = Join-Path $sourceDir 'browser-guardian-installed-namespace.cpp'
+          $probe = (Resolve-Path 'apps/metaengine-browser/test/native/browser-guardian-installed-namespace-probe.cpp').Path
+          $outDir = Join-Path $env:RUNNER_TEMP 'metaengine-guardian-namespace-runtime'
+          New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+          $probeExe = Join-Path $outDir 'METAENGINEBrowserGuardianNamespaceProbe.exe'
+          $compileCmd = 'call "{0}" >nul && cd /d "{1}" && cl.exe /nologo /std:c++20 /EHsc /W4 /WX /DUNICODE /D_UNICODE /DMETAENGINE_GUARDIAN_NAMESPACE_TEST /I"{2}" "{3}" "{4}" /Fe:"{5}" /link advapi32.lib bcrypt.lib' -f $vcvars, $outDir, $sourceDir, $namespace, $probe, $probeExe
+          & $env:ComSpec /d /s /c $compileCmd
+          if ($LASTEXITCODE -ne 0) { throw "guardian_namespace_runtime_compile_exit_$LASTEXITCODE" }
+          & $probeExe
+          if ($LASTEXITCODE -ne 0) { throw "guardian_namespace_runtime_exit_$LASTEXITCODE" }
+
+      - name: Compile mounted Guardian and exercise read-only self test
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./apps/metaengine-browser/scripts/build-guardian-native-staging.ps1 -OutputDir (Join-Path $env:RUNNER_TEMP 'metaengine-guardian-root-session-build')
+          if ($LASTEXITCODE -ne 0) { throw "guardian_root_session_build_exit_$LASTEXITCODE" }
+
+      - name: Exercise original connected-pipe mechanics and recovery quit fence
+        shell: powershell
+        working-directory: apps/metaengine-browser
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node ./scripts/run-isolated-tests.mjs test/browser-guardian-connected-peer-native.test.mjs test/runtime-recovery-connected-peer.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw "guardian_connected_peer_mechanics_exit_$LASTEXITCODE" }
+
+      - name: Compile and refresh native peer artifact using pinned build-host headers
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $out = Join-Path $env:RUNNER_TEMP 'metaengine-guardian-peer-build'
+          & ./apps/metaengine-browser/scripts/build-guardian-native-peer.ps1 -OutputDir $out
+          if ($LASTEXITCODE -ne 0) { throw "guardian_peer_build_exit_$LASTEXITCODE" }
+          & ./apps/metaengine-browser/scripts/build-guardian-native-peer.ps1 -OutputDir $out
+          if ($LASTEXITCODE -ne 0) { throw "guardian_peer_refresh_exit_$LASTEXITCODE" }
+          "GUARDIAN_PEER_BUILD_HOST_SMOKE_BINARY=$(Join-Path $out 'guardian-connected-peer.node')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Exercise build-host N-API exports without opening production pipe
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          // This exact freshly compiled temporary artifact is a build-host
+          // fixture, never a packaged Electron/loaded-code qualification.
+          const addon = require(process.env.GUARDIAN_PEER_BUILD_HOST_SMOKE_BINARY);
+          assert.deepEqual(Object.keys(addon).sort(), ['cancelPendingGuardianPeerObservations', 'openGuardianConnectedPeer']);
+          assert.throws(() => addon.openGuardianConnectedPeer({}), /arguments_forbidden/);
+          assert.throws(() => addon.cancelPendingGuardianPeerObservations({}), /arguments_forbidden/);
+          assert.equal(addon.cancelPendingGuardianPeerObservations(), undefined);
+          console.log('WINDOWS_BUILD_HOST_NAPI_EXPORTS=PASS; ELECTRON_AND_LAUNCH=UNQUALIFIED');
+          NODE
 
       - name: Prove source checkout unchanged
         shell: bash

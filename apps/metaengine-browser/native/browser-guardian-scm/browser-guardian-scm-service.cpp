@@ -10,6 +10,7 @@
 #include "browser-guardian-owner-enrollment-store.hpp"
 #include "browser-guardian-update-actuator.hpp"
 #include "browser-guardian-pipe-io-lifetime.hpp"
+#include "browser-guardian-native-root-session.hpp"
 
 namespace metaengine::guardian {
 // Sole production constructor for the revocation context. Never exported via
@@ -195,6 +196,7 @@ bool writeResponse(HANDLE pipe, const std::string& response) {
 
 DWORD WINAPI updateActuatorWorker(LPVOID /*context*/) {
     using namespace metaengine::guardian;
+    GuardianNativeRootSession nativeRootSession(g_effect_owner.context(), g_stop_event);
     while (WaitForSingleObject(g_stop_event, 0) == WAIT_TIMEOUT) {
         OwnerEnrollmentPipe pipe;
         if (!pipe.create(kBrowserGuardianUpdatePipeName)) {
@@ -214,10 +216,7 @@ DWORD WINAPI updateActuatorWorker(LPVOID /*context*/) {
             result.win32_error = GetLastError();
             result.effect_absent_proven = true;
         } else {
-            const OwnerEnrollmentObservation client = pipe.observeClientIdentity(true);
-            const OwnerEnrollmentStore store(browserGuardianOwnerEnrollmentStoreDefaultRoot());
-            const OwnerEnrollmentStoreResult owner = store.read();
-            result = handleGuardianUpdateActuatorRequest(request, client, owner, &g_effect_owner.context());
+            result = nativeRootSession.handleReadRequest(request, pipe);
         }
         const std::string response = serializeGuardianUpdateActuatorResult(result);
         writeResponse(pipe.handle(), response);

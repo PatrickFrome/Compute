@@ -38,6 +38,7 @@ export const SOURCE_CHECK_FILES = Object.freeze([
   "src/native-coding-service-heartbeat-publisher.mjs",
   "src/runtime-recovery-policy.mjs",
   "src/runtime-recovery-process-adapter.mjs",
+  "src/guardian-connected-peer-native.mjs",
   "src/runtime-recovery-transaction.mjs",
   "src/runtime-recovery-installed-binding.mjs",
   "src/runtime-recovery-main.mjs",

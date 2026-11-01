@@ -163,7 +163,11 @@ OwnerEnrollmentObservation OwnerEnrollmentPipe::observeClientIdentity(
 
     HANDLE token = nullptr;
     DWORD evidenceError = ERROR_SUCCESS;
-    if (!OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, FALSE, &token)) {
+    // Open the original impersonated THREAD token. Access is checked as this
+    // server process so a SECURITY_IDENTIFICATION client can be queried without
+    // granting the pipe server impersonation/delegation rights over the client.
+    // This does not substitute the server's primary token for client identity.
+    if (!OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, TRUE, &token)) {
         evidenceError = GetLastError();
     } else {
         out.user_sid = tokenSidString(token);

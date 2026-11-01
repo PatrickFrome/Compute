@@ -195,7 +195,7 @@ test('real inert process handoff crosses the durable barrier once, survives lost
   assert.equal(persisted.active.origin_browser.executable_sha256,persisted.active.new_browser.executable_sha256);
 });
 
-test('actual native kernel reader pins an inert child birth and proves its later absence; private Electron adapter binds own EXE and exact ticket args',{
+test('actual native kernel reader pins inert child birth/absence; app-shaped Node caller cannot bypass native peer admission',{
   skip:process.platform!=='win32'?'Physical birth/absence qualification requires the Windows kernel reader':false,
 },async t=>{
   const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore',windowsHide:true,shell:false});
@@ -215,10 +215,10 @@ test('actual native kernel reader pins an inert child birth and proves its later
     relaunch:options=>calls.push(options),quit:()=>calls.push('quit')}});
   const own=await adapter.capture(),ticket=randomUUID();
   assert.equal(own.pid,process.pid);assert.match(own.executable_sha256,/^[a-f0-9]{64}$/);
-  await adapter.requestRelaunch(ticket,own);
-  assert.deepEqual(calls,[{execPath:own.executable,args:['--metaengine-runtime-recovery='+ticket]},'quit']);
+  await assert.rejects(adapter.requestRelaunch(ticket,own),/guardian_connected_peer_unavailable/);
+  assert.deepEqual(calls,[]);
   await assert.rejects(adapter.requestRelaunch(ticket,{...own,created_100ns:'134000000000000001'}),/relaunch_binding_changed/);
-  assert.equal(calls.length,2);
+  assert.equal(calls.length,0);
 });
 
 test('the native recovery reader refuses invalid PIDs before querying a process on every platform',async()=>{
@@ -232,7 +232,7 @@ test('non-Windows native recovery refuses even a valid current PID rather than f
   await assert.rejects(readRuntimeRecoveryProcess(process.pid),{message:'runtime_recovery_process_query_invalid'});
 });
 
-test('portable adapter contract binds private process readback and exact ticket args without qualifying a native kernel',async t=>{
+test('portable adapter preserves exact process binding and refuses unqualified peer before planned quit',async t=>{
   const directory=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-recovery-adapter-')));
   t.after(()=>fs.rm(directory,{recursive:true,force:true}));
   const executable=path.join(directory,'fixture-browser.exe');await fs.writeFile(executable,'generated adapter fixture');
@@ -248,14 +248,13 @@ test('portable adapter contract binds private process readback and exact ticket 
   const own=await adapter.capture(),ticket=randomUUID();
   assert.equal(own.executable_sha256,createHash('sha256').update('generated adapter fixture').digest('hex'));
   assert.equal(own.pid,process.pid);assert.equal(own.authority_effect,false);
-  const requested=await adapter.requestRelaunch(ticket,own);
-  assert.deepEqual(calls,[{execPath:executable,args:['--metaengine-runtime-recovery='+ticket]},'quit']);
-  assert.deepEqual(tickets,[ticket]);assert.ok(reads.every(pid=>pid===process.pid));
-  assert.equal(requested.successor_ready,false);assert.equal(requested.automatic_retry_allowed,false);assert.equal(requested.authority_effect,false);
+  await assert.rejects(adapter.requestRelaunch(ticket,own),/guardian_connected_peer_unavailable/);
+  assert.deepEqual(calls,[]);
+  assert.deepEqual(tickets,[]);assert.ok(reads.every(pid=>pid===process.pid));
   await assert.rejects(adapter.requestRelaunch('not-a-ticket',own),/relaunch_binding_changed/);
   await assert.rejects(adapter.requestRelaunch(ticket,{...own,created_100ns:'134000000000000001'}),/relaunch_binding_changed/);
   physical={...physical,pid:process.pid+1};await assert.rejects(adapter.capture(),/own_process_unbound/);
-  assert.equal(calls.length,2);
+  assert.equal(calls.length,0);
 });
 
 for (const change of ['cancel', 'gate-epoch']) test(`successor confirmation rejects ${change} during physical predecessor readback`, async t => {

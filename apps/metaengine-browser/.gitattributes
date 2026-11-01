@@ -1,1 +1,3 @@
 package-lock.json text eol=lf
+# Preserve the exact hash-pinned upstream license, including its original indent.
+native/third_party/node-api-24.0.0/LICENSE whitespace=-space-before-tab
