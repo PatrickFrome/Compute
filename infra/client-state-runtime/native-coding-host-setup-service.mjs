@@ -249,9 +249,14 @@ export function createNativeCodingHostSetupService({sql,hostInstanceId,hostPid,p
   }).catch(async error=>{
    // Only a failure before the producer's original promise was created can
    // settle unused custody. Entered/unknown resources remain held.
-   if(runJob&&!row.actualJob&&!scope.unconfirmed())await transition('TERMINAL',actor,selectors(input),{
-    custody_id:row.custodyId,state:row.abort.signal.aborted?'STOPPED':'HOLD',
-    reason:row.abort.signal.aborted?'CANCELLED':'JOB_FAILED',cleanup_state:'DRAINED'});
+   if(runJob&&!row.actualJob&&!scope.unconfirmed()){
+    // Unused custody still owns any physical uncertainty from fallback SQL.
+    const publication=runNativePhysicalSettlementScope(()=>transition('TERMINAL',actor,selectors(input),{
+     custody_id:row.custodyId,state:row.abort.signal.aborted?'STOPPED':'HOLD',
+     reason:row.abort.signal.aborted?'CANCELLED':'JOB_FAILED',cleanup_state:'DRAINED'}));
+    row.publicationScope=publication;
+    await publication.promise;
+   }
   }).catch(()=>{}).finally(()=>{
    row.finished=true;if(scope.unconfirmed()||row.publicationScope?.unconfirmed())row.physicalConfirmed=false;
    if(row.physicalConfirmed)jobs.delete(input.operation_id);custodyRevision++;
