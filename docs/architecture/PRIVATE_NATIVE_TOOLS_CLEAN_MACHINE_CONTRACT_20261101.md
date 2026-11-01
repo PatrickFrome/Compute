@@ -157,3 +157,18 @@ The optional actual Windows payload-startup test is checked in as
 An independent final review confirmed closure of the three resolver findings
 (path aliases, incomplete inventories, manifest replacement window).
 No Windows binary execution or installation evidence is claimed.
+
+Additional read-only static import audit: 220 PE files and 381 private DLL
+import edges resolve from each importer directory or the actual private PATH;
+no private dependency was found only in an unrelated payload directory. The
+94 remaining external Windows/API/CLR names still require Windows loading
+qualification. Codex voice's 26 runtime libraries and vcruntime140.dll match
+the vendor's included inventories. This is not a loaded-image attestation.
+
+MinGit's optional GCM 2.9.1 targets .NET Framework 4.7.2 (its managed imports
+include mscoree.dll). It is not an app-local self-contained CLR. Preserve
+GIT_CONFIG_NOSYSTEM=1 and GIT_CONFIG_GLOBAL=NUL: the shipped etc/gitconfig
+otherwise includes Program Files Git configs and credential.helper=manager.
+The Windows startup test also checks GCM --version without login or credential
+creation. The OS baseline/CLR, helper/voice loading and actual sandbox bootstrap
+remain Windows qualification requirements.

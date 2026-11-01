@@ -36,6 +36,10 @@ test('actual pinned private Windows Git/Codex start without inherited tools and 
       await tools.revalidate();
       assert.match((await run(tools.gitExecutable,['--version'],options)).stdout,/git version 2\.56\.0\.windows\.4/);
       assert.match((await run(tools.cliExecutable,['--version'],options)).stdout,/0\.166\.0/);
+      // MinGit's optional GCM is Framework-based; a successful Git version
+      // alone does not qualify this shipped dependency. Version is read-only.
+      const gcm=await run(path.join(toolsRoot,'git','ucrt64','bin','git-credential-manager.exe'),['--version'],options);
+      assert.match(gcm.stdout+gcm.stderr,/2\.9\.1/);
       const repo=path.join(root,'repo');await fs.mkdir(repo);
       await run(tools.gitExecutable,['init','--quiet',repo],options);
       const repoOptions={...options,cwd:repo};
