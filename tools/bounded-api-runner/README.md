@@ -54,3 +54,20 @@ Documentation checked when this runner was prepared:
 - https://developers.openai.com/api/docs/pricing
 
 Reverify current pricing and model parameters before future reuse. Concurrency admission does not guarantee project RPM/TPM availability.
+
+## Optional official token-count preflight
+
+For a new, not-yet-submitted logical task, the authorized operator may run:
+
+```sh
+node runner.mjs count stable-logical-task /path/to/reviewed-prompt.txt 16000 high
+node runner.mjs --validate stable-logical-task /path/to/reviewed-prompt.txt 16000 high
+# Separate authorized generation; count never dispatches generation automatically:
+node runner.mjs run stable-logical-task /path/to/reviewed-prompt.txt 16000 high
+```
+
+Counting uses only `POST https://api.openai.com/v1/responses/input_tokens`, with identical model, input, instructions and tools. It has a 60-second absolute deadline, 1 MiB response limit, the same proxy configuration, no redirects and no retries. Count receipts are private ignored `outputs/TASK.count.json` files containing only selected metadata and a SHA-256 binding to the complete generation request. Prompt bytes, instructions, model, tools, effort and output limit must remain unchanged between count and generation. Counts cannot be supplied as arbitrary CLI numbers.
+
+A validated count plus 4096 tokens of margin can reduce the input allowance, never increase output allowance or total cap. Without a count receipt, the byte-based allowance remains. An invalid or mismatched existing receipt blocks generation; a failed count never silently dispatches generation. Prior admitted requests are not modified. Count receipts are trusted local artifacts: do not manually edit or copy them between tasks.
+
+Reference: https://developers.openai.com/api/docs/guides/token-counting and https://developers.openai.com/api/reference/resources/responses/subresources/input_tokens/methods/count

@@ -81,22 +81,56 @@ export function streamRequest(body,key,{request=https.request,deadline=1800000,o
  }catch{finish('request_setup_error');}
  });
 }
+export const requestHash=body=>createHash('sha256').update(JSON.stringify(body)).digest('hex');
+export function requestBody(prompt,max,effort){return {tools:[],instructions:'Analyze the supplied authorized project task. Return proposed code changes as JSON patches and test guidance only. Do not execute tools or apply changes.',model:'gpt-6-astra',reasoning:{effort,mode:'standard'},prompt_cache_options:{ttl:'30m'},service_tier:'fast',input:prompt,max_output_tokens:max,stream:true,store:false};}
+export function countBounds(receipt,body,key,b){
+ if(receipt.version!==1||receipt.status!=='counted'||receipt.task_key!==key||receipt.endpoint!=='/v1/responses/input_tokens'||receipt.request_sha256!==requestHash(body)||!Number.isSafeInteger(receipt.input_tokens)||receipt.input_tokens<1||receipt.input_tokens>b.input_bound||receipt.input_tokens+4096>272000)fail('invalid_or_mismatched_count_receipt');
+ const input_bound=Math.min(b.input_bound,receipt.input_tokens+4096);
+ return {...b,input_bound,worst_micro:cost(input_bound,b.max_output_tokens),counted_input_tokens:receipt.input_tokens,request_sha256:receipt.request_sha256};
+}
+export function countRequest(body,key,{request=https.request,deadline=60000}={}){
+ const payload=JSON.stringify({model:body.model,input:body.input,instructions:body.instructions,tools:body.tools});
+ return new Promise(resolve=>{
+  let req,res,done=false,chunks=[],size=0;const timer=setTimeout(()=>finish({status:'count_failed',reason:'count_deadline'}),Math.min(deadline,60000));
+  function finish(result){if(done)return;done=true;clearTimeout(timer);resolve(result);res?.destroy();req?.destroy();}
+  try{req=request({protocol:'https:',hostname:'api.openai.com',port:443,path:'/v1/responses/input_tokens',method:'POST',headers:{Authorization:`Bearer ${key}`,'Content-Type':'application/json','Content-Length':Buffer.byteLength(payload)},agent:request===https.request?new https.Agent({proxyEnv:process.env}):false},response=>{
+   res=response;if(res.statusCode!==200){finish({status:'count_failed',reason:'count_http_rejected'});return;}
+   res.on('data',chunk=>{if(done)return;size+=chunk.length;if(size>1024*1024){finish({status:'count_failed',reason:'count_response_limit'});return;}chunks.push(chunk);});
+   res.on('end',()=>{if(done)return;try{const r=JSON.parse(Buffer.concat(chunks).toString('utf8'));if(r.object!=='response.input_tokens'||!Number.isSafeInteger(r.input_tokens)||r.input_tokens<1||r.input_tokens+4096>272000)throw 0;finish({status:'counted',input_tokens:r.input_tokens,request_id:safe(res.headers['x-request-id'])});}catch{finish({status:'count_failed',reason:'count_invalid_response'});}});
+   res.on('error',()=>finish({status:'count_failed',reason:'count_transport_error'}));res.on('aborted',()=>finish({status:'count_failed',reason:'count_aborted'}));
+  });req.on('error',()=>finish({status:'count_failed',reason:'count_transport_error'}));req.end(payload);}catch{finish({status:'count_failed',reason:'count_setup_error'});}
+ });
+}
+
 export function reasoningEffort(value='max'){if(!['high','xhigh','max'].includes(value))fail('invalid_reasoning_effort');return value;}
-export async function run(key,promptFile,max=32000,dryRun=false,effort='max'){
+export async function run(key,promptFile,max=32000,dryRun=false,effort='max',countOnly=false){
  effort=reasoningEffort(effort);
  if(!safe(key)||['__proto__','constructor','prototype'].includes(key))fail('invalid_task_key');
  // Caller provides only pre-reviewed authorized source snippets, tests and deidentified logs.
  if(/(^|\/)\.env(?:\.|$)/.test(promptFile))fail('forbidden_prompt_path');
  const h=await fs.open(promptFile,'r');let raw;try{const st=await h.stat();bounds(st.size,max);raw=Buffer.alloc(st.size+1);let total=0;while(total<raw.length){const {bytesRead}=await h.read(raw,total,raw.length-total,total);if(!bytesRead)break;total+=bytesRead;}const end=await h.stat();if(total!==st.size||end.size!==st.size||end.mtimeMs!==st.mtimeMs)fail('prompt_changed');raw=raw.subarray(0,total);}finally{await h.close();}
- const b={...bounds(raw.length,max),requested_reasoning_effort:effort};const prompt=new TextDecoder('utf-8',{fatal:true}).decode(raw);
+ let b={...bounds(raw.length,max),requested_reasoning_effort:effort};const prompt=new TextDecoder('utf-8',{fatal:true}).decode(raw);
+ const bodyObject=requestBody(prompt,max,effort);
+ const countFile=path.join(ROOT,'outputs',key+'.count.json');
+ if(!countOnly){let receipt;try{receipt=JSON.parse(await fs.readFile(countFile,'utf8'));}catch(e){if(e.code!=='ENOENT')fail('count_receipt_read_failed');}if(receipt)b=countBounds(receipt,bodyObject,key,b);}
  if(dryRun)return {validated:true,task_key:key,...b,requested_model:'gpt-6-astra',requested_service_tier:'fast',reasoning_effort:effort,paid_request_made:false};
  const apiKey=process.env.OPENAI_API_KEY;if(!apiKey||/[\r\n]/.test(apiKey))fail('missing_or_invalid_key');
+ if(countOnly){
+  const s=JSON.parse(await fs.readFile(STATE,'utf8'));if(Object.hasOwn(s.tasks,key))return {skip:'duplicate_logical_key'};
+  await fs.mkdir(path.dirname(countFile),{recursive:true,mode:0o700});
+  return locked(countFile,async()=>{
+   try{await fs.access(countFile);fail('count_already_exists');}catch(e){if(e.code!=='ENOENT')throw e;}
+   const r=await countRequest(bodyObject,apiKey);if(r.status!=='counted')return r;
+   const receipt={version:1,task_key:key,endpoint:'/v1/responses/input_tokens',request_sha256:requestHash(bodyObject),...r};
+   const counted=countBounds(receipt,bodyObject,key,b);await atomic(countFile,receipt);return {task_key:key,status:'counted',...counted,generation_submitted:false};
+  });
+ }
  const admitted=await admit(key,b);if(!admitted.admitted)return admitted;
  console.log(JSON.stringify({task_key:key,status:'admitted',...b}));
- const body=JSON.stringify({tools:[],instructions:'Analyze the supplied authorized project task. Return proposed code changes as JSON patches and test guidance only. Do not execute tools or apply changes.',model:'gpt-6-astra',reasoning:{effort,mode:'standard'},prompt_cache_options:{ttl:'30m'},service_tier:'fast',input:prompt,max_output_tokens:max,stream:true,store:false});
+ const body=JSON.stringify(bodyObject);
  const dir=path.join(ROOT,'outputs');await fs.mkdir(dir,{recursive:true,mode:0o700});
  const result=await streamRequest(body,apiKey,{onCreated:id=>{persistCreated(path.join(dir,key+'.created.json'),id);console.log(JSON.stringify({task_key:key,status:'response_created',response_id:id}));}});const text=result.text;delete result.text;
- result.requested_reasoning_effort=effort;
+ result.requested_reasoning_effort=effort;result.request_sha256=requestHash(bodyObject);
  result.prompt_sha256=createHash('sha256').update(raw).digest('hex');
  const task=await settle(key,result);
  await fs.writeFile(path.join(dir,key+'.txt'),text,{flag:'wx',mode:0o600});
@@ -104,6 +138,6 @@ export async function run(key,promptFile,max=32000,dryRun=false,effort='max'){
  return {task_key:key,status:task.status,output:path.join(dir,key+'.txt'),receipt:path.join(dir,key+'.receipt.json')};
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
- try{const [cmd,...args]=process.argv.slice(2);let r;if(cmd==='init')r={initialized:!!(await init(STATE,JSON.parse(await fs.readFile(path.join(ROOT,'private-init.json'),'utf8'))))};else if(['run','--validate','dry-run'].includes(cmd)&&args.length>=2)r=await run(args[0],args[1],args[2]===undefined?32000:Number(args[2]),cmd!=='run',args[3]===undefined?'max':args[3]);else fail('usage_init_or_run_key_prompt_optional_max');console.log(JSON.stringify(r));}
+ try{const [cmd,...args]=process.argv.slice(2);let r;if(cmd==='init')r={initialized:!!(await init(STATE,JSON.parse(await fs.readFile(path.join(ROOT,'private-init.json'),'utf8'))))};else if(['run','count','--validate','dry-run'].includes(cmd)&&args.length>=2)r=await run(args[0],args[1],args[2]===undefined?32000:Number(args[2]),!['run','count'].includes(cmd),args[3]===undefined?'max':args[3],cmd==='count');else fail('usage_init_or_run_key_prompt_optional_max');console.log(JSON.stringify(r));}
  catch{console.error(JSON.stringify({status:'blocked',reason:'local_validation_or_state_failure_no_retry',hint:'Check CLI arguments, state and filesystem; raw errors suppressed.'}));process.exitCode=1;}
 }
