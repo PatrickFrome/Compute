@@ -46,8 +46,9 @@ async function syntheticMetadata() {
     runner: {sdk: 'SYNTHETIC', ucrt: 'SYNTHETIC', image_os: 'SYNTHETIC', image_version: 'SYNTHETIC'},
     run: {repository: 'PatrickFrome/Compute', sha: head, ref: 'refs/heads/synthetic', id: '1', attempt: '1', workflow_ref: 'PatrickFrome/Compute/.github/workflows/codex-effective-policy-windows-staging.yml@refs/heads/synthetic'}};
 }
-async function fixture(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-synthetic-staging-'));
+async function fixture(t, {tempRoot = os.tmpdir()} = {}) {
+  // Windows TEMP can use an 8.3 alias (RUNNER~1). Canonicalize only our new owned fixture.
+  const root = await fs.realpath(await fs.mkdtemp(path.join(tempRoot, 'codex-synthetic-staging-')));
   t.after(() => fs.rm(root, {recursive: true, force: true}));
   const binary = path.join(root, 'SYNTHETIC-NOT-EXECUTABLE.exe'); await fs.writeFile(binary, syntheticPe());
   const before = await inspectBinary(binary), metadata = await syntheticMetadata();
@@ -68,6 +69,17 @@ for (const [name, mutate, size] of [
   ['section raw data', b => b.writeUInt32LE(0xffffffff, 412), 1024],
 ]) test(`PE refuses ${name}`, () => {const b = syntheticPe(); mutate(b); assert.throws(() => validatePe(b, size));});
 test('PE refuses short header before offset reads', () => {for (const n of [0, 2, 63, 100, 391]) assert.throws(() => validatePe(syntheticPe().subarray(0, n), 1024));});
+test('owned test fixture resolves temporary-directory aliases without relaxing the inspector', async t => {
+  // Synthetic alias reproduces the path-spelling mismatch; CI supplies the real Windows 8.3 case.
+  const base = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'codex-fixture-alias-')));
+  t.after(() => fs.rm(base, {recursive: true, force: true}));
+  const real = path.join(base, 'real'), alias = path.join(base, 'alias'); await fs.mkdir(real);
+  await fs.symlink(real, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  const f = await fixture(t, {tempRoot: alias});
+  assert.equal(f.root, await fs.realpath(f.root)); assert.equal(path.dirname(f.root), real);
+  const aliasBinary = path.join(alias, path.basename(f.root), path.basename(f.binary));
+  await assert.rejects(inspectBinary(aliasBinary), /file path traverses link/);
+});
 test('binary inspection streams real file bytes; rejects directory, link and sparse oversize', async t => {
   const f = await fixture(t); assert.equal(f.before.sha256, digest(syntheticPe()));
   await assert.rejects(inspectBinary(f.root));
