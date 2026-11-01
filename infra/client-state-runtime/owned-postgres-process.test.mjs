@@ -12,6 +12,28 @@ import { runOwnedPostgresControlProcess, startOwnedWindowsPostgres, windowsPostg
 const sleep = delay => new Promise(resolve => setTimeout(resolve, delay));
 const exec = promisify(execFile);
 
+async function fixtureDescendantIsRunning(pid) {
+  const present = () => {
+    try { process.kill(pid, 0); return true; }
+    catch (error) { if (error.code === 'ESRCH') return false; throw error; }
+  };
+  if (!present()) return false;
+  if (process.platform !== 'linux') return true;
+  let stat;
+  try { stat = await fs.readFile(`/proc/${pid}/stat`, 'utf8'); }
+  catch (error) {
+    if (error.code === 'ENOENT' && !present()) return false;
+    throw error;
+  }
+  const end = stat.lastIndexOf(')');
+  assert(stat.startsWith(`${pid} (`) && end > 0, 'fixture kernel state is bound to its exact PID');
+  const state = stat.slice(end + 2).split(' ')[0];
+  assert.match(state, /^[RSDZTtXxKWPI]$/, 'fixture kernel state is recognized');
+  // A container's PID 1 may leave the exited orphan unreaped. Z proves exit,
+  // not PID absence; unknown observations must never authorize fixture removal.
+  return state !== 'Z';
+}
+
 test('owned control completion follows exit while a real descendant retains stdout handles', { timeout: 60000 }, async t => {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'compute-owned-control-pipes-')));
   const descendant = path.join(root, 'descendant.mjs');
@@ -40,7 +62,7 @@ test('owned control completion follows exit while a real descendant retains stdo
       if (!pid) continue;
       const deadline = Date.now() + 5000;
       let alive = true;
-      do { try { process.kill(pid, 0); } catch (error) { if (error.code === 'ESRCH') alive = false; else throw error; }
+      do { alive = await fixtureDescendantIsRunning(pid);
         if (alive) await sleep(25);
       } while (alive && Date.now() < deadline);
       assert.equal(alive, false, 'fixture descendant exited before deleting its private directory');
@@ -65,7 +87,7 @@ test('owned control completion follows exit while a real descendant retains stdo
   await sleep(100);
   assert.equal(referenceCallbackSettled, false, `execFile callback waits for descendant-owned stdout handles (exit=${referenceExitAt}ms, close=${referenceCloseAt}ms)`);
   const referencePid = Number(await fs.readFile(pidFiles[0], 'utf8'));
-  assert.doesNotThrow(() => process.kill(referencePid, 0));
+  assert.equal(await fixtureDescendantIsRunning(referencePid), true, 'reference descendant is still running before its gate opens');
   await fs.writeFile(gates[0], 'stop');
   await referenceOutcome;
 
@@ -73,7 +95,7 @@ test('owned control completion follows exit while a real descendant retains stdo
   await runOwnedPostgresControlProcess(process.execPath, [parent, descendant, gates[1], pidFiles[1]], { timeoutMs: 10000 });
   assert(Date.now() - started < 5000, 'control returns before its timeout with descendant still running');
   const controlPid = Number(await fs.readFile(pidFiles[1], 'utf8'));
-  assert.doesNotThrow(() => process.kill(controlPid, 0));
+  assert.equal(await fixtureDescendantIsRunning(controlPid), true, 'control descendant is still running before its gate opens');
   await assert.rejects(fs.lstat(gates[1]), { code: 'ENOENT' });
   await fs.writeFile(gates[1], 'stop');
 });
