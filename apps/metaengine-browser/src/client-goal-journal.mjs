@@ -80,6 +80,11 @@ function normalizeEntry(value) {
       ||progress.request_id!==id||progress.project_id!==receipt.project_id||progress.task_id!==receipt.root_task_id
       ||progress.found!==true||progress.authority_effect!==false||progress.automatic_retry_allowed!==false
       ||progress.physical_execution_proven!==false||!STATES.has(progress.task_state)))throw new Error('client_goal_journal_native_progress_invalid');
+    if(progress){
+      const control=Object.hasOwn(progress,'control_state')?progress.control_state:null;
+      if(control!==null&&!['ACTIVE','PAUSED','COMPLETED'].includes(control))throw new Error('client_goal_journal_native_control_state_invalid');
+      progress.control_state=control;
+    }
     if(progress?.review_rejection!=null){
       normalizeNativeReviewRejection(progress.review_rejection,receipt.project_id);
       if(progress.blocked_reason!=='NATIVE_REVIEW_REJECTED')throw new Error('client_goal_journal_native_review_invalid');

@@ -10,6 +10,7 @@ import {ClientGoalJournal} from '../src/client-goal-journal.mjs';
 import {createClientNativeCodingGoalRouter,normalizeNativeCodingSeedResult,normalizeNativeCodingGoalProgress,readClientGoalSubmissionMode} from '../src/client-native-coding-goal.mjs';
 import {drainManagedRuntimeBindings} from '../src/managed-runtime-drain.mjs';
 import {NativeCodingHostIpcError} from '../src/native-coding-host-ipc-client.mjs';
+import {normalizeClientProjectSnapshot} from '../src/client-project-continuity.mjs';
 
 const hash=s=>createHash('sha256').update(s).digest('hex');
 function fixture(){
@@ -518,6 +519,99 @@ test('bound review rejection remains visible and nonterminal across goal journal
  assert.equal(f.journal.latest().progress.physical_execution_proven,false);
  const restored=new ClientGoalJournal(f.storage);await restored.load();
  assert.deepEqual(restored.latest().progress.review_rejection,f.snapshot.native_review_rejection);
+});
+
+for(const state of ['ACTIVE','WAITING_CHILDREN','BLOCKED'])test(`native progress preserves PAUSED control beside ${state} aggregate and RUNNING task`,()=>{
+ const f=fixture();f.snapshot.state=state;f.snapshot.control_state='PAUSED';
+ if(state==='BLOCKED')f.snapshot.native_review_rejection=rejectedReview(f.receipt.project_id);
+ // projectSnapshot already normalizes on the actual Supervisor path.
+ const raw=normalizeClientProjectSnapshot(f.snapshot,{project_id:f.receipt.project_id});
+ const progress=normalizeNativeCodingGoalProgress(raw,{request_id:f.input.request_id,goal:f.input.objective,receipt:f.receipt});
+ assert.equal(progress.control_state,'PAUSED');assert.equal(progress.project_state,state);assert.equal(progress.task_state,'RUNNING');
+ assert.equal(progress.terminal,false);assert.equal(progress.physical_execution_proven,false);assert.equal(progress.authority_effect,false);
+ if(state==='BLOCKED'){
+  assert.equal(progress.blocked_reason,'NATIVE_REVIEW_REJECTED');assert.deepEqual(progress.review_rejection,f.snapshot.native_review_rejection);
+ }
+});
+
+test('saved PAUSED progress survives restart and unavailable reads until a fresh explicit control observation',async()=>{
+ const f=fixture();f.snapshot.control_state='PAUSED';let projectUnavailable=false,hostUnavailable=false;const calls=[];
+ const build=journal=>createClientNativeCodingGoalRouter({journal,request:async op=>{
+  calls.push(op);if(hostUnavailable)throw Error('fixture Host request timeout');return f.result;
+ },projectSnapshot:async()=>{
+  if(projectUnavailable)throw Error('fixture PG read timeout');
+  return normalizeClientProjectSnapshot(f.snapshot,{project_id:f.receipt.project_id});
+ }});
+ await build(f.journal).submit({request_id:f.input.request_id,goal:f.input.objective});
+ const original=f.journal.latest().progress;assert.equal(original.control_state,'PAUSED');
+ const restored=new ClientGoalJournal(f.storage);await restored.load();
+ assert.deepEqual(restored.latest().progress,original);assert.deepEqual(restored.latest().receipt,f.receipt);
+ const router=build(restored);projectUnavailable=true;await router.refresh(restored.latest());
+ assert.deepEqual(restored.latest().progress,original);assert.equal(restored.latest().project_error,'Native project observation unavailable');
+ hostUnavailable=true;await assert.rejects(router.refresh(restored.latest()),/fixture Host request timeout/);
+ assert.deepEqual(restored.latest().progress,original);assert.equal(restored.latest().project_error,'Native goal observation unavailable');
+ assert.equal(restored.latest().progress.physical_execution_proven,false);assert.deepEqual(calls,['SEED_GOAL','READ_SEED','READ_SEED']);
+ hostUnavailable=false;projectUnavailable=false;f.snapshot.control_state='ACTIVE';await router.refresh(restored.latest());
+ assert.equal(restored.latest().progress.control_state,'ACTIVE');assert.equal(restored.latest().progress.task_state,'RUNNING');
+ assert.equal(restored.latest().project_error,null);assert.deepEqual(restored.latest().receipt,f.receipt);
+});
+
+test('a late ACTIVE snapshot cannot overwrite a newer PAUSED observation across routers sharing one journal',async()=>{
+ const f=fixture();f.snapshot.control_state='ACTIVE';let reads=0,enter,release;
+ const entered=new Promise(resolve=>{enter=resolve;}),pending=new Promise(resolve=>{release=resolve;});
+ const olderSnapshot=structuredClone(f.snapshot),pausedSnapshot={...structuredClone(f.snapshot),control_state:'PAUSED'};
+ const options={journal:f.journal,request:async()=>f.result,projectSnapshot:async()=>{
+  reads++;if(reads===1)return f.snapshot;if(reads===2){enter();return pending;}return pausedSnapshot;
+ }};
+ const router=createClientNativeCodingGoalRouter(options);await router.submit({request_id:f.input.request_id,goal:f.input.objective});
+ const older=router.refresh(f.journal.latest());await entered;
+ await createClientNativeCodingGoalRouter(options).refresh(f.journal.latest());
+ assert.equal(f.journal.latest().progress.control_state,'PAUSED');const latest=f.journal.latest().progress;
+ release(olderSnapshot);await older;
+ assert.deepEqual(f.journal.latest().progress,latest);assert.equal(f.journal.latest().project_error,null);
+ assert.equal(f.journal.latest().progress.physical_execution_proven,false);assert.deepEqual(f.journal.latest().receipt,f.receipt);
+});
+
+for(const stage of ['seed','snapshot'])test(`superseded ${stage} read failure cannot mark a newer PAUSED observation unavailable`,async()=>{
+ const f=fixture();f.snapshot.control_state='PAUSED';let seeds=0,reads=0,enter,rejectOld;
+ const entered=new Promise(resolve=>{enter=resolve;}),pending=new Promise((resolve,reject)=>{rejectOld=reject;});
+ const options={journal:f.journal,request:async()=>{
+  seeds++;if(stage==='seed'&&seeds===2){enter();return pending;}return f.result;
+ },projectSnapshot:async()=>{reads++;if(stage==='snapshot'&&reads===2){enter();return pending;}return f.snapshot;}};
+ const router=createClientNativeCodingGoalRouter(options);await router.submit({request_id:f.input.request_id,goal:f.input.objective});
+ const older=router.refresh(f.journal.latest());await entered;
+ await createClientNativeCodingGoalRouter(options).refresh(f.journal.latest());const latest=f.journal.latest().progress;
+ rejectOld(Error('fixture superseded timeout'));
+ if(stage==='seed')await assert.rejects(older,/fixture superseded timeout/);else await older;
+ assert.deepEqual(f.journal.latest().progress,latest);assert.equal(f.journal.latest().project_error,null);
+});
+
+test('saved native control accepts enum or null and upgrades an older missing field to unknown',async()=>{
+ const f=fixture();await f.journal.begin({request_id:f.input.request_id,goal:f.input.objective,kind:'NATIVE_CODING'});
+ await f.journal.recordNativeAdmission(f.receipt);await f.journal.recordNativeProgress(normalizeNativeCodingGoalProgress(f.snapshot,f.journal.latest()));
+ for(const control of ['ACTIVE','PAUSED','COMPLETED',null,'MISSING']){
+  const durable=f.getDurable();if(control==='MISSING')delete durable.entries[0].progress.control_state;else durable.entries[0].progress.control_state=control;
+  const restored=new ClientGoalJournal({...f.storage,loadState:async()=>durable});await restored.load();const entry=restored.latest();
+  assert.equal(entry.progress.control_state,control==='MISSING'?null:control);
+  assert.equal(entry.authority_effect,false);assert.equal(entry.automatic_retry_allowed,false);
+  assert.equal(entry.scheduler_authority,false);assert.equal(entry.release_authority,false);assert.equal(entry.browser_actuation_authority,false);
+  assert.equal(entry.progress.physical_execution_proven,false);assert.equal(entry.progress.authority_effect,false);
+ }
+});
+
+for(const control_state of ['STOPPED','FENCED','paused','',false,0,{},[],undefined])test(`malformed saved native control is rejected on reload: ${JSON.stringify(control_state)}`,async()=>{
+ const f=fixture();await f.journal.begin({request_id:f.input.request_id,goal:f.input.objective,kind:'NATIVE_CODING'});
+ await f.journal.recordNativeAdmission(f.receipt);await f.journal.recordNativeProgress(normalizeNativeCodingGoalProgress(f.snapshot,f.journal.latest()));
+ const durable=f.getDurable(),original=f.getDurable();durable.entries[0].progress.control_state=control_state;
+ await assert.rejects(new ClientGoalJournal({...f.storage,loadState:async()=>durable}).load(),/client_goal_journal_native_control_state_invalid/);
+ assert.deepEqual(f.getDurable(),original);assert.equal(f.journal.latest().progress.physical_execution_proven,false);
+ assert.equal(f.journal.latest().automatic_retry_allowed,false);assert.equal(f.journal.latest().authority_effect,false);
+});
+
+test('native progress from an older producer preserves unknown control rather than deriving ACTIVE',()=>{
+ const f=fixture();const progress=normalizeNativeCodingGoalProgress(normalizeClientProjectSnapshot(f.snapshot),
+  {request_id:f.input.request_id,goal:f.input.objective,receipt:f.receipt});
+ assert.equal(progress.control_state,null);assert.equal(progress.project_state,'ACTIVE');assert.equal(progress.task_state,'RUNNING');
 });
 
 for(const tamper of [r=>r.project_id=randomUUID(),r=>r.verdict='ACCEPT',r=>r.authority_effect=true,

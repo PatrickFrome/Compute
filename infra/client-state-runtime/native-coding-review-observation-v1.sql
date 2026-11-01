@@ -16,7 +16,7 @@ begin
 
  if p.prosrc is null or p.lanname<>'plpgsql' or p.prosecdef is distinct from true or p.provolatile<>'v'
   or p.proconfig is distinct from ARRAY['search_path=pg_catalog, public, destruktion_meta, pg_temp']::text[]
-  or encode(extensions.digest(convert_to(replace(p.prosrc,E'\r\n',E'\n'),'UTF8'),'sha256'),'hex') not in('bdbb0c2c3cf3e1a17d6d6eec1d261aa505bcc48cb1695e6294c5cea44374cad1','f13408a7cc4598b54048ddb732e10e38cde2e65cb99bb23de5ff695102fe8427','55b91c1935bf14b1dad3b02468a93827ae8fab4f12036b05c68f72bc20441aa0')
+  or encode(extensions.digest(convert_to(replace(p.prosrc,E'\r\n',E'\n'),'UTF8'),'sha256'),'hex') not in('bdbb0c2c3cf3e1a17d6d6eec1d261aa505bcc48cb1695e6294c5cea44374cad1','f13408a7cc4598b54048ddb732e10e38cde2e65cb99bb23de5ff695102fe8427','55b91c1935bf14b1dad3b02468a93827ae8fab4f12036b05c68f72bc20441aa0','2f5ed27d52c265fb284d72448e3596b935a1e56777d24f2d30bcc17c2b9a51b9')
  then raise exception 'native_review_h205f22_project_snapshot_v1_requires_review' using errcode='55000';end if;
 end $review$;
 do $review$

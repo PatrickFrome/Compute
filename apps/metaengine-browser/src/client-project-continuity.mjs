@@ -38,6 +38,10 @@ export function normalizeClientProjectSnapshot(value, expected) {
   if (!object(value) || value.schema !== 'metaengine.devos.project-snapshot.v1' || typeof value.found !== 'boolean'
       || value.authority_effect !== false) fail('snapshot_invalid');
   if (!value.found) return Object.freeze({ schema: value.schema, found: false, automatic_retry_allowed: false, authority_effect: false });
+  // Older producers omit this field. Null also survives the second normalization
+  // on the native progress path; neither case infers intent from task execution.
+  const controlState = Object.hasOwn(value, 'control_state') ? value.control_state : null;
+  if (controlState !== null && !['ACTIVE', 'PAUSED', 'COMPLETED'].includes(controlState)) fail('snapshot_control_state_invalid');
   if (!id(value.project_id) || !id(value.root_task_id) || !id(value.request_id) || !text(value.state, 64)
       || !text(value.goal, 12000) || !count(value.last_seq) || !count(value.total_tasks, 1)
       || (expected?.project_id && value.project_id !== expected.project_id) || !Array.isArray(value.tasks) || value.tasks.length > 128
@@ -64,7 +68,7 @@ export function normalizeClientProjectSnapshot(value, expected) {
     ? value.immediate_children.map(readTask) : [];
   if (children.some(row => row.parent_task_id !== selected?.task_id) || new Set(children.map(row => row.task_id)).size !== children.length) fail('snapshot_children_invalid');
   return Object.freeze({ schema: value.schema, found: true, project_id: value.project_id, root_task_id: value.root_task_id,
-    request_id: value.request_id, state: value.state, goal: value.goal,
+    request_id: value.request_id, state: value.state, control_state: controlState, goal: value.goal,
     total_tasks: value.total_tasks, selected_task: selected, immediate_children: children,
     ...(Object.hasOwn(value,'native_review_rejection')?{native_review_rejection:normalizeNativeReviewRejection(value.native_review_rejection,value.project_id)}:{}),
     children_truncated: value.children_truncated === true,

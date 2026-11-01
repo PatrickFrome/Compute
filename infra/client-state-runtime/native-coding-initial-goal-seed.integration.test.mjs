@@ -566,6 +566,15 @@ test('private initial native goal admission is atomic and preserves the W30 auth
    assert.equal(observed.value.state,'BLOCKED');assert.equal(observed.value.native_review_rejection.verdict,'REJECT');
    assert.equal(observed.value.native_review_rejection.writer_task_id,rejected.writer.scope.task_id);
    assert.equal(observed.value.native_review_rejection.critic_task_id,rejected.critic.scope.task_id);
+   const pauseRollback=Symbol('generated pause observation rollback');
+   await assert.rejects(sql.begin(async tx=>{
+    await tx.unsafe("update destruktion_meta.project_run_h205f22 set state='PAUSED' where project_id=$1",[admitted.project_id]);
+    const [paused]=await tx.unsafe('select public.h205f22_project_snapshot_v1($1,$2,null,0,16,$3,$4,1) as value',
+     [f.profile.workspace_id,admitted.project_id,f.profile.device_id,f.profile.client_id]);
+    assert.equal(paused.value.control_state,'PAUSED');assert.equal(paused.value.state,'BLOCKED');
+    assert.deepEqual(paused.value.native_review_rejection,observed.value.native_review_rejection);
+    throw pauseRollback;
+   }),error=>error===pauseRollback);
    assert.equal((await sql.unsafe('select state from destruktion_meta.native_coding_worktree_fence_h205f22 where writer_task_id=$1',[rejected.writer.scope.task_id]))[0].state,'HELD');
    assert.equal((await sql.unsafe('select count(*)::int as n from destruktion_meta.native_coding_commit_h205f22 where project_id=$1',[admitted.project_id]))[0].n,1);
    const [otherBranch]=await sql.unsafe('select destruktion_meta.native_coding_review_rejection_v1($1,$2) as value',[admitted.project_id,continued.children[0].task_id]);
