@@ -109,11 +109,11 @@ struct GuardianInstallOriginLink::State {
             }
         }
         if (GetOverlappedResult(pipe, operation, bytes, FALSE)) return true;
-        const DWORD error = GetLastError();
+        const DWORD completion_error = GetLastError();
         // A signalled event is not a terminal IRP status. Keep its ORIGINAL
         // stack/event/frame storage alive through cancellation and kernel join.
         if (was_pending && !HasOverlappedIoCompleted(operation)) cancelAndJoinGuardianPipeIo(pipe, operation);
-        SetLastError(error);
+        SetLastError(completion_error);
         return false;
     }
     bool packet(HANDLE pipe, InstallOriginFrame* frame, bool write) {
