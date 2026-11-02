@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
@@ -12,6 +12,22 @@ import { planLockedWorkspaceMaterialization, planWorkspaceInventory } from '../s
 import { createManagedTaskProjectMemoryJournal, createManagedTaskProjectRuntime, createShellFreeGitExecutor } from '../src/managed-task-project-runtime.mjs';
 
 const exec = promisify(execFile);
+
+async function privateGitFixture(root) {
+  const filename = process.platform === 'win32' ? 'git.exe' : 'git';
+  const { stdout } = await exec('git', ['--exec-path']);
+  const candidates = [path.join(stdout.trim(), filename), ...(process.env.PATH || '').split(path.delimiter).filter(Boolean).map(directory => path.join(directory, filename))];
+  let gitExecutable;
+  for (const candidate of candidates) {
+    try { if ((await fs.stat(candidate)).isFile()) { gitExecutable = await fs.realpath(candidate); break; } } catch {}
+  }
+  assert.ok(gitExecutable, 'source fixture requires an absolute Git executable');
+  const decoy = path.join(root, 'decoy-path'); await fs.mkdir(decoy);
+  await fs.writeFile(path.join(decoy, filename), 'invalid external Git payload', { mode: 0o700 });
+  const environment = { PATH: '', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null' };
+  for (const key of ['SystemRoot', 'SYSTEMROOT', 'WINDIR']) if (process.env[key]) environment[key] = process.env[key];
+  return { gitExecutable, environment, decoy };
+}
 
 async function fixture(t, { rootLength = 0 } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-project-test-'));
@@ -57,6 +73,47 @@ test('real git creates exact locked task project and replay never runs a second 
   assert.equal(replay.replayed, true); assert.equal(creates, 1); assert.equal(opens, 1);
   assert.deepEqual(journal.snapshot().map(row => row.state), ['RESERVED', 'PROVEN']);
   assert.equal(first.authority_effect, false); assert.equal(first.automatic_retry_allowed, false);
+});
+
+test('private Git executor uses its absolute capability despite an ambient decoy PATH', async t => {
+  const request = await fixture(t), tools = await privateGitFixture(request.workspace_root);
+  let validations = 0; const calls = [];
+  const privateTools = Object.freeze({ gitExecutable: tools.gitExecutable, environment: Object.freeze(tools.environment),
+    revalidate: async () => { validations++; } });
+  const executor = createShellFreeGitExecutor({ privateTools, spawnProcess: (executable, argv, options) => {
+    assert.equal(validations, calls.length + 1, 'revalidate must precede every physical Git spawn');
+    calls.push({ executable, argv, options }); return spawn(executable, argv, options);
+  } });
+  const previous = process.env.PATH;
+  try {
+    process.env.PATH = tools.decoy;
+    const result = await executor.execute(planWorkspaceInventory(createWorkspaceReservation(request)));
+    assert.ok(result.stdout.includes(request.trusted_repo.repo_root.split(path.sep).join('/')));
+    assert.equal(calls.length, 1); assert.equal(calls[0].executable, tools.gitExecutable);
+    assert.equal(calls[0].options.env.PATH, ''); assert.equal(calls[0].options.shell, false);
+    assert.equal(calls[0].options.env.GIT_CONFIG_GLOBAL, tools.environment.GIT_CONFIG_GLOBAL);
+    assert.equal(privateTools.environment.GIT_OPTIONAL_LOCKS, undefined, 'invocation options must not mutate the capability');
+  } finally { if (previous === undefined) delete process.env.PATH; else process.env.PATH = previous; }
+});
+
+test('private Git executor refuses malformed, missing and changed tools without ambient fallback', async t => {
+  const request = await fixture(t), plan = planWorkspaceInventory(createWorkspaceReservation(request));
+  let spawns = 0, validations = 0;
+  const privateTools = { gitExecutable: path.join(request.workspace_root, 'missing-git'), environment: { PATH: '' },
+    revalidate: async () => { validations++; await fs.access(privateTools.gitExecutable); } };
+  const spawnProcess = () => { spawns++; throw Error('must_not_spawn'); };
+  for (const invalid of [{ ...privateTools, gitExecutable: 'git' }, { ...privateTools, revalidate: null },
+    { ...privateTools, environment: { PATH: 'trusted', Path: 'decoy' } }])
+    assert.throws(() => createShellFreeGitExecutor({ privateTools: invalid, spawnProcess }), /private_tools/);
+  const executor = createShellFreeGitExecutor({ privateTools, spawnProcess });
+  await assert.rejects(executor.execute({ ...plan, argv: ['config', '--list'] }), /git_plan_invalid/);
+  assert.equal(validations, 0, 'a private executable must not broaden the fixed Git plans');
+  await assert.rejects(executor.execute(plan), { code: 'ENOENT' });
+  assert.equal(validations, 1); assert.equal(spawns, 0);
+  const changed = createShellFreeGitExecutor({ privateTools: { ...privateTools,
+    revalidate: async () => { throw Error('private_git_payload_changed'); } }, spawnProcess });
+  await assert.rejects(changed.execute(plan), /private_git_payload_changed/);
+  assert.equal(spawns, 0);
 });
 
 test('same key with changed agent or repository identity is rejected', async (t) => {

@@ -45,10 +45,10 @@ if ($VcVarsPath) {
   if ($vcvars -match '[%!"\r\n&|<>^()]') { throw 'guardian_nasm_vcvars_shell_metacharacter_forbidden' }
 }
 if (-not $env:ComSpec -or -not (Test-Path -LiteralPath $env:ComSpec -PathType Leaf)) { throw 'guardian_nasm_cmd_missing' }
-$python = (Get-Command python.exe -CommandType Application -ErrorAction Stop).Source
+$python = (Get-Command python.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
 $extractor = Join-Path $PSScriptRoot 'extract-guardian-pinned-source.py'
 if (-not (Test-Path -LiteralPath $extractor -PathType Leaf)) { throw 'guardian_nasm_pinned_source_extractor_missing' }
-$perl = (Get-Command perl.exe -CommandType Application -ErrorAction Stop).Source
+$perl = (Get-Command perl.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
 $perlVersion = (& $perl -e 'print $^V').Trim()
 if ($LASTEXITCODE -ne 0 -or $perlVersion -notmatch '^v5\.') { throw 'guardian_nasm_perl5_required' }
 $perlHost = (& $perl -e 'print $^O').Trim()
@@ -83,6 +83,11 @@ foreach ($relative in $requiredSourceFiles) {
   }
 }
 if ((Get-Content -LiteralPath (Join-Path $sourceRoot 'version') -Raw).Trim() -cne '3.02') { throw 'guardian_nasm_source_version_invalid' }
+# The pinned upstream file includes stringapiset.h without its required Windows.h.
+# Apply only the exact reviewed preimage/postimage repair, before any compilation.
+& $python (Join-Path $PSScriptRoot 'prepare-guardian-nasm-msvc.py') --source-file (Join-Path $sourceRoot 'nasmlib/file.c')
+if ($LASTEXITCODE -ne 0) { throw 'guardian_nasm_reviewed_source_patch_failed' }
+
 
 function Invoke-NasmBuildCommand([string]$Command, [string]$LogName) {
   $prefix = ''
@@ -160,6 +165,7 @@ $manifest = [ordered]@{
   source_tag = 'nasm-3.02'
   source_tag_object = $tagObject
   source_built = $true
+  source_patch = [ordered]@{ path = 'nasmlib/file.c'; before_sha256 = 'cecdbdb8652c0ae4cae9242920bb832faf43f451d6b4d92ff36872db4fa8805d'; after_sha256 = '13017582791687d52f575c03f216d208b8969ac960f026e9511129f11b779df4'; reason = 'WINDOWS_SDK_REQUIRED_WINDOWS_H' }
   build_profile = 'windows-x64-msvc-release-static-crt'
   compiler_flags = $compilerFlags
   upstream_generated_source_target = 'perlreq'

@@ -58,7 +58,7 @@ class GitWindowsGpgTransportTests(unittest.TestCase):
 
     def test_msys_gpg_refuses_unc_or_drive_relative_home(self):
         with mock.patch.object(source, '_gpg_uses_msys_paths', return_value=True):
-            for bad in (r'\\host\share\gnupg', r'\relative-to-current-drive'):
+            for bad in (r'\\host\share\gnupg', r'\relative-to-current-drive', r'C:relative-keys', 'D:'):
                 with self.subTest(path=bad), self.assertRaisesRegex(
                         source.AcquisitionError, 'msys_gpg_unanchored_or_unc_path_unsupported'):
                     source.gpg_command(bad, '--list-keys')
@@ -104,6 +104,15 @@ class SignatureIdentityTests(unittest.TestCase):
             with self.subTest(marker=marker), self.assertRaises(source.AcquisitionError):
                 source.verify_gpg_status(valid_status() + f'[GNUPG:] {marker} ignored\n', PRIMARY, SUBKEY)
 
+    def test_binary_signature_notation_preserves_validsig_and_never_hides_failure(self):
+        status = b'[GNUPG:] NOTATION_DATA \xbb\xf2\x85%0Aopaque\n' + valid_status().encode('ascii')
+        self.assertEqual(source.verify_gpg_status(status, PRIMARY, SUBKEY)['signing_fingerprint'], SUBKEY)
+        for bad in [status + b'[GNUPG:] FAILURE gpg-exit 1\n',
+                    status + valid_status().encode('ascii'),
+                    valid_status().encode('ascii').replace(SUBKEY.encode('ascii'), b'\xbb' * 40)]:
+            with self.subTest(status=bad), self.assertRaises(source.AcquisitionError):
+                source.verify_gpg_status(bad, PRIMARY, SUBKEY)
+
     def test_certificate_subkey_must_belong_to_pinned_primary_and_be_valid(self):
         source.verify_certificate_listing(certificate_listing(), PRIMARY, SUBKEY)
         for listing in [
@@ -117,12 +126,23 @@ class SignatureIdentityTests(unittest.TestCase):
                 source.verify_certificate_listing(listing, PRIMARY, SUBKEY)
 
     def test_private_key_input_cannot_be_retained_as_public_certificate(self):
-        imported = mock.Mock(returncode=0, stdout='', stderr='')
         private = mock.Mock(returncode=0, stdout='sec:-:4096:1:64ED7B1DCCE71CB2:1:0::::::::\n', stderr='')
         with tempfile.TemporaryDirectory() as temp:
-            with mock.patch.object(source.subprocess, 'run', side_effect=[imported, private]):
+            with mock.patch.object(source.subprocess, 'run', side_effect=[private]):
                 with self.assertRaisesRegex(source.AcquisitionError, 'public_keys_only'):
                     source.import_certificate(Path(temp) / 'home', Path(temp) / 'certificate.asc', PRIMARY, SUBKEY)
+
+
+    @unittest.skipUnless(shutil.which('gpg'), 'GPG executable unavailable')
+    def test_real_fresh_public_keyring_requires_no_secret_agent(self):
+        certificate = Path(__file__).resolve().parent.parent / 'native' / 'openssl' / 'openssl-release-public-certificate.asc'
+        with tempfile.TemporaryDirectory(prefix='guardian-public-only-') as home:
+            inspected = source.import_certificate(Path(home), certificate, PRIMARY, SUBKEY)
+            self.assertEqual(inspected.returncode, 0)
+            self.assertTrue((Path(home) / 'openssl-release-public.gpg').is_file())
+            self.assertFalse(any(line.startswith(('sec:', 'ssb:')) for line in inspected.stdout.splitlines()))
+            with self.assertRaisesRegex(source.AcquisitionError, 'keyring_already_exists'):
+                source.import_certificate(Path(home), certificate, PRIMARY, SUBKEY)
 
 
 class DownloadIntegrityTests(unittest.TestCase):

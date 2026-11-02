@@ -24,12 +24,33 @@ const within = (root, target) => {
 const fail = code => { const error = new Error(code); error.code = code; throw error; };
 const maxFileBytes = 256 * 1024 * 1024;
 const maxTotalBytes = 2 ** 31;
+const verifiedPackages = new WeakMap();
+
+// Keep this verifier builtin-only: protected ASAR also executes these bytes by
+// data URL. This validates metadata, not a second release trust root.
+function privateToolsMetadata(value) {
+  const keys=['schema','manifest_sha256','manifest_bytes','file_count'];
+  if(!value||typeof value!=='object'||Array.isArray(value)
+    ||Object.keys(value).sort().join(',')!==[...keys].sort().join(',')
+    ||value.schema!=='metaengine.private-native-tools.binding.v1'||!hex.test(value.manifest_sha256||'')
+    ||!Number.isSafeInteger(value.manifest_bytes)||value.manifest_bytes<1||value.manifest_bytes>16*1024**2
+    ||!Number.isSafeInteger(value.file_count)||value.file_count<2||value.file_count>50000)fail('offline_bundle_private_native_tools_binding_invalid');
+  return Object.freeze(Object.fromEntries(keys.map(key=>[key,value[key]])));
+}
+
+// Only this module's successfully verified result can select this immutable
+// snapshot. The Host must still prove its actual entry/Node image and permits.
+export function readVerifiedOfflineRuntimePackage(result) {
+  if(!verifiedPackages.has(result))fail('offline_bundle_verified_result_required');
+  return verifiedPackages.get(result);
+}
 
 function safePath(path) {
   if (typeof path !== 'string' || path.length > 512 || path.includes('\\')
     || !path.split('/').every(part => /^[A-Za-z0-9_@+.-]+$/.test(part) && part !== '.' && part !== '..' && !part.startsWith('.'))) fail('offline_bundle_path_invalid');
-  const aclSource='apps/metaengine-browser/src/private-windows-storage-acl.mjs';
-  if (path!==aclSource && path!=='source/'+aclSource
+  const implementationSources=['apps/metaengine-browser/src/private-windows-storage-acl.mjs',
+    'apps/metaengine-browser/src/private-native-tools-core.mjs'];
+  if (!implementationSources.some(source=>path===source||path==='source/'+source)
     && path.split('/').some(part => /^(?:private|secrets?|credentials?|passwords?|dumps?|backups?|pgdata|profiles?)(?:[._-]|$)/i.test(part))) fail('offline_bundle_private_path_forbidden');
   return path;
 }
@@ -231,7 +252,8 @@ async function qualifyMetadata(paths) {
   if (registryPath && !JSON.stringify(json(await readFile(registryPath))).includes('3.4.7')) fail('offline_bundle_deno_dependency_invalid');
 }
 
-export async function captureOfflineRuntimeInventory({ sources, sourceBundleDigest, componentOrigins }) {
+export async function captureOfflineRuntimeInventory({ sources, sourceBundleDigest, componentOrigins, privateNativeToolsBinding }) {
+  const toolsBinding=privateNativeToolsBinding===undefined?undefined:privateToolsMetadata(privateNativeToolsBinding);
   const selected = await gather(sources);
   const binding = await sourceBinding(selected.roots.source, sourceBundleDigest);
   await qualifyMetadata(selected.paths);
@@ -239,7 +261,8 @@ export async function captureOfflineRuntimeInventory({ sources, sourceBundleDige
   for (const file of selected.paths) files.push({ path: file.path, component: file.component, kind: file.kind, ...await measure(file.absolute) });
   validateRecords(files);
   const body = { schema: OFFLINE_INVENTORY_SCHEMA, platform: 'win32', arch: 'x64', ...OFFLINE_LAYOUT,
-    ...binding, component_origins: origins(componentOrigins), files, policy: policy() };
+    ...binding, ...(toolsBinding===undefined?{}:{private_native_tools:toolsBinding}),
+    component_origins: origins(componentOrigins), files, policy: policy() };
   return { ...body, inventory_sha256: digest(JSON.stringify(body)) };
 }
 
@@ -254,6 +277,7 @@ function validateInventory(inventory, expectedDigest) {
     || !hex.test(inventory.reviewed_startup_source_sha256 || '')
     || !hex.test(inventory.reviewed_startup_files_sha256 || '')
     || JSON.stringify(origins(inventory.component_origins)) !== JSON.stringify(inventory.component_origins)) fail('offline_bundle_inventory_contract_invalid');
+  if(Object.hasOwn(inventory,'private_native_tools'))privateToolsMetadata(inventory.private_native_tools);
   validateRecords(inventory.files);
   return body;
 }
@@ -317,15 +341,18 @@ export async function verifyOfflineRuntimeBundle({ bundleDirectory, expectedBund
   const binding = await sourceBinding(join(root, 'source'), manifest.source_bundle_sha256);
   if (binding.reviewed_startup_source_sha256 !== manifest.reviewed_startup_source_sha256
     || binding.reviewed_startup_files_sha256 !== manifest.reviewed_startup_files_sha256) fail('offline_bundle_source_binding_invalid');
-  return {
+  const result = {
     manifest,
-    paths: {
+    paths: Object.freeze({
       sourceRoot: join(root, OFFLINE_LAYOUT.source_root), nodeExecutable: join(root, OFFLINE_LAYOUT.executables.node),
       denoExecutable: join(root, OFFLINE_LAYOUT.executables.deno), postgresBinDirectory: join(root, OFFLINE_LAYOUT.executables.postgres_bin),
       denoDirectory: join(root, OFFLINE_LAYOUT.deno_dir), hostEntry: join(root, OFFLINE_LAYOUT.entry),
       firstRunInitdbEntry: join(root, 'source/infra/client-state-runtime/fresh-pg17-initdb.mjs'),
       attachedOnboardingEntry: join(root, 'source/infra/client-state-runtime/attached-postgres-onboarding.mjs'),
       remoteSupportEntry: join(root, 'source/apps/metaengine-browser/src/remote-support-mcp.mjs'),
-    },
+    }),
   };
+  verifiedPackages.set(result,Object.freeze({bundleDirectory:root,bundleSha256:actualDigest,
+    privateNativeToolsBinding:Object.hasOwn(manifest,'private_native_tools')?privateToolsMetadata(manifest.private_native_tools):null}));
+  return Object.freeze(result);
 }

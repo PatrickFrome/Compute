@@ -1,0 +1,342 @@
+{
+  "schema": "metaengine.codex.producer-local-verification.v1",
+  "verification_revision": "ROOT_CLI_WITH_ORIGINAL_PROMPT_DIGEST_GATE",
+  "recorded_at": "2026-11-01T02:38:27.409130+00:00",
+  "base": {
+    "commit": "0e43a569ad52134bee65dea3182ee9a4c4bbc56f",
+    "tree": "897948a6e65c980f560f97b71abaca96c91e4069"
+  },
+  "upstream": {
+    "tag": "rust-v0.159.0-alpha.3",
+    "commit": "3b01b36fa5eb96ba82a776bd3c2fc57f8969181f",
+    "tree": "d22150f47f6f6d6b1332583987e862981c951388"
+  },
+  "source_inputs_sha256": "5a969fb681c8ffe844940aece03c3bc5f2e7d2b8733fe46f6713b735b821bb37",
+  "patch_sha256": "068c1e3e8eccef9c29713213e51fa51b638e85e99713c676d805a445229a656c",
+  "source_pin": {
+    "path": "dependencies/codex-effective-policy/source-pin.json",
+    "sha256": "014f582ec89c9e249a7d3021fd7918c1ed3de755f4b9d5f2e2106755f46aeff2"
+  },
+  "source_input_files_sha256": {
+    "upstream.patch": "068c1e3e8eccef9c29713213e51fa51b638e85e99713c676d805a445229a656c",
+    "LICENSE": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc",
+    "NOTICE": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915",
+    "src/metaengine_effective_policy.rs": "7fd846c9738eae71144fce5c86a01e30db7d81f1ca78e106dc1d72243680c0fd",
+    "src/metaengine_effective_policy_projection.rs": "2988354f1e46f1bf16d60140ffdc736029be093b909ea47d3f33cc94d1d34936",
+    "src/metaengine_effective_policy_projection_tests.rs": "b4cba0a5ead68de89427e193dd3f3c055dea74ce37f7e073906eb45c28ee9f2f",
+    "src/metaengine_effective_policy_tests.rs": "40169c88567bef58e899946bdb129a23cbece0bdae57d85343d50fa7796fe634"
+  },
+  "platform": "linux",
+  "target": "x86_64-unknown-linux-gnu",
+  "rust_toolchain": "1.95.0",
+  "binary": {
+    "kind": "root codex --no-daemon exec",
+    "profile": "dev, debug=0",
+    "sha256": "be8e0db3ad73bd0ff96150959565eb527f236564e77376997a928d433c9bd8e4",
+    "private_path": ".codex-effective-policy-build/bin/root-prompt-sha/codex",
+    "rebuilt_path": ".codex-effective-policy-build/target/debug/codex",
+    "final_rebuild_command": "cargo build --locked -p codex-cli --bin codex",
+    "final_source_before_after_inputs_sha256": "5a969fb681c8ffe844940aece03c3bc5f2e7d2b8733fe46f6713b735b821bb37",
+    "rebuilt_image_matches_qualified_image": true,
+    "physical_receipts_reused_because_source_and_image_unchanged": true,
+    "build_cache_scope": "Existing Cargo cache reused. This establishes finalized source/build/image binding, not an independently clean reproducible-build claim."
+  },
+  "checks": [
+    {
+      "name": "exact upstream source/tree, source input digests and final prepared-source readback",
+      "result": "PASS"
+    },
+    {
+      "name": "workspace-version-only lockfile normalization; external dependency versions/checksums unchanged",
+      "result": "PASS",
+      "workspace_packages_normalized": 158,
+      "original_lock_sha256": "5c3fd1fe59676117cd7fc9c55daafee90d95d0afedd13b9e1a71e10cad029a81",
+      "normalized_lock_sha256": "76435de9b4ebb0cd3d364d99699151f231e4c8344c94d313aab13d64cf5b1570"
+    },
+    {
+      "name": "source preparation real-checkout tests",
+      "result": "PASS",
+      "passed": 3,
+      "skipped": 0
+    },
+    {
+      "name": "just fmt-check",
+      "result": "PASS",
+      "log": "root-cli-fmt-check.log"
+    },
+    {
+      "name": "just fix for app-server/exec/client tests",
+      "result": "PASS",
+      "source_inputs_unchanged": true,
+      "elapsed": "3m09s"
+    },
+    {
+      "name": "clean subsequent just clippy for app-server/exec/client tests",
+      "result": "PASS",
+      "elapsed": "3m53s"
+    },
+    {
+      "name": "full root CLI unit tests",
+      "result": "PASS",
+      "passed": 307,
+      "skipped": 1
+    },
+    {
+      "name": "full app-server library tests",
+      "result": "PASS",
+      "passed": 380,
+      "skipped": 0,
+      "producer_tests_included": 14
+    },
+    {
+      "name": "full exec and app-server-client regression tests",
+      "result": "PASS",
+      "passed": 173,
+      "skipped": 0,
+      "slow": 2
+    },
+    {
+      "name": "final root CLI rebuild against finalized source manifest",
+      "result": "PASS",
+      "elapsed_including_artifact_lock_wait": "3m42s",
+      "image_sha256": "be8e0db3ad73bd0ff96150959565eb527f236564e77376997a928d433c9bd8e4"
+    },
+    {
+      "name": "physical root CLI disposable-context no-model barrier checks",
+      "result": "PASS",
+      "passed": 8,
+      "http_requests": 0,
+      "model_requests": 0,
+      "websocket_requests": 0
+    },
+    {
+      "name": "physical root CLI bootstrap and dotenv checks",
+      "result": "PASS",
+      "passed": 5,
+      "pre_ack_http_requests": 0,
+      "pre_ack_websocket_requests": 0,
+      "post_ack_mock_model_requests": 3,
+      "external_model_calls": 0
+    },
+    {
+      "name": "physical root CLI original-prompt transport, rejections and fixed deadlines",
+      "result": "PASS",
+      "passed": 10,
+      "pre_ack_tcp_connections": 0,
+      "pre_ack_http_or_websocket_requests": 0,
+      "mock_model_post_requests": 1,
+      "real_model_calls": 0,
+      "orphan_fixture_traffic": 0
+    },
+    {
+      "name": "legacy root duplicate ACK contaminates model-visible prompt",
+      "result": "EXPECTED_REGRESSION_REPRODUCED",
+      "cases": 1,
+      "legacy_binary_sha256": "f0980f72638a4c581299865d6f61c9114127359d2b742b5069cb1a4903cf13da",
+      "original_prompt_sha256": "f079834f0a7e3686a3b2b0aeca3585e792604dda3bc86f3021d6804dda296751",
+      "observed_contaminated_prompt_sha256": "5d5e07a632d066c63597ee0105153efbb74befe89855def4355faec038b182e3",
+      "post_ack_loopback_mock_model_requests": 1,
+      "real_model_calls": 0,
+      "new_binary_duplicate_ack_result": "refused before thread/model request"
+    }
+  ],
+  "physical_fixture_evidence": [
+    {
+      "suite": "no-model barrier",
+      "summary": ".codex-effective-policy-build/root-cli-no-model-summary.json",
+      "directory": ".codex-effective-policy-build/metaengine-policy-no-model-fhreWh",
+      "cases": [
+        "inspect_open_stdin",
+        "reject_nonce",
+        "reject_context",
+        "reject_unknown_field",
+        "reject_eof",
+        "reject_invalid_nonce",
+        "reject_disabled_exec_server",
+        "reject_remote_exec_server"
+      ]
+    },
+    {
+      "suite": "root bootstrap",
+      "summary": ".codex-effective-policy-build/root-bootstrap-recheck-summary.json",
+      "directory": ".codex-effective-policy-build/metaengine-root-bootstrap-bfEOBs",
+      "cases": [
+        "explicit_home_no_dotenv",
+        "dotenv_codeX_keys_filtered",
+        "dotenv_non_codeX_HOME_changes_implicit_home",
+        "dotenv_non_codeX_canary_after_ACK_loopback_mock",
+        "held_execute_cancelled_at_original_deadline"
+      ]
+    },
+    {
+      "suite": "hardened prompt transport",
+      "summary": ".codex-effective-policy-build/root-transport-hardened-3xiE1S/summary.json",
+      "directory": ".codex-effective-policy-build/root-transport-hardened-3xiE1S",
+      "original_prompt_sha256": "f079834f0a7e3686a3b2b0aeca3585e792604dda3bc86f3021d6804dda296751",
+      "cases": [
+        "exact_prompt_after_ack",
+        "ack_then_eof_without_original_prompt",
+        "duplicate_ack_rejected",
+        "tampered_prompt_rejected",
+        "wrong_original_digest_rejected",
+        "oversize_prompt_rejected",
+        "missing_digest_argument_rejected",
+        "malformed_digest_argument_rejected",
+        "fixed_deadline_before_ack",
+        "fixed_deadline_after_ack_before_prompt"
+      ]
+    },
+    {
+      "suite": "legacy duplicate-ACK red reproduction",
+      "summary": ".codex-effective-policy-build/root-transport-legacy-red-BB4kk7/summary.json",
+      "directory": ".codex-effective-policy-build/root-transport-legacy-red-BB4kk7",
+      "cases": [
+        "legacy_duplicate_ack_contaminates_prompt"
+      ]
+    }
+  ],
+  "current_local_evidence_sha256": {
+    ".codex-effective-policy-build/root-cli-unit-tests.log": "1a16aa711ad3d8879c38b62524ed5ce450d0a4710bb409a6cbbe9b584aec69bf",
+    ".codex-effective-policy-build/root-cli-app-server-tests.log": "2db36034bce5cac563b1ae7a44e70e7b714fab56e53c4b082854800fc1cf3afc",
+    ".codex-effective-policy-build/root-cli-exec-client-tests.log": "86f17412fc7dc2bed40cceecbfb7d0196f990a3f2954241c6c17af343177eed9",
+    ".codex-effective-policy-build/root-cli-fix-final.log": "54605377872772de678788a925398bef9cd4e9aa2f73520c870716d902289935",
+    ".codex-effective-policy-build/root-cli-clippy-clean.log": "6a82546545b18afcea90b8f2090af514b8800b83aedb66e61a005cdd66277c9e",
+    ".codex-effective-policy-build/root-cli-fmt-check.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    ".codex-effective-policy-build/root-cli-prepare-check.json": "8b5691831f4dc774c7660176733b3e9b4e69c00085974dffdab72c515499e560",
+    ".codex-effective-policy-build/root-cli-prepare-tests.log": "16ea10f6b69e5fe9155bd3e56354b95c20bf7b321ff4a8eab32945b5a969c8b3",
+    ".codex-effective-policy-build/root-cli-final-build.log": "e74caba3d4feee9b9fa6d37927d08cca65cd1ae5eac4cef2e6bc963030a8bb0e",
+    ".codex-effective-policy-build/root-cli-repro-build.log": "dac173a93e81aae5ba60b7bc0d2b0e56a4ae0ce1095bce8dce4e0fa8cc6f19c1",
+    ".codex-effective-policy-build/root-cli-rebuild-source-before.json": "8b5691831f4dc774c7660176733b3e9b4e69c00085974dffdab72c515499e560",
+    ".codex-effective-policy-build/root-cli-rebuild-source-after.json": "8b5691831f4dc774c7660176733b3e9b4e69c00085974dffdab72c515499e560",
+    ".codex-effective-policy-build/root-cli-rebuild-image-sha256.txt": "f75be8169c675e8531fdf91acfa66f7d50dd7e15e9671df219d51bbc712c878d",
+    ".codex-effective-policy-build/root-cli-no-model-summary.json": "05b799c317d8c11a5cefdddfd90f7fd7ef9275ccd041217b403e597d5363d124",
+    ".codex-effective-policy-build/root-bootstrap-recheck-summary.json": "8daaf8906805f2b591ddcaaee107bcb024c8f47937a905894d71ab26bba1981a",
+    ".codex-effective-policy-build/root-transport-hardened-3xiE1S/summary.json": "f042ba7636902aef592056a06969d58e15e027559d29fc40b6ccd953cb61b690",
+    ".codex-effective-policy-build/root-transport-legacy-red-BB4kk7/summary.json": "b99d5d50750f0dd7e3d0407546d45d564f83f5767c39a4dc9baaf199af4dfeff",
+    ".codex-effective-policy-build/root-cli-7d-no-model-summary.json": "8b96f3c9ccfe68c16e40fae6f4640d73586afa51c609a4592da41a3395334141"
+  },
+  "verification_tools_sha256": {
+    "dependencies/codex-effective-policy/test/no-model-probe.mjs": "a2ba65fbc3b09c7aadd0c5e452728089c36a1529bf668743142792701fde845c",
+    "dependencies/codex-effective-policy/test/root-bootstrap-probe.mjs": "86b31f41c7f91f2effb679b34c997a8bb0134b37d6e7b6d646e49f99c4f0c159",
+    "dependencies/codex-effective-policy/test/root-prompt-transport-probe.mjs": "9a63bf65741bc8af1021e51f0e2786f91a5964a89374df04d2dd4ee000073731",
+    "dependencies/codex-effective-policy/test/prepare.test.mjs": "9e20f0a252f77e58032fcc062970a731a225563fa8ec0fb1c62374e31783f58c"
+  },
+  "historical_evidence": {
+    "preserved_original_record": {
+      "path": "dependencies/codex-effective-policy/evidence/7dbeed76/VERIFICATION.json",
+      "sha256": "449fcc191ee39d59822fda4027b4cee94495730b813f0a1d9ed9b18273670e2e"
+    },
+    "preserved_source_pin": {
+      "path": "dependencies/codex-effective-policy/evidence/7dbeed76/source-pin.json",
+      "sha256": "88172dac2cbf1b62d4ea6e56ecbe0def8f8de45336e866f4bfd360ae19dfff72"
+    },
+    "directory": "dependencies/codex-effective-policy/evidence/7dbeed76",
+    "original_source_inputs_sha256": "020a5c2d97901b102441b75488e4e855019a00e7e197ba6af34fb0a8e1009c9f",
+    "original_patch_sha256": "cf8a897fe5fb2afb43f34e0c69f93c2aacdd790de0b9bd56057a1cae6e122549",
+    "binaries": [
+      {
+        "kind": "original standalone codex-exec",
+        "sha256": "5bb78cd7ae0d2c451452ad9757fad3797352090b7e02d851049ce42e2f1deb02",
+        "private_path": ".codex-effective-policy-build/bin/codex-exec",
+        "current_digest_gate_qualified": false
+      },
+      {
+        "kind": "original 7d root CLI",
+        "sha256": "f0980f72638a4c581299865d6f61c9114127359d2b742b5069cb1a4903cf13da",
+        "private_path": ".codex-effective-policy-build/bin/root-7dbeed76/codex",
+        "supplementary_no_model_summary": ".codex-effective-policy-build/root-cli-7d-no-model-summary.json",
+        "current_digest_gate_qualified": false
+      }
+    ],
+    "attribution_rule": "Old5bb standalone and f098 root receipts do not qualify the current be8 root; original7d source and receipts remain preserved."
+  },
+  "observed_bootstrap_boundary": {
+    "dotenv_read_before_exec_flag_parsing": true,
+    "CODEX_prefixed_dotenv_keys_filtered": true,
+    "non_CODEX_HOME_changed_implicit_home_in_disposable_fixture": true,
+    "non_CODEX_canary_reached_loopback_mock_header_after_ack": true,
+    "explicit_owned_CODEX_HOME_required_by_native_contract": true,
+    "no_shared_daemon_artifacts_in_disposable_root_checks": true,
+    "policy_event_attests_resulting_environment": false,
+    "required_native_handling": "Refuse an unapproved protected-home .env without reading secret contents, or independently qualify post-bootstrap environment and helper PATH before acceptance. The producer does not replace that custody."
+  },
+  "activation_contract": {
+    "execute_requires_immutable_argv_flag": "--metaengine-prompt-sha256 ORIGINAL_PROMPT_SHA256",
+    "digest_scope": "SHA256 of the original nonempty UTF-8 task bytes; never ACK or ACK+task",
+    "max_prompt_bytes": 32000,
+    "task_byte_rules": "No BOM removal, newline normalization, trimming, appended bytes or substitution. Validate digest before UTF-8 decoding; transfer admitted task once without a second stdin read.",
+    "wire_order": "empty owned stdin bootstrap -> one final policy event -> one matching ACK -> original task bytes -> EOF",
+    "thread_and_prewarm_barrier": "Both ACK and complete correctly hashed task must qualify before thread creation or prewarm.",
+    "eof_rule": "EOF after valid ACK and complete correctly hashed task activates normal execution. EOF is not a cancellation primitive.",
+    "cancellation_rule": "Terminate/fence the owned process tree before closing pipes; preserve original deadline, settlement and uncertain-delivery reconciliation. Do not retransmit ACK, change original prompt hash or automatically retry.",
+    "deadline_fixture_scope": "Disposable Node controller uses private process-group termination before pipe close. No native Windows watchdog qualification is inferred."
+  },
+  "network_evidence_scope": {
+    "real_model_or_external_api_calls_in_physical_fixtures": 0,
+    "post_ack_destinations": "authorized configured loopback mocks only",
+    "pre_ack_observation": "zero configured-provider HTTP, WebSocket and transport-probe TCP connections",
+    "general_os_egress_attestation": false
+  },
+  "scope": {
+    "runtime_consumer_changed": false,
+    "activated": false,
+    "native_process_environment_custody_qualified": false,
+    "windows_binary_qualified": false,
+    "root_cli_binary_built": true,
+    "installed": false,
+    "published": false
+  },
+  "limitations": [
+    "Linux root CLI source/build and disposable fixtures only; no installed-client, Windows binary, OS sandbox, native process/environment custody or signed release qualification.",
+    "Fresh enabled local exec only; no resume/fork/review/OSS/worktree/images/positional-task or remote/disabled execution modes.",
+    "Managed model-conditional AutoReview requirements are refused before emission; later model/account/routing policy remains an independent gate.",
+    "Requirement sources are normalized constraint provenance; layer origins exclude harness overrides. Ignored user metadata fingerprints an empty placeholder, not ignored file bytes.",
+    "Node mock transport fixtures are not the actual protected native transport/consumer and cannot substitute for its physical Windows integration.",
+    "Full workspace core/protocol/TUI suites and cross-platform qualification are not inferred from the scoped suites recorded here."
+  ],
+  "remaining_blockers": [
+    {
+      "action": "Obtain actual transport checkpoint source and run joint producer/consumer/native staged-pipe integration",
+      "target_commit": "46cea51a3060588525ac9cc98dd751c081e2ef97",
+      "status": "PENDING_EXTERNAL_SOURCE",
+      "lookup_outcome": "UNAVAILABLE_NOT_DENIED",
+      "coordinator_reported_evidence": [
+        "git cat-file: object absent",
+        "git fetch origin 46cea51a3060588525ac9cc98dd751c081e2ef97: fatal remote upload-pack: not our ref",
+        "Library title/recent-list lookup: no archive found"
+      ],
+      "pending_input": "Library source ID, source bundle or fetchable repository ref",
+      "completed": "Pinned producer patch, Linux root build and disposable bootstrap/transport/no-model checks",
+      "integration_executed": false
+    },
+    {
+      "action": "Qualify Windows root binary, source/release provenance and actual native process/environment custody with the existing owners",
+      "status": "PENDING_INDEPENDENT_QUALIFICATION",
+      "completed": "Linux source and image binding only"
+    }
+  ],
+  "resolved_historical_test_isolation_note": {
+    "action": "upstream arg0 PATH-alias setup during one baseline help and the first Rust test batch",
+    "target": "default CODEX_HOME/tmp/arg0",
+    "outcome": "filesystem rejected alias creation as read-only; no writes occurred",
+    "default_dotenv_presence_checked_without_reading_contents": "absent",
+    "correction": "subsequent checks used a project-owned disposable child HOME/CODEX_HOME; platform settings unchanged"
+  },
+  "publication": {
+    "state": "AUTHORIZED_PENDING_PUBLICATION",
+    "action": "Publish the completed reviewed source checkpoint to a new separate PatrickFrome/Compute branch and Draft PR targeting work/owner-ticket-closure-20261030",
+    "attempted_at_verification_recording": false,
+    "authorization": "Parent relayed explicit user permission: разрешаю всем потокам публиковать изменения",
+    "excluded_actions": [
+      "push to main or shared integration branches",
+      "merge or approve PR",
+      "publish credentials/auth/profiles/userdata or unqualified binary packages"
+    ]
+  },
+  "verification_tools_hash_scope": {
+    "meaning": "Hashes identify the current worktree verification tools; they do not alone establish exact executed harness byte identity.",
+    "root_prompt_transport_post_suite_change": "After the Linux suite, only the Windows termination metadata label was edited; Linux branch/runtime unchanged, coordinator reported. Current script syntax check passed.",
+    "current_root_prompt_transport_sha256": "9a63bf65741bc8af1021e51f0e2786f91a5964a89374df04d2dd4ee000073731",
+    "independent_clean_reproducibility_claim": false
+  }
+}

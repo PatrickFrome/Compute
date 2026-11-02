@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -31,6 +32,8 @@ function parsePowerShellFile(file) {
 test('electron-builder owns the single Guardian native staging build boundary', () => {
   assert.equal(builder.beforePack, './scripts/electron-builder-before-pack.cjs');
   assert.deepEqual(builder.extraResources, [{
+    from: 'native-dist/private-native-tools', to: 'private-native-tools', filter: ['**/*'],
+  }, {
     // The native child process cannot import these entry points through ASAR.
     // Keep the external surface an exact file list, never the whole src tree.
     from: 'src',
@@ -187,4 +190,47 @@ test('verified publisher refuses releases without staged-only Guardian evidence 
   assert.match(publisher, /GUARDIAN_SERVICE_SHA256/);
   assert.match(publisher, /GUARDIAN_CONFIGURATOR_SHA256/);
   assert.match(publisher, /both exact native binaries are release assets/);
+});
+
+
+test('Guardian packaging binds its output root explicitly and defers script-relative defaults', () => {
+  assert.match(hook, /'-OutputRoot', path\.join\(appRoot, 'native-dist'\)/);
+  for (const name of ['package', 'staging', 'peer']) {
+    const source = read('scripts/build-guardian-native-' + name + '.ps1');
+    const paramEnd = source.indexOf("$ErrorActionPreference");
+    assert(paramEnd > 0);
+    assert.doesNotMatch(source.slice(0, paramEnd), /\$PSScriptRoot/);
+    assert.match(source.slice(paramEnd), /if \(-not \$Output(?:Root|Dir)\) \{ \$Output(?:Root|Dir) = Join-Path \(Split-Path \$PSScriptRoot -Parent\)/);
+  }
+});
+
+test('Windows PowerShell 5.1 evaluates actual Guardian script parameter prefixes with omitted and explicit roots', {
+  skip: process.platform !== 'win32',
+}, () => {
+  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'guardian-output-default-'));
+  const scripts = path.join(fixture, 'scripts');
+  fs.mkdirSync(scripts);
+  try {
+    for (const name of ['package', 'staging', 'peer']) {
+      const source = read('scripts/build-guardian-native-' + name + '.ps1');
+      const prefix = source.slice(0, source.indexOf('Import-Module'));
+      const variable = name === 'package' ? 'OutputRoot' : 'OutputDir';
+      const target = path.join(scripts, name + '.ps1');
+      // Execute the exact parameter/default prefix only. Never build, enroll,
+      // install a service or use crypto credentials in this binding regression.
+      fs.writeFileSync(target, prefix + '\n[Console]::WriteLine($' + variable + ')\n');
+      const required = name === 'package' ? ['-SourceDir', fixture, '-CryptoOutputDir', fixture] : [];
+      for (const explicit of [false, true]) {
+        const custom = path.join(fixture, 'explicit-output');
+        const result = spawnSync(path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+          ['-NoProfile', '-NonInteractive', '-File', target, ...required, ...(explicit ? ['-' + variable, custom] : [])],
+          { encoding: 'utf8', timeout: 30000, windowsHide: true });
+        assert.equal(result.status, 0, result.stderr || result.stdout);
+        const expected = explicit ? custom : path.join(fixture, 'native-dist', ...(name === 'package' ? [] : [name === 'staging' ? 'guardian' : 'guardian-peer']));
+        assert.equal(path.resolve(result.stdout.trim()).toLowerCase(), path.resolve(expected).toLowerCase());
+      }
+    }
+  } finally {
+    fs.rmSync(fixture, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
 });

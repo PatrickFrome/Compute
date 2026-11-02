@@ -115,7 +115,7 @@ const digest=value=>createHash('sha256').update(canonical(value)).digest('hex');
 // This module has no SQL connection, DSN, network endpoint or lease poller.
 // Root binds handleMessage directly to the existing private process IPC event.
 export function createNativeCodingHostIpcServer({instanceId,operations,send=process.send?.bind(process),hostPid=process.pid,
-  parentPid=process.ppid,maxInflight=16,timeoutMs=30000,onProtocolError=()=>{},callbackPublication=null}={}) {
+  parentPid=process.ppid,maxInflight=16,timeoutMs=30000,onProtocolError=()=>{},callbackPublication=null,physicalCustody=null}={}) {
   if(!UUID.test(instanceId||'')||hostPid!==process.pid||parentPid!==process.ppid||process.connected!==true
     ||typeof process.send!=='function'||typeof send!=='function'||typeof onProtocolError!=='function'
     ||!Number.isSafeInteger(maxInflight)||maxInflight<1||maxInflight>16
@@ -128,6 +128,7 @@ export function createNativeCodingHostIpcServer({instanceId,operations,send=proc
   keys(operations,[...mountedActions,...(Object.hasOwn(operations||{},'close')?['close']:[])]);
   for(const action of mountedActions)if(typeof operations[action]!=='function')invalid('INVALID_PAYLOAD');
   if(Object.hasOwn(operations,'close')&&typeof operations.close!=='function')invalid('INVALID_PAYLOAD');
+  if(physicalCustody!==null&&(!physicalCustody||typeof physicalCustody.beginRequest!=='function'||typeof physicalCustody.endRequest!=='function'))invalid('INVALID_PAYLOAD');
   // Private composition only. Default runtime-host supplies no publisher. This
   // protocol cannot turn a caller proof/flag or a publication ACK into authority.
   if(callbackPublication!==null){
@@ -249,6 +250,7 @@ export function createNativeCodingHostIpcServer({instanceId,operations,send=proc
     const assertDispatch=()=>{if(closed||row.abort.signal.aborted||process.connected!==true||performance.now()>=row.expiresMono)invalid('SERVER_CLOSED');};
     const physical=runNativePhysicalSettlementScope(async()=>{
       assertDispatch();
+      if(physicalCustody){row.custodyTicket=await physicalCustody.beginRequest(row.request);assertDispatch();}
       if(publishing){
         const custody=await callbackPublication.publish(Object.freeze(structuredClone(message.payload)),context);
         assertDispatch();if(!custody||typeof custody!=='object')invalid('OPERATION_FAILED');
@@ -277,8 +279,11 @@ export function createNativeCodingHostIpcServer({instanceId,operations,send=proc
     physical.promise
       .then(value=>{json(value);row.result=structuredClone(value);row.succeeded=true;})
       .catch(error=>{row.held=nativePhysicalSettlementUnconfirmed(error);})
-      .finally(()=>{
+      .finally(async()=>{
         row.held=row.held===true||physical.unconfirmed();
+        if(physicalCustody&&row.custodyTicket!==undefined){
+          try{await physicalCustody.endRequest(row.custodyTicket,row.held);}catch{row.held=true;}
+        }
         row.ownerPhases?.close();clearTimeout(row.timer);
         // A finished JS promise cannot release a poisoned SQL reservation.
         // Held rows retain admission capacity until verified Host shutdown.

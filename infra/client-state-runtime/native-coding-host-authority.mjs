@@ -168,11 +168,11 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
       ${readOnly?'for share of j,e,p,d,pt':'for update of j,e for share of p,d,pt'}`,[taskId,generation,id]);
     if(rows.length!==1)fail('checkpoint_registered_pair_unavailable');return rows[0];
   }
-  function validateContext(c) {
+  function validateContext(c,{historical=false}={}) {
     const p=c?.permit,d=c?.device;
     if(c?.schema!=='metaengine.native-coding.admission-context.v1'||c.source!=='PROTECTED_OWN_PG_OPERATOR_REGISTRY'
       ||p?.schema!=='metaengine.native-coding.operator-permit.v1'||p.trust_namespace!=='LOCAL_OPERATOR_QA'
-      ||p.revoked!==false||!Number.isFinite(Date.parse(p.expires_at))||Date.parse(p.expires_at)<=Date.now()
+      ||p.revoked!==false||!Number.isFinite(Date.parse(p.expires_at))||!historical&&Date.parse(p.expires_at)<=Date.now()
       ||c.postgres_system_identifier!==p.postgres?.system_identifier||!exact(d,publicDeviceKeys)
       ||d.device_id!==p.device_id||d.profile!=='A2_DEVICE_HTTP_SIGNATURE_V1'
       ||d.key_fingerprint_sha256!==p.device_key_fingerprint_sha256||!Number.isSafeInteger(d.admin_grant_epoch)
@@ -192,13 +192,38 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
     if(rows.length!==1||!rows[0].context?.permit||!rows[0].context?.device) fail('permit_unavailable');
     return validateContext(rows[0].context);
   }
-  async function task(tx,query,{requireLive=true,lock=false}={}) {
+  // Same protected own-PG registry and current device/grant as admission, but
+  // the original permit may have expired. This private SELECT is used only by
+  // historical readback, inside its existing read-only transaction. No new
+  // producer, row locks, revived lease or renderer-controlled mode is involved.
+  async function historicalContext(tx,permitId) {
+    const rows=await tx.unsafe(`select /* protected historical own-PG context */
+      jsonb_build_object('schema','metaengine.native-coding.admission-context.v1',
+        'source','PROTECTED_OWN_PG_OPERATOR_REGISTRY','permit',p.permit,
+        'device',jsonb_build_object('device_id',d.device_id,'client_id',d.client_id,'profile',d.profile,
+          'public_jwk',d.public_jwk,'key_fingerprint_sha256',d.key_fingerprint_sha256,'admin_grant_epoch',d.admin_grant_epoch),
+        'postgres_system_identifier',(select system_identifier::text from pg_catalog.pg_control_system()),
+        'authority_effect',false) as context
+      from destruktion_meta.native_coding_operator_permit_h205f22 p
+      join destruktion_meta.project_run_h205f22 r on r.project_id=(p.permit->>'project_id')::uuid
+        and r.workspace_id=p.workspace_id and r.device_id=p.device_id and r.client_id=p.client_id
+        and r.admin_grant_epoch=p.admin_grant_epoch
+      join public.compute_fabric_a2_browser_device_h205f22 d on d.device_id=p.device_id and d.client_id=p.client_id
+      where p.permit_id=$1::uuid and p.revoked_at is null and d.active and d.revoked_at is null
+        and d.access_tier='ADMIN' and d.admin_revoked_at is null and d.admin_grant_epoch=p.admin_grant_epoch
+        and d.profile='A2_DEVICE_HTTP_SIGNATURE_V1' and d.key_fingerprint_sha256=p.permit->>'device_key_fingerprint_sha256'
+        and d.admin_scopes @> '["CONTROL_PLANE","DEVOS"]'::jsonb`,[permitId]);
+    if(rows.length!==1||!rows[0].context?.permit||!rows[0].context?.device)fail('historical_authority_unavailable');
+    return validateContext(rows[0].context,{historical:true});
+  }
+  async function task(tx,query,{requireLive=true,lock=false,historical=false}={}) {
     const rows=await tx.unsafe(`select to_jsonb(t) as task from destruktion_meta.devos_fleet_task_h205f22 t
       where t.task_id=$1::uuid and t.workspace_id=$2::uuid and t.lease_generation=$3::bigint ${lock?'for share of t':''}`,
       [query.task_id,query.workspace_id,query.lease_generation]);
     const t=rows[0]?.task;
     if(rows.length!==1||!t?.task_spec?.native_coding?.permit_id) fail('task_unavailable');
-    const c=await context(tx,t.task_spec.native_coding.permit_id,{requireActive:requireLive,lock}),p=c.permit;
+    const c=historical?await historicalContext(tx,t.task_spec.native_coding.permit_id)
+      :await context(tx,t.task_spec.native_coding.permit_id,{requireActive:requireLive,lock}),p=c.permit;
     if(t.lease_target_id!==`codex-cli:${p.provider_id}`||t.lease_agent_id!==p.agent_id
       ||Number(t.lease_agent_generation_epoch)!==p.agent_generation_epoch||t.role!==p.role||t.base_sha!==p.worktree.base_sha
       ||t.workspace_id!==p.workspace_id||t.lease_tab_id!==`native-coding:${p.provider_id}`
@@ -341,22 +366,24 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
       if(row&&!matchScope(scope,row))fail('execution_readback_scope_mismatch');
       return row?{...row,task_state:c.task.state,task_result_summary:c.task.result_summary}:null;
     },
-    async READ_PRIOR_EXECUTION({selector}) {
-      open();
+    async READ_PRIOR_EXECUTION({selector:rawSelector},request) {
+      const check=()=>{open();assertNativeCodingHostRequestOpen(request);};check();
+      const selector=structuredClone(rawSelector);
       if(!exact(selector,['workspace_id','project_id','task_id','lease_generation','agent_id','provider_id','agent_generation_epoch'])
         ||!['workspace_id','project_id','task_id','provider_id'].every(name=>uuid.test(selector[name]||''))
         ||!/^agent_[a-z0-9-]{8,64}$/.test(selector.agent_id||'')
         ||!['lease_generation','agent_generation_epoch'].every(name=>Number.isSafeInteger(selector[name])&&selector[name]>0))fail('prior_selector_invalid');
       // No caller supplies a historical incarnation, digest, reservation or path.
       // A repeatable read joins the existing task, permit and execution only.
-      return sql.begin('isolation level repeatable read read only',async tx=>{
-        await owner(tx);const c=await task(tx,selector,{requireLive:false}),p=c.permit,t=c.task;
+      const result=await sql.begin('isolation level repeatable read read only',async tx=>{
+        await owner(tx);check();const c=await task(tx,selector,{requireLive:false,historical:true}),p=c.permit,t=c.task;check();
         if(selector.agent_generation_epoch!==p.agent_generation_epoch)fail('prior_selector_mismatch');
         const rows=await tx.unsafe(`select to_jsonb(e)-'callback_publication' as execution,to_jsonb(j) as registration
           from destruktion_meta.native_coding_execution_h205f22 e
           left join destruktion_meta.native_coding_job_registration_h205f22 j using(task_id,lease_generation)
           where e.workspace_id=$1::uuid and e.task_id=$2::uuid and e.lease_generation=$3::bigint`,
           [selector.workspace_id,selector.task_id,selector.lease_generation]);
+        check();
         if(rows.length>1)fail('prior_execution_ambiguous');
         const e=rows[0]?.execution??null,j=rows[0]?.registration??null;
         let saved=null;
@@ -365,7 +392,7 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
           execution:e?structuredClone(e):null,receipt_sha256:receiptSha256,
           task_state:t.state,task_result_summary:t.result_summary??null,
           readback_only:true,physical_effect_replayed:false,automatic_retry_allowed:false,authority_effect:false});
-        if(!e){open();return reply('HOLD','PRIOR_EXECUTION_MISSING');}
+        if(!e){check();return reply('HOLD','PRIOR_EXECUTION_MISSING');}
         const birth=/^pid:([1-9][0-9]*):created_100ns:[1-9][0-9]{16,18}$/.exec(e.host_incarnation||'');
         if(!birth||!uuid.test(e.reservation_id||'')||e.automatic_retry_allowed!==false||e.authority_effect!==false
           ||!['RESERVED','ATTEMPTED','RESULT_READY','FAILED','AMBIGUOUS','CHECKPOINTED'].includes(e.state))fail('prior_execution_invalid');
@@ -374,11 +401,6 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
           lease_generation:Number(t.lease_generation),role:t.role,base_sha:t.base_sha};
         saved=buildNativeCodingExecutionScope(p,lease,{pid:Number(birth[1]),process_incarnation_id:e.host_incarnation});
         if(!matchScope(e,saved))fail('prior_execution_scope_changed');
-        if(typeof readCheckpointScope!=='function')return reply('HOLD','CURRENT_PHYSICAL_SCOPE_UNAVAILABLE');
-        const current=await readCheckpointScope(p,tx);open();
-        const samePhysical=value=>same(value?.artifact,p.artifact)&&same(value?.postgres,p.postgres)&&value?.user_sid===p.user_sid
-          &&value?.worktree?.path===p.worktree.path&&value.worktree.root_identity_sha256===p.worktree.root_identity_sha256;
-        if(!samePhysical(current))fail('prior_physical_scope_changed');
         if(!['RESULT_READY','CHECKPOINTED'].includes(e.state))return reply('HOLD','PRIOR_EXECUTION_INCOMPLETE');
         if(!j?.result_receipt||!j?.job_envelope)return reply('HOLD','PROTECTED_RESULT_UNAVAILABLE');
         const envelope=j.job_envelope,payload=envelope.payload;
@@ -387,9 +409,9 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
           ||e.job_proof_sha256!==j.job_envelope_sha256
           ||!matchScope(saved,buildNativeCodingExecutionScope(p,lease,payload.host_process)))fail('prior_registered_job_changed');
         let receipt;
-        try{receipt=await readProtectedReceipt({scope:saved,permit:p,job:envelope});}
-        catch{open();return reply('HOLD','PROTECTED_RESULT_UNAVAILABLE');}
-        open();
+        try{receipt=await readProtectedReceipt({scope:saved,permit:p,job:envelope,request});}
+        catch{check();return reply('HOLD','PROTECTED_RESULT_UNAVAILABLE');}
+        check();
         if(!receipt)return reply('HOLD','PROTECTED_RESULT_UNAVAILABLE');
         if(receipt.process?.launch||receipt.physical_settlement){try{validateCodexCliJoinedSettlement(receipt.physical_settlement,{proof:receipt.process});validateCodexCliLocalOutputDrain(receipt);}
           catch{return reply('HOLD','PROTECTED_SETTLEMENT_UNVERIFIED');}}
@@ -430,11 +452,22 @@ export async function createNativeCodingHostAuthority({sql,readNativeScope,readN
           lease_generation:Number(t.lease_generation),prompt_sha256:historical.value.prompt_sha256,expires_at:p.expires_at});
         if(Date.parse(payload.lease_expires_at)>Date.parse(t.lease_expires_at))fail('prior_lease_changed');
         verifyNativeCodingJobProof(envelope,{publicKey:key(c),expected:wanted,now:Date.parse(payload.proven_at)});
-        const after=await readCheckpointScope(p,tx);open();
-        if(!samePhysical(after)||!same(current,after)||receipt.git_after?.head!==after.worktree.base_sha
-          ||receipt.git_after?.artifact_sha256!==after.git?.artifact_sha256)fail('prior_physical_scope_changed');
-        return reply('READBACK_ONLY','PROTECTED_RESULT_VERIFIED',j.result_receipt_sha256);
+        // Protected ORIGINAL history remains readable if the installation has
+        // moved on or current tools are absent. This HOLD never resolves an
+        // unknown effect/capacity, promotes the receipt or permits a new run.
+        if(typeof readCheckpointScope!=='function')return reply('HOLD','HISTORICAL_RESULT_RECORDED');
+        const samePhysical=value=>same(value?.artifact,p.artifact)&&same(value?.postgres,p.postgres)&&value?.user_sid===p.user_sid
+          &&value?.worktree?.path===p.worktree.path&&value.worktree.root_identity_sha256===p.worktree.root_identity_sha256;
+        try{
+          const current=await readCheckpointScope(p,tx,request);check();
+          if(!samePhysical(current))return reply('HOLD','HISTORICAL_RESULT_RECORDED');
+          const after=await readCheckpointScope(p,tx,request);check();
+          if(!samePhysical(after)||!same(current,after)||receipt.git_after?.head!==after.worktree.base_sha
+            ||receipt.git_after?.artifact_sha256!==after.git?.artifact_sha256)return reply('HOLD','HISTORICAL_RESULT_RECORDED');
+          return reply('READBACK_ONLY','PROTECTED_RESULT_VERIFIED',j.result_receipt_sha256);
+        }catch{check();return reply('HOLD','HISTORICAL_RESULT_RECORDED');}
       });
+      check();return result;
     },
     async ADVANCE_EXECUTION({scope,transition},request) {
       const check=()=>{open();assertNativeCodingHostRequestOpen(request);};check();

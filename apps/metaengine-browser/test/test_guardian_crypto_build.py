@@ -18,6 +18,20 @@ def write(path, data):
     path.write_bytes(data if isinstance(data, bytes) else json.dumps(data).encode())
 
 
+class BuildHostApplicationSelectionTests(unittest.TestCase):
+    def test_duplicate_path_applications_select_one_executable_in_path_order(self):
+        # Get-Command Application can emit every PATH match on Windows. Never
+        # stringify multiple Source properties into one impossible executable.
+        for name, count in [('build-guardian-openssl-static.ps1', 5),
+                            ('build-guardian-nasm-static.ps1', 2)]:
+            source = (SCRIPT.parent / name).read_text()
+            resolutions = [line for line in source.splitlines() if 'Get-Command ' in line]
+            self.assertEqual(len(resolutions), count)
+            for line in resolutions:
+                self.assertIn('-CommandType Application', line)
+                self.assertIn('| Select-Object -First 1', line)
+
+
 class ByteAgreementTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

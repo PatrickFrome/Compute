@@ -1,5 +1,6 @@
 import path from 'node:path';
 import {readNativeCodingProtectedJson} from './native-coding-host-observers.mjs';
+import {assertPrivateNativeToolsCapability} from './private-native-tools-core.mjs';
 
 // Protected local paths and digest pins only. Own-PG remains the authority.
 export async function readNativeCodingOperatorPaths(stateDirectory,options={}) {
@@ -33,6 +34,30 @@ export function validateNativeCodingOperatorPaths(value){
     }
   }
   return Object.freeze(value);
+}
+
+// Placement refusal for installed Main/Host composition, not proof of release,
+// ACLs, native custody, completed onboarding or user login. The installer owns
+// payload inventory and private-state production; an old protected descriptor
+// alone cannot adopt an external executable or a previous user profile.
+export function validateNativeCodingInstalledPathScope(value,{resourcesPath,stateDirectory,privateTools}={}){
+  const fail=reason=>{throw Error('native_coding_installed_path_scope_'+reason);};
+  if(![resourcesPath,stateDirectory].every(root=>typeof root==='string'&&path.isAbsolute(root)&&!root.includes('\0')))fail('roots_invalid');
+  const resources=path.resolve(resourcesPath),state=path.resolve(stateDirectory),toolsRoot=path.join(resources,'private-native-tools');
+  const inside=(root,target)=>{
+    const relative=path.relative(root,path.resolve(target));
+    return relative!==''&&relative!=='..'&&!relative.startsWith('..'+path.sep)&&!path.isAbsolute(relative);
+  };
+  if(path.relative(resources,state)===''||inside(resources,state)||inside(state,resources))fail('roots_overlap');
+  validateNativeCodingOperatorPaths(value);
+  if(value.cli_executable!==path.join(toolsRoot,'codex','bin','codex.exe')
+    ||value.git_executable!==path.join(toolsRoot,'git','ucrt64','bin','git.exe'))fail('tool_not_owned');
+  try{assertPrivateNativeToolsCapability(privateTools);}catch{fail('tools_capability_required');}
+  if(privateTools.cliExecutable!==value.cli_executable||privateTools.gitExecutable!==value.git_executable)fail('tools_capability_mismatch');
+  for(const key of ['codex_home','journal_root','worker_temp_root','result_index_root'])if(!inside(state,value[key]))fail('state_not_owned');
+  for(const pin of [...Object.values(value.sandbox_receipts),...(value.provider_sandbox_receipts||[])])
+    if(!inside(state,pin.path))fail('state_not_owned');
+  return value;
 }
 
 export function resolveNativeCodingSandboxPin(operator,provider){

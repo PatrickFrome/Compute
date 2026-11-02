@@ -5,8 +5,8 @@ import {buildNativeCodingHistoricalTaskContext,buildNativeCodingExecutionScope,n
 
 // Ephemeral generated signatures/native data for deny-only tests. Never
 // registered with installed METAENGINE or represented as physical proof.
-export function checkpointFixture() {
-  const f=admissionFixture(),candidateHead='c'.repeat(40),candidate={head:candidateHead,status_sha256:'1'.repeat(64),
+export function checkpointFixture(options) {
+  const f=admissionFixture(options),candidateHead='c'.repeat(40),candidate={head:candidateHead,status_sha256:'1'.repeat(64),
     diff_sha256:'2'.repeat(64),changed_files:[{path:'fixture.txt',status:' M',sha256:'3'.repeat(64),bytes:7}],artifact_sha256:'4'.repeat(64),clean:false};
   const birth=(pid,offset)=>({pid,created_at:f.iso(offset),process_incarnation_id:`pid:${pid}:created_100ns:${BigInt(f.now+offset)*10000n+116444736000000000n}`});
   const project={project_id:f.permit.project_id,workspace_id:f.workspaceId,device_id:f.permit.device_id,client_id:f.clientId,admin_grant_epoch:1,state:'ACTIVE'};

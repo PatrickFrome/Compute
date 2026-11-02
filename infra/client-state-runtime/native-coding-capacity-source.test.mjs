@@ -38,3 +38,12 @@ test('read census has no MVCC write and the effect fence cannot renew evidence o
  assert.ok(fence.indexOf('native_coding_capacity_lock_v1')<fence.indexOf("'native-service:'"));
  assert.ok(fence.indexOf("'native-service:'")<fence.indexOf('update destruktion_meta.native_coding_service_heartbeat_h205f22'));
 });
+test('default historical census has no graph or callback authority and rejects even exact resolved selectors',async()=>{
+ const host=await fs.readFile(new URL('./native-coding-host-capacity.mjs',import.meta.url),'utf8');
+ const counts=source.match(/create or replace function destruktion_meta\.native_coding_capacity_counts_v1\([\s\S]*?as \$\$([\s\S]*?)\$\$;/)[1];
+ assert.match(host,/owned_setup:ownedSetup,resolved:\[\]/);
+ assert.doesNotMatch(host,/physicalCustody|prepareClosures|verifyObservation|resolvedCount/);
+ assert.match(host,/counts\.task_slots\+counted\.counts\.setup_slots!==Number\(first\.row_count\)/);
+ assert.doesNotMatch(counts,/native_coding_physical_resolution|verified_resolutions|resolved_count|then continue;end if/);
+ assert.match(counts,/jsonb_array_length\(p_evidence->'resolved'\)<>0[\s\S]*native_capacity_full_scope_unqualified/);
+});

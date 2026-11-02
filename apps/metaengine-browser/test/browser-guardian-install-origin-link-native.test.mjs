@@ -34,6 +34,20 @@ test('origin link keeps original-process access private and mechanics friends co
   assert.match(source, /#ifndef METAENGINE_GUARDIAN_INSTALL_ORIGIN_TEST\s+#error/);
 });
 
+test('native original-process and bootstrap payload file identities are retained on real call paths', () => {
+  const native = fs.readFileSync(path.join(directory, 'browser-guardian-install-origin-link.cpp'), 'utf8');
+  assert.match(native, /struct ImageCustody/);
+  assert.match(native, /GetFileInformationByHandleEx\([^\n]*FileIdInfo/);
+  assert.match(native, /GetFileInformationByHandleEx\([^\n]*FileAttributeTagInfo/);
+  assert.match(native, /FILE_FLAG_OPEN_REPARSE_POINT/);
+  assert.match(native, /FILE_SHARE_READ,\s*nullptr,\s*OPEN_EXISTING/);
+  assert.match(native, /captureCoordinatorBeforeElevation\([\s\S]*?coordinator_payload\.capture/);
+  assert.match(native, /connectOriginalBootstrap\([\s\S]*?bootstrap_payload\.capture/);
+  assert.match(native, /listenAsBootstrap\([\s\S]*?coordinator_payload\.capture[\s\S]*?bootstrap_payload\.capture/);
+  assert.match(native, /bootstrapExact\([\s\S]*?bootstrap_payload\.recheck/);
+  assert.match(native, /close\(\) noexcept[\s\S]*?coordinator_payload\.file\.reset\(\)/);
+});
+
 test('origin link probe covers native pending cancellation and exact bounded messages without effects', () => {
   for (const name of cases) assert.ok(source.includes(`run("${name}"`), `native case missing: ${name}`);
   assert.match(source, /BCryptGenRandom/);

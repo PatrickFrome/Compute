@@ -1,24 +1,31 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { startManagedRuntimeHost } from './runtime-host.mjs';
+import { runtimeRecoveryPostgresProof } from './runtime-recovery-postgres-proof.mjs';
 import { waitForRuntimeHostDescriptor } from './test/runtime-host-readiness.mjs';
 import { requireRuntimeHostLaunchNonce, runtimeHostTerminalMessage, runtimeHostFailureMessage,
-  sendRuntimeHostLifecycleMessage } from './runtime-host-lifecycle.mjs';
+  sendRuntimeHostLifecycleMessage,createRuntimeSetupDrain } from './runtime-host-lifecycle.mjs';
 
 const hostEntry = fileURLToPath(new URL('./runtime-host.mjs', import.meta.url));
 const nonce = '11111111-2222-4333-8444-555555555555';
 const outcome = { instance_id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', children_stopped: true,
   ownership_released: true, reason: 'runtime_health_failed' };
 
-async function fixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'metaengine-lifecycle-test-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+async function fixture(t, temporaryDirectory = os.tmpdir()) {
+  const temporary = await realpath(temporaryDirectory);
+  const root = await realpath(await mkdtemp(path.join(temporary, 'metaengine-lifecycle-test-')));
+  t.after(async () => {
+    assert.equal(await realpath(root), root);
+    assert.equal(path.dirname(root), temporary);
+    assert.ok(path.basename(root).startsWith('metaengine-lifecycle-test-'));
+    await rm(root, { recursive: true, force: true });
+  });
   const config = { schema: 'compute.runtime-host-config.v1', version: 1,
     bundle_directory: path.join(root, 'bundle'), expected_bundle_sha256: 'a'.repeat(64),
     state_directory: path.join(root, 'state'), pg_data_directory: path.join(root, 'state/data'),
@@ -50,6 +57,48 @@ async function fixture(t) {
     lock: path.join(config.state_directory, 'runtime-host-lock.json'),
     status: path.join(config.state_directory, 'runtime-instance.json') };
 }
+
+test('generated lifecycle fixture canonicalizes an aliased TEMP without accepting alias-spelled postmaster identity', async t => {
+  const temporary = await realpath(os.tmpdir());
+  const parent = await realpath(await mkdtemp(path.join(temporary, 'metaengine-lifecycle-alias-proof-')));
+  const physical = path.join(parent, 'physical'), alias = path.join(parent, 'alias');
+  t.after(async () => {
+    try { await unlink(alias); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    assert.equal(await realpath(parent), parent);
+    assert.equal(path.dirname(parent), temporary);
+    assert.ok(path.basename(parent).startsWith('metaengine-lifecycle-alias-proof-'));
+    await rm(parent, { recursive: true, force: true });
+  });
+  await mkdir(physical);
+  await symlink(physical, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  await t.test('physical continuity and terminal cleanup pass while an alias-spelled PID file remains refused', async child => {
+    const f = await fixture(child, alias);
+    // Generated process/SQL metadata only; this does not start or attest PostgreSQL.
+    const options = { identity: f.runtime.postgresIdentity, pgDataDirectory: f.config.pg_data_directory };
+    const proof = await runtimeRecoveryPostgresProof(options);
+    assert.equal(f.root, await realpath(f.root));
+    assert.equal(f.config.pg_data_directory, await realpath(f.config.pg_data_directory));
+    const pidFile = path.join(f.config.pg_data_directory, 'postmaster.pid');
+    const original = await readFile(pidFile, 'utf8'), lines = original.split('\n');
+    assert.equal(lines[1], f.config.pg_data_directory);
+    lines[1] = path.join(alias, path.basename(f.root), 'state', 'data');
+    try {
+      await writeFile(pidFile, lines.join('\n'));
+      await assert.rejects(runtimeRecoveryPostgresProof(options), /runtime_recovery_postgres_identity_unproven/);
+    } finally { await writeFile(pidFile, original); }
+    assert.deepEqual(await runtimeRecoveryPostgresProof(options), proof);
+    const receipts = [];
+    const host = await startManagedRuntimeHost({ configFile: f.configFile }, { ...f.hooks, async onTerminal(value) {
+      assert.equal(JSON.parse(await readFile(f.status, 'utf8')).state, 'STOPPED');
+      await assert.rejects(readFile(f.lock), { code: 'ENOENT' });
+      receipts.push(value);
+    } });
+    await host.stop();
+    await host.finished;
+    assert.deepEqual(receipts, [{ instance_id: f.runtime.instanceId, children_stopped: true,
+      ownership_released: true, reason: 'requested' }]);
+  });
+});
 
 test('terminal wire is generation-bound, finite and cannot encode unconfirmed cleanup', () => {
   const message = runtimeHostTerminalMessage({ launchNonce: nonce, hostPid: 123, outcome });
@@ -166,4 +215,36 @@ test('pre-runtime FAILED persistence failure retains ownership and emits no clea
   launchRuntime:async()=>{await unlink(f.status);await mkdir(f.status);throw Object.assign(Error('generated launch failure'),{code:'generated_launch_failure'});},
   onTerminal(){receipts++;}}),/status_path_invalid/);
  assert.equal(receipts,0);assert.ok((await readFile(f.lock)).length>0);
+});
+
+
+test('setup drain permits owned PG stop before a PG-dependent full join and retains its original promise',async()=>{
+ let resourcesDone,fullDone,resourceCalls=0,fullCalls=0;
+ const resources=new Promise(r=>{resourcesDone=r;}),full=new Promise(r=>{fullDone=r;});
+ const service={drainResources(){resourceCalls++;return resources;},drain(){fullCalls++;return full;}};
+ const drain=createRuntimeSetupDrain({timeoutMs:5});
+ assert.equal(await drain.beforeStop(service),false,'timeout is pending, not a cleanup proof');
+ assert.equal(fullCalls,0,'full SQL/publication does not block owned PG shutdown');
+ resourcesDone();fullDone();assert.equal(await drain.finish(service),true);
+ assert.equal(await drain.finish(service),true);assert.equal(resourceCalls,1);assert.equal(fullCalls,1);
+});
+test('setup drain never treats failed or pending original resources as confirmed terminal',async()=>{
+ for(const resource of [()=>Promise.reject(Error('original_join_failed')),()=>new Promise(()=>{}),async()=>true]){
+  const drain=createRuntimeSetupDrain({timeoutMs:5}),service={drainResources:resource,async drain(){}};
+  assert.equal(await drain.beforeStop(service),false);assert.equal(await drain.finish(service),false);
+ }
+});
+test('setup finalization retains previously observed service and refuses a later clean substitute',async()=>{
+ const drain=createRuntimeSetupDrain({timeoutMs:5});
+ const original={drainResources:()=>new Promise(()=>{}),async drain(){}},other={async drainResources(){},async drain(){}};
+ assert.equal(await drain.beforeStop(original),false);assert.equal(await drain.finish(other),false);
+});
+
+test('default Host orders setup resource stage before runtime stop and fences SQL disposal on unresolved setup',async()=>{
+ const source=await readFile(hostEntry,'utf8');
+ const stop=source.slice(source.indexOf("  const stop = (reason = 'requested')"),source.indexOf('  function onAbort()'));
+ assert(stop.indexOf('setupDrain.beforeStop(nativeSetupService)')<stop.indexOf('await runtime.stop('));
+ assert(!stop.includes('nativeSetupService?.drain()'));
+ assert.match(source,/setupDrain\.finish\(nativeSetupService\)/);
+ assert.match(source,/if\(nativeCodingSql&&schemaDrainJoined&&physicalJoined&&!setupCleanupUnconfirmed\)/);
 });

@@ -2,11 +2,13 @@ param(
   [switch]$TestLinkedNamespace,
   [Parameter(Mandatory=$true)][string]$SourceDir,
   [Parameter(Mandatory=$true)][string]$CryptoOutputDir,
-  [string]$OutputRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'native-dist'),
+  [string]$OutputRoot = '',
   [string]$VcVarsPath = $env:ME2_VCVARS_PATH
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+# Windows PowerShell 5.1 advanced parameter binding may precede script scope.
+if (-not $OutputRoot) { $OutputRoot = Join-Path (Split-Path $PSScriptRoot -Parent) 'native-dist' }
 Import-Module (Join-Path $PSScriptRoot 'guardian-static-crypto.psm1')
 $context = New-GuardianCryptoBuild -SourceDir $SourceDir -OutputDir $CryptoOutputDir -VcVarsPath $VcVarsPath
 try {

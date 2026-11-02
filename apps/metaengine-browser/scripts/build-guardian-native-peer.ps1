@@ -2,12 +2,14 @@ param(
   $CryptoBuild,
   [switch]$UnlinkedTestBuild,
   [string]$NodeHeadersPath,
-  [string]$OutputDir = (Join-Path (Split-Path $PSScriptRoot -Parent) 'native-dist\guardian-peer'),
+  [string]$OutputDir = '',
   [string]$VcVarsPath = $env:ME2_VCVARS_PATH
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+# Windows PowerShell 5.1 advanced parameter binding may precede script scope.
+if (-not $OutputDir) { $OutputDir = Join-Path (Split-Path $PSScriptRoot -Parent) 'native-dist\guardian-peer' }
 Import-Module (Join-Path $PSScriptRoot 'guardian-static-crypto.psm1')
 if ([bool]$CryptoBuild -eq [bool]$UnlinkedTestBuild) { throw 'guardian_native_requires_fresh_crypto_or_explicit_unlinked_test' }
 $crypto = $null

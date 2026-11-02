@@ -14,6 +14,7 @@ test('crypto runner paths are bound at the actual packaging step, not unavailabl
   const header = windows.split('\n    steps:')[0];
   assert.doesNotMatch(header, /\$\{\{\s*runner\./);
   const build = windows.split('- name: Build exact-head unsigned NSIS package through native staging hook')[1].split('\n      - name:')[0];
+  assert.match(build,/timeout-minutes:\s*90/,'authenticated static crypto and upstream tests exceed the former 20-minute package step');
   assert.match(build, /env:[\s\S]*ME2_GUARDIAN_CRYPTO_SOURCE_DIR:\s*\$\{\{ runner\.temp \}\}\/guardian-openssl-source/);
   assert.match(build, /env:[\s\S]*ME2_GUARDIAN_CRYPTO_OUTPUT_DIR:\s*\$\{\{ runner\.temp \}\}\/guardian-openssl-build/);
 });
@@ -39,6 +40,9 @@ test('Package Smoke reserves one source/version before dependency install or phy
   assert.match(workflow, /ME2_GUARDIAN_CRYPTO_OUTPUT_DIR:/);
   const acquire = workflow.indexOf('- name: Acquire authenticated crypto source before reserving a package identity');
   assert.ok(acquire > 0 && acquire < workflow.indexOf('  windows-nsis-package-smoke:'));
+  const publicInput=workflow.indexOf('prepare-guardian-openssl-certificate.py',acquire);
+  assert.ok(publicInput>acquire&&publicInput<workflow.indexOf('acquire-guardian-openssl-source.py',acquire));
+  assert.doesNotMatch(workflow,/official_public_openssl_certificate_required_before_package_reservation/);
   assert.match(workflow.slice(acquire, workflow.indexOf('  windows-nsis-package-smoke:')), /acquire-guardian-openssl-source\.py/);
   assert.match(workflow, /slsa-provenance-verify:[\s\S]*?timeout-minutes:\s*10/);
 

@@ -33,9 +33,13 @@ function msvcEnvironment() {
 test('actual production portable framing and terminal cancellation refuse replay and caller identity claims', {
   skip: !['linux', 'win32'].includes(process.platform) ? 'build harness supports Linux and Windows; no kernel identity claim' : false,
   timeout:60_000,
-}, () => {
-  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'guardian-install-origin-portable-'));
-  try {
+}, t => {
+  const temporary = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'guardian-install-origin-portable-')));
+  // Keep cleanup errors separate from a compiler/process assertion. Windows
+  // can briefly retain a completed build's directory; bounded retries still fail
+  // if the original generated tree cannot be removed.
+  t.after(() => fs.rmSync(temporary, {recursive:true, force:true, maxRetries:5, retryDelay:100}));
+  {
     const binary = path.join(temporary, process.platform === 'win32' ? 'origin-wire-tests.exe' : 'origin-wire-tests');
     if (process.platform === 'win32') {
       execFileSync('cl.exe', ['/nologo', '/std:c++20', '/EHsc', '/MT', '/W4', '/WX', source, `/Fe:${binary}`],
@@ -58,5 +62,5 @@ test('actual production portable framing and terminal cancellation refuse replay
     assert.equal(summary.windows_identity_execution, 'UNQUALIFIED');
     assert.equal(summary.classification, 'ACTUAL_PRODUCTION_PORTABLE_PROTOCOL_NOT_INSTALL_SCOPE');
     for (const name of cases) assert.equal(rows.find(row => row.name === name)?.state, 'PASS', name);
-  } finally { fs.rmSync(temporary, {recursive:true, force:true}); }
+  }
 });

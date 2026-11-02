@@ -39,6 +39,33 @@ test('physical Git proof rejects a changed file linked to another path and overs
   await fs.writeFile(original,Buffer.alloc(512*1024+1,65));await assert.rejects(f.read(),/changed_file_invalid/);
 });
 
+test('physical Git proof rejects raw invalid UTF-8 POSIX filenames before and after content changes',{skip:process.platform==='win32'},async t=>{
+  const f=await fixture(t),file=Buffer.concat([Buffer.from(f.root+path.sep+'invalid-'),Buffer.from([0xff]),Buffer.from('.txt')]);
+  for(const bytes of ['first\n','other\n']) {
+    await fs.writeFile(file,bytes);
+    await assert.rejects(f.read(),{code:'ERR_ENCODING_INVALID_ENCODED_DATA'});
+  }
+});
+
+test('physical Git proof preserves valid Unicode, NUL framing and deleted-file encoding',async t=>{
+  const f=await fixture(t),bytes=Buffer.from('unicode bytes\n');
+  const validUnicode=['unicode-\u96EA-\u{1F600}.txt','literal-\uFFFD.txt','\uFEFFleading-bom.txt','inside-\uFEFF-bom.txt'];
+  if(process.platform!=='win32')validUnicode.push('line\nbreak.txt');
+  for(const name of validUnicode)await fs.writeFile(path.join(f.root,name),bytes);
+  await fs.unlink(path.join(f.root,'fixture.txt'));
+  const proof=await f.read();
+  assert.equal(proof.changed_files.length,validUnicode.length+1);
+  for(const name of validUnicode)assert.deepEqual(proof.changed_files.find(file=>file.path===name),
+    {path:name,status:'??',sha256:hash(bytes),bytes:bytes.length});
+  assert.deepEqual(proof.changed_files.find(file=>file.path==='fixture.txt'),
+    {path:'fixture.txt',status:' D',sha256:null,bytes:0});
+  assert.equal(proof.artifact_sha256,hash(JSON.stringify({head:proof.head,files:proof.changed_files,diff_sha256:proof.diff_sha256})));
+  await fs.writeFile(path.join(f.root,validUnicode[1]),'updated unicode bytes\n');
+  const changed=await f.read();
+  assert.equal(changed.changed_files.find(file=>file.path===validUnicode[1]).sha256,hash('updated unicode bytes\n'));
+  assert.notEqual(changed.artifact_sha256,proof.artifact_sha256);
+});
+
 test('cancelled Git proof launches no new read and an in-flight Git child is joined before rejection',async t=>{
  const f=await fixture(t),before=await f.read();
  const cancelled=new AbortController();cancelled.abort();

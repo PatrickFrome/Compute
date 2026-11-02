@@ -414,6 +414,10 @@ int wmain(int argc, wchar_t**) {
         const auto client_json = coordinator.link->snapshotJson();
         const auto server_json = observer.bound_snapshot;
         noAuthority(client_json); noAuthority(server_json);
+        require(field(client_json, "original_path_file_id") == "HELD_SOURCE_ONLY" &&
+            field(client_json, "bootstrap_path_file_id") == "HELD_SOURCE_ONLY" &&
+            field(server_json, "original_path_file_id") == "HELD_SOURCE_ONLY" &&
+            field(server_json, "bootstrap_path_file_id") == "HELD_SOURCE_ONLY", "delayed_handshake_lost_native_file_custody");
         require(field(client_json, "kernel_binding") == "EXACT" && field(server_json, "kernel_binding") == "EXACT" &&
             field(client_json, "identity_binding") == "RETAINED" && field(server_json, "identity_binding") == "RETAINED" &&
             number(client_json, "original_pid") == GetCurrentProcessId() && number(server_json, "original_pid") == GetCurrentProcessId(),
@@ -462,6 +466,11 @@ int wmain(int argc, wchar_t**) {
         require(GuardianInstallOriginLinkTest::connect(*coordinator, GetCurrentProcess()), "actual_link_kernel_binding_failed");
         observer.waitBound(); observer.waitPending(2);
         const auto json = observer.bound_snapshot; noAuthority(json); noAuthority(coordinator->snapshotJson());
+        require(field(json, "original_path_file_id") == "HELD_SOURCE_ONLY" &&
+            field(json, "bootstrap_path_file_id") == "HELD_SOURCE_ONLY" &&
+            field(coordinator->snapshotJson(), "original_path_file_id") == "HELD_SOURCE_ONLY" &&
+            field(coordinator->snapshotJson(), "bootstrap_path_file_id") == "HELD_SOURCE_ONLY",
+            "original_and_bootstrap_image_file_custody_missing");
         require(field(json, "kernel_binding") == "EXACT" && field(json, "identity_binding") == "RETAINED" &&
             number(json, "original_pid") == GetCurrentProcessId(), "original_user_not_native_current_process");
         FILETIME created{}, exited{}, kernel{}, user{}; require(GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user) != FALSE, "oracle_birth_failed");
@@ -469,7 +478,9 @@ int wmain(int argc, wchar_t**) {
         require(field(json, "original_creation_time_100ns") == std::to_string(birth.QuadPart), "original_birth_not_exact");
         std::cout << "{\"name\":\"actual_original_user\",\"snapshot\":" << json << "}\n";
         coordinator->requestCancel();
-        require(field(coordinator->snapshotJson(), "kernel_binding") == "UNPROVEN", "cancelled_link_kept_current_binding");
+        require(field(coordinator->snapshotJson(), "kernel_binding") == "UNPROVEN" &&
+            field(coordinator->snapshotJson(), "original_path_file_id") == "UNPROVEN" &&
+            field(coordinator->snapshotJson(), "bootstrap_path_file_id") == "UNPROVEN", "cancelled_link_kept_current_binding_or_file_custody");
         require(!GuardianInstallOriginLinkTest::connect(*coordinator, GetCurrentProcess()), "completed_original_connection_replaced");
         coordinator->close(); observer.join();
         require(observer.result && observer.terminal_close && field(observer.link->snapshotJson(), "reason") == "ORIGINAL_COORDINATOR_CONNECTION_CLOSED",

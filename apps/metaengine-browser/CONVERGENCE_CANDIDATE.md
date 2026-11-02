@@ -1,6 +1,50 @@
-Prepared source package identity is `0.7.0-dev.1359740117434.1`.
+Prepared source package identity is `0.7.0-dev.2894075958544.1`.
 
-Physical package-version reservation is pending. This is a source-only successor of `88eb062b09bd456d430bd0da37cb21baaddcee6d`, not a built, signed, installed-qualified or production-ready package. The supported read-only planner observed no reservation for this proposed version at 2026-10-26T12:14:11.149Z, with exclusive consumed-version floor `0.7.0-dev.1269944506140.1`. That observation is time-bound and does not reserve the version; the ordinary producer must independently recheck the final versioned source and publish its immutable reservation before a physical build.
+2026-11-02: Predecessor `0.7.0-dev.2728883494179.1` was reserved by run 41367008565, artifact 13107342510. Independent earlier exact-source crypto qualification exposed native/W77 reserved-version drift: the C++ parser retained only two historic refusals while the W77 list had grown. The actual native test rejected none of the newly consumed identities. This successor aligns the native refusal list and runs a source-level equality gate before package reservation and before expensive crypto compilation. A locally compiled real C++ verifier reproduces the old failure and passes the corrected cross-language checks with system OpenSSL; this is not pinned Windows crypto qualification or a production-root positive signature. Both language lists include the consumed predecessor, and the next physical producer must independently reserve this new version.
+
+Clean-PC setup, data-preserving upgrade, first Owner, internal release trust and applied execution-policy qualification remain open. Windows publisher signing alone is deferred. No EXE or installed readiness is claimed.
+
+Historical predecessor notes:
+
+Prepared source package identity is `0.7.0-dev.2728883494179.1`.
+
+2026-11-02: Consumed predecessor `0.7.0-dev.2656093458019.1`, run 41364780649, reservation 13106881670, passed fresh and attached PostgreSQL checks and passed the repaired PowerShell parameter-binding boundary. Packaging stopped at the strict clean-source guard because runtime staging left downloaded private-tool archives under an unignored in-checkout native-cache directory. This successor moves archive acquisition into physically verified external build work; beforePack's fallback also uses an external unique directory. The full tracked/untracked source guard and archive pins remain unchanged. A real disposable Git regression proves the former cache dirtied the checkout, external acquisition does not, and unexpected files plus tracked edits remain visible.
+
+The ordinary producer must reserve and qualify this distinct identity. Clean-PC infrastructure setup and data-preserving existing-client upgrade remain required; the current fresh-only NSIS gate and first-Owner/internal-trust/applied-policy blockers remain open. No EXE, installed readiness or production promotion is claimed.
+
+Historical predecessor notes:
+
+Prepared source package identity is `0.7.0-dev.2656093458019.1`.
+
+2026-11-01: Consumed predecessor `0.7.0-dev.2529132193489.1`, run 41363033904, reservation 13106520643, passed exact staged fresh-PG17 and authenticated attached-upgrade checks. Physical packaging then stopped before producing an EXE: Windows PowerShell 5.1 advanced parameter binding evaluated the package script's PSScriptRoot-based default before script scope was available. The beforePack caller now passes the exact output root; all three native build scripts resolve omitted defaults in their bodies. A separate real Windows prefix regression reproduced the old package error and accepted the corrected prefix without running builds or changing the installed client. Full Windows packaging remains pending on this distinct identity; prior PG checks do not qualify the changed source.
+
+The clean-PC plus data-preserving upgrade acceptance requirement remains open. Fresh-only restrictions, internal Guardian release trust, first-Owner genesis and applied-policy blockers are not bypassed. Windows publisher signing remains deferred for this test build only. No installer or installed readiness is claimed.
+
+Historical predecessor notes:
+
+Prepared source package identity is `0.7.0-dev.2529132193489.1`.
+
+2026-11-01: Previous version `0.7.0-dev.2457446823794.1` was consumed by run 41359882719 at `c5bb36cbdfbd9980ecd6681b46aaf96eb1d806d5`, reservation artifact 13105160114. Its attached PostgreSQL test incorrectly used fresh onboarding after provisioning an existing direct API login. This successor tests authenticated upgrade with the same credentials and additionally rejects unauthenticated replay against existing grants. Local real PostgreSQL 17 replay passed; full Windows bundled qualification is still required. The ordinary producer must independently check and reserve this new identity.
+
+User acceptance requires BOTH self-contained clean-PC installation and data-preserving replacement of the older installed client. The current fresh-only installer gate does not satisfy the second requirement. Neither this package proposal nor passing database tests closes the installer upgrade, first-Owner, or applied-policy blockers. Windows publisher signing is deferred for this test build only. No installation or production readiness is claimed.
+
+Historical predecessor notes:
+
+Prepared source package identity is `0.7.0-dev.2457446823794.1`.
+
+2026-11-01: Previous attempt `0.7.0-dev.2309832227245.1` reserved artifact 13103954936 in run 41358637734 at `ba060afef14f6692abf78151ec0ac93388492292`, then failed before creating an installer because the runtime staging caller had not created its fixed native-dist parent. This successor repairs that preparation order. The normal CI producer must still verify and reserve this distinct version. Unsigned test package only; internal Guardian trust and unresolved first-Owner/policy gates remain unchanged. No installation result is claimed.
+
+Historical predecessor notes:
+
+Prepared source package identity is `0.7.0-dev.2309832227245.1`.
+
+2026-11-01: User requested an unsigned test installer from integrated source. This version is deterministically proposed from `1cf6bb5a895452aff54bea0cff5e7ec0f78a1d0a` above consumed predecessor `0.7.0-dev.2257027431866.1` (reservation artifact 12857849402, run 40783415257). Remote uniqueness and reservation remain the ordinary CI producer's responsibility; no absence of reservations is inferred. Windows publisher signing is deferred. Guardian's release checks, first Owner and applied sandbox-policy qualification remain unresolved and are not bypassed. No installation on the user's PC is authorized by this source note.
+
+Historical predecessor notes, retained without rewriting their evidence:
+
+Prepared source package identity is `0.7.0-dev.2257027431866.1`.
+
+Physical package-version reservation is pending. This is a source-only successor of `88eb062b09bd456d430bd0da37cb21baaddcee6d`, not a built, signed, installed-qualified or production-ready package. The supported read-only planner observation at 2026-10-26T12:14:11.149Z concerned the earlier proposed identity `0.7.0-dev.1359740117434.1`, with exclusive consumed-version floor `0.7.0-dev.1269944506140.1`. That historical observation found no reservation for the earlier identity; it is not evidence of reservation or readiness for the current prepared identity `0.7.0-dev.2257027431866.1`. It does not reserve either version. The ordinary producer must independently recheck the current final versioned source and publish its immutable reservation before a physical build.
 
 The consumed predecessor `0.7.0-dev.1107139874594.1` and separately consumed sibling `0.7.0-dev.1269944506140.1` remain burned. The sibling is not fabricated into this source line's ancestry or transition chain. Exact successor CI, physical Windows/native/own-PG package qualification and release signing remain pending. The inherited fresh-install-only diagnostic gate does not authorize replacement of the existing `.4594` installation: that migration remains HOLD. No historical success establishes readiness of this changed source.
 

@@ -63,9 +63,10 @@ export function createNativeCodingHostSeedBinding({sql,stateDirectory,readNative
   if(action==='SEED_GOAL'&&!service)fail('not_ready');
   const current=service||await prepare();
   open();assertNativeCodingHostRequestOpen(requestContext);
-  // Cold image/ACL preparation precedes the existing cryptographic freshness
-  // check. A packet that expired during setup is rejected, never re-signed or
-  // retried here. The next readonly request must carry a fresh signature.
+  // Cold protected-profile loading precedes cryptographic freshness. Image/ACL
+  // preparation belongs to authenticated SEED_GOAL and rechecks its original
+  // request lifetime and current device before any intent or SQL mutation.
+  // Packets are never re-signed or retried here.
   return context.run(action,checked,async input=>{
    open();assertNativeCodingHostRequestOpen(requestContext);
    const result=await current[action](input,requestContext);

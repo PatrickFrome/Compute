@@ -12,7 +12,7 @@ export function projectNativeRuntimeObservation(snapshot,{localProviderAttested=
   let attempt=null;
   const at=typeof mountAttempt?.attempted_at==='string'?Date.parse(mountAttempt.attempted_at):NaN;
   if(mountAttempt&&Object.keys(mountAttempt).sort().join(',')==='attempted_at,reason'
-   &&['HOST_UNAVAILABLE','OPERATOR_CONFIGURATION_MISSING','PROTECTED_PERMITS_UNAVAILABLE','SETUP_READBACK_FAILED'].includes(mountAttempt.reason)
+   &&['HOST_UNAVAILABLE','OPERATOR_CONFIGURATION_MISSING','INSTALLED_DEPENDENCY_SCOPE_UNBOUND','PROTECTED_PERMITS_UNAVAILABLE','SETUP_READBACK_FAILED'].includes(mountAttempt.reason)
    &&Number.isFinite(at)&&at>=0&&at<=now+5000&&new Date(at).toISOString()===mountAttempt.attempted_at)
    attempt=Object.freeze({reason:mountAttempt.reason,attempted_at:mountAttempt.attempted_at});
   return Object.freeze({...base,state:'UNBOUND',observed_at:observed,last_mount_attempt:attempt});

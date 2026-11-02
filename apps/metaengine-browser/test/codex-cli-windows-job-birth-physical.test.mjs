@@ -331,7 +331,7 @@ test('copied unassigned control omits only INNER association and preserves suspe
   const control = buildBirthGatedHelper(source, {...options, scenario: 'UNASSIGNED_CONTROL'});
   assert.equal(control.replace(omittedInnerAssociation, innerJobAttribute), bound);
   assert.ok(bound.includes(innerJobAttribute)); assert.ok(!control.includes(innerJobAttribute));
-  const nativeCreate = 'bool created=CreateProcess(exe,command,IntPtr.Zero,IntPtr.Zero,true,0x08000004|0x00080000,IntPtr.Zero,cwd,ref extended,out createdProcess);';
+  const nativeCreate = 'bool created=CreateProcess(exe,childCommandLine,IntPtr.Zero,IntPtr.Zero,true,0x08000004|0x00080000,IntPtr.Zero,cwd,ref extended,out createdProcess);';
   for (const variant of [bound, control]) {
     assert.equal(variant.split(nativeCreate).length, 2);
     assert.equal(variant.split('System.Threading.Thread.Sleep(10000);').length, 2);

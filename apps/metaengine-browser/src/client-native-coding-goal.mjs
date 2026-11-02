@@ -147,24 +147,17 @@ export function normalizeNativeCodingGoalProgress(raw,entry){
 // including after a lost IPC reply or a restart; refresh only calls READ_SEED.
 export function createClientNativeCodingGoalRouter({journal,request,projectSnapshot,onAdmitted=async()=>{}}={}){
   if(!journal||typeof request!=='function'||typeof projectSnapshot!=='function')fail('router_configuration');
-  if(!routerStates.has(journal))routerStates.set(journal,{inFlight:false,mount:null});
+  if(!routerStates.has(journal))routerStates.set(journal,{inFlight:false});
   const state=routerStates.get(journal);
-  async function observe(entry,raw){
+  async function recordAdmission(entry,raw){
     const input={request_id:entry.request_id,objective:entry.goal};
     const receipt=normalizeNativeCodingSeedResult(raw,input);
-    if(receipt?.schema==='metaengine.native-coding.seed-rejection.v1')return journal.recordNativeRejection(receipt);
-    if(!receipt){await journal.markReconcileRequired(entry.request_id,'native_seed_readback_required');return journal.get(entry.request_id);}
+    if(receipt?.schema==='metaengine.native-coding.seed-rejection.v1'){await journal.recordNativeRejection(receipt);return null;}
+    if(!receipt){await journal.markReconcileRequired(entry.request_id,'native_seed_readback_required');return null;}
     await journal.recordNativeAdmission(receipt);
-    // A receipt proves admission, not that this Browser still has an open
-    // runtime. Recheck after every verified read, including restored journals.
-    // Only concurrent observations join; successful mounts are never cached
-    // here because the private runtime/capability can subsequently close.
-    if(!state.mount){
-      const pending=Promise.resolve().then(()=>onAdmitted());state.mount=pending;
-      const settled=()=>{if(state.mount===pending)state.mount=null;};
-      pending.then(settled,settled);
-    }
-    try{await state.mount;}catch{/* Mount failure does not revoke a committed admission. */}
+    return receipt;
+  }
+  async function observeProject(entry,receipt){
     try{const progress=normalizeNativeCodingGoalProgress(await projectSnapshot({project_id:receipt.project_id,task_after_seq:0,limit:1}),journal.get(entry.request_id));
       await journal.recordNativeProgress(progress);}catch{
       // Preserve the last observation, explicitly label it stale, and never
@@ -172,6 +165,22 @@ export function createClientNativeCodingGoalRouter({journal,request,projectSnaps
       await journal.recordProjectError(entry.request_id,'Native project observation unavailable').catch(()=>{});
     }
     return journal.get(entry.request_id);
+  }
+  async function observe(entry,raw){
+    const receipt=await recordAdmission(entry,raw);
+    // Historical reads authenticate the original receipt and project only.
+    // Current execution tools, pins and pending mounts cannot gate history or
+    // start work from a refresh. Startup owns later runtime mounting.
+    return receipt?observeProject(entry,receipt):journal.get(entry.request_id);
+  }
+  async function observeSubmitted(entry,raw){
+    const receipt=await recordAdmission(entry,raw);
+    if(!receipt)return journal.get(entry.request_id);
+    // Only this explicit submission (including its immediate ACK readback)
+    // retains the existing effect/mount callback. Failure never revokes the
+    // committed admission or turns its physical execution into a proof.
+    try{await onAdmitted();}catch{/* Mount failure preserves committed admission. */}
+    return observeProject(entry,receipt);
   }
   return Object.freeze({
     async submit({request_id,goal}){
@@ -183,14 +192,14 @@ export function createClientNativeCodingGoalRouter({journal,request,projectSnaps
         if(prior)fail('request_already_recorded');
         const entry=await journal.begin({request_id,goal,kind:'NATIVE_CODING'});
         try{
-          const observed=await observe(entry,await request('SEED_GOAL',{request_id,objective:entry.goal}));
+          const observed=await observeSubmitted(entry,await request('SEED_GOAL',{request_id,objective:entry.goal}));
           if(observed.native_rejection)fail('rejected_before_dispatch:'+request_id);
           if(!observed.receipt)fail('seed_readback_required');
           return observed.receipt;
         }catch(error){
           if(journal.get(request_id)?.native_rejection)throw error;
           await journal.markReconcileRequired(request_id,error).catch(()=>{});
-          try{await observe(entry,await request('READ_SEED',{request_id,objective:entry.goal}));}catch{}
+          try{await observeSubmitted(entry,await request('READ_SEED',{request_id,objective:entry.goal}));}catch{}
           if(journal.get(request_id)?.native_rejection)fail('rejected_before_dispatch:'+request_id);
           fail('submit_requires_reconciliation:'+request_id);
         }

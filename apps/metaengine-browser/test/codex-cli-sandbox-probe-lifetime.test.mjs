@@ -4,11 +4,12 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import vm from 'node:vm';
 import {PassThrough} from 'node:stream';
+import {snapshotCodexCliPrivateTools,codexCliPrivateEnvironment} from '../src/codex-cli-runner.mjs';
 const source=await fs.readFile(new URL('../src/codex-cli-sandbox-probe.mjs',import.meta.url),'utf8');
 const start=source.indexOf('export async function runCodexCliSandboxProbe(');
 assert.ok(start>0);
-function fixture({failOpen=0,failSpawn=false,failResume=false,failSync=false,failTerminate=false,holdSync=false,failWrite=false,overflow=false,emitReport=false,pathApi=path}={}){
- const handles=[],events=[];let opens=0,finish,finishSync;
+function fixture({failOpen=0,failSpawn=false,failResume=false,failSync=false,failTerminate=false,holdSync=false,failWrite=false,overflow=false,emitReport=false,pathApi=path,scopeChangesAt=Infinity,tempChangesAt=Infinity,scopeCliSha='a'.repeat(64)}={}){
+ const handles=[],events=[],specs=[];let opens=0,finish,finishSync,scopeReads=0,tempReads=0;
  const syncGate=new Promise(resolve=>{finishSync=resolve;});
  const completion=new Promise(resolve=>{finish=resolve;});
  const handle={proof:{fixture_only:true},stdout:new PassThrough(),stderr:new PassThrough(),completion,
@@ -19,15 +20,82 @@ function fixture({failOpen=0,failSpawn=false,failResume=false,failSync=false,fai
  const run=vm.runInNewContext(source.slice(start).replace('export async function','async function')+'\nrunCodexCliSandboxProbe',{
   fs:files,path:pathApi,Buffer,process:{platform:'win32',env:{LOCALAPPDATA:'/fixture/local',USERPROFILE:'/fixture/user'}},
   randomUUID:()=> '11111111-1111-4111-8111-111111111111',modeValid:()=>true,isWithin:(a,b)=>{const r=pathApi.relative(a,b);return r!==''&&!r.startsWith('..')&&!pathApi.isAbsolute(r);},
-  CODEX_SANDBOX_PROBE_SCHEMA:'metaengine.codex-cli.sandbox-probe.v1',evaluateCodexSandboxProbe:()=>({state:'OBSERVED',reason:null,boundary_observed:true,execution_authorized:false,authority_effect:false}),
+  CODEX_SANDBOX_PROBE_SCHEMA:'metaengine.codex-cli.sandbox-probe.v2',evaluateCodexSandboxProbe:()=>({state:'OBSERVED',reason:null,boundary_observed:true,execution_authorized:false,authority_effect:false}),
   canaryScript:()=> 'fixture-only',windowsSandboxBootIdentity:()=> 'fixture',protectOwnerOnlyWindowsDirectory:async()=>({owner_dacl_verified:true}),
   verifyOwnerOnlyWindowsStorage:async()=>({owner_dacl_verified:true}),digest:()=> 'a'.repeat(64),buildCodexSandboxProbeArgs:()=>[],
   codexCliTemporaryEnvironment:v=>v,codexCliEnvironment:()=>({}),POWERSHELL:'/fixture/powershell',
+  captureCodexCliPhysicalScope:async()=>({schema:'fixture-physical-scope',cli:{sha256:scopeCliSha},generation:++scopeReads>=scopeChangesAt?'changed':'original',configuration_attestation:'UNAVAILABLE'}),codexCliInvocationFingerprint:()=> 'b'.repeat(64),
+  readDirectoryIdentity:async()=>++tempReads>=tempChangesAt?'changed-temporary-identity':'original-temporary-identity',
+  snapshotCodexCliPrivateTools,codexCliPrivateEnvironment,
   readWindowsSandboxProcess:async()=>({}),readWindowsSandboxHostBoot:async()=>({}),
  });
- return {handles,events,finish,finishSync,run:extra=>run({cliPath:'/fixture/cli',workspaceRoot:'/fixture/work',receiptDirectory:'/fixture/receipts',
-  codexHome:'/fixture/auth',scratchRoot:'/fixture/scratch',mode:'read-only',hostUserSid:'S-1-5-21-1',processController:{spawn:async()=>{events.push('spawn');if(failSpawn)throw Error('generated_spawn_failure');return handle;}},...extra})};
+ return {handles,events,specs,finish,finishSync,run:extra=>run({cliPath:'/fixture/cli',workspaceRoot:'/fixture/work',receiptDirectory:'/fixture/receipts',
+  codexHome:'/fixture/auth',scratchRoot:'/fixture/scratch',mode:'read-only',hostUserSid:'S-1-5-21-1',processController:{spawn:async spec=>{events.push('spawn');specs.push(spec);if(failSpawn)throw Error('generated_spawn_failure');return handle;}},...extra})};
 }
+test('probe refuses a CLI mutation between its byte pin and scope capture before log creation or spawn',async()=>{
+ const f=fixture({scopeCliSha:'c'.repeat(64)});await assert.rejects(f.run(),/cli_changed/);
+ assert.equal(f.handles.length,0);assert.equal(f.events.includes('spawn'),false);
+});
+for(const change of ['scope','temporary'])test('probe refuses '+change+' replacement before native spawn',async()=>{
+ const f=fixture(change==='scope'?{scopeChangesAt:2}:{tempChangesAt:2});
+ await assert.rejects(f.run(),/scope_changed/);assert.equal(f.events.includes('spawn'),false);
+ assert.ok(f.handles.every(h=>h.closed));
+});
+test('probe scope replacement after native spawn retains completion and never resumes',async()=>{
+ const f=fixture({scopeChangesAt:3});let settled=false;
+ const result=f.run().then(value=>{settled=true;return value;},error=>{settled=true;return error;});
+ await new Promise(resolve=>setImmediate(resolve));assert.equal(f.events.includes('spawn'),true);
+ assert.equal(f.events.includes('terminate'),true);assert.equal(f.events.includes('resume'),false);assert.equal(settled,false);
+ f.finish({fixture_only:true});assert.match((await result).message,/process_unconfirmed/);assert.ok(f.handles.every(h=>h.closed));
+});
+test('probe physical scope drift after canary completion cannot emit an observed receipt',async()=>{
+ const f=fixture({scopeChangesAt:4}),pending=f.run();await new Promise(resolve=>setImmediate(resolve));f.finish({fixture_only:true});
+ const result=await pending;assert.equal(result.state,'BLOCKED');assert.equal(result.reason,'SANDBOX_EXECUTION_SCOPE_CHANGED');
+ assert.equal(result.boundary_observed,false);
+});
+
+test('probe private bundle rejection happens before files, logs or process effects',async()=>{
+ const f=fixture();let checks=0;
+ const privateTools={cliExecutable:'/fixture/cli',gitExecutable:'/fixture/git',cliExecutableSha256:'a'.repeat(64),gitExecutableSha256:'b'.repeat(64),
+  environment:{PATH:'package-only'},revalidate:async()=>{checks++;throw Error('fixture_bundle_missing');}};
+ await assert.rejects(f.run({privateTools}),/fixture_bundle_missing/);
+ assert.equal(checks,1);assert.equal(f.events.length,0);
+ await assert.rejects(f.run({privateTools:{...privateTools,cliExecutable:'/fixture/foreign-cli'}}),/private_tools_binding/);
+ assert.equal(f.events.length,0);
+});
+
+test('probe preserves package-only helper paths and rechecks closure immediately before spawn',async()=>{
+ const f=fixture();let checks=0;
+ const environment={PATH:'package-only',GIT_EXEC_PATH:'private-libexec',GIT_SSL_CAINFO:'private-ca'};
+ const privateTools={cliExecutable:'/fixture/cli',gitExecutable:'/fixture/git',cliExecutableSha256:'a'.repeat(64),gitExecutableSha256:'b'.repeat(64),
+  environment,revalidate:async()=>{checks++;}};
+ const result=f.run({privateTools});
+ environment.PATH='decoy-after-selection';
+ await new Promise(resolve=>setImmediate(resolve));assert.equal(f.specs.length,1);
+ assert.equal(f.specs[0].env.PATH,'package-only');assert.equal(f.specs[0].env.GIT_EXEC_PATH,'private-libexec');
+ assert.equal(f.specs[0].env.CODEX_HOME,'/fixture/auth');assert.equal(checks,3);
+ f.finish({fixture_only:true});await result;
+});
+
+test('probe bundle drift before resume terminates and joins its suspended worker',async()=>{
+ const f=fixture();let drift=false,settled=false;
+ const privateTools={cliExecutable:'/fixture/cli',gitExecutable:'/fixture/git',cliExecutableSha256:'a'.repeat(64),gitExecutableSha256:'b'.repeat(64),
+  environment:{PATH:'package-only'},revalidate:async()=>{if(drift)throw Error('fixture_bundle_drift');}};
+ const result=f.run({privateTools,onProcessStarted:()=>{drift=true;}}).then(()=>{settled=true;return null;},error=>{settled=true;return error;});
+ await new Promise(resolve=>setImmediate(resolve));assert.equal(f.events.includes('resume'),false);assert.equal(f.events.includes('terminate'),true);
+ assert.equal(settled,false);assert.ok(f.handles.every(h=>!h.closed));
+ f.finish({fixture_only:true});assert.match((await result).message,/process_unconfirmed/);assert.ok(f.handles.every(h=>h.closed));
+});
+test('probe private bundle drift after canary completion cannot emit OBSERVED',async()=>{
+ const f=fixture();let drift=false;
+ const privateTools={cliExecutable:'/fixture/cli',gitExecutable:'/fixture/git',cliExecutableSha256:'a'.repeat(64),gitExecutableSha256:'b'.repeat(64),
+  environment:{PATH:'package-only'},revalidate:async()=>{if(drift)throw Error('fixture_bundle_drift');}};
+ const pending=f.run({privateTools});await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(f.events.includes('resume'),true);drift=true;f.finish({fixture_only:true});
+ const result=await pending;assert.equal(result.state,'BLOCKED');
+ assert.equal(result.reason,'SANDBOX_EXECUTION_SCOPE_CHANGED');assert.equal(result.boundary_observed,false);
+});
+
 test('probe refuses absent explicit home or scratch selection before creating files or spawning',async()=>{
  for(const extra of [{codexHome:undefined},{scratchRoot:undefined},{codexHome:'relative'},{scratchRoot:'relative'}]){
   const f=fixture();await assert.rejects(f.run(extra),/configuration_invalid/);

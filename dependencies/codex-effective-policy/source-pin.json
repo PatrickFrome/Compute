@@ -1,0 +1,29 @@
+{
+  "schema": "metaengine.codex.source-overlay.v1",
+  "repository": "https://github.com/openai/codex.git",
+  "tag": "rust-v0.159.0-alpha.3",
+  "commit": "3b01b36fa5eb96ba82a776bd3c2fc57f8969181f",
+  "tree": "d22150f47f6f6d6b1332583987e862981c951388",
+  "rust_toolchain": "1.95.0",
+  "inputs": {
+    "upstream.patch": "068c1e3e8eccef9c29713213e51fa51b638e85e99713c676d805a445229a656c",
+    "LICENSE": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc",
+    "NOTICE": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915",
+    "src/metaengine_effective_policy.rs": "7fd846c9738eae71144fce5c86a01e30db7d81f1ca78e106dc1d72243680c0fd",
+    "src/metaengine_effective_policy_projection.rs": "2988354f1e46f1bf16d60140ffdc736029be093b909ea47d3f33cc94d1d34936",
+    "src/metaengine_effective_policy_projection_tests.rs": "b4cba0a5ead68de89427e193dd3f3c055dea74ce37f7e073906eb45c28ee9f2f",
+    "src/metaengine_effective_policy_tests.rs": "40169c88567bef58e899946bdb129a23cbece0bdae57d85343d50fa7796fe634"
+  },
+  "overlays": {
+    "codex-rs/app-server/src/metaengine_effective_policy.rs": "src/metaengine_effective_policy.rs",
+    "codex-rs/app-server/src/metaengine_effective_policy_projection.rs": "src/metaengine_effective_policy_projection.rs",
+    "codex-rs/app-server/src/metaengine_effective_policy_projection_tests.rs": "src/metaengine_effective_policy_projection_tests.rs",
+    "codex-rs/app-server/src/metaengine_effective_policy_tests.rs": "src/metaengine_effective_policy_tests.rs"
+  },
+  "workspace_lock": {
+    "original_sha256": "5c3fd1fe59676117cd7fc9c55daafee90d95d0afedd13b9e1a71e10cad029a81",
+    "normalized_sha256": "76435de9b4ebb0cd3d364d99699151f231e4c8344c94d313aab13d64cf5b1570",
+    "workspace_package_count": 158,
+    "workspace_version": "0.159.0-alpha.3"
+  }
+}

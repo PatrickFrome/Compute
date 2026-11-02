@@ -1,6 +1,9 @@
 import test from 'node:test';
+import vm from 'node:vm';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
+import {spawnSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
 const source=await readFile(new URL('../../.github/workflows/client-checkpoint-reconciliation-qualification.yml',import.meta.url),'utf8');
 const pr=source.slice(source.indexOf('  pull_request:'),source.indexOf('  push:'));
 const paths=[...pr.matchAll(/^\s+- '([^']+)'$/gm)].map(m=>m[1]);
@@ -227,8 +230,9 @@ test('exact status bytes and substituted directory alias remain mandatory named 
   'committed status with intended U+FFFD cannot accept same-inode malformed UTF8 after lost rename acknowledgement',
   'distinct malformed UTF8 preimage bytes cannot authorize a status rename even when both decode to U+FFFD'])
   assert.ok(required.includes("'"+name+"',"),name+' must remain a required non-skipped case');
- // The sole existing counterfactual baseline skip is not broadened for aliases.
- assert.match(source,/skipped\.length!==1\|\|skipped\[0\]\.name!==baseline/);
+ // Only the counterfactual baseline and an impossible POSIX raw-byte filename case may skip; never Windows alias cases.
+ assert.match(source,/expectedSkipped=\[baseline,windowsNonApplicable\]/);
+ assert.match(source,/expectedSkipped\.some\(name=>skipped\.filter\(row=>row\.name===name\)\.length!==1\)/);
 });
 
 test('directory alias negative runs on Windows with a real disposable junction, not a platform skip',async()=>{
@@ -263,4 +267,89 @@ test('managed Git executor bytes are retained in the qualification source receip
  const inventory=source.slice(start,end);
  const entry="'apps/metaengine-browser/src/managed-task-project-runtime.mjs'";
  assert.equal(inventory.split(entry).length-1,1,'the executed Git implementation must be hashed exactly once');
+});
+
+test('durable physical custody source and PG17 suites are mandatory Windows outcomes with exact producer/consumer source receipts',async()=>{
+ const component=source.slice(source.indexOf('          const component=['),source.indexOf('          const native=['));
+ const native=source.slice(source.indexOf('          const native=['),source.indexOf('          const componentRequired=['));
+ const componentRequired=source.slice(source.indexOf('          const componentRequired=['),source.indexOf('          const nativeRequired=['));
+ const nativeRequired=source.slice(source.indexOf('          const nativeRequired=['),source.indexOf('          const baseline='));
+ const sourcePaths=source.slice(source.indexOf('          const sourcePaths=['),source.indexOf('          const sources=[];'));
+ for(const [files,lane,required] of [
+  [['native-coding-physical-task.test.mjs','native-coding-physical-ipc.test.mjs','native-coding-physical-authority.test.mjs','native-coding-setup-job-drain.test.mjs'],component,componentRequired],
+  [['native-coding-physical-custody.pg17.test.mjs','native-coding-physical-restart.pg17.test.mjs','native-coding-setup.pg17.test.mjs'],native,nativeRequired],
+ ])for(const file of files){
+  const full='infra/client-state-runtime/'+file;
+  assert.equal(lane.split("'"+full+"',").length-1,1,full+' must run exactly once in its mandatory Windows lane');
+  assert.ok(paths.some(pattern=>matches(full,pattern)),full+' must trigger Windows qualification');
+  const fixture=await readFile(new URL('./'+file,import.meta.url),'utf8');
+  for(const match of fixture.matchAll(/(?:^|\n)\s*(?:await t\.)?test\('([^']+)'/g)){
+   if(match[1].endsWith(' '))continue; // Generated parameter cases still run under the zero-SKIP gate.
+   assert.ok(required.includes("'"+match[1]+"',"),match[1]+' must be a named mandatory outcome');
+  }
+ }
+ for(const file of ['infra/client-state-runtime/native-coding-physical-custody.mjs',
+  'infra/client-state-runtime/native-coding-physical-custody-v1.sql',
+  'infra/client-state-runtime/native-coding-host-capacity.mjs',
+  'infra/client-state-runtime/native-coding-capacity-v2.sql',
+  'infra/client-state-runtime/native-coding-host-setup-service.mjs',
+  'infra/client-state-runtime/native-coding-setup-job-drain.mjs',
+  'infra/client-state-runtime/test/fixtures/native-coding-physical-task-fixture.mjs',
+  'infra/client-state-runtime/test/run-physical-custody-pg17.mjs',
+  'apps/metaengine-browser/src/native-coding-run-callback-journal.mjs',
+  'infra/client-state-runtime/package.json']){
+  assert.ok(paths.some(pattern=>matches(file,pattern)),file+' must trigger Windows qualification');
+  assert.equal(sourcePaths.split("'"+file+"'").length-1,1,file+' must be hashed exactly once');
+ }
+ assert.match(source,/assert\.equal\(process\.platform,'win32'\)/);
+ assert.match(source,/counts\.skipped!==0\|\|skipped\.length/);
+ assert.match(source,/expectedSkipped=\[baseline,windowsNonApplicable\]/);
+ assert.match(source,/expectedSkipped\.some\(name=>skipped\.filter\(row=>row\.name===name\)\.length!==1\)/);
+ assert.match(source,/scope:'SOURCE_COMPONENT_AND_DISPOSABLE_PG17_FIXTURES'/);
+ assert.match(source,/installed_autonomy_proven:false,production_qualified:false/);
+});
+
+test('physical custody npm entrypoints require actual PG17 execution and cannot succeed by skipping missing inputs',async()=>{
+ const pkg=JSON.parse(await readFile(new URL('./package.json',import.meta.url),'utf8'));
+ for(const file of ['native-coding-physical-task.test.mjs','native-coding-physical-ipc.test.mjs','native-coding-physical-authority.test.mjs','native-coding-setup-job-drain.test.mjs'])assert.equal(pkg.scripts.test.split(' ').filter(value=>value===file).length,1,file);
+ assert.equal(pkg.scripts['test:physical-custody:pg17'],'node test/run-physical-custody-pg17.mjs');
+ const runner=await readFile(new URL('./test/run-physical-custody-pg17.mjs',import.meta.url),'utf8');
+ for(const file of ['native-coding-physical-custody.pg17.test.mjs','native-coding-physical-restart.pg17.test.mjs','native-coding-setup.pg17.test.mjs'])assert.ok(runner.includes("'"+file+"'"),file);
+ assert.ok(runner.includes("'--test-isolation=process'"));assert.ok(runner.includes("'--test-concurrency=1'"));
+ assert.ok(runner.includes('physical_pg17_required_case_not_executed'));
+ const env=Object.fromEntries(Object.entries(process.env).filter(([key])=>!/^METAENGINE_PG_TEST_(?:BIN|DRIVER|BASE)$/i.test(key)));
+ const result=spawnSync(process.execPath,[fileURLToPath(new URL('./test/run-physical-custody-pg17.mjs',import.meta.url))],
+  {env,encoding:'utf8',windowsHide:true,shell:false,timeout:5000});
+ assert.equal(result.status,1);assert.equal(result.stdout,'');assert.equal(result.stderr.trim(),'physical_pg17_explicit_inputs_required');
+});
+
+
+test('actual Windows TAP gate rejects unknown or duplicate skips and never skips required/native cases',()=>{
+ const baseline='BASE reproduction: killed child after durable Git receipt leaves COMMITTED/PENDING and observer HOLD';
+ const windowsNonApplicable='physical Git proof rejects raw invalid UTF-8 POSIX filenames before and after content changes';
+ const start=source.indexOf('          function inspectTap('),end=source.indexOf('          // No source test',start);
+ assert.ok(start>=0&&end>start);
+ const inspect=vm.runInNewContext(source.slice(start,end)+';inspectTap',{baseline,windowsNonApplicable,publicName:v=>v,hash:()=> 'fixture'});
+ const tap=(names,required='required')=>['TAP version 13',...names.map((name,i)=>`ok ${i+1} - ${name} # SKIP`),
+  `ok ${names.length+1} - ${required}`,`1..${names.length+1}`,`# tests ${names.length+1}`,'# suites 0','# pass 1','# fail 0','# cancelled 0',`# skipped ${names.length}`,'# todo 0'].join('\n');
+ assert.equal(inspect(tap([baseline,windowsNonApplicable]),['required'],true).bad.length,0);
+ const diagnostic=inspect(tap([baseline,windowsNonApplicable])+'\n# SETUP_ROUTE_PHASE_BEGIN:123\n# SETUP_ROUTE_PHASE_SECRET:123\n# SETUP_ROUTE_PHASE_BEGIN:C:/private/path',['required'],true);
+ assert.ok(diagnostic.tap.includes('# SETUP_ROUTE_PHASE_BEGIN:123'));
+ assert.equal(diagnostic.tap.includes('SECRET'),false);assert.equal(diagnostic.tap.includes('C:/private/path'),false);
+ for(const names of [[baseline],[baseline,baseline],[baseline,'unknown'],[baseline,windowsNonApplicable,'unknown']])
+  assert.ok(inspect(tap(names),['required'],true).bad.includes('current_component_case_skipped'));
+ assert.ok(inspect(tap([baseline,windowsNonApplicable]),[windowsNonApplicable],true).bad.some(v=>v.startsWith('required_case_missing_')));
+ assert.ok(inspect(tap([baseline,windowsNonApplicable]),[],false).bad.includes('native_case_skipped'));
+});
+
+
+test('native setup gate requires actual integrated origin producer cases instead of retired callback-only names',async()=>{
+ const required=source.slice(source.indexOf('          const nativeRequired=['),source.indexOf('          const baseline='));
+ const tests=await readFile(new URL('./native-coding-setup.pg17.test.mjs',import.meta.url),'utf8');
+ for(const name of ['actual Git materializer publishes one origin token after resource milestone and terminal readback while full job drain waits',
+  'unconfirmed native resources or lost terminal ACK/readback prevent origin publication and cannot replay Git']){
+  assert.equal(required.split("'"+name+"'").length-1,1);assert.ok(tests.includes("t.test('"+name+"'"));
+ }
+ for(const old of ['actual joined setup job issues one opaque one-use ownership token only after cancellation and committed terminal readback',
+  'unconfirmed job owner or missing committed terminal readback cannot issue setup job-drain ownership'])assert.equal(required.includes(old),false);
 });

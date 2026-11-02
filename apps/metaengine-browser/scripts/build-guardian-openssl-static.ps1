@@ -70,11 +70,11 @@ if (-not $VcVarsPath) {
 }
 $vcvarsOriginal = (Resolve-Path -LiteralPath $VcVarsPath).Path
 Assert-CmdPath $vcvarsOriginal
-$python = (Get-Command python.exe -CommandType Application -ErrorAction Stop).Source
-$perl = (Get-Command perl.exe -CommandType Application -ErrorAction Stop).Source
+$python = (Get-Command python.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+$perl = (Get-Command perl.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
 if ($NodePath) { $node = (Resolve-Path -LiteralPath $NodePath).Path }
 else {
-  $node = (Get-Command node.exe -CommandType Application -ErrorAction Stop).Source
+  $node = (Get-Command node.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
   $defaultNodeVersion = (& $node -p 'process.versions.node').Trim()
   if ($LASTEXITCODE -ne 0) { throw 'guardian_openssl_node_version_probe_failed' }
   if ([version]$defaultNodeVersion -lt [version]'24.0.0' -and $env:RUNNER_TOOL_CACHE) {
@@ -94,10 +94,10 @@ if ($LASTEXITCODE -ne 0 -or [version]$nodeVersion -lt [version]'24.0.0') { throw
 $perlHost = (& $perl -e 'print $^O').Trim()
 if ($LASTEXITCODE -ne 0 -or $perlHost -cne 'MSWin32') { throw 'guardian_openssl_native_windows_perl_required' }
 if (-not $GpgPath) {
-  $gpgCommand = Get-Command gpg.exe -CommandType Application -ErrorAction SilentlyContinue
+  $gpgCommand = Get-Command gpg.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
   if ($gpgCommand) { $GpgPath = $gpgCommand.Source }
   else {
-    $gitDir = Split-Path (Get-Command git.exe -CommandType Application -ErrorAction Stop).Source -Parent
+    $gitDir = Split-Path (Get-Command git.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source -Parent
     foreach ($relative in @('../usr/bin/gpg.exe','../../usr/bin/gpg.exe')) {
       $candidate = [IO.Path]::GetFullPath((Join-Path $gitDir $relative))
       if (Test-Path -LiteralPath $candidate -PathType Leaf) { $GpgPath = $candidate; break }
