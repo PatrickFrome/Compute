@@ -1,3 +1,11 @@
+Prepared source package identity is `0.7.0-dev.2894075958544.1`.
+
+2026-11-02: Predecessor `0.7.0-dev.2728883494179.1` was reserved by run 41367008565, artifact 13107342510. Independent earlier exact-source crypto qualification exposed native/W77 reserved-version drift: the C++ parser retained only two historic refusals while the W77 list had grown. The actual native test rejected none of the newly consumed identities. This successor aligns the native refusal list and runs a source-level equality gate before package reservation and before expensive crypto compilation. A locally compiled real C++ verifier reproduces the old failure and passes the corrected cross-language checks with system OpenSSL; this is not pinned Windows crypto qualification or a production-root positive signature. Both language lists include the consumed predecessor, and the next physical producer must independently reserve this new version.
+
+Clean-PC setup, data-preserving upgrade, first Owner, internal release trust and applied execution-policy qualification remain open. Windows publisher signing alone is deferred. No EXE or installed readiness is claimed.
+
+Historical predecessor notes:
+
 Prepared source package identity is `0.7.0-dev.2728883494179.1`.
 
 2026-11-02: Consumed predecessor `0.7.0-dev.2656093458019.1`, run 41364780649, reservation 13106881670, passed fresh and attached PostgreSQL checks and passed the repaired PowerShell parameter-binding boundary. Packaging stopped at the strict clean-source guard because runtime staging left downloaded private-tool archives under an unignored in-checkout native-cache directory. This successor moves archive acquisition into physically verified external build work; beforePack's fallback also uses an external unique directory. The full tracked/untracked source guard and archive pins remain unchanged. A real disposable Git regression proves the former cache dirtied the checkout, external acquisition does not, and unexpected files plus tracked edits remain visible.

@@ -52,3 +52,13 @@ test('reserved identities and source-free input fail closed; no JSON verified fl
   assert.equal(inspectUnfrozenPackageIdentityW68({version:'bad'}).disposition,'INVALID_VERSION');
   assert.equal(inspectUnfrozenPackageIdentityW68({version:'0.7.0-dev.999999999999.1'}).disposition,'BLOCKED_UNBOUND_SOURCE');
 });
+
+
+test('native reserved version policy matches W77 before expensive packaging or reservation', async () => {
+  const native = await readFile(new URL('../native/browser-guardian-scm/browser-guardian-release-signature.cpp', import.meta.url), 'utf8');
+  const block = /constexpr std::string_view kReservedPackageVersions\[\] = \{([\s\S]*?)\};/.exec(native);
+  assert(block, 'native reserved version list must be explicit and reviewed');
+  const versions = [...block[1].matchAll(/"(0\.7\.0-dev\.[0-9]+\.1)"/g)].map(match => match[1]);
+  assert.deepEqual(versions, RESERVED_PACKAGE_IDENTITIES_W68, 'update BOTH native and W77 policies when burning a package version');
+  assert.match(native, /for \(const auto reserved : kReservedPackageVersions\)\s*if \(version == reserved\) return std::nullopt;/);
+});

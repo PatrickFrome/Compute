@@ -50,7 +50,18 @@ std::optional<ReleaseManifestV2> parseCanonicalManifest(std::string_view bytes) 
         || version.size() > 64 || version[start.size()] == '0') return std::nullopt;
     // Same historical refusal as the existing W77 serializer. Cross-language
     // tests iterate its canonical source list, so additions cannot go unnoticed.
-    if (version == "0.7.0-dev.37781000062.1" || version == "0.7.0-dev.842024784850.1") return std::nullopt;
+    constexpr std::string_view kReservedPackageVersions[] = {
+        "0.7.0-dev.2728883494179.1",
+        "0.7.0-dev.2656093458019.1",
+        "0.7.0-dev.2529132193489.1",
+        "0.7.0-dev.2457446823794.1",
+        "0.7.0-dev.37781000062.1",
+        "0.7.0-dev.842024784850.1",
+        "0.7.0-dev.2309832227245.1",
+        "0.7.0-dev.2257027431866.1",
+    };
+    for (const auto reserved : kReservedPackageVersions)
+        if (version == reserved) return std::nullopt;
     for (const char c : version.substr(start.size(), version.size() - start.size() - finish.size()))
         if (c < '0' || c > '9') return std::nullopt;
     for (std::size_t i = 4; i < values.size(); ++i) if (!lowerHex(values[i], i == 5 ? 40 : 64)) return std::nullopt;

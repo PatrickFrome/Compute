@@ -62,7 +62,7 @@ jobs:
           node-version: '24'
 
       - name: Exercise staged-byte binding and namespace source contracts
-        run: node --test apps/metaengine-browser/test/guardian-native-package-verification.test.mjs apps/metaengine-browser/test/browser-guardian-installed-namespace-native.test.mjs
+        run: node --test apps/metaengine-browser/test/browser-convergence-package-identity.test.mjs apps/metaengine-browser/test/guardian-native-package-verification.test.mjs apps/metaengine-browser/test/browser-guardian-installed-namespace-native.test.mjs
 
       - name: Run offline source acquisition and extraction adversarial tests
         shell: bash
