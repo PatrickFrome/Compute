@@ -1,3 +1,11 @@
+Prepared source package identity is `0.7.0-dev.2728883494179.1`.
+
+2026-11-02: Consumed predecessor `0.7.0-dev.2656093458019.1`, run 41364780649, reservation 13106881670, passed fresh and attached PostgreSQL checks and passed the repaired PowerShell parameter-binding boundary. Packaging stopped at the strict clean-source guard because runtime staging left downloaded private-tool archives under an unignored in-checkout native-cache directory. This successor moves archive acquisition into physically verified external build work; beforePack's fallback also uses an external unique directory. The full tracked/untracked source guard and archive pins remain unchanged. A real disposable Git regression proves the former cache dirtied the checkout, external acquisition does not, and unexpected files plus tracked edits remain visible.
+
+The ordinary producer must reserve and qualify this distinct identity. Clean-PC infrastructure setup and data-preserving existing-client upgrade remain required; the current fresh-only NSIS gate and first-Owner/internal-trust/applied-policy blockers remain open. No EXE, installed readiness or production promotion is claimed.
+
+Historical predecessor notes:
+
 Prepared source package identity is `0.7.0-dev.2656093458019.1`.
 
 2026-11-01: Consumed predecessor `0.7.0-dev.2529132193489.1`, run 41363033904, reservation 13106520643, passed exact staged fresh-PG17 and authenticated attached-upgrade checks. Physical packaging then stopped before producing an EXE: Windows PowerShell 5.1 advanced parameter binding evaluated the package script's PSScriptRoot-based default before script scope was available. The beforePack caller now passes the exact output root; all three native build scripts resolve omitted defaults in their bodies. A separate real Windows prefix regression reproduced the old package error and accepted the corrected prefix without running builds or changing the installed client. Full Windows packaging remains pending on this distinct identity; prior PG checks do not qualify the changed source.

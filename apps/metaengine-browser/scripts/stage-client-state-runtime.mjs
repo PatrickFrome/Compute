@@ -78,6 +78,10 @@ export async function stageClientStateRuntime({ repositoryRoot = path.resolve(he
   if (process.platform !== 'win32') throw new Error('runtime_build_windows_x64_required');
   const root = await realpath(repositoryRoot);
   const work = externalBuildWorkDirectory(root, workDirectory);
+  await mkdir(work, { recursive: true });
+  externalBuildWorkDirectory(root, await realpath(work));
+  await writeFile(path.join(work, 'runtime-build-work.json'), JSON.stringify({ schema: 'compute.runtime-build-work.v1',
+    repository_root: root, runtime_liveness_proven: false, private_data_included: false }) + '\n', { flag: 'wx' });
   // Build-only acquisition uses the same pinned canonical producer as beforePack.
   // No caller supplies a tools digest and the installed Host never downloads it.
   const { acquirePrivateNativeToolArchives, stagePrivateNativeTools, assertPrivateNativeToolsManifestPins } = await import('./stage-private-native-tools.mjs');
@@ -85,7 +89,7 @@ export async function stageClientStateRuntime({ repositoryRoot = path.resolve(he
   const privateToolsRoot = path.join(root, 'apps/metaengine-browser/native-dist/private-native-tools');
   if (!await stat(privateToolsRoot).catch(error => { if (error.code === 'ENOENT') return null; throw error; })) {
     await preparePrivateToolsStagingParent(root);
-    const toolArchives = path.join(root, 'apps/metaengine-browser/native-cache/private-tools');
+    const toolArchives = path.join(work, 'private-tool-archives');
     await mkdir(toolArchives, { recursive: true });
     await acquirePrivateNativeToolArchives({ archiveDirectory: toolArchives });
     await stagePrivateNativeTools({ archiveDirectory: toolArchives, outputDirectory: privateToolsRoot });
@@ -95,10 +99,6 @@ export async function stageClientStateRuntime({ repositoryRoot = path.resolve(he
   const privateToolsBinding = privateNativeToolsBinding(privateManifestBytes);
   const privateTools = await resolvePrivateNativeTools({ toolsRoot: privateToolsRoot, binding: privateToolsBinding });
   const output = path.resolve(outputDirectory || path.join(root, 'apps/metaengine-browser/client-state-runtime-dist'));
-  await mkdir(work, { recursive: true });
-  externalBuildWorkDirectory(root, await realpath(work));
-  await writeFile(path.join(work, 'runtime-build-work.json'), JSON.stringify({ schema: 'compute.runtime-build-work.v1',
-    repository_root: root, runtime_liveness_proven: false, private_data_included: false }) + '\n', { flag: 'wx' });
   const archives = archiveDirectory ? externalBuildWorkDirectory(root, await realpath(archiveDirectory)) : path.join(work, 'archives');
   if (!archiveDirectory) await mkdir(archives);
   const [nodeZip, denoZip, pgZip] = await Promise.all([

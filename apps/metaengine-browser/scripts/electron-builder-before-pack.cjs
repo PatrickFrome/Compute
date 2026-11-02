@@ -228,8 +228,11 @@ async function metaengineGuardianNativeBeforePack(context) {
   const { privateNativeToolsBinding, resolvePrivateNativeTools } = await import('../src/private-native-tools.mjs');
   const privateToolsRoot = path.join(appRoot, 'native-dist', 'private-native-tools');
   if (!fs.existsSync(privateToolsRoot)) {
-    const archiveDirectory = path.join(appRoot, 'native-cache', 'private-tools');
-    fs.mkdirSync(archiveDirectory, { recursive: true });
+    const { externalBuildWorkDirectory } = await import('./stage-client-state-runtime.mjs');
+    const archivePrefix = path.join(fs.realpathSync(os.tmpdir()), 'guardian-package-tool-archives-');
+    externalBuildWorkDirectory(repoRoot, archivePrefix);
+    const archiveDirectory = fs.mkdtempSync(archivePrefix);
+    externalBuildWorkDirectory(repoRoot, fs.realpathSync(archiveDirectory));
     await acquirePrivateNativeToolArchives({ archiveDirectory });
     await stagePrivateNativeTools({ archiveDirectory, outputDirectory: privateToolsRoot });
   }
