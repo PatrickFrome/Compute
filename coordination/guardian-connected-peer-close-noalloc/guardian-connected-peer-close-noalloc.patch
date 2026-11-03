@@ -1,0 +1,636 @@
+diff --git a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-connected-peer.cpp b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-connected-peer.cpp
+index 73bb1b6..160e04a 100644
+--- a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-connected-peer.cpp
++++ b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-connected-peer.cpp
+@@ -820,7 +820,8 @@ bool GuardianConnectedPeer::recheck() {
+ std::string GuardianConnectedPeer::snapshotJson() const {
+     std::lock_guard<std::mutex> guard(state_->lock);
+     if (state_->current_release_policy_bound) state_->releaseClockFence();
+-    return "{\"schema\":\"metaengine.browser-guardian.connected-peer-observation.v1\",\"state\":\"HOLD\",\"reason\":\"" + state_->reason +
++    return std::string("{\"schema\":\"metaengine.browser-guardian.connected-peer-observation.v1\",\"state\":\"HOLD\",\"reason\":\"") +
++        (state_->closed ? "ORIGINAL_PIPE_CLOSED" : state_->reason.c_str()) +
+         "\",\"server_pid\":" + std::to_string(state_->server_pid) + ",\"server_creation_time_100ns\":\"" +
+         (state_->server_birth ? std::to_string(state_->server_birth) : std::string{}) + "\",\"server_image_sha256\":\"" + state_->server_image_sha256 +
+         "\",\"source_sha\":\"" + state_->source_sha +
+@@ -828,7 +829,8 @@ std::string GuardianConnectedPeer::snapshotJson() const {
+         "\",\"installed_guardian_manifest_sha256\":\"" + state_->installed_guardian_manifest_sha256 +
+         "\",\"guardian_compatibility_preserved\":" + (state_->guardian_compatibility_preserved ? "true" : "false") +
+         ",\"kernel_binding\":\"" + (state_->kernel_exact ? "EXACT" : "UNPROVEN") +
+-        "\",\"scm_binding\":\"" + (state_->scm_exact ? "EXACT" : "UNPROVEN") + "\",\"account_binding\":\"" + state_->account +
++        "\",\"scm_binding\":\"" + (state_->scm_exact ? "EXACT" : "UNPROVEN") + "\",\"account_binding\":\"" +
++        (state_->closed ? "UNAVAILABLE" : state_->account.c_str()) +
+         "\",\"source_binding\":\"" + (state_->package_bound ? "PACKAGE_BOUND" : "UNAVAILABLE") +
+         "\",\"launch_admission\":\"UNAVAILABLE\",\"win32_error\":" + std::to_string(state_->error) +
+         ",\"current_release_policy_bound\":" + (state_->current_release_policy_bound ? "true" : "false") +
+@@ -844,9 +846,12 @@ void GuardianConnectedPeer::close() noexcept {
+     requestCancel();
+     std::lock_guard<std::mutex> guard(state_->lock);
+     if (state_->closed) return;
+-    state_->closed = true;
+     state_->kernel_exact = state_->scm_exact = state_->package_bound = false;
+-    state_->account = "UNAVAILABLE";
++    // Cleanup must not allocate: even a diagnostic string assignment can throw
++    // before the original endpoint is dropped. Render closed literals only in
++    // snapshotJson(), outside this noexcept cleanup and its physical joins.
++    state_->account.clear();
++    state_->reason.clear();
+     state_->source_sha.clear();
+     state_->installed_guardian_source_sha.clear();
+     state_->installed_guardian_manifest_sha256.clear();
+@@ -854,12 +859,15 @@ void GuardianConnectedPeer::close() noexcept {
+     state_->current_release_policy_bound = state_->bounded_loaded_image_observed = false;
+     state_->observation_revoked = true;
+     state_->release_window.invalidate();
++    // The peer mutex is held only after its active I/O has completed or joined.
++    // Notify the original creation owner before draining retained file oplocks;
++    // keep all of their owners alive until their destructors join completion.
++    state_->pipe.reset();
+     state_->loaded_images.reset();
+     state_->current_release_anchor.reset();
+     state_->current_release_directories.clear();
+     state_->release_policy.reset();
+     state_->release_policy_sha256.clear();
+-    state_->pipe.reset();
+     state_->application.reset();
+     state_->machine_slot.reset();
+     state_->compatibility_lineage.reset();
+@@ -869,8 +877,9 @@ void GuardianConnectedPeer::close() noexcept {
+     state_->reader_bound = false;
+     state_->service.reset();
+     state_->scm.reset();
+-    state_->reason = "ORIGINAL_PIPE_CLOSED";
+     state_->error = ERROR_OPERATION_ABORTED;
++    // NativeHost may publish retirement only after every release above returns.
++    state_->closed = true;
+ }
+ 
+ #ifdef METAENGINE_GUARDIAN_PEER_TEST
+diff --git a/apps/metaengine-browser/test/native/verify-guardian-connected-peer-close-model.py b/apps/metaengine-browser/test/native/verify-guardian-connected-peer-close-model.py
+new file mode 100644
+index 0000000..be05869
+--- /dev/null
++++ b/apps/metaengine-browser/test/native/verify-guardian-connected-peer-close-model.py
+@@ -0,0 +1,563 @@
++#!/usr/bin/env python3
++"""Exercise the actual connected-peer close under real C++ allocation failure.
++
++Win32 calls and resource construction are modeled. The production close,
++requestCancel, snapshot, host retireLocked, retained-file/oplock destructors,
++handle reset methods and cancel-and-join helper are extracted without edits.
++The pre-pipe old-account regression specifically uses libstdc++ COW ABI 0 and
++shared actual std::string storage. It is not a default MSVC/SSO reproduction.
++"""
++from __future__ import annotations
++
++import argparse
++import hashlib
++import json
++import os
++from pathlib import Path
++import subprocess
++import tempfile
++
++
++WINDOWS = r'''#pragma once
++#include <cstdint>
++using DWORD = std::uint32_t;
++using BOOL = int;
++using HANDLE = void*;
++using SC_HANDLE = void*;
++constexpr BOOL FALSE=0, TRUE=1;
++constexpr DWORD ERROR_SUCCESS=0, ERROR_ACCESS_DENIED=5, ERROR_IO_PENDING=997;
++constexpr DWORD ERROR_IO_INCOMPLETE=996, ERROR_OPERATION_ABORTED=995;
++constexpr DWORD WAIT_OBJECT_0=0, WAIT_TIMEOUT=258, WAIT_FAILED=0xffffffffU;
++#define INVALID_HANDLE_VALUE reinterpret_cast<HANDLE>(static_cast<std::intptr_t>(-1))
++struct OVERLAPPED { std::uintptr_t Internal=0; HANDLE hEvent=nullptr; };
++#define HasOverlappedIoCompleted(operation) ((operation)->Internal!=0x103U)
++HANDLE CreateEventW(void*, BOOL, BOOL, const wchar_t*);
++BOOL SetEvent(HANDLE);
++BOOL CloseHandle(HANDLE);
++BOOL CloseServiceHandle(SC_HANDLE);
++BOOL CancelIoEx(HANDLE, OVERLAPPED*);
++BOOL GetOverlappedResult(HANDLE, OVERLAPPED*, DWORD*, BOOL);
++DWORD WaitForSingleObject(HANDLE, DWORD);
++DWORD GetLastError();
++void Sleep(DWORD);
++'''
++
++
++CPP = r'''
++#include <array>
++#include <atomic>
++#include <cstdint>
++#include <cstdio>
++#include <cstdlib>
++#include <exception>
++#include <memory>
++#include <mutex>
++#include <new>
++#include <optional>
++#include <string>
++#include <thread>
++#include <utility>
++#include <vector>
++#include "windows.h"
++#include "browser-guardian-connected-peer.hpp"
++#include "browser-guardian-original-reader-transfer.hpp"
++
++namespace fixture {
++enum class Kind { Cancel, Event, Pipe, File, Process, Reader, Token, Scm, Service };
++struct Resource { Kind kind=Kind::File; bool closed=false; std::atomic<bool> signaled{false}; };
++struct Storage {
++    std::array<unsigned char,32> bytes{};
++    bool alive=true;
++    int operation=-1;
++    Storage() { bytes.fill(0x5a); }
++    ~Storage();
++};
++struct Operation {
++    HANDLE file=nullptr, event=nullptr;
++    OVERLAPPED* original=nullptr;
++    Storage* storage=nullptr;
++    bool terminal=false, pipe=false, cancel_requested=false;
++    unsigned results=0, waits=0;
++};
++struct Model {
++    std::atomic<bool> deny{false};
++    std::atomic<unsigned> allocations_denied{0}, violations{0}, cancellation_signals{0};
++    std::atomic<unsigned> pipe_closes{0}, handle_closes{0}, cancel_requests{0}, joined{0}, waits{0}, sleeps{0};
++    std::atomic<bool> worker_ready{false}, worker_joined{false};
++    std::array<Resource,128> resources{};
++    std::array<Operation,16> operations{};
++    unsigned next_handle=1, operation_count=0, expected_joins=0;
++    const void* phase_context=nullptr;
++    unsigned (*phase_value)(const void*) noexcept=nullptr;
++    bool* closed=nullptr;
++    HANDLE* borrowed=nullptr;
++    bool expect_pre_pipe_terminate=false, expect_post_pipe_terminate=false, require_early_pipe=true;
++    bool account_storage_shared=false;
++    bool in_close=false;
++} model;
++thread_local DWORD last_error=ERROR_SUCCESS;
++HANDLE make(Kind kind) {
++    const auto id=model.next_handle++;
++    if (id>=model.resources.size()) std::abort();
++    model.resources[id].kind=kind;
++    return reinterpret_cast<HANDLE>(static_cast<std::uintptr_t>(id));
++}
++Resource& resource(HANDLE value) {
++    const auto id=reinterpret_cast<std::uintptr_t>(value);
++    if (!id || id>=model.next_handle) std::abort();
++    return model.resources[id];
++}
++BOOL issuePending(HANDLE file, HANDLE event, OVERLAPPED* operation, Storage* storage, bool pipe=false) {
++    const auto id=model.operation_count++;
++    if (id>=model.operations.size()) std::abort();
++    operation->Internal=0x103U; operation->hEvent=event;
++    auto& pending=model.operations[id];
++    pending.file=file; pending.event=event; pending.original=operation; pending.storage=storage; pending.pipe=pipe;
++    storage->operation=static_cast<int>(id);
++    last_error=ERROR_IO_PENDING;
++    return FALSE;
++}
++Storage::~Storage() {
++    if (operation>=0 && !model.operations[static_cast<unsigned>(operation)].terminal) ++model.violations;
++    alive=false;
++}
++[[noreturn]] void terminateObserved() noexcept {
++    const bool pending=model.phase_value && model.phase_value(model.phase_context)==2;
++    const bool allocation=model.allocations_denied.load()>0;
++    const bool before_pipe=model.pipe_closes.load()==0 && model.joined.load()==0 && model.handle_closes.load()==0;
++    const bool after_pipe=model.pipe_closes.load()==1 && model.joined.load()==model.expected_joins;
++    if (model.in_close && allocation && pending && model.cancellation_signals &&
++        model.expect_pre_pipe_terminate && before_pipe && model.account_storage_shared) {
++        std::fprintf(stderr,"EXPECTED_PRE_PIPE_BAD_ALLOC real_std_string ABI=%d shared=1 pipe=0 joined=0 allocations=%u\n",
++            _GLIBCXX_USE_CXX11_ABI,model.allocations_denied.load());
++        std::_Exit(86);
++    }
++    if (model.in_close && allocation && pending && model.expect_post_pipe_terminate && after_pipe) {
++        std::fprintf(stderr,"EXPECTED_POST_PIPE_BAD_ALLOC real_std_string ABI=%d pipe=1 joined=%u allocations=%u\n",
++            _GLIBCXX_USE_CXX11_ABI,model.joined.load(),model.allocations_denied.load());
++        std::_Exit(87);
++    }
++    std::fprintf(stderr,"UNEXPECTED_TERMINATE ABI=%d pipe=%u joined=%u denied=%u violations=%u\n",
++        _GLIBCXX_USE_CXX11_ABI,model.pipe_closes.load(),model.joined.load(),
++        model.allocations_denied.load(),model.violations.load());
++    std::_Exit(99);
++}
++}
++
++[[gnu::noinline]] void* operator new(std::size_t size) {
++    if (fixture::model.deny.load()) { ++fixture::model.allocations_denied; throw std::bad_alloc(); }
++    if (auto* value=std::malloc(size?size:1)) return value;
++    throw std::bad_alloc();
++}
++[[gnu::noinline]] void operator delete(void* value) noexcept { std::free(value); }
++[[gnu::noinline]] void operator delete(void* value,std::size_t) noexcept { std::free(value); }
++[[gnu::noinline]] void* operator new[](std::size_t size) { return ::operator new(size); }
++[[gnu::noinline]] void operator delete[](void* value) noexcept { std::free(value); }
++[[gnu::noinline]] void operator delete[](void* value,std::size_t) noexcept { std::free(value); }
++
++HANDLE CreateEventW(void*,BOOL,BOOL,const wchar_t*) { return fixture::make(fixture::Kind::Cancel); }
++BOOL SetEvent(HANDLE value) {
++    fixture::resource(value).signaled.store(true,std::memory_order_release);
++    ++fixture::model.cancellation_signals; return TRUE;
++}
++BOOL CloseHandle(HANDLE value) {
++    auto& m=fixture::model;
++    auto& resource=fixture::resource(value);
++    if (resource.closed) ++m.violations;
++    for (unsigned i=0;i<m.operation_count;++i) {
++        const auto& pending=m.operations[i];
++        if ((pending.file==value || pending.event==value) && !pending.terminal) ++m.violations;
++    }
++    resource.closed=true; ++m.handle_closes;
++    if (resource.kind==fixture::Kind::Pipe) ++m.pipe_closes;
++    return TRUE;
++}
++BOOL CloseServiceHandle(SC_HANDLE value) { return CloseHandle(value); }
++DWORD GetLastError() { return fixture::last_error; }
++BOOL CancelIoEx(HANDLE file,OVERLAPPED* operation) {
++    auto& m=fixture::model; ++m.cancel_requests;
++    for (unsigned i=0;i<m.operation_count;++i) if (m.operations[i].original==operation) {
++        auto& pending=m.operations[i];
++        if (pending.file!=file || operation->Internal!=0x103U || !pending.storage->alive) ++m.violations;
++        pending.cancel_requested=true;
++        // Refused cancellation is deliberately not treated as completion.
++        fixture::last_error=ERROR_ACCESS_DENIED; return FALSE;
++    }
++    ++m.violations; return FALSE;
++}
++BOOL GetOverlappedResult(HANDLE file,OVERLAPPED* operation,DWORD*,BOOL) {
++    auto& m=fixture::model;
++    for (unsigned i=0;i<m.operation_count;++i) if (m.operations[i].original==operation) {
++        auto& pending=m.operations[i];
++        if (!m.deny || !m.in_close || pending.file!=file || !pending.cancel_requested || !pending.storage->alive ||
++            fixture::resource(file).closed || fixture::resource(pending.event).closed ||
++            !m.phase_value || m.phase_value(m.phase_context)!=2 || !m.closed || *m.closed || !m.borrowed || *m.borrowed) ++m.violations;
++        for (const auto byte:pending.storage->bytes) if (byte!=0x5a) ++m.violations;
++        if (m.require_early_pipe && m.pipe_closes.load()!=(pending.pipe?0U:1U)) ++m.violations;
++        if (++pending.results<=3) { fixture::last_error=ERROR_IO_INCOMPLETE; return FALSE; }
++        operation->Internal=ERROR_OPERATION_ABORTED; pending.terminal=true; ++m.joined;
++        fixture::last_error=ERROR_OPERATION_ABORTED; return FALSE;
++    }
++    ++m.violations; return FALSE;
++}
++DWORD WaitForSingleObject(HANDLE event,DWORD) {
++    auto& m=fixture::model; ++m.waits;
++    for (unsigned i=0;i<m.operation_count;++i) if (m.operations[i].event==event) {
++        auto& pending=m.operations[i];
++        if (pending.terminal || pending.original->Internal!=0x103U) ++m.violations;
++        switch (++pending.waits%3) { case 1:return WAIT_TIMEOUT; case 2:return WAIT_FAILED; default:return WAIT_OBJECT_0; }
++    }
++    ++m.violations; return WAIT_FAILED;
++}
++void Sleep(DWORD) { ++fixture::model.sleeps; std::this_thread::yield(); }
++
++namespace metaengine::guardian {
++#include "actual-close-handles.inc.hpp"
++#include "actual-close-join.inc.hpp"
++namespace guardian_loaded_detail {
++class RetainedFile {
++    Handle file_{fixture::make(fixture::Kind::File)},event_{fixture::make(fixture::Kind::Event)};
++    OVERLAPPED oplock_{};
++    fixture::Storage output_;
++    bool pending_=false;
++public:
++    RetainedFile() { pending_=!fixture::issuePending(file_.value,event_.value,&oplock_,&output_) && GetLastError()==ERROR_IO_PENDING; }
++#include "actual-close-retained-destructor.inc.hpp"
++};
++}
++namespace installed_close_model {
++class ReadOplock {
++    HANDLE file;
++    Handle event{fixture::make(fixture::Kind::Event)};
++    OVERLAPPED operation{};
++    fixture::Storage output;
++    bool pending=false;
++public:
++    explicit ReadOplock(HANDLE original):file(original) {
++        pending=!fixture::issuePending(file,event.value,&operation,&output) && GetLastError()==ERROR_IO_PENDING;
++    }
++#include "actual-close-installed-destructor.inc.hpp"
++};
++}
++class GuardianInstalledNamespace {
++    Handle file_{fixture::make(fixture::Kind::File)};
++    std::unique_ptr<installed_close_model::ReadOplock> oplock_=std::make_unique<installed_close_model::ReadOplock>(file_.value);
++};
++class GuardianUpgradeRetainedPath {
++    GuardianInstalledNamespace original_;
++};
++class GuardianLoadedImageObservation {
++    std::unique_ptr<guardian_loaded_detail::RetainedFile> original_=std::make_unique<guardian_loaded_detail::RetainedFile>();
++};
++struct GuardianLoadedReleaseWindow { bool invalid=false; void invalidate() noexcept { invalid=true; } };
++struct GuardianLoadedReleasePolicy {};
++struct GuardianConnectedPeer::State {
++#include "actual-close-state-fields.inc.hpp"
++    bool releaseClockFence() { ++fixture::model.violations; return false; }
++};
++#include "actual-close-constructors.inc.hpp"
++#include "actual-close-request-cancel.inc.hpp"
++#include "actual-close-snapshot.inc.hpp"
++#include "actual-close-method.inc.hpp"
++struct GuardianConnectedPeerTest {
++    static std::unique_ptr<GuardianConnectedPeer> make(bool owners) {
++        auto out=std::unique_ptr<GuardianConnectedPeer>(new GuardianConnectedPeer());
++        auto& s=*out->state_;
++        if (owners) {
++            s.pipe.reset(fixture::make(fixture::Kind::Pipe));
++            s.server_process.reset(fixture::make(fixture::Kind::Process));
++            s.original_service_reader.reset(fixture::make(fixture::Kind::Reader));
++            s.original_service_token.reset(fixture::make(fixture::Kind::Token));
++            s.scm.value=fixture::make(fixture::Kind::Scm); s.service.value=fixture::make(fixture::Kind::Service);
++            s.application=std::make_unique<GuardianInstalledNamespace>();
++            s.machine_slot=std::make_unique<GuardianInstalledNamespace>();
++            s.compatibility_lineage=std::make_unique<GuardianInstalledNamespace>();
++            s.current_release_anchor=std::make_unique<guardian_loaded_detail::RetainedFile>();
++            s.loaded_images=std::make_unique<GuardianLoadedImageObservation>();
++            s.current_release_directories.push_back(std::make_unique<GuardianUpgradeRetainedPath>());
++            s.current_release_directories.push_back(std::make_unique<GuardianUpgradeRetainedPath>());
++            s.release_policy.emplace();
++        }
++        s.kernel_exact=s.scm_exact=s.package_bound=s.current_release_policy_bound=s.bounded_loaded_image_observed=true;
++        s.reader_bound=s.guardian_compatibility_preserved=true;
++        s.source_sha=s.installed_guardian_source_sha=s.installed_guardian_manifest_sha256=std::string(64,'b');
++        s.release_policy_sha256=std::string(64,'c'); s.server_pid=42; s.server_birth=43;
++        s.reason="R"; s.reason.shrink_to_fit(); s.account="A"; s.account.shrink_to_fit();
++        return out;
++    }
++    static auto& state(GuardianConnectedPeer& peer) { return *peer.state_; }
++    static void nullState(GuardianConnectedPeer& peer) { peer.state_.reset(); }
++};
++struct OriginalEntryScope {
++    enum class TransactionPhase:unsigned { Idle=0, Active=1, RetirePending=2, Retired=3 };
++    std::atomic<TransactionPhase> transaction_phase{TransactionPhase::RetirePending};
++    HANDLE original_pipe=nullptr;
++    std::unique_ptr<GuardianConnectedPeer> authority;
++    std::atomic<GuardianConnectedPeer*> published_authority{nullptr};
++};
++#include "actual-close-retire.inc.hpp"
++}
++
++int main(int argc,char** argv) {
++    using namespace metaengine::guardian;
++    if (argc<2) return 2;
++    const std::string name=argv[1];
++    auto& m=fixture::model;
++    std::set_terminate(fixture::terminateObserved);
++    m.expect_pre_pipe_terminate=argc>2 && std::string(argv[2])=="pre";
++    m.expect_post_pipe_terminate=argc>2 && std::string(argv[2])=="post";
++    const bool no_owners=name=="empty_owners" || name=="null_state";
++    OriginalEntryScope scope;
++    scope.authority=GuardianConnectedPeerTest::make(!no_owners);
++    auto* stable=scope.authority.get();
++    scope.published_authority.store(stable);
++    auto& state=GuardianConnectedPeerTest::state(*stable);
++    scope.original_pipe=state.pipe.value;
++    // Read the actual scope atomic during every incomplete/terminal boundary;
++    // a copied phase could hide premature retirement inside close or a deleter.
++    m.phase_context=&scope;
++    m.phase_value=[](const void* value) noexcept {
++        return static_cast<unsigned>(static_cast<const OriginalEntryScope*>(value)->transaction_phase.load());
++    };
++    m.closed=&state.closed; m.borrowed=&scope.original_pipe;
++    std::string account_copy,reason_copy;
++    if (name=="shared_account" || name=="active_pipe_io" || name=="pending_wait_order") {
++        state.account=std::string(80,'a'); account_copy=state.account;
++        m.account_storage_shared=std::as_const(state.account).data()==std::as_const(account_copy).data();
++        if (!_GLIBCXX_USE_CXX11_ABI && !m.account_storage_shared) ++m.violations;
++    }
++    if (name=="shared_reason" || name=="active_pipe_io" || name=="pending_wait_order") {
++        state.reason=std::string(80,'r'); reason_copy=state.reason;
++    }
++    if (name=="null_state") {
++        GuardianConnectedPeerTest::nullState(*stable); m.closed=nullptr;
++        const auto before=m.handle_closes.load();
++        m.in_close=true; m.deny=true;
++        stable->requestCancel(); stable->close(); stable->close();
++        m.deny=false; m.in_close=false;
++        const bool ok=m.allocations_denied==0 && m.handle_closes==before && m.cancellation_signals==0;
++        std::printf("%s null_state ABI=%d denied=%u\n",ok?"PASS":"FAIL",_GLIBCXX_USE_CXX11_ABI,m.allocations_denied.load());
++        return ok?0:7;
++    }
++    std::thread active;
++    OVERLAPPED active_operation{};
++    fixture::Storage active_storage;
++    Handle active_event;
++    if (name=="active_pipe_io") {
++        active_event.reset(fixture::make(fixture::Kind::Event));
++        active=std::thread([&] {
++            std::lock_guard<std::mutex> lock(state.lock);
++            if (fixture::issuePending(state.pipe.value,active_event.value,&active_operation,&active_storage,true) || GetLastError()!=ERROR_IO_PENDING)
++                ++m.violations;
++            m.worker_ready.store(true,std::memory_order_release);
++            while (!fixture::resource(state.cancelled.value).signaled.load(std::memory_order_acquire)) std::this_thread::yield();
++            cancelAndJoinGuardianPipeIo(state.pipe.value,&active_operation);
++            m.worker_joined.store(true,std::memory_order_release);
++        });
++        while (!m.worker_ready.load(std::memory_order_acquire)) std::this_thread::yield();
++    }
++    m.expected_joins=m.operation_count;
++    if (name=="idle_is_not_retirement") scope.transaction_phase.store(OriginalEntryScope::TransactionPhase::Idle);
++    m.in_close=true; m.deny=true;
++    if (name=="idle_is_not_retirement") {
++        retireLocked(scope);
++        if (state.closed || m.pipe_closes || m.joined) ++m.violations;
++        scope.transaction_phase.store(OriginalEntryScope::TransactionPhase::RetirePending);
++    }
++    retireLocked(scope);
++    if (active.joinable()) active.join();
++    const auto closes=m.handle_closes.load(), joins=m.joined.load(), signals=m.cancellation_signals.load();
++    // Both actual close and actual retireLocked must be idempotent under the
++    // same continuously denied allocator, without releasing the peer address.
++    stable->close(); stable->close(); retireLocked(scope);
++    m.deny=false; m.in_close=false;
++    bool ok=m.violations==0 && m.allocations_denied==0 && state.closed && state.observation_revoked &&
++        scope.transaction_phase.load()==OriginalEntryScope::TransactionPhase::Retired && scope.original_pipe==nullptr &&
++        scope.authority.get()==stable && scope.published_authority.load()==stable &&
++        m.handle_closes==closes && m.joined==joins && m.joined==m.expected_joins && m.cancel_requests==m.expected_joins &&
++        m.cancellation_signals==signals+2 && m.pipe_closes==(no_owners?0U:1U) &&
++        !state.pipe.valid() && !state.loaded_images && !state.current_release_anchor && state.current_release_directories.empty() &&
++        !state.application && !state.machine_slot && !state.compatibility_lineage && !state.server_process.valid() &&
++        !state.original_service_reader.valid() && !state.original_service_token.valid() && !state.reader_bound &&
++        !state.service.value && !state.scm.value && !state.release_policy && state.release_policy_sha256.empty() &&
++        !state.kernel_exact && !state.scm_exact && !state.package_bound && !state.current_release_policy_bound &&
++        !state.bounded_loaded_image_observed && state.release_window.invalid && state.error==ERROR_OPERATION_ABORTED;
++    if (name=="active_pipe_io") ok=ok && m.worker_joined;
++    if (!no_owners) ok=ok && m.waits==3*m.expected_joins && m.sleeps>=2*m.expected_joins;
++    const auto json=stable->snapshotJson();
++    ok=ok && json.find("\"reason\":\"ORIGINAL_PIPE_CLOSED\"")!=std::string::npos &&
++        json.find("\"account_binding\":\"UNAVAILABLE\"")!=std::string::npos &&
++        json.find("\"kernel_binding\":\"UNPROVEN\"")!=std::string::npos &&
++        json.find("\"authority_effect\":false")!=std::string::npos;
++    std::printf("%s %s ABI=%d denied=%u pipe=%u joined=%u cancel_requests=%u waits=%u sleeps=%u violations=%u\n",
++        ok?"PASS":"FAIL",name.c_str(),_GLIBCXX_USE_CXX11_ABI,m.allocations_denied.load(),m.pipe_closes.load(),
++        m.joined.load(),m.cancel_requests.load(),m.waits.load(),m.sleeps.load(),m.violations.load());
++    return ok?0:7;
++}
++'''
++
++
++def between(source: str, first: str, after: str) -> str:
++    if source.count(first) != 1:
++        raise ValueError(f"Expected unique production marker: {first}")
++    start = source.index(first)
++    return source[start:source.index(after, start)]
++
++
++def digest(path: Path) -> str:
++    return hashlib.sha256(path.read_bytes()).hexdigest()
++
++
++def main() -> None:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--tree", type=Path, default=Path(__file__).resolve().parents[4])
++    parser.add_argument("--evidence", type=Path)
++    parser.add_argument("--mutation-check", action="store_true")
++    parser.add_argument("--baseline-peer-source", type=Path, help="Also compile the complete unedited baseline close and require the COW pre-pipe allocation failure")
++    instrumentation = parser.add_mutually_exclusive_group()
++    instrumentation.add_argument("--sanitize", action="store_true")
++    instrumentation.add_argument("--tsan", action="store_true")
++    args = parser.parse_args()
++    tree = args.tree.resolve()
++    native = tree / "apps/metaengine-browser/native/browser-guardian-scm"
++    inputs = {name: native / name for name in (
++        "browser-guardian-connected-peer.cpp", "browser-guardian-connected-peer.hpp",
++        "browser-guardian-original-main-native-host.cpp", "browser-guardian-pipe-io-lifetime.hpp",
++        "browser-guardian-loaded-file.hpp", "browser-guardian-installed-namespace.cpp",
++        "browser-guardian-original-reader-transfer.hpp")}
++    peer = inputs["browser-guardian-connected-peer.cpp"].read_bytes().decode("utf-8")
++    host = inputs["browser-guardian-original-main-native-host.cpp"].read_bytes().decode("utf-8")
++    loaded = inputs["browser-guardian-loaded-file.hpp"].read_bytes().decode("utf-8")
++    installed = inputs["browser-guardian-installed-namespace.cpp"].read_bytes().decode("utf-8")
++    io = inputs["browser-guardian-pipe-io-lifetime.hpp"].read_bytes().decode("utf-8")
++    fragments = {
++        "handles": between(peer, "struct Handle {", "std::uint64_t ticks("),
++        "state-fields": between(peer, "    enum class LifetimeCheck", "    bool fail("),
++        "constructors": between(peer, "GuardianConnectedPeer::GuardianConnectedPeer()", "std::unique_ptr<GuardianConnectedPeer> GuardianConnectedPeer::connect()"),
++        "request-cancel": between(peer, "void GuardianConnectedPeer::requestCancel()", "bool GuardianConnectedPeer::recheck()"),
++        "snapshot": between(peer, "std::string GuardianConnectedPeer::snapshotJson()", "void GuardianConnectedPeer::close()"),
++        "method": between(peer, "void GuardianConnectedPeer::close()", "#ifdef METAENGINE_GUARDIAN_PEER_TEST"),
++        "retire": between(host, "void retireLocked(", "void requestRetirement("),
++        "join": between(io, "constexpr DWORD kGuardianIoJoinPollMs", "}  // namespace metaengine::guardian"),
++        "retained-destructor": between(loaded, "    ~RetainedFile()", "    static std::unique_ptr<RetainedFile> capture("),
++        "installed-destructor": between(installed, "    ~ReadOplock()", "    bool acquire()"),
++    }
++    temporary = tempfile.TemporaryDirectory(prefix="guardian-peer-close-model-") if args.evidence is None else None
++    evidence = Path(temporary.name) if temporary else args.evidence.resolve()
++    if not temporary:
++        evidence.mkdir(parents=True, exist_ok=False)
++    for name, body in fragments.items():
++        (evidence / f"actual-close-{name}.inc.hpp").write_text(body)
++    (evidence / "windows.h").write_text(WINDOWS)
++    fixture = evidence / "close-model.cpp"
++    fixture.write_text(CPP)
++    baseline = args.baseline_peer_source.resolve() if args.baseline_peer_source else None
++    source_hashes = {str(path): digest(path) for path in [Path(__file__).resolve(), *inputs.values(), *([baseline] if baseline else [])]}
++    sanitizer = "thread" if args.tsan else "address,undefined" if args.sanitize else "none"
++    environment = dict(os.environ)
++    if args.sanitize:
++        environment["ASAN_OPTIONS"] = "detect_leaks=1:halt_on_error=1"
++        environment["UBSAN_OPTIONS"] = "halt_on_error=1:print_stacktrace=1"
++    if args.tsan:
++        environment["TSAN_OPTIONS"] = "halt_on_error=1"
++    records = []
++
++    def run(step, command, expected=0, marker=None):
++        try:
++            result = subprocess.run(command, capture_output=True, text=True, env=environment, timeout=60)
++        except subprocess.TimeoutExpired as error:
++            stdout, stderr = error.stdout or b"", error.stderr or b""
++            if isinstance(stdout, bytes):
++                stdout = stdout.decode(errors="replace")
++            if isinstance(stderr, bytes):
++                stderr = stderr.decode(errors="replace")
++            result = subprocess.CompletedProcess(command, 124, stdout, stderr + "\nTIMEOUT\n")
++        (evidence / f"{step}.stdout.log").write_text(result.stdout)
++        (evidence / f"{step}.stderr.log").write_text(result.stderr)
++        ok = result.returncode == expected and (marker is None or marker in result.stdout + result.stderr)
++        records.append({"step": step, "argv": command, "exit_code": result.returncode,
++                        "expected_exit_code": expected, "expected_marker": marker, "status": "PASS" if ok else "FAIL"})
++        print(result.stdout + result.stderr, end="", flush=True)
++        return ok
++
++    def compile_model(label, abi):
++        binary = evidence / label
++        command = ["g++", "-std=c++20", "-O1", "-g", "-Wall", "-Wextra", "-Werror", "-pedantic", "-pthread",
++                   "-DMETAENGINE_GUARDIAN_PEER_TEST", f"-D_GLIBCXX_USE_CXX11_ABI={abi}",
++                   "-I", str(evidence), "-I", str(native), str(fixture), "-o", str(binary)]
++        if sanitizer != "none":
++            command.extend([f"-fsanitize={sanitizer}", "-fno-omit-frame-pointer", "-no-pie"])
++        return binary, run(f"compile-{label}", command)
++
++    ok = True
++    cases = ("short_strings", "shared_account", "shared_reason", "pending_wait_order", "active_pipe_io", "idle_is_not_retirement", "empty_owners", "null_state")
++    for abi in (1, 0):
++        binary, built = compile_model(f"close-abi{abi}", abi)
++        ok = ok and built
++        if not built:
++            break
++        for case in cases:
++            ok = run(f"abi{abi}-{case}", [str(binary), case]) and ok
++    controls = []
++    if ok and args.mutation_check:
++        path = evidence / "actual-close-method.inc.hpp"
++        fixed = fragments["method"]
++        if fixed.count("state_->account.clear();") != 1 or fixed.count("state_->reason.clear();") != 1:
++            raise ValueError("Expected allocation-free diagnostic cleanup anchors")
++        mutations = (
++            ("account-diagnostic-reintroduction", 0, "shared_account", "pre", 86, "EXPECTED_PRE_PIPE_BAD_ALLOC",
++             fixed.replace("state_->account.clear();", 'state_->account = "UNAVAILABLE";')),
++            ("tail-reason-diagnostic-reintroduction", 1, "short_strings", "post", 87, "EXPECTED_POST_PIPE_BAD_ALLOC",
++             fixed.replace("    state_->closed = true;", '    state_->reason = "ORIGINAL_PIPE_CLOSED";\n    state_->closed = true;')),
++            ("late-pipe", 1, "pending_wait_order", "order", 7, "FAIL pending_wait_order",
++             fixed.replace("    state_->pipe.reset();\n", "").replace("    state_->application.reset();", "    state_->pipe.reset();\n    state_->application.reset();")),
++            ("early-closed", 1, "pending_wait_order", "order", 7, "FAIL pending_wait_order",
++             fixed.replace("    if (state_->closed) return;", "    if (state_->closed) return;\n    state_->closed = true;")),
++        )
++        try:
++            for label, abi, case, expectation, code, marker, mutant in mutations:
++                if mutant == fixed:
++                    raise ValueError(f"Mutation did not change close: {label}")
++                path.write_text(mutant)
++                binary, built = compile_model(label, abi)
++                detected = built and run(f"mutation-{label}", [str(binary), case, expectation], code, marker)
++                controls.append({"mutation": label, "abi": abi, "compiled": built,
++                                 "behaviorally_detected": detected, "expected_exit_code": code,
++                                 "scope": "Diagnostic statement reintroduced in otherwise current close" if "diagnostic" in label else "Resource/completion ordering mutation in current close"})
++                ok = detected and ok
++        finally:
++            path.write_text(fixed)
++    baseline_control = None
++    if ok and baseline:
++        path = evidence / "actual-close-method.inc.hpp"
++        original = between(baseline.read_bytes().decode("utf-8"), "void GuardianConnectedPeer::close()", "#ifdef METAENGINE_GUARDIAN_PEER_TEST")
++        (evidence / "baseline-complete-close.inc.hpp").write_text(original)
++        try:
++            path.write_text(original)
++            binary, built = compile_model("complete-baseline-close", 0)
++            detected = built and run("complete-baseline-pre-pipe", [str(binary), "shared_account", "pre"], 86, "EXPECTED_PRE_PIPE_BAD_ALLOC")
++            baseline_control = {"source": str(baseline), "complete_close_byte_exact": True, "abi": 0,
++                                "compiled": built, "behaviorally_detected": detected, "expected_exit_code": 86}
++            ok = detected and ok
++        finally:
++            path.write_text(fragments["method"])
++    unchanged = all(Path(path).is_file() and digest(Path(path)) == value for path, value in source_hashes.items())
++    ok = ok and unchanged
++    report = {"schema": "metaengine.guardian.connected-peer-close-allocator-model.v1",
++              "status": "PASS" if ok else "FAIL", "sanitizer": sanitizer,
++              "source_hashes": source_hashes, "sources_unchanged": unchanged,
++              "production_fragments_byte_exact": True, "cases_per_abi": len(cases), "abis": [1, 0],
++              "commands": records, "mutation_controls": controls, "complete_baseline_control": baseline_control,
++              "allocation_evidence_limit": "Account pre-pipe allocation is reproduced with actual libstdc++ COW ABI 0 shared std::string storage; not a default MSVC/SSO reproduction. Tail-reason allocation is separately post-pipe.",
++              "modeled_boundary": "Win32 resource construction and completion are modeled; original OVERLAPPED/buffers remain live through incomplete results, timeout/failed waits and terminal completion.",
++              "asan_options": environment.get("ASAN_OPTIONS"), "tsan_options": environment.get("TSAN_OPTIONS"),
++              "leak_sanitizer": "Enabled for normal-exit positive cases; expected terminate controls use _Exit and skip leak finalization" if args.sanitize else "NOT RUN",
++              "windows_execution": "NOT RUN", "native_authority": "NOT RUN"}
++    (evidence / "summary.json").write_text(json.dumps(report, indent=2) + "\n")
++    print(json.dumps({"status": report["status"], "cases": 2 * len(cases), "controls": len(controls),
++                      "evidence": str(evidence), "sanitizer": sanitizer, "windows_execution": "NOT RUN"}), flush=True)
++    raise SystemExit(0 if ok else 1)
++
++
++if __name__ == "__main__":
++    main()
