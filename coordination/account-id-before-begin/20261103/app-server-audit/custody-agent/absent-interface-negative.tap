@@ -1,0 +1,15 @@
+✔ existing exact Host BEGIN input refuses added account/home/session records (1.386031ms)
+✔ public records, copied records and proxies cannot create original process custody (0.180172ms)
+✔ existing launch rejects an invented app-server RPC input protocol (0.41052ms)
+✔ raw usage snapshot with omitted accountId cannot become private codex_auth (1.326441ms)
+✔ raw usage snapshot with null accountId cannot become private codex_auth (0.308255ms)
+✔ raw usage snapshot with string accountId cannot become private codex_auth (0.235746ms)
+✔ matching claimed usage accountId cannot bypass PRODUCER_UNAVAILABLE before ID allocation (1.965726ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 78.564711

@@ -1,0 +1,82 @@
+Pinned Codex protocol evidence: 6ff1e1ca3b30fc8b914720681fcf5fe62e95f856
+Tag rust-v0.166.0; annotated tag object 593389380740f7b4762771573c447ccfdc59742f.
+Read-only source research. No installation, login, authenticated backend call or model call.
+
+stable_pin: The METAENGINE native-tools lock pins stable 0.166.0, tag rust-v0.166.0. Public git ls-remote resolved annotated tag object 593389380740f7b4762771573c447ccfdc59742f to commit 6ff1e1ca3b30fc8b914720681fcf5fe62e95f856. The inspected source checkout HEAD matches that commit. This establishes source protocol support, not that a particular running binary is this release.
+
+method: GetAccountRateLimitsResponse is the response of account/rateLimits/read. The request has no account selector and is not serialized on the account-auth group. account/read is a separate method serialized on account-auth.
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server-protocol/src/protocol/common.rs#L1386-L1389
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server-protocol/src/protocol/common.rs#L1526-L1529
+
+optional_id: Stable account/rateLimits/read has top-level accountId. Rust uses Option<String>; generated TypeScript declares accountId: string | null. JSON Schema permits string/null and does not require this property (only rateLimits is required). The concrete serializer has no skip-None attribute, so the pinned Rust normally serializes a missing value as null; compatible readers must also tolerate omission.
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server-protocol/src/protocol/v2/account.rs#L358-L375
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server-protocol/schema/typescript/v2/GetAccountRateLimitsResponse.ts#L21-L25
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server-protocol/schema/json/v2/GetAccountRateLimitsResponse.json#L289-L296
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server-protocol/schema/json/v2/GetAccountRateLimitsResponse.json#L335-L340
+
+usage_provenance: accountId is copied from the backend usage JSON account_id; backend user_id is consumed internally but is not exposed by GetAccountRateLimitsResponse. Backend read is a GET of api/codex/usage or wham/usage with auth-provider headers. It names the account associated with that usage snapshot, not a credential or capability.
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/backend-client/src/types.rs#L44-L66
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/backend-client/src/client/rate_limit_resets.rs#L34-L79
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/backend-client/src/client/rate_limit_resets.rs#L124-L128
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/backend-client/src/client.rs#L294-L305
+
+mismatch_forwarded: After a usage response, app-server compares backend account_id AND user_id to current auth, also excluding FedRAMP, but only filters ordinaryUsageAllowed and rateLimitUpsell. It always forwards response.account_id. A non-null accountId therefore does not imply the snapshot matched current auth. The upstream test expressly returns mismatching accountId unchanged with permission/banner null.
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/request_processors/account_processor.rs#L1248-L1277
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/tests/suite/v2/rate_limits.rs#L367-L372
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/tests/suite/v2/rate_limits.rs#L436-L442
+
+usage_switch_test: Upstream concurrent usage-read/login test covers a user switch, workspace switch, and same-identity token refresh. In that test changed owners cause network-permission revocation; same identity refresh completes successfully. This is evidence of a specific protected race path, not a general guarantee that accountId is current at later execution.
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/tests/suite/v2/rate_limits_identity_tests.rs#L29-L36
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/tests/suite/v2/rate_limits_identity_tests.rs#L95-L140
+
+account_read_id: Account.Chatgpt itself has email, planType, workspaceName and no ID. However account/read has the experimental top-level workspaceRouting object with chatgptAccountId, backendOrigin, accountRoutingOverride. It is wrong to conclude the pinned account/read response has no ID just from the default generated schema.
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server-protocol/src/protocol/v2/account.rs#L18-L38
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server-protocol/src/protocol/v2/account.rs#L584-L601
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/README.md#L520-L524
+
+schema_filtering: workspaceRouting is explicitly experimental. Default TS/schema exports filter experimental fields, which explains why checked-in GetAccountResponse.ts omits it while WorkspaceRouting.ts remains. get_account emits the field without a capability parameter; inspected outbound filtering does not generally strip response fields. Treat its existence as experimental and version-specific; do not claim default schema proves absence or that runtime opt-in is the field's only emission gate.
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server-protocol/src/export.rs#L112-L145
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server-protocol/src/export.rs#L251-L266
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/request_processors/account_processor/workspace_routing.rs#L258-L292
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/transport.rs#L181-L202
+
+routing_id_provenance: Routing discovery selects exactly one accounts/check membership whose ID equals the auth-selected account ID, then returns entry.id as chatgptAccountId. Missing/duplicate workspaces fail. Saved auth without a selected ID yields no routing; API-only/signed-out return null. Routing discovery is not a caller-chosen synthetic ID and does not select the backend default workspace.
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/request_processors/account_processor/workspace_routing.rs#L350-L368
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/request_processors/account_processor/workspace_routing.rs#L456-L490
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/request_processors/account_processor/workspace_routing.rs#L599-L603
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/README.md#L522-L524
+
+routing_freshness: read_account monitors auth owner_generation, aborts on ownership changes, checks again before returning and verifies configuration after discovery; same-owner refresh invalidates routing cache without necessarily cancelling discovery. This is an in-process snapshot guarantee and does not bind a subsequent job or prevent a later auth change.
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/request_processors/account_processor/workspace_routing.rs#L295-L301
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/request_processors/account_processor/workspace_routing.rs#L466-L503
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/request_processors/account_processor/workspace_routing.rs#L544-L559
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/login/src/auth/change_state.rs#L5-L19
+
+session_identity: Experimental accountSession/list supplies activeSessionId and sessions containing separate userId and selectedWorkspaceAccountId, plus workspaces[].accountId. sessionId is an opaque managed-login identifier, stable across token rotations/workspace changes. accountId identifies a workspace, expressly not a user. Methods require experimentalApi capability.
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server-protocol/src/protocol/common.rs#L1364-L1377
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server-protocol/src/protocol/v2/account.rs#L229-L282
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/login/src/auth/manager/workspace_switching.rs#L100-L106
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/message_processor.rs#L1013-L1016
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/README.md#L668-L689
+
+session_list_freshness: The implementation lists only the active managed ChatGPT login. External auth, API key and signed-out modes produce no sessions. refreshWorkspaceMetadata false uses cached auth and avoids the membership lookup; true calls auth() and accounts/check then rechecks active managed session and selected workspace, failing if changed. Neither response is a lease for future execution.
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/request_processors/account_processor/workspace_switching.rs#L13-L92
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/tests/suite/v2/account_workspace_switching.rs#L490-L517
+
+switch_semantics: accountSession/switch validates session and workspace membership, pauses admission/unloads threads, changes credentials, validates routing and attempts rollback on failure while credentials remain current. It sends account/updated on success. The current-workspace fast path keeps threads. These mutation semantics were inspected only; no switch was performed.
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/request_processors/account_processor/workspace_switching.rs#L113-L160
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/request_processors/account_processor/workspace_switching.rs#L187-L223
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/README.md#L674-L689
+
+notifications: account/updated contains only authMode and planType; account/rateLimits/updated contains only rateLimits and no accountId. Sparse update metadata should merge or trigger refetch. Account notifications recheck owner_generation after reserving queue capacity and drop superseded updates; login completion becomes failure if superseded. README explicitly treats notifications as snapshots and tells clients to reread account/read and configRequirements/read.
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server-protocol/src/protocol/v2/account.rs#L615-L621
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server-protocol/src/protocol/v2/account.rs#L679-L706
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/account_notifications.rs#L15-L51
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/README.md#L524
+
+inference_limits: Inference from these source facts: a nonempty usage accountId can corroborate the workspace of that usage snapshot against a separately obtained expected workspace ID on the trusted app-server connection. It cannot establish a unique human user, prove credential custody, identify a METAENGINE owner/registration/operation, or authorize later BEGIN/admission by itself. No returned auth epoch or cryptographic binding to a future job exists in these response types. Reconnects, account changes and stale results need client invalidation and a separately enforced execution-time identity/custody check.
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server-protocol/src/protocol/v2/account.rs#L358-L375
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server-protocol/src/protocol/v2/account.rs#L584-L621
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/login/src/auth/change_state.rs#L5-L19
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/message_processor.rs#L1969-L1973
+  https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/outgoing_message.rs#L732-L770

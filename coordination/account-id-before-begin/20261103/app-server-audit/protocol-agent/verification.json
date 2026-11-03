@@ -1,0 +1,196 @@
+{
+  "passed": true,
+  "recorded_at_utc": "2026-11-03T08:39:42.564635+00:00",
+  "verifier": "/workspace/metaengine-results/account-id-app-server/protocol-agent/verify_protocol.py",
+  "verifier_sha256": "65ab9271387117acfd41bd53da0e5595f857fa26ccec20d5850e0a0be973af14",
+  "codex_repo": "/workspace/codex-pinned-source",
+  "metaengine_repo": "/workspace/metaengine-account-source/Compute",
+  "pinned_commit": "6ff1e1ca3b30fc8b914720681fcf5fe62e95f856",
+  "pinned_tag": "rust-v0.166.0",
+  "check_count": 7,
+  "passed_count": 7,
+  "source_file_count": 21,
+  "checks": [
+    "Pinned source HEAD and clean checkout; METAENGINE lock pin and SHA-256 match",
+    "JSON accountId permits string/null",
+    "JSON accountId is not required; only rateLimits required",
+    "TypeScript declares accountId: string | null",
+    "Rust response uses account_id: Option<String>",
+    "Experimental account/read.workspaceRouting exists in Rust",
+    "All 21 recorded full-source hashes and pinned Git blobs match"
+  ],
+  "check_details": [
+    {
+      "name": "Pinned source HEAD and clean checkout; METAENGINE lock pin and SHA-256 match",
+      "passed": true,
+      "observation": {
+        "head": "6ff1e1ca3b30fc8b914720681fcf5fe62e95f856",
+        "clean": true,
+        "lock_sha256": "478161f32fc6fc2842c6529ff77fdda14f763fddced9a1920069e554d473faad",
+        "tag": "rust-v0.166.0"
+      }
+    },
+    {
+      "name": "JSON accountId permits string/null",
+      "passed": true,
+      "observation": {
+        "accountId_types": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    {
+      "name": "JSON accountId is not required; only rateLimits required",
+      "passed": true,
+      "observation": {
+        "required": [
+          "rateLimits"
+        ]
+      }
+    },
+    {
+      "name": "TypeScript declares accountId: string | null",
+      "passed": true,
+      "observation": {
+        "declaration": "accountId: string | null"
+      }
+    },
+    {
+      "name": "Rust response uses account_id: Option<String>",
+      "passed": true,
+      "observation": {
+        "declaration": "GetAccountRateLimitsResponse.account_id: Option<String>"
+      }
+    },
+    {
+      "name": "Experimental account/read.workspaceRouting exists in Rust",
+      "passed": true,
+      "observation": {
+        "field": "account/read.workspaceRouting",
+        "identity": "chatgptAccountId"
+      }
+    },
+    {
+      "name": "All 21 recorded full-source hashes and pinned Git blobs match",
+      "passed": true,
+      "observation": {
+        "source_file_count": 21,
+        "matches_pinned_git_blobs": true,
+        "files": [
+          {
+            "path": "codex-rs/app-server-protocol/schema/json/v2/GetAccountRateLimitsResponse.json",
+            "sha256": "9c0def7f8ab2396122af939dffbf01b34b8d66082fe4129dd20917bfd4313fdc",
+            "bytes": 8239
+          },
+          {
+            "path": "codex-rs/app-server-protocol/schema/typescript/v2/GetAccountRateLimitsResponse.ts",
+            "sha256": "a046fcd60782ace2b87517d43bdeaf9ceaec4ad06f67b84ca3d1a83c251bc9d1",
+            "bytes": 1291
+          },
+          {
+            "path": "codex-rs/app-server-protocol/src/export.rs",
+            "sha256": "70e6757554f2ff0be629f327fe2bef5a3c6d459eb92e5761693bf915a6e13194",
+            "bytes": 110582
+          },
+          {
+            "path": "codex-rs/app-server-protocol/src/protocol/common.rs",
+            "sha256": "b7f0a90dcc822962e59890b252a43142a113cb1355f333d8c6b0f704b97f89f7",
+            "bytes": 176292
+          },
+          {
+            "path": "codex-rs/app-server-protocol/src/protocol/v2/account.rs",
+            "sha256": "8768b6d379a1045522c72b678ac812e1e0aedfbf73f7948c31e479192ada76cc",
+            "bytes": 32448
+          },
+          {
+            "path": "codex-rs/app-server/README.md",
+            "sha256": "7d5da6fb29d05debe830ef9fe3ce1ddc18bc5bd8987a411d7971562a49f3ea57",
+            "bytes": 46426
+          },
+          {
+            "path": "codex-rs/app-server/src/account_notifications.rs",
+            "sha256": "0ddd334e79409f9f0f031c0e7c0fd989f3a95e5ec05a5bbbb4027fa51d36b3ef",
+            "bytes": 2141
+          },
+          {
+            "path": "codex-rs/app-server/src/message_processor.rs",
+            "sha256": "6d81a0b5bab7172bf9ab24a6e8e05375f5623f0a8ac6d6da97c4ed184ad1085f",
+            "bytes": 85229
+          },
+          {
+            "path": "codex-rs/app-server/src/outgoing_message.rs",
+            "sha256": "bb8062823bc2bb5699121bd64981527603ff6be4aafcc1b061d43d89e9de7053",
+            "bytes": 62662
+          },
+          {
+            "path": "codex-rs/app-server/src/request_processors/account_processor.rs",
+            "sha256": "76d7f41221f74291f03bda83dba9cd0166c943245cdde66cd44b01f63c497915",
+            "bytes": 64249
+          },
+          {
+            "path": "codex-rs/app-server/src/request_processors/account_processor/workspace_routing.rs",
+            "sha256": "57acc17ad35148162bf349dcb5663adaf3e7a5bfc3b4adef7f20be9fd7d1b846",
+            "bytes": 27469
+          },
+          {
+            "path": "codex-rs/app-server/src/request_processors/account_processor/workspace_switching.rs",
+            "sha256": "aa6170e7c877d541b43f8d5302089dffaf85d0d120ae854b33595a38eaee06b9",
+            "bytes": 10702
+          },
+          {
+            "path": "codex-rs/app-server/src/transport.rs",
+            "sha256": "5b4cb5599deae1af2153976fee7586be3f87df53a2e2816f2011bddf638bda06",
+            "bytes": 9115
+          },
+          {
+            "path": "codex-rs/app-server/tests/suite/v2/account_workspace_switching.rs",
+            "sha256": "610b6d09970b9b46a7ddc888dd5cb89089c7b115376c8f6ee93359d0c792176b",
+            "bytes": 19931
+          },
+          {
+            "path": "codex-rs/app-server/tests/suite/v2/rate_limits.rs",
+            "sha256": "e229d3ca17b040fceb63e65e24c153eef7060dcb834e93755e1152baa5890956",
+            "bytes": 27359
+          },
+          {
+            "path": "codex-rs/app-server/tests/suite/v2/rate_limits_identity_tests.rs",
+            "sha256": "71b109c524a90c81678bceaa5a695e801c95a16b9e152efbf3a1920f02a0630b",
+            "bytes": 5484
+          },
+          {
+            "path": "codex-rs/backend-client/src/client.rs",
+            "sha256": "6dbf760c5461b687815f46ea2d02ec4be3d3ae82bba288df1f7aa5caa2f68319",
+            "bytes": 49107
+          },
+          {
+            "path": "codex-rs/backend-client/src/client/rate_limit_resets.rs",
+            "sha256": "434eacc050fd1838f149455f8f0d6ffdb23588993e71323ee2d5d1cbf3237c9d",
+            "bytes": 5780
+          },
+          {
+            "path": "codex-rs/backend-client/src/types.rs",
+            "sha256": "7229112d0d8ee7d1ff3f23457ccd13868cbba024d3a7b4fca74aa3e288ea0eac",
+            "bytes": 21555
+          },
+          {
+            "path": "codex-rs/login/src/auth/change_state.rs",
+            "sha256": "3e40a7c39b3bc92ff1752f9b33adf2557af1129dde863cf8b50e5d92c42710b7",
+            "bytes": 2197
+          },
+          {
+            "path": "codex-rs/login/src/auth/manager/workspace_switching.rs",
+            "sha256": "74f39b4e42e9e4c0f9349cb98e0695068403da05966492015395cda8dbc63c09",
+            "bytes": 13517
+          }
+        ]
+      }
+    }
+  ],
+  "validation_kind": "Read-only protocol/source assertions, not compiled or runtime integration tests",
+  "compiled_tests_run": false,
+  "live_authenticated_calls_run": false,
+  "model_calls_run": false,
+  "network_calls_run": false,
+  "remaining_blockers": []
+}

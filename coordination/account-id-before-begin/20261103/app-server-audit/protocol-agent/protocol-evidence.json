@@ -1,0 +1,583 @@
+{
+  "research": "Pinned OpenAI Codex app-server account identity protocol",
+  "recorded_at_utc": "2026-11-03T08:37:55.979636+00:00",
+  "upstream_repository": "https://github.com/openai/codex.git",
+  "upstream_tag": "rust-v0.166.0",
+  "upstream_tag_object": "593389380740f7b4762771573c447ccfdc59742f",
+  "upstream_commit": "6ff1e1ca3b30fc8b914720681fcf5fe62e95f856",
+  "source_checkout": "/workspace/codex-pinned-source",
+  "source_checkout_git_status": "clean when checked",
+  "metaengine_lock": "/workspace/metaengine-account-source/Compute/apps/metaengine-browser/build/private-native-tools.lock.json",
+  "metaengine_lock_sha256": "478161f32fc6fc2842c6529ff77fdda14f763fddced9a1920069e554d473faad",
+  "scope": "Read-only source/protocol research; no installation, auth-file inspection, login, live app-server request, account switching, model call, or METAENGINE source edit performed.",
+  "remaining_blockers": [],
+  "findings": [
+    {
+      "id": "stable_pin",
+      "conclusion": "The METAENGINE native-tools lock pins stable 0.166.0, tag rust-v0.166.0. Public git ls-remote resolved annotated tag object 593389380740f7b4762771573c447ccfdc59742f to commit 6ff1e1ca3b30fc8b914720681fcf5fe62e95f856. The inspected source checkout HEAD matches that commit. This establishes source protocol support, not that a particular running binary is this release.",
+      "sources": []
+    },
+    {
+      "id": "method",
+      "conclusion": "GetAccountRateLimitsResponse is the response of account/rateLimits/read. The request has no account selector and is not serialized on the account-auth group. account/read is a separate method serialized on account-auth.",
+      "sources": [
+        {
+          "path": "codex-rs/app-server-protocol/src/protocol/common.rs",
+          "lines": [
+            1386,
+            1389
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server-protocol/src/protocol/common.rs#L1386-L1389"
+        },
+        {
+          "path": "codex-rs/app-server-protocol/src/protocol/common.rs",
+          "lines": [
+            1526,
+            1529
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server-protocol/src/protocol/common.rs#L1526-L1529"
+        }
+      ]
+    },
+    {
+      "id": "optional_id",
+      "conclusion": "Stable account/rateLimits/read has top-level accountId. Rust uses Option<String>; generated TypeScript declares accountId: string | null. JSON Schema permits string/null and does not require this property (only rateLimits is required). The concrete serializer has no skip-None attribute, so the pinned Rust normally serializes a missing value as null; compatible readers must also tolerate omission.",
+      "sources": [
+        {
+          "path": "codex-rs/app-server-protocol/src/protocol/v2/account.rs",
+          "lines": [
+            358,
+            375
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server-protocol/src/protocol/v2/account.rs#L358-L375"
+        },
+        {
+          "path": "codex-rs/app-server-protocol/schema/typescript/v2/GetAccountRateLimitsResponse.ts",
+          "lines": [
+            21,
+            25
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server-protocol/schema/typescript/v2/GetAccountRateLimitsResponse.ts#L21-L25"
+        },
+        {
+          "path": "codex-rs/app-server-protocol/schema/json/v2/GetAccountRateLimitsResponse.json",
+          "lines": [
+            289,
+            296
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server-protocol/schema/json/v2/GetAccountRateLimitsResponse.json#L289-L296"
+        },
+        {
+          "path": "codex-rs/app-server-protocol/schema/json/v2/GetAccountRateLimitsResponse.json",
+          "lines": [
+            335,
+            340
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server-protocol/schema/json/v2/GetAccountRateLimitsResponse.json#L335-L340"
+        }
+      ]
+    },
+    {
+      "id": "usage_provenance",
+      "conclusion": "accountId is copied from the backend usage JSON account_id; backend user_id is consumed internally but is not exposed by GetAccountRateLimitsResponse. Backend read is a GET of api/codex/usage or wham/usage with auth-provider headers. It names the account associated with that usage snapshot, not a credential or capability.",
+      "sources": [
+        {
+          "path": "codex-rs/backend-client/src/types.rs",
+          "lines": [
+            44,
+            66
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/backend-client/src/types.rs#L44-L66"
+        },
+        {
+          "path": "codex-rs/backend-client/src/client/rate_limit_resets.rs",
+          "lines": [
+            34,
+            79
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/backend-client/src/client/rate_limit_resets.rs#L34-L79"
+        },
+        {
+          "path": "codex-rs/backend-client/src/client/rate_limit_resets.rs",
+          "lines": [
+            124,
+            128
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/backend-client/src/client/rate_limit_resets.rs#L124-L128"
+        },
+        {
+          "path": "codex-rs/backend-client/src/client.rs",
+          "lines": [
+            294,
+            305
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/backend-client/src/client.rs#L294-L305"
+        }
+      ]
+    },
+    {
+      "id": "mismatch_forwarded",
+      "conclusion": "After a usage response, app-server compares backend account_id AND user_id to current auth, also excluding FedRAMP, but only filters ordinaryUsageAllowed and rateLimitUpsell. It always forwards response.account_id. A non-null accountId therefore does not imply the snapshot matched current auth. The upstream test expressly returns mismatching accountId unchanged with permission/banner null.",
+      "sources": [
+        {
+          "path": "codex-rs/app-server/src/request_processors/account_processor.rs",
+          "lines": [
+            1248,
+            1277
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/request_processors/account_processor.rs#L1248-L1277"
+        },
+        {
+          "path": "codex-rs/app-server/tests/suite/v2/rate_limits.rs",
+          "lines": [
+            367,
+            372
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/tests/suite/v2/rate_limits.rs#L367-L372"
+        },
+        {
+          "path": "codex-rs/app-server/tests/suite/v2/rate_limits.rs",
+          "lines": [
+            436,
+            442
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/tests/suite/v2/rate_limits.rs#L436-L442"
+        }
+      ]
+    },
+    {
+      "id": "usage_switch_test",
+      "conclusion": "Upstream concurrent usage-read/login test covers a user switch, workspace switch, and same-identity token refresh. In that test changed owners cause network-permission revocation; same identity refresh completes successfully. This is evidence of a specific protected race path, not a general guarantee that accountId is current at later execution.",
+      "sources": [
+        {
+          "path": "codex-rs/app-server/tests/suite/v2/rate_limits_identity_tests.rs",
+          "lines": [
+            29,
+            36
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/tests/suite/v2/rate_limits_identity_tests.rs#L29-L36"
+        },
+        {
+          "path": "codex-rs/app-server/tests/suite/v2/rate_limits_identity_tests.rs",
+          "lines": [
+            95,
+            140
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/tests/suite/v2/rate_limits_identity_tests.rs#L95-L140"
+        }
+      ]
+    },
+    {
+      "id": "account_read_id",
+      "conclusion": "Account.Chatgpt itself has email, planType, workspaceName and no ID. However account/read has the experimental top-level workspaceRouting object with chatgptAccountId, backendOrigin, accountRoutingOverride. It is wrong to conclude the pinned account/read response has no ID just from the default generated schema.",
+      "sources": [
+        {
+          "path": "codex-rs/app-server-protocol/src/protocol/v2/account.rs",
+          "lines": [
+            18,
+            38
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server-protocol/src/protocol/v2/account.rs#L18-L38"
+        },
+        {
+          "path": "codex-rs/app-server-protocol/src/protocol/v2/account.rs",
+          "lines": [
+            584,
+            601
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server-protocol/src/protocol/v2/account.rs#L584-L601"
+        },
+        {
+          "path": "codex-rs/app-server/README.md",
+          "lines": [
+            520,
+            524
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/README.md#L520-L524"
+        }
+      ]
+    },
+    {
+      "id": "schema_filtering",
+      "conclusion": "workspaceRouting is explicitly experimental. Default TS/schema exports filter experimental fields, which explains why checked-in GetAccountResponse.ts omits it while WorkspaceRouting.ts remains. get_account emits the field without a capability parameter; inspected outbound filtering does not generally strip response fields. Treat its existence as experimental and version-specific; do not claim default schema proves absence or that runtime opt-in is the field's only emission gate.",
+      "sources": [
+        {
+          "path": "codex-rs/app-server-protocol/src/export.rs",
+          "lines": [
+            112,
+            145
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server-protocol/src/export.rs#L112-L145"
+        },
+        {
+          "path": "codex-rs/app-server-protocol/src/export.rs",
+          "lines": [
+            251,
+            266
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server-protocol/src/export.rs#L251-L266"
+        },
+        {
+          "path": "codex-rs/app-server/src/request_processors/account_processor/workspace_routing.rs",
+          "lines": [
+            258,
+            292
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/request_processors/account_processor/workspace_routing.rs#L258-L292"
+        },
+        {
+          "path": "codex-rs/app-server/src/transport.rs",
+          "lines": [
+            181,
+            202
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/transport.rs#L181-L202"
+        }
+      ]
+    },
+    {
+      "id": "routing_id_provenance",
+      "conclusion": "Routing discovery selects exactly one accounts/check membership whose ID equals the auth-selected account ID, then returns entry.id as chatgptAccountId. Missing/duplicate workspaces fail. Saved auth without a selected ID yields no routing; API-only/signed-out return null. Routing discovery is not a caller-chosen synthetic ID and does not select the backend default workspace.",
+      "sources": [
+        {
+          "path": "codex-rs/app-server/src/request_processors/account_processor/workspace_routing.rs",
+          "lines": [
+            350,
+            368
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/request_processors/account_processor/workspace_routing.rs#L350-L368"
+        },
+        {
+          "path": "codex-rs/app-server/src/request_processors/account_processor/workspace_routing.rs",
+          "lines": [
+            456,
+            490
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/request_processors/account_processor/workspace_routing.rs#L456-L490"
+        },
+        {
+          "path": "codex-rs/app-server/src/request_processors/account_processor/workspace_routing.rs",
+          "lines": [
+            599,
+            603
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/request_processors/account_processor/workspace_routing.rs#L599-L603"
+        },
+        {
+          "path": "codex-rs/app-server/README.md",
+          "lines": [
+            522,
+            524
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/README.md#L522-L524"
+        }
+      ]
+    },
+    {
+      "id": "routing_freshness",
+      "conclusion": "read_account monitors auth owner_generation, aborts on ownership changes, checks again before returning and verifies configuration after discovery; same-owner refresh invalidates routing cache without necessarily cancelling discovery. This is an in-process snapshot guarantee and does not bind a subsequent job or prevent a later auth change.",
+      "sources": [
+        {
+          "path": "codex-rs/app-server/src/request_processors/account_processor/workspace_routing.rs",
+          "lines": [
+            295,
+            301
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/request_processors/account_processor/workspace_routing.rs#L295-L301"
+        },
+        {
+          "path": "codex-rs/app-server/src/request_processors/account_processor/workspace_routing.rs",
+          "lines": [
+            466,
+            503
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/request_processors/account_processor/workspace_routing.rs#L466-L503"
+        },
+        {
+          "path": "codex-rs/app-server/src/request_processors/account_processor/workspace_routing.rs",
+          "lines": [
+            544,
+            559
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/request_processors/account_processor/workspace_routing.rs#L544-L559"
+        },
+        {
+          "path": "codex-rs/login/src/auth/change_state.rs",
+          "lines": [
+            5,
+            19
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/login/src/auth/change_state.rs#L5-L19"
+        }
+      ]
+    },
+    {
+      "id": "session_identity",
+      "conclusion": "Experimental accountSession/list supplies activeSessionId and sessions containing separate userId and selectedWorkspaceAccountId, plus workspaces[].accountId. sessionId is an opaque managed-login identifier, stable across token rotations/workspace changes. accountId identifies a workspace, expressly not a user. Methods require experimentalApi capability.",
+      "sources": [
+        {
+          "path": "codex-rs/app-server-protocol/src/protocol/common.rs",
+          "lines": [
+            1364,
+            1377
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server-protocol/src/protocol/common.rs#L1364-L1377"
+        },
+        {
+          "path": "codex-rs/app-server-protocol/src/protocol/v2/account.rs",
+          "lines": [
+            229,
+            282
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server-protocol/src/protocol/v2/account.rs#L229-L282"
+        },
+        {
+          "path": "codex-rs/login/src/auth/manager/workspace_switching.rs",
+          "lines": [
+            100,
+            106
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/login/src/auth/manager/workspace_switching.rs#L100-L106"
+        },
+        {
+          "path": "codex-rs/app-server/src/message_processor.rs",
+          "lines": [
+            1013,
+            1016
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/message_processor.rs#L1013-L1016"
+        },
+        {
+          "path": "codex-rs/app-server/README.md",
+          "lines": [
+            668,
+            689
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/README.md#L668-L689"
+        }
+      ]
+    },
+    {
+      "id": "session_list_freshness",
+      "conclusion": "The implementation lists only the active managed ChatGPT login. External auth, API key and signed-out modes produce no sessions. refreshWorkspaceMetadata false uses cached auth and avoids the membership lookup; true calls auth() and accounts/check then rechecks active managed session and selected workspace, failing if changed. Neither response is a lease for future execution.",
+      "sources": [
+        {
+          "path": "codex-rs/app-server/src/request_processors/account_processor/workspace_switching.rs",
+          "lines": [
+            13,
+            92
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/request_processors/account_processor/workspace_switching.rs#L13-L92"
+        },
+        {
+          "path": "codex-rs/app-server/tests/suite/v2/account_workspace_switching.rs",
+          "lines": [
+            490,
+            517
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/tests/suite/v2/account_workspace_switching.rs#L490-L517"
+        }
+      ]
+    },
+    {
+      "id": "switch_semantics",
+      "conclusion": "accountSession/switch validates session and workspace membership, pauses admission/unloads threads, changes credentials, validates routing and attempts rollback on failure while credentials remain current. It sends account/updated on success. The current-workspace fast path keeps threads. These mutation semantics were inspected only; no switch was performed.",
+      "sources": [
+        {
+          "path": "codex-rs/app-server/src/request_processors/account_processor/workspace_switching.rs",
+          "lines": [
+            113,
+            160
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/request_processors/account_processor/workspace_switching.rs#L113-L160"
+        },
+        {
+          "path": "codex-rs/app-server/src/request_processors/account_processor/workspace_switching.rs",
+          "lines": [
+            187,
+            223
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/request_processors/account_processor/workspace_switching.rs#L187-L223"
+        },
+        {
+          "path": "codex-rs/app-server/README.md",
+          "lines": [
+            674,
+            689
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/README.md#L674-L689"
+        }
+      ]
+    },
+    {
+      "id": "notifications",
+      "conclusion": "account/updated contains only authMode and planType; account/rateLimits/updated contains only rateLimits and no accountId. Sparse update metadata should merge or trigger refetch. Account notifications recheck owner_generation after reserving queue capacity and drop superseded updates; login completion becomes failure if superseded. README explicitly treats notifications as snapshots and tells clients to reread account/read and configRequirements/read.",
+      "sources": [
+        {
+          "path": "codex-rs/app-server-protocol/src/protocol/v2/account.rs",
+          "lines": [
+            615,
+            621
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server-protocol/src/protocol/v2/account.rs#L615-L621"
+        },
+        {
+          "path": "codex-rs/app-server-protocol/src/protocol/v2/account.rs",
+          "lines": [
+            679,
+            706
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server-protocol/src/protocol/v2/account.rs#L679-L706"
+        },
+        {
+          "path": "codex-rs/app-server/src/account_notifications.rs",
+          "lines": [
+            15,
+            51
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/account_notifications.rs#L15-L51"
+        },
+        {
+          "path": "codex-rs/app-server/README.md",
+          "lines": [
+            524,
+            524
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/README.md#L524"
+        }
+      ]
+    },
+    {
+      "id": "inference_limits",
+      "conclusion": "Inference from these source facts: a nonempty usage accountId can corroborate the workspace of that usage snapshot against a separately obtained expected workspace ID on the trusted app-server connection. It cannot establish a unique human user, prove credential custody, identify a METAENGINE owner/registration/operation, or authorize later BEGIN/admission by itself. No returned auth epoch or cryptographic binding to a future job exists in these response types. Reconnects, account changes and stale results need client invalidation and a separately enforced execution-time identity/custody check.",
+      "sources": [
+        {
+          "path": "codex-rs/app-server-protocol/src/protocol/v2/account.rs",
+          "lines": [
+            358,
+            375
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server-protocol/src/protocol/v2/account.rs#L358-L375"
+        },
+        {
+          "path": "codex-rs/app-server-protocol/src/protocol/v2/account.rs",
+          "lines": [
+            584,
+            621
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server-protocol/src/protocol/v2/account.rs#L584-L621"
+        },
+        {
+          "path": "codex-rs/login/src/auth/change_state.rs",
+          "lines": [
+            5,
+            19
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/login/src/auth/change_state.rs#L5-L19"
+        },
+        {
+          "path": "codex-rs/app-server/src/message_processor.rs",
+          "lines": [
+            1969,
+            1973
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/message_processor.rs#L1969-L1973"
+        },
+        {
+          "path": "codex-rs/app-server/src/outgoing_message.rs",
+          "lines": [
+            732,
+            770
+          ],
+          "url": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/app-server/src/outgoing_message.rs#L732-L770"
+        }
+      ]
+    }
+  ],
+  "source_files": {
+    "codex-rs/app-server-protocol/schema/json/v2/GetAccountRateLimitsResponse.json": {
+      "sha256": "9c0def7f8ab2396122af939dffbf01b34b8d66082fe4129dd20917bfd4313fdc",
+      "bytes": 8239
+    },
+    "codex-rs/app-server-protocol/schema/typescript/v2/GetAccountRateLimitsResponse.ts": {
+      "sha256": "a046fcd60782ace2b87517d43bdeaf9ceaec4ad06f67b84ca3d1a83c251bc9d1",
+      "bytes": 1291
+    },
+    "codex-rs/app-server-protocol/src/export.rs": {
+      "sha256": "70e6757554f2ff0be629f327fe2bef5a3c6d459eb92e5761693bf915a6e13194",
+      "bytes": 110582
+    },
+    "codex-rs/app-server-protocol/src/protocol/common.rs": {
+      "sha256": "b7f0a90dcc822962e59890b252a43142a113cb1355f333d8c6b0f704b97f89f7",
+      "bytes": 176292
+    },
+    "codex-rs/app-server-protocol/src/protocol/v2/account.rs": {
+      "sha256": "8768b6d379a1045522c72b678ac812e1e0aedfbf73f7948c31e479192ada76cc",
+      "bytes": 32448
+    },
+    "codex-rs/app-server/README.md": {
+      "sha256": "7d5da6fb29d05debe830ef9fe3ce1ddc18bc5bd8987a411d7971562a49f3ea57",
+      "bytes": 46426
+    },
+    "codex-rs/app-server/src/account_notifications.rs": {
+      "sha256": "0ddd334e79409f9f0f031c0e7c0fd989f3a95e5ec05a5bbbb4027fa51d36b3ef",
+      "bytes": 2141
+    },
+    "codex-rs/app-server/src/message_processor.rs": {
+      "sha256": "6d81a0b5bab7172bf9ab24a6e8e05375f5623f0a8ac6d6da97c4ed184ad1085f",
+      "bytes": 85229
+    },
+    "codex-rs/app-server/src/outgoing_message.rs": {
+      "sha256": "bb8062823bc2bb5699121bd64981527603ff6be4aafcc1b061d43d89e9de7053",
+      "bytes": 62662
+    },
+    "codex-rs/app-server/src/request_processors/account_processor.rs": {
+      "sha256": "76d7f41221f74291f03bda83dba9cd0166c943245cdde66cd44b01f63c497915",
+      "bytes": 64249
+    },
+    "codex-rs/app-server/src/request_processors/account_processor/workspace_routing.rs": {
+      "sha256": "57acc17ad35148162bf349dcb5663adaf3e7a5bfc3b4adef7f20be9fd7d1b846",
+      "bytes": 27469
+    },
+    "codex-rs/app-server/src/request_processors/account_processor/workspace_switching.rs": {
+      "sha256": "aa6170e7c877d541b43f8d5302089dffaf85d0d120ae854b33595a38eaee06b9",
+      "bytes": 10702
+    },
+    "codex-rs/app-server/src/transport.rs": {
+      "sha256": "5b4cb5599deae1af2153976fee7586be3f87df53a2e2816f2011bddf638bda06",
+      "bytes": 9115
+    },
+    "codex-rs/app-server/tests/suite/v2/account_workspace_switching.rs": {
+      "sha256": "610b6d09970b9b46a7ddc888dd5cb89089c7b115376c8f6ee93359d0c792176b",
+      "bytes": 19931
+    },
+    "codex-rs/app-server/tests/suite/v2/rate_limits.rs": {
+      "sha256": "e229d3ca17b040fceb63e65e24c153eef7060dcb834e93755e1152baa5890956",
+      "bytes": 27359
+    },
+    "codex-rs/app-server/tests/suite/v2/rate_limits_identity_tests.rs": {
+      "sha256": "71b109c524a90c81678bceaa5a695e801c95a16b9e152efbf3a1920f02a0630b",
+      "bytes": 5484
+    },
+    "codex-rs/backend-client/src/client.rs": {
+      "sha256": "6dbf760c5461b687815f46ea2d02ec4be3d3ae82bba288df1f7aa5caa2f68319",
+      "bytes": 49107
+    },
+    "codex-rs/backend-client/src/client/rate_limit_resets.rs": {
+      "sha256": "434eacc050fd1838f149455f8f0d6ffdb23588993e71323ee2d5d1cbf3237c9d",
+      "bytes": 5780
+    },
+    "codex-rs/backend-client/src/types.rs": {
+      "sha256": "7229112d0d8ee7d1ff3f23457ccd13868cbba024d3a7b4fca74aa3e288ea0eac",
+      "bytes": 21555
+    },
+    "codex-rs/login/src/auth/change_state.rs": {
+      "sha256": "3e40a7c39b3bc92ff1752f9b33adf2557af1129dde863cf8b50e5d92c42710b7",
+      "bytes": 2197
+    },
+    "codex-rs/login/src/auth/manager/workspace_switching.rs": {
+      "sha256": "74f39b4e42e9e4c0f9349cb98e0695068403da05966492015395cda8dbc63c09",
+      "bytes": 13517
+    }
+  }
+}

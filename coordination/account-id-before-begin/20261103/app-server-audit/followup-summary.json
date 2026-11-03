@@ -1,0 +1,21 @@
+{
+  "stable166": {
+    "commit": "6ff1e1ca3b30fc8b914720681fcf5fe62e95f856",
+    "schema_path": "codex-rs/app-server-protocol/schema/json/v2/GetAccountRateLimitsResponse.json",
+    "schema_sha256": "9c0def7f8ab2396122af939dffbf01b34b8d66082fe4129dd20917bfd4313fdc",
+    "accountId_nullable": true,
+    "accountId_required": false
+  },
+  "overlay159": {
+    "commit": "3b01b36fa5eb96ba82a776bd3c2fc57f8969181f",
+    "schema_path": "codex-rs/app-server-protocol/schema/json/v2/GetAccountRateLimitsResponse.json",
+    "schema_sha256": "cb9655e68130116f634ed9353e45b336492e6069a6628f424d1cd52e54eda0e0",
+    "accountId_nullable": true,
+    "accountId_required": false
+  },
+  "production_source_changed_this_followup": false,
+  "source_patch_this_followup": null,
+  "runtime_authenticated_probe": "NOT RUN: original authenticated app-controlled home/session owner unavailable",
+  "upstream_rust_tests": "NOT RUN: source inspected only; no dependencies or toolchain installed",
+  "installed_windows_package_schema": "NOT RUN: exact manifest-bound Windows executable not run or replaced"
+}

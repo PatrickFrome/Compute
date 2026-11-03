@@ -1,0 +1,4 @@
+argv: ["rg", "-n", "-i", "app[-_ ]server|account/rate.?limits/read|rate.?limits/updated", "apps/metaengine-browser/src", "infra/client-state-runtime", "--glob", "!*.test.*", "--glob", "!README*", "--glob", "!*.md"]
+exit_code: 1
+stdout:
+stderr:
