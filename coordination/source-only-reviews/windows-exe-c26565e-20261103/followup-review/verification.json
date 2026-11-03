@@ -1,0 +1,33 @@
+{
+  "schema": "metaengine.review1436.followup.v1",
+  "original_source_tree": "2dbe253e97379532f6f4b52ef7edf26109a9266d",
+  "review_baseline_tree": "219e5e2b468154fd3e6a1c1f34c8cdea81d5628f",
+  "result_tree": "a6d439952d06e7e0b1f5353de6859a060ccc78c2",
+  "incremental_patch_sha256": "c0d5f40d673da70e48b18694d460ce8de45bde578efee6df258ad68c29d26a3b",
+  "combined_patch_sha256": "a191a50436c12cd3dd1f9e3c2bf37fa76c8abb2ef187fabcfdf0d892ef138183",
+  "incremental_apply_check": true,
+  "combined_apply_check": true,
+  "both_result_trees_match": true,
+  "tests": {
+    "source_checks": 292,
+    "python_models_pass": 24,
+    "gate_pass": 41,
+    "runtime_pass": 12,
+    "runtime_windows_skip": 4,
+    "runtime_early_refusal_before_expected_fail": 2,
+    "runtime_early_refusal_after_pass": 2,
+    "runtime_independent_probe_pass": 8,
+    "pe_before_expected_fail": 11,
+    "pe_after_pass": 11,
+    "pe_independent_expectations_pass": 13,
+    "relocated_source_pass": 1
+  },
+  "os_root_producer": "UNAVAILABLE to standalone Node; C policy is not native OS-root proof",
+  "nonstandard_root": "HOLD; no environment-selected fallback",
+  "chromium_full_source_identity": "HOLD; production receipt/publication unavailable",
+  "node_descendants": "HOLD until reviewed full postpatch identity or replay",
+  "pe_transforms": "EXACT_BYTES_NO_TRANSFORMS; ordinary builder edits HOLD",
+  "release_trust_replaced": false,
+  "windows_build": "NOT RUN",
+  "install_or_database_or_service_changes": false
+}

@@ -1,0 +1,164 @@
+METAENGINE PE transformation review — follow-up #1436
+
+Scope and disposition
+This is a source-only, byte-parser review. No dependencies were installed, no
+downloaded package code was executed, no project module was imported, and no
+Windows executable was run. No project source, trust root, or release guard was
+changed by this reviewer. Evidence files alone were written under this directory.
+
+The original .text-only comparison is insufficient executable identity. The safe
+immediate disposition is full-byte equality, otherwise HOLD. Current packaging
+legitimately transforms the image, including before afterPack, so this policy is
+expected to HOLD until an independently checked transformation model exists.
+Do not disable ASAR integrity or fuses to obtain equality. An Authenticode
+exception does not authorize disabling internal release signatures or admission.
+
+Pinned material and primary-source correspondence
+The reviewed package-lock.json SHA256 is
+99dcdb3b2f2ea3e40e35bed0d5a37c684d70b6d40cc06d7259282b002880ff8b.
+Lock entries select electron-builder/app-builder-lib 26.15.7, top-level
+@electron/fuses 2.1.3, app-builder-lib's nested @electron/fuses 1.8.0,
+resedit 1.7.2, and pe-library 0.4.1.
+
+The five downloaded source archives matched their exact lockfile SHA512 SRI.
+app-builder-lib archive SHA256:
+ef95de00b654fbe0b186c014d6146a240355fa837ac29835e70e453f8a2fa053.
+This verifies agreement with the lock, not independent signature/provenance trust.
+Raw metadata, archives, hashes, and SRI values are retained in pe-upstream/;
+pe-upstream/sri-source-verification.json records the checks.
+
+The official builder release tag is electron-builder@26.15.7. Its winPackager,
+resEdit, ElectronFramework, and platformPackager TypeScript files exactly match
+the verified npm archive's source-map sourcesContent. Three additional matches
+were confirmed for electronWin, asar/integrity, and windowsCodeSign. The fuses
+archives have no sourcesContent; no such match is claimed for them. Their
+published JS and the official versioned source were read independently.
+
+Source-derived transformations; these are not blanket normalization allowances
+1. Rename: ElectronFramework.ts:51–63 renames electron.exe to the product name.
+   A file rename changes no executable bytes.
+   https://github.com/electron-userland/electron-builder/blob/electron-builder%4026.15.7/packages/app-builder-lib/src/electron/ElectronFramework.ts#L51-L63
+
+2. ASAR integrity: electronWin.ts:8–42 adds an INTEGRITY/ELECTRONASAR resource.
+   Its JSON entries contain normalized Windows paths, algorithm, and expected
+   ASAR header hashes; asar/integrity.ts derives SHA256 hashes and sorts inputs.
+   The full resource serializer runs afterward, so byte differences extend
+   beyond the new JSON payload. Any future verifier must recompute the expected
+   values from independently verified staged ASAR files, preserve all other
+   resources, and reproduce the exact serializer output.
+   https://github.com/electron-userland/electron-builder/blob/electron-builder%4026.15.7/packages/app-builder-lib/src/electron/electronWin.ts#L8-L42
+   https://github.com/electron-userland/electron-builder/blob/electron-builder%4026.15.7/packages/app-builder-lib/src/asar/integrity.ts#L22-L84
+
+3. Fuses: platformPackager.ts:369–428 imports @electron/fuses from within
+   app-builder-lib; the lock therefore selects nested 1.8.0 for built-in writes.
+   The repository final-readback hook imports top-level 2.1.3. Both versions alter
+   configured fuse states adjacent to the fixed sentinel. For this config only
+   indices 4 and 5 are requested true (0x31); unconfigured states are inherited.
+   A precise future model should require one unambiguous x64 wire, preserve the
+   sentinel/version/length and every other byte, and verify exact expected
+   states. It must not exempt an entire containing section. Version 2.1.3 writes
+   back the existing wire buffer; its source also handles universal macOS wires,
+   which is no reason to allow multiple ambiguous wires in this x64 policy.
+   https://github.com/electron-userland/electron-builder/blob/electron-builder%4026.15.7/packages/app-builder-lib/src/platformPackager.ts#L369-L428
+   https://github.com/electron/fuses/blob/v1.8.0/src/index.ts#L55-L118
+   https://github.com/electron/fuses/blob/00f2479b958d917fe0f6e7711e85f62b74b3e7c2/src/index.ts#L141-L228
+   https://github.com/electron/fuses/blob/00f2479b958d917fe0f6e7711e85f62b74b3e7c2/src/config.ts#L10-L21
+
+4. Product resources: winPackager.ts:159–253 derives expected product metadata,
+   icon, and optional execution level. resEdit.ts:15–67 edits version information,
+   icon group 1, and an existing manifest only for a requested non-asInvoker
+   level, then regenerates the image. Current config supplies no execution-level
+   exception. These are exact, input-dependent resource changes, not permission
+   to ignore arbitrary .rsrc, import metadata, or headers.
+   https://github.com/electron-userland/electron-builder/blob/electron-builder%4026.15.7/packages/app-builder-lib/src/winPackager.ts#L159-L253
+   https://github.com/electron-userland/electron-builder/blob/electron-builder%4026.15.7/packages/app-builder-lib/src/util/resEdit.ts#L15-L67
+
+5. PE serialization/certificates: resedit 1.7.2 re-exports pe-library's parser.
+   NtExecutableResource.ts:848–912 rebuilds the resource section and data RVAs.
+   NtExecutable.ts:246–351 and 442–532 can shift later section offsets/RVAs and
+   image size when resources grow. generate():369–440 rebuilds the image, zeros
+   the certificate directory, and recomputes a previously nonzero checksum.
+   from():79–106 rejects certificate-bearing images by default; builder's calls
+   do not request ignoreCert. Thus certificate stripping is not an ordinary
+   allowed builder-input normalization. Signed originals must HOLD unless a
+   separate explicit, validated policy covers them.
+   https://github.com/jet2jet/pe-library-js/blob/94974834fc131c99963fd1635e5bfbc135b160bd/src/main/NtExecutableResource.ts#L848-L912
+   https://github.com/jet2jet/pe-library-js/blob/94974834fc131c99963fd1635e5bfbc135b160bd/src/main/NtExecutable.ts#L79-L106
+   https://github.com/jet2jet/pe-library-js/blob/94974834fc131c99963fd1635e5bfbc135b160bd/src/main/NtExecutable.ts#L369-L532
+
+6. Authenticode: builder dispatches to external signing tools or a configured
+   signing hook after resource edits. This review did not run or verify those
+   tools and proves no signer-specific byte normalization. No certificate,
+   checksum, overlay, or other generic exclusion is granted. Microsoft documents
+   that the certificate table has file-offset rather than ordinary RVA semantics;
+   an independent parser must validate its complete bounds and placement if a
+   later policy handles it.
+   https://github.com/electron-userland/electron-builder/blob/electron-builder%4026.15.7/packages/app-builder-lib/src/codeSign/windowsCodeSign.ts#L8-L19
+   https://github.com/electron-userland/electron-builder/blob/electron-builder%4026.15.7/packages/app-builder-lib/src/codeSign/windowsSignToolManager.ts
+   https://learn.microsoft.com/en-us/windows/win32/debug/pe-format
+
+Stage order and intentional HOLD
+Verified platformPackager.ts:320–356 computes/injects ASAR integrity through
+framework.beforeCopyExtraFiles, then emits the user afterPack hook, then applies
+built-in fuses and signApp (which edits resources before optional signing).
+Therefore afterPack already observes an ASAR-transformed image, while the final
+artifact hook observes further fuse/resource/signing changes. Equal .text at
+either stage does not prove equal executable behavior or complete identity.
+https://github.com/electron-userland/electron-builder/blob/electron-builder%4026.15.7/packages/app-builder-lib/src/platformPackager.ts#L320-L356
+
+Safer precise alternative, not implemented by this reviewer
+Start from the receipt-verified complete original image, independently validate
+the staged ASAR/config/version/icon inputs, and deterministically generate an
+expected image using the exact lock-pinned pure-JS transformations in their
+observed order. Compare every output byte to that expected image at each relevant
+stage. Preserve and compare non-allowlisted resource entries, all code/data,
+imports, exports, relocations, TLS/load-config/exception data, entry point,
+section permissions, headers and overlay. Reject overlapping/ambiguous/truncated
+layouts and extra or duplicate resources/wires. Keep all internal release and
+runtime admission checks independent. Until this model is audited and tested,
+retain full-byte equality/HOLD; do not let candidate-supplied metadata define its
+own expected normalized identity.
+
+Independent raw negative-fixture evidence
+Reviewed original gate snapshot SHA256:
+5c9606b04aa6305351d660f8044be7a53bf282cea0b28aeba2d8337da0615f3a.
+The saved snapshot is mode 0444; its path is
+pe-upstream/reviewed-custom-electron-package-gate.cjs.
+pe-negative-fixtures.cjs isolates its peExecutableDigest function in a VM with
+only Buffer/hash/error helpers. The 4096-byte synthetic PE-shaped fixture is not
+a runnable Electron image and supplies no Windows qualification.
+
+Baseline fixture run: 12/12 expectations passed. Ten distinct changed images
+retained the original identity: entry point, import directory, TLS directory,
+section RWX flags, import-name bytes, .data, .rsrc, certificate directory, overlay
+edit, and overlay append. Changing .text changed the digest; deleting the marker
+was rejected. Full-byte equality distinguishes all ten false-identity cases.
+Raw evidence: pe-negative-fixtures.json, pe-negative-fixtures.raw.log, and
+pe-negative-fixture-baseline.bin.
+
+Current-gate independent verification
+After the implementation owner's edit, the reviewer captured a second mode-0444
+snapshot at pe-upstream/reviewed-current-custom-electron-package-gate.cjs.
+Its SHA256 is
+3cd915d31398574bd9004e5a37f3c0bc00cd717043afc3ce67d3904b09077d50.
+The live gate still matched that snapshot at the final check.
+
+pe-current-gate-fixtures.cjs VM-loads the two snapshots with only whitelisted
+Node fs/path/crypto builtins, then calls checkDist against a temporary synthetic
+1 MiB image, synthetic native manifest, and self-authored fixture receipt. The
+receipt asserts no source/build authority; this verifies only byte-gate behavior.
+No project module import or Windows/downloaded-code execution occurs.
+
+Result: 13/13 expectations passed. The identical-byte control passes both gates.
+All ten unchanged-.text alterations accepted by the original gate are rejected
+by the current gate with the exact error
+custom_electron_package_packaged_exe_transform_unqualified_hold.
+All successfully parsed current-image digests equal independent SHA256 of the
+complete image. The .text-change and missing-marker controls are rejected by
+both gates. The revised implementation therefore closes the demonstrated false
+identity class and explicitly retains HOLD for unqualified legitimate transforms.
+
+Raw evidence: pe-current-gate-fixtures.json and
+pe-current-gate-fixtures.raw.log; reproducible harness:
+pe-current-gate-fixtures.cjs. The synthetic receipt and input files are retained
+at the fixture root named inside the JSON evidence. They are test data only.

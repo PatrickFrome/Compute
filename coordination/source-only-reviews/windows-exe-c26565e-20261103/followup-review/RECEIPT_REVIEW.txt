@@ -1,0 +1,40 @@
+Receipt attribution follow-up to parent review #1436
+
+Assessment: the review is valid. The previous origin-normalization fix removed a schema mismatch but did not establish the missing source policy. A locked origin could be written despite an arbitrary descendant checkout; observed heads were present but ignored by the package gate. The previous positive changed-head model test encoded that unsafe acceptance and has been replaced with refusal regressions.
+
+Reviewed staged baseline: tree 219e5e2b468154fd3e6a1c1f34c8cdea81d5628f. This follow-up changes only source policy, receipt consistency, and tests in the four files identified below; packaging_fix independently changed the PE byte checks in the two shared gate files.
+
+What the earlier checks actually established:
+- Electron HEAD was exact but its working tree did not have to be clean. Three Electron source preimages were hashed.
+- Node/V8/BoringSSL accepted any descendant of the locked commit. Node checked only eight final interface files. V8 checked only two primary-evidence source files. BoringSSL had no complete source postimage verification in this path.
+- The .patches document was hashed, but the full official series and complete postpatch tree were not replayed/authenticated by this producer. The separate interface checker explicitly qualifies only three Electron and eight Node files.
+- The official GPG check authenticates the separate OpenSSL archive. It does not authenticate the BoringSSL checkout or arbitrary descendant changes.
+- Chromium had a version tag and one DEPS document hash, with no reviewed immutable full-source commit/tree identity. A mutable local tag cannot supply one.
+- The JS gate checked receipt.origin against constants and checked the output/native manifests against self-authored receipt data; it never checked upstream_checkout_heads. That is byte/declared consistency, not independent source authentication.
+
+Exact reproductions saved separately:
+1. original-source-negative.log runs four new refusal tests against the unchanged staged pre-fix builder. All twelve refusal assertions fail because the old verifier ACCEPTS: Node/V8/BoringSSL descendant commits changing a source file outside every selected hash (3 cases); dirty tracked source at the same HEAD in Electron/Node/V8/BoringSSL (4); untracked extra source at the same HEAD in those four repositories (4); and the absent full Chromium identity (1).
+   These are synthetic temporary Git repositories with the same bounded-file policy structure. Git ancestry/status and file hashing are real; only fixture content hashes/expected fixture commits are substituted in the test. This is not a complete upstream source or compiler execution test.
+2. original-gate-negative.tap uses the real staged pre-fix JS byte gate through a test-only loader and inert PE-shaped data. All nine malformed/changed declared-head cases are accepted, so the new refusal group reports 10 failures including its parent: missing record, missing component, extra component, changed Node/V8/BoringSSL heads, uppercase value, uppercase component, and an array record. No Windows executable runs.
+3. original-accepted-lineage-and-receipt.log preserves the two earlier acceptance models passing on the baseline, including a changed observed-head receipt passing the real byte gate.
+
+Implemented fail-closed correction:
+- custom-electron-source-build.py now requires the exact locked HEAD and clean tracked/untracked Git status for each of Electron, Node, V8 and BoringSSL. Ancestry alone is no longer admitted. Usual gclient-committed Node descendants now HOLD until there is a separately reviewed complete postpatch identity or complete official replay policy.
+- build_receipt and publish_distribution validate the complete, exact four-component declared-head mapping themselves, including helper calls; missing, extra, changed or differently cased values are rejected before output effects.
+- verify_source_identity, build_receipt and publish_distribution explicitly raise custom_electron_chromium_full_source_identity_unavailable. There is no production flag, environment override, local-tag inference or self-reported verified field. The real main entry is tested to HOLD before interface/crypto/staging/GN effects and before output creation.
+- The JS gate now requires all four upstream_checkout_heads to match the exact declared locks. Header/comments state clearly that this is consistency of untrusted receipt declarations; a self-authored receipt never authenticates the source checkouts, compiler inputs or complete Chromium closure.
+- Positive byte-publication models explicitly mock only the known missing Chromium prerequisite and use exact declared heads. They are labelled MODEL ONLY, preserve all other byte/head checks, and produce no runtime/release authority.
+
+Final verification after combined PE changes:
+- Python source/receipt model suite: 24/24 PASS, no skips. It covers arbitrary outside-hash descendants, dirty/untracked same-HEAD source, clean exact four-repository helper positives, production/pre-output Chromium HOLD, direct producer helper refusal, and the real JS gate refusing changed observed heads even when origin/bytes remain fixed.
+- Complete JS package gate suite: 41/41 PASS, no skips, including the separate packaging_fix PE regressions.
+- Receipt metadata-only JS group: 10/10 PASS, no skips.
+- git diff --check: PASS.
+
+Files changed by this reviewer, unstaged and uncommitted:
+apps/metaengine-browser/scripts/custom-electron-source-build.py
+apps/metaengine-browser/test/test_custom_electron_source_build.py
+apps/metaengine-browser/scripts/custom-electron-package-gate.cjs (receipt/header portions only)
+apps/metaengine-browser/test/custom-electron-package-gate.test.mjs (receipt fixture/metadata regressions only)
+
+Remaining blocker: this is a source-composition hardening result, NOT a successful build. No production receipt or package can be produced by this source producer without a reviewed complete Chromium identity; ordinary patched Node also needs a reviewed full postpatch identity/replay. Exact four-repo declarations do not establish complete source closure. No build, installation, dependency acquisition, Windows executable, service, database, trust-root, signing or machine configuration effect was performed. No operation is denied, pending approval or uncertain; the missing source authority is an explicit deterministic HOLD.
