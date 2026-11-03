@@ -5,23 +5,48 @@
     "arch": "x64"
   },
   "focused_tests": {
-    "pass": 576,
+    "pass": 572,
     "fail": 0,
     "skip": 0
   },
   "source_checks": 299,
-  "adversarial_suite": {
+  "selector_namespace_suite": {
+    "tests": 45,
+    "included_in_focused_tests": true,
+    "selector_and_main_provider": "UNMODIFIED_PRODUCTION_SOURCE",
+    "physical_reads": "REAL_NATIVE_IDENTITY_READS_WITH_BOUNDARY_SWAP_WRAPPER",
+    "filesystem": "REAL_TEMPORARY_TREES_WITH_FORBIDDEN_WRITE_SPIES",
+    "post_observation_ancestor_swaps": [
+      "REPLACEMENT_DIRECTORY",
+      "ALIAS_TO_RETAINED_PGDATA"
+    ],
+    "filesystem_write_attempts": 0,
+    "sealed_persist_attempts": 0,
+    "dacl_mutation_attempts": 0,
+    "original_and_replacement_trees": "UNCHANGED_AFTER_FIXTURE_SWAP"
+  },
+  "sealed_scope_regression": {
+    "suite_tests": 16,
+    "actual_opaque_scope_registration": null,
+    "encrypt": 0,
+    "decrypt": 0,
+    "ensure": 0,
+    "filesystem_mutations": 0,
+    "device_file_bytes": "UNCHANGED",
+    "dormant_transition_tests": "EXPLICIT_MOCK_ISSUER_ALGORITHMS_ONLY"
+  },
+  "recovery_effect_suite": {
     "tests": 11,
     "included_in_focused_tests": true,
     "production_veto_unmodified": true,
-    "directory_identity_and_filesystem": "REAL_ISOLATED_TEMPORARY_DIRECTORIES",
-    "root_read_before_effect_swap": "ROOT_STATE_PGDATA_AND_ALIAS_SWAPS",
     "owned_source_pool_creations": 0,
     "native_controller_creations": 0,
     "backup_restore_filesystem_mutations": 0
   },
+  "selector_creation_state": "HOLD_ORIGINAL_PARENT_NAMESPACE_CUSTODY_REQUIRED",
   "recovery_effect_state": "HOLD_ORIGINAL_NATIVE_DIRECTORY_CUSTODY_REQUIRED",
-  "native_directory_issuer": "MISSING_NO_POSITIVE_BRANCH",
+  "original_parent_namespace_issuer": "MISSING",
+  "original_recovery_directory_issuer": "MISSING",
   "commands": [
     {
       "cwd": "apps/metaengine-browser",
@@ -68,8 +93,8 @@
         "../../infra/client-state-runtime/pg17-recovery-state-producer.test.mjs"
       ],
       "exit_code": 0,
-      "tests": 576,
-      "pass": 576,
+      "tests": 572,
+      "pass": 572,
       "fail": 0,
       "skip": 0,
       "log": "focused-tests.log"
@@ -109,6 +134,5 @@
   "postgresql_integration": "NOT_RUN",
   "installation": "NOT_PERFORMED",
   "database_access": "NONE",
-  "trust_root_change": "NONE",
-  "test_boundary": "Existing deep native/PG algorithm fixtures explicitly bypass veto ONLY in exact synthetic query modules. Production imports and adversarial suite retain original refusal."
+  "trust_root_change": "NONE"
 }

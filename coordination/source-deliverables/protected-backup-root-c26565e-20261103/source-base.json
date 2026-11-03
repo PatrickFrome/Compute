@@ -10,13 +10,16 @@
   "archive_sha256": "4200e492828dbb857aaa737a7ce56d0aeda3c97c84f7743b1501ef2f229d3636",
   "source_commit": "c26565e58ab92dcbcda9663c4d231bdf4a9a7ee6",
   "source_tree": "2dbe253e97379532f6f4b52ef7edf26109a9266d",
-  "result_tree": "0139c9fd5d5d04558dbb57bbf08c9cd047062822",
-  "patch_sha256": "89dd8893ac98174e37c0dc5334e6b3648856078476e64c9e263b0ba642d55636",
+  "result_tree": "cf8cbe232fef42c5ebf6c76316544e9e1cbe743b",
+  "patch_sha256": "9889999dfe35be42cd8d3b6d5d4fa3e3ce56a51bd321ec7bd0f9329d89c7b54e",
   "prior_patches_applied": false,
   "repository_skills": "No AGENTS.md or .agents/skills in verified source snapshot",
-  "previous_result_tree": "b6c5977b519c9332158af1d5b7de295fa452c1e6",
-  "supersedes_patch_sha256": "62c23c0fe581766bb319ddafc46effe2db503b10476445a655965726807e6640",
-  "incremental_patch": "directory-custody-hold.patch",
-  "incremental_patch_sha256": "9e7fb4d3f06c129dccec97375dc21066b31d199b7d2fcdf9a2e35b6bfb5715fe",
-  "recovery_effect_state": "HOLD_ORIGINAL_NATIVE_DIRECTORY_CUSTODY_REQUIRED"
+  "previous_result_tree": "0139c9fd5d5d04558dbb57bbf08c9cd047062822",
+  "supersedes_patch_sha256": "89dd8893ac98174e37c0dc5334e6b3648856078476e64c9e263b0ba642d55636",
+  "incremental_patch": "selector-parent-namespace-hold.patch",
+  "incremental_patch_sha256": "5efe66806b88a711a98a7ea7b74e2900b27aedf999984f0103b12ed2a1294bb8",
+  "recovery_effect_state": "HOLD_ORIGINAL_NATIVE_DIRECTORY_CUSTODY_REQUIRED",
+  "selector_creation_state": "HOLD_ORIGINAL_PARENT_NAMESPACE_CUSTODY_REQUIRED",
+  "selector_scope_registration": null,
+  "historical_directory_custody_patch": "directory-custody-hold.patch"
 }

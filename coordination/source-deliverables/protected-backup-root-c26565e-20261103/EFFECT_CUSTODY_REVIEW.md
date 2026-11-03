@@ -6,6 +6,30 @@ the selected directory objects or their pathname ancestry alive against
 replacement. The selected backup/restore path therefore remains **HOLD** until
 the existing native authority supplies actual directory-handle custody.
 
+## Selector effects are also withheld
+
+Registration is an effect before backup/restore. The former selector branch
+persisted REGISTERING and created the root through a pathname, without holding
+its parent namespace. A swap after the final before-create identity observation
+could redirect creation before a post-check refused the result.
+
+The selector now has no creation/write branch. An absent sealed record gives
+`owned_protected_backup_root_original_parent_namespace_custody_required` before
+ID generation, REGISTERING, temporary-state writes or mkdir. Its actual opaque
+scopes always expose `registration:null`, so they cannot reach the identity
+persistence method. Existing READY requalification remains read-only; it does
+not bypass the unchanged recovery-effect veto.
+
+The original native interface must protect BOTH mutation namespaces: the
+Supervisor identity-store parent/ancestors used by its temporary create and
+atomic replacement, and the exact owned Host state parent/ancestors used for
+fixed-name root creation. It must retain the same original parent objects from
+before the first sealed write until creation, READY commit and all joins finish.
+Creation must be exclusive and relative to the held original parent, atomically
+returning/retaining the original new child object. `mkdir(path)` followed by
+`open(path)` leaves another substitution gap. Numeric handle reuse, reopening,
+callbacks or JSON cannot establish original same-object custody.
+
 ## Actual consumer and first effect
 
 `readOriginalRecoveryProtectedRoot` rechecks the original Main phase and reads
@@ -89,6 +113,12 @@ confirms that the observed old identity can coexist with a new object at the
 same path. The fixed veto still prevents source connection, filesystem backup
 mutations and native launch. Tests also cover a valid unswapped selector,
 original close/drain, and the standalone adapter's refusal.
+
+The selector regression separately swaps a real state ancestor after the last
+physical observation before the absent-registration branch. The unchanged
+production selector refuses before any persistence, entropy or filesystem
+mutation. Original and replacement namespaces and identity-store bytes remain
+unchanged after the adversarial fixture's own swap.
 
 Existing deep lifecycle/PG algorithm fixtures explicitly substitute the missing
 native-directory boundary only in unique test module instances. They do not
