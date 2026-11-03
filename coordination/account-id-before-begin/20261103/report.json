@@ -1,0 +1,283 @@
+{
+  "status": "PARTIAL_SOURCE_FIX_MISSING_AUTHENTIC_PRODUCER",
+  "task": "Trusted selected Codex account identifier before BEGIN from an existing authentic owner",
+  "source": {
+    "repository": "PatrickFrome/Compute",
+    "transfer_branch": "work/source-transfer-c26565e-20261103",
+    "transfer_commit": "accb28e72c87c059e780efb8e6681886b33e9b4f",
+    "parts": [
+      "coordination/source-transfer/c26565e/archive.part00",
+      "coordination/source-transfer/c26565e/archive.part01",
+      "coordination/source-transfer/c26565e/archive.part02"
+    ],
+    "archive_sha256": "4200e492828dbb857aaa737a7ce56d0aeda3c97c84f7743b1501ef2f229d3636",
+    "source_commit_label": "c26565e58ab92dcbcda9663c4d231bdf4a9a7ee6",
+    "verified_tree": "2dbe253e97379532f6f4b52ef7edf26109a9266d",
+    "local_reconstruction_commit": "b0d4f445fb45d9541f7a0a4cb96b813e14f93fa2",
+    "local_history_is_original": false,
+    "previous_patches_reapplied": false,
+    "repository_AGENTS_or_agents_skills_present": false
+  },
+  "patch": {
+    "name": "codex-account-before-begin-c26565e.patch",
+    "sha256": "c3407baa7a7ddef0e5440456efcd7ba163b778c9936c06fb65814990fe8e7514",
+    "bytes": 43234,
+    "applies_to_tree": "2dbe253e97379532f6f4b52ef7edf26109a9266d",
+    "result_tree": "0d56f49a42ec442a2fe362ea6f0143c79d992111",
+    "git_apply_check": "PASS",
+    "fresh_worktree_apply_index": "PASS",
+    "files": [
+      "apps/metaengine-browser/src/main.mjs",
+      "apps/metaengine-browser/src/native-coding-initial-selection-contract.mjs",
+      "apps/metaengine-browser/src/native-coding-initial-setup-composition.mjs",
+      "apps/metaengine-browser/src/native-coding-initial-setup-main.mjs",
+      "apps/metaengine-browser/src/native-coding-initial-setup-panel.mjs",
+      "apps/metaengine-browser/src/native-coding-initial-ui-contract.mjs",
+      "apps/metaengine-browser/test/native-coding-initial-selection.test.mjs",
+      "apps/metaengine-browser/test/native-coding-initial-setup-composition.test.mjs",
+      "apps/metaengine-browser/test/native-coding-initial-setup-main.test.mjs",
+      "apps/metaengine-browser/test/native-coding-initial-setup-panel.test.mjs"
+    ]
+  },
+  "fixed": [
+    "Distinguish absent account observer as PRODUCER_UNAVAILABLE/null; do not misreport missing producer as merely needing login.",
+    "Remove editable/raw account_id from installed confirmation form and builder. Use exact current Main projection account ID.",
+    "Check fresh authenticated account and exact selected-ID equality before confirmation ID allocation/persistence, including raw IPC choices.",
+    "Observe account after asynchronous operation readback before root preparation and again before provider/BEGIN dispatch.",
+    "Reobserve account after confirmation persistence/readbacks before advertising can_begin; disable confirmation/BEGIN for missing producer/logout/account mismatch.",
+    "Keep immutable retained selections and existing unknown-outcome/replay, cancellation, source/admin, native custody and release gates."
+  ],
+  "missing_producer": {
+    "location": "apps/metaengine-browser/src/main.mjs:1311",
+    "exact_code": "const readCodexAuth = async () => null;",
+    "consumer": "apps/metaengine-browser/src/native-coding-initial-setup-composition.mjs:91",
+    "exact_refusal": "native_initial_selection_codex_account_producer_unavailable",
+    "producer_exists": false,
+    "authentic_identifier_obtained": false,
+    "required_seam": "An existing genuine Main-owned account/authentication owner must supply current non-secret {state, account_id} observations for the selected account and the same controlled Codex authentication context ultimately used as CODEX_HOME, with account switch/logout observable on each read and a real lifetime/handoff contract through BEGIN. Such an owner and handoff are absent from the supplied source.",
+    "non_solutions": [
+      "Renderer-entered account ID",
+      "cached user label",
+      "synthetic test fixture",
+      "ChatGPT tab or URL state",
+      "PID/path/status/JSON as authority",
+      "decoding/copying credentials or using an unrelated Codex home",
+      "a new arbitrary transport/provider callback or trust root"
+    ]
+  },
+  "verification": {
+    "initial_setup": "89 PASS, 0 FAIL, 0 SKIP across nine initial-setup suites",
+    "protocol_owner_ticket": "17 PASS, 0 FAIL, 0 SKIP",
+    "general_source": "292 PASS",
+    "main_begin_model": "9 PASS normal and 9 PASS ASAN/UBSAN; generated only; WINDOWS NOT RUN",
+    "main_owner_wait_model": "13 PASS normal and 13 PASS ASAN/UBSAN; generated only; WINDOWS NOT RUN",
+    "requester_session_model": "15 PASS normal and 15 PASS ASAN/UBSAN; generated only; WINDOWS NOT RUN",
+    "original_main_launch_source": "81 PASS, 1 expected FAIL: wire_route_authenticates_then_launches; route remains HOLD",
+    "original_main_source": "23 PASS, 0 FAIL, 5 NOT RUN",
+    "not_run_checks": [
+      {
+        "name": "w77-pinned-openssl-regression",
+        "status": "NOT RUN",
+        "reason": "Provide the acquired+extracted pinned OpenSSL 3.5.9 source with a completed static build"
+      },
+      {
+        "name": "w77-boringssl-regression",
+        "status": "NOT RUN",
+        "reason": "Provide the exact pinned public source and its isolated static crypto build"
+      },
+      {
+        "name": "electron-source-interface",
+        "status": "NOT RUN",
+        "reason": "Provide exact Electron and Node-after-Electron-patches source files"
+      },
+      {
+        "name": "official-electron-header-syntax",
+        "status": "NOT RUN",
+        "reason": "Provide verified official Electron header archive and patched Node internal headers"
+      },
+      {
+        "name": "win64-cross-builds",
+        "status": "NOT RUN",
+        "reason": "No existing cross compiler supplied; this runner never installs one"
+      }
+    ],
+    "additional_not_run": [
+      "Real Codex authentication/account observation and context handoff: missing genuine producer",
+      "Windows process/pipe/Job/WTS/ACL and service compile/link qualification: no authorized Windows stand",
+      "Full custom Electron/Node build",
+      "Production grant and signed release positive path",
+      "Continuous code custody proof",
+      "LeakSanitizer: disabled by runner on ptrace host"
+    ],
+    "commands": [
+      {
+        "name": "initial_setup",
+        "command": [
+          "node",
+          "--test",
+          "apps/metaengine-browser/test/native-coding-initial-loaded-signers.test.mjs",
+          "apps/metaengine-browser/test/native-coding-initial-provider-composition.test.mjs",
+          "apps/metaengine-browser/test/native-coding-initial-publication-contract.test.mjs",
+          "apps/metaengine-browser/test/native-coding-initial-selection-store.test.mjs",
+          "apps/metaengine-browser/test/native-coding-initial-selection.test.mjs",
+          "apps/metaengine-browser/test/native-coding-initial-setup-composition.test.mjs",
+          "apps/metaengine-browser/test/native-coding-initial-setup-main.test.mjs",
+          "apps/metaengine-browser/test/native-coding-initial-setup-panel.test.mjs",
+          "apps/metaengine-browser/test/native-coding-initial-setup-ui-adapter.test.mjs"
+        ],
+        "cwd": "/workspace/metaengine-account-source/Compute",
+        "exit_code": 0,
+        "seconds": 0.835,
+        "log": "initial_setup.log"
+      },
+      {
+        "name": "original_main_launch_source",
+        "command": [
+          "python3",
+          "apps/metaengine-browser/test/native/verify-guardian-original-main-launch-source.py"
+        ],
+        "cwd": "/workspace/metaengine-account-source/Compute",
+        "exit_code": 1,
+        "seconds": 0.033,
+        "log": "original_main_launch_source.log"
+      },
+      {
+        "name": "begin_model",
+        "command": [
+          "python3",
+          "apps/metaengine-browser/test/native/verify-guardian-main-begin-model.py"
+        ],
+        "cwd": "/workspace/metaengine-account-source/Compute",
+        "exit_code": 0,
+        "seconds": 1.161,
+        "log": "begin_model.log"
+      },
+      {
+        "name": "begin_model_sanitize",
+        "command": [
+          "python3",
+          "apps/metaengine-browser/test/native/verify-guardian-main-begin-model.py",
+          "--sanitize"
+        ],
+        "cwd": "/workspace/metaengine-account-source/Compute",
+        "exit_code": 0,
+        "seconds": 1.417,
+        "log": "begin_model_sanitize.log"
+      },
+      {
+        "name": "owner_wait_model",
+        "command": [
+          "python3",
+          "apps/metaengine-browser/test/native/verify-guardian-main-owner-wait-model.py"
+        ],
+        "cwd": "/workspace/metaengine-account-source/Compute",
+        "exit_code": 0,
+        "seconds": 1.348,
+        "log": "owner_wait_model.log"
+      },
+      {
+        "name": "owner_wait_model_sanitize",
+        "command": [
+          "python3",
+          "apps/metaengine-browser/test/native/verify-guardian-main-owner-wait-model.py",
+          "--sanitize"
+        ],
+        "cwd": "/workspace/metaengine-account-source/Compute",
+        "exit_code": 0,
+        "seconds": 1.303,
+        "log": "owner_wait_model_sanitize.log"
+      },
+      {
+        "name": "requester_session_model",
+        "command": [
+          "python3",
+          "apps/metaengine-browser/test/native/verify-guardian-requester-session-model.py"
+        ],
+        "cwd": "/workspace/metaengine-account-source/Compute",
+        "exit_code": 0,
+        "seconds": 0.47,
+        "log": "requester_session_model.log"
+      },
+      {
+        "name": "requester_session_model_sanitize",
+        "command": [
+          "python3",
+          "apps/metaengine-browser/test/native/verify-guardian-requester-session-model.py",
+          "--sanitize"
+        ],
+        "cwd": "/workspace/metaengine-account-source/Compute",
+        "exit_code": 0,
+        "seconds": 0.671,
+        "log": "requester_session_model_sanitize.log"
+      },
+      {
+        "name": "protocol_owner_ticket",
+        "command": [
+          "node",
+          "--test",
+          "apps/metaengine-browser/test/browser-guardian-original-main-launch-protocol.test.mjs",
+          "apps/metaengine-browser/test/guardian-owner-loaded-read.test.mjs",
+          "apps/metaengine-browser/test/browser-guardian-native-ticket-enrollment-contract.test.mjs"
+        ],
+        "cwd": "/workspace/metaengine-account-source/Compute",
+        "exit_code": 0,
+        "seconds": 0.847,
+        "log": "protocol_owner_ticket.log"
+      },
+      {
+        "name": "check_source",
+        "command": [
+          "node",
+          "scripts/check-source.mjs"
+        ],
+        "cwd": "/workspace/metaengine-account-source/Compute/apps/metaengine-browser",
+        "exit_code": 0,
+        "seconds": 9.12,
+        "log": "check_source.log"
+      },
+      {
+        "name": "original_main_source",
+        "command": [
+          "python3",
+          "apps/metaengine-browser/test/native/verify-guardian-original-main-source.py",
+          "--repo",
+          "/workspace/metaengine-account-source/Compute",
+          "--out",
+          "/workspace/metaengine-results/account-id/source-evidence"
+        ],
+        "cwd": "/workspace/metaengine-account-source/Compute",
+        "exit_code": 0,
+        "seconds": 27.252,
+        "log": "original_main_source.log"
+      },
+      {
+        "name": "diff_check",
+        "command": [
+          "git",
+          "diff",
+          "--check"
+        ],
+        "cwd": "/workspace/metaengine-account-source/Compute",
+        "exit_code": 0,
+        "seconds": 0.01,
+        "log": "diff_check.log"
+      }
+    ]
+  },
+  "remaining_limits": [
+    "This patch does not implement or prove an authentic account producer or a working Main launch. Production confirmation and BEGIN remain held.",
+    "Reobservations close tested async-readback windows but are not continuous atomic account custody. A genuine producer must own selection/context lifetime and revoke on switch/logout through dispatch.",
+    "Existing retained requester process/token, signed package namespace, Job/worker and I/O custody logic is untouched; no new original native objects are minted here.",
+    "Clean-install enrollment authority, upgrade authority/data-preserving handoff, pre-Main authenticated connection, launch recovery/barrier lifetime, native Windows qualification remain outside this account-observation patch and blocked as stated in the source task."
+  ],
+  "actions_not_performed": [
+    "No install or application execution",
+    "No user PC/DB/service changes",
+    "No merge or shared-branch updates",
+    "No new trust roots/protection weakening",
+    "No secrets or real account IDs collected"
+  ],
+  "persistence": {
+    "Space": "No accessible Spaces returned in previous full inventory; no Space created. Deliverable prepared for Library and authorized separate public Git branch/draft PR."
+  }
+}

@@ -1,0 +1,545 @@
+{
+  "schema": "metaengine.read-only.account-context-custody-audit.v1",
+  "result": "INTERFACE_MISSING_HOLD_RETAINED",
+  "scope": "Read-only source custody audit; evidence writes only in the custody-agent directory. Upstream RPC schema audit is delegated to the parent.",
+  "source": {
+    "root": "/workspace/metaengine-account-source/Compute",
+    "local_head": "b0d4f445fb45d9541f7a0a4cb96b813e14f93fa2",
+    "head_message": "Reconstruct verified c26565e source snapshot",
+    "verified_snapshot_label": "c26565e reconstructed source plus pre-existing initial-setup account patch",
+    "git_status_short": [
+      " M apps/metaengine-browser/src/main.mjs",
+      " M apps/metaengine-browser/src/native-coding-initial-selection-contract.mjs",
+      " M apps/metaengine-browser/src/native-coding-initial-setup-composition.mjs",
+      " M apps/metaengine-browser/src/native-coding-initial-setup-main.mjs",
+      " M apps/metaengine-browser/src/native-coding-initial-setup-panel.mjs",
+      " M apps/metaengine-browser/src/native-coding-initial-ui-contract.mjs",
+      " M apps/metaengine-browser/test/native-coding-initial-selection.test.mjs",
+      " M apps/metaengine-browser/test/native-coding-initial-setup-composition.test.mjs",
+      " M apps/metaengine-browser/test/native-coding-initial-setup-main.test.mjs",
+      " M apps/metaengine-browser/test/native-coding-initial-setup-panel.test.mjs"
+    ],
+    "source_edits_by_this_agent": false,
+    "agents_md_found": false,
+    "recorded_source_hashes_unchanged_at_finish": true,
+    "changed_since_recording": [],
+    "git_status_at_finish": [
+      " M apps/metaengine-browser/src/main.mjs",
+      " M apps/metaengine-browser/src/native-coding-initial-selection-contract.mjs",
+      " M apps/metaengine-browser/src/native-coding-initial-setup-composition.mjs",
+      " M apps/metaengine-browser/src/native-coding-initial-setup-main.mjs",
+      " M apps/metaengine-browser/src/native-coding-initial-setup-panel.mjs",
+      " M apps/metaengine-browser/src/native-coding-initial-ui-contract.mjs",
+      " M apps/metaengine-browser/test/native-coding-initial-selection.test.mjs",
+      " M apps/metaengine-browser/test/native-coding-initial-setup-composition.test.mjs",
+      " M apps/metaengine-browser/test/native-coding-initial-setup-main.test.mjs",
+      " M apps/metaengine-browser/test/native-coding-initial-setup-panel.test.mjs"
+    ]
+  },
+  "outcome": "No existing genuine METAENGINE owner ties account/rateLimits/read accountId to the selected managed CODEX_HOME, original authenticated session, cancellable bounded observer and Host handoff before BEGIN. A confirmed upstream field alone cannot close those interfaces. The loaded implementation correctly remains PRODUCER_UNAVAILABLE/HOLD.",
+  "findings": [
+    {
+      "id": "loaded-observer-absent",
+      "conclusion": "The genuine loaded Main path has no Codex account observation producer. It supplies readCodexAuth = async () => null; the private facts reader maps absence to PRODUCER_UNAVAILABLE/account_id null. No production app-server/RPC owner or account/rateLimits/read consumer was found in the searched Main/Host implementation scope.",
+      "evidence": [
+        {
+          "path": "apps/metaengine-browser/src/main.mjs",
+          "line_start": 1269,
+          "line_end": 1328
+        },
+        {
+          "path": "apps/metaengine-browser/src/native-coding-initial-setup-composition.mjs",
+          "line_start": 15,
+          "line_end": 19
+        },
+        {
+          "path": "apps/metaengine-browser/src/native-coding-initial-setup-composition.mjs",
+          "line_start": 79,
+          "line_end": 104
+        }
+      ],
+      "negative_behavior": "Missing producer remains distinct from a signed-out observation. Confirmation refuses before selected IDs are allocated; retained BEGIN refuses with codex_account_producer_unavailable.",
+      "qualification": "A source scan cannot determine whether an upstream binary internally contains an app-server; it establishes absence of the METAENGINE owner/consumer in the searched production code."
+    },
+    {
+      "id": "home-and-auth-owner-gap",
+      "conclusion": "The selected execution CODEX_HOME is a deterministic app-owned codex-home-v1 child of the initial-setup state directory. It is not the ambient user profile home. Selection derives this path, and only explicit BEGIN prepares the five selected private roots. No user-mediated Codex login owner or account observer for that selected home is wired in the archive.",
+      "evidence": [
+        {
+          "path": "apps/metaengine-browser/src/main.mjs",
+          "line_start": 1283,
+          "line_end": 1286
+        },
+        {
+          "path": "apps/metaengine-browser/src/native-coding-initial-selection-contract.mjs",
+          "line_start": 105,
+          "line_end": 109
+        },
+        {
+          "path": "apps/metaengine-browser/src/native-coding-initial-selection-contract.mjs",
+          "line_start": 118,
+          "line_end": 145
+        },
+        {
+          "path": "apps/metaengine-browser/src/native-coding-initial-setup-main.mjs",
+          "line_start": 88,
+          "line_end": 106
+        },
+        {
+          "path": "apps/metaengine-browser/src/native-coding-initial-selection-store.mjs",
+          "line_start": 53,
+          "line_end": 85
+        }
+      ],
+      "implication": "Observing the ambient installed CLI/account cannot establish the account used by the selected managed home. Empty-home creation alone is not authentication. Pre-confirmation authenticated readback therefore needs an existing or newly authorized genuine home/auth owner; none is supplied here.",
+      "qualification": "No home, auth file, token, login status or credential content was read during this audit."
+    },
+    {
+      "id": "facts-lack-original-session-custody",
+      "conclusion": "The readCodexAuth seam is a zero-argument callback returning only state/account_id data. The exact private facts schema contains no selected-home identity, original process/connection handle, auth-session generation, observation deadline or cancellation signal. The environment binding preserves device/source/tools/Postgres/sandbox and stores the selected account separately; it does not retain an original authenticated session.",
+      "evidence": [
+        {
+          "path": "apps/metaengine-browser/src/native-coding-initial-setup-composition.mjs",
+          "line_start": 79,
+          "line_end": 104
+        },
+        {
+          "path": "apps/metaengine-browser/src/native-coding-initial-selection-contract.mjs",
+          "line_start": 65,
+          "line_end": 85
+        },
+        {
+          "path": "apps/metaengine-browser/src/native-coding-initial-selection-contract.mjs",
+          "line_start": 136,
+          "line_end": 145
+        },
+        {
+          "path": "apps/metaengine-browser/src/native-coding-initial-setup-main.mjs",
+          "line_start": 26,
+          "line_end": 29
+        }
+      ],
+      "implication": "A caller record containing an accountId, email or percentage cannot fill this origin/lifetime gap. Even a correctly decoded upstream accountId must come from the original authenticated connection bound to the intended managed home."
+    },
+    {
+      "id": "existing-process-custody-is-not-rpc",
+      "conclusion": "A genuine Windows process controller exists: original controller handles are registered in a private WeakMap; the owner snapshots the exact spawn environment and invocation, validates native helper identity, and retains completion/termination. Its exposed input contract is a one-shot resume or EFFECTIVE_POLICY_ACK_V1 bootstrap/ACK/prompt, after which the native stdin writer closes the pipe. It does not expose a bidirectional app-server RPC channel.",
+      "evidence": [
+        {
+          "path": "apps/metaengine-browser/src/codex-cli-windows-process-controller.mjs",
+          "line_start": 18,
+          "line_end": 32
+        },
+        {
+          "path": "apps/metaengine-browser/src/codex-cli-windows-process-controller.mjs",
+          "line_start": 151,
+          "line_end": 171
+        },
+        {
+          "path": "apps/metaengine-browser/src/codex-cli-windows-process-controller.mjs",
+          "line_start": 329,
+          "line_end": 389
+        },
+        {
+          "path": "apps/metaengine-browser/src/codex-cli-windows-process-controller.mjs",
+          "line_start": 391,
+          "line_end": 424
+        },
+        {
+          "path": "apps/metaengine-browser/src/codex-cli-physical-settlement.mjs",
+          "line_start": 32,
+          "line_end": 35
+        },
+        {
+          "path": "apps/metaengine-browser/scripts/codex-cli-job-runner.ps1",
+          "line_start": 70,
+          "line_end": 103
+        },
+        {
+          "path": "apps/metaengine-browser/scripts/codex-cli-job-runner.ps1",
+          "line_start": 248,
+          "line_end": 273
+        }
+      ],
+      "implication": "Its original-handle and joined-cancellation patterns are useful existing ownership primitives, but a public proof, copied handle, raw child process or new JSON protocol label cannot automatically become a genuine account observer."
+    },
+    {
+      "id": "pre-begin-cancel-and-signing-lifetime",
+      "conclusion": "The controller checks the selected account before root preparation and again after preparation plus a fresh NOT_STARTED readback. Cancel aborts the local pre-BEGIN controller and beginOpen vetoes late provider/BEGIN work after pending reads return. However current()/readPrivateFacts()/readCodexAuth() receive no original cancellation/deadline context. After the final account read, existing BEGIN signing awaits nativeSetupBeginHeaders; the final synchronous gate checks identity, Host and lifecycle, with no retained auth-session revocation gate.",
+      "evidence": [
+        {
+          "path": "apps/metaengine-browser/src/native-coding-initial-setup-main.mjs",
+          "line_start": 24,
+          "line_end": 29
+        },
+        {
+          "path": "apps/metaengine-browser/src/native-coding-initial-setup-main.mjs",
+          "line_start": 88,
+          "line_end": 121
+        },
+        {
+          "path": "apps/metaengine-browser/src/native-coding-setup-owner-main.mjs",
+          "line_start": 26,
+          "line_end": 33
+        },
+        {
+          "path": "apps/metaengine-browser/src/native-coding-setup-owner-main.mjs",
+          "line_start": 90,
+          "line_end": 100
+        }
+      ],
+      "implication": "This is a missing auth-lifetime composition, not a demonstrated production exploit. There is currently no real account producer to keep alive, cancel, drain or revalidate through those awaits. A future observer needs the original bounded read/join and a deny-only lifetime fence through signing/dispatch; a fresh timeout or late JSON success must not revive it."
+    },
+    {
+      "id": "host-handoff-excludes-account",
+      "conclusion": "The existing provider handoff returns only configuration and policy. The signed BEGIN input contains workspace/operation/repository identities and approved source/worktree choices, with no account/home/session binding. Host validation uses an exact field allowlist; the service constructs the original request, retained job, custody and cancellation from that existing repository ADMIN contract.",
+      "evidence": [
+        {
+          "path": "apps/metaengine-browser/src/native-coding-initial-selection-contract.mjs",
+          "line_start": 221,
+          "line_end": 234
+        },
+        {
+          "path": "apps/metaengine-browser/src/native-coding-setup-contract.mjs",
+          "line_start": 17,
+          "line_end": 25
+        },
+        {
+          "path": "apps/metaengine-browser/src/native-coding-setup-configuration-provider.mjs",
+          "line_start": 78,
+          "line_end": 117
+        },
+        {
+          "path": "infra/client-state-runtime/native-coding-host-setup-service.mjs",
+          "line_start": 21,
+          "line_end": 41
+        },
+        {
+          "path": "infra/client-state-runtime/native-coding-host-setup-service.mjs",
+          "line_start": 214,
+          "line_end": 245
+        },
+        {
+          "path": "infra/client-state-runtime/native-coding-host-ipc.mjs",
+          "line_start": 500,
+          "line_end": 515
+        }
+      ],
+      "implication": "The original Host setup contract is repository ADMIN preparation, not a CLI execution permit. There is no pre-BEGIN original account-observer transfer in it. Adding caller JSON account fields is rejected and would not create authority. Connecting an actual observer requires an explicit private lifetime/handoff interface in genuine Main/Host composition."
+    },
+    {
+      "id": "policy-scope-does-not-authenticate",
+      "conclusion": "Existing physical policy snapshots pin directory/executable/config-source identities and explicit CODEX_HOME environment selection. They explicitly do not attest effective configuration. The TOML inventory does not establish an authenticated account/session. These sandbox-policy witnesses cannot be promoted to an account producer.",
+      "evidence": [
+        {
+          "path": "apps/metaengine-browser/src/codex-cli-runner.mjs",
+          "line_start": 48,
+          "line_end": 71
+        },
+        {
+          "path": "apps/metaengine-browser/src/codex-cli-execution-policy.mjs",
+          "line_start": 97,
+          "line_end": 165
+        },
+        {
+          "path": "apps/metaengine-browser/src/codex-cli-sandbox-probe.mjs",
+          "line_start": 352,
+          "line_end": 388
+        }
+      ],
+      "qualification": "This conclusion follows from the source inventory, without reading any credentials or assuming authentication merely from home directory presence."
+    },
+    {
+      "id": "pin-selection-is-separate",
+      "conclusion": "The source packaging path selects the stable 0.166.0 vendor package lock, not the separate 0.159.0-alpha.3 effective-policy source overlay. Loaded runtime selects resources/private-native-tools/codex/bin/codex.exe using ASAR package metadata binding and complete manifest/tree verification. Build-time stage/pack code checks the staged manifest against the stable lock. Runtime does not read the source lock or source-overlay pin directly.",
+      "evidence": [
+        {
+          "path": "apps/metaengine-browser/build/private-native-tools.lock.json",
+          "line_start": 28,
+          "line_end": 45
+        },
+        {
+          "path": "apps/metaengine-browser/src/private-native-tools.mjs",
+          "line_start": 9,
+          "line_end": 25
+        },
+        {
+          "path": "apps/metaengine-browser/src/private-native-tools-core.mjs",
+          "line_start": 119,
+          "line_end": 180
+        },
+        {
+          "path": "apps/metaengine-browser/scripts/stage-private-native-tools.mjs",
+          "line_start": 53,
+          "line_end": 75
+        },
+        {
+          "path": "apps/metaengine-browser/scripts/stage-private-native-tools.mjs",
+          "line_start": 92,
+          "line_end": 103
+        },
+        {
+          "path": "apps/metaengine-browser/scripts/stage-private-native-tools.mjs",
+          "line_start": 168,
+          "line_end": 211
+        },
+        {
+          "path": "apps/metaengine-browser/scripts/electron-builder-before-pack.cjs",
+          "line_start": 225,
+          "line_end": 258
+        },
+        {
+          "path": "apps/metaengine-browser/scripts/stage-client-state-runtime.mjs",
+          "line_start": 85,
+          "line_end": 100
+        }
+      ],
+      "stable_source_lock": {
+        "version": "0.166.0",
+        "tag": "rust-v0.166.0",
+        "release_id": 428320524,
+        "asset_id": 689710836,
+        "archive_name": "codex-package-x86_64-pc-windows-msvc.tar.gz",
+        "archive_sha256": "d559bb88e74d471265857b93b7f19bc250dae527673b9191b33534478093f6bc",
+        "inventory_sha256": "e1dd7e081c14a6d4c843ac650dba13dcf38183b558b1c25f382751ced5694bba"
+      },
+      "overlay_build": {
+        "tag": "rust-v0.159.0-alpha.3",
+        "commit": "3b01b36fa5eb96ba82a776bd3c2fc57f8969181f",
+        "source_root": ".codex-effective-policy-build/source",
+        "windows_staging_root": ".codex-effective-policy-build/staging",
+        "integrated_into_private_capability": false,
+        "evidence": [
+          {
+            "path": "dependencies/codex-effective-policy/source-pin.json",
+            "line_start": 1,
+            "line_end": 27
+          },
+          {
+            "path": "dependencies/codex-effective-policy/README.md",
+            "line_start": 3,
+            "line_end": 19
+          },
+          {
+            "path": "dependencies/codex-effective-policy/windows-staging.mjs",
+            "line_start": 12,
+            "line_end": 21
+          },
+          {
+            "path": "dependencies/codex-effective-policy/windows-staging.mjs",
+            "line_start": 228,
+            "line_end": 253
+          },
+          {
+            "path": ".github/workflows/codex-effective-policy-windows-staging.yml",
+            "line_start": 132,
+            "line_end": 151
+          }
+        ]
+      },
+      "qualification": "No installed binary, packaged ASAR, live capability or executable version was inspected or qualified. The user-observed 0.166.0-alpha.1 CLI label cannot identify the private capability or prove a stable schema/Compute-patched binary. Upstream schema comparison belongs to the parent audit."
+    }
+  ],
+  "missing_interfaces": [
+    {
+      "target": "Main user-mediated Codex auth/home owner",
+      "missing": "Protected managed-home selection and a real user-mediated login/readback relationship before confirmation. No ambient-home adoption or credential copying is justified."
+    },
+    {
+      "target": "readCodexAuth / genuine account observer",
+      "missing": "Original private process/connection-owned RPC read, pinned executable/environment/home identity, account/session generation, response correlation/freshness, original absolute deadline, cancellation and resource-drain contract. Existing callback only returns state/account_id."
+    },
+    {
+      "target": "Main BEGIN auth lifetime",
+      "missing": "Private observer lifetime/revocation retained through root preparation, readback, signing and final synchronous dispatch fence; no late success after cancel or expiry."
+    },
+    {
+      "target": "genuine Main/Host setup handoff",
+      "missing": "Explicit original-handle/session-observation consumption under the intended setup contract. Current exact signed repository ADMIN BEGIN/provider/phase contracts carry no account observation; caller fields or copied records cannot supply it."
+    }
+  ],
+  "meaningful_negative_tests_now": [
+    {
+      "case": "Absent producer, signed-out state, or different selected account",
+      "existing_coverage": "Existing initial-selection/controller suites reject before allocation/persistence or before root/provider/BEGIN effect, and at root/final-readback boundaries. Generated data validates refusal only."
+    },
+    {
+      "case": "Cancel during pending final private-facts/readback or root stat",
+      "existing_coverage": "Existing initial controller/store tests prevent late root creation/provider/BEGIN; they do not prove cancellation/drain of a nonexistent real app-server observer."
+    },
+    {
+      "case": "Copied provider/custody, changed Host/identity during signature, held late work, unconfirmed native cleanup",
+      "existing_coverage": "Existing owner/provider/policy/controller suites refuse or retain HOLD until their original simulated joins; actual native/account provenance remains unqualified."
+    },
+    {
+      "case": "Unrecognized Host account/home/session fields, invented protocol, public process record, raw usage snapshot as private auth and matching untrusted usage ID",
+      "existing_coverage": "Seven supplementary audit-only negatives call actual production validators/custody lookup. Omitted/null/string accountId raw usage snapshots are rejected as codex_auth; a matching claimed usage ID cannot bypass PRODUCER_UNAVAILABLE before selection ID allocation. Generated data and schema refusal do not establish authenticated success."
+    },
+    {
+      "case": "Wrong app-server request/session/account binding, stale response, different managed home, actual auth change or cancel during authenticated RPC",
+      "existing_coverage": "No existing genuine producer/connection contract exposes these boundaries, so end-to-end qualification is currently unavailable. Upstream protocol-negative tests can test upstream semantics but cannot qualify METAENGINE home/session/Host binding."
+    }
+  ],
+  "tests": {
+    "node_version": "v24.19.0",
+    "existing_total": 243,
+    "existing_pass": 243,
+    "existing_fail": 0,
+    "runs": [
+      {
+        "id": "existing-initial-setup-contracts",
+        "argv": [
+          "node",
+          "--test",
+          "apps/metaengine-browser/test/native-coding-initial-selection.test.mjs",
+          "apps/metaengine-browser/test/native-coding-initial-setup-main.test.mjs",
+          "apps/metaengine-browser/test/native-coding-initial-setup-composition.test.mjs",
+          "apps/metaengine-browser/test/native-coding-initial-selection-store.test.mjs"
+        ],
+        "log": "initial-setup-contract-tests.tap",
+        "exit_code": 0,
+        "tests": 50,
+        "pass": 50,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "scope": "Existing production validators/controller/readers/store, generated account facts and isolated filesystem hooks. No real authenticated account producer or native login is qualified.",
+        "cwd": "/workspace/metaengine-account-source/Compute",
+        "shell_command": "node --test apps/metaengine-browser/test/native-coding-initial-selection.test.mjs apps/metaengine-browser/test/native-coding-initial-setup-main.test.mjs apps/metaengine-browser/test/native-coding-initial-setup-composition.test.mjs apps/metaengine-browser/test/native-coding-initial-selection-store.test.mjs > /workspace/metaengine-results/account-id-app-server/custody-agent/initial-setup-contract-tests.tap 2>&1",
+        "log_sha256": "6c2a40ec23cee8b03b437ba2d259c34dfa7dab6c9200bc4a325124775e803df5"
+      },
+      {
+        "id": "existing-custody-transport-contracts",
+        "argv": [
+          "node",
+          "--test",
+          "apps/metaengine-browser/test/native-coding-setup-owner-main.test.mjs",
+          "apps/metaengine-browser/test/native-coding-setup-configuration-provider.test.mjs",
+          "apps/metaengine-browser/test/codex-cli-setup-policy-preparation.test.mjs",
+          "apps/metaengine-browser/test/codex-cli-windows-process-controller-failures.test.mjs",
+          "apps/metaengine-browser/test/codex-cli-physical-settlement.test.mjs"
+        ],
+        "log": "existing-custody-contract-tests.tap",
+        "exit_code": 0,
+        "tests": 193,
+        "pass": 193,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "scope": "Existing source composition/protocol tests. Generated enrolled ES256 keys in disposable fixtures are real signatures; native tools/Windows helper/kernel/phase seams are explicitly simulated. No Windows, installer, real Codex child, live DB or real authentication is qualified.",
+        "cwd": "/workspace/metaengine-account-source/Compute",
+        "shell_command": "node --test apps/metaengine-browser/test/native-coding-setup-owner-main.test.mjs apps/metaengine-browser/test/native-coding-setup-configuration-provider.test.mjs apps/metaengine-browser/test/codex-cli-setup-policy-preparation.test.mjs apps/metaengine-browser/test/codex-cli-windows-process-controller-failures.test.mjs apps/metaengine-browser/test/codex-cli-physical-settlement.test.mjs > /workspace/metaengine-results/account-id-app-server/custody-agent/existing-custody-contract-tests.tap 2>&1",
+        "log_sha256": "739806e8e866d27937a5432a4caf3db2913478403a859bfc34e3af904b4298af"
+      },
+      {
+        "id": "supplementary-absent-interface-negatives",
+        "argv": [
+          "node",
+          "--test",
+          "/workspace/metaengine-results/account-id-app-server/custody-agent/absent-interface-negative.test.mjs"
+        ],
+        "log": "absent-interface-negative.tap",
+        "exit_code": 0,
+        "tests": 7,
+        "pass": 7,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "scope": "Audit-only portable evidence file imports production contracts via METAENGINE_SOURCE_ROOT + pathToFileURL (default process.cwd()). All generated records are expressly test data and never auth/native proof. Tests exact Host-field rejection, copied/proxied public records having no original process custody, unsupported app-server input protocol, raw usage snapshots as codex_auth with omitted/null/string accountId, and matching claimed usage accountId failing PRODUCER_UNAVAILABLE before selected ID allocation. No producer or authenticated connection fixture is created.",
+        "first_run": {
+          "log": "absent-interface-negative-first-run.tap",
+          "exit_code": 1,
+          "pass": 2,
+          "fail": 1,
+          "reason": "Audit assertion expected the wrong error prefix; actual production error was codex_cli_settlement_launch_input_protocol. Corrected only the audit assertion and reran. No production defect or production edit."
+        },
+        "cwd": "/workspace/metaengine-account-source/Compute",
+        "shell_command": "METAENGINE_SOURCE_ROOT=/workspace/metaengine-account-source/Compute node --test /workspace/metaengine-results/account-id-app-server/custody-agent/absent-interface-negative.test.mjs > /workspace/metaengine-results/account-id-app-server/custody-agent/absent-interface-negative.tap 2>&1",
+        "log_sha256": "62bb7fbeeb657e6835b27ab7c8ca0528ff83c615b55398d37c6b60958826a566",
+        "environment": {
+          "METAENGINE_SOURCE_ROOT": "/workspace/metaengine-account-source/Compute"
+        },
+        "evidence_test_sha256": "821f43bcdf898106626f8bf0f2e6c3a1ded9a19c43a61a8bcaee5640a34c341c"
+      }
+    ],
+    "supplementary_total": 7,
+    "supplementary_pass": 7,
+    "supplementary_fail": 0,
+    "combined_total": 250,
+    "combined_pass": 250,
+    "combined_fail": 0,
+    "interpretation": "243 existing tests plus 7 evidence-only negatives passed. No authenticated app-server call or real account producer was exercised. The supplementary file was extended at the parent request; only that file was rerun after extension."
+  },
+  "searches": [
+    {
+      "argv": [
+        "rg",
+        "-n",
+        "-i",
+        "app[-_ ]server|account/rate.?limits/read|rate.?limits/updated",
+        "apps/metaengine-browser/src",
+        "infra/client-state-runtime",
+        "--glob",
+        "!*.test.*",
+        "--glob",
+        "!README*",
+        "--glob",
+        "!*.md"
+      ],
+      "cwd": "/workspace/metaengine-account-source/Compute",
+      "exit_code": 1,
+      "matches": [],
+      "evidence_log": "production-app-server-search.txt"
+    }
+  ],
+  "not_performed": [
+    "Production source edits",
+    "Credential/token/auth-file inspection or copying",
+    "Live login or authentication mutation",
+    "Codex/app-server executable launch",
+    "Paid/model calls",
+    "Build/install/deploy",
+    "Database or PC configuration changes",
+    "Actual installed binary/ASAR qualification"
+  ],
+  "blockers": [
+    {
+      "action": "Qualify and connect a real original accountId observer before BEGIN",
+      "target": "Loaded Main readCodexAuth and original setup handoff",
+      "reason": "Producer/home-auth ownership and private lifetime/handoff interfaces do not exist in the audited source. Existing exact contracts cannot be filled by caller JSON.",
+      "status": "NOT_ATTEMPTED_OUTSIDE_READ_ONLY_SCOPE",
+      "denied": false,
+      "pending_tool_action": false,
+      "uncertain_outcome": false
+    }
+  ],
+  "completed": "Source traces, package/build selection comparison, 243 existing tests, 7 supplementary narrow negatives, logs, structured evidence; no source edits.",
+  "source_file_sha256": {
+    ".github/workflows/codex-effective-policy-windows-staging.yml": "4d1bdb69f1aa669c608c69ebb576245ee07b1b89819722765cf10d1e0eb2164e",
+    "apps/metaengine-browser/build/private-native-tools.lock.json": "478161f32fc6fc2842c6529ff77fdda14f763fddced9a1920069e554d473faad",
+    "apps/metaengine-browser/scripts/codex-cli-job-runner.ps1": "5943f415e33e0b6d9d497839372cc3a94b8a3ac7045bd2521ce3bdeed0d66dbb",
+    "apps/metaengine-browser/scripts/electron-builder-before-pack.cjs": "8c6626c005acf342ab37c757509f130189304a91f0b3ced331e047835ae5bc9a",
+    "apps/metaengine-browser/scripts/stage-client-state-runtime.mjs": "4fa8995244e641e744e79421ef9750905b652930d591752d937a92abf1f6adcc",
+    "apps/metaengine-browser/scripts/stage-private-native-tools.mjs": "c53c4e9c83eb2fffe6d185eddcb0061d4fd16b59590b8f62fd38a54feb39f948",
+    "apps/metaengine-browser/src/codex-cli-execution-policy.mjs": "730ef36265a72eb80665afd87da6b882f55a578458bab5c0b686c1bd87ecc827",
+    "apps/metaengine-browser/src/codex-cli-physical-settlement.mjs": "9cefac202ebb4734cd29fa873f31084969f58d8838f7fe8b851a0e7a384d2a8f",
+    "apps/metaengine-browser/src/codex-cli-runner.mjs": "3549ddb51f1befafecb6a4bf47f98770175f6cda5ec5b1fbe80a037518b261b2",
+    "apps/metaengine-browser/src/codex-cli-sandbox-probe.mjs": "4f21773a4588c05e2f60e2906a52ce8a292606f1f600c841a9e91ae4e37c7ec3",
+    "apps/metaengine-browser/src/codex-cli-windows-process-controller.mjs": "9d0544f5a9a155a5b768a822ad8dd857c74d54f166fc4ddeab5bd306822cb9b4",
+    "apps/metaengine-browser/src/main.mjs": "bfc4846a703e302accb7455e0f947dfd249da5eccfa4db41176b1a1d374602c5",
+    "apps/metaengine-browser/src/native-coding-initial-selection-contract.mjs": "c26d1a54d762f9bb9746e47a18a390a02fe6acc52bc0340f5ab5fecc7390018c",
+    "apps/metaengine-browser/src/native-coding-initial-selection-store.mjs": "cb216ae198453f9e145536c705fc10b2c861e1da6a83ea12f9ee9cd9a2cc0dc3",
+    "apps/metaengine-browser/src/native-coding-initial-setup-composition.mjs": "d9797fb01d212b41a08587ade0d8d21758b65d21a5b215cb61ffb4b600374109",
+    "apps/metaengine-browser/src/native-coding-initial-setup-main.mjs": "a0a4706d3c3b0cfaa01405fafddb911f181eb68cdc24888b0ddf38b9d1fc3f69",
+    "apps/metaengine-browser/src/native-coding-setup-configuration-provider.mjs": "5a898e6da3a0bc1f6fdfa98355a89196898d135d5f7534eed4f6b8db49dfc22b",
+    "apps/metaengine-browser/src/native-coding-setup-contract.mjs": "e33ea3380ca191b3f8c40cac4e0f2ea822dbdafc32beceb8a40895073cc443fb",
+    "apps/metaengine-browser/src/native-coding-setup-owner-main.mjs": "398d0fde3d897d0c695bbb7aed129e24d8ff34637092d546d26c2d144a06c5ae",
+    "apps/metaengine-browser/src/private-native-tools-core.mjs": "71a92363449281e7737d0759186993f9a520b4a7bc2bc79fe872b208fc042a7a",
+    "apps/metaengine-browser/src/private-native-tools.mjs": "824011aa38ca9529705adecc5d6aa685ae22c29853a878c0f270e0041fbf8ae3",
+    "dependencies/codex-effective-policy/README.md": "67762aebba4e6d645700177f311cae0ead361b034327662c39948caf26f604c1",
+    "dependencies/codex-effective-policy/source-pin.json": "014f582ec89c9e249a7d3021fd7918c1ed3de755f4b9d5f2e2106755f46aeff2",
+    "dependencies/codex-effective-policy/windows-staging.mjs": "ae93fdd1c10b05d6cbebb1b87527b55e426c3fa6ac0620e45cac16c2c7629dc5",
+    "infra/client-state-runtime/native-coding-host-ipc.mjs": "ff1eac87c703bd3a457940d3eae5582eb1b0821ab2b6e2d878e365e474752880",
+    "infra/client-state-runtime/native-coding-host-setup-service.mjs": "384f16cfa5b9473f76938abb968957379165ba8a3e07d6a89738ef6cdd6cb870"
+  }
+}

@@ -1,0 +1,542 @@
+diff --git a/apps/metaengine-browser/src/main.mjs b/apps/metaengine-browser/src/main.mjs
+index 83f579671658dd76a0772a219c5c3df604565162..d52421f31ab6d11660d51e2055bb33a981ff8301 100644
+--- a/apps/metaengine-browser/src/main.mjs
++++ b/apps/metaengine-browser/src/main.mjs
+@@ -1305,8 +1305,9 @@ function initialNativeSetupComposition() {
+     };
+     // PRECISE INTERFACE BREAK (kept as HOLD, never bypassed): no Codex
+     // authentication/account observation producer exists in this archive, so
+-    // the composition reports AUTHENTICATION_REQUIRED and BEGIN refuses with
+-    // codex_authentication_required. Login stays user-mediated.
++    // the composition reports PRODUCER_UNAVAILABLE. Confirmation refuses before
++    // allocating IDs and BEGIN refuses with codex_account_producer_unavailable.
++    // Login stays user-mediated.
+     const readCodexAuth = async () => null;
+     const capabilityFacade = createInitialSetupCapabilityFacade({
+       acquire: summary => createOwnedNativeCodingHostCapability(summary),
+diff --git a/apps/metaengine-browser/src/native-coding-initial-selection-contract.mjs b/apps/metaengine-browser/src/native-coding-initial-selection-contract.mjs
+index 4a9ddc9bece81e903d4b500409fcef168b9f7d0e..157af9774c311f533701bdc8ed096623d012b280 100644
+--- a/apps/metaengine-browser/src/native-coding-initial-selection-contract.mjs
++++ b/apps/metaengine-browser/src/native-coding-initial-selection-contract.mjs
+@@ -14,7 +14,7 @@ export const NATIVE_INITIAL_CONFIGURATION_READBACK_SCHEMA='metaengine.native-cod
+ const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
+ const HASH=/^[a-f0-9]{64}$/,GIT_SHA=/^[a-f0-9]{40}$/;
+ const ROLES=['IMPLEMENTER','CRITIC'];
+-const AUTH_STATES=new Set(['AUTHENTICATED','AUTHENTICATION_REQUIRED','UNKNOWN']);
++const AUTH_STATES=new Set(['AUTHENTICATED','AUTHENTICATION_REQUIRED','PRODUCER_UNAVAILABLE','UNKNOWN']);
+ const ENVIRONMENT_STATES=new Set(['CURRENT','DRIFTED','UNAVAILABLE']);
+ const SETUP_STATES=new Set(['NOT_STARTED','INTENT','RUNNING','CANCEL_REQUESTED','HOLD','COMPLETED','FAILED','AMBIGUOUS']);
+ const CONFIGURATION_STATES=new Set(['NOT_CONFIGURED','PUBLISHED','MOUNTED','HOLD','UNKNOWN']);
+@@ -78,10 +78,10 @@ export function validateInitialPrivateFacts(value){
+     ||!(value.sandbox.generation===null||cleanString(value.sandbox.generation,256))
+     ||value.sandbox.state==='NOT_CONFIGURED'&&value.sandbox.generation!==null
+     ||value.sandbox.state==='CONFIGURED'&&value.sandbox.generation===null
+-    ||!exact(value.codex_auth,['state','account_id'])||!['AUTHENTICATED','AUTHENTICATION_REQUIRED'].includes(value.codex_auth.state)
++    ||!exact(value.codex_auth,['state','account_id'])||!['AUTHENTICATED','AUTHENTICATION_REQUIRED','PRODUCER_UNAVAILABLE'].includes(value.codex_auth.state)
+     ||!(value.codex_auth.account_id===null||cleanString(value.codex_auth.account_id,256))
+     ||value.codex_auth.state==='AUTHENTICATED'&&value.codex_auth.account_id===null
+-    ||value.codex_auth.state==='AUTHENTICATION_REQUIRED'&&value.codex_auth.account_id!==null
++    ||value.codex_auth.state!=='AUTHENTICATED'&&value.codex_auth.account_id!==null
+     ||value.authority_effect!==false)fail('private_facts_invalid');
+   return frozenCopy(value);
+ }
+@@ -96,6 +96,12 @@ function compareRegisteredFacts(registered,facts){
+   return {registered:r,facts:f};
+ }
+ 
++function assertCodexAccountCurrent(observed,selected){
++  if(observed.state==='PRODUCER_UNAVAILABLE')fail('codex_account_producer_unavailable');
++  if(observed.state!=='AUTHENTICATED')fail('codex_authentication_required');
++  if(observed.account_id!==selected.account_id)fail('codex_account_changed');
++}
++
+ function privatePaths(stateDirectory){
+   if(!windowsPath(stateDirectory))fail('state_directory_invalid');
+   const names={codex_home:'codex-home-v1',journal_root:'native-coding-journal-v1',worker_temp_root:'native-coding-worker-temp-v1',
+@@ -109,6 +115,7 @@ export function createInitialNativeSetupSelection({registeredRepository,privateF
+   const {registered,facts}=compareRegisteredFacts(registeredRepository,privateFacts),choice=normalizeInitialNativeSetupUiChoice(uiChoice);
+   if(choice.proposal_id!==proposalId)fail('proposal_changed');
+   if(choice.repository.repo_id!==registered.repository.repo_id||choice.repository.source_head!==registered.source.head)fail('repository_or_source_choice_changed');
++  assertCodexAccountCurrent(facts.codex_auth,choice.authentication);
+   if(typeof randomUUID!=='function'||typeof now!=='function')fail('allocator_invalid');
+   if(!windowsPath(stateDirectory)||overlaps(stateDirectory,registered.repository.repo_root)||overlaps(stateDirectory,registered.repository.managed_root))
+     fail('state_directory_scope_invalid');
+@@ -207,8 +214,7 @@ export function verifyInitialNativeSetupEnvironment(selection,registeredReposito
+ export function assertInitialNativeSetupEnvironmentCurrent(selection,registeredRepository,privateFacts){
+   const current=verifyInitialNativeSetupEnvironment(selection,registeredRepository,privateFacts),s=current.selection,facts=current.facts;
+   if(Date.parse(s.configuration.expires_at)<=Date.now())fail('selection_expired');
+-  if(facts.codex_auth.state!=='AUTHENTICATED')fail('codex_authentication_required');
+-  if(facts.codex_auth.account_id!==s.authentication.account_id)fail('codex_account_changed');
++  assertCodexAccountCurrent(facts.codex_auth,s.authentication);
+   return current;
+ }
+ 
+@@ -273,7 +279,8 @@ export function projectInitialNativeSetup(selection,{setupReadback=null,configur
+     if(repositoryChoice!==null&&(!exact(repositoryChoice,['repo_id','source_head'])||!cleanString(repositoryChoice.repo_id,160)
+       ||!/^[-a-zA-Z0-9:._/]{3,160}$/.test(repositoryChoice.repo_id)||!GIT_SHA.test(repositoryChoice.source_head||'')))fail('projection_repository_choice_invalid');
+     if(codexAccountId!==null&&!cleanString(codexAccountId,256))fail('projection_account_invalid');
+-    const canConfirm=proposalId!==null&&repositoryChoice!==null&&environmentState==='CURRENT';
++    const canConfirm=proposalId!==null&&repositoryChoice!==null&&environmentState==='CURRENT'
++      &&authState==='AUTHENTICATED'&&codexAccountId!==null;
+     return Object.freeze({schema:NATIVE_INITIAL_PROJECTION_SCHEMA,state:'NOT_CONFIGURED',roster_state:'EMPTY',proposal_id:proposalId,
+       work_mode:'NATIVE_CODING',repository:repositoryChoice?.repo_id??null,source:repositoryChoice?.source_head??null,authentication:authState,codex_account_id:codexAccountId,environment_state:environmentState,roles:Object.freeze([]),selection_id:null,
+       operation_id:null,selection_expires_at:null,setup_readback:null,configuration_readback:null,can_confirm:canConfirm,can_begin:false,can_cancel:false,
+diff --git a/apps/metaengine-browser/src/native-coding-initial-setup-composition.mjs b/apps/metaengine-browser/src/native-coding-initial-setup-composition.mjs
+index f3df594c734938817f793523502741687674fd69..d821080f441e9255fe4c8b9a9b750811ebf0df0a 100755
+--- a/apps/metaengine-browser/src/native-coding-initial-setup-composition.mjs
++++ b/apps/metaengine-browser/src/native-coding-initial-setup-composition.mjs
+@@ -13,10 +13,10 @@
+ //    NOT_CONFIGURED before the first setup).
+ //
+ // PRECISE INTERFACE BREAK (HOLD, not bypassed): no Codex authentication/account
+-// observation producer exists in this archive, so codex_auth is always
+-// AUTHENTICATION_REQUIRED/null and BEGIN keeps refusing with
+-// codex_authentication_required. Login stays user-mediated; nothing here asks
+-// for or stores credentials.
++// observation producer exists in this archive, so codex_auth reports
++// PRODUCER_UNAVAILABLE/null. Confirmation refuses before allocating IDs and
++// BEGIN refuses with codex_account_producer_unavailable. Login stays
++// user-mediated; nothing here asks for or stores credentials.
+ import {createHash} from 'node:crypto';
+ import fs from 'node:fs/promises';
+ import path from 'node:path';
+@@ -100,7 +100,7 @@ export function createMainInitialSetupPrivateFactsReader({
+       tools:{private_tools_sha256:privateToolsSha256,git_executable_sha256:tools.gitExecutableSha256,
+         codex_executable_sha256:tools.cliExecutableSha256},
+       postgres,sandbox,
+-      codex_auth:codexAuth??{state:'AUTHENTICATION_REQUIRED',account_id:null},
++      codex_auth:codexAuth??{state:'PRODUCER_UNAVAILABLE',account_id:null},
+       authority_effect:false});
+   };
+ }
+diff --git a/apps/metaengine-browser/src/native-coding-initial-setup-main.mjs b/apps/metaengine-browser/src/native-coding-initial-setup-main.mjs
+index 86610365f64d35c52879919621e34d8a4e5e3dc3..9e5da7c525d20a9c4bca5726e5dfc6bfcf7ebaa7 100644
+--- a/apps/metaengine-browser/src/native-coding-initial-setup-main.mjs
++++ b/apps/metaengine-browser/src/native-coding-initial-setup-main.mjs
+@@ -50,12 +50,12 @@ export function createInitialNativeSetupMainController({store,readRegisteredRepo
+       if(environmentState==='CURRENT'&&!state.proposal)state.proposal={id:allocateId(),createdAt:now()};
+       return projectInitialNativeSetup(null,{proposalId:state.proposal?.id??null,authState,environmentState,repositoryChoice,codexAccountId});
+     }
++    const {setup,configuration}=await safeReadbacks(selection);
+     let authState='UNKNOWN',environmentState='UNAVAILABLE';
+     try{const {registered,facts}=await current();authState=facts.codex_auth.state;
+       try{verifyInitialNativeSetupEnvironment(selection,registered,facts);environmentState=facts.codex_auth.state==='AUTHENTICATED'
+         &&facts.codex_auth.account_id!==selection.authentication.account_id?'DRIFTED':'CURRENT';}catch{environmentState='DRIFTED';}}
+     catch{environmentState='UNAVAILABLE';}
+-    const {setup,configuration}=await safeReadbacks(selection);
+     return projectInitialNativeSetup(selection,{setupReadback:setup,configurationReadback:configuration,authState,environmentState});
+   }
+   async function confirm(raw){
+@@ -66,9 +66,10 @@ export function createInitialNativeSetupMainController({store,readRegisteredRepo
+       const {registered,facts}=await current();open();
+       const selection=createInitialNativeSetupSelection({registeredRepository:registered,privateFacts:facts,stateDirectory:store.stateDirectory,
+         uiChoice:choice,proposalId:state.proposal.id,randomUUID:allocateId,now});
+-      const persisted=await store.writeOnce(selection);state.proposal=null;const readbacks=await safeReadbacks(persisted);
+-      return projectInitialNativeSetup(persisted,{setupReadback:readbacks.setup,configurationReadback:readbacks.configuration,
+-        authState:facts.codex_auth.state,environmentState:'CURRENT'});
++      await store.writeOnce(selection);state.proposal=null;
++      // Reobserve the current account after persistence/readbacks; the facts
++      // used to approve this immutable selection may already have changed.
++      return await snapshot();
+     }finally{state.inFlight=false;}
+   }
+   async function decline(){
+@@ -89,11 +90,13 @@ export function createInitialNativeSetupMainController({store,readRegisteredRepo
+     const beginOpen=()=>{open();if(abort.signal.aborted)fail('cancelled');};
+     try{
+       beginOpen();const selection=await store.read();if(selection===null)fail('selection_required');
+-      const before=await current();assertInitialNativeSetupEnvironmentCurrent(selection,before.registered,before.facts);await requireNotStarted(selection);beginOpen();
++      await requireNotStarted(selection);beginOpen();
++      const before=await current();assertInitialNativeSetupEnvironmentCurrent(selection,before.registered,before.facts);beginOpen();
+       // Explicit BEGIN is the only B path allowed to create/protect these selected app-owned roots.
+       const deadlineAt=Math.min(Date.parse(selection.configuration.expires_at),now()+privateRootPreparationTimeoutMs);
+       await store.preparePrivateRoots(selection,{signal:abort.signal,deadlineAt});beginOpen();
+-      const after=await current();assertInitialNativeSetupEnvironmentCurrent(selection,after.registered,after.facts);await requireNotStarted(selection);beginOpen();
++      await requireNotStarted(selection);beginOpen();
++      const after=await current();assertInitialNativeSetupEnvironmentCurrent(selection,after.registered,after.facts);beginOpen();
+       const choices=initialNativeSetupProviderChoices(selection),configurationProvider=createProvider({identity,capability,privateTools,
+         configuration:choices.configuration,policy:choices.policy,assertOpen:beginOpen});
+       const input=initialNativeSetupBeginInput(selection,after.registered);
+diff --git a/apps/metaengine-browser/src/native-coding-initial-setup-panel.mjs b/apps/metaengine-browser/src/native-coding-initial-setup-panel.mjs
+index ffcb9df4c19fc5f48c118e231fee2968b0d20055..e1c91a53b4519020bd96112d29dd6ca7973cb4d7 100644
+--- a/apps/metaengine-browser/src/native-coding-initial-setup-panel.mjs
++++ b/apps/metaengine-browser/src/native-coding-initial-setup-panel.mjs
+@@ -6,18 +6,18 @@ const integer=(value,min,max)=>{const n=Number(value);if(!Number.isSafeInteger(n
+ const list=value=>{const text=String(value??'').trim();if(!text)return null;const values=text.split(',').map(item=>item.trim()).filter(Boolean);
+   if(values.length>64||new Set(values).size!==values.length||values.some(name=>!/^[_A-Za-z][_A-Za-z0-9]{0,127}$/.test(name)))fail('environment_excludes_invalid');return values;};
+ 
+-// Pure renderer builder. Repository/source come only from the Main projection;
++// Pure renderer builder. Repository/source/account come only from the Main projection;
+ // no path, identity hash, executable, DSN, credential, receipt or evidence input exists.
+ export function buildInitialNativeSetupConfirmation(projection,raw){
+   const current=normalizeInitialNativeSetupProjection(projection);
+-  const keys=['account_id','implementer_model','critic_model','implementer_environment_excludes','critic_environment_excludes',
++  const keys=['implementer_model','critic_model','implementer_environment_excludes','critic_environment_excludes',
+     'max_depth','max_tasks','max_children','max_total_tasks','max_wall_clock_ms','valid_for_ms'];
+-  if(current.state!=='NOT_CONFIGURED'||!current.can_confirm||!current.proposal_id||!current.repository||!current.source||!exact(raw,keys))fail('confirmation_unavailable');
+-  const accountId=String(raw.account_id??'').trim();if(!accountId||accountId.length>256||/[\x00-\x1f\x7f]/.test(accountId))fail('account_invalid');
++  if(current.state!=='NOT_CONFIGURED'||!current.can_confirm||!current.proposal_id||!current.repository||!current.source
++    ||current.authentication!=='AUTHENTICATED'||!current.codex_account_id||!exact(raw,keys))fail('confirmation_unavailable');
+   const model=value=>{const text=String(value??'').trim();return text||null;};
+   return normalizeInitialNativeSetupUiChoice({schema:'metaengine.native-coding.initial-ui-choice.v1',proposal_id:current.proposal_id,
+     work_mode:'NATIVE_CODING',repository:{repo_id:current.repository,source_head:current.source},
+-    authentication:{provider:'CODEX',mode:'USER_MEDIATED_LOGIN',account_id:accountId},roles:[
++    authentication:{provider:'CODEX',mode:'USER_MEDIATED_LOGIN',account_id:current.codex_account_id},roles:[
+       {role:'IMPLEMENTER',model:model(raw.implementer_model),agentMcpShellEnvironmentExcludes:list(raw.implementer_environment_excludes)},
+       {role:'CRITIC',model:model(raw.critic_model),agentMcpShellEnvironmentExcludes:list(raw.critic_environment_excludes)},
+     ],primary_writer:'IMPLEMENTER',logical_limits:{max_depth:integer(raw.max_depth,0,64),max_tasks:integer(raw.max_tasks,1,4096),
+@@ -63,15 +63,17 @@ export function mountInitialNativeSetupPanel({root,api,document=root?.ownerDocum
+     panel.append(node(document,'h2','Native setup'),node(document,'div',`State: ${projection.state}`),
+       node(document,'div',`Roster: ${projection.roster_state}`),node(document,'div',`Repository: ${projection.repository??'not registered'}`),
+       node(document,'div',`Source HEAD: ${projection.source??'unknown'}`),node(document,'div',`Codex authentication: ${projection.authentication}`),
+-      node(document,'div',`Codex account: ${projection.codex_account_id??'choose account / login separately'}`),
++      node(document,'div',`Codex account: ${projection.codex_account_id??'not observed'}`),
+       node(document,'div',`Environment: ${projection.environment_state}`));
++    if(projection.authentication==='PRODUCER_UNAVAILABLE')panel.append(node(document,'p',
++      'Codex account observation is unavailable in this build. Native setup cannot be confirmed or started.'));
+     if(errorText)panel.append(node(document,'p',errorText));
+     const progress=node(document,'pre');progress.textContent=`Setup readback: ${statusText(projection.setup_readback)}\nConfiguration readback: ${statusText(projection.configuration_readback)}`;panel.append(progress);
+-    if(projection.state==='NOT_CONFIGURED'&&projection.can_confirm){
++    if(projection.state==='NOT_CONFIGURED'&&projection.can_confirm&&projection.authentication==='AUTHENTICATED'&&projection.codex_account_id){
+       const form=node(document,'form');form.dataset.nativeInitialSetupForm='true';
+       const fields={};
+       for(const [label,name,value,type] of [
+-        ['Codex account ID','account_id',projection.codex_account_id??'','text'],['Implementer model','implementer_model','','text'],['Critic model','critic_model','','text'],
++        ['Implementer model','implementer_model','','text'],['Critic model','critic_model','','text'],
+         ['Implementer env excludes (comma separated)','implementer_environment_excludes','','text'],['Critic env excludes (comma separated)','critic_environment_excludes','','text'],
+         ['Max depth','max_depth',8,'number'],['Max tasks','max_tasks',64,'number'],['Max children','max_children',8,'number'],
+         ['Max total tasks','max_total_tasks',64,'number'],['Max wall clock ms','max_wall_clock_ms',3600000,'number'],['Selection lifetime ms','valid_for_ms',3600000,'number'],
+@@ -86,7 +88,7 @@ export function mountInitialNativeSetupPanel({root,api,document=root?.ownerDocum
+       const roster=node(document,'ul');for(const role of projection.roles)roster.append(node(document,'li',`${role.role}: ${role.agent_id} — ${role.state}${role.model?` — ${role.model}`:''}`));panel.append(roster);
+       const begin=node(document,'button','Begin native setup');begin.type='button';begin.disabled=busy||Boolean(errorText)||!projection.can_begin;begin.addEventListener('click',()=>void invoke(()=>api.begin()));panel.append(begin);
+       if(projection.can_cancel||busy){const cancel=node(document,'button','Cancel setup');cancel.type='button';cancel.disabled=cancelling;cancel.addEventListener('click',()=>void invoke(()=>api.cancel(),true));panel.append(cancel);}
+-      if(projection.authentication!=='AUTHENTICATED')panel.append(node(document,'p','Authenticate the selected Codex account with the existing user-mediated login flow before BEGIN.'));
++      if(projection.authentication==='AUTHENTICATION_REQUIRED')panel.append(node(document,'p','Log in to Codex separately, then refresh readback before BEGIN.'));
+     }
+     const refreshButton=node(document,'button','Refresh readback');refreshButton.type='button';refreshButton.addEventListener('click',()=>void refresh());panel.append(refreshButton);
+     root.replaceChildren(panel);
+diff --git a/apps/metaengine-browser/src/native-coding-initial-ui-contract.mjs b/apps/metaengine-browser/src/native-coding-initial-ui-contract.mjs
+index e1daf1aba82d6c50c0e77d3f8eba2a63eb591c07..8d8f6663cf1de6c7c6590ca97a4d87f36e900846 100644
+--- a/apps/metaengine-browser/src/native-coding-initial-ui-contract.mjs
++++ b/apps/metaengine-browser/src/native-coding-initial-ui-contract.mjs
+@@ -10,7 +10,7 @@ export const NATIVE_INITIAL_CONFIGURATION_READBACK_SCHEMA='metaengine.native-cod
+ const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
+ const HASH=/^[a-f0-9]{64}$/,GIT_SHA=/^[a-f0-9]{40}$/;
+ const ROLES=['IMPLEMENTER','CRITIC'];
+-const AUTH_STATES=new Set(['AUTHENTICATED','AUTHENTICATION_REQUIRED','UNKNOWN']);
++const AUTH_STATES=new Set(['AUTHENTICATED','AUTHENTICATION_REQUIRED','PRODUCER_UNAVAILABLE','UNKNOWN']);
+ const ENVIRONMENT_STATES=new Set(['CURRENT','DRIFTED','UNAVAILABLE']);
+ const SETUP_STATES=new Set(['NOT_STARTED','INTENT','RUNNING','CANCEL_REQUESTED','HOLD','COMPLETED','FAILED','AMBIGUOUS']);
+ const CONFIGURATION_STATES=new Set(['NOT_CONFIGURED','PUBLISHED','MOUNTED','HOLD','UNKNOWN']);
+@@ -66,7 +66,8 @@ export function normalizeInitialNativeSetupProjection(value){
+     if(value.roster_state!=='EMPTY'||value.roles.length!==0||value.selection_id!==null||value.operation_id!==null||value.selection_expires_at!==null
+       ||value.setup_readback!==null||value.configuration_readback!==null||value.proposal_id!==null&&!UUID.test(value.proposal_id||'')
+       ||!((value.repository===null&&value.source===null)||(cleanString(value.repository,160)&&/^[-a-zA-Z0-9:._/]{3,160}$/.test(value.repository)&&GIT_SHA.test(value.source||'')))
+-      ||value.can_confirm!==Boolean(value.proposal_id&&value.repository&&value.source&&value.environment_state==='CURRENT'))fail('projection_empty_invalid');
++      ||value.can_confirm!==Boolean(value.proposal_id&&value.repository&&value.source&&value.environment_state==='CURRENT'
++        &&value.authentication==='AUTHENTICATED'&&value.codex_account_id!==null))fail('projection_empty_invalid');
+   }else{
+     if(value.roster_state!=='CONFIGURED_NOT_ADMITTED'||value.proposal_id!==null||!UUID.test(value.selection_id||'')||!UUID.test(value.operation_id||'')
+       ||!cleanString(value.repository,160)||!GIT_SHA.test(value.source||'')||!Number.isFinite(Date.parse(value.selection_expires_at||''))||value.roles.length!==2)fail('projection_configured_invalid');
+diff --git a/apps/metaengine-browser/test/native-coding-initial-selection.test.mjs b/apps/metaengine-browser/test/native-coding-initial-selection.test.mjs
+index ffc5b2a0c9e85a95ebd15d4d2e755363895980e0..2163fa18b01d4e726674dcdfde0c390638c3b2ef 100644
+--- a/apps/metaengine-browser/test/native-coding-initial-selection.test.mjs
++++ b/apps/metaengine-browser/test/native-coding-initial-selection.test.mjs
+@@ -40,7 +40,8 @@ test('read-only projection is EMPTY before confirmation and never labels configu
+   const blank=projectInitialNativeSetup(null,{proposalId:uuid(901),authState:'AUTHENTICATION_REQUIRED',environmentState:'CURRENT',
+     repositoryChoice:{repo_id:'github:PatrickFrome/Compute',source_head:'a'.repeat(40)}});
+   assert.equal(blank.roster_state,'EMPTY');assert.deepEqual(blank.roles,[]);assert.equal(blank.repository,'github:PatrickFrome/Compute');assert.equal(blank.source,'a'.repeat(40));
+-  assert.equal(blank.can_confirm,true);assert.equal(blank.can_begin,false);
++  assert.equal(blank.can_confirm,false);assert.equal(blank.can_begin,false);
++  assert.deepEqual(normalizeInitialNativeSetupProjection(blank),blank);
+   const {selection}=create(),configured=projectInitialNativeSetup(selection,{setupReadback:setupReadback(selection),
+     configurationReadback:configurationReadback(selection),authState:'AUTHENTICATED',environmentState:'CURRENT'});
+   assert.equal(configured.roster_state,'CONFIGURED_NOT_ADMITTED');
+@@ -52,6 +53,41 @@ test('read-only projection is EMPTY before confirmation and never labels configu
+   assert.deepEqual(normalizeInitialNativeSetupProjection(configured),configured);
+ });
+ 
++test('confirmation is offered only for a current authenticated account observation',()=>{
++  const context={proposalId:uuid(9015),environmentState:'CURRENT',
++    repositoryChoice:{repo_id:'github:PatrickFrome/Compute',source_head:'a'.repeat(40)}};
++  for(const [authState,codexAccountId,environmentState,expected] of [
++    ['PRODUCER_UNAVAILABLE',null,'CURRENT',false],
++    ['AUTHENTICATION_REQUIRED',null,'CURRENT',false],
++    ['UNKNOWN',null,'CURRENT',false],
++    ['AUTHENTICATED',null,'CURRENT',false],
++    ['AUTHENTICATED','generated-owner-account','DRIFTED',false],
++    ['AUTHENTICATED','generated-owner-account','UNAVAILABLE',false],
++    ['AUTHENTICATED','generated-owner-account','CURRENT',true],
++  ]){
++    const view=projectInitialNativeSetup(null,{...context,authState,codexAccountId,environmentState});
++    assert.equal(view.can_confirm,expected);
++    assert.equal(view.can_begin,false);
++    assert.deepEqual(normalizeInitialNativeSetupProjection(view),view);
++    assert.throws(()=>normalizeInitialNativeSetupProjection({...view,can_confirm:!expected}),/native_initial_selection_projection_empty_invalid/);
++  }
++});
++
++test('confirmation refuses missing, signed-out or changed Codex account observations before allocating IDs',()=>{
++  const proposal=uuid(9016);
++  for(const [authState,accountId,expected] of [
++    ['PRODUCER_UNAVAILABLE',null,'native_initial_selection_codex_account_producer_unavailable'],
++    ['AUTHENTICATION_REQUIRED',null,'native_initial_selection_codex_authentication_required'],
++    ['AUTHENTICATED','other-observed-account','native_initial_selection_codex_account_changed'],
++  ]){
++    const fixture=initialFixture({authState,accountId});let allocated=0;
++    assert.throws(()=>createInitialNativeSetupSelection({registeredRepository:fixture.registered,privateFacts:fixture.facts,
++      stateDirectory:fixture.stateDirectory,uiChoice:choice(proposal),proposalId:proposal,
++      randomUUID:()=>{allocated++;return uuid(allocated);},now:Date.now}),{message:expected});
++    assert.equal(allocated,0);
++  }
++});
++
+ test('renderer choices cannot smuggle evidence, paths, executables, DSNs or credentials',()=>{
+   const proposal=uuid(902),base=choice(proposal);
+   for(const [key,value] of [['evidence_sha256','f'.repeat(64)],['codex_home','C:\\evil'],['executable','cmd.exe'],['dsn','postgres://x'],['credential','secret']])
+@@ -94,6 +130,21 @@ test('current ADMIN epoch, paths, HEAD/tool/PG/sandbox facts and selected Codex
+   assert.throws(()=>assertInitialNativeSetupEnvironmentCurrent(selection,registered,authChanged),/native_initial_selection_codex_account_changed/);
+ });
+ 
++test('BEGIN preserves the exact missing-producer or signed-out diagnostic for a retained selection',()=>{
++  const {registered,facts,selection}=create();
++  for(const [state,expected] of [
++    ['PRODUCER_UNAVAILABLE','native_initial_selection_codex_account_producer_unavailable'],
++    ['AUTHENTICATION_REQUIRED','native_initial_selection_codex_authentication_required'],
++  ]){
++    const current=structuredClone(facts);current.codex_auth={state,account_id:null};
++    assert.throws(()=>assertInitialNativeSetupEnvironmentCurrent(selection,registered,current),{message:expected});
++    const view=projectInitialNativeSetup(selection,{setupReadback:setupReadback(selection),authState:state,environmentState:'CURRENT'});
++    assert.equal(view.can_begin,false);
++    assert.equal(view.codex_account_id,selection.authentication.account_id);
++    assert.deepEqual(normalizeInitialNativeSetupProjection(view),view);
++  }
++});
++
+ test('selection validation preserves exact stable IDs and rejects stored roster duplication or path changes',()=>{
+   const {selection}=create(),copy=structuredClone(selection),validated=validateInitialNativeSetupSelection(copy,{allowExpired:true});
+   assert.equal(validated.selection_id,selection.selection_id);assert.equal(validated.operation_id,selection.operation_id);
+diff --git a/apps/metaengine-browser/test/native-coding-initial-setup-composition.test.mjs b/apps/metaengine-browser/test/native-coding-initial-setup-composition.test.mjs
+index 93146fdcb93d91d5469006e6fb7ca8f97befe51e..4219738f94ffa20d2d6750b8231f8842f4c4cb91 100755
+--- a/apps/metaengine-browser/test/native-coding-initial-setup-composition.test.mjs
++++ b/apps/metaengine-browser/test/native-coding-initial-setup-composition.test.mjs
+@@ -68,9 +68,9 @@ test('private facts reader keeps every value from real owners and fails closed o
+     {git_executable_sha256:'5'.repeat(64),codex_executable_sha256:'6'.repeat(64)})).digest('hex');
+   assert.equal(facts.tools.private_tools_sha256,expectedToolsSha);
+   assert.deepEqual(facts.sandbox,{state:'NOT_CONFIGURED',generation:null});
+-  // The Codex authentication observation producer is absent: fail-closed
+-  // AUTHENTICATION_REQUIRED, never a fabricated AUTHENTICATED state.
+-  assert.deepEqual(facts.codex_auth,{state:'AUTHENTICATION_REQUIRED',account_id:null});
++  // An absent Codex account producer is distinct from an observed signed-out
++  // account; neither may become a fabricated AUTHENTICATED state.
++  assert.deepEqual(facts.codex_auth,{state:'PRODUCER_UNAVAILABLE',account_id:null});
+   assert.equal(await factsReader({privateTools:async()=>null})(),null);
+   assert.equal(await factsReader({postgres:async()=>null})(),null);
+   assert.equal(await factsReader({sandbox:async()=>null})(),null);
+@@ -79,6 +79,27 @@ test('private facts reader keeps every value from real owners and fails closed o
+   assert.equal((await drifted()).sandbox.state,'CONFIGURED');
+ });
+ 
++test('private Codex facts distinguish missing producer from generated signed-out and authenticated observations',async()=>{
++  for(const missing of [null,undefined]){
++    const facts=await factsReader({codexAuth:async()=>missing})();
++    assert.deepEqual(facts.codex_auth,{state:'PRODUCER_UNAVAILABLE',account_id:null});
++  }
++  for(const observed of [
++    {state:'AUTHENTICATION_REQUIRED',account_id:null},
++    {state:'AUTHENTICATED',account_id:'generated-owner-account'},
++  ]){
++    const facts=await factsReader({codexAuth:async()=>observed})();
++    assert.deepEqual(facts.codex_auth,observed);
++    assert.ok(Object.isFrozen(facts.codex_auth));
++  }
++  for(const malformed of [
++    {state:'PRODUCER_UNAVAILABLE',account_id:'unobserved-account'},
++    {state:'AUTHENTICATION_REQUIRED',account_id:'unobserved-account'},
++    {state:'AUTHENTICATED',account_id:null},
++    {state:'UNKNOWN',account_id:null},
++  ])await assert.rejects(factsReader({codexAuth:async()=>malformed}),/native_initial_selection_private_facts_invalid/);
++});
++
+ test('postgres facts bind to the CURRENT host status file and measure the real data directory identity',async t=>{
+   const root=await fs.mkdtemp(path.join(os.tmpdir(),'initial-setup-postgres-'));
+   t.after(async()=>{await fs.rm(root,{recursive:true,force:true});});
+diff --git a/apps/metaengine-browser/test/native-coding-initial-setup-main.test.mjs b/apps/metaengine-browser/test/native-coding-initial-setup-main.test.mjs
+index 99c197162d4e62ea077d3396869acec945afd5bf..2ef2cfe3135198cc4dc22010c44f3f86b7d6fdc4 100644
+--- a/apps/metaengine-browser/test/native-coding-initial-setup-main.test.mjs
++++ b/apps/metaengine-browser/test/native-coding-initial-setup-main.test.mjs
+@@ -80,6 +80,53 @@ test('wrong authenticated Codex account is visible as drift and cannot advertise
+   const view=await controller.snapshot();assert.equal(view.authentication,'AUTHENTICATED');assert.equal(view.environment_state,'DRIFTED');assert.equal(view.can_begin,false);
+ });
+ 
++// GENERATED account observations exercise the real controller. They are not
++// an account producer or evidence of real Codex authentication.
++for(const [name,auth,reason] of [
++  ['missing producer',{state:'PRODUCER_UNAVAILABLE',account_id:null},/codex_account_producer_unavailable/],
++  ['logout',{state:'AUTHENTICATION_REQUIRED',account_id:null},/codex_authentication_required/],
++  ['different selected account',{state:'AUTHENTICATED',account_id:'other-codex-account'},/codex_account_changed/],
++]){
++  test(name+' after proposal refuses forged or stale confirmation before persistence',async()=>{
++    const h=harness(),controller=h.newController(),blank=await controller.snapshot();
++    h.fixture.facts.codex_auth=auth;
++    const view=await controller.snapshot();
++    if(auth.state!=='AUTHENTICATED')assert.equal(view.can_confirm,false);
++    await assert.rejects(()=>controller.confirm(choice(blank.proposal_id)),reason);
++    assert.equal(h.persisted,null);
++    assert.deepEqual(h.counters,{write:0,prepare:0,provider:0,begin:0,cancel:0,login:0});
++  });
++
++  for(const boundary of ['before roots','during roots','final operation readback'])test(name+' '+boundary+' refuses BEGIN',async()=>{
++    const h=harness();
++    const overrides=boundary==='during roots'?{readPrivateFacts:async()=>{
++      if(h.counters.prepare)h.fixture.facts.codex_auth=auth;
++      return h.fixture.facts;
++    }}:boundary==='final operation readback'?{readSetupReadback:async()=>{
++      if(h.counters.prepare)h.fixture.facts.codex_auth=auth;
++      return h.persisted?setupReadback(h.persisted,'NOT_STARTED'):null;
++    }}:{};
++    const controller=h.newController(allocator(2500),overrides),blank=await controller.snapshot();
++    await controller.confirm(choice(blank.proposal_id));
++    if(boundary==='before roots')h.fixture.facts.codex_auth=auth;
++    await assert.rejects(()=>controller.begin(),reason);
++    assert.equal(h.counters.prepare,boundary==='before roots'?0:1);
++    assert.equal(h.counters.provider,0);assert.equal(h.counters.begin,0);assert.equal(h.counters.login,0);
++    const view=await controller.snapshot();assert.equal(view.can_begin,false);
++    assert.equal(h.persisted.authentication.account_id,'codex-account-1');
++  });
++}
++
++test('confirmation reobserves account drift during readback before advertising BEGIN',async()=>{
++  const h=harness(),controller=h.newController(allocator(2600),{readSetupReadback:async()=>{
++    h.fixture.facts.codex_auth={state:'AUTHENTICATED',account_id:'changed-during-readback'};
++    return h.persisted?setupReadback(h.persisted):null;
++  }});
++  const blank=await controller.snapshot(),view=await controller.confirm(choice(blank.proposal_id));
++  assert.equal(view.environment_state,'DRIFTED');assert.equal(view.can_begin,false);
++  assert.equal(h.counters.provider+h.counters.prepare+h.counters.begin,0);
++});
++
+ test('HEAD/admin/path drift rejects BEGIN before root preparation',async()=>{
+   const h=harness(),controller=h.newController(allocator(1800)),blank=await controller.snapshot();await controller.confirm(choice(blank.proposal_id));
+   h.fixture.facts.repository.head='c'.repeat(40);
+diff --git a/apps/metaengine-browser/test/native-coding-initial-setup-panel.test.mjs b/apps/metaengine-browser/test/native-coding-initial-setup-panel.test.mjs
+index 645129109e0ac1d7cc8e9ebc78af78a105d56c97..b6feb843871893669a6c84ef2a88a78eb7149513 100644
+--- a/apps/metaengine-browser/test/native-coding-initial-setup-panel.test.mjs
++++ b/apps/metaengine-browser/test/native-coding-initial-setup-panel.test.mjs
+@@ -4,22 +4,41 @@ import {buildInitialNativeSetupConfirmation} from '../src/native-coding-initial-
+ import {projectInitialNativeSetup} from '../src/native-coding-initial-selection-contract.mjs';
+ import {uuid} from './native-coding-initial-setup-fixture.mjs';
+ 
+-function projection(){return projectInitialNativeSetup(null,{proposalId:uuid(980),authState:'AUTHENTICATION_REQUIRED',environmentState:'CURRENT',
+-  repositoryChoice:{repo_id:'github:PatrickFrome/Compute',source_head:'a'.repeat(40)},codexAccountId:null});}
+-function values(){return {account_id:'codex-account-1',implementer_model:'gpt-5.6-sol',critic_model:'gpt-5.6-sol',
++function projection(context={}){return projectInitialNativeSetup(null,{proposalId:uuid(980),authState:'AUTHENTICATED',environmentState:'CURRENT',
++  repositoryChoice:{repo_id:'github:PatrickFrome/Compute',source_head:'a'.repeat(40)},codexAccountId:'codex-account-1',...context});}
++function values(){return {implementer_model:'gpt-5.6-sol',critic_model:'gpt-5.6-sol',
+   implementer_environment_excludes:'OPENAI_API_KEY',critic_environment_excludes:'',max_depth:'8',max_tasks:'64',max_children:'8',
+   max_total_tasks:'64',max_wall_clock_ms:'3600000',valid_for_ms:'3600000'};}
+ 
+-test('installed UI builder binds explicit repository/source/account/roles/settings without private evidence inputs',()=>{
+-  const result=buildInitialNativeSetupConfirmation(projection(),values());
++test('installed UI builder binds repository/source/account from Main and explicit roles/settings without private evidence inputs',()=>{
++  const result=buildInitialNativeSetupConfirmation(projection({codexAccountId:'observed-codex-account'}),values());
+   assert.deepEqual(result.repository,{repo_id:'github:PatrickFrome/Compute',source_head:'a'.repeat(40)});
+-  assert.equal(result.authentication.account_id,'codex-account-1');assert.deepEqual(result.roles.map(role=>role.role),['IMPLEMENTER','CRITIC']);
++  assert.equal(result.authentication.account_id,'observed-codex-account');assert.deepEqual(result.roles.map(role=>role.role),['IMPLEMENTER','CRITIC']);
+   const text=JSON.stringify(result);for(const forbidden of ['repo_root','managed_root','evidence_sha256','receipt_path','executable','dsn','credential'])assert.equal(text.includes(forbidden),false);
+ });
+ 
+-test('installed UI builder rejects extra renderer fields and missing account choice',()=>{
++test('installed UI builder rejects extra renderer fields including a supplied account ID',()=>{
+   assert.throws(()=>buildInitialNativeSetupConfirmation(projection(),{...values(),evidence_sha256:'f'.repeat(64)}),/native_initial_setup_panel_confirmation_unavailable/);
+-  assert.throws(()=>buildInitialNativeSetupConfirmation(projection(),{...values(),account_id:''}),/native_initial_setup_panel_account_invalid/);
++  for(const account_id of ['codex-account-1','injected-codex-account','']){
++    assert.throws(()=>buildInitialNativeSetupConfirmation(projection(),{...values(),account_id}),/native_initial_setup_panel_confirmation_unavailable/);
++  }
++});
++
++for(const authentication of ['AUTHENTICATION_REQUIRED','PRODUCER_UNAVAILABLE','UNKNOWN']){
++  test('installed UI builder refuses '+authentication+' and a forged can_confirm flag',()=>{
++    const view=projection({authState:authentication,codexAccountId:null});
++    assert.equal(view.can_confirm,false);
++    assert.throws(()=>buildInitialNativeSetupConfirmation(view,values()));
++    assert.throws(()=>buildInitialNativeSetupConfirmation({...view,can_confirm:true},values()));
++    assert.throws(()=>buildInitialNativeSetupConfirmation({...view,can_confirm:true,codex_account_id:'forged-account'},values()));
++  });
++}
++
++test('installed UI builder refuses an authenticated projection without an observed account ID',()=>{
++  const view=projection({codexAccountId:null});
++  assert.equal(view.can_confirm,false);
++  assert.throws(()=>buildInitialNativeSetupConfirmation(view,values()));
++  assert.throws(()=>buildInitialNativeSetupConfirmation({...view,can_confirm:true},values()));
+ });
+ 
+ class FakeNode {
+@@ -29,6 +48,66 @@ class FakeNode {
+   addEventListener(name,listener){this.listeners[name]=listener;}
+ }
+ class FakeDocument {createElement(tag){return new FakeNode(tag,this);}}
++const descendants=node=>[node,...node.children.flatMap(descendants)];
++
++for(const authentication of ['AUTHENTICATION_REQUIRED','PRODUCER_UNAVAILABLE','UNKNOWN']){
++  test(authentication+' has no confirmation form and performs no actions on mount',async()=>{
++    const {mountInitialNativeSetupPanel}=await import('../src/native-coding-initial-setup-panel.mjs');
++    const doc=new FakeDocument(),root=new FakeNode('root',doc),calls=[];
++    const view=projection({authState:authentication,codexAccountId:null});
++    const action=name=>async()=>{calls.push(name);return view;};
++    const panel=mountInitialNativeSetupPanel({root,api:{snapshot:action('snapshot'),confirm:action('confirm'),
++      decline:action('decline'),begin:action('begin'),cancel:action('cancel')},document:doc});
++    await new Promise(resolve=>setImmediate(resolve));
++    assert.deepEqual(calls,['snapshot']);
++    const nodes=descendants(root);
++    assert.equal(nodes.some(node=>node.tagName==='form'),false);
++    assert.equal(nodes.some(node=>node.name==='account_id'),false);
++    if(authentication==='PRODUCER_UNAVAILABLE'){
++      assert.ok(nodes.some(node=>node.textContent==='Codex account observation is unavailable in this build. Native setup cannot be confirmed or started.'));
++      assert.equal(nodes.some(node=>/log\s?in|authenticate/i.test(node.textContent)),false);
++    }
++    panel.close();
++  });
++}
++
++test('confirmation form has no account input and submits only the account in the refreshed Main projection',async()=>{
++  const {mountInitialNativeSetupPanel}=await import('../src/native-coding-initial-setup-panel.mjs');
++  const doc=new FakeDocument(),root=new FakeNode('root',doc),confirmed=[];
++  let view=projection();
++  const noop=async()=>view,api={snapshot:noop,decline:noop,begin:noop,cancel:noop,
++    confirm:async value=>{confirmed.push(value);return view;}};
++  const panel=mountInitialNativeSetupPanel({root,api,document:doc});
++  await new Promise(resolve=>setImmediate(resolve));
++  assert.equal(descendants(root).some(node=>node.name==='account_id'),false);
++  view=projection({codexAccountId:'newly-observed-codex-account'});
++  await panel.refresh();
++  const form=descendants(root).find(node=>node.tagName==='form');assert.ok(form);
++  form.listeners.submit({preventDefault(){}});
++  await new Promise(resolve=>setImmediate(resolve));
++  assert.equal(confirmed.length,1);
++  assert.equal(confirmed[0].authentication.account_id,'newly-observed-codex-account');
++  assert.equal(descendants(root).some(node=>node.name==='account_id'),false);
++  panel.close();
++});
++
++test('a retained selection with an unavailable account producer disables BEGIN without promising a login flow',async()=>{
++  const {mountInitialNativeSetupPanel}=await import('../src/native-coding-initial-setup-panel.mjs');
++  const {createInitialNativeSetupSelection}=await import('../src/native-coding-initial-selection-contract.mjs');
++  const {initialFixture,choice,allocator,setupReadback}=await import('./native-coding-initial-setup-fixture.mjs');
++  const fixture=initialFixture(),proposal=uuid(981);
++  const selection=createInitialNativeSetupSelection({registeredRepository:fixture.registered,privateFacts:fixture.facts,
++    stateDirectory:fixture.stateDirectory,uiChoice:choice(proposal),proposalId:proposal,randomUUID:allocator(9100),now:Date.now});
++  const view=projectInitialNativeSetup(selection,{setupReadback:setupReadback(selection),authState:'PRODUCER_UNAVAILABLE',environmentState:'CURRENT'});
++  const doc=new FakeDocument(),root=new FakeNode('root',doc),noop=async()=>view;
++  const panel=mountInitialNativeSetupPanel({root,api:{snapshot:noop,confirm:noop,decline:noop,begin:noop,cancel:noop},document:doc});
++  await new Promise(resolve=>setImmediate(resolve));
++  const nodes=descendants(root),begin=nodes.find(node=>node.tagName==='button'&&node.textContent==='Begin native setup');
++  assert.ok(begin);assert.equal(begin.disabled,true);
++  assert.ok(nodes.some(node=>node.textContent==='Codex account observation is unavailable in this build. Native setup cannot be confirmed or started.'));
++  assert.equal(nodes.some(node=>/log\s?in|authenticate/i.test(node.textContent)),false);
++  panel.close();
++});
+ 
+ test('mount is read-only: it performs snapshot only and never confirm/begin/cancel/decline',async()=>{
+   const {mountInitialNativeSetupPanel}=await import('../src/native-coding-initial-setup-panel.mjs');
