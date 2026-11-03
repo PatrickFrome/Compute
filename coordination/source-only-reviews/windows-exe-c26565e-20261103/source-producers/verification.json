@@ -1,0 +1,54 @@
+{
+  "schema": "metaengine.packaging-source-producers.next.v1",
+  "baseline_tree": "a6d439952d06e7e0b1f5353de6859a060ccc78c2",
+  "archive_tree": "2dbe253e97379532f6f4b52ef7edf26109a9266d",
+  "result_tree": "000067a7f03f1541aa7a0b715842d73042d82e30",
+  "incremental_patch_sha256": "56400f70cb63386115bd9a3d622f92a3e1b1f969819d260663e19219523685f1",
+  "combined_patch_sha256": "343223cd8811e2f1502ae34140f70a6f1f0ce18de036b86ffd07ade862191988",
+  "both_apply_checks": true,
+  "both_applied_result_trees_match": true,
+  "chromium": {
+    "commit": "dd78960ccd8a03a2fe1f629543d27783885b78e9",
+    "base_tree": "63b2edfe4c6ae23d2fd3424cde3e529db49f7068",
+    "commit_object_verified": true,
+    "tree_contents_and_physical_checkout_qualified": false
+  },
+  "node": {
+    "base_commit": "f14cd3aa7bf9ca8df2cc5b8bb14beb0f335b1d93",
+    "base_tree": "409a26f676d83fa6e1b0bfdb1c10d6878845c071",
+    "complete_postpatch_tree": "92f36398f6bacb44cbba33fea5b902898ac8ef9a",
+    "patches": 64,
+    "entries_physically_verified": 46474,
+    "canonical_bytes_verified": 639931050,
+    "symlinks_verified": 6,
+    "independent_git_am_replay_matches": true,
+    "windows_representation_qualified": false
+  },
+  "electron_entries_physically_verified": 3404,
+  "tests": {
+    "source_policy_pass": 17,
+    "wrapper_pass": 24,
+    "independent_source_negatives_pass": 9,
+    "pe_new_with_verified_archive_data_pass": 30,
+    "exact_gate_pass": 41,
+    "pe_new_without_source_fixture": {
+      "pass": 25,
+      "skipped": 5
+    },
+    "pe_independent_spotchecks_pass": 6,
+    "browser_source_checks_pass": 292
+  },
+  "implemented": "COMPLETE_COMPONENT_GIT_TREES + PE data ingredients/direct preconditions",
+  "full_dependency_closure_verified": false,
+  "transformed_pe_admission_enabled": false,
+  "production_receipt_emitted": false,
+  "windows_build": "NOT RUN",
+  "installation_or_db_or_services_changed": false,
+  "guards_weakened": false,
+  "source_file_sha256": {
+    "apps/metaengine-browser/scripts/custom-electron-source-policy.py": "5671a093a10d7c39e7d4f15cbc9b4b9e5d964946e165d547e3d1df28cdfd5108",
+    "apps/metaengine-browser/scripts/custom-electron-source-build.py": "cea1aaa6865523da41098086d9524c64c670ff4cd34038b8b589dc3f207b19d3",
+    "apps/metaengine-browser/scripts/custom-electron-transform-inputs.cjs": "fd5c04e9974cdfd21a5fdf557bd4678fdfe8d55d356020fd37c917a20ff0a5af",
+    "apps/metaengine-browser/scripts/custom-electron-pe-layout.cjs": "ad512f6497aed0bd4720b1a5403265e050591ea25ce7d3016ea13ddf4f944eba"
+  }
+}

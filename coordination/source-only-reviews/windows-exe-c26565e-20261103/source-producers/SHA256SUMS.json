@@ -1,0 +1,50 @@
+{
+  "PE_PRODUCER.md": {
+    "sha256": "035e177dbe3a76aa050c36d3e525d637331bdfc026d7d5ce8b1641a36f29776d",
+    "bytes": 4002
+  },
+  "PE_REVIEW.txt": {
+    "sha256": "9b2d601c2048e9223a228720c0f74c06f659bbe3a3f92448caf67f825f334483",
+    "bytes": 10581
+  },
+  "REPORT.md": {
+    "sha256": "c574888afe02425a21e40b300e8bbf2f165f3aa5a378e57f3bdde3d96a2dbb37",
+    "bytes": 10629
+  },
+  "SOURCE_PRODUCER.md": {
+    "sha256": "be929dc739e0b66684cdd0ead566dccdd4dda82b4bff800fa51f4434f746359e",
+    "bytes": 5679
+  },
+  "SOURCE_REVIEW.txt": {
+    "sha256": "a1a052c8048e3259e6a82482559bed5ae5925fe4ef8537997b4cd31c3dca94bc",
+    "bytes": 11791
+  },
+  "changed-files.txt": {
+    "sha256": "e9b59512ebb07885d9cab6deda61a3c68358d576ea7c15ae1580dee4d086de6a",
+    "bytes": 800
+  },
+  "chromium-identity.json": {
+    "sha256": "1302b2485a60206dea045c9ca87011b880b9e17c15b2f1e8f530ac1d2f50afc5",
+    "bytes": 655
+  },
+  "metaengine-c26565e-producers-combined.patch": {
+    "sha256": "343223cd8811e2f1502ae34140f70a6f1f0ce18de036b86ffd07ade862191988",
+    "bytes": 237909
+  },
+  "node-full-tree-proof.json": {
+    "sha256": "dfcebdb3169fa5804625df425473df1286e1592f9e21e0aa615de602b1a2491a",
+    "bytes": 17193
+  },
+  "source-producers-incremental.patch": {
+    "sha256": "56400f70cb63386115bd9a3d622f92a3e1b1f969819d260663e19219523685f1",
+    "bytes": 137011
+  },
+  "test-evidence.tar.gz": {
+    "sha256": "183b555702faa3627ae6877debb150f43c35d72b506368117c0d9d1385649080",
+    "bytes": 5095205
+  },
+  "verification.json": {
+    "sha256": "2069491185b7c54a2493fddef07a7c2f23def6f2907287a3fda6e7a9a99a40b5",
+    "bytes": 2514
+  }
+}
