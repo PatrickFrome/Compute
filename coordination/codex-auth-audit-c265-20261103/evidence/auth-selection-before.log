@@ -1,0 +1,37 @@
+✖ authenticated account A refuses confirmation for account B before persistence or preparation (10.787644ms)
+✔ authenticated account A can confirm account A without starting setup (2.904208ms)
+✔ prelogin account choice stays supported while authentication is required and BEGIN remains closed (4.478726ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 2
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 95.886629
+
+✖ failing tests:
+
+test at apps/metaengine-browser/test/native-coding-initial-auth-selection.test.mjs:30:1
+✖ authenticated account A refuses confirmation for account B before persistence or preparation (10.787644ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    {
+      begin: 0,
+      prepare: 0,
+      provider: 0,
+  +   write: 1
+  -   write: 0
+    }
+  
+      at TestContext.<anonymous> (file:///workspace/metaengine-auth-c265/Compute/apps/metaengine-browser/test/native-coding-initial-auth-selection.test.mjs:34:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { write: 1, prepare: 0, provider: 0, begin: 0 },
+    expected: { write: 0, prepare: 0, provider: 0, begin: 0 },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

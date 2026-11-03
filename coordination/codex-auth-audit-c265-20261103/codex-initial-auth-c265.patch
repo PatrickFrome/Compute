@@ -1,0 +1,263 @@
+diff --git a/apps/metaengine-browser/src/native-coding-initial-selection-contract.mjs b/apps/metaengine-browser/src/native-coding-initial-selection-contract.mjs
+index 4a9ddc9bece81e903d4b500409fcef168b9f7d0e..c0ec521df49b281bec48406340107872a7194611 100644
+--- a/apps/metaengine-browser/src/native-coding-initial-selection-contract.mjs
++++ b/apps/metaengine-browser/src/native-coding-initial-selection-contract.mjs
+@@ -109,6 +109,8 @@ export function createInitialNativeSetupSelection({registeredRepository,privateF
+   const {registered,facts}=compareRegisteredFacts(registeredRepository,privateFacts),choice=normalizeInitialNativeSetupUiChoice(uiChoice);
+   if(choice.proposal_id!==proposalId)fail('proposal_changed');
+   if(choice.repository.repo_id!==registered.repository.repo_id||choice.repository.source_head!==registered.source.head)fail('repository_or_source_choice_changed');
++  if(facts.codex_auth.state==='AUTHENTICATED'&&facts.codex_auth.account_id!==choice.authentication.account_id)
++    fail('codex_account_changed');
+   if(typeof randomUUID!=='function'||typeof now!=='function')fail('allocator_invalid');
+   if(!windowsPath(stateDirectory)||overlaps(stateDirectory,registered.repository.repo_root)||overlaps(stateDirectory,registered.repository.managed_root))
+     fail('state_directory_scope_invalid');
+diff --git a/apps/metaengine-browser/src/native-coding-initial-setup-main.mjs b/apps/metaengine-browser/src/native-coding-initial-setup-main.mjs
+index 86610365f64d35c52879919621e34d8a4e5e3dc3..30ca62a93ec85ff7fb16c2b1c0846b71240ec5b1 100644
+--- a/apps/metaengine-browser/src/native-coding-initial-setup-main.mjs
++++ b/apps/metaengine-browser/src/native-coding-initial-setup-main.mjs
+@@ -89,11 +89,16 @@ export function createInitialNativeSetupMainController({store,readRegisteredRepo
+     const beginOpen=()=>{open();if(abort.signal.aborted)fail('cancelled');};
+     try{
+       beginOpen();const selection=await store.read();if(selection===null)fail('selection_required');
+-      const before=await current();assertInitialNativeSetupEnvironmentCurrent(selection,before.registered,before.facts);await requireNotStarted(selection);beginOpen();
++      // A Host readback can wait while Codex auth or the selected environment
++      // changes. Observe those facts after it, immediately before each effect.
++      // This observation is not a retained Codex session/revocation capability.
++      await requireNotStarted(selection);beginOpen();
++      const before=await current();assertInitialNativeSetupEnvironmentCurrent(selection,before.registered,before.facts);beginOpen();
+       // Explicit BEGIN is the only B path allowed to create/protect these selected app-owned roots.
+       const deadlineAt=Math.min(Date.parse(selection.configuration.expires_at),now()+privateRootPreparationTimeoutMs);
+       await store.preparePrivateRoots(selection,{signal:abort.signal,deadlineAt});beginOpen();
+-      const after=await current();assertInitialNativeSetupEnvironmentCurrent(selection,after.registered,after.facts);await requireNotStarted(selection);beginOpen();
++      await requireNotStarted(selection);beginOpen();
++      const after=await current();assertInitialNativeSetupEnvironmentCurrent(selection,after.registered,after.facts);beginOpen();
+       const choices=initialNativeSetupProviderChoices(selection),configurationProvider=createProvider({identity,capability,privateTools,
+         configuration:choices.configuration,policy:choices.policy,assertOpen:beginOpen});
+       const input=initialNativeSetupBeginInput(selection,after.registered);
+diff --git a/apps/metaengine-browser/test/native-coding-initial-auth-dispatch-race.test.mjs b/apps/metaengine-browser/test/native-coding-initial-auth-dispatch-race.test.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..ee429f614d9803c2c0d9b7fa1aeaffce5045dc6e
+--- /dev/null
++++ b/apps/metaengine-browser/test/native-coding-initial-auth-dispatch-race.test.mjs
+@@ -0,0 +1,85 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import {createInitialNativeSetupMainController} from '../src/native-coding-initial-setup-main.mjs';
++import {initialFixture,choice,allocator,setupReadback} from './native-coding-initial-setup-fixture.mjs';
++
++// Generated local fixtures: no Codex credentials, native Guardian, Host, DB,
++// installed runtime or network is used. Pause a setup readback to change
++// current auth before either root preparation or provider/BEGIN dispatch.
++async function pausedBegin(t,{afterPreparation,pauseAt='READBACK'}={}){
++  const fixture=initialFixture();
++  const counters={prepare:0,provider:0,begin:0};
++  let selection=null,operationState='NOT_STARTED',paused=false,armed=false,release,entered;
++  const gate=new Promise(resolve=>{release=resolve;});
++  const waiting=new Promise(resolve=>{entered=resolve;});
++  t.after(()=>release());
++  const pause=async boundary=>{
++    const expectedPreparationCount=afterPreparation?1:0;
++    if(armed&&boundary===pauseAt&&counters.prepare===expectedPreparationCount&&!paused){
++      paused=true;entered();await gate;
++    }
++  };
++  const controller=createInitialNativeSetupMainController({
++    store:{stateDirectory:fixture.stateDirectory,
++      async read(){return selection;},
++      async writeOnce(value){selection=structuredClone(value);return selection;},
++      async preparePrivateRoots(){counters.prepare++;}},
++    readRegisteredRepository:async()=>structuredClone(fixture.registered),
++    readPrivateFacts:async()=>{
++      const facts=structuredClone(fixture.facts);
++      await pause('CURRENT');
++      return facts;
++    },
++    readSetupReadback:async()=>{
++      await pause('READBACK');
++      return selection?setupReadback(selection,operationState):null;
++    },
++    readConfigurationReadback:async()=>null,
++    cancelSetup:async()=>{assert.fail('local cancellation must not dispatch a Host cancel');},
++    identity:{},capability:{},privateTools:{},app:{},
++    assertOpen:()=>undefined,
++    createProvider:()=>{counters.provider++;return Object.freeze({fixture:true});},
++    beginSetup:async()=>{counters.begin++;operationState='RUNNING';},
++    allocateId:allocator(4000),now:Date.now,
++  });
++  const blank=await controller.snapshot();
++  await controller.confirm(choice(blank.proposal_id));
++  armed=true;
++  const pending=controller.begin();
++  pending.catch(()=>{});
++  await waiting;
++  return {fixture,counters,pending,release,controller};
++}
++
++for(const afterPreparation of [false,true]){
++  const boundary=afterPreparation?'provider/BEGIN dispatch':'root preparation';
++  test(`current Codex authorization permits one BEGIN after the readback before ${boundary}`,
++    {timeout:5000},async t=>{
++    const h=await pausedBegin(t,{afterPreparation});
++    h.release();
++    const view=await h.pending;
++    assert.equal(view.setup_readback.state,'RUNNING');
++    assert.deepEqual(h.counters,{prepare:1,provider:1,begin:1});
++    });
++
++for(const [name,authentication,reason] of [
++  ['revocation',{state:'AUTHENTICATION_REQUIRED',account_id:null},'codex_authentication_required'],
++  ['account switch',{state:'AUTHENTICATED',account_id:'other-codex-account'},'codex_account_changed'],
++])test(`Codex ${name} during the readback before ${boundary} vetoes subsequent effects`,
++  {timeout:5000},async t=>{
++    const h=await pausedBegin(t,{afterPreparation});
++    h.fixture.facts.codex_auth=authentication;
++    h.release();
++    await assert.rejects(h.pending,new RegExp(`native_initial_selection_${reason}`));
++    assert.deepEqual(h.counters,{prepare:afterPreparation?1:0,provider:0,begin:0});
++  });
++
++  test(`cancellation while current facts are pending before ${boundary} vetoes subsequent effects`,
++    {timeout:5000},async t=>{
++      const h=await pausedBegin(t,{afterPreparation,pauseAt:'CURRENT'});
++      await h.controller.cancel();
++      h.release();
++      await assert.rejects(h.pending,/native_initial_setup_main_cancelled/);
++      assert.deepEqual(h.counters,{prepare:afterPreparation?1:0,provider:0,begin:0});
++    });
++}
+diff --git a/apps/metaengine-browser/test/native-coding-initial-auth-restart.test.mjs b/apps/metaengine-browser/test/native-coding-initial-auth-restart.test.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..c98aa0832c0c347d48e0ec6cc7a292cf0c997840
+--- /dev/null
++++ b/apps/metaengine-browser/test/native-coding-initial-auth-restart.test.mjs
+@@ -0,0 +1,65 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import {createInitialNativeSetupMainController} from '../src/native-coding-initial-setup-main.mjs';
++import {initialFixture,choice,allocator,setupReadback} from './native-coding-initial-setup-fixture.mjs';
++
++// Controller reconstruction over the same in-memory persisted selection.
++// These tests do not authenticate a real Codex account or restart native code.
++async function retainedSelection(){
++  const fixture=initialFixture();
++  const counters={write:0,prepare:0,provider:0,begin:0};
++  let selection=null,authUnavailable=false,operationState='NOT_STARTED';
++  const store={stateDirectory:fixture.stateDirectory,
++    async read(){return selection;},
++    async writeOnce(value){counters.write++;selection=structuredClone(value);return selection;},
++    async preparePrivateRoots(){counters.prepare++;}};
++  const controller=(start)=>createInitialNativeSetupMainController({
++    store,readRegisteredRepository:async()=>structuredClone(fixture.registered),
++    readPrivateFacts:async()=>{
++      if(authUnavailable)throw Error('fixture_codex_auth_observation_unavailable');
++      return structuredClone(fixture.facts);
++    },
++    readSetupReadback:async()=>selection?setupReadback(selection,operationState):null,
++    readConfigurationReadback:async()=>null,
++    cancelSetup:async()=>{},identity:{},capability:{},privateTools:{},app:{},
++    assertOpen:()=>undefined,
++    createProvider:()=>{counters.provider++;return Object.freeze({fixture:true});},
++    beginSetup:async()=>{counters.begin++;operationState='RUNNING';},
++    allocateId:allocator(start),now:Date.now,
++  });
++  const first=controller(5000),blank=await first.snapshot();
++  await first.confirm(choice(blank.proposal_id));
++  const original=structuredClone(selection);
++  return {fixture,counters,original,restart:()=>controller(6000),
++    markUnavailable(){authUnavailable=true;},readSelection:()=>selection};
++}
++
++for(const [name,mutate,authentication,reason] of [
++  ['revoked authorization',h=>{h.fixture.facts.codex_auth={state:'AUTHENTICATION_REQUIRED',account_id:null};},
++    'AUTHENTICATION_REQUIRED',/native_initial_selection_codex_authentication_required/],
++  ['a different account',h=>{h.fixture.facts.codex_auth.account_id='other-codex-account';},
++    'AUTHENTICATED',/native_initial_selection_codex_account_changed/],
++  ['an unavailable auth observation',h=>h.markUnavailable(),
++    'UNKNOWN',/fixture_codex_auth_observation_unavailable/],
++])test(`reconstructed controller with ${name} keeps snapshot read-only and refuses BEGIN`,async()=>{
++  const h=await retainedSelection();mutate(h);
++  const restarted=h.restart(),view=await restarted.snapshot();
++  assert.equal(view.authentication,authentication);
++  assert.equal(view.can_begin,false);
++  assert.equal(view.selection_id,h.original.selection_id);
++  assert.equal(view.operation_id,h.original.operation_id);
++  assert.deepEqual(h.readSelection(),h.original);
++  assert.deepEqual(h.counters,{write:1,prepare:0,provider:0,begin:0});
++  await assert.rejects(()=>restarted.begin(),reason);
++  assert.deepEqual(h.counters,{write:1,prepare:0,provider:0,begin:0});
++});
++
++test('reconstructed controller with current matching account waits for explicit BEGIN',async()=>{
++  const h=await retainedSelection(),restarted=h.restart();
++  const view=await restarted.snapshot();
++  assert.equal(view.can_begin,true);
++  assert.deepEqual(h.counters,{write:1,prepare:0,provider:0,begin:0});
++  await restarted.begin();
++  assert.deepEqual(h.counters,{write:1,prepare:1,provider:1,begin:1});
++  assert.deepEqual(h.readSelection(),h.original);
++});
+diff --git a/apps/metaengine-browser/test/native-coding-initial-auth-selection.test.mjs b/apps/metaengine-browser/test/native-coding-initial-auth-selection.test.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..666ff25698918c9cc28982a7dff41d080a0048b6
+--- /dev/null
++++ b/apps/metaengine-browser/test/native-coding-initial-auth-selection.test.mjs
+@@ -0,0 +1,59 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import {createInitialNativeSetupMainController} from '../src/native-coding-initial-setup-main.mjs';
++import {initialFixture,choice,allocator,setupReadback,configurationReadback} from './native-coding-initial-setup-fixture.mjs';
++
++// Generated in-memory owners only. No login, filesystem, process or SQL effects.
++function harness({authState='AUTHENTICATED',accountId='account-A'}={}){
++  const fixture=initialFixture({authState,accountId});
++  let persisted=null;
++  const effects={write:0,prepare:0,provider:0,begin:0};
++  const store={stateDirectory:fixture.stateDirectory,
++    async read(){return persisted;},
++    async writeOnce(value){effects.write++;persisted=structuredClone(value);return persisted;},
++    async preparePrivateRoots(){effects.prepare++;},
++  };
++  const controller=createInitialNativeSetupMainController({store,
++    readRegisteredRepository:async()=>fixture.registered,
++    readPrivateFacts:async()=>fixture.facts,
++    readSetupReadback:async()=>persisted?setupReadback(persisted):null,
++    readConfigurationReadback:async()=>persisted?configurationReadback(persisted):null,
++    cancelSetup:async()=>{throw Error('unexpected_cancel');},
++    identity:{},capability:{},privateTools:{},app:{},
++    createProvider:()=>{effects.provider++;return Object.freeze({});},
++    beginSetup:async()=>{effects.begin++;},
++    allocateId:allocator(48000),
++  });
++  return {controller,effects,get persisted(){return persisted;}};
++}
++
++test('authenticated account A refuses confirmation for account B before persistence or preparation',async()=>{
++  const h=harness(),proposal=await h.controller.snapshot();
++  const outcome=await h.controller.confirm(choice(proposal.proposal_id,{accountId:'account-B'}))
++    .then(value=>({value}),error=>({error}));
++  assert.deepEqual(h.effects,{write:0,prepare:0,provider:0,begin:0});
++  assert.equal(h.persisted,null);
++  assert.ok(outcome.error instanceof Error,'confirmation must reject the mismatched account');
++  assert.match(outcome.error.message,/native_initial_selection_codex_account_changed/);
++});
++
++test('authenticated account A can confirm account A without starting setup',async()=>{
++  const h=harness(),proposal=await h.controller.snapshot();
++  const view=await h.controller.confirm(choice(proposal.proposal_id,{accountId:'account-A'}));
++  assert.deepEqual(h.effects,{write:1,prepare:0,provider:0,begin:0});
++  assert.equal(h.persisted.authentication.account_id,'account-A');
++  assert.equal(view.authentication,'AUTHENTICATED');
++  assert.equal(view.environment_state,'CURRENT');
++  assert.equal(view.can_begin,true);
++});
++
++test('prelogin account choice stays supported while authentication is required and BEGIN remains closed',async()=>{
++  const h=harness({authState:'AUTHENTICATION_REQUIRED'}),proposal=await h.controller.snapshot();
++  const view=await h.controller.confirm(choice(proposal.proposal_id,{accountId:'account-A'}));
++  assert.deepEqual(h.effects,{write:1,prepare:0,provider:0,begin:0});
++  assert.equal(h.persisted.authentication.account_id,'account-A');
++  assert.equal(view.authentication,'AUTHENTICATION_REQUIRED');
++  assert.equal(view.can_begin,false);
++  await assert.rejects(h.controller.begin(),/native_initial_selection_codex_authentication_required/);
++  assert.deepEqual(h.effects,{write:1,prepare:0,provider:0,begin:0});
++});
