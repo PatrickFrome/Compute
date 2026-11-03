@@ -1,0 +1,11 @@
+apps/metaengine-browser/scripts/custom-electron-after-pack.cjs
+apps/metaengine-browser/scripts/custom-electron-package-gate.cjs
+apps/metaengine-browser/scripts/custom-electron-source-build.py
+apps/metaengine-browser/test/custom-electron-package-gate.test.mjs
+apps/metaengine-browser/test/test_custom_electron_source_build.py
+docs/guardian-custom-electron-runtime-packaging-v1.md
+docs/interfaces/custom-electron-runtime-integration-contract.md
+infra/client-state-runtime/local-vault-key.mjs
+infra/client-state-runtime/local-vault-key.test.mjs
+infra/client-state-runtime/owned-postgres-process.mjs
+infra/client-state-runtime/owned-postgres-process.test.mjs

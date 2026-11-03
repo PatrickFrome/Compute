@@ -1,0 +1,81 @@
+{
+  "scope": "PINNED_CONFIGURATION_SOURCE_EVIDENCE_NOT_ACTUAL_GCLIENT_CONTEXT",
+  "source_files": [
+    {
+      "path": "DEPS",
+      "electron_commit": "c542df1ecbc2c2978e8f53f8c7baf602404d166f",
+      "git_blob": "b1f99e77cb3661760f655d8fb9346351b354bdba",
+      "sha256": "c254ca413381a28243b3808e10dc8842ff0bc09629e1663ee7e09ef79dd4514a",
+      "bytes": 8442
+    },
+    {
+      "path": ".github/actions/install-build-tools/action.yml",
+      "electron_commit": "c542df1ecbc2c2978e8f53f8c7baf602404d166f",
+      "git_blob": "d8e821d42d4e98b803b2bcd5fa4af7e2beb3f70c",
+      "sha256": "35fde09f9c6d0e781c277e9d7d455476b849f92ffad078cc604054c9aa8230de",
+      "bytes": 1785
+    },
+    {
+      "path": ".github/actions/checkout/action.yml",
+      "electron_commit": "c542df1ecbc2c2978e8f53f8c7baf602404d166f",
+      "git_blob": "bf0ed67cb9bd993921b9a4641a42eabae42baef6",
+      "sha256": "0992aea7a0b9d0fb166980c5d10f00b9e8b318a98650e025afede34ac2d25721",
+      "bytes": 10052
+    },
+    {
+      "path": ".github/actions/fix-sync/action.yml",
+      "electron_commit": "c542df1ecbc2c2978e8f53f8c7baf602404d166f",
+      "git_blob": "517d4e247b7b8919c6da2979c3c1c7f7be75b987",
+      "sha256": "2061e5727c2fc80921233b4987625c309bc699a2a1b7bcb9ff49bf9596dcc3f2",
+      "bytes": 7485
+    },
+    {
+      "path": ".github/workflows/build.yml",
+      "electron_commit": "c542df1ecbc2c2978e8f53f8c7baf602404d166f",
+      "git_blob": "69c5384e0cdfe5d7e816074f502432d78243ff68",
+      "sha256": "0cc17b98b0965f82f48546a3c6f1da5d09b1b4f7ffd635c1b0fafb67bfa11a98",
+      "bytes": 20370
+    },
+    {
+      "path": ".github/workflows/pipeline-segment-electron-build.yml",
+      "electron_commit": "c542df1ecbc2c2978e8f53f8c7baf602404d166f",
+      "git_blob": "d825dad6338edabdac96465b0d4c4b880cb2a806",
+      "sha256": "5c756979ae68bc9bc761289396e85f49bb7c991d94608ec971757596bd348ef4",
+      "bytes": 15320
+    },
+    {
+      "path": ".github/workflows/pipeline-segment-electron-test.yml",
+      "electron_commit": "c542df1ecbc2c2978e8f53f8c7baf602404d166f",
+      "git_blob": "5932f78521a9ddc3d37fa1014491754eccace118",
+      "sha256": "f1cc93bd74288178c10da7d68df8fcb94d69b4537d29624b41119d7e39ae4c91",
+      "bytes": 37960
+    },
+    {
+      "path": "docs/development/build-instructions-gn.md",
+      "electron_commit": "c542df1ecbc2c2978e8f53f8c7baf602404d166f",
+      "git_blob": "ffd8e58e664903a6970e87cac94e42f3f5f243be",
+      "sha256": "8f32a0b64d1ccf87b474fd8f9455b853a45278cb7a95c45a768ef153e4ffa97c",
+      "bytes": 14271
+    },
+    {
+      "path": "build/args/release.gn",
+      "electron_commit": "c542df1ecbc2c2978e8f53f8c7baf602404d166f",
+      "git_blob": "59326deae7980cbbe82e6305eb939e0a668ec20d",
+      "sha256": "b4490cee911e0ed136a6d095c69a7914cb3f4aa2d5517e3f987a2b5f45d3cd56",
+      "bytes": 902
+    },
+    {
+      "path": "build/args/all.gn",
+      "electron_commit": "c542df1ecbc2c2978e8f53f8c7baf602404d166f",
+      "git_blob": "6d2eca704fa221a7aacf1f724adc83fa4a350759",
+      "sha256": "d4ba5836bdadee7d07368351d49feebf1169db2ab49e800903f693b95fc517d8",
+      "bytes": 4812
+    }
+  ],
+  "chromium_dependency_depot_tools_commit": "38c391feba5fb96812f9028da12413ffc39df394",
+  "actual_bootstrap_gclient_revision": null,
+  "build_tools_commit_in_electron_ci": "3bf7c9f543348c03b7a0f2e265dd352d0f61c1ab",
+  "actual_solution_spec_or_dot_gclient_qualified": false,
+  "actual_custom_vars_or_custom_deps_qualified": false,
+  "actual_target_os_host_os_host_cpu_cipd_platform_qualified": false
+}

@@ -1,0 +1,110 @@
+Independent follow-up review #1436: Windows system-root selection
+2026-11-03; /workspace/metaengine-source/Compute; source-only Linux review.
+
+REVIEW
+
+Correction to the prior review: the original staged Vault/owned-PG changes had
+late root/context refusal. The current follow-up moves that refusal before
+effects. It DOES NOT add support for another Windows system drive.
+
+Native OS path sources found (not environment-selected)
+- native/browser-guardian-scm/browser-guardian-startup-custody.hpp:308 calls
+  GetSystemDirectoryW with a 32768-character buffer, rejects failure/truncation,
+  and constructs exact expected system-DLL paths. Failure reaches
+  GUARDIAN_STARTUP_FIXED_IMAGE_SCOPE_UNPROVEN at :212. fail() at :251-259
+  permanently clears sealing, revokes the watch, and signals its owned stop.
+- native/browser-guardian-scm/browser-guardian-trusted-main-peer-consumer.cpp:236
+  calls GetSystemDirectoryW, rejects with ORIGINAL_NATIVE_SYSTEM32_ROOT_UNAVAILABLE
+  at :237, then retains and digest-checks exact policy DLLs at :244-249. Its
+  fail() at :102-111 revokes the original loader/startup lifetime.
+- native/browser-guardian-scm/browser-guardian-original-main-debug-owner.cpp:318
+  calls GetSystemDirectoryW; :319 refuses ORIGINAL_MAIN_SYSTEM32_ROOT_UNAVAILABLE.
+  fail() at :183-190 revokes the original ledger/sequence and clears held facts.
+- native/browser-guardian-scm/browser-guardian-connected-peer.cpp:590 calls
+  GetSystemDirectoryW; :591 refuses GUARDIAN_SYSTEM_MODULE_ROOT_UNAVAILABLE.
+  fail() at :176-191 permanently revokes the observation and clears readiness
+  facts. Even bounded observation is not continuous code custody (:636-641).
+All four paths above are under apps/metaengine-browser/. No production caller
+of GetWindowsDirectory/GetSystemWindowsDirectory was found by exact API search.
+
+No reusable early JavaScript/Node root producer exists
+- The native calls above are internal expected-DLL calculations, not root
+  exports. Connected-peer N-API only exports open/cancel (:554-560), and its
+  object methods are peer/material operations (:390-394). Replacement-runtime
+  N-API only exports captureBeforeImport and birth/custody operations (:104-110).
+- guardian-connected-peer-native.mjs:38 loads the original source-linked
+  binding only through its existing packaged Main/provenance/custody rail;
+  stock Electron, a worker or a Node CLI is not an alternate provider.
+- host-native-owner-producers-w60.mjs:41-59 explicitly keeps nonstandard roots
+  UNKNOWN and returns null. fixedWindowsNativeReadEnvironment is fixed C policy.
+- private-windows-storage-acl.mjs:41-43 accepts a drive-letter Windows path from
+  environment. That is compatibility precedent, NOT independent OS-root proof.
+  It must not be reused as authority to choose a new executable root.
+
+Safe possible future interface; not implemented by this review
+Use only an original authenticated native Main/Host composition, exposing a
+private zero-argument, bounded operation that reads OS directories directly
+(as the GetSystemDirectoryW callers already do) and remains scoped to the same
+original native lifetime. Any required Windows-directory root needs its own OS
+API reading rather than an environment-derived drive. Preserve native file,
+ancestor, image and identity verification. An arbitrary callback/path, public
+JSON/config/environment field, helper receipt or copied object cannot mint the
+producer. A root path alone is not loaded-code custody or execution authority.
+Until that producer exists and is qualified, other system roots remain HOLD.
+
+Current follow-up source reviewed
+- local-vault-key.mjs:8-13 retains the same fixed-root refusal and narrow context
+  validation. :46 snapshots the validated frozen environment before any fs IO;
+  :60 and :72 reuse it for ACL work instead of rereading mutable process.env.
+  Unsupported/conflicting/missing declared root throws
+  local_vault_windows_root_unverified; invalid provided profile/temp context
+  throws windows_native_read_environment_context_invalid. No key is opened.
+- owned-postgres-process.mjs:141-148 retains the fixed-root/context refusal.
+  :237-240 copies/freezes launch context and validates inventory context BEFORE
+  path IO, endpoint probing or pg_ctl. claim/verify/isAlive use the frozen
+  inventory snapshot; start/isready/stop use the frozen launch snapshot.
+  Invalid root/context throws owned_postgres_process_inventory_unavailable
+  before any path read or process launch.
+- Missing optional profile/temp fields keep existing fixed defaults; invalid
+  supplied values still deny. Original invalid-argument/cancellation precedence,
+  finite deadlines, exact PID/PGDATA/port/incarnation checks and no-generic-kill
+  cleanup remain. No public export, fallback, new root or authority bridge added.
+- Later genuine native failures can still end in runtime_cleanup_unconfirmed
+  (:349-354); this change does not manufacture confirmed cleanup or auto-retry.
+- IMPORTANT: C:\Windows policy/environment agreement is NOT native proof of the
+  actual OS root. Spoofing environment cannot be described as root discovery.
+  General different-drive compatibility and real Windows execution remain
+  unqualified. These are explicit unsupported-capability limits, not an
+  automatic-approval denial; no real PC action was attempted.
+
+TESTS (independently run; no installation/dependency/DB/service/Windows effects)
+
+1. node --test --test-concurrency=1 \
+     apps/metaengine-browser/test/windows-native-read-environment.test.mjs \
+     apps/metaengine-browser/test/host-native-owner-producers-w60.test.mjs \
+     apps/metaengine-browser/test/browser-guardian-startup-custody.test.mjs
+   Exit 0: 36 tests, 35 passed, 1 Windows-only skipped, 0 failed.
+   Log: review-followup-system-root-baseline.tap.
+   The startup producer ran only with simulated Win32/model policy. Its stub
+   GetSystemDirectoryW fixes C:\Windows (synthetic/core.cpp:131); it does not
+   qualify another system drive, actual W77 authentication or Windows execution.
+
+2. node --test --test-concurrency=1 \
+     infra/client-state-runtime/local-vault-key.test.mjs \
+     infra/client-state-runtime/owned-postgres-process.test.mjs
+   Exit 0 after final test edits: 16 tests, 12 passed, 4 Windows-only skipped,
+   0 failed. Log: review-followup-system-root-runtime.tap.
+
+3. node --test --test-concurrency=1 \
+     /workspace/metaengine-evidence/review-followup-system-root-probe.mjs
+   Exit 0: 8 passed, 0 failed/skipped. Log: review-followup-system-root-probe.tap.
+   Independent inert VM probe executes complete production functions with all
+   filesystem/native/PG/network facets replaced by doubles. Original staged
+   blobs 71a1a1a4f1ebb729a0325aa45661890bdfd60c00 (Vault) and
+   d785eba35cc5d822963076c3ea4f249ad7beb5a4 (PG) reproduce late key-create / PG-start
+   before HOLD. Current source has zero IO/native/PG effects for D:\Windows,
+   conflicting aliases, missing root, and hostile provided TEMP.
+
+The previous full startup-manifest test's missing postgres/package.json remains
+documented in autoconfig-review.txt; no dependency installation was attempted.
+This reviewer changed only evidence files, not production or test source.

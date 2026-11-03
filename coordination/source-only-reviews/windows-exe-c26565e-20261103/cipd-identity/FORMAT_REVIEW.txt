@@ -1,0 +1,140 @@
+Independent CIPD package format and payload review
+
+Source authority and execution scope
+The format review uses official LUCI Go commit
+61fc2ffcffaa3d602e13d752206c2285ae9a637c. Read-only source metadata was fetched
+from the official GitHub Git repository; known raw files were read from
+raw.githubusercontent.com and matched to exact Git blob IDs in that commit.
+No Go/package source was compiled or executed. See
+official-format/source-manifest.json for paths, URLs, byte lengths, SHA256,
+Git blob IDs and membership checks. No previous denied Gitiles/API route was
+retried. Root alone attempted CIPD service acquisition; that request failed with
+proxy-tunnel 403, so actual instance resolution and payload readback are NOT RUN.
+No service/download alternate route is authorized or attempted by this review.
+
+The selected commit is a pinned source-format reference, not proof that every
+current service package uses this format subset or that the complete CIPD
+bootstrap/controller is authenticated. Unsupported layouts must HOLD/refuse.
+
+Instance byte identity and service schemas
+common/iid.go encodes SHA256 instances as raw URL-safe unpadded base64 of the
+32-byte digest followed by algorithm byte 2 (44 characters). Legacy SHA1 uses
+40 lowercase hex characters. ObjectRef is {hash_algo, hex_digest}; SHA256 enum=2.
+local/reader.go VerifyHash seeks to file offset zero and hashes until EOF before
+opening the ZIP. The expected digest therefore covers the complete raw archive:
+local/central headers, compressed member bodies, metadata, comment and any other
+file bytes. It is not a hash of decompressed files or an embedded manifest.
+
+Repository.ResolveVersion request: package:string, version:string. Response is
+Instance: package:string, instance:ObjectRef, registered_by:string,
+registered_ts:Timestamp. A symbolic tag/ref request is not itself an immutable
+instance proof; compare the returned package and concrete identity separately.
+
+Repository.GetInstanceURL request: package:string, instance:ObjectRef. Response
+ObjectURL has a single signed_url:string field. Its HTTPS URL is opaque and
+short-lived; the pinned schema provides no separate expiry field. Protobuf JSON
+uses the declared field names/standard lowerCamel mapping (hashAlgo, hexDigest,
+registeredBy, registeredTs, signedUrl); the proto source and generated Go tags
+record the exact names. Service acquisition is root-owned, not implemented here.
+
+Primary local schema files:
+official-format/cipd/api/cipd/v1/repo.proto
+SHA256 f0a20babd0cedb270f53d377a6f89d88515ae7a6eec7a588f831734636d7ed3a
+Git blob fa4a6374ee56f8335c760c73079333a8e5936b08
+official-format/cipd/api/cipd/v1/cas.proto
+SHA256 81bfbcac554e2118b406a1d675aa0a18519dd2520c8a5ff50310f535bec98149
+Git blob 0770f848dcf353c436e8240d29cc058336542f10
+
+Embedded manifest schema
+local/json_descs.go defines the package service directory .cipdpkg and embedded
+manifest .cipdpkg/manifest.json. .cipd is installation state, not this package
+metadata directory. The writer's current format string at this pin is "1.1".
+The archive writer supplies:
+  format_version: string
+  package_name: string
+  version_file: optional string
+  install_mode: optional "", "copy" or "symlink"
+
+The Files field is present only in a DEPLOYED manifest; the archive's embedded
+manifest does not contain a required member digest/size list. A verifier must
+derive members from the complete authenticated ZIP instead of inventing such a
+manifest requirement. A strict archive profile may reject unknown/deployed-only
+fields and duplicate JSON keys rather than silently applying ambiguous data.
+
+The package name must equal the expected concrete package name exactly. The
+official common validator permits rootless lowercase components composed of
+ASCII a-z, digits, underscore, hyphen and dot, excluding dots-only components.
+ZIP filesystem member rules are separate and stricter for a Windows profile.
+
+version_file is not an existing archive member list: the reader synthesizes an
+additional JSON output containing package_name and instance_id at the named
+path. A bounded archive-member producer should either reject nonempty
+version_file as unsupported or separately derive that generated output and
+validate namespace collisions. It must not claim archive members alone equal
+the installed namespace when this feature is present.
+
+Format "1" is a legacy compatibility branch which strips writable bits; "1.1"
+preserves them. A narrow implementation may support only 1.1 and explicitly
+refuse other versions, rather than silently normalizing a legacy format.
+
+Primary local schema:
+official-format/cipd/client/cipd/local/json_descs.go
+SHA256 f65cd0c34e18061f8614801882ef755ad55c9de266db27b2d0ccaf28f66379d7
+Git blob a99381ef24f9b4b834391f4f450b24add2eb2f6a
+
+ZIP member modes and data
+The builder emits Store or Deflate. It intentionally derives normalized owner
+permission bits: read 0400, optional executable 0100, optional writable 0200;
+the ZIP setter also encodes the file type. Symlinks use ZIP Unix symlink mode
+and a body containing the target. The reader interprets executable/writable
+bits, symlinks and Windows hidden/system attributes. These semantics must not be
+discarded merely because member bytes happen to be identical.
+
+Windows installation uses copy mode. A regular-file-only Windows profile may
+refuse symlinks, explicit directory entries, reparse/type bits and unsupported
+attributes. That is a bounded refusal profile, not full CIPD installer parity.
+Normal Go ZIP output can use data-descriptor bit 3 with local sizes/CRC zero
+until a descriptor follows the compressed body; correct support or explicit
+unsupported refusal is required.
+
+Primary local implementations:
+official-format/cipd/client/cipd/local/builder.go
+SHA256 fee0a2c3ba45fead82edd55ab1c6cf0c319c3908fe0548aef0539dfa39dc8eed
+Git blob 90122a08b3b534cf2a2f75c44b0409d1bbbb73fa
+official-format/cipd/client/cipd/local/reader.go
+SHA256 7f0f19b1f5788626d9dcb72eb30cba99e27ca93288625f30cbd528eb5b4e3eb4
+Git blob 549d3a7f7d5dcb79bf019b7d920cb265ccfc1eda
+
+Independent negative-review requirements sent to the implementer
+- Full raw archive digest must match a canonical concrete instance before member
+  proof. Wrong expected package, tag/ref, unsupported algorithm and body change
+  must not be accepted through caller metadata or a verified flag.
+- Exactly one embedded manifest, strict supported version/types/fields and
+  package binding. Reject missing/duplicate/ambiguous metadata and unsupported
+  generated version files. Archive members come from ZIP, not a fabricated
+  embedded files[] list.
+- Validate raw names before library normalization: NUL, absolute/drive/UNC paths,
+  backslashes, dot traversal, ADS colon, trailing dots/spaces, DOS device names,
+  case-folded aliases and file/directory-prefix collisions. A narrow ASCII
+  profile may refuse unsupported Unicode instead of guessing Windows folding.
+- Compare local and central header names, encoding flags, methods and sizes;
+  account for valid descriptor semantics. Refuse duplicate/overlapping ranges,
+  multiple disks, unsupported ZIP64/encryption/extras/types and opaque prefix/
+  trailer bytes if the selected profile does not model them.
+- Read every accepted member completely, check CRC and exact decompressed size,
+  impose archive/member/count/aggregate expansion bounds, and require Deflate
+  end-of-stream with no unused compressed tail. A library trusting declared
+  uncompressed length is not proof that all compressed data was interpreted.
+- Preserve executable/writable/attribute observations; reject unsupported links
+  and reparse/type modes. Member identity cannot be reduced to content alone.
+- Parse and hash the same immutable bytes. A byte snapshot proves those bytes,
+  not future filesystem path custody or an installed tool's identity. No
+  extraction, installation, hook/tool execution or implicit TOCTOU claim.
+
+Remaining qualification boundaries
+Even a complete single-package archive/member proof would not establish the
+DEPS tag-to-instance binding, actual gclient/vpython/CIPD bootstrap, platform/spec
+and sync phase, recursive package closure, SDK/generated outputs, installation,
+or build/release authority. These remain explicit HOLD. Real service data and
+payload readback remain NOT RUN because acquisition was blocked; inert tests
+must be labeled synthetic, with no invented production instance catalog.

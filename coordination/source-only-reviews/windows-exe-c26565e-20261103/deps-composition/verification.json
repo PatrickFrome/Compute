@@ -1,0 +1,246 @@
+{
+  "archive_tree": "2dbe253e97379532f6f4b52ef7edf26109a9266d",
+  "baseline_tree": "000067a7f03f1541aa7a0b715842d73042d82e30",
+  "both_apply_checks": true,
+  "both_result_trees_match": true,
+  "changed_source_sha256": {
+    "apps/metaengine-browser/build/custom-electron-hook-inputs.json": "5c2c90da17fb1a1ad5f4a1d1ac7dde37a4bd4eca7008fae95257c43a08c56277",
+    "apps/metaengine-browser/scripts/custom-electron-deps-policy.py": "aaef7aa1d1f0fc37927990f9047600203c434ba33a721e62e0c38036f50d6891",
+    "apps/metaengine-browser/scripts/custom-electron-hook-inputs.py": "d5c5e20fbdc2195cddd6523d2f9da420646e51be82d6629aeaaaf8c8a3b5ad42",
+    "apps/metaengine-browser/scripts/custom-electron-source-build.py": "86f2e897dc62d002983343038c143d088a21a7c85f65073634952fa2317e3f87",
+    "apps/metaengine-browser/test/test_custom_electron_deps_policy.py": "269ab546c531869f0f3f1ab34d13d036e4a3b7cf51c128881d5597bd8972a587",
+    "apps/metaengine-browser/test/test_custom_electron_hook_inputs.py": "14cf7968ef75d4787fe7c888172a94665fb57f304948bfecf1bb2a3eed26a1a8",
+    "apps/metaengine-browser/test/test_custom_electron_source_build.py": "c9fd388a83030d9a700dbaecd411e0a1330667721e66206addd46edb1f3b1cf3",
+    "docs/custom-electron-deps-composition-v1.md": "500c7c97fec417b785179bc20642c39e16e4c8889024fa3e3bdfa2820f87e6af",
+    "docs/custom-electron-source-producer-v1.md": "bb33c3170b3e6752c46ad3bc8262216828e350350ae377723ba2dc8d3de09fc8",
+    "docs/guardian-custom-electron-runtime-packaging-v1.md": "bcadc0bedf2d6b1adc320dfc46efcc0e111018a87774be4e3efdec5ab519dd27",
+    "docs/interfaces/custom-electron-runtime-integration-contract.md": "6f17e97499cc16f2ddcb43be3727fa717424de7516a9c53bbcf15fedc76a53fb"
+  },
+  "client_installation": "NOT RUN",
+  "combined_patch_sha256": "c21b5df22f575d573d53f0e93be277e83326c278eda5adda1284df27b7176824",
+  "declared_profile": {
+    "name": "DECLARED_NATIVE_WIN_X64_INITIAL_SYNC",
+    "observed_sync_spec": false,
+    "variables": {
+      "checkout_android": false,
+      "checkout_arm": false,
+      "checkout_arm64": false,
+      "checkout_chromeos": false,
+      "checkout_fuchsia": false,
+      "checkout_ios": false,
+      "checkout_linux": false,
+      "checkout_loong64": false,
+      "checkout_mac": false,
+      "checkout_mips": false,
+      "checkout_mips64": false,
+      "checkout_ppc": false,
+      "checkout_riscv64": false,
+      "checkout_s390": false,
+      "checkout_win": true,
+      "checkout_x64": true,
+      "checkout_x86": false,
+      "host_cpu": "x64",
+      "host_os": "win"
+    }
+  },
+  "declared_profile_selection_qualified": false,
+  "dependency_installations": false,
+  "deps_summary": {
+    "dependency_kinds": {
+      "cipd": 144,
+      "gcs": 30,
+      "git": 278
+    },
+    "dependency_selection": {
+      "EXCLUDED": 257,
+      "SELECTED": 185,
+      "UNRESOLVED": 10
+    },
+    "hook_count": 77,
+    "hook_selection": {
+      "EXCLUDED": 54,
+      "SELECTED": 22,
+      "UNRESOLVED": 1
+    },
+    "recursion_count": 10
+  },
+  "fixed_deps_manifest_sha256": "d7c6e51ecb2d61c48997c94b28783ecec9723687a286a9c09db65cd99c4cf664",
+  "gitlinks_verified": 270,
+  "hook_inventory_sha256": "ac90883a9001f33362b02d5f80e9f44365755952b31d94235fc685b7a3a87e20",
+  "hook_summary": {
+    "all_hook_count": 77,
+    "hook_selection": {
+      "SELECTED": 22,
+      "UNRESOLVED": 1
+    },
+    "source_content": {
+      "MATCHES_BASE_BLOB_BYTES": 34
+    }
+  },
+  "incremental_patch_sha256": "715c3d0b41a0ac279d078e5e822338c33cb81c6c2c2e5ddf6b54d729e52a719d",
+  "independent_deps_review_snapshot": {
+    "all_upstream_source_execution": false,
+    "derived_manifest_bytes": 255584,
+    "derived_manifest_sha256": "d7c6e51ecb2d61c48997c94b28783ecec9723687a286a9c09db65cd99c4cf664",
+    "implementer_tests_independently_passed": 17,
+    "independent_helper_guard_checks_passed": 6,
+    "independent_tests_passed": 17,
+    "operational_composition_qualified": false,
+    "prior_pre_helper_review_policy_sha256": "5dbeb49a99c1b3afae79d06bd201fc18b9cf6d76a46c7e25bc92db68bb39c094",
+    "reviewed_files_sha256": {
+      "apps/metaengine-browser/scripts/custom-electron-deps-policy.py": "aaef7aa1d1f0fc37927990f9047600203c434ba33a721e62e0c38036f50d6891",
+      "apps/metaengine-browser/scripts/custom-electron-source-build.py": "86f2e897dc62d002983343038c143d088a21a7c85f65073634952fa2317e3f87",
+      "apps/metaengine-browser/scripts/custom-electron-source-policy.py": "5671a093a10d7c39e7d4f15cbc9b4b9e5d964946e165d547e3d1df28cdfd5108",
+      "apps/metaengine-browser/test/test_custom_electron_deps_policy.py": "269ab546c531869f0f3f1ab34d13d036e4a3b7cf51c128881d5597bd8972a587",
+      "apps/metaengine-browser/test/test_custom_electron_source_build.py": "c9fd388a83030d9a700dbaecd411e0a1330667721e66206addd46edb1f3b1cf3"
+    },
+    "reviewed_policy_sha256": "aaef7aa1d1f0fc37927990f9047600203c434ba33a721e62e0c38036f50d6891",
+    "reviewed_tests_sha256": "269ab546c531869f0f3f1ab34d13d036e4a3b7cf51c128881d5597bd8972a587",
+    "schema": "metaengine.deps-independent-review-snapshot.v1",
+    "source_head": "337608c86e464433f7f5693289c8ce697d4b074d",
+    "source_repository_mutated": false,
+    "verified_recomputed_canonical": true,
+    "wrapper_tests_independently_passed": 25
+  },
+  "new_trust_roots_or_weakened_guards": false,
+  "pc_db_services_changed": false,
+  "pr_description_update": "NOT ATTEMPTED; prior automatic-review denial remains pending user decision",
+  "production_blockers": [
+    "DEPOT_TOOLS_GCLIENT_INTERPRETER_IDENTITY",
+    "GCLIENT_PHASE_AND_CUSTOM_VARS_IDENTITY",
+    "DECLARED_PROFILE_SELECTION_NOT_OPERATIONAL",
+    "RECURSIVE_DEPS_OBJECT_CLOSURE_UNAVAILABLE",
+    "ELECTRON_PATCHED_DEPS_RECONCILIATION_UNAVAILABLE",
+    "HOOK_GENERATED_OUTPUTS_UNVERIFIED",
+    "ENABLED_GIT_CIPD_GCS_PHYSICAL_CONTENT_UNVERIFIED"
+  ],
+  "production_receipt_emitted": false,
+  "result_tree": "2d268fbb87d7974a53095cde68f98c1d1fe0c3f5",
+  "schema": "metaengine.deps-composition.source-only.v1",
+  "source_closure_qualified": false,
+  "tests": {
+    "browser_source_checks_pass": 292,
+    "clean_apply_deps_models_pass": 17,
+    "component_policy_regressions_pass": 17,
+    "deps_models_pass": 17,
+    "hook_tests_with_pinned_byte_capture_pass": 14,
+    "hook_tests_without_byte_capture": {
+      "pass": 9,
+      "skip": 5
+    },
+    "independent_deps_negatives_pass": 17,
+    "independent_helper_guards_pass": 6,
+    "independent_hook_supplemental_probes_pass": 4,
+    "independent_hook_tests_pass": 14,
+    "package_pe_node_regressions": {
+      "pass": 66,
+      "skip": 5
+    },
+    "wrapper_regressions_pass": 25
+  },
+  "transformed_pe_admission_enabled": false,
+  "tree_packet": {
+    "all_object_hashes_checked": true,
+    "checkout_created": false,
+    "commit": "dd78960ccd8a03a2fe1f629543d27783885b78e9",
+    "raw_tree_bytes": 29623918,
+    "root_tree": "63b2edfe4c6ae23d2fd3424cde3e529db49f7068",
+    "scope": "MERKLE_TREE_METADATA_ONLY",
+    "source_blob_contents_acquired": false,
+    "tree_objects": 43092
+  },
+  "unresolved_conditions": [
+    {
+      "owner": "chromium",
+      "path": "src/third_party/jetstream/main",
+      "reasons": {
+        "unresolved": [
+          "STRING_VAR_SEMANTICS_UNKNOWN:checkout_configuration"
+        ]
+      }
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/jetstream/v2.2",
+      "reasons": {
+        "unresolved": [
+          "STRING_VAR_SEMANTICS_UNKNOWN:checkout_configuration"
+        ]
+      }
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/speedometer/main",
+      "reasons": {
+        "unresolved": [
+          "STRING_VAR_SEMANTICS_UNKNOWN:checkout_configuration"
+        ]
+      }
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/speedometer/v3.1",
+      "reasons": {
+        "unresolved": [
+          "STRING_VAR_SEMANTICS_UNKNOWN:checkout_configuration"
+        ]
+      }
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/speedometer/v3.0",
+      "reasons": {
+        "unresolved": [
+          "STRING_VAR_SEMANTICS_UNKNOWN:checkout_configuration"
+        ]
+      }
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/speedometer/v2.1",
+      "reasons": {
+        "unresolved": [
+          "STRING_VAR_SEMANTICS_UNKNOWN:checkout_configuration"
+        ]
+      }
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/speedometer/v2.0",
+      "reasons": {
+        "unresolved": [
+          "STRING_VAR_SEMANTICS_UNKNOWN:checkout_configuration"
+        ]
+      }
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/openxr/src",
+      "reasons": {
+        "unresolved": [
+          "PARENT_VARIABLE_PRECEDENCE:checkout_openxr"
+        ]
+      }
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/swift-format",
+      "reasons": {
+        "unresolved": [
+          "CONDITION_VAR:mac"
+        ]
+      }
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/swift-toolchain",
+      "reasons": {
+        "unresolved": [
+          "CONDITION_VAR:mac"
+        ]
+      }
+    }
+  ],
+  "upstream_hooks_executed": false,
+  "windows_build": "NOT RUN"
+}

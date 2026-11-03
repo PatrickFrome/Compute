@@ -1,0 +1,13 @@
+apps/metaengine-browser/build/custom-electron-transform-inputs.json
+apps/metaengine-browser/scripts/custom-electron-pe-layout.cjs
+apps/metaengine-browser/scripts/custom-electron-source-build.py
+apps/metaengine-browser/scripts/custom-electron-source-policy.py
+apps/metaengine-browser/scripts/custom-electron-transform-inputs.cjs
+apps/metaengine-browser/test/custom-electron-transform-inputs.test.mjs
+apps/metaengine-browser/test/fixtures/pe-fixed-layout.mjs
+apps/metaengine-browser/test/test_custom_electron_source_build.py
+apps/metaengine-browser/test/test_custom_electron_source_policy.py
+docs/custom-electron-pe-transform-producer-v1.md
+docs/custom-electron-source-producer-v1.md
+docs/guardian-custom-electron-runtime-packaging-v1.md
+docs/interfaces/custom-electron-runtime-integration-contract.md

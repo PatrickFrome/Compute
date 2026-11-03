@@ -1,0 +1,105 @@
+{
+  "scope": "FIXED_DEPS_DIRECT_SHA256_INSTANCE_DECLARATIONS_ONLY",
+  "rows": [
+    {
+      "package": "chromium/testing/meet-effects-videos",
+      "instance_id": "I5ME8r-BP_A2lRn-c5E-9POZkrJwGS8BNnRdREhYbs8C",
+      "archive_sha256": "239304f2bf813ff0369519fe73913ef4f39992b270192f0136745d4448586ecf",
+      "path": "src/content/test/data/gpu/meet_effects_videos",
+      "package_index": 0,
+      "payload_obtained": false,
+      "membership_verified": false
+    },
+    {
+      "package": "chromium/third_party/updater/chrome_win_arm64",
+      "instance_id": "OoGMyCUHah7D_AOVm4RpVoPOdkGqjFHuSMcoKTZ0rlsC",
+      "archive_sha256": "3a818cc825076a1ec3fc03959b84695683ce7641aa8c51ee48c728293674ae5b",
+      "path": "src/third_party/updater/chrome_win_arm64_sans_iid/cipd",
+      "package_index": 0,
+      "payload_obtained": false,
+      "membership_verified": false
+    },
+    {
+      "package": "chromium/third_party/updater/chrome_win_x86",
+      "instance_id": "gqhcrVQFtXAKUu7yEISTlbrBpPaBUnQZ6FdOo5E4HLQC",
+      "archive_sha256": "82a85cad5405b5700a52eef210849395bac1a4f681527419e8574ea391381cb4",
+      "path": "src/third_party/updater/chrome_win_x86_sans_iid/cipd",
+      "package_index": 0,
+      "payload_obtained": false,
+      "membership_verified": false
+    },
+    {
+      "package": "chromium/third_party/updater/chrome_win_x86_64",
+      "instance_id": "koo1i4cAVdOK2-re2VGbx-crCcbTz9h0qumUk1hyEt0C",
+      "archive_sha256": "928a358b870055d38adbeaded9519bc7e72b09c6d3cfd874aae99493587212dd",
+      "path": "src/third_party/updater/chrome_win_x86_64_sans_iid/cipd",
+      "package_index": 0,
+      "payload_obtained": false,
+      "membership_verified": false
+    },
+    {
+      "package": "chromium/third_party/updater/chromium_win_arm64",
+      "instance_id": "ksRzLnqewvz7P-YMX2e8mxZuDI1hgPtLNCuAXIisXhoC",
+      "archive_sha256": "92c4732e7a9ec2fcfb3fe60c5f67bc9b166e0c8d6180fb4b342b805c88ac5e1a",
+      "path": "src/third_party/updater/chromium_win_arm64_sans_iid/cipd",
+      "package_index": 0,
+      "payload_obtained": false,
+      "membership_verified": false
+    },
+    {
+      "package": "chromium/third_party/updater/chromium_win_x86",
+      "instance_id": "tcFWGGE3wmwKDhT_s-9mzPiQVYxMOI1U9sRAhm1_5QcC",
+      "archive_sha256": "b5c156186137c26c0a0e14ffb3ef66ccf890558c4c388d54f6c440866d7fe507",
+      "path": "src/third_party/updater/chromium_win_x86_sans_iid/cipd",
+      "package_index": 0,
+      "payload_obtained": false,
+      "membership_verified": false
+    },
+    {
+      "package": "chromium/third_party/updater/chromium_win_x86_64",
+      "instance_id": "iXamEEmbStVBV_c-vEG4Xtrda8tTqSRCZ-tmE7VRHb0C",
+      "archive_sha256": "8976a610499b4ad54157f73ebc41b85edadd6bcb53a9244267eb6613b5511dbd",
+      "path": "src/third_party/updater/chromium_win_x86_64_sans_iid/cipd",
+      "package_index": 0,
+      "payload_obtained": false,
+      "membership_verified": false
+    },
+    {
+      "package": "chromium/third_party/enterprise_companion/chromium_win_x86",
+      "instance_id": "AYslTlYIeTAeixIsCIfqdortf8dhyL7afIv34gZLi8sC",
+      "archive_sha256": "018b254e560879301e8b122c0887ea768aed7fc761c8beda7c8bf7e2064b8bcb",
+      "path": "src/third_party/enterprise_companion/chromium_win_x86/cipd",
+      "package_index": 0,
+      "payload_obtained": false,
+      "membership_verified": false
+    },
+    {
+      "package": "chromium/third_party/enterprise_companion/chromium_win_x86_64",
+      "instance_id": "xzQaSZE4tRCdx_KPMEzpYFiVSmAAhuRFxtjTJMjcV-kC",
+      "archive_sha256": "c7341a499138b5109dc7f28f304ce96058954a600086e445c6d8d324c8dc57e9",
+      "path": "src/third_party/enterprise_companion/chromium_win_x86_64/cipd",
+      "package_index": 0,
+      "payload_obtained": false,
+      "membership_verified": false
+    },
+    {
+      "package": "chromium/chrome/test/data/variations/cipd",
+      "instance_id": "mVEsPtSXI4F46cdHi9Gsnn89DOjyf6rCqZvL0QEqCQ8C",
+      "archive_sha256": "99512c3ed497238178e9c7478bd1ac9e7f3d0ce8f27faac2a99bcbd1012a090f",
+      "path": "src/components/variations/test_data/cipd",
+      "package_index": 0,
+      "payload_obtained": false,
+      "membership_verified": false
+    },
+    {
+      "package": "skia/tools/goldctl/windows-amd64",
+      "instance_id": "-xDDUZodBeTybAnBSH4M_GKIYBtt7r4CdSUugKkjFpgC",
+      "archive_sha256": "fb10c3519a1d05e4f26c09c1487e0cfc6288601b6deebe0275252e80a9231698",
+      "path": "src/tools/skia_goldctl/win",
+      "package_index": 0,
+      "payload_obtained": false,
+      "membership_verified": false
+    }
+  ],
+  "all_actual_payloads_unavailable": true
+}

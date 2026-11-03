@@ -1,0 +1,266 @@
+Independent pinned-DEPS composition review
+Reviewer: /root/autoconfig_review; scope: source-only, data-only inspection.
+Repository: /workspace/metaengine-source/Compute
+Disposition: HOLD. No actual enabled Windows-x64 dependency/build closure is qualified.
+
+1. Exact available declarations
+
+Electron source commit c542df1ecbc2c2978e8f53f8c7baf602404d166f.
+  DEPS blob b1f99e77cb3661760f655d8fb9346351b354bdba, 8442 bytes,
+  SHA256 c254ca413381a28243b3808e10dc8842ff0bc09629e1663ee7e09ef79dd4514a.
+Chromium commit dd78960ccd8a03a2fe1f629543d27783885b78e9, root tree
+  63b2edfe4c6ae23d2fd3424cde3e529db49f7068.
+  DEPS blob 3a60b026a4e39b2eff1ed9ab860107e9e9f57b83, 194497 bytes,
+  SHA256 c3cd8ae90218c260d5fadbe5d9095164693fe420812218a18dfcf65c3f1743b9.
+Root independently acquired and hashed the reachable Chromium tree packet; its
+DEPS tree membership is now established. This is not a full blob checkout.
+Our independent parser readback matches all 270 gitlinks in root-independent-
+gitlinks.json. No recursive dependency commit trees or payloads follow merely
+from the presence of gitlinks in the parent tree.
+
+Input artifacts under /workspace/metaengine-next-evidence/upstream:
+  electron-DEPS, chromium-DEPS.
+Additional review artifacts under /workspace/metaengine-deps-evidence:
+  source-configuration-evidence.json: independently verified Git blob/SHA256
+    identities for ten pinned Electron configuration files.
+  static-input-inventory.json: AST grammar, assignments, conditions and names.
+  dependency-shape-inventory.json: all raw dependency/package/object shapes.
+
+2. Bootstrap interpreter identity is missing, not supplied by a fetched dep
+
+Pinned Chromium DEPS:2174-2175 declares src/third_party/depot_tools at
+38c391feba5fb96812f9028da12413ffc39df394. This is a dependency to fetch. It does
+not identify the bootstrap gclient interpreter that parsed/synced the solution.
+
+Pinned Electron .github/actions/install-build-tools/action.yml:18 fixes
+BUILD_TOOLS_SHA=3bf7c9f543348c03b7a0f2e265dd352d0f61c1ab; lines22-27 install build
+tools, run update_depot_tools, then disable auto-update. No depot_tools HEAD is
+captured. Build-tools identity and gclient/depot_tools identity are distinct.
+.github/workflows/pipeline-segment-electron-test.yml:202-218 also clones the
+default depot_tools remote and disables updates without a commit argument.
+
+No actual provisioned .gclient/--spec, custom_vars/custom_deps, sync invocation,
+gclient Python/interpreter identities, CIPD client identity or post-update
+depot_tools commit is supplied. Current/head evaluator documentation may explain
+an algorithm, but cannot prove the actual invocation's immutable semantics.
+
+3. Windows target is not proof of native Windows sync host
+
+Pinned .github/workflows/build.yml:226-242 runs the Windows checkout job on a
+Linux runner/container, sets --custom-var=checkout_win=True and TARGET_OS=win.
+.github/actions/checkout/action.yml:102-112 creates an unmanaged src/electron
+solution, appends target_os, then syncs. The action uses environment toolchain
+switches and three-way patch application. Those are source declarations, not a
+record of a real sync performed for this task.
+
+.github/actions/fix-sync/action.yml:16-22 explicitly distinguishes host variables
+from CIPD ${platform}/${arch} expansion on the actual Linux sync host and says
+the Windows cache is synced with host_os=linux. Its follow-up fixups replace
+host-selected binaries. A native-Windows x64 analysis may be declared as a
+candidate, but it is not the pinned workflow's Windows cache composition.
+
+.github/workflows/pipeline-segment-electron-build.yml:214-220 later runs hooks
+with --spec custom_vars process_deps=False. Electron DEPS:62 defaults it True.
+Initial sync and later runhooks must have separately bound phase/spec records.
+The local source builder's target_cpu=x64 and native-win32/AMD64 host guards
+do not prove the gclient sync host, checkout CPU flags or CIPD platform.
+
+4. Variable/condition interpretation requires typed and phase-bound evidence
+
+The two pinned files use only top-level assignments, dictionaries, lists,
+literal scalar values, string addition, and literal-argument Var/Str calls.
+No executable DEPS evaluation is necessary for a raw inventory. Conditions are
+separate strings using Boolean operations/comparisons and variable references.
+String-valued condition defaults include recursive predicates; Str(...) denotes
+literal strings and must not be converted with Python's nonempty-string truth.
+Chromium DEPS:574 non_git_source is the string 'True', not a bool literal.
+DEPS:188 also requires the != comparison operator in a condition-valued var.
+
+Parent/child defaults disagree exactly on:
+  checkout_clang_tidy: Electron True, Chromium False (E:74; C:171).
+  checkout_openxr: Electron False, Chromium expression checkout_win or
+    checkout_android (E:66; C:186).
+  generate_location_tags: Electron False, Chromium True (E:59; C:241).
+Without a pinned actual interpreter/spec, inheritance/custom-variable priority
+must not be invented. The producer marks all three conflicts explicitly and
+does not claim operational selection qualification.
+
+Chromium DEPS:3026 and :3040 literally contain host_os == mac, where mac is an
+unquoted name absent from local defaults. The swift-format/swift-toolchain
+condition remains UNRESOLVED. Do not silently replace it with a quoted string
+or an implicit false value.
+
+Review finding sent to producer: ordinary-string comparison operands originally
+recurse as if Boolean conditions. checkout_configuration='default' used by
+checkout_press_benchmarks becomes CONDITION_VAR:default, giving seven misleading
+benchmark unknown reasons. If the exact interpreter semantics remain unbound,
+report STRING_VAR_SEMANTICS_UNKNOWN with the original variable/literal rather
+than claiming the literal is a missing variable/pin. This was a conservative
+misdescription, not a source execution or authority bypass. The producer has
+now made that correction; the seven benchmark rows retain UNRESOLVED with
+STRING_VAR_SEMANTICS_UNKNOWN:checkout_configuration instead of a false missing
+default name. The exact interpreter remains unbound.
+
+Producer follow-up also retains all semantic top-level declarations and typed
+variable defaults, substitutes template values only within already-parsed
+literal string constants, and maps the independently proved Chromium/Node tags
+to fixed commit identities. The Node tag was independently reconfirmed with a
+successful read-only official Git ls-remote: v24.22.0 annotated tag object
+f2bc3c738a0873ecb23e8a09e5c074e412c4c42f peels to
+f14cd3aa7bf9ca8df2cc5b8bb14beb0f335b1d93. See node-version-tag-official.log.
+
+5. Exact unfiltered shapes are not an enabled closure
+
+Electron: 8 Git deps, 15 total hooks (one pre-deps), recursedeps ['src'].
+Chromium: 444 deps = 270 Git + 144 CIPD + 30 GCS; 62 hooks; 9 recursedeps.
+Combined manifest must retain all 452 dependency records, 77 hooks and 10
+recursion edges, even when candidate conditions exclude some of them.
+
+Chromium has 150 CIPD package records. Four use version_file instead of version
+(DEPS:1271,1282,1293,1304, Android orderfiles). The version files are additional
+inputs; an instance or version must not be fabricated. Tags and git_revision:
+labels are not verified immutable CIPD payload membership. Even an immutable
+instance ID needs independently verified package bytes/extraction/membership.
+Platform templates require the actual pinned client's host/arch semantics.
+
+There are 85 GCS objects, all declaring SHA256, size and generation; 30 have
+their own object condition. Object selection combines the dependency condition
+AND the object condition. These declared pins are not payload readback or safe
+extraction proof. Preserve unresolved object conditions as well as parent ones.
+
+Chromium recursive DEPS edges are angle, dawn, instrumented_libs, openscreen,
+devtools-frontend, clank, optimization_guide/internal, ios_internal and
+webpagereplay. Applicable immutable recursive DEPS objects are not acquired or
+verified. Absence of an enabled recursive edge's contents prevents closure.
+
+Hook actions remain opaque, unexecuted data. Electron DEPS:154-159 includes an
+unconditional python -c command invoking yarn install --immutable. Other hooks
+apply patches, write mtime/siso/PGO data or download tools. No hook, installer,
+package manager, native Windows action or source-import side effect was run.
+Chromium gclient_gn_args_file/src/build/config/gclient_args.gni depends on the
+resolved phase-specific variable environment; it is generated compiler input,
+not qualified solely by the top-level DEPS file or local target_cpu argument.
+
+6. Safe feasible next interface
+
+Keep the current producer as a deterministic recomputable data-only inventory,
+with fixed DEPS byte identities, hash-verified tree packet, explicit candidate
+profile, UNRESOLVED values, source_closure_qualified=False, selection_qualified=
+False and authority_effect=False. It must not write a success receipt or unblock
+the source builder. Canonical derived bytes should reject edited rows or flags.
+
+A later composition producer needs immutable bootstrap depot_tools/gclient and
+Python/client objects, actual .gclient/spec bytes, phase/custom_vars/custom_deps,
+target_os/host_os/host_cpu/platform evidence and known evaluator behavior. It
+must then bind parent precedence, all recursive DEPS/patch overlays, all enabled
+Git/CIPD/GCS immutable contents and physical entries, and approved hook identity/
+inputs/outputs. No arbitrary evaluator callback, external path trust root,
+unknown hook execution or unchecked network downloader should be accepted.
+
+7. Independent verification results
+
+Command:
+  python3 /workspace/metaengine-deps-evidence/deps-independent-negatives.py
+Initial result: 14 tests passed; deps-independent-negatives-initial.log.
+The harness imports only the new local policy module. It never evaluates,
+executes or imports upstream DEPS/hook source. Checks cover source hashes,
+top-level counts/HOLD, unsafe top-level expressions, code in both condition
+branches, duplicate keys/assignments, unknown/cyclic conditions, typed Str,
+explicit parent conflicts/bare mac, GCS conjunction, version_file preservation,
+corrupt tree packet refusal, all270 independently recorded gitlinks, and edited
+manifest flags/dependency/hook rows.
+
+After those corrections, the expanded independent harness passed 17 tests in
+3.953 seconds (deps-independent-negatives.log). Added checks require truthful
+string-ambiguity reasons, preserve typed defaults/semantic fields/fixed aliases,
+and confirm that a quote/Boolean fragment in a template value remains literal
+data rather than changing condition syntax.
+
+Final verification snapshot: deps-independent-final-snapshot.json.
+  Source HEAD when reviewed: 337608c86e464433f7f5693289c8ce697d4b074d.
+  Policy SHA256:
+    aaef7aa1d1f0fc37927990f9047600203c434ba33a721e62e0c38036f50d6891.
+  Implementation unit-test file SHA256:
+    269ab546c531869f0f3f1ab34d13d036e4a3b7cf51c128881d5597bd8972a587.
+
+Implementation tests run independently:
+  python3 -m unittest discover -s apps/metaengine-browser/test \
+    -p test_custom_electron_deps_policy.py -v
+  Result: 17 tests passed; deps-policy-review-unit-final.log.
+  Prior pre-helper 16-test success is retained in deps-policy-review-unit.log.
+Expanded reviewer harness rerun on final snapshot:
+  python3 /workspace/metaengine-deps-evidence/deps-independent-negatives.py
+  Result: 17 tests passed; deps-independent-negatives-final.log.
+Actual fixed-source CLI was run with both pinned DEPS paths and the hash-verified
+tree packet, output review-derived-deps-inventory.json; exit 0 with disposition
+HOLD and selection_qualified=False; deps-policy-review-cli.log.
+  255584 canonical bytes, SHA256
+    d7c6e51ecb2d61c48997c94b28783ecec9723687a286a9c09db65cd99c4cf664.
+  452 dependency rows: candidate SELECTED185/EXCLUDED257/UNRESOLVED10.
+  77 hooks: candidate SELECTED22/EXCLUDED54/UNRESOLVED1; all unexecuted.
+  Ten recursion declarations retained; gitlink_count270.
+Canonical manifest bytes were independently recomputed/verified against the
+same pinned source bytes and full hashed tree packet. None of these successful
+inventory/test results qualifies the actual composition or unblocks the source
+builder's explicit dependency-closure HOLD.
+
+Late Git-input helper and wrapper review (final snapshot):
+  custom-electron-deps-policy.py:462-517 derive_from_git loads only its fixed
+  local sibling source-policy module. It runs repository_controls before object
+  access, hashes fixed commit objects, checks their exact root trees, requires
+  root DEPS mode100644 and exact blob membership, and rechecks both DEPS hashes.
+  It exports only hash-verified Chromium tree bytes into a private temporary
+  directory, then calls the same deterministic derive_manifest. The packet is
+  cleaned up and object readers close on every normal/error path. No source
+  checkout/index/ref write, source callback, caller JSON or DEPS execution is
+  introduced. Missing input is not fetched; existing no-lazy-fetch, replacement,
+  promisor/config-composition and raw-object hash guards are reused.
+
+  custom-electron-source-build.py:198-225 loads the fixed local DEPS module and
+  supplies only chromium/electron and chromium source repository paths. It
+  always calls fail after deriving inventory, even if all qualification bits
+  are True or blockers is empty. verify_source_identity calls this before the
+  interface/crypto/staging/GN/build steps. build_receipt and publish_distribution
+  still call it without source context, refusing with
+  custom_electron_gclient_deps_cipd_hook_closure_unavailable:source_inputs_unavailable
+  before any receipt/output write. The helper is a source-bound inventory,
+  not a closure producer or an admission path.
+
+  Wrapper SHA256:
+    86f2e897dc62d002983343038c143d088a21a7c85f65073634952fa2317e3f87.
+  Command:
+    PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
+      -s apps/metaengine-browser/test -p test_custom_electron_source_build.py -v
+  Result: 25 tests passed; deps-wrapper-review-unit-final.log.
+
+  Independent bounded helper probe:
+    PYTHONDONTWRITEBYTECODE=1 python3 \
+      /workspace/metaengine-deps-evidence/deps-helper-independent-probe.py
+  Result: all six checks passed; deps-helper-independent-probe.log.
+  Disposable tiny Git fixtures only; every actual helper Git subprocess was
+  observed and limited to config --list, rev-parse, for-each-ref and cat-file.
+  Hardened environment flags were asserted on each child. The entire fixture
+  file-byte/mode snapshot, including .git objects/config/index/refs, remained
+  unchanged after successful and failing helper calls. Missing fixed commit,
+  wrong DEPS blob membership and promisor config all refused; promisor refused
+  before cat-file. No-context wrapper refused before policy loading; forced
+  qualification bits and even an empty blocker list still refused.
+
+  No new actionable bypass or trust expansion was found in the late helper.
+  The existing explicit composition/physical-content/Windows HOLDs still apply.
+
+8. Remaining blocked capabilities and access status
+
+Actual enabled sync/build qualification: BLOCKED by missing immutable bootstrap
+gclient/spec/context and recursive/payload/hook-generated-input evidence above.
+No actual sync/build was attempted. Status is evidence HOLD, not permission
+pending and not an uncertain side effect.
+
+The only network request by this reviewer in this phase was the successful
+official GitHub Node tag query recorded above; it did not acquire source or
+execute a program from the remote. Earlier CONNECT403-denied Gitiles/API/headers
+hosts were not retried or bypassed. No
+installation, package/dependency install, native Windows/PC/DB/service change,
+new trust root, guard bypass, publication or PR-description edit was performed.
+Review deliverables were written under /workspace/metaengine-deps-evidence;
+this reviewer made no production source-code edits.

@@ -1,0 +1,53 @@
+{
+  "scope": "BOUNDED_FINAL_HOOK_SOURCE_REVIEW",
+  "checks": [
+    {
+      "name": "unresolved_clang_tidy_rejected_before_payload_comparison",
+      "passed": true,
+      "selection": "UNRESOLVED",
+      "error": "custom_electron_hook_inputs_gcs_source_selection_not_resolved"
+    },
+    {
+      "name": "missing_source_bytes_not_promoted",
+      "passed": true,
+      "disposition": "HOLD",
+      "missing_sources": 34,
+      "hook_selection": {
+        "SELECTED": 22,
+        "UNRESOLVED": 1
+      }
+    },
+    {
+      "name": "environment_checker_vs_inventory_scope",
+      "passed": true,
+      "inventory_records_override": true,
+      "inventory_disposition": "HOLD",
+      "explicit_checker_error": "custom_electron_hook_inputs_environment_override_forbidden:NODE_OPTIONS"
+    },
+    {
+      "name": "cli_successful_inventory_still_exit_1_hold",
+      "passed": true,
+      "exit_code": 1,
+      "disposition": "HOLD",
+      "scope": "PINNED_TOP_LEVEL_BASE_DECLARATIONS_ONLY",
+      "source_matches": 34,
+      "hook_selection": {
+        "SELECTED": 22,
+        "UNRESOLVED": 1
+      }
+    }
+  ],
+  "all_passed": true,
+  "source_sha256": {
+    "scripts/custom-electron-hook-inputs.py": "d5c5e20fbdc2195cddd6523d2f9da420646e51be82d6629aeaaaf8c8a3b5ad42",
+    "build/custom-electron-hook-inputs.json": "5c2c90da17fb1a1ad5f4a1d1ac7dde37a4bd4eca7008fae95257c43a08c56277",
+    "test/test_custom_electron_hook_inputs.py": "14cf7968ef75d4787fe7c888172a94665fb57f304948bfecf1bb2a3eed26a1a8",
+    "scripts/custom-electron-deps-policy.py": "aaef7aa1d1f0fc37927990f9047600203c434ba33a721e62e0c38036f50d6891",
+    "scripts/custom-electron-source-build.py": "86f2e897dc62d002983343038c143d088a21a7c85f65073634952fa2317e3f87",
+    "scripts/custom-electron-package-gate.cjs": "3cd915d31398574bd9004e5a37f3c0bc00cd717043afc3ce67d3904b09077d50"
+  },
+  "upstream_hooks_executed": false,
+  "upstream_code_imported": false,
+  "dependencies_installed": false,
+  "project_source_edited": false
+}

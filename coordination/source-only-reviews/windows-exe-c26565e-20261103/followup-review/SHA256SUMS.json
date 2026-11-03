@@ -1,0 +1,38 @@
+{
+  "FOLLOWUP_REVIEW.md": {
+    "sha256": "c65a5fa810c0b944b6e231e39d96598c8f4da94e335826dfcce067a141350104",
+    "bytes": 10500
+  },
+  "PE_REVIEW.txt": {
+    "sha256": "28766889015b7c9ccaaea4e5ebe44c134725d436e3fe7aba183a355f29721a1a",
+    "bytes": 11262
+  },
+  "RECEIPT_REVIEW.txt": {
+    "sha256": "96c2a2ef8821828fee991985608d84d3b9554fe409af4c8056923956c116fa25",
+    "bytes": 6427
+  },
+  "SYSTEM_ROOT_REVIEW.txt": {
+    "sha256": "019bc34ef53e2653bc344dda32840282a7943a3eaaac2a90f5c429ebe9054b30",
+    "bytes": 7189
+  },
+  "changed-files.txt": {
+    "sha256": "ace98411f75f9127ebe1c8a45af4e905d775a111e3e30e8f52166b4cd35ef314",
+    "bytes": 655
+  },
+  "followup-test-evidence.tar.gz": {
+    "sha256": "742caeced67f2a4c1ed12c2574dc0bbde8399bef16f0c65f21d92b997217d558",
+    "bytes": 56109
+  },
+  "metaengine-c26565e-reviewed-combined.patch": {
+    "sha256": "a191a50436c12cd3dd1f9e3c2bf37fa76c8abb2ef187fabcfdf0d892ef138183",
+    "bytes": 119671
+  },
+  "review-1436-followup.patch": {
+    "sha256": "c0d5f40d673da70e48b18694d460ce8de45bde578efee6df258ad68c29d26a3b",
+    "bytes": 81579
+  },
+  "verification.json": {
+    "sha256": "63dd621f7275cf228468ab6e80d46ab2d7d1d5b9ce83b54030087dc4af70c7c2",
+    "bytes": 1487
+  }
+}

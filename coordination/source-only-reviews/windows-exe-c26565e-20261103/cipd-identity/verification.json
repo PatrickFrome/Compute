@@ -1,0 +1,142 @@
+{
+  "actual_go_produced_package_fixture": "NOT RUN; installed go command is not a Golang toolchain",
+  "actual_payload_proofs": 0,
+  "actual_resolved_symbolic_requests": 0,
+  "archive_extracted": false,
+  "archive_tree": "2dbe253e97379532f6f4b52ef7edf26109a9266d",
+  "baseline_tree": "2d268fbb87d7974a53095cde68f98c1d1fe0c3f5",
+  "both_apply_checks_passed": true,
+  "both_paths_same_result_tree": true,
+  "combined_patch_sha256": "ca107ac791ad4b42c65ecbc0a942d37cda258eca17e171ea090768733f357a32",
+  "full_enabled_dependency_closure_qualified": false,
+  "guards_weakened": false,
+  "incremental_patch_sha256": "d3bd2bd9b18c127deafc3e6cb366bad176aed722876f865caedf624594063083",
+  "installation": "NOT RUN",
+  "new_trust_roots": false,
+  "parent_integration_commit": "e2e23dcb789dccedfe58ba59fb74b957307de596",
+  "payload_independent_probes": {
+    "failed": 0,
+    "passed": 99
+  },
+  "pc_database_services_changed": false,
+  "pr_description_update": "NOT ATTEMPTED; prior automatic-review refusal awaits user decision",
+  "production_receipt_emitted": false,
+  "request_independent_snapshot": {
+    "canonical_recomputation_passed": true,
+    "client_executed": false,
+    "disposition": "HOLD",
+    "implementation_tests_independently_passed": 20,
+    "independent_negatives_passed": 15,
+    "matches_primary_plan": true,
+    "name_guard_plan_unchanged": true,
+    "network_used_by_request_producer": false,
+    "parent_deps_policy_sha256": "aaef7aa1d1f0fc37927990f9047600203c434ba33a721e62e0c38036f50d6891",
+    "prior_pre_name_guard_policy_sha256": "d02676dcb112e0def1aa5fc2632862c9071f8ab08c078135fcea4e869ee4c0f1",
+    "request_plan_bytes": 142820,
+    "request_plan_sha256": "5292851814df791414a7c672155e8669eb223dcf305480dfb2489358f697090e",
+    "reviewed_policy_sha256": "f65ea01e38c762a4ae1e6bfd77df09000f2faf0d448e79d23f092f02ca0197c9",
+    "reviewed_tests_sha256": "73f08f152585677e3631cd8fd112a42ae9d4ea7b2b4da89b8e669e0afacb2b5a",
+    "schema": "metaengine.cipd-independent-review-snapshot.v1",
+    "selection_qualified": false,
+    "service_retry": false,
+    "source_closure_qualified": false,
+    "source_head": "337608c86e464433f7f5693289c8ce697d4b074d",
+    "summary": {
+      "dependency_selection": {
+        "EXCLUDED": 111,
+        "SELECTED": 31,
+        "UNRESOLVED": 2
+      },
+      "package_selection": {
+        "EXCLUDED": 115,
+        "SELECTED": 33,
+        "UNRESOLVED": 2
+      },
+      "resolution_request_count": 22,
+      "selected_reference_kinds": {
+        "SHA256_INSTANCE": 11,
+        "SYMBOLIC_SELECTOR": 22
+      },
+      "unique_resolution_request_count": 21,
+      "version_file_count": 4
+    },
+    "windows_build_qualified": false
+  },
+  "request_plan_bytes": 142820,
+  "request_plan_sha256": "5292851814df791414a7c672155e8669eb223dcf305480dfb2489358f697090e",
+  "request_summary": {
+    "dependency_selection": {
+      "EXCLUDED": 111,
+      "SELECTED": 31,
+      "UNRESOLVED": 2
+    },
+    "package_selection": {
+      "EXCLUDED": 115,
+      "SELECTED": 33,
+      "UNRESOLVED": 2
+    },
+    "resolution_request_count": 22,
+    "selected_reference_kinds": {
+      "SHA256_INSTANCE": 11,
+      "SYMBOLIC_SELECTOR": 22
+    },
+    "unique_resolution_request_count": 21,
+    "version_file_count": 4
+  },
+  "result_tree": "4a6b3e1fae7520454f0952d7f56f6d8430e11e72",
+  "retained_guard_sha256": {
+    "apps/metaengine-browser/scripts/custom-electron-after-pack.cjs": "a578d342219682a90c52e6ebd8202a40d29f68d2374dfda7be3966db4601753c",
+    "apps/metaengine-browser/scripts/custom-electron-package-gate.cjs": "3cd915d31398574bd9004e5a37f3c0bc00cd717043afc3ce67d3904b09077d50",
+    "apps/metaengine-browser/scripts/custom-electron-source-build.py": "86f2e897dc62d002983343038c143d088a21a7c85f65073634952fa2317e3f87",
+    "apps/metaengine-browser/scripts/electron-builder-after-all-artifact-build.cjs": "22049004e169f153b57400534094d8212acfeda68f64e7cae35f285539e2702a",
+    "apps/metaengine-browser/scripts/electron-builder-before-pack.cjs": "0a593cd08fd84b360d728be2323d98378d644b5472845a7a84c37f94fd9aa6fb",
+    "infra/client-state-runtime/local-vault-key.mjs": "3e68209aa86e049a35c1c4b1219c1f8e619996b68f2a012b76b4e31d48dd392d",
+    "infra/client-state-runtime/owned-postgres-process.mjs": "856bae3a66af7446a5ff54c1c49599be5c903aec4d7c093b88de41edb7879f49"
+  },
+  "schema": "metaengine.cipd-source-identity.v1",
+  "service_acquisition": {
+    "action": "CIPD ResolveVersion POST",
+    "attempt": 1,
+    "error": "<urlopen error Tunnel connection failed: 403 Forbidden>",
+    "error_type": "URLError",
+    "outcome": "FAILED",
+    "request": {
+      "package": "gn/gn/windows-amd64",
+      "version": "git_revision:641ace93dd9560e75e7add0d08f77b446fbb3b78"
+    },
+    "retry_performed": false,
+    "time_utc": "2026-11-03T09:43:58.004738+00:00",
+    "url": "https://chrome-infra-packages.appspot.com/prpc/cipd.Repository/ResolveVersion"
+  },
+  "source_changed_sha256": {
+    "apps/metaengine-browser/scripts/custom-electron-cipd-payload.py": "76d799db2f641016fd1563dcca10c01692c84b1aa758ca2ca469f94d866475a8",
+    "apps/metaengine-browser/scripts/custom-electron-cipd-policy.py": "f65ea01e38c762a4ae1e6bfd77df09000f2faf0d448e79d23f092f02ca0197c9",
+    "apps/metaengine-browser/test/test_custom_electron_cipd_payload.py": "20032d8122527fdca150a3749d83f1ac216c47aa9797116ac2d1582cbbf74905",
+    "apps/metaengine-browser/test/test_custom_electron_cipd_policy.py": "73f08f152585677e3631cd8fd112a42ae9d4ea7b2b4da89b8e669e0afacb2b5a",
+    "docs/custom-electron-cipd-identity-v1.md": "1803c68f364c42954cdfa32ea8bc94e1ad1709f1e3cdb776c16fccfa4aedbba0",
+    "docs/custom-electron-deps-composition-v1.md": "57b82defb7572a9afc8a35b36e7585be15a6b6febe03fbfd4ae41087cf5f3d39"
+  },
+  "source_hook_or_downloaded_code_executed": false,
+  "tests": {
+    "browser_source_checks_pass": 292,
+    "clean_apply_combined_source_tests_pass": 50,
+    "existing_builder_guard_regressions_pass": 25,
+    "existing_deps_regressions_pass": 17,
+    "independent_descriptor_format_models_pass": 8,
+    "independent_payload_probes_pass": 99,
+    "independent_request_pass": 15,
+    "payload_portable": {
+      "pass": 29,
+      "skip": 1
+    },
+    "payload_with_fixed_raw_source_pass": 30,
+    "request_portable": {
+      "pass": 19,
+      "skip": 1
+    },
+    "request_with_fixed_raw_source_pass": 20,
+    "root_actual_selected_requests_reject_synthetic_archive": 33
+  },
+  "windows_build": "NOT RUN",
+  "zip_profile": "CIPD_1_1_ASCII_WINDOWS_REGULAR_ZIP32"
+}

@@ -1,0 +1,2839 @@
+diff --git a/apps/metaengine-browser/build/custom-electron-transform-inputs.json b/apps/metaengine-browser/build/custom-electron-transform-inputs.json
+new file mode 100644
+index 0000000..bdaaa77
+--- /dev/null
++++ b/apps/metaengine-browser/build/custom-electron-transform-inputs.json
+@@ -0,0 +1,1113 @@
++{
++  "schema": "metaengine.custom-electron.transform-input-catalog.v1",
++  "purpose": "Pinned build-only data ingredients for a future expected-image producer; no transform admission or runtime authority.",
++  "entry_module": "resedit/dist/index.js",
++  "packages": {
++    "resedit": {
++      "version": "1.7.2",
++      "lock_path": "node_modules/resedit",
++      "resolved": "https://registry.npmjs.org/resedit/-/resedit-1.7.2.tgz",
++      "archive_sha256": "db582bc4b1d049b813164651f2edddbac5f794ac93094f4c6808aecb8b6cb1cd",
++      "lock_integrity": "sha512-vHjcY2MlAITJhC0eRD/Vv8Vlgmu9Sd3LX9zZvtGzU5ZImdTN3+d6e/4mnTyV8vEbyf1sgNIrWxhWlrys52OkEA==",
++      "cjs_entry": "dist/index.js",
++      "package_json_sha256": "c9485f524ca28cc76490ada37c6199bc8933dd9ed573832dd1f2f2165b49ee87",
++      "package_json_bytes": 2699
++    },
++    "pe-library": {
++      "version": "0.4.1",
++      "lock_path": "node_modules/pe-library",
++      "resolved": "https://registry.npmjs.org/pe-library/-/pe-library-0.4.1.tgz",
++      "archive_sha256": "f58fee834833ae5d6e701d9f2fb21532610ede94c8fbca9525cfa87745bc3d7b",
++      "lock_integrity": "sha512-eRWB5LBz7PpDu4PUlwT0PhnQfTQJlDDdPa35urV4Osrm0t0AqQFGn+UIkU3klZvwJ8KPO3VbBFsXquA6p6kqZw==",
++      "cjs_entry": "dist/index.js",
++      "package_json_sha256": "0b283076c841523612eefc4b2927173da7a3772f0f924198d912ec0efe1afc2b",
++      "package_json_bytes": 2332
++    }
++  },
++  "modules": [
++    {
++      "package": "pe-library",
++      "path": "dist/NtExecutable.js",
++      "bytes": 18658,
++      "sha256": "31c0779b59cd0b338785ba13778695adf5f57cb774f6ea14403bdcdbc0c8570a",
++      "literal_require_edges": [
++        {
++          "specifier": "./format/ImageDataDirectoryArray.js",
++          "package": "pe-library",
++          "path": "dist/format/ImageDataDirectoryArray.js"
++        },
++        {
++          "specifier": "./format/ImageDirectoryEntry.js",
++          "package": "pe-library",
++          "path": "dist/format/ImageDirectoryEntry.js"
++        },
++        {
++          "specifier": "./format/ImageDosHeader.js",
++          "package": "pe-library",
++          "path": "dist/format/ImageDosHeader.js"
++        },
++        {
++          "specifier": "./format/ImageNtHeaders.js",
++          "package": "pe-library",
++          "path": "dist/format/ImageNtHeaders.js"
++        },
++        {
++          "specifier": "./format/ImageSectionHeaderArray.js",
++          "package": "pe-library",
++          "path": "dist/format/ImageSectionHeaderArray.js"
++        },
++        {
++          "specifier": "./util/functions.js",
++          "package": "pe-library",
++          "path": "dist/util/functions.js"
++        },
++        {
++          "specifier": "./util/generate.js",
++          "package": "pe-library",
++          "path": "dist/util/generate.js"
++        }
++      ]
++    },
++    {
++      "package": "pe-library",
++      "path": "dist/NtExecutableResource.js",
++      "bytes": 25638,
++      "sha256": "7d73e6436e72dd67e44bc4ff77764f99cdd569e6e10f754d61de78d69fd913be",
++      "literal_require_edges": [
++        {
++          "specifier": "./format/ImageDirectoryEntry.js",
++          "package": "pe-library",
++          "path": "dist/format/ImageDirectoryEntry.js"
++        },
++        {
++          "specifier": "./util/functions.js",
++          "package": "pe-library",
++          "path": "dist/util/functions.js"
++        }
++      ]
++    },
++    {
++      "package": "pe-library",
++      "path": "dist/format/ArrayFormatBase.js",
++      "bytes": 2513,
++      "sha256": "c30642d037810a3640053aab08b9c3197f1ccb151825ce1abadbef52c3ab1dc8",
++      "literal_require_edges": [
++        {
++          "specifier": "./FormatBase.js",
++          "package": "pe-library",
++          "path": "dist/format/FormatBase.js"
++        }
++      ]
++    },
++    {
++      "package": "pe-library",
++      "path": "dist/format/FormatBase.js",
++      "bytes": 677,
++      "sha256": "4902a09663e1628488204b07f0f816db3cbad4c3bb1531116f4dcfa26b7a4768",
++      "literal_require_edges": []
++    },
++    {
++      "package": "pe-library",
++      "path": "dist/format/ImageDataDirectoryArray.js",
++      "bytes": 2551,
++      "sha256": "4326aaa658ec6902805cf3997e7389568b12503d45be8f130cff740e7f0ff5ab",
++      "literal_require_edges": [
++        {
++          "specifier": "./ArrayFormatBase.js",
++          "package": "pe-library",
++          "path": "dist/format/ArrayFormatBase.js"
++        }
++      ]
++    },
++    {
++      "package": "pe-library",
++      "path": "dist/format/ImageDirectoryEntry.js",
++      "bytes": 1721,
++      "sha256": "b4777c8ac25e12684b576227dfcfd0a6291711a764b8eff19e4b0421b85ab880",
++      "literal_require_edges": []
++    },
++    {
++      "package": "pe-library",
++      "path": "dist/format/ImageDosHeader.js",
++      "bytes": 7147,
++      "sha256": "2d3cc6bac921a64e791eb8da2141e061275c63f52d55c5f29be25cc3d268f101",
++      "literal_require_edges": [
++        {
++          "specifier": "./FormatBase.js",
++          "package": "pe-library",
++          "path": "dist/format/FormatBase.js"
++        },
++        {
++          "specifier": "../util/functions.js",
++          "package": "pe-library",
++          "path": "dist/util/functions.js"
++        }
++      ]
++    },
++    {
++      "package": "pe-library",
++      "path": "dist/format/ImageFileHeader.js",
++      "bytes": 3659,
++      "sha256": "9f236e2441b5a9f6be354c2816b853a657ba60584067f76b400dd4faa1d991cb",
++      "literal_require_edges": [
++        {
++          "specifier": "./FormatBase.js",
++          "package": "pe-library",
++          "path": "dist/format/FormatBase.js"
++        }
++      ]
++    },
++    {
++      "package": "pe-library",
++      "path": "dist/format/ImageNtHeaders.js",
++      "bytes": 4751,
++      "sha256": "d368915a0f754798d78d26b3206894026dbb10c597eaf73a0e790d50d92fb6c1",
++      "literal_require_edges": [
++        {
++          "specifier": "./FormatBase.js",
++          "package": "pe-library",
++          "path": "dist/format/FormatBase.js"
++        },
++        {
++          "specifier": "./ImageFileHeader.js",
++          "package": "pe-library",
++          "path": "dist/format/ImageFileHeader.js"
++        },
++        {
++          "specifier": "./ImageOptionalHeader.js",
++          "package": "pe-library",
++          "path": "dist/format/ImageOptionalHeader.js"
++        },
++        {
++          "specifier": "./ImageOptionalHeader64.js",
++          "package": "pe-library",
++          "path": "dist/format/ImageOptionalHeader64.js"
++        },
++        {
++          "specifier": "./ImageDataDirectoryArray.js",
++          "package": "pe-library",
++          "path": "dist/format/ImageDataDirectoryArray.js"
++        },
++        {
++          "specifier": "../util/functions.js",
++          "package": "pe-library",
++          "path": "dist/util/functions.js"
++        }
++      ]
++    },
++    {
++      "package": "pe-library",
++      "path": "dist/format/ImageOptionalHeader.js",
++      "bytes": 11283,
++      "sha256": "6ed5ba3918553adc2262656ad6b1157c322d3a8983dac81652eedbf1717b39b9",
++      "literal_require_edges": [
++        {
++          "specifier": "./FormatBase.js",
++          "package": "pe-library",
++          "path": "dist/format/FormatBase.js"
++        }
++      ]
++    },
++    {
++      "package": "pe-library",
++      "path": "dist/format/ImageOptionalHeader64.js",
++      "bytes": 13693,
++      "sha256": "1f47881a86ade453271f7d75007040ce0bbd9e969e092164cac9393739d2f006",
++      "literal_require_edges": [
++        {
++          "specifier": "./FormatBase.js",
++          "package": "pe-library",
++          "path": "dist/format/FormatBase.js"
++        }
++      ]
++    },
++    {
++      "package": "pe-library",
++      "path": "dist/format/ImageSectionHeaderArray.js",
++      "bytes": 3358,
++      "sha256": "e718ee51aa979cd936bc576c0346fbd96adfc7271dee17f9065718267773aeec",
++      "literal_require_edges": [
++        {
++          "specifier": "./ArrayFormatBase.js",
++          "package": "pe-library",
++          "path": "dist/format/ArrayFormatBase.js"
++        },
++        {
++          "specifier": "../util/functions.js",
++          "package": "pe-library",
++          "path": "dist/util/functions.js"
++        }
++      ]
++    },
++    {
++      "package": "pe-library",
++      "path": "dist/format/index.js",
++      "bytes": 3371,
++      "sha256": "b144257c2b6307cd6e99d775f161ef556cc6b7c4ba557224d397b06a2469d0a7",
++      "literal_require_edges": [
++        {
++          "specifier": "./ArrayFormatBase.js",
++          "package": "pe-library",
++          "path": "dist/format/ArrayFormatBase.js"
++        },
++        {
++          "specifier": "./FormatBase.js",
++          "package": "pe-library",
++          "path": "dist/format/FormatBase.js"
++        },
++        {
++          "specifier": "./ImageDataDirectoryArray.js",
++          "package": "pe-library",
++          "path": "dist/format/ImageDataDirectoryArray.js"
++        },
++        {
++          "specifier": "./ImageDirectoryEntry.js",
++          "package": "pe-library",
++          "path": "dist/format/ImageDirectoryEntry.js"
++        },
++        {
++          "specifier": "./ImageDosHeader.js",
++          "package": "pe-library",
++          "path": "dist/format/ImageDosHeader.js"
++        },
++        {
++          "specifier": "./ImageFileHeader.js",
++          "package": "pe-library",
++          "path": "dist/format/ImageFileHeader.js"
++        },
++        {
++          "specifier": "./ImageNtHeaders.js",
++          "package": "pe-library",
++          "path": "dist/format/ImageNtHeaders.js"
++        },
++        {
++          "specifier": "./ImageOptionalHeader.js",
++          "package": "pe-library",
++          "path": "dist/format/ImageOptionalHeader.js"
++        },
++        {
++          "specifier": "./ImageOptionalHeader64.js",
++          "package": "pe-library",
++          "path": "dist/format/ImageOptionalHeader64.js"
++        },
++        {
++          "specifier": "./ImageSectionHeaderArray.js",
++          "package": "pe-library",
++          "path": "dist/format/ImageSectionHeaderArray.js"
++        }
++      ]
++    },
++    {
++      "package": "pe-library",
++      "path": "dist/index.js",
++      "bytes": 890,
++      "sha256": "cc96d20480ee04dcbf59220979796609e438fa921e93966459401654d86a3677",
++      "literal_require_edges": [
++        {
++          "specifier": "./NtExecutable.js",
++          "package": "pe-library",
++          "path": "dist/NtExecutable.js"
++        },
++        {
++          "specifier": "./NtExecutableResource.js",
++          "package": "pe-library",
++          "path": "dist/NtExecutableResource.js"
++        },
++        {
++          "specifier": "./util/functions.js",
++          "package": "pe-library",
++          "path": "dist/util/functions.js"
++        },
++        {
++          "specifier": "./version.js",
++          "package": "pe-library",
++          "path": "dist/version.js"
++        },
++        {
++          "specifier": "./format/index.js",
++          "package": "pe-library",
++          "path": "dist/format/index.js"
++        },
++        {
++          "specifier": "./type/index.js",
++          "package": "pe-library",
++          "path": "dist/type/index.js"
++        }
++      ]
++    },
++    {
++      "package": "pe-library",
++      "path": "dist/type/index.js",
++      "bytes": 79,
++      "sha256": "ef1f170ad28f2d870a474d2f96ae353d770fff5f20e642cd8f9b6f1d7742df13",
++      "literal_require_edges": []
++    },
++    {
++      "package": "pe-library",
++      "path": "dist/util/functions.js",
++      "bytes": 9143,
++      "sha256": "c98747b35b9c4540391c08050768f43a2b35a05ad246727fde6825b245f1f7bb",
++      "literal_require_edges": [
++        {
++          "specifier": "../format/ImageDosHeader.js",
++          "package": "pe-library",
++          "path": "dist/format/ImageDosHeader.js"
++        }
++      ]
++    },
++    {
++      "package": "pe-library",
++      "path": "dist/util/generate.js",
++      "bytes": 6060,
++      "sha256": "df821e1cf955da31f67fdf167de5d778fe5a6f37b2168e4d73d74f6516b263f9",
++      "literal_require_edges": [
++        {
++          "specifier": "../format/ImageDataDirectoryArray.js",
++          "package": "pe-library",
++          "path": "dist/format/ImageDataDirectoryArray.js"
++        },
++        {
++          "specifier": "../format/ImageDosHeader.js",
++          "package": "pe-library",
++          "path": "dist/format/ImageDosHeader.js"
++        },
++        {
++          "specifier": "../format/ImageFileHeader.js",
++          "package": "pe-library",
++          "path": "dist/format/ImageFileHeader.js"
++        },
++        {
++          "specifier": "../format/ImageNtHeaders.js",
++          "package": "pe-library",
++          "path": "dist/format/ImageNtHeaders.js"
++        },
++        {
++          "specifier": "../format/ImageOptionalHeader.js",
++          "package": "pe-library",
++          "path": "dist/format/ImageOptionalHeader.js"
++        },
++        {
++          "specifier": "../format/ImageOptionalHeader64.js",
++          "package": "pe-library",
++          "path": "dist/format/ImageOptionalHeader64.js"
++        },
++        {
++          "specifier": "./functions.js",
++          "package": "pe-library",
++          "path": "dist/util/functions.js"
++        }
++      ]
++    },
++    {
++      "package": "pe-library",
++      "path": "dist/version.js",
++      "bytes": 107,
++      "sha256": "438073a43826171964b0826bfdd146abdf6ccaa773961567ac71084d6dd70f1b",
++      "literal_require_edges": []
++    },
++    {
++      "package": "resedit",
++      "path": "dist/data/IconFile.js",
++      "bytes": 5525,
++      "sha256": "630a8abca7f84a7b34a028a4011eb56d983d019d1b2b4aafb1de961d4578c768",
++      "literal_require_edges": [
++        {
++          "specifier": "./IconItem.js",
++          "package": "resedit",
++          "path": "dist/data/IconItem.js"
++        },
++        {
++          "specifier": "./RawIconItem.js",
++          "package": "resedit",
++          "path": "dist/data/RawIconItem.js"
++        },
++        {
++          "specifier": "../util/functions.js",
++          "package": "resedit",
++          "path": "dist/util/functions.js"
++        }
++      ]
++    },
++    {
++      "package": "resedit",
++      "path": "dist/data/IconItem.js",
++      "bytes": 6951,
++      "sha256": "c5195e6e4079ff5543a51e172bfd66e20c82d11331af2d3310fcba915749fa5d",
++      "literal_require_edges": [
++        {
++          "specifier": "../util/functions.js",
++          "package": "resedit",
++          "path": "dist/util/functions.js"
++        }
++      ]
++    },
++    {
++      "package": "resedit",
++      "path": "dist/data/RawIconItem.js",
++      "bytes": 1179,
++      "sha256": "85053988be4813bf8599304bf479a5031c0e1abba9e92187ce6081765f885767",
++      "literal_require_edges": [
++        {
++          "specifier": "../util/functions.js",
++          "package": "resedit",
++          "path": "dist/util/functions.js"
++        }
++      ]
++    },
++    {
++      "package": "resedit",
++      "path": "dist/data/index.js",
++      "bytes": 430,
++      "sha256": "12f5a556d5161b2d4effcf2bb66c82d9ac4c837f553275f447445ed1a0c8c8bb",
++      "literal_require_edges": [
++        {
++          "specifier": "./IconFile.js",
++          "package": "resedit",
++          "path": "dist/data/IconFile.js"
++        },
++        {
++          "specifier": "./IconItem.js",
++          "package": "resedit",
++          "path": "dist/data/IconItem.js"
++        },
++        {
++          "specifier": "./RawIconItem.js",
++          "package": "resedit",
++          "path": "dist/data/RawIconItem.js"
++        }
++      ]
++    },
++    {
++      "package": "resedit",
++      "path": "dist/index.js",
++      "bytes": 1101,
++      "sha256": "a92b2ac81a45feaf3abbed1ee38a87d737c0272e87281b4e0318c78268332c16",
++      "literal_require_edges": [
++        {
++          "specifier": "pe-library",
++          "package": "pe-library",
++          "path": "dist/index.js"
++        },
++        {
++          "specifier": "./version.js",
++          "package": "resedit",
++          "path": "dist/version.js"
++        },
++        {
++          "specifier": "./data/index.js",
++          "package": "resedit",
++          "path": "dist/data/index.js"
++        },
++        {
++          "specifier": "./resource/index.js",
++          "package": "resedit",
++          "path": "dist/resource/index.js"
++        },
++        {
++          "specifier": "./sign/index.js",
++          "package": "resedit",
++          "path": "dist/sign/index.js"
++        }
++      ]
++    },
++    {
++      "package": "resedit",
++      "path": "dist/resource/IconGroupEntry.js",
++      "bytes": 11192,
++      "sha256": "e66725ca1d73e2791ddeb853ba66322543cd98f1a0f26c574b1b9949828257d8",
++      "literal_require_edges": [
++        {
++          "specifier": "../data/IconItem.js",
++          "package": "resedit",
++          "path": "dist/data/IconItem.js"
++        },
++        {
++          "specifier": "../data/RawIconItem.js",
++          "package": "resedit",
++          "path": "dist/data/RawIconItem.js"
++        },
++        {
++          "specifier": "../util/functions.js",
++          "package": "resedit",
++          "path": "dist/util/functions.js"
++        }
++      ]
++    },
++    {
++      "package": "resedit",
++      "path": "dist/resource/StringTable.js",
++      "bytes": 4954,
++      "sha256": "b640d7993c7c061f0843110f3bbf360b769ecd2ecc330d9bc408ba8adc7ccd94",
++      "literal_require_edges": [
++        {
++          "specifier": "./StringTableItem.js",
++          "package": "resedit",
++          "path": "dist/resource/StringTableItem.js"
++        }
++      ]
++    },
++    {
++      "package": "resedit",
++      "path": "dist/resource/StringTableItem.js",
++      "bytes": 2586,
++      "sha256": "fac8040d5d1913061da31ab3adcb3a18de19546be357f6f853653c3b0d55e356",
++      "literal_require_edges": []
++    },
++    {
++      "package": "resedit",
++      "path": "dist/resource/VersionFileFlags.js",
++      "bytes": 787,
++      "sha256": "a14cd2c0160ec6536537e7f72f625ff914a5dbc6d9cd1d51c457a8fa0c4206a3",
++      "literal_require_edges": []
++    },
++    {
++      "package": "resedit",
++      "path": "dist/resource/VersionFileOS.js",
++      "bytes": 1210,
++      "sha256": "0e657c4ebb2159b5c057e684e09c83c98c092dfaa70a9b0e3019e8a9eb46d624",
++      "literal_require_edges": []
++    },
++    {
++      "package": "resedit",
++      "path": "dist/resource/VersionFileSubtypes.js",
++      "bytes": 1848,
++      "sha256": "83cb17c8b050c819d7cf451c6e1116cbf089ea44040d1d656b130e6c9c64e368",
++      "literal_require_edges": []
++    },
++    {
++      "package": "resedit",
++      "path": "dist/resource/VersionFileType.js",
++      "bytes": 727,
++      "sha256": "90a7c679b98c139115a4c37984ee1c1343059fb8cc96730cdfb9134761d530de",
++      "literal_require_edges": []
++    },
++    {
++      "package": "resedit",
++      "path": "dist/resource/VersionInfo.js",
++      "bytes": 30716,
++      "sha256": "81517e2d6479e124c34d2c4284d160f36cf70055ed9db6a1226313452d90e8a9",
++      "literal_require_edges": [
++        {
++          "specifier": "../util/functions.js",
++          "package": "resedit",
++          "path": "dist/util/functions.js"
++        }
++      ]
++    },
++    {
++      "package": "resedit",
++      "path": "dist/resource/index.js",
++      "bytes": 1361,
++      "sha256": "77dc860cb53a02b0467291b48482d690133f15c7c31de139842f760558ff36ab",
++      "literal_require_edges": [
++        {
++          "specifier": "./IconGroupEntry.js",
++          "package": "resedit",
++          "path": "dist/resource/IconGroupEntry.js"
++        },
++        {
++          "specifier": "./StringTable.js",
++          "package": "resedit",
++          "path": "dist/resource/StringTable.js"
++        },
++        {
++          "specifier": "./VersionFileFlags.js",
++          "package": "resedit",
++          "path": "dist/resource/VersionFileFlags.js"
++        },
++        {
++          "specifier": "./VersionFileOS.js",
++          "package": "resedit",
++          "path": "dist/resource/VersionFileOS.js"
++        },
++        {
++          "specifier": "./VersionFileSubtypes.js",
++          "package": "resedit",
++          "path": "dist/resource/VersionFileSubtypes.js"
++        },
++        {
++          "specifier": "./VersionFileType.js",
++          "package": "resedit",
++          "path": "dist/resource/VersionFileType.js"
++        },
++        {
++          "specifier": "./VersionInfo.js",
++          "package": "resedit",
++          "path": "dist/resource/VersionInfo.js"
++        }
++      ]
++    },
++    {
++      "package": "resedit",
++      "path": "dist/sign/certUtil.js",
++      "bytes": 10357,
++      "sha256": "b7726d40864f28b6b5ebb77ce8d1e6885d2103b502aecbeab1f82081292c2b6a",
++      "literal_require_edges": [
++        {
++          "specifier": "./data/DERObject.js",
++          "package": "resedit",
++          "path": "dist/sign/data/DERObject.js"
++        },
++        {
++          "specifier": "./data/KnownOids.js",
++          "package": "resedit",
++          "path": "dist/sign/data/KnownOids.js"
++        }
++      ]
++    },
++    {
++      "package": "resedit",
++      "path": "dist/sign/data/AlgorithmIdentifier.js",
++      "bytes": 576,
++      "sha256": "e9870a93ae1729b7ce237624be83cd4f8b4865739c6c82bf9da339eabebefe70",
++      "literal_require_edges": [
++        {
++          "specifier": "./derUtil.js",
++          "package": "resedit",
++          "path": "dist/sign/data/derUtil.js"
++        }
++      ]
++    },
++    {
++      "package": "resedit",
++      "path": "dist/sign/data/Attribute.js",
++      "bytes": 535,
++      "sha256": "6b5000d5e698cbb774047df56d47b618d0f52e1d3316fe51b0e3673d3d422b84",
++      "literal_require_edges": [
++        {
++          "specifier": "./derUtil.js",
++          "package": "resedit",
++          "path": "dist/sign/data/derUtil.js"
++        }
++      ]
++    },
++    {
++      "package": "resedit",
++      "path": "dist/sign/data/CertificateDataRoot.js",
++      "bytes": 1240,
++      "sha256": "a58f9c91bfa42f891c1c137c86970d0d77c60697d22c8244d614bd4f1e0c1cb9",
++      "literal_require_edges": [
++        {
++          "specifier": "./ContentInfo.js",
++          "package": "resedit",
++          "path": "dist/sign/data/ContentInfo.js"
++        }
++      ]
++    },
++    {
++      "package": "resedit",
++      "path": "dist/sign/data/ContentInfo.js",
++      "bytes": 601,
++      "sha256": "6417eec1e56f3e7243f9205875df877f7e7a08ba42c24dc89ca7c653bc0c80f9",
++      "literal_require_edges": [
++        {
++          "specifier": "./derUtil.js",
++          "package": "resedit",
++          "path": "dist/sign/data/derUtil.js"
++        }
++      ]
++    },
++    {
++      "package": "resedit",
++      "path": "dist/sign/data/DERObject.js",
++      "bytes": 400,
++      "sha256": "c50603f43a07b59bb182faf7231f8fd57c4ec49cd6e1a6a337a0492796ee8f10",
++      "literal_require_edges": []
++    },
++    {
++      "package": "resedit",
++      "path": "dist/sign/data/DigestInfo.js",
++      "bytes": 898,
++      "sha256": "aa9a0521c78f014ef47cf68cc5e725be7844c83c1fe3a80f2d8702c05c7e1ecd",
++      "literal_require_edges": [
++        {
++          "specifier": "./derUtil.js",
++          "package": "resedit",
++          "path": "dist/sign/data/derUtil.js"
++        }
++      ]
++    },
++    {
++      "package": "resedit",
++      "path": "dist/sign/data/IssuerAndSerialNumber.js",
++      "bytes": 575,
++      "sha256": "311b44df1315e9244efeb1b6c2d9fcfba025e48d8978e69f9099c95a31cc8442",
++      "literal_require_edges": [
++        {
++          "specifier": "./derUtil.js",
++          "package": "resedit",
++          "path": "dist/sign/data/derUtil.js"
++        }
++      ]
++    },
++    {
++      "package": "resedit",
++      "path": "dist/sign/data/KnownOids.js",
++      "bytes": 4033,
++      "sha256": "9da526fb885356582d831da875ee2d0c21b1fb9f38765b80fa5224f2b6553ba9",
++      "literal_require_edges": [
++        {
++          "specifier": "./ObjectIdentifier.js",
++          "package": "resedit",
++          "path": "dist/sign/data/ObjectIdentifier.js"
++        }
++      ]
++    },
++    {
++      "package": "resedit",
++      "path": "dist/sign/data/ObjectIdentifier.js",
++      "bytes": 1462,
++      "sha256": "d36e3c2ebbae1e009994f17edcb5375aee164877d0465a00f500f59aef8d7907",
++      "literal_require_edges": [
++        {
++          "specifier": "./derUtil.js",
++          "package": "resedit",
++          "path": "dist/sign/data/derUtil.js"
++        }
++      ]
++    },
++    {
++      "package": "resedit",
++      "path": "dist/sign/data/SignedData.js",
++      "bytes": 1319,
++      "sha256": "f0ee4e87e2d1404f11572c58b18cce4c7b4e080d97710a3990412c7054791f33",
++      "literal_require_edges": [
++        {
++          "specifier": "./derUtil.js",
++          "package": "resedit",
++          "path": "dist/sign/data/derUtil.js"
++        }
++      ]
++    },
++    {
++      "package": "resedit",
++      "path": "dist/sign/data/SignerInfo.js",
++      "bytes": 1783,
++      "sha256": "5b7ef4d9287f19f245137404d5c39e1cd219a901d16a6b555a40a7d26c882f42",
++      "literal_require_edges": [
++        {
++          "specifier": "./derUtil.js",
++          "package": "resedit",
++          "path": "dist/sign/data/derUtil.js"
++        }
++      ]
++    },
++    {
++      "package": "resedit",
++      "path": "dist/sign/data/SpcIndirectDataContent.js",
++      "bytes": 2791,
++      "sha256": "f8bfbb983b514475bc7b2632408f788dc50427ee5419daec975cddccd204f5b7",
++      "literal_require_edges": [
++        {
++          "specifier": "./ContentInfo.js",
++          "package": "resedit",
++          "path": "dist/sign/data/ContentInfo.js"
++        },
++        {
++          "specifier": "./ObjectIdentifier.js",
++          "package": "resedit",
++          "path": "dist/sign/data/ObjectIdentifier.js"
++        },
++        {
++          "specifier": "./derUtil.js",
++          "package": "resedit",
++          "path": "dist/sign/data/derUtil.js"
++        }
++      ]
++    },
++    {
++      "package": "resedit",
++      "path": "dist/sign/data/SpcLink.js",
++      "bytes": 2444,
++      "sha256": "62fac1569d58ab853a8db68e6ff00d30b0b0e1670f761787f3020f0cd23baa44",
++      "literal_require_edges": [
++        {
++          "specifier": "./DERObject.js",
++          "package": "resedit",
++          "path": "dist/sign/data/DERObject.js"
++        },
++        {
++          "specifier": "./derUtil.js",
++          "package": "resedit",
++          "path": "dist/sign/data/derUtil.js"
++        }
++      ]
++    },
++    {
++      "package": "resedit",
++      "path": "dist/sign/data/SpcPeImageData.js",
++      "bytes": 2259,
++      "sha256": "70fc40bf1696820bde6dbc8b530e04dc4adac229e4b0a697f7c523f9de1bda62",
++      "literal_require_edges": [
++        {
++          "specifier": "./ObjectIdentifier.js",
++          "package": "resedit",
++          "path": "dist/sign/data/ObjectIdentifier.js"
++        },
++        {
++          "specifier": "./SpcIndirectDataContent.js",
++          "package": "resedit",
++          "path": "dist/sign/data/SpcIndirectDataContent.js"
++        },
++        {
++          "specifier": "./derUtil.js",
++          "package": "resedit",
++          "path": "dist/sign/data/derUtil.js"
++        }
++      ]
++    },
++    {
++      "package": "resedit",
++      "path": "dist/sign/data/derUtil.js",
++      "bytes": 2543,
++      "sha256": "b30e79ac3b83a1f9eaa66e3402deafee62e0a56e1441902c5e5c977d12501257",
++      "literal_require_edges": []
++    },
++    {
++      "package": "resedit",
++      "path": "dist/sign/index.js",
++      "bytes": 20178,
++      "sha256": "e0f7e3d2f94d2dee577af5678091fd5693833c715c88cd53aa7c29505fad1ab1",
++      "literal_require_edges": [
++        {
++          "specifier": "pe-library",
++          "package": "pe-library",
++          "path": "dist/index.js"
++        },
++        {
++          "specifier": "../util/functions.js",
++          "package": "resedit",
++          "path": "dist/util/functions.js"
++        },
++        {
++          "specifier": "./certUtil.js",
++          "package": "resedit",
++          "path": "dist/sign/certUtil.js"
++        },
++        {
++          "specifier": "./data/AlgorithmIdentifier.js",
++          "package": "resedit",
++          "path": "dist/sign/data/AlgorithmIdentifier.js"
++        },
++        {
++          "specifier": "./data/CertificateDataRoot.js",
++          "package": "resedit",
++          "path": "dist/sign/data/CertificateDataRoot.js"
++        },
++        {
++          "specifier": "./data/DERObject.js",
++          "package": "resedit",
++          "path": "dist/sign/data/DERObject.js"
++        },
++        {
++          "specifier": "./data/DigestInfo.js",
++          "package": "resedit",
++          "path": "dist/sign/data/DigestInfo.js"
++        },
++        {
++          "specifier": "./data/IssuerAndSerialNumber.js",
++          "package": "resedit",
++          "path": "dist/sign/data/IssuerAndSerialNumber.js"
++        },
++        {
++          "specifier": "./data/KnownOids.js",
++          "package": "resedit",
++          "path": "dist/sign/data/KnownOids.js"
++        },
++        {
++          "specifier": "./data/SignedData.js",
++          "package": "resedit",
++          "path": "dist/sign/data/SignedData.js"
++        },
++        {
++          "specifier": "./data/SignerInfo.js",
++          "package": "resedit",
++          "path": "dist/sign/data/SignerInfo.js"
++        },
++        {
++          "specifier": "./data/SpcIndirectDataContent.js",
++          "package": "resedit",
++          "path": "dist/sign/data/SpcIndirectDataContent.js"
++        },
++        {
++          "specifier": "./data/SpcPeImageData.js",
++          "package": "resedit",
++          "path": "dist/sign/data/SpcPeImageData.js"
++        },
++        {
++          "specifier": "./data/SpcLink.js",
++          "package": "resedit",
++          "path": "dist/sign/data/SpcLink.js"
++        },
++        {
++          "specifier": "./data/Attribute.js",
++          "package": "resedit",
++          "path": "dist/sign/data/Attribute.js"
++        },
++        {
++          "specifier": "./data/derUtil.js",
++          "package": "resedit",
++          "path": "dist/sign/data/derUtil.js"
++        },
++        {
++          "specifier": "./data/ContentInfo.js",
++          "package": "resedit",
++          "path": "dist/sign/data/ContentInfo.js"
++        },
++        {
++          "specifier": "./data/ObjectIdentifier.js",
++          "package": "resedit",
++          "path": "dist/sign/data/ObjectIdentifier.js"
++        },
++        {
++          "specifier": "./timestamp.js",
++          "package": "resedit",
++          "path": "dist/sign/timestamp.js"
++        }
++      ]
++    },
++    {
++      "package": "resedit",
++      "path": "dist/sign/timestamp.js",
++      "bytes": 5767,
++      "sha256": "7d1236333d00027cccca9b10b7dd20d743eabb9f8f6eaaa056695117b3fbe815",
++      "literal_require_edges": [
++        {
++          "specifier": "../util/functions.js",
++          "package": "resedit",
++          "path": "dist/util/functions.js"
++        },
++        {
++          "specifier": "./certUtil.js",
++          "package": "resedit",
++          "path": "dist/sign/certUtil.js"
++        },
++        {
++          "specifier": "./data/derUtil.js",
++          "package": "resedit",
++          "path": "dist/sign/data/derUtil.js"
++        },
++        {
++          "specifier": "./data/KnownOids.js",
++          "package": "resedit",
++          "path": "dist/sign/data/KnownOids.js"
++        }
++      ]
++    },
++    {
++      "package": "resedit",
++      "path": "dist/util/functions.js",
++      "bytes": 8732,
++      "sha256": "d149e217722dded20c8ab7082fcbd80189afe449ece60f258aee4d0805cb0558",
++      "literal_require_edges": []
++    },
++    {
++      "package": "resedit",
++      "path": "dist/version.js",
++      "bytes": 107,
++      "sha256": "8835a77b1596c7f3e9678edb1eaf43147896afbe7d34f5d652ac16ecb4c666fc",
++      "literal_require_edges": []
++    }
++  ],
++  "reference_sources": [
++    {
++      "package": "app-builder-lib",
++      "lock_path": "node_modules/app-builder-lib",
++      "version": "26.15.7",
++      "resolved": "https://registry.npmjs.org/app-builder-lib/-/app-builder-lib-26.15.7.tgz",
++      "lock_integrity": "sha512-C7APoYISPExUmrEntNhDpz9Tccb4uWuEDfLaC0WPPc7/pwzz0WZGznCz/ycPfkkzw6tKOalceD8g6TgHmVz1QA==",
++      "path": "out/asar/asar.js",
++      "bytes": 5600,
++      "sha256": "81e17e4cb42da15e01a6b5c32bd5ecce18c8e762ff277ec860bead32f379f0b3",
++      "purpose": "reference data only; never imported or executed by the ingredient collector"
++    },
++    {
++      "package": "app-builder-lib",
++      "lock_path": "node_modules/app-builder-lib",
++      "version": "26.15.7",
++      "resolved": "https://registry.npmjs.org/app-builder-lib/-/app-builder-lib-26.15.7.tgz",
++      "lock_integrity": "sha512-C7APoYISPExUmrEntNhDpz9Tccb4uWuEDfLaC0WPPc7/pwzz0WZGznCz/ycPfkkzw6tKOalceD8g6TgHmVz1QA==",
++      "path": "out/asar/integrity.js",
++      "bytes": 2773,
++      "sha256": "5502994127252352a5a65060caf82ca9a0ce7deb5dfc195faa7ecb296c761d42",
++      "purpose": "reference data only; never imported or executed by the ingredient collector"
++    },
++    {
++      "package": "app-builder-lib",
++      "lock_path": "node_modules/app-builder-lib",
++      "version": "26.15.7",
++      "resolved": "https://registry.npmjs.org/app-builder-lib/-/app-builder-lib-26.15.7.tgz",
++      "lock_integrity": "sha512-C7APoYISPExUmrEntNhDpz9Tccb4uWuEDfLaC0WPPc7/pwzz0WZGznCz/ycPfkkzw6tKOalceD8g6TgHmVz1QA==",
++      "path": "out/electron/electronWin.js",
++      "bytes": 1810,
++      "sha256": "0c651e389e8c593eeca2fc18142539d0c499773c40acf5d530f11a14fc2e31f3",
++      "purpose": "reference data only; never imported or executed by the ingredient collector"
++    },
++    {
++      "package": "app-builder-lib",
++      "lock_path": "node_modules/app-builder-lib",
++      "version": "26.15.7",
++      "resolved": "https://registry.npmjs.org/app-builder-lib/-/app-builder-lib-26.15.7.tgz",
++      "lock_integrity": "sha512-C7APoYISPExUmrEntNhDpz9Tccb4uWuEDfLaC0WPPc7/pwzz0WZGznCz/ycPfkkzw6tKOalceD8g6TgHmVz1QA==",
++      "path": "out/util/resEdit.js",
++      "bytes": 2846,
++      "sha256": "02ddb3dee119c3f8aaf6a427e7fea8b2765a61778e5db6f5e02df1cbb5b16cde",
++      "purpose": "reference data only; never imported or executed by the ingredient collector"
++    },
++    {
++      "package": "app-builder-lib",
++      "lock_path": "node_modules/app-builder-lib",
++      "version": "26.15.7",
++      "resolved": "https://registry.npmjs.org/app-builder-lib/-/app-builder-lib-26.15.7.tgz",
++      "lock_integrity": "sha512-C7APoYISPExUmrEntNhDpz9Tccb4uWuEDfLaC0WPPc7/pwzz0WZGznCz/ycPfkkzw6tKOalceD8g6TgHmVz1QA==",
++      "path": "out/platformPackager.js",
++      "bytes": 36232,
++      "sha256": "70cfafee4176a4931ee839159f2b6f9c3a15a20e32c520a7c43cbe17e57697bd",
++      "purpose": "reference data only; never imported or executed by the ingredient collector"
++    },
++    {
++      "package": "app-builder-lib",
++      "lock_path": "node_modules/app-builder-lib",
++      "version": "26.15.7",
++      "resolved": "https://registry.npmjs.org/app-builder-lib/-/app-builder-lib-26.15.7.tgz",
++      "lock_integrity": "sha512-C7APoYISPExUmrEntNhDpz9Tccb4uWuEDfLaC0WPPc7/pwzz0WZGznCz/ycPfkkzw6tKOalceD8g6TgHmVz1QA==",
++      "path": "out/winPackager.js",
++      "bytes": 13814,
++      "sha256": "ac4ae48193db71cc50be3eeb6017d4e35f934637eac0ae7ef4e0c62fbd9db552",
++      "purpose": "reference data only; never imported or executed by the ingredient collector"
++    },
++    {
++      "package": "@electron/fuses",
++      "lock_path": "node_modules/app-builder-lib/node_modules/@electron/fuses",
++      "version": "1.8.0",
++      "resolved": "https://registry.npmjs.org/@electron/fuses/-/fuses-1.8.0.tgz",
++      "lock_integrity": "sha512-zx0EIq78WlY/lBb1uXlziZmDZI4ubcCXIMJ4uGjXzZW0nS19TjSPeXPAjzzTmKQlJUZm0SbmZhPKP7tuQ1SsEw==",
++      "path": "dist/index.js",
++      "bytes": 8086,
++      "sha256": "c752d0204e8abd08d029c20de6245029cf6e5e9f8cc019d337be1755c1e33484",
++      "purpose": "reference data only; never imported or executed by the ingredient collector"
++    },
++    {
++      "package": "@electron/fuses",
++      "lock_path": "node_modules/app-builder-lib/node_modules/@electron/fuses",
++      "version": "1.8.0",
++      "resolved": "https://registry.npmjs.org/@electron/fuses/-/fuses-1.8.0.tgz",
++      "lock_integrity": "sha512-zx0EIq78WlY/lBb1uXlziZmDZI4ubcCXIMJ4uGjXzZW0nS19TjSPeXPAjzzTmKQlJUZm0SbmZhPKP7tuQ1SsEw==",
++      "path": "dist/constants.js",
++      "bytes": 534,
++      "sha256": "ff339b9cc7c8a5d67ce848d59945b3c36018e3cc6975a7b41ccd5ce4f996ad2f",
++      "purpose": "reference data only; never imported or executed by the ingredient collector"
++    },
++    {
++      "package": "@electron/fuses",
++      "lock_path": "node_modules/app-builder-lib/node_modules/@electron/fuses",
++      "version": "1.8.0",
++      "resolved": "https://registry.npmjs.org/@electron/fuses/-/fuses-1.8.0.tgz",
++      "lock_integrity": "sha512-zx0EIq78WlY/lBb1uXlziZmDZI4ubcCXIMJ4uGjXzZW0nS19TjSPeXPAjzzTmKQlJUZm0SbmZhPKP7tuQ1SsEw==",
++      "path": "dist/config.js",
++      "bytes": 1304,
++      "sha256": "7c54c68eb5844736ab5f4b0949ff48c3512aed6e6b6d7c4d5138c21730fb76b0",
++      "purpose": "reference data only; never imported or executed by the ingredient collector"
++    }
++  ]
++}
+diff --git a/apps/metaengine-browser/scripts/custom-electron-pe-layout.cjs b/apps/metaengine-browser/scripts/custom-electron-pe-layout.cjs
+new file mode 100644
+index 0000000..b463697
+--- /dev/null
++++ b/apps/metaengine-browser/scripts/custom-electron-pe-layout.cjs
+@@ -0,0 +1,143 @@
++'use strict';
++// A precondition audit for a FUTURE expected-image serializer. This is not a
++// transform verifier: resource serialization and indirect loader references
++// remain unresolved, so even a successful audit returns HOLD. The production
++// package gate continues to require exact whole-image equality.
++const { createHash } = require('node:crypto');
++const FUSE_SENTINEL = Buffer.from('dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX');
++const fail = reason => { throw Error('custom_electron_layout_' + reason); };
++const hash = bytes => createHash('sha256').update(bytes).digest('hex');
++const round = (value, alignment) => Math.ceil(value / alignment) * alignment;
++const powerOfTwo = value => value > 0 && Number.isInteger(Math.log2(value));
++function span(start, size, limit) {
++  return Number.isSafeInteger(start) && Number.isSafeInteger(size) && start >= 0 && size > 0
++    && start <= limit && size <= limit - start;
++}
++function overlaps(a, b) { return a.start < b.end && b.start < a.end; }
++
++function readFixedLayout(image) {
++  if (!Buffer.isBuffer(image) || image.length < 512 || image.length > 512 * 1024 * 1024
++      || image.toString('ascii', 0, 2) !== 'MZ') fail('image_invalid');
++  const nt = image.readUInt32LE(0x3c);
++  if (nt < 64 || nt % 4 || !span(nt, 24 + 240, image.length) || image.toString('ascii', nt, nt + 4) !== 'PE\0\0'
++      || image.readUInt16LE(nt + 4) !== 0x8664 || image.readUInt16LE(nt + 20) !== 240
++      || image.readUInt16LE(nt + 24) !== 0x20b) fail('pe32plus_x64_required');
++  if (image.readUInt32LE(nt + 12) || image.readUInt32LE(nt + 16)) fail('symbols_unsupported');
++  const optional = nt + 24, table = optional + 240;
++  const count = image.readUInt16LE(nt + 6);
++  if (!count || count > 96 || !span(table, count * 40, image.length)
++      || image.readUInt32LE(optional + 108) !== 16) fail('headers_unsupported');
++  const fileAlignment = image.readUInt32LE(optional + 36);
++  const sectionAlignment = image.readUInt32LE(optional + 32);
++  const headers = image.readUInt32LE(optional + 60);
++  if (!powerOfTwo(fileAlignment) || fileAlignment < 512 || fileAlignment > 65536
++      || !powerOfTwo(sectionAlignment) || sectionAlignment < fileAlignment
++      || headers !== round(table + count * 40, fileAlignment) || headers > image.length) fail('alignment_unsupported');
++  const sections = [], names = new Set();
++  for (let index = 0; index < count; index++) {
++    const header = table + index * 40;
++    const name = image.toString('ascii', header, header + 8).replace(/\0+$/, '');
++    const virtualSize = image.readUInt32LE(header + 8), rva = image.readUInt32LE(header + 12);
++    const size = image.readUInt32LE(header + 16), offset = image.readUInt32LE(header + 20);
++    if (!/^[.A-Za-z0-9_-]+$/.test(name) || names.has(name) || !virtualSize
++        || !span(offset, size, image.length) || offset < headers || offset % fileAlignment || size % fileAlignment
++        || rva < round(headers, sectionAlignment) || rva % sectionAlignment
++        || rva + round(Math.max(virtualSize, size), sectionAlignment) > 0xffffffff) fail('section_unsupported');
++    const section = { name, header, rva, virtualSize, offset, size,
++      mappedSize: round(Math.max(virtualSize, size), sectionAlignment),
++      flags: image.readUInt32LE(header + 36), start: offset, end: offset + size };
++    for (const previous of sections) {
++      if (overlaps(section, previous) || overlaps({ start: rva, end: rva + section.mappedSize },
++        { start: previous.rva, end: previous.rva + previous.mappedSize })) fail('section_overlap');
++    }
++    names.add(name); sections.push(section);
++  }
++  const directories = Array.from({ length: 16 }, (_, index) => ({
++    rva: image.readUInt32LE(optional + 112 + index * 8),
++    size: image.readUInt32LE(optional + 116 + index * 8),
++  }));
++  if (directories[4].rva || directories[4].size) fail('unsigned_image_required');
++  const resource = sections.find(section => section.name === '.rsrc');
++  if (!resource || resource.flags !== 0x40000040 || resource.virtualSize > resource.size
++      || directories[2].rva !== resource.rva || directories[2].size !== resource.virtualSize) fail('resource_layout_unsupported');
++  const entry = image.readUInt32LE(optional + 16);
++  if (!sections.some(section => section !== resource && section.flags & 0x20000000
++      && entry >= section.rva && entry - section.rva < Math.min(section.virtualSize, section.size))) fail('source_entry_point_unsupported');
++  for (let index = 0; index < directories.length; index++) {
++    if (index === 2 || index === 4) continue;
++    const directory = directories[index];
++    if (!directory.rva && !directory.size) continue;
++    if (!directory.rva || !directory.size || !sections.some(section => section !== resource
++        && directory.rva >= section.rva && directory.size <= Math.min(section.virtualSize, section.size) - (directory.rva - section.rva))) {
++      fail('direct_directory_not_separate:' + index);
++    }
++  }
++  const imageSize = image.readUInt32LE(optional + 56);
++  if (imageSize !== Math.max(...sections.map(section => section.rva + section.mappedSize))) fail('image_size_unsupported');
++  return { nt, optional, table, headers, count, fileAlignment, sectionAlignment, sections, resource, directories };
++}
++
++function sourceFuseWrites(image, layout = readFixedLayout(image)) {
++  const sentinel = image.indexOf(FUSE_SENTINEL);
++  if (sentinel < 0 || image.lastIndexOf(FUSE_SENTINEL) !== sentinel) fail('unique_source_fuse_wire_required');
++  const wire = sentinel + FUSE_SENTINEL.length;
++  if (!span(wire, 2, image.length) || image[wire] !== 1 || image[wire + 1] < 6 || image[wire + 1] > 64) fail('fuse_wire_unsupported');
++  const owner = layout.sections.find(section => section !== layout.resource
++    && sentinel >= section.offset && wire + 2 + image[wire + 1] <= section.offset + Math.min(section.size, section.virtualSize));
++  if (!owner || !(owner.flags & 0x40000000) || owner.flags & 0xa0000000) fail('fuse_wire_section_unsupported');
++  for (let index = 0; index < image[wire + 1]; index++) {
++    if (![48, 49, 114].includes(image[wire + 2 + index])) fail('source_fuse_state_unsupported');
++  }
++  if (image[wire + 6] === 114 || image[wire + 7] === 114) fail('required_fuse_removed');
++  return [{ offset: wire + 6, value: 49 }, { offset: wire + 7, value: 49 }];
++}
++
++// Matches pe-library 0.4.1's checksum update for its generate() path. Its caller
++// updates a nonzero source checksum only. This is data processing, not signing.
++function peChecksum(image, checksumOffset) {
++  let sum = 0;
++  const update = value => { sum += value; if (sum >= 0x100000000) sum = sum % 0x100000000 + Math.floor(sum / 0x100000000); };
++  const aligned = image.length - image.length % 4;
++  for (let offset = 0; offset < aligned; offset += 4) if (offset !== checksumOffset) update(image.readUInt32LE(offset));
++  if (aligned !== image.length) {
++    let tail = 0;
++    for (let index = 0; aligned + index < image.length; index++) tail |= image[aligned + index] << ((3 - index) * 8);
++    update(tail);
++  }
++  sum = (sum & 0xffff) + (sum >>> 16); sum += sum >>> 16;
++  return (sum & 0xffff) + image.length;
++}
++
++function inspectFixedLayoutTransform(source, candidate, { stage = 'FINAL_UNSIGNED' } = {}) {
++  if (!['AFTER_PACK', 'FINAL_UNSIGNED'].includes(stage)) fail('stage_invalid');
++  const original = readFixedLayout(source), changed = readFixedLayout(candidate);
++  if (source.length !== candidate.length || original.headers !== changed.headers
++      || original.table !== changed.table || original.count !== changed.count) fail('geometry_changed');
++  const resource = original.resource;
++  if (resource.mappedSize !== changed.resource.mappedSize) fail('resource_virtual_span_changed');
++  const writes = sourceFuseWrites(source, original);
++  const permittedHeaderFields = [original.optional + 64, original.optional + 132, resource.header + 8];
++  for (let offset = 0; offset < original.headers; offset++) {
++    if (permittedHeaderFields.some(start => offset >= start && offset < start + 4)) continue;
++    if (source[offset] !== candidate[offset]) fail('header_or_mapping_changed:' + offset);
++  }
++  const checksumOffset = original.optional + 64;
++  const expectedChecksum = source.readUInt32LE(checksumOffset) ? peChecksum(candidate, checksumOffset) : 0;
++  if (candidate.readUInt32LE(checksumOffset) !== expectedChecksum) fail('checksum_not_expected');
++  const expectedFuses = new Map(writes.map(write => [write.offset, stage === 'FINAL_UNSIGNED' ? write.value : source[write.offset]]));
++  for (let offset = original.headers; offset < source.length; offset++) {
++    // This range is observed and hashed below, NEVER approved or normalized.
++    // Its exact expected serialization remains an explicit unresolved check.
++    if (offset >= resource.offset && offset < resource.offset + resource.size) continue;
++    if (candidate[offset] !== (expectedFuses.has(offset) ? expectedFuses.get(offset) : source[offset])) fail('nonresource_byte_changed:' + offset);
++  }
++  return Object.freeze({ schema: 'metaengine.custom-electron.direct-layout-preconditions.v1', state: 'HOLD',
++    stage, source_image_sha256: hash(source), candidate_image_sha256: hash(candidate),
++    resource_source_sha256: hash(source.subarray(resource.offset, resource.offset + resource.size)),
++    resource_candidate_sha256: hash(candidate.subarray(resource.offset, resource.offset + resource.size)),
++    scope: 'DIRECT_LAYOUT_AND_NONRESOURCE_BYTES_ONLY',
++    unresolved_checks: ['IMMUTABLE_EXPECTED_ASAR_PRODUCER', 'EXACT_EXPECTED_RESOURCE_SERIALIZER',
++      'INDIRECT_LOADER_REFERENCE_CLOSURE', 'EXACT_EXPECTED_WHOLE_IMAGE_COMPARISON'], authority_effect: false });
++}
++
++module.exports = { readFixedLayout, sourceFuseWrites, peChecksum, inspectFixedLayoutTransform };
+diff --git a/apps/metaengine-browser/scripts/custom-electron-source-build.py b/apps/metaengine-browser/scripts/custom-electron-source-build.py
+index 2ff1e65..29c7f22 100644
+--- a/apps/metaengine-browser/scripts/custom-electron-source-build.py
++++ b/apps/metaengine-browser/scripts/custom-electron-source-build.py
+@@ -7,17 +7,16 @@ environment attestation or release. It never executes the produced Windows PE,
+ never installs software, never touches services/DB/credentials and never edits
+ source seals or versions.
+ 
+-Every stage fails closed. The existing pins qualify a bounded source
+-interface, not the complete Chromium source closure. Production source
+-verification, receipt creation and publication currently HOLD until a reviewed
+-immutable Chromium identity exists. No caller flag can waive that prerequisite.
+-Electron's usual committed Node patches also HOLD until their complete
+-postpatch identity or a reviewed full replay is pinned; ancestry is not enough.
++Every stage fails closed. The separate source-policy producer derives complete
++named component trees from immutable commits and every official patch. This is
++not the enabled gclient/DEPS/CIPD/hooks or compiler-input closure. Production
++staging, receipt creation and publication still HOLD on that missing composition
++producer; no caller flag or self-reported verified field can waive it.
+ 
+ Verification stages, in order:
+   1. local lock/pin consistency (pins.json + Guardian OpenSSL lock)
+-  2. upstream checkout identity (commits, preimages, patched Node bytes,
+-     primary source evidence documents)
++  2. complete component tree replay/physical readback, followed by the required
++     enabled dependency/CIPD/hook composition producer (currently unavailable)
+   3. the existing bounded source-interface checker (patch apply + postimages)
+   4. cryptographic prerequisites (pinned OpenSSL archive/signature with the
+      existing official GPG certificate verifier; pinned BoringSSL commit)
+@@ -188,13 +187,21 @@ def pinned_checkout_heads(heads):
+     return {name: heads[name] for name in names}
+ 
+ 
+-def require_reviewed_chromium_identity():
+-    # The checked-in pins contain a version tag and one Chromium DEPS hash,
+-    # with no immutable full-source commit/tree identity. A local tag, ancestry
+-    # or a caller's "verified" field cannot supply that missing authority.
+-    # Keep this guard on every receipt/publication path until a separately
+-    # reviewed immutable source policy is implemented; there is no bypass flag.
+-    fail('chromium_full_source_identity_unavailable')
++def load_source_policy():
++    path = APP / 'scripts/custom-electron-source-policy.py'
++    spec = importlib.util.spec_from_file_location('guardian_complete_component_source_policy', path)
++    module = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(module)
++    return module
++
++
++def require_gclient_dependency_closure():
++    # Complete named component trees do not authenticate other enabled DEPS
++    # repositories, CIPD payloads, hooks/generated files or compiler tools.
++    # A separately reviewed producer must bind that closure before any stage,
++    # GN/tool execution or package receipt. No JSON flag or caller callback can
++    # substitute for that missing producer.
++    fail('gclient_deps_cipd_hook_closure_unavailable')
+ 
+ 
+ def verify_source_identity(chromium, pins):
+@@ -202,12 +209,12 @@ def verify_source_identity(chromium, pins):
+     node = chromium / 'third_party/electron_node'
+     v8 = chromium / 'v8'
+     boringssl = chromium / 'third_party/boringssl/src'
+-    heads = {
+-        'electron': exact_checkout_head(electron, EXPECTED['electron_commit']),
+-        'node': exact_checkout_head(node, EXPECTED['node_commit']),
+-        'v8': exact_checkout_head(v8, EXPECTED['v8_commit']),
+-        'boringssl': exact_checkout_head(boringssl, EXPECTED['boringssl_commit']),
+-    }
++    policy = load_source_policy()
++    component_roots = {'electron': electron, 'chromium': chromium,
++                       'node': node, 'v8': v8, 'boringssl': boringssl}
++    components = {name: policy.verify_component_tree(electron, root, name)
++                  for name, root in component_roots.items()}
++    heads = {name: components[name]['observed_head'] for name in ('electron', 'node', 'v8', 'boringssl')}
+     for row in pins['files']:
+         if filehash(ordinary(electron, row['path'])) != row['before_sha256']:
+             fail('electron_preimage_drift:' + row['path'])
+@@ -234,8 +241,7 @@ def verify_source_identity(chromium, pins):
+             or not str(official.get('sha256', '')).startswith('5f75ae1e70e69442c9d23f7d984e8ca2')
+             or official.get('bytes') != 349406):
+         fail('official_header_pin_drift')
+-    pinned_checkout_heads(heads)
+-    require_reviewed_chromium_identity()
++    require_gclient_dependency_closure()
+     return heads
+ 
+ 
+@@ -291,7 +297,8 @@ def verify_cryptographic_prerequisites(chromium, openssl_lock, archive, signatur
+         if (identity['signing_fingerprint'] != signer
+                 or (evidence / 'gpg-status.txt').read_bytes().count(b'VALIDSIG') != 1):
+             fail('guardian_openssl_signature_identity_drift')
+-    exact_checkout_head(chromium / 'third_party/boringssl/src', EXPECTED['boringssl_commit'])
++    load_source_policy().verify_component_tree(chromium / 'electron',
++        chromium / 'third_party/boringssl/src', 'boringssl')
+     return {'openssl_version': pinned['version'], 'signature_verified': True,
+             'boringssl_commit': EXPECTED['boringssl_commit']}
+ 
+@@ -391,7 +398,7 @@ def verified_zip_entries(zip_path):
+ 
+ def build_receipt(heads, pins, openssl, native_manifest, exe_sha256, inventory):
+     heads = pinned_checkout_heads(heads)
+-    require_reviewed_chromium_identity()
++    require_gclient_dependency_closure()
+     return {
+         'schema': 'metaengine.custom-electron-build-host-bytes.v1',
+         'profile': EXPECTED['profile'],
+@@ -425,7 +432,7 @@ def build_receipt(heads, pins, openssl, native_manifest, exe_sha256, inventory):
+ def publish_distribution(dist_zip, linked_exe, destination, receipt_path, heads, pins,
+                          openssl, native_manifest):
+     heads = pinned_checkout_heads(heads)
+-    require_reviewed_chromium_identity()
++    require_gclient_dependency_closure()
+     if destination.exists() or receipt_path.exists():
+         fail('outputs_must_be_new_no_replay')
+     entries = verified_zip_entries(dist_zip)
+diff --git a/apps/metaengine-browser/scripts/custom-electron-source-policy.py b/apps/metaengine-browser/scripts/custom-electron-source-policy.py
+new file mode 100644
+index 0000000..72e6932
+--- /dev/null
++++ b/apps/metaengine-browser/scripts/custom-electron-source-policy.py
+@@ -0,0 +1,416 @@
++#!/usr/bin/env python3
++"""Derive complete component Git trees from pinned objects and official patches.
++
++This producer never runs source scripts, hooks, downloads or a compiler. Its
++scope is COMPLETE_COMPONENT_GIT_TREES, not the enabled gclient/DEPS/CIPD/hook or
++toolchain closure. All output remains build-host evidence without release or
++runtime authority. The physical profile is canonical raw Git blobs: upstream
++attribute-driven EOL/encoding conversions are not silently normalized.
++"""
++import argparse
++from contextlib import contextmanager
++import hashlib
++import json
++import os
++from pathlib import Path, PurePosixPath
++import re
++import stat
++import subprocess
++import tempfile
++
++ELECTRON_COMMIT = 'c542df1ecbc2c2978e8f53f8c7baf602404d166f'
++ELECTRON_TREE = '328891d1f8b4d93d49c9f31332baf75fa726cb6e'
++COMPONENTS = {
++    'electron': (ELECTRON_COMMIT, None),
++    'chromium': ('dd78960ccd8a03a2fe1f629543d27783885b78e9', 'patches/chromium'),
++    'node': ('f14cd3aa7bf9ca8df2cc5b8bb14beb0f335b1d93', 'patches/node'),
++    'v8': ('a11d960c1c22c067ff898ceb4a8e4e0687014d41', 'patches/v8'),
++    'boringssl': ('572a4c68475d284b34675f45ddbb9c158ef3c2ae', 'patches/boringssl'),
++}
++KNOWN_BASE_TREES = {
++    'electron': ELECTRON_TREE,
++    'chromium': '63b2edfe4c6ae23d2fd3424cde3e529db49f7068',
++    'node': '409a26f676d83fa6e1b0bfdb1c10d6878845c071',
++}
++OID = re.compile(r'^[0-9a-f]{40}$')
++MAX_OBJECT = 1024 ** 3
++
++
++def fail(reason):
++    raise ValueError('custom_electron_source_policy_' + reason)
++
++
++def environment(extra=None):
++    result = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
++    result.update(GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull,
++                  GIT_NO_REPLACE_OBJECTS='1', GIT_OPTIONAL_LOCKS='0',
++                  GIT_NO_LAZY_FETCH='1', GIT_TERMINAL_PROMPT='0')
++    result.update(extra or {})
++    return result
++
++
++def git_arguments(repo, *args):
++    return ['git', '--no-optional-locks', '-c', 'core.fsmonitor=false',
++            '-c', 'core.hooksPath=' + os.devnull, '-c', 'core.attributesFile=' + os.devnull,
++            '-c', 'core.autocrlf=false', '-C', str(repo), *map(str, args)]
++
++
++def git(repo, *args, data=None, allow_missing=False):
++    result = subprocess.run(git_arguments(repo, *args), input=data, capture_output=True,
++                            env=environment(), timeout=120)
++    if result.returncode and not allow_missing:
++        # Never expose provider/config diagnostics or execute a lazy fetch.
++        fail('git_operation_failed:' + str(args[0]))
++    return result.stdout
++
++
++def repository_controls(repo):
++    repo = Path(repo).absolute()
++    if not repo.is_dir() or repo.is_symlink() or repo.resolve() != repo:
++        fail('canonical_repository_required')
++    # Read only the repository's own config keys, never included files. Reject
++    # alternate config composition before any object access could trigger an
++    # included promisor remote or filter. False includeIf conditions are still
++    # outside this producer's deliberately fixed configuration profile.
++    config_keys = {key.casefold() for key in git(repo, 'config', '--local',
++        '--no-includes', '--name-only', '--list').decode('utf-8', 'strict').splitlines()}
++    if any(key.startswith(('include.', 'includeif.')) for key in config_keys) \
++            or 'extensions.worktreeconfig' in config_keys:
++        fail('local_config_composition_forbidden')
++    if any(key == 'extensions.partialclone' or key.startswith('filter.')
++            or (key.startswith('remote.') and key.endswith('.promisor'))
++            or key in ('core.attributesfile', 'core.fsmonitor') for key in config_keys):
++        fail('partial_clone_or_external_filter_forbidden')
++    top = git(repo, 'rev-parse', '--show-toplevel').decode().strip()
++    if Path(top).resolve() != repo or git(repo, 'rev-parse', '--show-object-format').strip() != b'sha1':
++        fail('repository_root_or_object_format')
++    if git(repo, 'for-each-ref', '--format=%(refname)', 'refs/replace').strip():
++        fail('replacement_objects_forbidden')
++    grafts = Path(git(repo, 'rev-parse', '--path-format=absolute', '--git-path', 'info/grafts').decode().strip())
++    if grafts.exists() and (grafts.is_symlink() or grafts.stat().st_size):
++        fail('grafts_forbidden')
++    return repo
++
++
++class Objects:
++    """Streaming raw object verification; never textconv/attributes/filters."""
++    def __init__(self, repo):
++        self.repo = Path(repo)
++        self.child = subprocess.Popen(git_arguments(repo, 'cat-file', '--batch'),
++            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
++            env=environment())
++        self.checked = set()
++
++    def read(self, oid, retain=True):
++        if not OID.fullmatch(oid):
++            fail('object_id_invalid')
++        self.child.stdin.write((oid + '\n').encode())
++        self.child.stdin.flush()
++        fields = self.child.stdout.readline(256).rstrip(b'\n').split(b' ')
++        if len(fields) != 3 or fields[0].decode('ascii', 'strict') != oid:
++            fail('required_object_unavailable:' + oid)
++        kind = fields[1].decode('ascii', 'strict')
++        if kind not in ('blob', 'tree', 'commit') or not fields[2].isdigit():
++            fail('object_header_invalid')
++        size = int(fields[2])
++        if size > MAX_OBJECT or (retain and size > 64 * 1024 ** 2):
++            fail('object_too_large')
++        digest = hashlib.sha1(kind.encode() + b' ' + fields[2] + b'\0')
++        chunks, remaining = [], size
++        while remaining:
++            chunk = self.child.stdout.read(min(1024 ** 2, remaining))
++            if not chunk:
++                fail('object_read_incomplete')
++            digest.update(chunk)
++            if retain:
++                chunks.append(chunk)
++            remaining -= len(chunk)
++        if self.child.stdout.read(1) != b'\n' or digest.hexdigest() != oid:
++            fail('object_content_hash_mismatch')
++        self.checked.add(oid)
++        return kind, b''.join(chunks)
++
++    def close(self):
++        self.child.stdin.close()
++        try:
++            self.child.wait(timeout=5)
++        except subprocess.TimeoutExpired:
++            self.child.terminate()
++            self.child.wait(timeout=5)
++        self.child.stdout.close()
++
++
++def commit_tree(objects, commit):
++    kind, content = objects.read(commit)
++    first = content.split(b'\n', 1)[0]
++    if kind != 'commit' or not first.startswith(b'tree '):
++        fail('commit_object_invalid')
++    tree = first[5:].decode('ascii', 'strict')
++    if not OID.fullmatch(tree):
++        fail('commit_tree_invalid')
++    return tree
++
++
++def tree_entries(objects, tree, prefix='', verify_blobs=True):
++    kind, content = objects.read(tree)
++    if kind != 'tree':
++        fail('tree_object_invalid')
++    entries, offset = [], 0
++    while offset < len(content):
++        space = content.find(b' ', offset)
++        end = content.find(b'\0', space + 1)
++        if space < 0 or end < 0 or end + 21 > len(content):
++            fail('tree_encoding_invalid')
++        mode = content[offset:space].decode('ascii', 'strict')
++        name = content[space + 1:end].decode('utf-8', 'strict')
++        if not name or name in ('.', '..') or '/' in name or '\\' in name:
++            fail('tree_path_invalid')
++        path = prefix + name
++        oid = content[end + 1:end + 21].hex()
++        offset = end + 21
++        if mode == '40000':
++            entries.extend(tree_entries(objects, oid, path + '/', verify_blobs))
++        elif mode in ('100644', '100755', '120000', '160000'):
++            if mode != '160000' and verify_blobs and oid not in objects.checked:
++                if objects.read(oid, retain=False)[0] != 'blob':
++                    fail('tree_leaf_not_blob')
++            entries.append({'path': path, 'mode': mode, 'oid': oid})
++        else:
++            fail('tree_mode_invalid')
++    return sorted(entries, key=lambda entry: entry['path'])
++
++
++@contextmanager
++def derive_component_tree(electron_repo, component_repo, component):
++    """All official patches, in order, in private index/object storage only."""
++    if component not in COMPONENTS:
++        fail('component_invalid')
++    electron_repo = repository_controls(electron_repo)
++    component_repo = repository_controls(component_repo)
++    authority, source, derived = Objects(electron_repo), Objects(component_repo), None
++    try:
++        authority_tree = commit_tree(authority, ELECTRON_COMMIT)
++        if authority_tree != ELECTRON_TREE:
++            fail('electron_authority_tree_mismatch')
++        authority_entries = {entry['path']: entry for entry in tree_entries(authority,
++            authority_tree, verify_blobs=False)}
++        base, patch_directory = COMPONENTS[component]
++        base_tree = commit_tree(source, base)
++        if component in KNOWN_BASE_TREES and base_tree != KNOWN_BASE_TREES[component]:
++            fail('base_tree_mismatch')
++        tree_entries(source, base_tree)  # Hash all base blobs, not selected headers.
++        patches, list_blob = [], None
++        if patch_directory:
++            row = authority_entries.get(patch_directory + '/.patches')
++            if not row or row['mode'] != '100644':
++                fail('patch_order_missing')
++            list_blob = row['oid']
++            _, order = authority.read(list_blob)
++            names = order.decode('utf-8', 'strict').splitlines()
++            if not names or len(names) != len(set(names)):
++                fail('patch_order_invalid')
++            for name in names:
++                if not re.fullmatch(r'[A-Za-z0-9_.-]+\.patch', name):
++                    fail('patch_name_invalid')
++                row = authority_entries.get(patch_directory + '/' + name)
++                if not row or row['mode'] != '100644':
++                    fail('official_patch_missing')
++                kind, content = authority.read(row['oid'])
++                if kind != 'blob':
++                    fail('official_patch_not_blob')
++                patches.append((name, row['oid'], content))
++        with tempfile.TemporaryDirectory(prefix='guardian-component-tree-') as directory:
++            scratch = Path(directory)
++            bare = scratch / 'replay.git'
++            result = subprocess.run(['git', 'init', '--bare', '--quiet', str(bare)],
++                env=environment(), capture_output=True, timeout=30)
++            if result.returncode:
++                fail('temporary_repository_failed')
++            object_path = git(component_repo, 'rev-parse', '--path-format=absolute',
++                              '--git-path', 'objects').decode().strip()
++            (bare / 'objects/info/alternates').write_text(object_path + '\n')
++            git(bare, 'read-tree', base)
++            for _, _, content in patches:
++                git(bare, 'apply', '--cached', '--whitespace=nowarn', '-', data=content)
++            expected_tree = git(bare, 'write-tree').decode().strip()
++            derived = Objects(bare)
++            derived.checked.update(source.checked)
++            entries = tree_entries(derived, expected_tree)
++            serialized = json.dumps(entries, separators=(',', ':'), ensure_ascii=False).encode()
++            evidence = {
++                'schema': 'metaengine.component-git-tree-proof.v1',
++                'scope': 'COMPLETE_COMPONENT_GIT_TREES', 'component': component,
++                'electron_commit': ELECTRON_COMMIT, 'electron_tree': ELECTRON_TREE,
++                'base_commit': base, 'base_tree': base_tree,
++                'patch_order_blob': list_blob,
++                'patches': [{'name': name, 'blob_sha1': oid,
++                    'sha256': hashlib.sha256(content).hexdigest(), 'bytes': len(content)}
++                    for name, oid, content in patches],
++                'expected_tree': expected_tree, 'entry_count': len(entries),
++                'entry_manifest_sha256': hashlib.sha256(serialized).hexdigest(),
++                'gitlinks': [entry for entry in entries if entry['mode'] == '160000'],
++                'physical_profile': 'canonical-raw-git-blobs-v1',
++                'physical_tree_verified': False, 'dependency_closure_verified': False,
++                'compiler_or_windows_build_executed': False, 'authority_effect': False,
++            }
++            yield evidence, entries, derived
++    finally:
++        if derived:
++            derived.close()
++        authority.close()
++        source.close()
++
++
++def physical_tree(root, entries):
++    """Read every physical byte; Git index assume/skip flags cannot hide drift."""
++    root = Path(root).absolute()
++    if not root.is_dir() or root.is_symlink() or root.resolve() != root:
++        fail('canonical_physical_tree_required')
++    expected = {entry['path']: entry for entry in entries}
++    gitlinks = {entry['path'] for entry in entries if entry['mode'] == '160000'}
++    directories = {str(PurePosixPath(name).parent) for name in expected}
++    for name in tuple(directories):
++        directories.update(str(parent) for parent in PurePosixPath(name).parents)
++    seen, pins = set(), []
++    def identity(info):
++        return (info.st_dev, info.st_ino, info.st_mode, info.st_nlink, info.st_size,
++                info.st_mtime_ns, info.st_ctime_ns)
++    for current, dirs, files in os.walk(root, followlinks=False):
++        current = Path(current)
++        pins.append((current, identity(current.lstat())))
++        for name in tuple(dirs):
++            target = current / name
++            relative = target.relative_to(root).as_posix()
++            if relative == '.git':
++                dirs.remove(name)
++            elif relative in gitlinks:
++                if target.is_symlink():
++                    fail('gitlink_directory_alias')
++                dirs.remove(name)
++            elif target.is_symlink():
++                dirs.remove(name)
++                files.append(name)
++            elif relative not in directories:
++                fail('extra_physical_directory:' + relative)
++        for name in files:
++            target = current / name
++            relative = target.relative_to(root).as_posix()
++            if relative == '.git':
++                continue  # A real worktree .git control file is not source.
++            row = expected.get(relative)
++            if row is None or relative in gitlinks:
++                fail('extra_physical_file:' + relative)
++            before = target.lstat()
++            if row['mode'] == '120000':
++                if not stat.S_ISLNK(before.st_mode):
++                    fail('reviewed_symlink_representation_required:' + relative)
++                content = os.fsencode(os.readlink(target))
++                digest = hashlib.sha1(b'blob ' + str(len(content)).encode() + b'\0' + content).hexdigest()
++            else:
++                if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
++                    fail('physical_file_alias:' + relative)
++                if os.name != 'nt' and bool(before.st_mode & 0o111) != (row['mode'] == '100755'):
++                    fail('physical_file_mode_mismatch:' + relative)
++                value = hashlib.sha1(b'blob ' + str(before.st_size).encode() + b'\0')
++                with target.open('rb') as stream:
++                    if identity(os.fstat(stream.fileno())) != identity(before):
++                        fail('physical_file_changed')
++                    for chunk in iter(lambda: stream.read(1024 ** 2), b''):
++                        value.update(chunk)
++                    if identity(os.fstat(stream.fileno())) != identity(before):
++                        fail('physical_file_changed')
++                digest = value.hexdigest()
++            if digest != row['oid']:
++                fail('canonical_checkout_representation_mismatch:' + relative)
++            if identity(target.lstat()) != identity(before):
++                fail('physical_file_changed')
++            pins.append((target, identity(before)))
++            seen.add(relative)
++    if seen != set(expected) - gitlinks:
++        fail('physical_tree_file_set_mismatch')
++    if any(identity(target.lstat()) != before for target, before in pins):
++        fail('physical_tree_changed_during_readback')
++    return {'physical_tree_verified': True, 'physical_file_count': len(seen),
++            'gitlink_dependencies_qualified': False, 'windows_representation_qualified': False}
++
++
++def materialize_canonical_tree(root, entries, objects):
++    """Create a new source-only tree from verified raw blobs; never overwrite."""
++    root = Path(root).absolute()
++    if not root.parent.is_dir() or root.parent.resolve() != root.parent or root.exists():
++        fail('new_canonical_output_required')
++    root.mkdir(mode=0o700)
++    for row in entries:
++        target = root.joinpath(*PurePosixPath(row['path']).parts)
++        target.parent.mkdir(parents=True, exist_ok=True)
++        if row['mode'] == '160000':
++            target.mkdir()
++            continue  # An empty dependency placeholder is never qualified.
++        kind, content = objects.read(row['oid'])
++        if kind != 'blob':
++            fail('canonical_source_not_blob')
++        if row['mode'] == '120000':
++            target.symlink_to(os.fsdecode(content))
++        else:
++            with target.open('xb') as stream:
++                stream.write(content)
++            target.chmod(0o755 if row['mode'] == '100755' else 0o644)
++    return physical_tree(root, entries)
++
++
++def verify_component_tree(electron_repo, checkout, component):
++    with derive_component_tree(electron_repo, checkout, component) as (evidence, entries, _):
++        observed = git(checkout, 'rev-parse', 'HEAD').decode().strip()
++        objects = Objects(checkout)
++        try:
++            if commit_tree(objects, observed) != evidence['expected_tree']:
++                fail('observed_component_tree_mismatch:' + component)
++        finally:
++            objects.close()
++        evidence.update(physical_tree(checkout, entries))
++        if git(checkout, 'rev-parse', 'HEAD').decode().strip() != observed:
++            fail('observed_component_head_changed')
++        return {**evidence, 'observed_head': observed}
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--electron', required=True, type=Path)
++    parser.add_argument('--checkout', required=True, type=Path)
++    parser.add_argument('--component', required=True, choices=tuple(COMPONENTS))
++    mode = parser.add_mutually_exclusive_group()
++    mode.add_argument('--derive-only', action='store_true',
++                        help='Derive expected objects only; does not qualify a physical checkout')
++    mode.add_argument('--canonical-output', type=Path,
++                        help='Create a NEW canonical raw-blob source tree; no hooks or dependencies')
++    mode.add_argument('--physical-tree', type=Path,
++                      help='Verify a separate canonical source tree against the fully derived tree')
++    parser.add_argument('--output', required=True, type=Path)
++    args = parser.parse_args()
++    try:
++        if args.derive_only or args.canonical_output or args.physical_tree:
++            with derive_component_tree(args.electron, args.checkout, args.component) as result:
++                evidence = result[0]
++                if args.canonical_output:
++                    evidence.update(materialize_canonical_tree(args.canonical_output, result[1], result[2]))
++                    evidence['canonical_source_materialization'] = True
++                elif args.physical_tree:
++                    evidence.update(physical_tree(args.physical_tree, result[1]))
++                    evidence['physical_tree_is_separate_from_object_checkout'] = True
++        else:
++            evidence = verify_component_tree(args.electron, args.checkout, args.component)
++        with args.output.open('x', encoding='utf-8') as stream:
++            json.dump(evidence, stream, indent=2)
++            stream.write('\n')
++        print(json.dumps({'scope': evidence['scope'], 'component': args.component,
++            'expected_tree': evidence['expected_tree'], 'entry_count': evidence['entry_count'],
++            'patch_count': len(evidence['patches']),
++            'physical_tree_verified': evidence['physical_tree_verified'],
++            'dependency_closure_verified': False, 'authority_effect': False}))
++    except (OSError, ValueError, subprocess.TimeoutExpired) as error:
++        reason = str(error) if str(error).startswith('custom_electron_source_policy_') else 'custom_electron_source_policy_unavailable'
++        parser.exit(1, reason + '\n')
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/apps/metaengine-browser/scripts/custom-electron-transform-inputs.cjs b/apps/metaengine-browser/scripts/custom-electron-transform-inputs.cjs
+new file mode 100644
+index 0000000..6167c7c
+--- /dev/null
++++ b/apps/metaengine-browser/scripts/custom-electron-transform-inputs.cjs
+@@ -0,0 +1,147 @@
++'use strict';
++// Build-only ingredient collection. No dependency code is imported/executed.
++// No caller-provided expected image, ASAR path, callback or "verified" receipt
++// can authorize a transform. The expected-resource producer does not exist yet;
++// this collector therefore always reports HOLD and is not a package gate.
++const fs = require('node:fs');
++const path = require('node:path');
++const { createHash } = require('node:crypto');
++const APP = path.resolve(__dirname, '..');
++const sha = bytes => createHash('sha256').update(bytes).digest('hex');
++const fail = reason => { throw Error('custom_electron_transform_inputs_' + reason); };
++
++function stableFile(root, relative, maximum = 8 * 1024 * 1024) {
++  if (!relative || relative.includes('\\') || path.isAbsolute(relative)
++      || relative.split('/').some(part => !part || part === '.' || part === '..')) fail('path_invalid');
++  let current = root;
++  if (fs.lstatSync(current).isSymbolicLink()) fail('source_alias');
++  for (const part of relative.split('/')) {
++    current = path.join(current, part);
++    if (fs.lstatSync(current).isSymbolicLink()) fail('source_alias');
++  }
++  const before = fs.lstatSync(current);
++  if (!before.isFile() || before.nlink !== 1 || before.size > maximum) fail('source_file_invalid');
++  const actual = fs.realpathSync(current), expected = path.resolve(current);
++  if (process.platform === 'win32' ? actual.toLowerCase() !== expected.toLowerCase() : actual !== expected) fail('source_alias');
++  const bytes = fs.readFileSync(current), after = fs.lstatSync(current);
++  if (before.dev !== after.dev || before.ino !== after.ino || before.size !== bytes.length
++      || before.size !== after.size || before.mtimeMs !== after.mtimeMs || !after.isFile() || after.nlink !== 1) fail('source_changed');
++  return bytes;
++}
++
++function catalog() {
++  const bytes = stableFile(APP, 'build/custom-electron-transform-inputs.json');
++  const value = JSON.parse(bytes);
++  if (value.schema !== 'metaengine.custom-electron.transform-input-catalog.v1'
++      || value.entry_module !== 'resedit/dist/index.js'
++      || Object.keys(value.packages).sort().join(',') !== 'pe-library,resedit'
++      || value.modules.length !== 52 || value.reference_sources.length !== 9) fail('catalog_invalid');
++  Object.defineProperty(value, 'source_catalog_sha256', { value: sha(bytes) });
++  return value;
++}
++
++function sourceInventory(value = catalog()) {
++  const files = new Map();
++  const add = (relative, bytes, digest) => {
++    if (files.has(relative) || !Number.isSafeInteger(bytes) || bytes < 1 || !/^[a-f0-9]{64}$/.test(digest)) fail('catalog_file_invalid');
++    files.set(relative, { bytes, sha256: digest });
++  };
++  for (const item of Object.values(value.packages)) add(item.lock_path + '/package.json', item.package_json_bytes, item.package_json_sha256);
++  for (const item of value.modules) {
++    const owner = value.packages[item.package];
++    if (!owner) fail('catalog_owner_invalid');
++    add(owner.lock_path + '/' + item.path, item.bytes, item.sha256);
++  }
++  for (const item of value.reference_sources) add(item.lock_path + '/' + item.path, item.bytes, item.sha256);
++  return files;
++}
++
++// A data-only comparison against the checked-in lock-derived catalog. This
++// does not qualify a serializer, prove safe module loading, or admit an image.
++function comparePinnedSourceBytes({ lockBytes, sourceFiles }) {
++  const value = catalog(), lock = JSON.parse(lockBytes.toString('utf8'));
++  const records = [...Object.values(value.packages), ...value.reference_sources];
++  for (const item of records) {
++    const pin = lock.packages?.[item.lock_path];
++    if (!pin || pin.version !== item.version || pin.resolved !== item.resolved || pin.integrity !== item.lock_integrity) fail('dependency_lock_drift:' + item.lock_path);
++  }
++  const inventory = sourceInventory(value);
++  if (!(sourceFiles instanceof Map) || sourceFiles.size !== inventory.size) fail('source_inventory_incomplete');
++  const summaries = [];
++  for (const [relative, pin] of inventory) {
++    const bytes = sourceFiles.get(relative);
++    if (!Buffer.isBuffer(bytes) || bytes.length !== pin.bytes || sha(bytes) !== pin.sha256) fail('source_bytes_drift:' + relative);
++    summaries.push({ path: relative, bytes: bytes.length, sha256: pin.sha256 });
++  }
++  return Object.freeze({ scope: 'PINNED_SOURCE_BYTES_ONLY', cjs_module_count: value.modules.length,
++    reference_source_count: value.reference_sources.length, file_count: inventory.size,
++    source_inventory_sha256: sha(Buffer.from(JSON.stringify(summaries))),
++    catalog_sha256: value.source_catalog_sha256, authority_effect: false });
++}
++
++// Pure byte utility for a FUTURE producer-owned immutable ASAR snapshot. The
++// collector below deliberately never obtains expected integrity from a
++// candidate app.asar. Header hashing follows builder 26.15.7 readAsarHeader/
++// hashHeader: the UTF-8 header string, not the ASAR body or raw pickle bytes.
++function deriveAsarIntegrityResource(immutableExpectedAsarBytes) {
++  const bytes = immutableExpectedAsarBytes;
++  if (!Buffer.isBuffer(bytes) || bytes.length < 16 || bytes.readUInt32LE(0) !== 4) fail('asar_size_pickle_invalid');
++  const size = bytes.readUInt32LE(4);
++  if (size < 8 || size > 16 * 1024 * 1024 || size % 4 || size > bytes.length - 8
++      || bytes.readUInt32LE(8) !== size - 4) fail('asar_header_pickle_invalid');
++  const length = bytes.readUInt32LE(12);
++  if (length > size - 8) fail('asar_header_string_invalid');
++  const raw = bytes.subarray(16, 16 + length);
++  // TextDecoder normally removes a leading BOM. The pinned builder hashes the
++  // exact header string; this narrow profile rejects BOM instead of silently
++  // changing the value that a future producer would bind.
++  if (raw.length >= 3 && raw[0] === 0xef && raw[1] === 0xbb && raw[2] === 0xbf) fail('asar_header_bom_unsupported');
++  let header;
++  try { header = new TextDecoder('utf-8', { fatal: true }).decode(raw); } catch { fail('asar_header_utf8_invalid'); }
++  let parsed;
++  try { parsed = JSON.parse(header); } catch { fail('asar_header_json_invalid'); }
++  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !parsed.files
++      || typeof parsed.files !== 'object' || Array.isArray(parsed.files)) fail('asar_header_files_invalid');
++  const digest = sha(Buffer.from(header, 'utf8'));
++  return Buffer.from(JSON.stringify([{ file: 'resources\\app.asar', alg: 'SHA256', value: digest }]));
++}
++
++function collectWindowsTransformIngredients() {
++  const configBytes = stableFile(APP, 'electron-builder.test.json');
++  const config = JSON.parse(configBytes), packageBytes = stableFile(APP, 'package.json');
++  if (config.electronVersion !== '44.9.3' || config.electronDist !== 'native-dist/custom-electron'
++      || config.asar !== true || config.electronFuses?.enableEmbeddedAsarIntegrityValidation !== true
++      || config.electronFuses?.onlyLoadAppFromAsar !== true || config.win?.icon !== 'build/icon.ico') fail('package_policy_drift');
++  const icon = stableFile(APP, 'build/icon.ico', 32 * 1024 * 1024);
++  const lockBytes = stableFile(APP, 'package-lock.json');
++  let dependencySources = null, dependencyHold = null;
++  try {
++    const sourceFiles = new Map([...sourceInventory()].map(([relative]) => [relative, stableFile(APP, relative)]));
++    dependencySources = comparePinnedSourceBytes({ lockBytes, sourceFiles });
++  } catch (error) {
++    if (error?.code === 'ENOENT') dependencyHold = 'LOCKED_INSTALLED_SOURCE_FILES_UNAVAILABLE';
++    else throw error;
++  }
++  const unresolved = ['IMMUTABLE_EXPECTED_ASAR_PRODUCER_UNAVAILABLE', 'BUILDER_RESOLVED_METADATA_NOT_RETAINED',
++    'EXACT_EXPECTED_IMAGE_SERIALIZER_UNAVAILABLE', 'INDIRECT_LOADER_REFERENCE_CLOSURE_UNPROVEN'];
++  if (dependencyHold) unresolved.unshift(dependencyHold);
++  return Object.freeze({ schema: 'metaengine.custom-electron.transform-ingredients.v1', state: 'HOLD',
++    scope: 'BUILD_INPUT_COLLECTION_ONLY',
++    package_json_sha256: sha(packageBytes), builder_config_sha256: sha(configBytes),
++    icon: { relative_path: 'build/icon.ico', bytes: icon.length, sha256: sha(icon) },
++    dependency_sources: dependencySources,
++    expected_asar_integrity: null,
++    future_transform_order: ['ASAR_INTEGRITY_RESOURCE', 'SOURCE_ANCHORED_FUSES_4_5', 'VERSION_AND_ICON_RESOURCES'],
++    unresolved_checks: unresolved, authority_effect: false });
++}
++
++if (require.main === module) {
++  try {
++    if (process.argv.length !== 2) fail('arguments_forbidden');
++    process.stdout.write(JSON.stringify(collectWindowsTransformIngredients(), null, 2) + '\n');
++    process.exitCode = 1; // An ingredients record must never be mistaken for package admission.
++  } catch (error) { process.stderr.write(String(error.message) + '\n'); process.exitCode = 1; }
++}
++
++module.exports = { sourceInventory, comparePinnedSourceBytes, deriveAsarIntegrityResource,
++  collectWindowsTransformIngredients };
+diff --git a/apps/metaengine-browser/test/custom-electron-transform-inputs.test.mjs b/apps/metaengine-browser/test/custom-electron-transform-inputs.test.mjs
+new file mode 100644
+index 0000000..f21983e
+--- /dev/null
++++ b/apps/metaengine-browser/test/custom-electron-transform-inputs.test.mjs
+@@ -0,0 +1,183 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import fs from 'node:fs';
++import path from 'node:path';
++import { createHash } from 'node:crypto';
++import { createRequire } from 'node:module';
++import { fileURLToPath } from 'node:url';
++import { spawnSync } from 'node:child_process';
++import { fixedLayoutFixture } from './fixtures/pe-fixed-layout.mjs';
++const require = createRequire(import.meta.url);
++const { sourceInventory, comparePinnedSourceBytes, deriveAsarIntegrityResource,
++  collectWindowsTransformIngredients } = require('../scripts/custom-electron-transform-inputs.cjs');
++const { inspectFixedLayoutTransform, sourceFuseWrites, peChecksum } = require('../scripts/custom-electron-pe-layout.cjs');
++const app = fileURLToPath(new URL('../', import.meta.url));
++const hash = bytes => createHash('sha256').update(bytes).digest('hex');
++
++function sourceBytes(t) {
++  const fixture = process.env.METAENGINE_TEST_TRANSFORM_SOURCE_BYTES;
++  if (fixture) {
++    const data = JSON.parse(fs.readFileSync(fixture));
++    return { lockBytes: Buffer.from(data.lock_base64, 'base64'),
++      sourceFiles: new Map(Object.entries(data.files_base64).map(([name, value]) => [name, Buffer.from(value, 'base64')])) };
++  }
++  try {
++    return { lockBytes: fs.readFileSync(path.join(app, 'package-lock.json')),
++      sourceFiles: new Map([...sourceInventory()].map(([name]) => [name, fs.readFileSync(path.join(app, name))])) };
++  } catch (error) {
++    if (error.code !== 'ENOENT') throw error;
++    t.skip('Exact installed source bytes or explicit read-only archive-byte fixture unavailable'); return null;
++  }
++}
++
++test('source-only ingredient comparison binds all 52 CJS modules and 9 reference sources', t => {
++  const input = sourceBytes(t); if (!input) return;
++  const proof = comparePinnedSourceBytes(input);
++  assert.equal(proof.scope, 'PINNED_SOURCE_BYTES_ONLY');
++  assert.equal(proof.cjs_module_count, 52); assert.equal(proof.reference_source_count, 9);
++  assert.equal(proof.file_count, 63); assert.equal(proof.authority_effect, false);
++});
++
++for (const target of ['node_modules/resedit/dist/index.js', 'node_modules/pe-library/dist/NtExecutable.js',
++  'node_modules/app-builder-lib/node_modules/@electron/fuses/dist/index.js']) {
++  test('changed source bytes cannot reuse the ingredient catalog: ' + target, t => {
++    const input = sourceBytes(t); if (!input) return;
++    const changed = Buffer.from(input.sourceFiles.get(target)); changed[0] ^= 0xff;
++    input.sourceFiles.set(target, changed);
++    assert.throws(() => comparePinnedSourceBytes(input), /source_bytes_drift/);
++  });
++}
++
++test('missing source and changed lock SRI both refuse an ingredient comparison', t => {
++  const input = sourceBytes(t); if (!input) return;
++  const incomplete = new Map(input.sourceFiles); incomplete.delete(incomplete.keys().next().value);
++  assert.throws(() => comparePinnedSourceBytes({ ...input, sourceFiles: incomplete }), /source_inventory_incomplete/);
++  const lock = JSON.parse(input.lockBytes); lock.packages['node_modules/resedit'].integrity = 'sha512-unreviewed';
++  assert.throws(() => comparePinnedSourceBytes({ ...input, lockBytes: Buffer.from(JSON.stringify(lock)) }), /dependency_lock_drift/);
++});
++
++function asar(header, body = Buffer.from('inert payload')) {
++  const text = Buffer.from(header), size = 4 + Math.ceil((4 + text.length) / 4) * 4;
++  const bytes = Buffer.alloc(8 + size + body.length);
++  bytes.writeUInt32LE(4, 0); bytes.writeUInt32LE(size, 4);
++  bytes.writeUInt32LE(size - 4, 8); bytes.writeUInt32LE(text.length, 12);
++  text.copy(bytes, 16); body.copy(bytes, 8 + size); return bytes;
++}
++
++test('pure ASAR utility hashes the exact UTF-8 header string and serializes the builder payload', () => {
++  const header = JSON.stringify({ files: { 'é.mjs': { size: 1, offset: '0' } } });
++  const expected = Buffer.from(JSON.stringify([{ file: 'resources\\app.asar', alg: 'SHA256', value: hash(Buffer.from(header)) }]));
++  assert.deepEqual(deriveAsarIntegrityResource(asar(header)), expected);
++  assert.deepEqual(deriveAsarIntegrityResource(asar(header, Buffer.from('different inert body'))), expected);
++});
++
++test('ASAR utility refuses malformed/truncated pickle, invalid UTF-8 and non-files header', () => {
++  const valid = asar('{"files":{}}');
++  assert.throws(() => deriveAsarIntegrityResource(valid.subarray(0, 15)), /asar_/);
++  const oversized = Buffer.from(valid); oversized.writeUInt32LE(0x7fffffff, 4);
++  assert.throws(() => deriveAsarIntegrityResource(oversized), /asar_header_pickle_invalid/);
++  const utf8 = Buffer.from(valid); utf8[16] = 0xff;
++  assert.throws(() => deriveAsarIntegrityResource(utf8), /asar_header_utf8_invalid/);
++  assert.throws(() => deriveAsarIntegrityResource(asar('\ufeff{"files":{}}')), /asar_header_bom_unsupported/);
++  assert.throws(() => deriveAsarIntegrityResource(asar('{}')), /asar_header_files_invalid/);
++});
++
++test('collector never invents expected ASAR identity and its CLI remains HOLD', () => {
++  const ingredients = collectWindowsTransformIngredients();
++  assert.equal(ingredients.state, 'HOLD'); assert.equal(ingredients.expected_asar_integrity, null);
++  assert.equal(ingredients.authority_effect, false);
++  assert.ok(ingredients.unresolved_checks.includes('IMMUTABLE_EXPECTED_ASAR_PRODUCER_UNAVAILABLE'));
++  const result = spawnSync(process.execPath, [path.join(app, 'scripts/custom-electron-transform-inputs.cjs')], { encoding: 'utf8' });
++  assert.equal(result.status, 1, result.stderr);
++  assert.equal(JSON.parse(result.stdout).state, 'HOLD');
++});
++
++test('direct fixed-layout audit records resource changes but still holds all transformed admission', () => {
++  const { image, final } = fixedLayoutFixture();
++  const report = inspectFixedLayoutTransform(image, final);
++  assert.equal(report.state, 'HOLD'); assert.equal(report.authority_effect, false);
++  assert.equal(report.scope, 'DIRECT_LAYOUT_AND_NONRESOURCE_BYTES_ONLY');
++  assert.notEqual(report.resource_source_sha256, report.resource_candidate_sha256);
++  assert.ok(report.unresolved_checks.includes('EXACT_EXPECTED_RESOURCE_SERIALIZER'));
++  assert.ok(report.unresolved_checks.includes('INDIRECT_LOADER_REFERENCE_CLOSURE'));
++});
++
++const mutations = [
++  ['entry point', f => f.final.writeUInt32LE(0x1011, f.optional + 16)],
++  ['import directory', f => f.final.writeUInt32LE(0x2081, f.optional + 120)],
++  ['import-related data', f => { f.final[f.sections['.rdata'].offset + 200] ^= 1; }],
++  ['second executable section', f => { f.final[f.sections['.code'].offset + 16] ^= 1; }],
++  ['relocation bytes', f => { f.final[f.sections['.reloc'].offset + 16] ^= 1; }],
++  ['overlay bytes', f => { f.final[f.final.length - 1] ^= 1; }],
++  ['writable resource section', f => f.final.writeUInt32LE(0xc0000040, f.sections['.rsrc'].header + 36)],
++  ['executable resource section', f => f.final.writeUInt32LE(0x60000040, f.sections['.rsrc'].header + 36)],
++  ['raw section movement', f => f.final.writeUInt32LE(7168, f.sections['.reloc'].header + 20)],
++  ['direct import span in resources', f => f.final.writeUInt32LE(f.sections['.rsrc'].rva + 100, f.optional + 120)],
++  ['resource virtual span growth', f => { f.final.writeUInt32LE(5000, f.sections['.rsrc'].header + 8); f.final.writeUInt32LE(5000, f.optional + 132); }],
++  ['unchecked checksum', f => f.final.writeUInt32LE(1234, f.optional + 64)],
++  ['other fuse byte', f => { f.final[f.wire + 2] = 48; }],
++  ['disabled required fuse', f => { f.final[f.wire + 6] = 48; }],
++  ['certificate entry', f => { f.final.writeUInt32LE(7168, f.optional + 144); f.final.writeUInt32LE(16, f.optional + 148); }],
++];
++for (const [name, mutate] of mutations) test('direct-layout precondition refuses ' + name, () => {
++  const fixture = fixedLayoutFixture(); mutate(fixture);
++  assert.throws(() => inspectFixedLayoutTransform(fixture.image, fixture.final), /custom_electron_layout_/);
++});
++
++test('unchanged direct layout cannot claim closure of indirect resource references', () => {
++  const f = fixedLayoutFixture();
++  f.image.writeUInt32LE(f.sections['.rsrc'].rva + 100, f.sections['.rdata'].offset + 200);
++  f.final.writeUInt32LE(f.sections['.rsrc'].rva + 100, f.sections['.rdata'].offset + 200);
++  assert.equal(inspectFixedLayoutTransform(f.image, f.final).state, 'HOLD');
++});
++
++test('source fuse anchor is unique and required writes do not change other fuse states', () => {
++  const f = fixedLayoutFixture();
++  assert.deepEqual(sourceFuseWrites(f.image), [{ offset: f.wire + 6, value: 49 }, { offset: f.wire + 7, value: 49 }]);
++  Buffer.from('dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX').copy(f.image, f.sections['.code'].offset);
++  assert.throws(() => sourceFuseWrites(f.image), /unique_source_fuse_wire_required/);
++});
++
++test('nonzero checksum must equal the exact pe-library checksum update', () => {
++  const f = fixedLayoutFixture(); f.image.writeUInt32LE(1, f.optional + 64);
++  f.final.writeUInt32LE(peChecksum(f.final, f.optional + 64), f.optional + 64);
++  assert.equal(inspectFixedLayoutTransform(f.image, f.final).state, 'HOLD');
++});
++
++test('direct-layout precondition refuses sections overlapping mapped headers', () => {
++  const f = fixedLayoutFixture(), shift = 4096, nt = 4096;
++  const source = Buffer.alloc(f.image.length + shift);
++  f.image.copy(source, 0, 0, 64);
++  f.image.copy(source, nt, f.nt, f.table + 5 * 40);
++  f.image.copy(source, 1024 + shift, 1024);
++  source.writeUInt32LE(nt, 0x3c);
++  source.writeUInt32LE(4608, nt + 24 + 60);
++  for (let index = 0; index < 5; index++) {
++    const header = nt + 24 + 240 + index * 40;
++    source.writeUInt32LE(source.readUInt32LE(header + 20) + shift, header + 20);
++  }
++  const candidate = Buffer.from(source);
++  candidate[f.wire + shift + 6] = 49; candidate[f.wire + shift + 7] = 49;
++  assert.throws(() => inspectFixedLayoutTransform(source, candidate), /custom_electron_layout_/);
++});
++
++test('direct-layout precondition requires a raw-backed executable source entry point', () => {
++  for (const entry of [0, 0x2001, 0x4064, 0x1fff]) {
++    const f = fixedLayoutFixture();
++    f.image.writeUInt32LE(entry, f.optional + 16); f.final.writeUInt32LE(entry, f.optional + 16);
++    assert.throws(() => inspectFixedLayoutTransform(f.image, f.final), /source_entry_point_unsupported/);
++  }
++});
++
++test('raw padding participates in virtual mapped-span overlap checks', () => {
++  const f = fixedLayoutFixture(), shift = 8192 - 512;
++  const source = Buffer.alloc(f.image.length + shift);
++  f.image.copy(source, 0, 0, f.sections['.rdata'].offset);
++  f.image.copy(source, f.sections['.rdata'].offset + shift, f.sections['.rdata'].offset);
++  source.writeUInt32LE(8192, f.sections['.text'].header + 16);
++  for (let index = 1; index < 5; index++) {
++    const header = f.table + index * 40;
++    source.writeUInt32LE(source.readUInt32LE(header + 20) + shift, header + 20);
++  }
++  assert.throws(() => inspectFixedLayoutTransform(source, source), /section_overlap/);
++});
+diff --git a/apps/metaengine-browser/test/fixtures/pe-fixed-layout.mjs b/apps/metaengine-browser/test/fixtures/pe-fixed-layout.mjs
+new file mode 100644
+index 0000000..042fdcf
+--- /dev/null
++++ b/apps/metaengine-browser/test/fixtures/pe-fixed-layout.mjs
+@@ -0,0 +1,42 @@
++// Inert layout data only. The resource payload is deliberately not a resource
++// tree, so this fixture cannot qualify serialization, a loader graph or Windows.
++export function fixedLayoutFixture() {
++  const image = Buffer.alloc(7296);
++  const nt = 0x80, optional = nt + 24, table = optional + 240;
++  image.write('MZ'); image.writeUInt32LE(nt, 0x3c); image.write('PE\0\0', nt);
++  image.writeUInt16LE(0x8664, nt + 4); image.writeUInt16LE(5, nt + 6);
++  image.writeUInt16LE(240, nt + 20); image.writeUInt16LE(0x22, nt + 22);
++  image.writeUInt16LE(0x20b, optional); image.writeUInt32LE(0x1010, optional + 16);
++  image.writeBigUInt64LE(0x140000000n, optional + 24);
++  image.writeUInt32LE(4096, optional + 32); image.writeUInt32LE(512, optional + 36);
++  image.writeUInt32LE(0x6000, optional + 56); image.writeUInt32LE(1024, optional + 60);
++  image.writeUInt32LE(16, optional + 108);
++  const rows = [
++    ['.text', 1024, 512, 512, 0x60000020], ['.rdata', 1536, 512, 512, 0x40000040],
++    ['.code', 2048, 512, 512, 0x60000020], ['.rsrc', 2560, 4096, 1000, 0x40000040],
++    ['.reloc', 6656, 512, 100, 0x42000040],
++  ];
++  const sections = {};
++  for (const [index, [name, offset, size, virtualSize, flags]] of rows.entries()) {
++    const header = table + index * 40, rva = (index + 1) * 4096;
++    image.write(name, header); image.writeUInt32LE(virtualSize, header + 8);
++    image.writeUInt32LE(rva, header + 12); image.writeUInt32LE(size, header + 16);
++    image.writeUInt32LE(offset, header + 20); image.writeUInt32LE(flags, header + 36);
++    image.fill(name === '.text' || name === '.code' ? 0xcc : 0x55, offset, offset + size);
++    sections[name] = { header, offset, size, virtualSize, rva };
++  }
++  image.writeUInt32LE(sections['.rdata'].rva + 128, optional + 120);
++  image.writeUInt32LE(20, optional + 124);
++  image.writeUInt32LE(sections['.rsrc'].rva, optional + 128);
++  image.writeUInt32LE(1000, optional + 132);
++  image.writeUInt32LE(sections['.reloc'].rva, optional + 152);
++  image.writeUInt32LE(100, optional + 156);
++  const sentinel = Buffer.from('dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX');
++  const wire = sections['.rdata'].offset + 32 + sentinel.length;
++  sentinel.copy(image, sections['.rdata'].offset + 32);
++  image[wire] = 1; image[wire + 1] = 8;
++  image.set([49, 48, 49, 49, 48, 48, 48, 49], wire + 2);
++  const final = Buffer.from(image); final[wire + 6] = 49; final[wire + 7] = 49;
++  final[sections['.rsrc'].offset + 100] ^= 0xff;
++  return { image, final, nt, optional, table, sections, wire };
++}
+diff --git a/apps/metaengine-browser/test/test_custom_electron_source_build.py b/apps/metaengine-browser/test/test_custom_electron_source_build.py
+index 0cbfeb3..f080837 100644
+--- a/apps/metaengine-browser/test/test_custom_electron_source_build.py
++++ b/apps/metaengine-browser/test/test_custom_electron_source_build.py
+@@ -4,9 +4,9 @@
+ These exercise the builder's fail-closed verification functions against
+ synthetic inputs and the repository's real pins/locks. No Chromium checkout,
+ GN/Ninja invocation, Windows PE execution or network access happens here; the
+-production source build currently HOLDs without a reviewed complete Chromium
+-identity. Positive byte-publication models explicitly mock that unavailable
+-prerequisite; they never qualify source provenance or a complete build.
++production source build currently HOLDs without the enabled DEPS/CIPD/hooks
++composition producer. Positive byte-publication models explicitly mock that
++unavailable prerequisite; they never qualify source provenance or a build.
+ """
+ from contextlib import redirect_stderr
+ import hashlib
+@@ -106,6 +106,15 @@ def source_policy_fixture(chromium):
+     return pins, roots, expected
+ 
+ 
++def component_policy_model(expected):
++    # Wrapper composition model only. The separate policy suite exercises real
++    # Git object replay and complete physical trees; no proof flag enters main.
++    result = mock.Mock()
++    result.verify_component_tree.side_effect = lambda authority, root, name: {
++        'observed_head': expected.get(name + '_commit', '0' * 40)}
++    return result
++
++
+ class PinAndLockTests(unittest.TestCase):
+     def test_real_repository_pins_and_locks_load(self):
+         pins = builder.load_pins()
+@@ -192,7 +201,7 @@ class CheckoutIdentityTests(unittest.TestCase):
+                                cwd=roots[component], check=True)
+                 with mock.patch.dict(builder.EXPECTED, expected), self.assertRaisesRegex(
+                         ValueError, 'upstream_commit_not_exact'):
+-                    builder.verify_source_identity(chromium, pins)
++                    builder.exact_checkout_head(roots[component], expected[component + '_commit'])
+ 
+     def test_dirty_tracked_source_at_the_locked_head_is_refused(self):
+         for component in ('electron', 'node', 'v8', 'boringssl'):
+@@ -203,7 +212,7 @@ class CheckoutIdentityTests(unittest.TestCase):
+                 self.assertEqual(builder.git_head(roots[component]), expected[component + '_commit'])
+                 with mock.patch.dict(builder.EXPECTED, expected), self.assertRaisesRegex(
+                         ValueError, 'upstream_checkout_dirty'):
+-                    builder.verify_source_identity(chromium, pins)
++                    builder.exact_checkout_head(roots[component], expected[component + '_commit'])
+ 
+     def test_extra_untracked_source_at_the_locked_head_is_refused(self):
+         for component in ('electron', 'node', 'v8', 'boringssl'):
+@@ -214,15 +223,18 @@ class CheckoutIdentityTests(unittest.TestCase):
+                 self.assertEqual(builder.git_head(roots[component]), expected[component + '_commit'])
+                 with mock.patch.dict(builder.EXPECTED, expected), self.assertRaisesRegex(
+                         ValueError, 'upstream_checkout_dirty'):
+-                    builder.verify_source_identity(chromium, pins)
++                    builder.exact_checkout_head(roots[component], expected[component + '_commit'])
+ 
+-    def test_clean_four_repo_fixture_cannot_supply_missing_chromium_identity(self):
++    def test_component_producer_does_not_supply_missing_dependency_composition(self):
+         with tempfile.TemporaryDirectory() as temporary:
+             chromium = Path(temporary)
+             pins, _, expected = source_policy_fixture(chromium)
+-            with mock.patch.dict(builder.EXPECTED, expected), self.assertRaisesRegex(
+-                    ValueError, 'chromium_full_source_identity_unavailable'):
++            component_model = component_policy_model(expected)
++            with mock.patch.dict(builder.EXPECTED, expected), \
++                    mock.patch.object(builder, 'load_source_policy', return_value=component_model), \
++                    self.assertRaisesRegex(ValueError, 'gclient_deps_cipd_hook_closure_unavailable'):
+                 builder.verify_source_identity(chromium, pins)
++            self.assertEqual(component_model.verify_component_tree.call_count, 5)
+ 
+     def test_production_entry_holds_before_staging_or_tool_execution(self):
+         with tempfile.TemporaryDirectory() as temporary:
+@@ -241,6 +253,7 @@ class CheckoutIdentityTests(unittest.TestCase):
+                     mock.patch.object(builder.sys, 'argv', arguments), \
+                     mock.patch.dict(builder.os.environ, {'PROCESSOR_ARCHITECTURE': 'AMD64'}), \
+                     mock.patch.object(builder, 'load_pins', return_value=pins), \
++                    mock.patch.object(builder, 'load_source_policy', return_value=component_policy_model(expected)), \
+                     mock.patch.object(builder, 'run_interface_checker') as checker, \
+                     mock.patch.object(builder, 'verify_cryptographic_prerequisites') as crypto, \
+                     mock.patch.object(builder, 'stage_native_sources') as stage, \
+@@ -248,7 +261,7 @@ class CheckoutIdentityTests(unittest.TestCase):
+                 with self.assertRaises(SystemExit) as raised:
+                     builder.main()
+             self.assertEqual(raised.exception.code, 1)
+-            self.assertIn('chromium_full_source_identity_unavailable', stderr.getvalue())
++            self.assertIn('gclient_deps_cipd_hook_closure_unavailable', stderr.getvalue())
+             checker.assert_not_called()
+             crypto.assert_not_called()
+             stage.assert_not_called()
+@@ -336,10 +349,10 @@ class PublishDistributionTests(unittest.TestCase):
+         openssl = {'openssl_version': '3.5.9', 'signature_verified': True,
+                    'boringssl_commit': builder.EXPECTED['boringssl_commit']}
+         manifest = native_manifest if native_manifest is not None else {'electron-original-main/BUILD.gn': 'a' * 64}
+-        # MODEL ONLY: bypass only the known missing complete-Chromium
++        # MODEL ONLY: bypass only the known missing complete composition
+         # prerequisite to exercise byte staging, never a production admission.
+         with mock.patch.object(builder, 'REPOSITORY', repository), \
+-                mock.patch.object(builder, 'require_reviewed_chromium_identity'):
++                mock.patch.object(builder, 'require_gclient_dependency_closure'):
+             receipt = builder.publish_distribution(dist_zip, linked, destination, receipt_path,
+                                                     heads, pins, openssl, manifest)
+         return receipt, destination, receipt_path
+@@ -420,12 +433,12 @@ gate.checkDist({appRoot: process.argv[2], dist: gate.DIST_REL,
+                 with self.assertRaisesRegex(ValueError, 'receipt_checkout_heads_'):
+                     builder.build_receipt(heads, {}, {}, {}, 'a' * 64, [])
+ 
+-    def test_missing_chromium_identity_blocks_direct_receipt_and_publication(self):
++    def test_missing_dependency_composition_blocks_direct_receipt_and_publication(self):
+         with tempfile.TemporaryDirectory() as temporary:
+             root = Path(temporary)
+-            with self.assertRaisesRegex(ValueError, 'chromium_full_source_identity_unavailable'):
++            with self.assertRaisesRegex(ValueError, 'gclient_deps_cipd_hook_closure_unavailable'):
+                 builder.build_receipt(locked_heads(), {}, {}, {}, 'a' * 64, [])
+-            with self.assertRaisesRegex(ValueError, 'chromium_full_source_identity_unavailable'):
++            with self.assertRaisesRegex(ValueError, 'gclient_deps_cipd_hook_closure_unavailable'):
+                 builder.publish_distribution(root / 'missing.zip', root / 'missing.exe',
+                     root / 'dist', root / 'receipt.json', locked_heads(), {}, {}, {})
+             self.assertEqual(list(root.iterdir()), [])
+diff --git a/apps/metaengine-browser/test/test_custom_electron_source_policy.py b/apps/metaengine-browser/test/test_custom_electron_source_policy.py
+new file mode 100644
+index 0000000..60e3e1c
+--- /dev/null
++++ b/apps/metaengine-browser/test/test_custom_electron_source_policy.py
+@@ -0,0 +1,235 @@
++#!/usr/bin/env python3
++"""Real Git/object/physical-byte policy regressions with inert small fixtures."""
++import hashlib
++import importlib.util
++import json
++import os
++from pathlib import Path
++import subprocess
++import tempfile
++import unittest
++from unittest import mock
++
++SCRIPT = Path(__file__).resolve().parents[1] / 'scripts/custom-electron-source-policy.py'
++spec = importlib.util.spec_from_file_location('component_source_policy_tests', SCRIPT)
++policy = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(policy)
++
++
++def run(repo, *args):
++    result = subprocess.run(policy.git_arguments(repo, *args), capture_output=True,
++                            env=policy.environment(), check=True)
++    return result.stdout
++
++
++def commit(repo, message):
++    run(repo, 'add', '-A')
++    run(repo, '-c', 'user.name=Component Model', '-c', 'user.email=model@example.invalid',
++        '-c', 'commit.gpgsign=false', 'commit', '-qm', message)
++    return run(repo, 'rev-parse', 'HEAD').decode().strip()
++
++
++class ComponentPolicyTests(unittest.TestCase):
++    def fixture(self):
++        temporary = tempfile.TemporaryDirectory(prefix='component-source-policy-model-')
++        self.addCleanup(temporary.cleanup)
++        root = Path(temporary.name)
++        node, electron = root / 'node', root / 'electron'
++        node.mkdir()
++        electron.mkdir()
++        run(node, 'init', '--quiet')
++        run(electron, 'init', '--quiet')
++        (node / 'main.cc').write_bytes(b'original source\n')
++        (node / 'binary.dat').write_bytes(b'\0original\xff')
++        (node / '.gitignore').write_text('ignored-extra.cc\n')
++        base = commit(node, 'base')
++        base_tree = run(node, 'rev-parse', 'HEAD^{tree}').decode().strip()
++        (node / 'main.cc').write_bytes(b'official first patch\n')
++        (node / 'binary.dat').write_bytes(b'\0official binary patch\xfe')
++        first = run(node, 'diff', '--binary', '--full-index')
++        commit(node, 'official patch one')
++        (node / 'extra-official.cc').write_bytes(b'official added source\n')
++        run(node, 'add', 'extra-official.cc')
++        second = run(node, 'diff', '--cached', '--binary', '--full-index')
++        commit(node, 'official patch two')
++        final_tree = run(node, 'rev-parse', 'HEAD^{tree}').decode().strip()
++        patches = electron / 'patches/node'
++        patches.mkdir(parents=True)
++        (patches / '.patches').write_text('first.patch\nsecond.patch\n')
++        (patches / 'first.patch').write_bytes(first)
++        (patches / 'second.patch').write_bytes(second)
++        authority = commit(electron, 'official patch authority model')
++        authority_tree = run(electron, 'rev-parse', 'HEAD^{tree}').decode().strip()
++        for name, value in (('ELECTRON_COMMIT', authority), ('ELECTRON_TREE', authority_tree)):
++            patch = mock.patch.object(policy, name, value)
++            patch.start()
++            self.addCleanup(patch.stop)
++        for target, values in ((policy.COMPONENTS, {'node': (base, 'patches/node')}),
++                               (policy.KNOWN_BASE_TREES, {'node': base_tree})):
++            patch = mock.patch.dict(target, values)
++            patch.start()
++            self.addCleanup(patch.stop)
++        return root, electron, node, final_tree
++
++    def test_complete_ordered_binary_tree_replay_and_physical_checkout(self):
++        _, electron, node, expected = self.fixture()
++        before = {name: (node / '.git' / name).read_bytes() for name in ('HEAD', 'index')}
++        proof = policy.verify_component_tree(electron, node, 'node')
++        self.assertEqual(proof['expected_tree'], expected)
++        self.assertEqual(len(proof['patches']), 2)
++        self.assertEqual(proof['scope'], 'COMPLETE_COMPONENT_GIT_TREES')
++        self.assertTrue(proof['physical_tree_verified'])
++        self.assertFalse(proof['dependency_closure_verified'])
++        self.assertFalse(proof['authority_effect'])
++        self.assertEqual(before, {name: (node / '.git' / name).read_bytes() for name in before})
++
++    def test_index_assume_unchanged_does_not_hide_physical_source_drift(self):
++        _, electron, node, _ = self.fixture()
++        run(node, 'update-index', '--assume-unchanged', 'main.cc')
++        (node / 'main.cc').write_bytes(b'unreviewed physical source\n')
++        self.assertEqual(run(node, 'status', '--porcelain'), b'')
++        with self.assertRaisesRegex(ValueError, 'canonical_checkout_representation_mismatch'):
++            policy.verify_component_tree(electron, node, 'node')
++
++    def test_ignored_extra_source_is_not_a_permitted_boundary(self):
++        _, electron, node, _ = self.fixture()
++        (node / 'ignored-extra.cc').write_bytes(b'unreviewed ignored source\n')
++        self.assertEqual(run(node, 'status', '--porcelain'), b'')
++        with self.assertRaisesRegex(ValueError, 'extra_physical_file'):
++            policy.verify_component_tree(electron, node, 'node')
++
++    def test_unreviewed_descendant_outside_patches_is_rejected(self):
++        _, electron, node, _ = self.fixture()
++        (node / 'unreviewed.cc').write_bytes(b'unreviewed descendant source\n')
++        commit(node, 'not an official patch')
++        with self.assertRaisesRegex(ValueError, 'observed_component_tree_mismatch'):
++            policy.verify_component_tree(electron, node, 'node')
++
++    def test_patch_worktree_tampering_cannot_replace_pinned_git_object_bytes(self):
++        _, electron, node, expected = self.fixture()
++        (electron / 'patches/node/first.patch').write_bytes(b'not official patch content')
++        with policy.derive_component_tree(electron, node, 'node') as (proof, _, _):
++            self.assertEqual(proof['expected_tree'], expected)
++            self.assertEqual(len(proof['patches']), 2)
++            self.assertFalse(proof['physical_tree_verified'])
++
++    def test_complete_canonical_materialization_is_fresh_and_reverified(self):
++        root, electron, node, expected = self.fixture()
++        output = root / 'canonical-source'
++        with policy.derive_component_tree(electron, node, 'node') as (proof, entries, objects):
++            result = policy.materialize_canonical_tree(output, entries, objects)
++            self.assertTrue(result['physical_tree_verified'])
++            self.assertEqual(proof['expected_tree'], expected)
++            self.assertEqual((output / 'binary.dat').read_bytes(), b'\0official binary patch\xfe')
++            with self.assertRaisesRegex(ValueError, 'new_canonical_output_required'):
++                policy.materialize_canonical_tree(output, entries, objects)
++
++    def test_raw_profile_refuses_crlf_instead_of_silently_normalizing(self):
++        root, electron, node, _ = self.fixture()
++        with policy.derive_component_tree(electron, node, 'node') as (_, entries, objects):
++            output = root / 'canonical-source'
++            policy.materialize_canonical_tree(output, entries, objects)
++            (output / 'main.cc').write_bytes(b'official first patch\r\n')
++            with self.assertRaisesRegex(ValueError, 'canonical_checkout_representation_mismatch'):
++                policy.physical_tree(output, entries)
++
++    def test_supplied_git_environment_cannot_redirect_index_or_repository(self):
++        root, electron, node, _ = self.fixture()
++        index = node / '.git/index'
++        before = index.read_bytes()
++        with mock.patch.dict(os.environ, {'GIT_INDEX_FILE': str(index),
++                'GIT_DIR': str(root / 'nonexistent'), 'GIT_CONFIG_COUNT': '1',
++                'GIT_CONFIG_KEY_0': 'core.fsmonitor', 'GIT_CONFIG_VALUE_0': 'untrusted-command'}):
++            self.assertTrue(policy.verify_component_tree(electron, node, 'node')['physical_tree_verified'])
++        self.assertEqual(index.read_bytes(), before)
++
++    def test_promisor_repository_is_rejected_before_any_lazy_fetch(self):
++        _, electron, node, _ = self.fixture()
++        run(node, 'config', 'remote.origin.promisor', 'true')
++        with self.assertRaisesRegex(ValueError, 'partial_clone_or_external_filter_forbidden'):
++            policy.verify_component_tree(electron, node, 'node')
++
++    def test_included_local_configuration_is_refused_before_object_access(self):
++        root, electron, node, _ = self.fixture()
++        included = root / 'outside-config'
++        included.write_text('[remote "model"]\n promisor = true\n[filter "model"]\n clean = untrusted-command\n')
++        run(node, 'config', 'include.path', str(included))
++        with mock.patch.object(policy, 'Objects') as objects, self.assertRaisesRegex(
++                ValueError, 'local_config_composition_forbidden'):
++            policy.verify_component_tree(electron, node, 'node')
++        objects.assert_not_called()
++
++    def test_false_mixed_case_includeif_is_also_refused(self):
++        root, electron, node, _ = self.fixture()
++        included = root / 'outside-config'
++        included.write_text('[remote "model"]\n promisor = true\n')
++        with (node / '.git/config').open('a') as config:
++            config.write('[IncludeIf "gitdir:/condition-never-matches/"]\n Path = ' + str(included) + '\n')
++        with mock.patch.object(policy, 'Objects') as objects, self.assertRaisesRegex(
++                ValueError, 'local_config_composition_forbidden'):
++            policy.verify_component_tree(electron, node, 'node')
++        objects.assert_not_called()
++
++    def test_worktree_configuration_cannot_hide_a_promisor_or_filter(self):
++        _, electron, node, _ = self.fixture()
++        run(node, 'config', 'extensions.worktreeConfig', 'true')
++        (node / '.git/config.worktree').write_text(
++            '[remote "model"]\n promisor = true\n[filter "model"]\n clean = untrusted-command\n')
++        with mock.patch.object(policy, 'Objects') as objects, self.assertRaisesRegex(
++                ValueError, 'local_config_composition_forbidden'):
++            policy.verify_component_tree(electron, node, 'node')
++        objects.assert_not_called()
++
++    def test_external_filter_configuration_is_refused(self):
++        _, electron, node, _ = self.fixture()
++        run(node, 'config', 'filter.model.clean', 'untrusted-command')
++        with self.assertRaisesRegex(ValueError, 'partial_clone_or_external_filter_forbidden'):
++            policy.verify_component_tree(electron, node, 'node')
++
++    def test_replacement_refs_are_refused(self):
++        _, electron, node, _ = self.fixture()
++        base = policy.COMPONENTS['node'][0]
++        run(node, 'update-ref', 'refs/replace/' + base,
++            run(node, 'rev-parse', 'HEAD').decode().strip())
++        with self.assertRaisesRegex(ValueError, 'replacement_objects_forbidden'):
++            policy.verify_component_tree(electron, node, 'node')
++
++    @unittest.skipIf(os.name == 'nt', 'Windows does not expose the Git executable bit as a POSIX mode')
++    def test_executable_mode_drift_is_refused_even_when_blob_bytes_match(self):
++        root, electron, node, _ = self.fixture()
++        with policy.derive_component_tree(electron, node, 'node') as (_, entries, objects):
++            output = root / 'canonical-source'
++            policy.materialize_canonical_tree(output, entries, objects)
++            (output / 'main.cc').chmod(0o755)
++            with self.assertRaisesRegex(ValueError, 'physical_file_mode_mismatch'):
++                policy.physical_tree(output, entries)
++
++    def test_composed_external_root_is_not_silently_ignored(self):
++        _, electron, node, _ = self.fixture()
++        (node / 'unqualified-electron-root').mkdir()
++        with self.assertRaisesRegex(ValueError, 'extra_physical_directory'):
++            policy.verify_component_tree(electron, node, 'node')
++
++    def test_reviewed_symlink_targets_and_modes_are_exact(self):
++        _, _, node, _ = self.fixture()
++        root = node.parent / 'physical-only'
++        root.mkdir()
++        target = root / 'target'
++        target.write_bytes(b'file')
++        target.chmod(0o644)
++        try:
++            (root / 'link').symlink_to('target')
++        except OSError:
++            self.skipTest('Host cannot create a source symlink')
++        oid = lambda data: hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
++        entries = [{'path': 'target', 'mode': '100644', 'oid': oid(b'file')},
++                   {'path': 'link', 'mode': '120000', 'oid': oid(b'target')}]
++        self.assertTrue(policy.physical_tree(root, entries)['physical_tree_verified'])
++        (root / 'link').unlink()
++        (root / 'link').symlink_to('../unreviewed')
++        with self.assertRaisesRegex(ValueError, 'canonical_checkout_representation_mismatch'):
++            policy.physical_tree(root, entries)
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/docs/custom-electron-pe-transform-producer-v1.md b/docs/custom-electron-pe-transform-producer-v1.md
+new file mode 100644
+index 0000000..2a87eec
+--- /dev/null
++++ b/docs/custom-electron-pe-transform-producer-v1.md
+@@ -0,0 +1,67 @@
++# PE transform producer prerequisites
++
++The production package gate still accepts only identical complete image bytes.
++No normalized-image admission or Windows qualification is enabled by this work.
++The new source-only modules make a bounded next stage executable:
++
++- `build/custom-electron-transform-inputs.json` records SRI-derived source
++  metadata and hashes for 52 resedit/pe-library CommonJS modules, their package
++  metadata and nine separately declared builder/fuse reference files.
++- `scripts/custom-electron-transform-inputs.cjs` compares installed source
++  bytes to that catalog without importing/executing dependency code. It reads
++  only fixed project config/lock/icon paths and refuses an arbitrary expected
++  ASAR path, callback or receipt flag. Its ASAR-header utility processes data
++  only; it does not make that data authoritative.
++- `scripts/custom-electron-pe-layout.cjs` audits a narrow fixed layout and
++  nonresource byte preconditions. Every result remains HOLD, including a
++  structurally acceptable resource change. Direct directory equality cannot
++  prove that indirect imports/TLS/load-config/relocations or other consumers
++  do not reference changed resource bytes.
++
++Run the diagnostic from `apps/metaengine-browser`:
++
++```sh
++node scripts/custom-electron-transform-inputs.cjs
++```
++
++Exit 1/HOLD is deliberate. This workspace has no installed dependency sources,
++and the original expected-resource producer is absent. Current reasons are
++`LOCKED_INSTALLED_SOURCE_FILES_UNAVAILABLE`,
++`IMMUTABLE_EXPECTED_ASAR_PRODUCER_UNAVAILABLE`,
++`BUILDER_RESOLVED_METADATA_NOT_RETAINED`,
++`EXACT_EXPECTED_IMAGE_SERIALIZER_UNAVAILABLE` and
++`INDIRECT_LOADER_REFERENCE_CLOSURE_UNPROVEN`.
++
++## Concrete producer and qualification steps
++
++1. Extend the original source-authoritative ASAR writer to retain its completed
++   immutable expected bytes/header and resolved appInfo/version/icon inputs
++   before candidate readback. The current afterPack context exposes candidate
++   resources and cannot supply its own expected integrity. Use a private
++   producer-owned handoff, not a caller-provided expected path/hash/flag.
++2. Verify the exact installed source closure against the lock-derived catalog
++   before loading any transform module. Restrict module resolution to the
++   reviewed graph; reject unexpected imports, aliases and mutation. The 52
++   modules and nine reference files are data ingredients, not a full qualified
++   transform-execution closure or release authority.
++3. From the retained pristine unsigned image, deterministically serialize ASAR
++   INTEGRITY/ELECTRONASAR resources, then required source-anchored fuse indices
++   4/5, then exact product metadata/icon resources. Match pinned builder order:
++   ASAR resources already precede afterPack; fuses/resources/signing follow it.
++   Compare each candidate against every independently produced expected byte.
++4. Independently enforce the narrow structural policy: unsigned PE32+ x64,
++   fixed section/raw/RVA/aligned spans, no overlap/growth/movement, resources
++   readable/nonwritable/nonexecutable, all other headers and nonresource bytes
++   unchanged except the exact source-anchored fuse positions; use the exact
++   checksum update. Unknown layouts remain HOLD.
++5. Prove complete indirect-loader/reference closure for resource edits and
++   exercise adversarial fixtures. The current structural audit records this
++   unresolved obligation; it cannot replace it with a success boolean.
++6. Qualify the exact retained producer, serializer, loader verifier and bytes
++   on an authorized isolated Windows build host. Preserve existing internal
++   release signatures, native admission and the user's Authenticode policy as
++   separate requirements. Do not disable ASAR integrity/fuses to obtain equality.
++
++There is no command or flag in this patch that fabricates these missing
++implementations. A source-level test run using verified archive bytes as data
++is not an installed dependency, executed vendor code, ready PE or working client.
+diff --git a/docs/custom-electron-source-producer-v1.md b/docs/custom-electron-source-producer-v1.md
+new file mode 100644
+index 0000000..9243b68
+--- /dev/null
++++ b/docs/custom-electron-source-producer-v1.md
+@@ -0,0 +1,99 @@
++# Complete component source producer
++
++`apps/metaengine-browser/scripts/custom-electron-source-policy.py` is a runnable
++source-only producer. It does not execute upstream hooks/scripts, download
++objects, compile code, qualify Windows, or grant runtime/release authority.
++It replaces the former missing-Chromium-identity placeholder with concrete
++component derivation and physical readback. The remaining composition boundary
++is explicit rather than a caller-authored success flag.
++
++## Established identities
++
++The existing locked Electron commit is
++`c542df1ecbc2c2978e8f53f8c7baf602404d166f`, tree
++`328891d1f8b4d93d49c9f31332baf75fa726cb6e`. Its DEPS names Chromium tag
++`152.0.7977.167`. The official Chromium GitHub mirror resolves that tag to
++`dd78960ccd8a03a2fe1f629543d27783885b78e9`; hashing the raw commit object confirms
++that ID and its embedded tree `63b2edfe4c6ae23d2fd3424cde3e529db49f7068`.
++The declared Chromium DEPS bytes match the existing SHA256 pin. Chromium tree
++contents and a physical Chromium checkout were not acquired or qualified here.
++
++Node base `f14cd3aa7bf9ca8df2cc5b8bb14beb0f335b1d93` has tree
++`409a26f676d83fa6e1b0bfdb1c10d6878845c071`. All 64 patches from the locked
++Electron `patches/node/.patches`, in order, derive posttree
++`92f36398f6bacb44cbba33fea5b902898ac8ef9a`. An independent upstream-equivalent
++`git am --keep-non-patch --keep-cr` replay produced the same complete tree.
++All 46,474 entries and 639,931,050 canonical raw source bytes, including six
++reviewed symlink targets, were physically reread. The eight prior interface
++hashes also agree, but are no longer the complete Node identity check.
++
++## Producer contract
++
++Inputs are full preprovisioned object repositories. The producer verifies raw
++Git object hashes, fixed commit/tree identities, every ordered patch blob and
++the complete resulting tree. Replay uses private index/object storage; supplied
++source repositories, HEAD and indexes are not modified. Replacement refs,
++grafts, local include/includeIf/worktreeConfig composition, external filters
++and promisor repositories are refused before object access; Git environment
++redirection is removed and lazy fetch is disabled.
++
++Physical verification reads all files independently of Git index assume/skip
++bits, compares exact modes/bytes and reviewed symlink targets, and refuses
++extra or ignored files/directories. Gitlink dependencies remain unqualified.
++This is a point-in-time readback, not continuous source custody through a build.
++
++The profile is `canonical-raw-git-blobs-v1`. Normal upstream attributes can
++change physical checkout representation: two Node paths have pinned CRLF
++checkout rules. Those bytes are not silently normalized. Use a new canonical
++export or provide independently materialized raw blobs; ordinary Windows
++checkout representation remains unqualified. No Windows build result follows
++from a successful Linux source proof.
++
++From the repository root, with repositories already provisioned:
++
++```sh
++python3 -B apps/metaengine-browser/scripts/custom-electron-source-policy.py \
++  --electron /prepared/electron --checkout /prepared/node --component node \
++  --derive-only --output /new/node-expected-tree.json
++
++python3 -B apps/metaengine-browser/scripts/custom-electron-source-policy.py \
++  --electron /prepared/electron --checkout /prepared/node --component node \
++  --canonical-output /new/node-raw --output /new/node-materialized.json
++
++python3 -B apps/metaengine-browser/scripts/custom-electron-source-policy.py \
++  --electron /prepared/electron --checkout /prepared/node --component node \
++  --physical-tree /prepared/node-raw --output /new/node-readback.json
++```
++
++`--derive-only` records `physical_tree_verified:false`. The other two modes
++perform complete raw readback; outputs must be new. Omitting these options
++checks the supplied checkout's HEAD tree and physical source against the fully
++derived tree. The same interface supports `electron`, `chromium`, `v8` and
++`boringssl`; every component's entire official series is applied. Chromium,
++V8 and BoringSSL complete postpatch replay was not run in this environment.
++Missing objects fail locally; this command never fetches them.
++
++## Remaining composition producer
++
++Electron's patch configuration names 19 repositories; the five component
++proofs do not qualify all enabled build inputs. The next producer must:
++
++1. Interpret the exact pinned Electron/Chromium DEPS and conditions for the
++   selected Windows x64/custom variables using a reviewed interpreter/tool
++   identity, producing the complete selected repository and boundary set.
++2. Verify every selected repository's immutable base and whole official patch
++   series, plus exact physical representation. Authenticate every nested
++   boundary independently; never ignore arbitrary gclient directories.
++3. Bind CIPD instances, GCS/digest-selected resources, hooks, generated files,
++   compiler/SDK/tool binaries and their immutable dependency closure.
++4. Retain the verified inputs through GN/build, detect mutation, and connect
++   the original producer directly to receipt/publication. A caller JSON,
++   callback, path or `verified:true` field is not that connection.
++
++The current builder stops before stage/GN/receipt/publication with
++`custom_electron_gclient_deps_cipd_hook_closure_unavailable` once its component
++prerequisites pass. A composed gclient tree can instead refuse earlier at an
++unqualified nested boundary or checkout representation. Receipt helpers and
++the real package gate retain conservative base-head checks until a reviewed
++composition-proof handoff replaces them; a source component proof is not a
++production receipt input. Existing release signatures remain independent.
+diff --git a/docs/guardian-custom-electron-runtime-packaging-v1.md b/docs/guardian-custom-electron-runtime-packaging-v1.md
+index 5b38585..7e79281 100644
+--- a/docs/guardian-custom-electron-runtime-packaging-v1.md
++++ b/docs/guardian-custom-electron-runtime-packaging-v1.md
+@@ -97,13 +97,18 @@ provenance explicitly. A real git checkout is verified by `git rev-parse`.
+ ## Windows source-build transaction
+ 
+ `apps/metaengine-browser/scripts/custom-electron-source-build.py` is the
+-fail-closed build-host transaction. It now requires exact, clean locked
+-Electron/Node/V8/BoringSSL checkouts; ancestry and a bounded file-hash set do
+-not authorize descendant changes elsewhere. The production path currently
+-holds before staging/build/publication because a reviewed immutable full
+-Chromium identity is absent. Electron's committed Node patches also need a
+-reviewed complete postpatch identity or full replay policy. The remaining
+-stages, once those prerequisites are reviewed, are preimage/postimage and patched-Node byte
++fail-closed build-host transaction. The separate producer
++`scripts/custom-electron-source-policy.py` now derives complete component trees
++from pinned Git objects and every official ordered Electron patch, then checks
++all canonical physical bytes/modes/links. Chromium is fixed at
++`dd78960ccd8a03a2fe1f629543d27783885b78e9`, base tree
++`63b2edfe4c6ae23d2fd3424cde3e529db49f7068`. The full 64-patch Node replay yields
++`92f36398f6bacb44cbba33fea5b902898ac8ef9a`; ancestry alone remains insufficient.
++See [the source producer](custom-electron-source-producer-v1.md) for its exact
++scope, representation and runnable interface. The production path still holds
++before staging/build/publication on the unimplemented enabled gclient/DEPS,
++CIPD, hooks/generated inputs and toolchain composition producer. The remaining
++stages, once that closure is qualified, are preimage/postimage and patched-Node byte
+ verification, the five primary-source-evidence documents, the existing
+ interface checker, GPG re-verification of the OpenSSL archive in an isolated
+ keyring, staging of the complete `native/` tree into
+@@ -120,11 +125,11 @@ binary. Its guarded receipt helper describes the upstream
+ heads, the interface patch and pins digests, the OpenSSL signature identity,
+ the GN target and arguments, the complete staged native-source manifest and
+ the full distribution inventory. Receipt creation and publication currently
+-return `chromium_full_source_identity_unavailable`; no caller flag waives it.
++return `gclient_deps_cipd_hook_closure_unavailable`; no caller flag waives it.
+ 
+ This transaction was **NOT RUN** here: it requires a Windows x64 build host
+ and refuses to run anywhere else (a unit test covers that refusal). Positive
+-receipt/staging models explicitly replace the unavailable Chromium prerequisite
++receipt/staging models explicitly replace the unavailable dependency-closure prerequisite
+ with an inert test double; they do not qualify a production receipt or source
+ build. Existing bounded interface checks do not authenticate the full closure.
+ 
+@@ -152,6 +157,12 @@ the final artifact readback. It fails closed unless:
+   imports, other executable sections, resources and certificates cannot be
+   silently excluded from this comparison.
+ 
++The new [PE input collector and structural audit](custom-electron-pe-transform-producer-v1.md)
++make the next producer's ingredients and refusal checks executable. They do
++not normalize or admit transformed images. In particular, candidate ASAR bytes
++cannot supply their own expected integrity, and direct PE layout equality does
++not prove the closure of indirect loader references into changed resources.
++
+ A stock electron-builder artifact has none of these and fails on multiple
+ levels (model tests cover each). The gate is build metadata, never a runtime
+ admission input: `authority_effect`, `signed`, `windows_qualified` and
+diff --git a/docs/interfaces/custom-electron-runtime-integration-contract.md b/docs/interfaces/custom-electron-runtime-integration-contract.md
+index ea1fe0b..6431027 100644
+--- a/docs/interfaces/custom-electron-runtime-integration-contract.md
++++ b/docs/interfaces/custom-electron-runtime-integration-contract.md
+@@ -63,13 +63,15 @@
+ - Dynamic native addons stay blocked by the pinned `kNoNativeAddons` before
+   any application code, including inherited workers.
+ 
+-The builder requires exact, clean locked Electron/Node/V8/BoringSSL commits;
+-descendants are not authorized by ancestry or a small set of file hashes.
+-The checked-in Chromium tag and DEPS hash do not supply a reviewed immutable
+-full-source identity, so production verification, receipt creation and
+-publication currently HOLD with no caller waiver. A complete Node postpatch
+-identity or reviewed full replay policy is also required for normal patched
+-gclient checkouts. The bounded checks cover the three Electron preimages; the eight
++The complete component producer `scripts/custom-electron-source-policy.py`
++derives expected Git trees from fixed base objects and all ordered official
++patches. Chromium base commit/tree and the complete Node postpatch tree are now
++established; see [source producer](../custom-electron-source-producer-v1.md).
++An unreviewed descendant cannot substitute for the expected tree, and every
++canonical physical source byte/mode/link is checked independently of index flags.
++This is not the enabled DEPS/CIPD/hook/toolchain closure. Production staging,
++receipt creation and publication still HOLD on that explicit missing producer,
++without a caller waiver. The additional bounded checks cover the three Electron preimages; the eight
+ patched Node file hashes; the five primary-source-evidence documents; the
+ existing bounded interface checker (reused, not re-implemented); the GPG
+ signature of the OpenSSL archive in an isolated keyring via the existing
+@@ -82,8 +84,9 @@ freshly linked binary before any distribution directory is published.
+ 
+ The invocation below documents the future interface for an **isolated**
+ Windows x64 builder. It currently remains HOLD even with provisioned tools:
+-the missing reviewed source identities must first be implemented, without
+-inventing pins or accepting a caller's verification flag.
++the complete enabled dependency/CIPD/hook/toolchain composition and checkout
++representation must first be qualified, without inventing pins or accepting
++a caller's verification flag.
+ 
+ ```powershell
+ $src = 'D:\disposable\electron\src'   # pinned gclient checkout, patches applied
+@@ -101,7 +104,7 @@ python "$app\scripts\custom-electron-source-build.py" `
+ 
+ The transaction refuses replay of existing outputs and requires the GN output
+ inside the Chromium checkout. Its guarded publication helpers cannot emit a
+-distribution or receipt while the source-identity prerequisite is unavailable.
++distribution or receipt while that composition prerequisite is unavailable.
+ 
+ ## Honest limits
+ 

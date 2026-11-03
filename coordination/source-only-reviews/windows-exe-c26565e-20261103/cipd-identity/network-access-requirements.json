@@ -1,0 +1,21 @@
+{
+  "denied_official_host": "chrome-infra-packages.appspot.com",
+  "port": 443,
+  "denial_phase": "HTTPS_PROXY_CONNECT",
+  "request_sent_to_origin": false,
+  "minimum_for_resolution": {
+    "egress": "HTTPS/CONNECT TCP443 to chrome-infra-packages.appspot.com",
+    "method": "POST",
+    "path": "/prpc/cipd.Repository/ResolveVersion"
+  },
+  "additional_for_payload": {
+    "method": "POST",
+    "path": "/prpc/cipd.Repository/GetInstanceURL",
+    "host": "chrome-infra-packages.appspot.com",
+    "then": "HTTPS GET to the signed_url returned by the official service",
+    "signed_url_target_host": "UNKNOWN_SERVICE_DID_NOT_RETURN_URL"
+  },
+  "retry_performed": false,
+  "alternative_route_used": false,
+  "network_settings_modified": false
+}

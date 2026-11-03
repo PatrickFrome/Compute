@@ -1,0 +1,243 @@
+{
+  "scope": "DECLARED_NATIVE_WIN_X64_INITIAL_SYNC_TOP_LEVEL_ONLY",
+  "service_access": "DENIED_AT_HTTPS_PROXY_CONNECT",
+  "request_count": 22,
+  "unique_package_version_count": 21,
+  "requests": [
+    {
+      "package": "build/siso/windows-amd64",
+      "version": "git_revision:7bc9a0bfe050ef97e1712ff61c6f11952799e951",
+      "uses": [
+        {
+          "path": "src/third_party/siso/cipd",
+          "package_index": 0
+        }
+      ],
+      "resolved_instance": null
+    },
+    {
+      "package": "chromium/third_party/screen-ai/windows-386",
+      "version": "version:148.13",
+      "uses": [
+        {
+          "path": "src/third_party/screen-ai/windows_386",
+          "package_index": 0
+        }
+      ],
+      "resolved_instance": null
+    },
+    {
+      "package": "chromium/third_party/screen-ai/windows-amd64",
+      "version": "version:148.13",
+      "uses": [
+        {
+          "path": "src/third_party/screen-ai/windows_amd64",
+          "package_index": 0
+        }
+      ],
+      "resolved_instance": null
+    },
+    {
+      "package": "chromium/third_party/typescript/linux-amd64",
+      "version": "version:2@7.0.1-rc",
+      "uses": [
+        {
+          "path": "src/third_party/typescript/linux-amd64/src",
+          "package_index": 0
+        }
+      ],
+      "resolved_instance": null
+    },
+    {
+      "package": "chromium/third_party/typescript/windows-amd64",
+      "version": "version:2@7.0.1-rc",
+      "uses": [
+        {
+          "path": "src/third_party/typescript/windows-amd64/src",
+          "package_index": 0
+        }
+      ],
+      "resolved_instance": null
+    },
+    {
+      "package": "chromium/third_party/updater/chrome_win_arm64",
+      "version": "version:2@152.0.7933.0",
+      "uses": [
+        {
+          "path": "src/third_party/updater/chrome_win_arm64/cipd",
+          "package_index": 0
+        }
+      ],
+      "resolved_instance": null
+    },
+    {
+      "package": "chromium/third_party/updater/chrome_win_x86",
+      "version": "version:2@152.0.7933.0",
+      "uses": [
+        {
+          "path": "src/third_party/updater/chrome_win_x86/cipd",
+          "package_index": 0
+        }
+      ],
+      "resolved_instance": null
+    },
+    {
+      "package": "chromium/third_party/updater/chrome_win_x86_64",
+      "version": "version:2@152.0.7933.0",
+      "uses": [
+        {
+          "path": "src/third_party/updater/chrome_win_x86_64/cipd",
+          "package_index": 0
+        }
+      ],
+      "resolved_instance": null
+    },
+    {
+      "package": "chromium/third_party/updater/chromium_win_arm64",
+      "version": "version:2@1662007",
+      "uses": [
+        {
+          "path": "src/third_party/updater/chromium_win_arm64/cipd",
+          "package_index": 0
+        }
+      ],
+      "resolved_instance": null
+    },
+    {
+      "package": "chromium/third_party/updater/chromium_win_x86",
+      "version": "version:2@1662035",
+      "uses": [
+        {
+          "path": "src/third_party/updater/chromium_win_x86/cipd",
+          "package_index": 0
+        }
+      ],
+      "resolved_instance": null
+    },
+    {
+      "package": "chromium/third_party/updater/chromium_win_x86_64",
+      "version": "version:2@1662007",
+      "uses": [
+        {
+          "path": "src/third_party/updater/chromium_win_x86_64/cipd",
+          "package_index": 0
+        }
+      ],
+      "resolved_instance": null
+    },
+    {
+      "package": "chromium/third_party/webview2",
+      "version": "version:2@1.0.3856.49.r1",
+      "uses": [
+        {
+          "path": "src/third_party/webview2",
+          "package_index": 0
+        }
+      ],
+      "resolved_instance": null
+    },
+    {
+      "package": "chromium/third_party/wtl",
+      "version": "version:2@10.1.0",
+      "uses": [
+        {
+          "path": "src/third_party/wtl",
+          "package_index": 0
+        }
+      ],
+      "resolved_instance": null
+    },
+    {
+      "package": "gn/gn/windows-amd64",
+      "version": "git_revision:641ace93dd9560e75e7add0d08f77b446fbb3b78",
+      "uses": [
+        {
+          "path": "src/buildtools/win",
+          "package_index": 0
+        }
+      ],
+      "resolved_instance": null
+    },
+    {
+      "package": "infra/3pp/tools/7z/windows-amd64",
+      "version": "version:3@26.03",
+      "uses": [
+        {
+          "path": "src/third_party/lzma_sdk/bin/host_platform",
+          "package_index": 0
+        },
+        {
+          "path": "src/third_party/lzma_sdk/bin/win64",
+          "package_index": 0
+        }
+      ],
+      "resolved_instance": null
+    },
+    {
+      "package": "infra/3pp/tools/httpd-php/windows-arm64",
+      "version": "version:3@httpd2.4.55-php8.2.5.chromium.6",
+      "uses": [
+        {
+          "path": "src/third_party/apache-windows-arm64",
+          "package_index": 0
+        }
+      ],
+      "resolved_instance": null
+    },
+    {
+      "package": "infra/3pp/tools/ninja/windows-amd64",
+      "version": "version:3@1.12.1.chromium.4",
+      "uses": [
+        {
+          "path": "src/third_party/ninja",
+          "package_index": 0
+        }
+      ],
+      "resolved_instance": null
+    },
+    {
+      "package": "infra/tools/luci/cas/windows-amd64",
+      "version": "git_revision:9429fac3f8d3e6389ffdafd9d9fa1eb791dd0fe9",
+      "uses": [
+        {
+          "path": "src/tools/luci-go",
+          "package_index": 0
+        }
+      ],
+      "resolved_instance": null
+    },
+    {
+      "package": "infra/tools/luci/isolate/windows-amd64",
+      "version": "git_revision:9429fac3f8d3e6389ffdafd9d9fa1eb791dd0fe9",
+      "uses": [
+        {
+          "path": "src/tools/luci-go",
+          "package_index": 1
+        }
+      ],
+      "resolved_instance": null
+    },
+    {
+      "package": "infra/tools/luci/swarming/windows-amd64",
+      "version": "git_revision:9429fac3f8d3e6389ffdafd9d9fa1eb791dd0fe9",
+      "uses": [
+        {
+          "path": "src/tools/luci-go",
+          "package_index": 2
+        }
+      ],
+      "resolved_instance": null
+    },
+    {
+      "package": "infra/tools/result_adapter/windows-amd64",
+      "version": "git_revision:5fb3ca203842fd691cab615453f8e5a14302a1d8",
+      "uses": [
+        {
+          "path": "src/tools/resultdb",
+          "package_index": 0
+        }
+      ],
+      "resolved_instance": null
+    }
+  ]
+}

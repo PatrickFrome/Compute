@@ -1,0 +1,189 @@
+Independent source-policy review
+2026-11-03; read-only source work in /workspace/metaengine-source/Compute.
+No source/build hooks, packages, compilers, Windows executables, installers,
+database or service operations were executed. Disposable Git source replays
+and evidence exports were created outside the supplied source checkouts.
+
+Verified immutable identities
+
+1. Electron v44.9.3
+   Official GitHub tag object: 0808123e8c647070eb23fb7d9dcd987251a81ed7.
+   Peeled commit: c542df1ecbc2c2978e8f53f8c7baf602404d166f.
+   Raw commit Git SHA1 independently recomputed; 2867 bytes;
+   raw SHA256 7db19e8b64fab77a6e5b98c50bea16e81b7049c89228996bd14f5dae7628f599.
+   Root tree: 328891d1f8b4d93d49c9f31332baf75fa726cb6e; raw tree hash recomputed.
+   3404 recursive entries; no gitlinks or tracked symlinks; input checkout clean.
+
+2. Node v24.22.0
+   Official GitHub tag object: f2bc3c738a0873ecb23e8a09e5c074e412c4c42f.
+   Peeled commit: f14cd3aa7bf9ca8df2cc5b8bb14beb0f335b1d93.
+   Raw commit Git SHA1 independently recomputed; 2613 bytes;
+   raw SHA256 e45027e2443e4f43a0da29e4de5aeed79e0c2bd5ca2d93c6dd5af2a5419037ed.
+   Base tree: 409a26f676d83fa6e1b0bfdb1c10d6878845c071; raw tree hash recomputed.
+   46467 recursive base entries; no gitlinks; six tracked source symlinks;
+   input checkout clean. Tag lookup is not a signature-verification claim.
+
+3. Chromium 152.0.7977.167
+   Pinned Electron DEPS selects this Chromium tag and Node v24.22.0:
+   https://raw.githubusercontent.com/electron/electron/c542df1ecbc2c2978e8f53f8c7baf602404d166f/DEPS
+   Independently queried official GitHub Chromium mirror ref:
+   dd78960ccd8a03a2fe1f629543d27783885b78e9 refs/tags/152.0.7977.167.
+   Raw commit Git SHA1 independently recomputed; 2284 bytes;
+   raw SHA256 9cb149f110f3249a9474523f2264c760a4caf2aba0c6588b3b84ff68d6194e82.
+   Commit embeds root-tree identity 63b2edfe4c6ae23d2fd3424cde3e529db49f7068.
+   This is an exact immutable commitment, not full local checkout qualification:
+   root-tree contents and DEPS tree-membership proof were not acquired here.
+   The separately fetched official mirrored DEPS matches the existing lock:
+   SHA256 c3cd8ae90218c260d5fadbe5d9095164693fe420812218a18dfcf65c3f1743b9,
+   194497 bytes; Git blob 3a60b026a4e39b2eff1ed9ab860107e9e9f57b83.
+   Its literal V8 a11d960c1c22c067ff898ceb4a8e4e0687014d41 and BoringSSL
+   572a4c68475d284b34675f45ddbb9c158ef3c2ae revisions match existing pins.
+
+Input evidence checks
+- Electron DEPS: SHA256 c254ca413381a28243b3808e10dc8842ff0bc09629e1663ee7e09ef79dd4514a;
+  Git blob b1f99e77cb3661760f655d8fb9346351b354bdba; 8442 bytes.
+- Node .patches: SHA256 9c8b37e532a9196abd3844e1f2774ec8cbfbf8fb3ee28850cb3987abc9ab7a4b;
+  Git blob 1c7e2099b98e73e05c251606d8a07555cfc47a42; 3540 bytes;
+  exactly 64 unique ordered safe patch filenames. All 64 patch blob hashes
+  were independently recomputed from pinned Electron Git objects.
+- patches/config.json: SHA256 5fbf6a7e9e641fbff4faa13f30c6c438fbd534292152328d0820cbdee913e489;
+  Git blob 014e36363c511319f0c61651187f5ad33eb5d68c; 19 target repositories.
+- Acquisition documents and exact input records are under source-review-upstream/,
+  particularly component-git-object-verification.json and
+  chromium-independent-identity.json. Existing source pins were not rewritten.
+
+Independent complete Node replay, not an eight-file simulation
+
+The official pinned apply_all_patches.py/lib/git.py use ordered mailbox patches,
+git am --keep-non-patch --keep-cr, and optionally enable three-way merge from
+environment. This review reproduced the ordinary non-three-way operation with
+all 64 original patch blobs and message metadata, with system/global Git config,
+external attributes, signing and hooks disabled, in a NEW disposable checkout.
+No fetched Python or other source script was run.
+
+Result: exactly 64 new patch commits; complete posttree
+92f36398f6bacb44cbba33fea5b902898ac8ef9a. This independently matches the other
+producer's complete alternate-index cached-apply result. Committer-dependent
+postpatch commit IDs were not treated as source pins.
+
+Both complete physical representations were read back:
+- Actual Git checkout: every one of 46474 entries matched its expected blob,
+  mode and symlink bytes, allowing ONLY the two exact committed CRLF conversions.
+- Canonical raw Git export: every one of 46474 entries was written from verified
+  object bytes and independently reread; 639931050 source bytes, six symlinks.
+  Every blob and all eight pre-existing Node interface SHA256 pins matched.
+  All physical names were enumerated, including ignored/untracked candidates;
+  extra files were not silently skipped. Original input checkouts stayed clean.
+- Inventory SHA256:
+  5dc892c62bca7230a66172db2c62527f29b09944f6117b5480b761569641e5d5.
+
+Reproduction/evidence:
+  independent-node-am-replay.py
+  independent-node-am-output.log
+  independent-node-am-review-run.log
+  independent-node-am-readback.py
+  independent-node-am-readback.log
+  independent-node-am-replay.json
+  independent-node-am-file-inventory.json
+  independent-node-posttree-raw/ (canonical source export, never executed)
+The first replay script intentionally exposed the raw-checkout mismatch at
+tools/msvs/find_python.cmd. The second completed explicit-profile verification
+and raw export/readback without replacing or replaying the input checkouts.
+
+Important physical representation finding
+
+core.autocrlf=false does NOT suppress committed eol=crlf rules. Cached attribute
+inspection of all 46474 expected-index paths, with no info/global/system
+attributes, found exactly two CRLF paths: tools/msvs/find_python.cmd and
+vcbuild.bat. Both canonical Git blobs contain LF only; the observed checkouts
+equal deterministic LF-to-CRLF conversion, with no other byte differences.
+Root .gitattributes blob: 36b6c2b11d095bf77fc0d91ecdad630a3fa84675;
+SHA256 fc6037db9077e9052ad40efac95021449ee8fa005b0a0f98195cc61a7c77ef5f.
+Four committed attribute files exist. All paths have filter, ident and
+working-tree-encoding unspecified; V8 has text=auto/eol=lf rules. Full detail:
+independent-node-am-checkout-profile.json. The six exact tracked symlinks are
+listed in source-review-upstream/node-symlink-inventory.json.
+
+Safe feasible source-policy interface
+
+- Derive component identity from the exact official base commit object plus
+  pinned Electron tree and exact ordered .patches/patch Git blobs. Recompute
+  object hashes and whole posttree, including every blob/mode/link, in isolated
+  index/object storage; never --include only eight files or accept ancestry.
+- Compare complete actual source bytes and names with an explicit physical
+  representation. Canonical raw blobs are the minimal implemented profile;
+  ordinary upstream CRLF conversion must HOLD unless the two exact transforms
+  and locked attribute interpretation are separately admitted. Do not execute
+  external filters or normalize arbitrary bytes to make comparisons pass.
+- Keep missing objects, promisor/lazy fetch, replacements/grafts, unreviewed
+  filters, extras and source drift as refusal. Run no source hooks during proof.
+- A component result must carry base commit/tree, patch order/blob/digests,
+  full expected tree, complete manifest and physical profile/readback scope.
+  observed HEAD may be a genuine patched descendant; its tree supplies byte
+  identity, while commit-derived build metadata remains another build input.
+- This proves named component source trees only. Electron's config targets
+  Chromium/Node/V8/BoringSSL plus fifteen other repositories; Chromium DEPS also
+  selects recursive Git, CIPD and GCS inputs. Full enabled conditions, external
+  roots, exact package instances, hooks/generated outputs, PGO and toolchains
+  require a separate composition producer. Do not blanket-ignore external
+  checkout directories or turn component evidence into a full build receipt.
+- The production build/publication boundary must retain an explicit
+  gclient_deps_cipd_hook_closure_unavailable HOLD until that producer exists.
+
+Focused implementation audit (completed after fixes)
+
+- Initial independent test_custom_electron_source_policy.py run: 11 passed.
+- Added separate small-fixture negatives for actual replacement refs, grafts,
+  traversal tree entries, hardlinks, executable-mode drift, extra directories,
+  aliased source roots and hook/fsmonitor tripwires: seven passed.
+- Two additional cases exposed a concrete guard gap: --local config queries
+  omit include/includeIf files and enabled config.worktree scope. Both could
+  hide promisor/filter settings from repository_controls. No remote or filter
+  was executed: the failing probes called only the metadata guard with all
+  fixture objects already present. The implementation agent fixed both.
+- Before-fix evidence: source-policy-independent-negatives-before-fix.log
+  (9 cases, 7 pass, 2 failures). Reproducer:
+  source-policy-independent-negatives.py.
+- Final code review: repository_controls now queries --local --no-includes
+  raw key names before object access, case-folds keys, and refuses any include,
+  includeIf (even false conditions), or extensions.worktreeConfig with
+  local_config_composition_forbidden. No config source is silently broadened.
+- Final independent commands:
+  python3 -B -m unittest discover -s apps/metaengine-browser/test \
+    -p test_custom_electron_source_policy.py -v
+  Result: 17 passed, zero failures. Log:
+  source-policy-independent-unit-tests.log.
+  python3 -B /workspace/metaengine-next-evidence/source-policy-independent-negatives.py
+  Result: 9 passed, zero failures. Log:
+  source-policy-independent-negatives.log. Only the two probe expected reasons
+  were updated to the new fixed refusal category; neither refusal was loosened.
+- No remaining defect found in the authorized component-proof scope. Object
+  hashes bind full source trees; actual filesystem readback does not trust the
+  index's assume/skip flags. Promisor/config/filter, aliases, extras, modes,
+  traversal and replacement controls are covered by the focused checks.
+- The component producer currently uses canonical raw Git bytes and correctly
+  refuses arbitrary CRLF normalization. Ordinary composed gclient checkout
+  boundaries remain outside its isolated component-tree scope; no blanket
+  external-directory exclusions were approved. The builder's full closure
+  refusal must remain on verification and receipt/publication paths.
+- Two conservative integration limits were sent to the implementation agent:
+  composed Chromium checkout roots contain external solution directories that
+  cannot be blanket-ignored by a component verifier; legacy receipt head-shape
+  checks still expect upstream base heads and are not a producer for genuine
+  postpatch descendant metadata. Both currently refuse, and neither replaces
+  or waives the explicit dependency-composition HOLD.
+
+Blocked/unperformed actions
+
+- Requested exact public GitHub API metadata read (api.github.com Chromium tag)
+  failed CONNECT 403. Gitiles access was already denied in the parent research.
+  Neither denied endpoint was retried through another channel. The distinct
+  permitted official github.com Git endpoint supplied refs/objects instead.
+- Reverification of the exact electronjs.org headers tarball and SHASUMS256.txt
+  URLs also failed CONNECT 403; no archive bytes were acquired or extracted.
+  Existing locked tar SHA256 5f75ae1e70e69442c9d23f7d984e8ca211e49c5bee2298ca2d84d3c75c640710
+  and size349406 remain recorded pins, not newly verified tar evidence here.
+  See source-review-upstream/official-header-acquisition-review.json.
+- Full Chromium source/dependency acquisition, actual Windows representation,
+  GN/ninja/compiler work, runtime acceptance and release authority were NOT RUN.
+  No denied action had an uncertain live-machine outcome.

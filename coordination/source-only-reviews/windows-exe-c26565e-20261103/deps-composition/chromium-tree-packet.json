@@ -1,0 +1,10 @@
+{
+  "root_tree": "63b2edfe4c6ae23d2fd3424cde3e529db49f7068",
+  "commit": "dd78960ccd8a03a2fe1f629543d27783885b78e9",
+  "tree_objects": 43092,
+  "raw_tree_bytes": 29623918,
+  "all_object_hashes_checked": true,
+  "source_blob_contents_acquired": false,
+  "checkout_created": false,
+  "scope": "MERKLE_TREE_METADATA_ONLY"
+}

@@ -1,0 +1,12 @@
+{
+  "official_mirror": "https://github.com/chromium/chromium.git",
+  "tag": "152.0.7977.167",
+  "resolved_commit": "dd78960ccd8a03a2fe1f629543d27783885b78e9",
+  "commit_object_sha1_matches": true,
+  "commit_object_sha256": "9cb149f110f3249a9474523f2264c760a4caf2aba0c6588b3b84ff68d6194e82",
+  "root_tree_from_hashed_commit": "63b2edfe4c6ae23d2fd3424cde3e529db49f7068",
+  "root_tree_contents_acquired": false,
+  "source_checkout_qualified": false,
+  "acquisition": "git fetch --filter=tree:0 --depth1 exactcommit; metadata only; no checkout/hook/build",
+  "electron_locked_DEPS_sha256": "c254ca413381a28243b3808e10dc8842ff0bc09629e1663ee7e09ef79dd4514a"
+}

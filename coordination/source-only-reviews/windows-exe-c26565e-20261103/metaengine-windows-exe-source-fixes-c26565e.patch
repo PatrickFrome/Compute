@@ -1,0 +1,864 @@
+diff --git a/apps/metaengine-browser/electron-builder.test.json b/apps/metaengine-browser/electron-builder.test.json
+index c6f6a3d..187f32c 100644
+--- a/apps/metaengine-browser/electron-builder.test.json
++++ b/apps/metaengine-browser/electron-builder.test.json
+@@ -1,6 +1,9 @@
+ {
+   "appId": "com.metaengine.browser.test",
+   "productName": "METAENGINE Browser Test",
++  "electronVersion": "44.9.3",
++  "electronDist": "native-dist/custom-electron",
++  "afterPack": "./scripts/custom-electron-after-pack.cjs",
+   "asar": true,
+   "electronFuses": {
+     "enableEmbeddedAsarIntegrityValidation": true,
+diff --git a/apps/metaengine-browser/scripts/bootstrap-install-and-launch.ps1 b/apps/metaengine-browser/scripts/bootstrap-install-and-launch.ps1
+index 402f480..4ff103f 100644
+--- a/apps/metaengine-browser/scripts/bootstrap-install-and-launch.ps1
++++ b/apps/metaengine-browser/scripts/bootstrap-install-and-launch.ps1
+@@ -25,6 +25,14 @@ function Write-BootstrapProof($Proof) {
+   $json
+ }
+ 
++# RUNNER_TEMP is a CI convention; an ordinary Windows user need not have it.
++# Resolve and validate the common log location before any installer effect.
++$logDirectory = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [System.IO.Path]::GetTempPath() }
++if (-not $logDirectory -or -not [System.IO.Path]::IsPathRooted($logDirectory) `
++    -or -not (Test-Path -LiteralPath $logDirectory -PathType Container)) {
++  throw 'bootstrap_log_directory_unavailable'
++}
++
+ if ($ExpectedInstallerSha256 -notmatch '^[a-fA-F0-9]{64}$') { throw 'bootstrap_installer_sha256_invalid' }
+ if ($ExpectedVersion -notmatch '^\d+\.\d+\.\d+-dev\.\d+\.1$') { throw 'bootstrap_expected_version_invalid' }
+ if (-not (Test-Path -LiteralPath $InstallerPath -PathType Leaf)) { throw 'bootstrap_installer_missing' }
+@@ -128,8 +136,8 @@ $userData = $null
+ $startupJournal = $null
+ $versionProbeVerified = $false
+ if ($PhysicalProof) {
+-  $profileOut = Join-Path $env:RUNNER_TEMP 'bootstrap-profile-probe.out'
+-  $profileErr = Join-Path $env:RUNNER_TEMP 'bootstrap-profile-probe.err'
++  $profileOut = Join-Path $logDirectory 'bootstrap-profile-probe.out'
++  $profileErr = Join-Path $logDirectory 'bootstrap-profile-probe.err'
+   Remove-Item $profileOut,$profileErr -Force -ErrorAction SilentlyContinue
+   $priorProfileWrite = $env:METAENGINE_PROFILE_PROBE_WRITE
+   $env:METAENGINE_PROFILE_PROBE_WRITE = '1'
+@@ -168,8 +176,8 @@ if ($PhysicalProof) {
+ # Assisted NSIS keeps the manual run-after-finish UX, while verified automation uses
+ # a silent install followed by one exact normal launch. This proves the same packaged
+ # entry point without depending on installer UI availability in a CI/session-0 host.
+-$normalOut = if ($env:RUNNER_TEMP) { Join-Path $env:RUNNER_TEMP 'bootstrap-normal-ui.out' } else { Join-Path $env:TEMP 'bootstrap-normal-ui.out' }
+-$normalErr = if ($env:RUNNER_TEMP) { Join-Path $env:RUNNER_TEMP 'bootstrap-normal-ui.err' } else { Join-Path $env:TEMP 'bootstrap-normal-ui.err' }
++$normalOut = Join-Path $logDirectory 'bootstrap-normal-ui.out'
++$normalErr = Join-Path $logDirectory 'bootstrap-normal-ui.err'
+ Remove-Item $normalOut,$normalErr -Force -ErrorAction SilentlyContinue
+ $normal = Start-Process -FilePath $InstalledExePath -PassThru -RedirectStandardOutput $normalOut -RedirectStandardError $normalErr
+ $null = $normal.Handle
+diff --git a/apps/metaengine-browser/scripts/custom-electron-package-gate.cjs b/apps/metaengine-browser/scripts/custom-electron-package-gate.cjs
+index 5c4eb66..468c165 100644
+--- a/apps/metaengine-browser/scripts/custom-electron-package-gate.cjs
++++ b/apps/metaengine-browser/scripts/custom-electron-package-gate.cjs
+@@ -138,6 +138,13 @@ function checkDist({ appRoot = APP, dist, receipt, configuration, outputExecutab
+   if (receiptStat.isSymbolicLink() || !receiptStat.isFile()) {
+     stop('receipt_regular_file_required');
+   }
++  let distStat;
++  try {
++    distStat = fs.lstatSync(distAbsolute);
++  } catch {
++    stop('distribution_directory_required');
++  }
++  if (!distStat.isDirectory() || distStat.isSymbolicLink()) stop('distribution_directory_required');
+   const evidence = JSON.parse(fs.readFileSync(receiptAbsolute, 'utf8'));
+   const native = nativeRoot || path.join(root, 'native');
+   const actualManifest = nativeSourceManifest(native);
+@@ -214,7 +221,8 @@ function checkDist({ appRoot = APP, dist, receipt, configuration, outputExecutab
+ // electron-builder hook entry: reject a stock runtime before any staging work
+ // (beforePack) and re-verify the packaged executable's code identity (afterPack).
+ function checkBuilderContext(context, { after = false, appRoot = APP, nativeRoot = null } = {}) {
+-  if (process.platform !== 'win32' || String(context.arch) !== '1') {
++  if (process.platform !== 'win32' || context?.electronPlatformName !== 'win32'
++      || String(context.arch) !== '1') {
+     // electron-builder's Arch.x64 enum is integer 1.
+     stop('win_x64_only');
+   }
+diff --git a/apps/metaengine-browser/scripts/custom-electron-source-build.py b/apps/metaengine-browser/scripts/custom-electron-source-build.py
+index ec2fe17..2620c82 100644
+--- a/apps/metaengine-browser/scripts/custom-electron-source-build.py
++++ b/apps/metaengine-browser/scripts/custom-electron-source-build.py
+@@ -318,7 +318,7 @@ def stage_native_sources(chromium):
+ 
+ def apply_interface_patch(chromium, pins):
+     electron = chromium / 'electron'
+-    patch = electron / NATIVE_REL / 'electron-original-main/electron-44.9.3-original-main-entry.interface.patch'
++    patch = chromium / NATIVE_REL / 'electron-original-main/electron-44.9.3-original-main-entry.interface.patch'
+     for arguments in (['--check'], []):
+         result = subprocess.run(['git', 'apply', *arguments, str(patch)],
+                                 cwd=electron, text=True, capture_output=True)
+@@ -382,13 +382,21 @@ def build_receipt(heads, pins, openssl, native_manifest, exe_sha256, inventory):
+         'electron': EXPECTED['electron_version'],
+         'node': EXPECTED['node_version'],
+         'origin': {
+-            'electron': heads['electron'], 'node': heads['node'],
+-            'v8': heads['v8'], 'boringssl': heads['boringssl'],
++            'electron': EXPECTED['electron_commit'], 'node': EXPECTED['node_commit'],
++            'v8': EXPECTED['v8_commit'], 'boringssl': EXPECTED['boringssl_commit'],
+             'chromium_tag': EXPECTED['chromium_tag'],
+         },
++        # Electron's hooks can commit their patch series on top of the locked
++        # upstream revisions. Keep those observed heads as build evidence;
++        # origin is the upstream lock identity checked by the package gate.
++        'upstream_checkout_heads': dict(heads),
+         'interface_patch_sha256': pins['patch_sha256'],
+         'pins_file_sha256': filehash(PINS_FILE),
+-        'openssl': openssl,
++        'openssl': {
++            'version': openssl['openssl_version'],
++            'signature_verified': openssl['signature_verified'],
++            'boringssl_commit': openssl['boringssl_commit'],
++        },
+         'gn_target': GN_TARGET,
+         'gn_args': GN_ARGS,
+         'native_source_manifest': native_manifest,
+diff --git a/apps/metaengine-browser/scripts/electron-builder-after-all-artifact-build.cjs b/apps/metaengine-browser/scripts/electron-builder-after-all-artifact-build.cjs
+index 6b3c5e1..c8656d5 100644
+--- a/apps/metaengine-browser/scripts/electron-builder-after-all-artifact-build.cjs
++++ b/apps/metaengine-browser/scripts/electron-builder-after-all-artifact-build.cjs
+@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
+ const fs = require('node:fs');
+ const { execFileSync } = require('node:child_process');
+ const path = require('node:path');
++const { checkDist, DIST_REL, RECEIPT_REL } = require('./custom-electron-package-gate.cjs');
+ const { VERIFIER_FILE, assertPackagedOfflineRuntimeBinding } = require('./offline-runtime-package-binding.cjs');
+ const { localBuildSelected, captureLocalBuildIdentity, assertLocalBuildIdentity } = require('./local-build-identity.cjs');
+ const {
+@@ -210,6 +211,10 @@ module.exports = async function verifyPackagedEmergencyTrustRoot(buildResult) {
+   if (!fs.existsSync(executable) || !fs.statSync(executable).isFile()) {
+     throw new Error('packaged_browser_executable_missing');
+   }
++  // Read back the final executable after every builder/resource/signing hook.
++  // A build receipt is byte evidence only; existing release signatures and
++  // installed admission still provide their independent authority checks.
++  checkDist({ appRoot, dist: DIST_REL, receipt: RECEIPT_REL, outputExecutable: executable });
+ 
+   const asar = await import('@electron/asar');
+   const packageJson = JSON.parse(asar.extractFile(asarPath, 'package.json').toString('utf8'));
+diff --git a/apps/metaengine-browser/scripts/electron-builder-before-pack.cjs b/apps/metaengine-browser/scripts/electron-builder-before-pack.cjs
+index fae8151..58d7dcb 100644
+--- a/apps/metaengine-browser/scripts/electron-builder-before-pack.cjs
++++ b/apps/metaengine-browser/scripts/electron-builder-before-pack.cjs
+@@ -8,6 +8,7 @@ const os = require('node:os');
+ const { verifyStagedGuardianRuntime } = require('./guardian-native-package-verification.cjs');
+ const { buildDevOSSourceSnapshot } = require('./devos-source-snapshot-builder.cjs');
+ const { buildOfflineRuntimeBinding } = require('./offline-runtime-package-binding.cjs');
++const { checkBuilderContext } = require('./custom-electron-package-gate.cjs');
+ const { localBuildSelected, captureLocalBuildIdentity } = require('./local-build-identity.cjs');
+ const {
+   createBuildIdentity,
+@@ -203,6 +204,9 @@ function validateGuardianBootstrapBinding(binding, { sourceHead, packageVersion
+ 
+ async function metaengineGuardianNativeBeforePack(context) {
+   if (!context || context.electronPlatformName !== 'win32') return;
++  // The original-main custody binding is compiled into the custom runtime.
++  // Refuse stock or stale distributions before acquiring/staging any tools.
++  checkBuilderContext(context);
+   if (process.platform !== 'win32') {
+     throw new Error('guardian_native_staging_windows_toolchain_required');
+   }
+diff --git a/apps/metaengine-browser/test/bootstrap-install-and-launch.test.mjs b/apps/metaengine-browser/test/bootstrap-install-and-launch.test.mjs
+index 67d9f96..25f4e2d 100644
+--- a/apps/metaengine-browser/test/bootstrap-install-and-launch.test.mjs
++++ b/apps/metaengine-browser/test/bootstrap-install-and-launch.test.mjs
+@@ -11,7 +11,8 @@ const quote = value => `'${String(value).replaceAll("'", "''")}'`;
+ const script = new URL('../scripts/bootstrap-install-and-launch.ps1', import.meta.url);
+ 
+ async function bootstrapFixture(t, { failure = '', digestMismatch = false, timeout = 7,
+-  omitInstallTimeoutParameter = false, receiptPatch = '', existingOwner = false } = {}) {
++  omitInstallTimeoutParameter = false, receiptPatch = '', existingOwner = false,
++  physicalProof = false, omitRunnerTemp = false } = {}) {
+   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-bootstrap-bounded-'));
+   t.after(() => fs.rm(root, { recursive: true, force: true }));
+   const installer = path.join(root, 'candidate.exe');
+@@ -19,6 +20,8 @@ async function bootstrapFixture(t, { failure = '', digestMismatch = false, timeo
+   const proof = path.join(root, 'proof.json');
+   const calls = path.join(root, 'bounded-call.json');
+   const launches = path.join(root, 'normal-launches.txt');
++  const userData = path.join(root, 'profile');
++  await fs.mkdir(userData);
+   await fs.copyFile(script, path.join(root, 'bootstrap-install-and-launch.ps1'));
+   const bytes = Buffer.from('inert test fixture, never executed');
+   await fs.writeFile(installer, bytes);
+@@ -52,10 +55,14 @@ ${receiptPatch}
+ $receipt | ConvertTo-Json -Compress
+ `);
+   const invocation = `& ${quote(path.join(root, 'bootstrap-install-and-launch.ps1'))} -InstallerPath ${quote(installer)} -ExpectedInstallerSha256 ${quote(digestMismatch ? '0'.repeat(64) : digest.toUpperCase())} -ExpectedVersion '0.7.0-dev.1107139874561.1' -InstalledExePath ${quote(installed)} -ProofPath ${quote(proof)}`
+-    + (omitInstallTimeoutParameter ? '' : ` -InstallTimeoutSeconds ${timeout}`);
++    + (omitInstallTimeoutParameter ? '' : ` -InstallTimeoutSeconds ${timeout}`)
++    + (physicalProof ? ' -PhysicalProof' : '');
+   await fs.writeFile(path.join(root, 'invoke.ps1'), `
+ $ErrorActionPreference = 'Stop'
+ $env:APPDATA = ${quote(appData)}
++$env:RUNNER_TEMP = ${omitRunnerTemp ? '$null' : quote(root)}
++$env:TEMP = ${quote(root)}
++$env:TMP = ${quote(root)}
+ $global:BootstrapProcessReads = 0
+ function Get-Process {
+   param($ErrorAction)
+@@ -67,8 +74,20 @@ function Get-Process {
+ function Start-Process {
+   param($FilePath, $ArgumentList, [switch]$PassThru, $RedirectStandardOutput, $RedirectStandardError, $WindowStyle)
+   $FilePath | Add-Content -LiteralPath ${quote(launches)}
+-  $process = [pscustomobject]@{ Handle=1; Id=913; HasExited=$false }
++  if ($ArgumentList -eq '--metaengine-profile-probe') {
++    [ordered]@{ schema='metaengine.browser.profile-probe.v1'; version='0.7.0-dev.1107139874561.1';
++      primary_instance=$true; user_data_path=${quote(userData)} } |
++      ConvertTo-Json -Compress | Set-Content -LiteralPath $RedirectStandardOutput -Encoding utf8
++  } else {
++    [ordered]@{ schema='metaengine.browser.startup-journal.v1'; current_version='0.7.0-dev.1107139874561.1';
++      current_pid=913; current_boot_id='fixture-boot'; events=@(
++        [ordered]@{ boot_id='fixture-boot'; version='0.7.0-dev.1107139874561.1'; pid=913; state='RUNTIME_IMPORT_OK' },
++        [ordered]@{ boot_id='fixture-boot'; version='0.7.0-dev.1107139874561.1'; pid=913; state='PRIMARY_WINDOW_STABLE'; sequence=2; details=@{visible=$true} }
++      ) } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath ${quote(path.join(userData, 'metaengine-browser-startup-journal-v1.json'))} -Encoding utf8
++  }
++  $process = [pscustomobject]@{ Handle=1; Id=913; HasExited=$false; ExitCode=0 }
+   $process | Add-Member -MemberType ScriptMethod -Name Refresh -Value {}
++  $process | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value { param($Timeout) return $true }
+   return $process
+ }
+ ${invocation}
+@@ -111,6 +130,18 @@ test('bootstrap rejects digest mismatch before installer or GUI launch', { skip:
+   assert.deepEqual(f.launches, []);
+ });
+ 
++test('physical proof uses Windows temp without RUNNER_TEMP and reaches one verified normal launch',
++  { skip: !windows }, async t => {
++    const f = await bootstrapFixture(t, { physicalProof: true, omitRunnerTemp: true });
++    assert.equal(f.result.status, 0, f.result.stderr);
++    assert.deepEqual(f.launches, [f.installed, f.installed]);
++    assert.equal(f.proof.version_probe_verified, true);
++    assert.equal(f.proof.runtime_import_verified, true);
++    assert.equal(f.proof.browser_visible, true);
++    assert.equal(f.proof.startup_stable_event_sequence, 2);
++    assert.equal(f.proof.automatic_retry_allowed, false);
++  });
++
+ test('bootstrap retains timeout uncertainty without rollback claim, retry or GUI launch',
+   { skip: !windows }, async t => {
+     const f = await bootstrapFixture(t, { failure: 'package_installer_timeout' });
+@@ -174,4 +205,4 @@ test('bootstrap refuses a previously pinned Owner before starting the installer
+     assert.equal(f.calls, null);
+     assert.equal(f.proof, null);
+     assert.deepEqual(f.launches, []);
+-  });
+\ No newline at end of file
++  });
+diff --git a/apps/metaengine-browser/test/custom-electron-package-gate.test.mjs b/apps/metaengine-browser/test/custom-electron-package-gate.test.mjs
+index 2545207..671a012 100644
+--- a/apps/metaengine-browser/test/custom-electron-package-gate.test.mjs
++++ b/apps/metaengine-browser/test/custom-electron-package-gate.test.mjs
+@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
+ import fs from 'node:fs';
+ import os from 'node:os';
+ import path from 'node:path';
++import vm from 'node:vm';
+ import { fileURLToPath } from 'node:url';
+ import { createRequire } from 'node:module';
+ 
+@@ -157,6 +158,14 @@ test('a missing receipt fails closed', () => {
+     /receipt_regular_file_required/);
+ });
+ 
++test('a missing custom distribution fails closed even with a valid receipt', () => {
++  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'custom-electron-gate-'));
++  const { appRoot, dist } = stageFixture(scratch);
++  fs.rmSync(dist, { recursive: true });
++  assert.throws(() => checkDist({ appRoot, dist: DIST_REL, receipt: RECEIPT_REL,
++    configuration: CONFIG, nativeRoot: path.join(APP_ROOT, 'native') }), /distribution_directory_required/);
++});
++
+ test('a receipt that does not bind the current native source tree is refused', () => {
+   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'custom-electron-gate-'));
+   const { appRoot, receiptPath } = stageFixture(scratch, {
+@@ -212,6 +221,7 @@ test('afterPack detects a packaged executable whose code bytes differ', () => {
+   fs.mkdirSync(outDir, { recursive: true });
+   fs.writeFileSync(path.join(outDir, 'METAENGINE Browser Test.exe'), exe);
+   const context = {
++    electronPlatformName: 'win32',
+     arch: 1,
+     appOutDir: outDir,
+     packager: {
+@@ -243,17 +253,87 @@ test('afterPack detects a packaged executable whose code bytes differ', () => {
+ 
+ test('the hook refuses non-win32 builder contexts', () => {
+   const bareRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'custom-electron-gate-bare-'));
+-  const context = { arch: 1, packager: { projectDir: bareRoot, config: { ...CONFIG } } };
+-  assert.throws(() => checkBuilderContext(context, { appRoot: bareRoot,
+-    nativeRoot: path.join(APP_ROOT, 'native') }), /win_x64_only/);
+-  Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
++  const context = { electronPlatformName: 'win32', arch: 1,
++    packager: { projectDir: bareRoot, config: { ...CONFIG } } };
++  const originalPlatform = process.platform;
+   try {
++    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
++    assert.throws(() => checkBuilderContext(context, { appRoot: bareRoot,
++      nativeRoot: path.join(APP_ROOT, 'native') }), /win_x64_only/);
++    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
++    for (const target of ['darwin', 'linux', undefined]) {
++      assert.throws(() => checkBuilderContext({ ...context, electronPlatformName: target }, { appRoot: bareRoot }),
++        /win_x64_only/);
++    }
++    for (const arch of [0, 2, 3, undefined]) {
++      assert.throws(() => checkBuilderContext({ ...context, arch }, { appRoot: bareRoot }), /win_x64_only/);
++    }
+     // A bare app root has no custom distribution or receipt at all.
+     assert.throws(() => checkBuilderContext(context, { appRoot: bareRoot,
+       nativeRoot: path.join(APP_ROOT, 'native') }),
+       /receipt_regular_file_required/);
+   } finally {
+-    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
++    Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
++  }
++});
++
++// Evaluate the actual hook with imports blocked. A missing early byte gate
++// must fail the regression without invoking tool acquisition or native builds.
++function isolatedHook(name, overrides = {}) {
++  const file = path.join(APP_ROOT, 'scripts', name);
++  const load = createRequire(file);
++  const module = { exports: {} };
++  const wrapper = new vm.Script('(function(require,module,exports,__filename,__dirname){\n'
++    + fs.readFileSync(file, 'utf8') + '\n})', {
++    filename: file,
++    importModuleDynamically() { throw Error('unexpected_packaging_staging_import'); },
++  }).runInThisContext();
++  wrapper(id => Object.hasOwn(overrides, id) ? overrides[id] : load(id),
++    module, module.exports, file, path.dirname(file));
++  return module.exports;
++}
++
++test('the package recipe selects the pinned custom runtime and existing afterPack gate', () => {
++  const config = JSON.parse(fs.readFileSync(path.join(APP_ROOT, 'electron-builder.test.json'), 'utf8'));
++  assert.equal(config.electronVersion, '44.9.3');
++  assert.equal(config.electronDist, DIST_REL);
++  assert.equal(config.beforePack, './scripts/electron-builder-before-pack.cjs');
++  assert.equal(config.afterPack, './scripts/custom-electron-after-pack.cjs');
++  assert.equal(config.afterAllArtifactBuild, './scripts/electron-builder-after-all-artifact-build.cjs');
++  assert.equal(config.asar, true);
++  assert.equal(config.electronFuses.enableEmbeddedAsarIntegrityValidation, true);
++  assert.equal(config.electronFuses.onlyLoadAppFromAsar, true);
++});
++
++test('beforePack rejects stock runtime selection before any staging import', async () => {
++  const beforePack = isolatedHook('electron-builder-before-pack.cjs');
++  const originalPlatform = process.platform;
++  Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
++  try {
++    await assert.rejects(beforePack({ electronPlatformName: 'win32', arch: 1,
++      packager: { projectDir: APP_ROOT, config: { electronVersion: '44.9.3' } } }),
++    /custom_electron_package_custom_electron_dist_not_selected/);
++  } finally {
++    Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
++  }
++});
++
++test('final artifact hook rechecks the final executable before reading ASAR or producing evidence', async () => {
++  const sentinel = Error('final_custom_executable_readback');
++  let seen;
++  const afterAll = isolatedHook('electron-builder-after-all-artifact-build.cjs', {
++    'node:fs': { existsSync: file => !file.endsWith(path.sep + 'app'), statSync: () => ({ isFile: () => true }) },
++    './custom-electron-package-gate.cjs': { DIST_REL, RECEIPT_REL, checkDist(options) { seen = options; throw sentinel; } },
++  });
++  const originalPlatform = process.platform;
++  Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
++  try {
++    await assert.rejects(afterAll({ outDir: path.join(APP_ROOT, 'dist-test') }), error => error === sentinel);
++    assert.equal(seen.dist, DIST_REL);
++    assert.equal(seen.receipt, RECEIPT_REL);
++    assert.equal(seen.outputExecutable, path.join(APP_ROOT, 'dist-test/win-unpacked/METAENGINE Browser Test.exe'));
++  } finally {
++    Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+   }
+ });
+ 
+diff --git a/apps/metaengine-browser/test/test_custom_electron_source_build.py b/apps/metaengine-browser/test/test_custom_electron_source_build.py
+index 66117cd..9e6e29e 100644
+--- a/apps/metaengine-browser/test/test_custom_electron_source_build.py
++++ b/apps/metaengine-browser/test/test_custom_electron_source_build.py
+@@ -6,10 +6,14 @@ synthetic inputs and the repository's real pins/locks. No Chromium checkout,
+ GN/Ninja invocation, Windows PE execution or network access happens here; the
+ full source build itself is a separate isolated Windows build-host task.
+ """
++from contextlib import redirect_stderr
+ import hashlib
+ import importlib.util
++import io
+ import json
+ from pathlib import Path
++import shutil
++import struct
+ import subprocess
+ import sys
+ import tempfile
+@@ -30,6 +34,28 @@ def sha256(data):
+     return hashlib.sha256(data).hexdigest()
+ 
+ 
++def synthetic_pe():
++    """Inert x64 PE-shaped bytes for the package gate; never executable."""
++    data = bytearray(1_100_000)
++    header = 0x80
++    optional_size = 0xf0
++    table = header + 24 + optional_size
++    data[:2] = b'MZ'
++    struct.pack_into('<I', data, 0x3c, header)
++    data[header:header + 4] = b'PE\0\0'
++    struct.pack_into('<HH', data, header + 4, 0x8664, 2)
++    struct.pack_into('<H', data, header + 20, optional_size)
++    struct.pack_into('<H', data, header + 24, 0x20b)
++    for index, (name, offset) in enumerate(((b'.text', 512), (b'.rdata', 4608))):
++        section = table + index * 40
++        data[section:section + len(name)] = name
++        struct.pack_into('<II', data, section + 16, 4096, offset)
++    data[512:4608] = b'\xcc' * 4096
++    marker = b'electron_browser_guardian_original_main\0'
++    data[4624:4624 + len(marker)] = marker
++    return bytes(data)
++
++
+ def write_git_repository(directory, files):
+     directory.mkdir(parents=True, exist_ok=True)
+     subprocess.run(['git', 'init', '-q'], cwd=directory, check=True)
+@@ -130,6 +156,27 @@ class GitLineageTests(unittest.TestCase):
+             self.assertIn('upstream_commit_not_pinned_lineage', str(raised.exception))
+ 
+ 
++class InterfacePatchTests(unittest.TestCase):
++    def test_patch_is_applied_from_the_actual_staged_native_tree(self):
++        with tempfile.TemporaryDirectory() as temporary:
++            chromium = Path(temporary)
++            electron = chromium / 'electron'
++            before, after = b'original\n', b'patched\n'
++            write_git_repository(electron, {'fixture.cc': before})
++            source = electron / 'fixture.cc'
++            source.write_bytes(after)
++            patch_bytes = subprocess.run(['git', 'diff', '--binary'], cwd=electron,
++                                         capture_output=True, check=True).stdout
++            source.write_bytes(before)
++            patch = chromium / builder.NATIVE_REL / 'electron-original-main' / builder.INTERFACE_PATCH.name
++            patch.parent.mkdir(parents=True)
++            patch.write_bytes(patch_bytes)
++            builder.apply_interface_patch(chromium, {'files': [
++                {'path': 'fixture.cc', 'after_sha256': sha256(after)},
++            ]})
++            self.assertEqual(source.read_bytes(), after)
++
++
+ class DistZipTests(unittest.TestCase):
+     def make_zip(self, temporary, entries, mode='w'):
+         path = Path(temporary) / 'dist.zip'
+@@ -165,7 +212,8 @@ class DistZipTests(unittest.TestCase):
+ 
+ 
+ class PublishDistributionTests(unittest.TestCase):
+-    def publish(self, temporary, *, exe=b'C' * 1_100_000, linked_exe=None, extra=None):
++    def publish(self, temporary, *, exe=b'C' * 1_100_000, linked_exe=None, extra=None,
++                heads=None, native_manifest=None):
+         repository = Path(temporary) / 'repository'
+         repository.mkdir(parents=True, exist_ok=True)
+         dist_zip = repository / 'out' / 'GuardianRelease' / 'dist.zip'
+@@ -180,10 +228,12 @@ class PublishDistributionTests(unittest.TestCase):
+         linked.write_bytes(exe if linked_exe is None else linked_exe)
+         destination = repository / 'apps' / 'metaengine-browser' / 'native-dist' / 'custom-electron'
+         receipt_path = repository / 'apps' / 'metaengine-browser' / 'native-dist' / 'receipt.json'
+-        heads = {'electron': 'e' * 40, 'node': 'n' * 40, 'v8': 'v' * 40, 'boringssl': 'b' * 40}
++        if heads is None:
++            heads = {'electron': 'e' * 40, 'node': 'n' * 40, 'v8': 'v' * 40, 'boringssl': 'b' * 40}
+         pins = json.loads((builder.MOUNT / 'electron-44.9.3-original-main-entry.pins.json').read_text())
+-        openssl = {'openssl_version': '3.5.9', 'signature_verified': True, 'boringssl_commit': 'b' * 40}
+-        manifest = {'electron-original-main/BUILD.gn': 'a' * 64}
++        openssl = {'openssl_version': '3.5.9', 'signature_verified': True,
++                   'boringssl_commit': builder.EXPECTED['boringssl_commit']}
++        manifest = native_manifest if native_manifest is not None else {'electron-original-main/BUILD.gn': 'a' * 64}
+         with mock.patch.object(builder, 'REPOSITORY', repository):
+             receipt = builder.publish_distribution(dist_zip, linked, destination, receipt_path,
+                                                     heads, pins, openssl, manifest)
+@@ -202,6 +252,33 @@ class PublishDistributionTests(unittest.TestCase):
+             self.assertFalse(receipt['runtime_admission_input'])
+             self.assertEqual(len(receipt['files']), 2)
+ 
++    @unittest.skipUnless(shutil.which('node'), 'Node is required for the Python-to-package-gate contract')
++    def test_patched_checkout_receipt_passes_the_real_package_gate(self):
++        with tempfile.TemporaryDirectory() as temporary:
++            heads = {'electron': builder.EXPECTED['electron_commit'], 'node': '1' * 40,
++                     'v8': '2' * 40, 'boringssl': '3' * 40}
++            receipt, destination, receipt_path = self.publish(temporary, exe=synthetic_pe(),
++                heads=heads, native_manifest=builder.native_source_manifest())
++            self.assertEqual(receipt['upstream_checkout_heads'], heads)
++            self.assertEqual(receipt['origin']['node'], builder.EXPECTED['node_commit'])
++            self.assertEqual(receipt['origin']['v8'], builder.EXPECTED['v8_commit'])
++            self.assertEqual(receipt['origin']['boringssl'], builder.EXPECTED['boringssl_commit'])
++            app_root = destination.parents[1]
++            script = """const gate = require(process.argv[1]);
++const proof = gate.checkDist({appRoot: process.argv[2], dist: gate.DIST_REL,
++  receipt: process.argv[3], nativeRoot: process.argv[4],
++  configuration: {electronDist: gate.DIST_REL, electronVersion: '44.9.3'}});
++process.stdout.write(JSON.stringify(proof));"""
++            result = subprocess.run(['node', '-e', script,
++                str(APP / 'scripts/custom-electron-package-gate.cjs'), str(app_root),
++                receipt_path.relative_to(app_root).as_posix(), str(builder.NATIVE)],
++                capture_output=True, text=True)
++            self.assertEqual(result.returncode, 0, result.stderr)
++            proof = json.loads(result.stdout)
++            self.assertEqual(proof['files'], 2)
++            self.assertEqual(proof['electron_exe_sha256'], receipt['electron_exe_sha256'])
++            self.assertFalse(proof['authority_effect'])
++
+     def test_replay_is_refused(self):
+         with tempfile.TemporaryDirectory() as temporary:
+             self.publish(temporary)
+@@ -226,12 +303,18 @@ class NativeManifestTests(unittest.TestCase):
+ 
+ class WindowsBoundaryTests(unittest.TestCase):
+     def test_builder_refuses_to_run_on_linux(self):
+-        result = subprocess.run([sys.executable, str(SCRIPT), '--chromium', '.', '--openssl-archive', 'a',
+-                                 '--openssl-signature', 'b', '--out', 'o', '--dist-zip', 'z',
+-                                 '--dist', 'd', '--receipt', 'r'],
+-                                capture_output=True, text=True, cwd=REPOSITORY)
+-        self.assertEqual(result.returncode, 1)
+-        self.assertIn('custom_electron_native_windows_x64_source_build_required', result.stderr)
++        arguments = [str(SCRIPT), '--chromium', '.', '--openssl-archive', 'a',
++                     '--openssl-signature', 'b', '--out', 'o', '--dist-zip', 'z',
++                     '--dist', 'd', '--receipt', 'r']
++        stderr = io.StringIO()
++        # The same deterministic refusal test must remain inert on Windows;
++        # never let a model suite accidentally enter the real source builder.
++        with mock.patch.object(builder.sys, 'platform', 'linux'), \
++                mock.patch.object(builder.sys, 'argv', arguments), redirect_stderr(stderr):
++            with self.assertRaises(SystemExit) as raised:
++                builder.main()
++        self.assertEqual(raised.exception.code, 1)
++        self.assertIn('custom_electron_native_windows_x64_source_build_required', stderr.getvalue())
+ 
+ 
+ if __name__ == '__main__':
+diff --git a/docs/guardian-custom-electron-runtime-packaging-v1.md b/docs/guardian-custom-electron-runtime-packaging-v1.md
+index 49ad383..6e81d10 100644
+--- a/docs/guardian-custom-electron-runtime-packaging-v1.md
++++ b/docs/guardian-custom-electron-runtime-packaging-v1.md
+@@ -125,8 +125,8 @@ executed checks above.
+ ## Packaging boundary: a stock artifact cannot pass
+ 
+ `apps/metaengine-browser/scripts/custom-electron-package-gate.cjs` is the
+-build-host byte gate used by the (proposed, unapplied) `beforePack`/`afterPack`
+-wiring. It fails closed unless:
++build-host byte gate used by the integrated `beforePack`/`afterPack` hooks and
++the final artifact readback. It fails closed unless:
+ 
+ - `electron-builder.test.json` selects `electronDist: native-dist/custom-electron`
+   with `electronVersion: 44.9.3` — the stock npm distribution path
+@@ -163,8 +163,8 @@ admission input: `authority_effect`, `signed`, `windows_qualified` and
+ | Production crypto TU object against pinned OpenSSL headers | PASS |
+ | BoringSSL 572a4c pinned-headers TU compile | PASS |
+ | Mount adapter (18), host model (26), NAPI/static-peer Node regressions | PASS |
+-| Package gate model tests | PASS (15 cases) |
+-| Source-build transaction model tests | PASS (14 cases) |
++| Package gate model tests | PASS (19 cases) |
++| Source-build transaction model tests | PASS (16 cases, including Python-to-Node receipt contract) |
+ | Full source runner with real prerequisites | 25 PASS / 0 FAIL / 2 NOT RUN |
+ | BoringSSL static library build + W77 link | NOT RUN (no Go/CMake in executor) |
+ | Windows-target OpenSSL TU (cross compiler + VC-WIN64A headers) | NOT RUN (no cross compiler/Windows headers) |
+diff --git a/docs/interfaces/custom-electron-runtime-integration-contract.md b/docs/interfaces/custom-electron-runtime-integration-contract.md
+index cb1a124..4d13857 100644
+--- a/docs/interfaces/custom-electron-runtime-integration-contract.md
++++ b/docs/interfaces/custom-electron-runtime-integration-contract.md
+@@ -11,17 +11,19 @@
+    TU qualification options of
+    `test/native/verify-guardian-original-main-source.py`. No shared
+    Main/runtime/preload/build file is modified by the primary patch.
+-2. **Shared package boundary — coordinator review required**:
+-   `docs/interfaces/custom-electron-package-shared-interface.patch` (NOT
+-   applied) changes exactly `electron-builder.test.json` (three keys:
+-   `electronVersion`, `electronDist`, `afterPack`) and adds a two-line
+-   `checkBuilderContext(context)` rejection at the top of
+-   `metaengineGuardianNativeBeforePack` plus its require. Apply only after a
+-   real custom distribution and receipt exist from the source-build
+-   transaction, and after the W78 stock-package qualifier and the existing
+-   signed release/inventory gates are reconciled by their owners: with the
+-   custom dist selected, the W78 receipt attests the stock npm package, not
+-   the packaged runtime, and must not be presented as runtime provenance.
++2. **Shared package boundary — integrated source checks**:
++   `electron-builder.test.json` selects the pinned `electronVersion` and
++   `electronDist`, and the existing `afterPack` gate. `beforePack` calls
++   `checkBuilderContext(context)` before staging or acquiring tools. The final
++   artifact hook rechecks the packaged executable before producing its code
++   inventory. The historical
++   `docs/interfaces/custom-electron-package-shared-interface.patch` is retained
++   as reference and must not be reapplied. Packaging now refuses a missing,
++   stock or stale distribution; it requires the real custom distribution and
++   receipt from the source-build transaction. Windows build/qualification and
++   signed release evidence remain prerequisites. The W78 stock-package receipt
++   attests the stock npm package, not the custom packaged runtime, and must not
++   be presented as its runtime provenance.
+ 3. **Build workflow proposal — coordinator review required**:
+    `docs/interfaces/custom-electron-build-workflow.patch` (NOT applied) adds a
+    manual-dispatch-only, self-hosted isolated Windows source-build workflow.
+diff --git a/infra/client-state-runtime/local-vault-key.mjs b/infra/client-state-runtime/local-vault-key.mjs
+index d243003..71a1a1a 100644
+--- a/infra/client-state-runtime/local-vault-key.mjs
++++ b/infra/client-state-runtime/local-vault-key.mjs
+@@ -3,23 +3,33 @@ import { chmod, lstat, open, realpath, readFile } from 'node:fs/promises';
+ import { isAbsolute, join, resolve, relative } from 'node:path';
+ import { spawnSync } from 'node:child_process';
+ import { fileURLToPath, pathToFileURL } from 'node:url';
++import { fixedWindowsNativeReadEnvironment } from '../../apps/metaengine-browser/src/windows-native-read-environment.mjs';
+ 
+ async function secureKeyFile(keyPath) {
+   if (process.platform !== 'win32') return chmod(keyPath, 0o600);
++  const root = 'C:\\Windows';
++  if (String(process.env.SystemRoot || process.env.SYSTEMROOT || '').toLowerCase() !== root.toLowerCase()
++    || [process.env.SystemRoot, process.env.SYSTEMROOT, process.env.WINDIR].some(value => value !== undefined
++      && String(value).toLowerCase() !== root.toLowerCase())) throw new Error('local_vault_windows_root_unverified');
+   const script = `$ErrorActionPreference = 'Stop'
++$PSModuleAutoLoadingPreference = 'None'
+ $vaultKeyPath = [Environment]::GetEnvironmentVariable('LOCAL_VAULT_KEY_PATH')
+ $vaultIdentity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+-$vaultAcl = New-Object System.Security.AccessControl.FileSecurity
++$vaultAcl = [System.Security.AccessControl.FileSecurity]::new()
+ $vaultAcl.SetAccessRuleProtection($true, $false)
+ $vaultAcl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($vaultIdentity.User, 'Read,Write', 'Allow'))
+ $vaultSystem = [System.Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+ $vaultAcl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($vaultSystem, 'FullControl', 'Allow'))
+ [System.IO.File]::SetAccessControl($vaultKeyPath, $vaultAcl)
+ `;
+-  const acl = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], {
+-    encoding: 'utf8', windowsHide: true, timeout: 30000, maxBuffer: 65536, env: { ...process.env, LOCAL_VAULT_KEY_PATH: keyPath },
++  // The existing fixed OS rail keeps Vault protection independent of PATH and
++  // per-user PowerShell modules. Only profile/temp context reaches WinPS; no
++  // key, database credential or inherited loader setting enters the child.
++  const acl = spawnSync(root + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], {
++    windowsHide: true, shell: false, stdio: 'ignore', timeout: 30000,
++    env: { ...fixedWindowsNativeReadEnvironment(process.env), LOCAL_VAULT_KEY_PATH: keyPath },
+   });
+-  if (acl.status !== 0) throw new Error('local_vault_key_acl_failed');
++  if (acl.status !== 0 || acl.error || acl.signal) throw new Error('local_vault_key_acl_failed');
+ }
+ 
+ export async function initializeLocalVaultKey({ dataDirectory }) {
+diff --git a/infra/client-state-runtime/local-vault-key.test.mjs b/infra/client-state-runtime/local-vault-key.test.mjs
+index 700b852..7eec85c 100644
+--- a/infra/client-state-runtime/local-vault-key.test.mjs
++++ b/infra/client-state-runtime/local-vault-key.test.mjs
+@@ -3,7 +3,54 @@ import test from 'node:test';
+ import { mkdtemp, writeFile, readFile, lstat, link, realpath, mkdir, symlink, rm } from 'node:fs/promises';
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
++import vm from 'node:vm';
+ import { initializeLocalVaultKey } from './local-vault-key.mjs';
++import { fixedWindowsNativeReadEnvironment } from '../../apps/metaengine-browser/src/windows-native-read-environment.mjs';
++
++test('Windows Vault protection works without shell PATH and never inherits credentials or module overrides', async () => {
++  // Evaluate the actual private ACL function with an inert native-call double;
++  // these assertions do not claim Windows ACL or native-process qualification.
++  const source = await readFile(new URL('./local-vault-key.mjs', import.meta.url), 'utf8');
++  const fn = source.slice(source.indexOf('async function secureKeyFile('),
++    source.indexOf('export async function initializeLocalVaultKey(')).trim();
++  const environment = { SystemRoot: 'C:\\Windows', SYSTEMROOT: 'C:\\Windows', WINDIR: 'C:\\Windows',
++    TEMP: 'C:\\Users\\RUNNER~1\\AppData\\Local\\Temp', USERPROFILE: "C:\\Users\\O'Connor",
++    PATH: '', PSModulePath: 'D:\\untrusted-modules', NODE_OPTIONS: '--require private-token',
++    PGPASSWORD: 'private-password', DATABASE_URL: 'private-database' };
++  const calls = []; let outcome = { status: 0 };
++  const secure = vm.runInNewContext('(' + fn + ')', {
++    process: { platform: 'win32', env: environment }, Buffer, fixedWindowsNativeReadEnvironment,
++    spawnSync: (...args) => { calls.push(args); return outcome; },
++  });
++  const target = "C:\\Users\\O'Connor\\private pg17\\client-vault.key";
++  await secure(target);
++  const [executable, argv, options] = calls[0];
++  assert.equal(executable, 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
++  assert.equal(options.shell, false); assert.equal(options.stdio, 'ignore');
++  assert.equal(options.windowsHide, true); assert.equal(options.timeout, 30000);
++  assert.deepEqual({ ...options.env }, { ...fixedWindowsNativeReadEnvironment(environment), LOCAL_VAULT_KEY_PATH: target });
++  assert.doesNotMatch(JSON.stringify(options.env), /private-token|private-password|private-database|untrusted/);
++  const script = Buffer.from(argv.at(-1), 'base64').toString('utf16le');
++  assert.match(script, /\$PSModuleAutoLoadingPreference = 'None'/);
++  assert.doesNotMatch(script, /New-Object|Import-Module|O'Connor/);
++  assert.match(script, /SetAccessRuleProtection\(\$true, \$false\)/);
++  assert.match(script, /'S-1-5-18'/);
++  assert.match(script, /'Read,Write', 'Allow'/);
++  assert.equal(JSON.stringify(argv).includes(target), false);
++
++  for (const failed of [{ status: 0, error: { code: 'EIO', message: 'private detail' } },
++    { status: null, error: { code: 'ETIMEDOUT', message: 'private detail' } }, { status: 7 }, { status: 0, signal: 'SIGTERM' }]) {
++    outcome = failed;
++    await assert.rejects(secure(target), { message: 'local_vault_key_acl_failed' });
++  }
++  assert.equal(calls.length, 5, 'native failures are never retried');
++  for (const changes of [{ SystemRoot: 'D:\\Windows' }, { WINDIR: 'D:\\Windows' }]) {
++    const prior = { ...environment }; Object.assign(environment, changes);
++    await assert.rejects(secure(target), { message: 'local_vault_windows_root_unverified' });
++    Object.assign(environment, prior);
++  }
++  assert.equal(calls.length, 5, 'no alternative OS root is trusted');
++});
+ 
+ test('vault key is random, private and stable across repeated initialization', async () => {
+   const fixturePath = await mkdtemp(join(tmpdir(), 'compute-vault-key-'));
+diff --git a/infra/client-state-runtime/owned-postgres-process.mjs b/infra/client-state-runtime/owned-postgres-process.mjs
+index c650b4d..d785eba 100644
+--- a/infra/client-state-runtime/owned-postgres-process.mjs
++++ b/infra/client-state-runtime/owned-postgres-process.mjs
+@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
+ import net from 'node:net';
+ import path from 'node:path';
+ import { promisify } from 'node:util';
++import { fixedWindowsNativeReadEnvironment } from '../../apps/metaengine-browser/src/windows-native-read-environment.mjs';
+ 
+ const exec = promisify(execFile);
+ const sleep = delay => new Promise(resolve => setTimeout(resolve, delay));
+@@ -138,14 +139,28 @@ export function windowsPostgresCommandMatches(commandLine, { postgresExecutable,
+ }
+ 
+ async function processRecord(pid, env, timeoutMs = 10000) {
+-  const powershell = path.join(env.SystemRoot || env.SYSTEMROOT || process.env.SystemRoot || 'C:\\Windows',
+-    'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+-  // Only a validated numeric PID enters this program. Process paths and
+-  // command output remain private and never become public error messages.
+-  const program = `$ErrorActionPreference='Stop'; $ownedPgProcess=Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}' -ErrorAction Stop; if ($null -eq $ownedPgProcess) { [Console]::Out.Write('null'); exit 0 }; [pscustomobject]@{pid=[int]$ownedPgProcess.ProcessId; executable=[string]$ownedPgProcess.ExecutablePath; command_line=[string]$ownedPgProcess.CommandLine; created_at=$ownedPgProcess.CreationDate.ToUniversalTime().ToString('O')} | ConvertTo-Json -Compress`;
++  const root = 'C:\\Windows';
++  if (!Number.isSafeInteger(pid) || pid < 1 || pid > 0x7fffffff
++    || String(env.SystemRoot || env.SYSTEMROOT || '').toLowerCase() !== root.toLowerCase()
++    || [env.SystemRoot, env.SYSTEMROOT, env.WINDIR].some(value => value !== undefined
++      && String(value).toLowerCase() !== root.toLowerCase())) throw failure('owned_postgres_process_inventory_unavailable');
++  const powershell = path.win32.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
++  // The PID is data, never program text. Pin the same existing native OS rail
++  // as Browser inventory; clean WinPS must not discover CIM via user modules.
++  // Process paths and command output remain private.
++  const program = `$ErrorActionPreference='Stop'
++$PSModuleAutoLoadingPreference='None'
++Microsoft.PowerShell.Core\\Import-Module -Name 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules\\Microsoft.PowerShell.Utility\\Microsoft.PowerShell.Utility.psd1' -ErrorAction Stop
++Microsoft.PowerShell.Core\\Import-Module -Name 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules\\CimCmdlets\\CimCmdlets.psd1' -ErrorAction Stop
++$ownedPgProcess=Get-CimInstance Win32_Process -Filter ('ProcessId = '+[int]$env:METAENGINE_OWNED_POSTGRES_PID) -Property ProcessId,ExecutablePath,CommandLine,CreationDate -ErrorAction Stop
++if ($null -eq $ownedPgProcess) { [Console]::Out.Write('null'); exit 0 }
++[pscustomobject]@{pid=[int]$ownedPgProcess.ProcessId; executable=[string]$ownedPgProcess.ExecutablePath; command_line=[string]$ownedPgProcess.CommandLine; created_at=$ownedPgProcess.CreationDate.ToUniversalTime().ToString('O')} | ConvertTo-Json -Compress`;
+   try {
+-    const result = await exec(powershell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', program],
+-      { env, shell: false, windowsHide: true, timeout: timeoutMs, maxBuffer: maximumDiagnosticBytes });
++    const pending = exec(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(program, 'utf16le').toString('base64')],
++      { env: { ...fixedWindowsNativeReadEnvironment(env), METAENGINE_OWNED_POSTGRES_PID: String(pid) },
++        shell: false, windowsHide: true, timeout: timeoutMs, maxBuffer: maximumDiagnosticBytes });
++    pending.child?.stdin?.end();
++    const result = await pending;
+     const record = JSON.parse(result.stdout);
+     if (record === null) return null;
+     if (record.pid !== pid || typeof record.executable !== 'string' || !record.executable
+diff --git a/infra/client-state-runtime/owned-postgres-process.test.mjs b/infra/client-state-runtime/owned-postgres-process.test.mjs
+index 18e9200..8d1ff16 100644
+--- a/infra/client-state-runtime/owned-postgres-process.test.mjs
++++ b/infra/client-state-runtime/owned-postgres-process.test.mjs
+@@ -6,12 +6,62 @@ import path from 'node:path';
+ import test from 'node:test';
+ import { execFile } from 'node:child_process';
+ import { promisify } from 'node:util';
++import vm from 'node:vm';
++import { fixedWindowsNativeReadEnvironment } from '../../apps/metaengine-browser/src/windows-native-read-environment.mjs';
+ import { runOwnedPostgresControlProcess, startOwnedWindowsPostgres, windowsPostgresCommandMatches,
+   windowsPostgresStartupTimestampsMatch } from './owned-postgres-process.mjs';
+ 
+ const sleep = delay => new Promise(resolve => setTimeout(resolve, delay));
+ const exec = promisify(execFile);
+ 
++test('owned PostgreSQL inventory pins native CIM modules and closes stdin without depending on user PATH', async () => {
++  // Read the actual private inventory function without exposing a new public
++  // process-reader surface. The native response is synthetic, never OS proof.
++  const source = await fs.readFile(new URL('./owned-postgres-process.mjs', import.meta.url), 'utf8');
++  const fn = source.slice(source.indexOf('async function processRecord('), source.indexOf('async function portClosed(')).trim();
++  const calls = []; let closed = 0, rejectRead = false;
++  const record = { pid: 123, executable: 'C:\\bundle\\postgres.exe',
++    command_line: 'synthetic PostgreSQL command', created_at: '2026-11-03T12:00:00.000Z' };
++  const read = vm.runInNewContext('(' + fn + ')', {
++    path, Buffer, fixedWindowsNativeReadEnvironment, maximumDiagnosticBytes: 32768,
++    failure: code => Object.assign(new Error(code), { code }),
++    exec: (file, args, options) => {
++      calls.push({ file, args, options });
++      const pending = rejectRead ? Promise.reject(new Error('private-native-detail')) : Promise.resolve({ stdout: JSON.stringify(record) });
++      pending.child = { stdin: { end() { closed++; } } }; return pending;
++    },
++  });
++  const environment = { SystemRoot: 'C:\\Windows', SYSTEMROOT: 'C:\\Windows', WINDIR: 'C:\\Windows',
++    TEMP: 'C:\\Users\\RUNNER~1\\AppData\\Local\\Temp', USERPROFILE: "C:\\Users\\O'Connor",
++    PATH: '', PSModulePath: 'D:\\untrusted-modules', NODE_OPTIONS: '--require private-token', PGPASSWORD: 'private-password' };
++  const observed = await read(123, environment, 9000);
++  assert.deepEqual({ ...observed }, record); assert.equal(closed, 1);
++  const { file, args, options } = calls[0];
++  assert.equal(file, 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
++  assert.equal(options.timeout, 9000); assert.equal(options.shell, false); assert.equal(options.windowsHide, true);
++  assert.deepEqual({ ...options.env }, { ...fixedWindowsNativeReadEnvironment(environment), METAENGINE_OWNED_POSTGRES_PID: '123' });
++  assert.doesNotMatch(JSON.stringify(options.env), /private-token|private-password|untrusted/);
++  const script = Buffer.from(args.at(-1), 'base64').toString('utf16le');
++  assert.match(script, /\$PSModuleAutoLoadingPreference='None'/);
++  for (const module of ['Microsoft.PowerShell.Utility', 'CimCmdlets']) {
++    assert(script.includes(`Microsoft.PowerShell.Core\\Import-Module -Name 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules\\${module}\\${module}.psd1' -ErrorAction Stop`));
++  }
++  assert.match(script, /-Property ProcessId,ExecutablePath,CommandLine,CreationDate/);
++  assert.doesNotMatch(script, /O'Connor|RUNNER~1|private-token/);
++  assert.equal(script.includes('ProcessId = 123'), false, 'PID remains data in the fixed program');
++
++  for (const pid of [0, -1, 1.5, 0x80000000, "123'; exit 0;"]) {
++    await assert.rejects(read(pid, environment), { code: 'owned_postgres_process_inventory_unavailable' });
++  }
++  for (const change of [{ SystemRoot: 'D:\\Windows' }, { WINDIR: 'D:\\Windows' }, { TEMP: '\\\\remote\\share' }]) {
++    await assert.rejects(read(123, { ...environment, ...change }), { code: 'owned_postgres_process_inventory_unavailable' });
++  }
++  assert.equal(calls.length, 1, 'invalid context cannot launch native inventory');
++  rejectRead = true;
++  await assert.rejects(read(123, environment), { code: 'owned_postgres_process_inventory_unavailable', message: 'owned_postgres_process_inventory_unavailable' });
++  assert.equal(closed, 2); assert.equal(calls.length, 2, 'native failure is not retried');
++});
++
+ async function fixtureDescendantExited(pid) {
+   try { process.kill(pid, 0); }
+   catch (error) { if (error.code === 'ESRCH') return true; throw error; }
+diff --git a/infra/client-state-runtime/startup-source-manifest.test.mjs b/infra/client-state-runtime/startup-source-manifest.test.mjs
+index 1367d48..f9d4ed7 100644
+--- a/infra/client-state-runtime/startup-source-manifest.test.mjs
++++ b/infra/client-state-runtime/startup-source-manifest.test.mjs
+@@ -1,9 +1,9 @@
+ import assert from 'node:assert/strict';
+ import test from 'node:test';
+-import { mkdtemp, writeFile, readFile, realpath, rm, mkdir, symlink } from 'node:fs/promises';
++import { mkdtemp, writeFile, readFile, realpath, rm, mkdir, symlink, copyFile } from 'node:fs/promises';
+ import { tmpdir } from 'node:os';
+-import { join } from 'node:path';
+-import { fileURLToPath } from 'node:url';
++import { join, relative, dirname } from 'node:path';
++import { fileURLToPath, pathToFileURL } from 'node:url';
+ import { bindStartupManifest, captureStartupSource, persistStartupManifest, safeRuntimePolicy, sourceClosure } from './startup-source-manifest.mjs';
+ 
+ const repositoryRoot = fileURLToPath(new URL('../..', import.meta.url));
+@@ -32,6 +32,27 @@ test('runtime source closure explicitly includes PostgreSQL stderr classifier an
+   assert.ok(closure.files.includes(join(here,'launcher.mjs')));
+ });
+ 
++test('Vault and owned PostgreSQL keep their fixed Windows environment in a relocatable source closure', async t => {
++  const entries = ['local-vault-key.mjs', 'owned-postgres-process.mjs'].map(name => join(here, name));
++  const nativeContext = join(repositoryRoot, 'apps/metaengine-browser/src/windows-native-read-environment.mjs');
++  const closure = await sourceClosure(entries, repositoryRoot);
++  assert(closure.files.includes(nativeContext));
++  assert.deepEqual(closure.npm, []);
++  const stage = await realpath(await mkdtemp(join(tmpdir(), 'compute-native-tool-source-')));
++  t.after(() => rm(stage, { recursive: true, force: true }));
++  for (const source of closure.files) {
++    const target = join(stage, relative(repositoryRoot, source));
++    await mkdir(dirname(target), { recursive: true }); await copyFile(source, target);
++  }
++  const stagedEntries = entries.map(source => join(stage, relative(repositoryRoot, source)));
++  const stagedClosure = await sourceClosure(stagedEntries, stage);
++  assert.deepEqual(stagedClosure.files.map(source => relative(stage, source)),
++    closure.files.map(source => relative(repositoryRoot, source)));
++  // Imports only: no initdb, Vault creation, PostgreSQL or Windows command.
++  assert.equal(typeof (await import(pathToFileURL(stagedEntries[0]).href)).initializeLocalVaultKey, 'function');
++  assert.equal(typeof (await import(pathToFileURL(stagedEntries[1]).href)).startOwnedWindowsPostgres, 'function');
++});
++
+ test('startup manifest hashes dependencies, binds instance and omits credential material', async () => {
+   const config = { postgresMode: 'attached', databasePort: 15434, apiPort: 15432, edgePort: 15433,
+     databaseUrl: 'postgres://user:never-report-password@127.0.0.1/db', apiKey: 'never-report-key' };

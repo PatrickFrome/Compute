@@ -1,0 +1,2134 @@
+diff --git a/apps/metaengine-browser/build/custom-electron-hook-inputs.json b/apps/metaengine-browser/build/custom-electron-hook-inputs.json
+new file mode 100644
+index 0000000..3d74028
+--- /dev/null
++++ b/apps/metaengine-browser/build/custom-electron-hook-inputs.json
+@@ -0,0 +1,604 @@
++{
++  "schema": "metaengine.custom-electron.hook-source-catalog.v1",
++  "scope": "LOCKED_TOP_LEVEL_BASE_DECLARATIONS_AND_KNOWN_SOURCE_BYTES_ONLY",
++  "sources": [
++    {
++      "name": "electron",
++      "commit": "c542df1ecbc2c2978e8f53f8c7baf602404d166f",
++      "blob_sha1": "b1f99e77cb3661760f655d8fb9346351b354bdba",
++      "sha256": "c254ca413381a28243b3808e10dc8842ff0bc09629e1663ee7e09ef79dd4514a"
++    },
++    {
++      "name": "chromium",
++      "commit": "dd78960ccd8a03a2fe1f629543d27783885b78e9",
++      "blob_sha1": "3a60b026a4e39b2eff1ed9ab860107e9e9f57b83",
++      "sha256": "c3cd8ae90218c260d5fadbe5d9095164693fe420812218a18dfcf65c3f1743b9"
++    }
++  ],
++  "files": [
++    {
++      "owner": "chromium",
++      "commit": "dd78960ccd8a03a2fe1f629543d27783885b78e9",
++      "path": ".vpython3",
++      "blob_sha1": "7cfdf7b56865f455fa46ac282c5c979720446136",
++      "bytes": 17183,
++      "sha256": "bd1533f72ac26ecd58c9dc5ea09dfcb35bab48ddac249776d4a863edf48bff50",
++      "root_tree": "63b2edfe4c6ae23d2fd3424cde3e529db49f7068",
++      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE"
++    },
++    {
++      "owner": "chromium",
++      "commit": "dd78960ccd8a03a2fe1f629543d27783885b78e9",
++      "path": "build/config/siso/configure_siso.py",
++      "blob_sha1": "aec885109dbab181bf63be744da195c6e5225847",
++      "bytes": 4494,
++      "sha256": "630a6cf285474fa34e5ad23d7995425c6d1b983b8a07608b12185ab5945a3b32",
++      "root_tree": "63b2edfe4c6ae23d2fd3424cde3e529db49f7068",
++      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE"
++    },
++    {
++      "owner": "chromium",
++      "commit": "dd78960ccd8a03a2fe1f629543d27783885b78e9",
++      "path": "build/config/win/BUILD.gn",
++      "blob_sha1": "069432bbae2fff5c76785bcbc97ec663e7f04b35",
++      "bytes": 25217,
++      "sha256": "575ad32181c67aa8062906e2208d8d30a6bb8a90c007fdbbb30be05c510e48bd",
++      "root_tree": "63b2edfe4c6ae23d2fd3424cde3e529db49f7068",
++      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE"
++    },
++    {
++      "owner": "chromium",
++      "commit": "dd78960ccd8a03a2fe1f629543d27783885b78e9",
++      "path": "build/find_depot_tools.py",
++      "blob_sha1": "f891a414837a507759bb3591b0cecf2b79300d1a",
++      "bytes": 2185,
++      "sha256": "f42b1d5f2c8e2f26d50a679a5e5dc7595dd4c1b64af23f6684c22207f5c98b73",
++      "root_tree": "63b2edfe4c6ae23d2fd3424cde3e529db49f7068",
++      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE"
++    },
++    {
++      "owner": "chromium",
++      "commit": "dd78960ccd8a03a2fe1f629543d27783885b78e9",
++      "path": "build/get_landmines.py",
++      "blob_sha1": "956024631775c07e246cecdd40e2ef29b9a178b5",
++      "bytes": 4023,
++      "sha256": "c266e23758992d6d1b6b26d4dfe3587b3ffc1b84e0b23a99469e44b4bd0b47e1",
++      "root_tree": "63b2edfe4c6ae23d2fd3424cde3e529db49f7068",
++      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE"
++    },
++    {
++      "owner": "chromium",
++      "commit": "dd78960ccd8a03a2fe1f629543d27783885b78e9",
++      "path": "build/gn_helpers.py",
++      "blob_sha1": "1474375b63cdb0ce320d55cf915755afd90cbd90",
++      "bytes": 19142,
++      "sha256": "4c99d6d159f0faef3b83ac594ea0cf4d30973c029179721f3525cf87d765f082",
++      "root_tree": "63b2edfe4c6ae23d2fd3424cde3e529db49f7068",
++      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE"
++    },
++    {
++      "owner": "chromium",
++      "commit": "dd78960ccd8a03a2fe1f629543d27783885b78e9",
++      "path": "build/landmines.py",
++      "blob_sha1": "844ee3808c60424305d02b34b504f40d10c9378b",
++      "bytes": 5155,
++      "sha256": "60f6f053ae87ded43d612b74f77b170851cb86649def53477301c1c2eed86d84",
++      "root_tree": "63b2edfe4c6ae23d2fd3424cde3e529db49f7068",
++      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE"
++    },
++    {
++      "owner": "chromium",
++      "commit": "dd78960ccd8a03a2fe1f629543d27783885b78e9",
++      "path": "build/toolchain/win/rc/win/rc.exe.sha1",
++      "blob_sha1": "7c8aa9aee057ccfc54ef3765bd5adbc258c7448a",
++      "bytes": 40,
++      "sha256": "ad6cd3835f44229227d120a4d13d070a1af4c3cd2461105d63951e179364100c",
++      "root_tree": "63b2edfe4c6ae23d2fd3424cde3e529db49f7068",
++      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE"
++    },
++    {
++      "owner": "chromium",
++      "commit": "dd78960ccd8a03a2fe1f629543d27783885b78e9",
++      "path": "build/toolchain/win/setup_toolchain.py",
++      "blob_sha1": "e0b7c03a522040d58afdf82cbe20acc38f96b43e",
++      "bytes": 13518,
++      "sha256": "f6ae24c99ae0bfc72b093da415615119652f25415155dffb4db22f49b78ca8cf",
++      "root_tree": "63b2edfe4c6ae23d2fd3424cde3e529db49f7068",
++      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE"
++    },
++    {
++      "owner": "chromium",
++      "commit": "dd78960ccd8a03a2fe1f629543d27783885b78e9",
++      "path": "build/util/lastchange.py",
++      "blob_sha1": "78232084df8b30a75f866379c003c1614fa439c3",
++      "bytes": 23853,
++      "sha256": "e8124f001dbdb317fcf054e5e0d8d77dc364ba278992adb1bb9c018e0a6407f8",
++      "root_tree": "63b2edfe4c6ae23d2fd3424cde3e529db49f7068",
++      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE"
++    },
++    {
++      "owner": "chromium",
++      "commit": "dd78960ccd8a03a2fe1f629543d27783885b78e9",
++      "path": "build/util/tast_control.py",
++      "blob_sha1": "cb04a13c113085f650c7b65c49488b4b0acdaa25",
++      "bytes": 2525,
++      "sha256": "e216d3d5ddaa86cdfe7e9d3d80718e24cde91fdc625fc41e3c50ac418b734498",
++      "root_tree": "63b2edfe4c6ae23d2fd3424cde3e529db49f7068",
++      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE"
++    },
++    {
++      "owner": "chromium",
++      "commit": "dd78960ccd8a03a2fe1f629543d27783885b78e9",
++      "path": "build/vs_toolchain.py",
++      "blob_sha1": "7c62254219ca578f25f89823f7cca494a5781230",
++      "bytes": 26279,
++      "sha256": "5b258c09a6037b0d0ef3bb95d431fba562758592ee4424dbc261f80bf590b8f2",
++      "root_tree": "63b2edfe4c6ae23d2fd3424cde3e529db49f7068",
++      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE"
++    },
++    {
++      "owner": "chromium",
++      "commit": "dd78960ccd8a03a2fe1f629543d27783885b78e9",
++      "path": "buildtools/reclient_cfgs/configure_reclient_cfgs.py",
++      "blob_sha1": "8779d4609c9eed155c414a1c97d3598906857b22",
++      "bytes": 11056,
++      "sha256": "6ab0bfb84822b4e1815aacc99bf5db95b4e3be2080f845a366bf18ece077d5fc",
++      "root_tree": "63b2edfe4c6ae23d2fd3424cde3e529db49f7068",
++      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE"
++    },
++    {
++      "owner": "chromium",
++      "commit": "dd78960ccd8a03a2fe1f629543d27783885b78e9",
++      "path": "tools/clang/scripts/update.py",
++      "blob_sha1": "9cf9371c34f55f06c62eeff23fa33346202e0825",
++      "bytes": 14777,
++      "sha256": "0679888392d7a700fb3a3c3de93f56bfb4e4064a5a46ece798c306b63e98b7cd",
++      "root_tree": "63b2edfe4c6ae23d2fd3424cde3e529db49f7068",
++      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE"
++    },
++    {
++      "owner": "chromium",
++      "commit": "dd78960ccd8a03a2fe1f629543d27783885b78e9",
++      "path": "tools/remove_stale_files.py",
++      "blob_sha1": "5973fd57bc99e7e702346eb048985c599268c2b2",
++      "bytes": 601,
++      "sha256": "6a3225ffac5f681f530fec5a3f2ed29c085d937daef8ace3672b07cb564d3cd3",
++      "root_tree": "63b2edfe4c6ae23d2fd3424cde3e529db49f7068",
++      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE"
++    },
++    {
++      "owner": "chromium",
++      "commit": "dd78960ccd8a03a2fe1f629543d27783885b78e9",
++      "path": "tools/remove_stale_pyc_files.py",
++      "blob_sha1": "f1c65f1936ffe9ec84b6d82731ae370e419bc0fb",
++      "bytes": 2776,
++      "sha256": "a41098a3ce4f625c9d62133208aa917d2f5899a6a455cf3c788a21d54f75a585",
++      "root_tree": "63b2edfe4c6ae23d2fd3424cde3e529db49f7068",
++      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE"
++    },
++    {
++      "owner": "chromium",
++      "commit": "dd78960ccd8a03a2fe1f629543d27783885b78e9",
++      "path": "tools/rust/update_rust.py",
++      "blob_sha1": "f00dc67e48679b4c001e2d8d8077717b51a85cc7",
++      "bytes": 6084,
++      "sha256": "ad5332728305a079dc4fcaf16aeb57de3fa2788831ff56b89c92cc7075bb936a",
++      "root_tree": "63b2edfe4c6ae23d2fd3424cde3e529db49f7068",
++      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE"
++    },
++    {
++      "owner": "electron",
++      "commit": "c542df1ecbc2c2978e8f53f8c7baf602404d166f",
++      "path": ".github/workflows/pipeline-segment-build-siso.yml",
++      "blob_sha1": "ee6a614c183abf2a3782824c80570e268bf86292",
++      "bytes": 5730,
++      "sha256": "f00b5eccd440ba76c0b6e377f3a66848401d54d548b0d77e0b54af2c285859a4",
++      "root_tree": "328891d1f8b4d93d49c9f31332baf75fa726cb6e",
++      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE"
++    },
++    {
++      "owner": "electron",
++      "commit": "c542df1ecbc2c2978e8f53f8c7baf602404d166f",
++      "path": ".yarn/releases/yarn-4.18.0.cjs",
++      "blob_sha1": "57ec26f4e2d6731486039d80c41af9f8c8757cfc",
++      "bytes": 3784908,
++      "sha256": "fb8b1d20be72a0b544a35bcec4c7ed0ff55a9b173c01f191b02ba164b2051db5",
++      "root_tree": "328891d1f8b4d93d49c9f31332baf75fa726cb6e",
++      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE"
++    },
++    {
++      "owner": "electron",
++      "commit": "c542df1ecbc2c2978e8f53f8c7baf602404d166f",
++      "path": ".yarnrc.yml",
++      "blob_sha1": "f6af5c87747b2102dc8caf704af0091055006fb6",
++      "bytes": 337,
++      "sha256": "5ff351333ed430b13a26492feea6c1adfd7f680aaf6bfb339afb6c3c0c897cc0",
++      "root_tree": "328891d1f8b4d93d49c9f31332baf75fa726cb6e",
++      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE"
++    },
++    {
++      "owner": "electron",
++      "commit": "c542df1ecbc2c2978e8f53f8c7baf602404d166f",
++      "path": "build/args/release.gn",
++      "blob_sha1": "59326deae7980cbbe82e6305eb939e0a668ec20d",
++      "bytes": 902,
++      "sha256": "b4490cee911e0ed136a6d095c69a7914cb3f4aa2d5517e3f987a2b5f45d3cd56",
++      "root_tree": "328891d1f8b4d93d49c9f31332baf75fa726cb6e",
++      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE"
++    },
++    {
++      "owner": "electron",
++      "commit": "c542df1ecbc2c2978e8f53f8c7baf602404d166f",
++      "path": "build/pgo_profiles/v8-builtins.pgo.txt",
++      "blob_sha1": "0830ea7163eb811b8893e3ec692b8f28c50783da",
++      "bytes": 111,
++      "sha256": "0574263718b2902f8c47d2e7d5223d4d1a71837ebe97e5d279bc7dd0de2f9624",
++      "root_tree": "328891d1f8b4d93d49c9f31332baf75fa726cb6e",
++      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE"
++    },
++    {
++      "owner": "electron",
++      "commit": "c542df1ecbc2c2978e8f53f8c7baf602404d166f",
++      "path": "build/pgo_profiles/win-arm64.pgo.txt",
++      "blob_sha1": "96dcb20afc849a3f96c236c6a2ad3b26c5529c45",
++      "bytes": 115,
++      "sha256": "65fe83e9756555d248b8cdad7cb32db7a629a97d6e027c1ee011d280f4d203c5",
++      "root_tree": "328891d1f8b4d93d49c9f31332baf75fa726cb6e",
++      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE"
++    },
++    {
++      "owner": "electron",
++      "commit": "c542df1ecbc2c2978e8f53f8c7baf602404d166f",
++      "path": "build/pgo_profiles/win-x64.pgo.txt",
++      "blob_sha1": "db6d17c96c192693695083b062dc38deff67cd54",
++      "bytes": 113,
++      "sha256": "ad7db47570e85f684cf1d1bd5980cbfef723972ba3ede79cc3a45fc2d5680a1c",
++      "root_tree": "328891d1f8b4d93d49c9f31332baf75fa726cb6e",
++      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE"
++    },
++    {
++      "owner": "electron",
++      "commit": "c542df1ecbc2c2978e8f53f8c7baf602404d166f",
++      "path": "build/siso_revision",
++      "blob_sha1": "3dba72a89493a8d910138e69ed1fa2e0cb3102d8",
++      "bytes": 41,
++      "sha256": "4d6d291eece72f22cd4bff5ad43e056cdd2a52c2d340bbcf050672dc14b07e3a",
++      "root_tree": "328891d1f8b4d93d49c9f31332baf75fa726cb6e",
++      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE"
++    },
++    {
++      "owner": "electron",
++      "commit": "c542df1ecbc2c2978e8f53f8c7baf602404d166f",
++      "path": "package.json",
++      "blob_sha1": "0c91d8bad78b63f36652c4850ec3e16c3477613a",
++      "bytes": 6214,
++      "sha256": "0e4a2fe8ef3ea595a615a2091b4164fc96ee3d37cff89e6984b9345e6210a4f6",
++      "root_tree": "328891d1f8b4d93d49c9f31332baf75fa726cb6e",
++      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE"
++    },
++    {
++      "owner": "electron",
++      "commit": "c542df1ecbc2c2978e8f53f8c7baf602404d166f",
++      "path": "script/apply_all_patches.py",
++      "blob_sha1": "37f60fa4d1252ee8c62e516ca85ab75e459d7523",
++      "bytes": 2479,
++      "sha256": "c8c5afd7706f28dd7000b9e649123943446035a5a05858b0fd8e7cbc48e4822f",
++      "root_tree": "328891d1f8b4d93d49c9f31332baf75fa726cb6e",
++      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE"
++    },
++    {
++      "owner": "electron",
++      "commit": "c542df1ecbc2c2978e8f53f8c7baf602404d166f",
++      "path": "script/gen-siso-revision.js",
++      "blob_sha1": "5f718dc3f026787c1f781c86bc634d6ef54a12bb",
++      "bytes": 2088,
++      "sha256": "e1e0dbee6786d441acb9e1869b9870bd64902390d1e57f11653006421c765838",
++      "root_tree": "328891d1f8b4d93d49c9f31332baf75fa726cb6e",
++      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE"
++    },
++    {
++      "owner": "electron",
++      "commit": "c542df1ecbc2c2978e8f53f8c7baf602404d166f",
++      "path": "script/lib/git.py",
++      "blob_sha1": "9a76d6076a58432516966642639d92e9e22be0ef",
++      "bytes": 12244,
++      "sha256": "80ff751b85381c32d3fab305489b47a4674c21de69897312202c4d2283949269",
++      "root_tree": "328891d1f8b4d93d49c9f31332baf75fa726cb6e",
++      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE"
++    },
++    {
++      "owner": "electron",
++      "commit": "c542df1ecbc2c2978e8f53f8c7baf602404d166f",
++      "path": "script/lib/patches.py",
++      "blob_sha1": "785de42e0ec02d1fa809d7ddc12f4ded039d6805",
++      "bytes": 1329,
++      "sha256": "dbc83703912c42fea72d6b64e2b845cd07ef5e0e9f4f743134fdf74448be4a62",
++      "root_tree": "328891d1f8b4d93d49c9f31332baf75fa726cb6e",
++      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE"
++    },
++    {
++      "owner": "electron",
++      "commit": "c542df1ecbc2c2978e8f53f8c7baf602404d166f",
++      "path": "script/patches-mtime-cache.py",
++      "blob_sha1": "2576705b904e7469d80701d71889abe67a8443ab",
++      "bytes": 5680,
++      "sha256": "8d4f54d3abed9f8463620f19387ba4b9f9643811c6d4bcebd13011b4b3207137",
++      "root_tree": "328891d1f8b4d93d49c9f31332baf75fa726cb6e",
++      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE"
++    },
++    {
++      "owner": "electron",
++      "commit": "c542df1ecbc2c2978e8f53f8c7baf602404d166f",
++      "path": "script/pgo/download-profiles.py",
++      "blob_sha1": "f72275b1c1644bd3d86a350dbc77d4781a693ee6",
++      "bytes": 8739,
++      "sha256": "cf16f90bcc2cfa845a0b4a85ab13d73f6971352b5ae3beb9cb51c72c900aeab5",
++      "root_tree": "328891d1f8b4d93d49c9f31332baf75fa726cb6e",
++      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE"
++    },
++    {
++      "owner": "electron",
++      "commit": "c542df1ecbc2c2978e8f53f8c7baf602404d166f",
++      "path": "script/sysroots.json",
++      "blob_sha1": "aaad2a796350291280e28f7cad0485bfb6d94f3d",
++      "bytes": 3024,
++      "sha256": "2fcdb40d559e8e5334618afca7da27f7e3b40321780372f3fed4e40585805e6c",
++      "root_tree": "328891d1f8b4d93d49c9f31332baf75fa726cb6e",
++      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE"
++    },
++    {
++      "owner": "electron",
++      "commit": "c542df1ecbc2c2978e8f53f8c7baf602404d166f",
++      "path": "yarn.lock",
++      "blob_sha1": "552af176bec53be86ada93bfc5286027a06e7bd2",
++      "bytes": 349701,
++      "sha256": "92ffc6eb5852ece404d7649f55c96c6e72443c1dcb66bc4175ecec035745c5a1",
++      "root_tree": "328891d1f8b4d93d49c9f31332baf75fa726cb6e",
++      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE"
++    }
++  ],
++  "hooks": [
++    {
++      "owner": "electron",
++      "phase": "pre_deps_hooks",
++      "index": 0,
++      "name": "generate_mtime_cache",
++      "action_sha256": "caba9ca5808551311e4963a1ba734ba4f4a85f37bbc6bd08298351917b58c60f",
++      "source_paths": [
++        "electron/script/patches-mtime-cache.py"
++      ]
++    },
++    {
++      "owner": "electron",
++      "phase": "hooks",
++      "index": 0,
++      "name": "patch_chromium",
++      "action_sha256": "7e23d2dad271da27aae77e10ec75ee559d15ada73179a4e23128ef6256aa2df5",
++      "source_paths": [
++        "electron/script/apply_all_patches.py"
++      ]
++    },
++    {
++      "owner": "electron",
++      "phase": "hooks",
++      "index": 1,
++      "name": "apply_mtime_cache",
++      "action_sha256": "fe9029f5ce2193469759979082d8a55259cfb7726e26f2799b88295739baf4ff",
++      "source_paths": [
++        "electron/script/patches-mtime-cache.py"
++      ]
++    },
++    {
++      "owner": "electron",
++      "phase": "hooks",
++      "index": 2,
++      "name": "electron_npm_deps",
++      "action_sha256": "9d9872c4e44f9419221d181b26f1a6e722de45be638c5fdfbdf8db071e8a754e",
++      "source_paths": [
++        "electron/package.json",
++        "electron/yarn.lock",
++        "electron/.yarnrc.yml",
++        "electron/.yarn/releases/yarn-4.18.0.cjs"
++      ]
++    },
++    {
++      "owner": "electron",
++      "phase": "hooks",
++      "index": 3,
++      "name": "gen_siso_revision",
++      "action_sha256": "b16179be051b51743c6e62f3383365beec014ad17b865a187a834ca047d99bf2",
++      "source_paths": [
++        "electron/script/gen-siso-revision.js"
++      ]
++    },
++    {
++      "owner": "electron",
++      "phase": "hooks",
++      "index": 11,
++      "name": "electron_pgo_profiles_win",
++      "action_sha256": "63c9af2c9c3fd4a4a55a033dd1f76f6aebda03f3cf62791d64e42412bebc2f0a",
++      "source_paths": [
++        "electron/script/pgo/download-profiles.py",
++        "electron/build/pgo_profiles/win-x64.pgo.txt",
++        "electron/build/pgo_profiles/win-arm64.pgo.txt"
++      ]
++    },
++    {
++      "owner": "electron",
++      "phase": "hooks",
++      "index": 13,
++      "name": "electron_pgo_profiles_v8_builtins",
++      "action_sha256": "e54670cbb2951d27a9016d2fb668f8ae8c10be1c845beff6333850b5a1ce3fc3",
++      "source_paths": [
++        "electron/script/pgo/download-profiles.py",
++        "electron/build/pgo_profiles/v8-builtins.pgo.txt"
++      ]
++    },
++    {
++      "owner": "chromium",
++      "phase": "hooks",
++      "index": 0,
++      "name": "vpython3_common",
++      "action_sha256": "41bfe9710567853cc64709d8aa2cdaf3312ec3a768ba8bba6b3b3ed6c3812204",
++      "source_paths": [
++        "chromium/.vpython3"
++      ]
++    },
++    {
++      "owner": "chromium",
++      "phase": "hooks",
++      "index": 1,
++      "name": "landmines",
++      "action_sha256": "58f8357f9d46c8f9d7f140307789c2587db08aa7e20f3283799136d81cbcca87",
++      "source_paths": [
++        "chromium/build/landmines.py"
++      ]
++    },
++    {
++      "owner": "chromium",
++      "phase": "hooks",
++      "index": 3,
++      "name": "disable_depot_tools_selfupdate",
++      "action_sha256": "0c0e113c5307355e05c6cc75e01eb84f8e023ef89f0696749f5c910650f85bae",
++      "source_paths": [
++        "depot_tools/update_depot_tools_toggle.py"
++      ]
++    },
++    {
++      "owner": "chromium",
++      "phase": "hooks",
++      "index": 4,
++      "name": "remove_stale_files",
++      "action_sha256": "bcabbe38a10cf588289fa3736f12451ea43b3523f9a118033e88376f55799362",
++      "source_paths": [
++        "chromium/tools/remove_stale_files.py"
++      ]
++    },
++    {
++      "owner": "chromium",
++      "phase": "hooks",
++      "index": 5,
++      "name": "remove_stale_pyc_files",
++      "action_sha256": "7e6915cb8afc5b37de382b51dc9d1a8c6fc983747895d369cff92e45a61a7df5",
++      "source_paths": [
++        "chromium/tools/remove_stale_pyc_files.py"
++      ]
++    },
++    {
++      "owner": "chromium",
++      "phase": "hooks",
++      "index": 8,
++      "name": "win_toolchain",
++      "action_sha256": "c00e3c1ec30ce48fdd009d72dd340d74e5d051befb9d9a90dc01455c341bd6d5",
++      "source_paths": [
++        "chromium/build/vs_toolchain.py"
++      ]
++    },
++    {
++      "owner": "chromium",
++      "phase": "hooks",
++      "index": 12,
++      "name": "lastchange",
++      "action_sha256": "59e45e3ae7b36707454ba826a7a875970a25c6ba5dd1cffff6bdacc5b5073412",
++      "source_paths": [
++        "chromium/build/util/lastchange.py"
++      ]
++    },
++    {
++      "owner": "chromium",
++      "phase": "hooks",
++      "index": 14,
++      "name": "gpu_lists_version",
++      "action_sha256": "4c4c338e9a0ecb105d9e078a3f95be93876a032479eb0673880c605fd9405c57",
++      "source_paths": [
++        "chromium/build/util/lastchange.py"
++      ]
++    },
++    {
++      "owner": "chromium",
++      "phase": "hooks",
++      "index": 15,
++      "name": "lastchange_skia",
++      "action_sha256": "e201a112840042ad92b94453c226f940e5d75a406b810c929fc546de57e2e76a",
++      "source_paths": [
++        "chromium/build/util/lastchange.py"
++      ]
++    },
++    {
++      "owner": "chromium",
++      "phase": "hooks",
++      "index": 16,
++      "name": "lastchange_dawn",
++      "action_sha256": "810accffc39b9a2da02351254eb68001129b2c702dd68b12c3e6f535ba384413",
++      "source_paths": [
++        "chromium/build/util/lastchange.py"
++      ]
++    },
++    {
++      "owner": "chromium",
++      "phase": "hooks",
++      "index": 19,
++      "name": "rc_win",
++      "action_sha256": "24de266170dec330d5cbcffd835d32a53da5971ce698749a864ca6704f3153ac",
++      "source_paths": [
++        "depot_tools/download_from_google_storage.py",
++        "chromium/build/toolchain/win/rc/win/rc.exe.sha1"
++      ]
++    },
++    {
++      "owner": "chromium",
++      "phase": "hooks",
++      "index": 22,
++      "name": "apache_win32",
++      "action_sha256": "363082d38ab10fe535f8a40028b99827bc0dc1249a7494467eb5142f1af25a01",
++      "source_paths": [
++        "depot_tools/download_from_google_storage.py"
++      ]
++    },
++    {
++      "owner": "chromium",
++      "phase": "hooks",
++      "index": 53,
++      "name": "Generate location tags for tests",
++      "action_sha256": "79fbe3b650f45557f2116de4ea473387dbea8e3a6e47c0da8cbd90dc4997d1f4",
++      "source_paths": [
++        "chromium/testing/generate_location_tags.py"
++      ]
++    },
++    {
++      "owner": "chromium",
++      "phase": "hooks",
++      "index": 56,
++      "name": "configure_reclient_cfgs",
++      "action_sha256": "3b2df17d7bb68bbf2fe8a6e2138689d07e5e1ef8ea5288aa3dfddb55e16f598c",
++      "source_paths": [
++        "chromium/buildtools/reclient_cfgs/configure_reclient_cfgs.py"
++      ]
++    },
++    {
++      "owner": "chromium",
++      "phase": "hooks",
++      "index": 57,
++      "name": "configure_siso",
++      "action_sha256": "c06d83913b0b984804bf54d244a5bd6e336a7e78585bbdc6d03efe4917a66124",
++      "source_paths": [
++        "chromium/build/config/siso/configure_siso.py"
++      ]
++    },
++    {
++      "owner": "chromium",
++      "phase": "hooks",
++      "index": 60,
++      "name": "tast_control",
++      "action_sha256": "7fc3f7257434659a65f1a66ac9e1b5bd3403043d45a6a676bab57dfa2506c46f",
++      "source_paths": [
++        "chromium/build/util/tast_control.py"
++      ]
++    }
++  ],
++  "cipd_format_reference": {
++    "commit": "61fc2ffcffaa3d602e13d752206c2285ae9a637c",
++    "iid_source": "https://chromium.googlesource.com/infra/luci/luci-go/+/61fc2ffcffaa3d602e13d752206c2285ae9a637c/cipd/common/iid.go",
++    "hash_enum_source": "https://chromium.googlesource.com/infra/luci/luci-go/+/61fc2ffcffaa3d602e13d752206c2285ae9a637c/cipd/api/cipd/v1/cas.proto"
++  }
++}
+diff --git a/apps/metaengine-browser/scripts/custom-electron-deps-policy.py b/apps/metaengine-browser/scripts/custom-electron-deps-policy.py
+new file mode 100644
+index 0000000..e486b23
+--- /dev/null
++++ b/apps/metaengine-browser/scripts/custom-electron-deps-policy.py
+@@ -0,0 +1,551 @@
++#!/usr/bin/env python3
++"""Static pinned-DEPS inventory; never exec/eval DEPS or execute its hooks.
++
++Selections describe a declared native-Windows-x64 initial-sync analysis. The
++actual bootstrap gclient revision/spec, recursive DEPS and patched declarations
++are not qualified. This data cannot authorize a build, receipt or installation.
++"""
++import argparse
++import ast
++import base64
++import binascii
++from collections import Counter
++import hashlib
++import importlib.util
++import json
++import os
++from pathlib import Path
++import re
++import stat
++import tempfile
++
++SOURCES = {
++    'electron': {
++        'commit': 'c542df1ecbc2c2978e8f53f8c7baf602404d166f',
++        'blob_sha1': 'b1f99e77cb3661760f655d8fb9346351b354bdba',
++        'sha256': 'c254ca413381a28243b3808e10dc8842ff0bc09629e1663ee7e09ef79dd4514a',
++    },
++    'chromium': {
++        'commit': 'dd78960ccd8a03a2fe1f629543d27783885b78e9',
++        'blob_sha1': '3a60b026a4e39b2eff1ed9ab860107e9e9f57b83',
++        'sha256': 'c3cd8ae90218c260d5fadbe5d9095164693fe420812218a18dfcf65c3f1743b9',
++    },
++}
++CHROMIUM_TREE = '63b2edfe4c6ae23d2fd3424cde3e529db49f7068'
++SOURCE_TREES = {'electron': '328891d1f8b4d93d49c9f31332baf75fa726cb6e',
++                'chromium': CHROMIUM_TREE}
++FIELDS = {'vars', 'deps', 'hooks', 'pre_deps_hooks', 'recursedeps', 'git_dependencies',
++          'gclient_gn_args_from', 'gclient_gn_args_file', 'gclient_gn_args',
++          'allowed_hosts', 'include_rules', 'skip_child_includes'}
++SHA1 = re.compile(r'^[0-9a-f]{40}$')
++SHA256 = re.compile(r'^[0-9a-f]{64}$')
++RESOLVED_ALIASES = {
++    ('https://chromium.googlesource.com/chromium/src.git', '152.0.7977.167'):
++        'dd78960ccd8a03a2fe1f629543d27783885b78e9',
++    ('https://github.com/nodejs/node.git', 'v24.22.0'):
++        'f14cd3aa7bf9ca8df2cc5b8bb14beb0f335b1d93',
++}
++
++
++def fail(code):
++    raise ValueError('custom_electron_deps_policy_' + code)
++
++
++class LiteralString(str):
++    """Str(...) is literal data, not a recursively evaluated condition."""
++
++
++class Unknown:
++    def __init__(self, *reasons):
++        self.reasons = frozenset(reasons)
++
++
++def unknown_union(values):
++    return Unknown(*(reason for value in values if isinstance(value, Unknown) for reason in value.reasons))
++
++
++def json_value(value):
++    if isinstance(value, Unknown):
++        return {'unresolved': sorted(value.reasons)}
++    if isinstance(value, dict):
++        return {key: json_value(child) for key, child in value.items()}
++    if isinstance(value, list):
++        return [json_value(child) for child in value]
++    return value
++
++
++def declared_profile():
++    # An explicit candidate profile, not defaults inferred from GN arguments,
++    # the running host, historical CI or a caller-supplied .gclient file.
++    values = {name: False for name in (
++        'checkout_android', 'checkout_ios', 'checkout_fuchsia', 'checkout_chromeos',
++        'checkout_linux', 'checkout_mac', 'checkout_arm', 'checkout_arm64',
++        'checkout_mips', 'checkout_mips64', 'checkout_ppc', 'checkout_riscv64',
++        'checkout_s390', 'checkout_x86', 'checkout_loong64')}
++    values.update(host_os=LiteralString('win'), host_cpu=LiteralString('x64'),
++                  checkout_win=True, checkout_x64=True)
++    return values
++
++
++class StaticDeps:
++    def __init__(self, content, owner, parent_vars=None):
++        if len(content) > 2 * 1024 ** 2:
++            fail('input_too_large')
++        try:
++            tree = ast.parse(content.decode('utf-8', 'strict'), filename=owner)
++        except (SyntaxError, UnicodeError, RecursionError):
++            fail('syntax_unavailable:' + owner)
++        if sum(1 for _ in ast.walk(tree)) > 100000:
++            fail('ast_too_large')
++        self.owner, self.context = owner, {}
++        assignments = {}
++        for statement in tree.body:
++            if not isinstance(statement, ast.Assign) or len(statement.targets) != 1 \
++                    or not isinstance(statement.targets[0], ast.Name):
++                fail('unsupported_statement:' + type(statement).__name__)
++            name = statement.targets[0].id
++            if name not in FIELDS or name in assignments:
++                fail('unsupported_or_duplicate_field:' + name)
++            assignments[name] = statement.value
++        defaults = self.value(assignments.get('vars', ast.Dict(keys=[], values=[])))
++        if not isinstance(defaults, dict):
++            fail('vars_not_dictionary')
++        self.context = dict(defaults)
++        self.parent_conflicts = []
++        for key, value in (parent_vars or {}).items():
++            if key in self.context and (type(value) != type(self.context[key]) or value != self.context[key]):
++                self.context[key] = Unknown('PARENT_VARIABLE_PRECEDENCE:' + key)
++                self.parent_conflicts.append(key)
++            else:
++                self.context[key] = value
++        self.context.update(declared_profile())
++        self.defaults = defaults
++        self.data = {name: defaults if name == 'vars' else self.value(value)
++                     for name, value in assignments.items()}
++
++    def value(self, node, depth=0):
++        if depth > 64:
++            fail('expression_too_deep')
++        if isinstance(node, ast.Constant) and type(node.value) in (str, int, bool, type(None)):
++            return node.value
++        if isinstance(node, ast.List):
++            return [self.value(child, depth + 1) for child in node.elts]
++        if isinstance(node, ast.Dict):
++            result = {}
++            for key, value in zip(node.keys, node.values):
++                if key is None:
++                    fail('dictionary_unpack_forbidden')
++                name = self.value(key, depth + 1)
++                if not isinstance(name, str) or name in result:
++                    fail('dictionary_key_invalid_or_duplicate')
++                result[name] = self.value(value, depth + 1)
++            return result
++        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
++            left, right = self.value(node.left, depth + 1), self.value(node.right, depth + 1)
++            if isinstance(left, Unknown) or isinstance(right, Unknown):
++                return unknown_union((left, right))
++            if isinstance(left, str) and isinstance(right, str):
++                return left + right
++            fail('non_string_addition')
++        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
++                and node.func.id in ('Var', 'Str') and len(node.args) == 1 and not node.keywords:
++            argument = node.args[0]
++            if not isinstance(argument, ast.Constant) or not isinstance(argument.value, str):
++                fail('nonliteral_var_or_str')
++            if node.func.id == 'Str':
++                return LiteralString(argument.value)
++            return self.context.get(argument.value, Unknown('VAR:' + argument.value))
++        fail('unsupported_expression:' + type(node).__name__)
++
++    def condition(self, expression, seen=()):
++        if expression is None:
++            return True
++        if not isinstance(expression, str) or len(expression) > 16384 or len(seen) > 32:
++            fail('condition_invalid_or_cyclic')
++        # Substitute only inside already-parsed string constants. A quote or
++        # boolean fragment in a value must never become condition syntax.
++        def replacement(match):
++            name = match.group(1)
++            value = self.context.get(name, Unknown('SUBSTITUTION:' + name))
++            if isinstance(value, Unknown):
++                raise KeyError(name)
++            if type(value) not in (str, LiteralString, bool, int):
++                fail('substitution_type_unsupported')
++            return str(value)
++        def literal_value(value):
++            if '${' in value:
++                return Unknown('CONDITION_TEMPLATE_SEMANTICS')
++            if re.search(r'\{[^{}]*[.\[!:][^{}]*\}', value):
++                fail('unsafe_condition_substitution')
++            try:
++                return re.sub(r'\{([A-Za-z_][A-Za-z0-9_]*)\}', replacement, value)
++            except KeyError as error:
++                return Unknown('SUBSTITUTION:' + error.args[0])
++        try:
++            node = ast.parse(expression, mode='eval').body
++        except (SyntaxError, RecursionError):
++            return Unknown('CONDITION_PARSE:' + expression)
++        allowed = (ast.Constant, ast.Name, ast.BoolOp, ast.And, ast.Or, ast.UnaryOp,
++                   ast.Not, ast.Compare, ast.Eq, ast.NotEq, ast.Load)
++        if any(not isinstance(child, allowed) for child in ast.walk(node)):
++            fail('unsupported_condition_expression')
++        def evaluate(child):
++            if isinstance(child, ast.Constant):
++                if type(child.value) not in (str, bool, int, type(None)):
++                    fail('condition_literal_unsupported')
++                return literal_value(child.value) if isinstance(child.value, str) else child.value
++            if isinstance(child, ast.Name):
++                if child.id in seen:
++                    fail('condition_variable_cycle:' + child.id)
++                value = self.context.get(child.id, Unknown('CONDITION_VAR:' + child.id))
++                if isinstance(value, LiteralString):
++                    return str(value)
++                if type(value) is str:
++                    if re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', value) \
++                            and value not in self.context and value not in ('True', 'False', 'None'):
++                        return Unknown('STRING_VAR_SEMANTICS_UNKNOWN:' + child.id)
++                    return self.condition(value, (*seen, child.id))
++                return value
++            if isinstance(child, ast.UnaryOp):
++                value = evaluate(child.operand)
++                if isinstance(value, Unknown):
++                    return value
++                if type(value) is not bool:
++                    fail('condition_not_boolean')
++                return not value
++            if isinstance(child, ast.BoolOp):
++                values = [evaluate(value) for value in child.values]
++                if any(not isinstance(value, Unknown) and type(value) is not bool for value in values):
++                    fail('condition_not_boolean')
++                if isinstance(child.op, ast.And) and any(value is False for value in values):
++                    return False
++                if isinstance(child.op, ast.Or) and any(value is True for value in values):
++                    return True
++                if any(isinstance(value, Unknown) for value in values):
++                    return unknown_union(values)
++                return isinstance(child.op, ast.And)
++            if isinstance(child, ast.Compare):
++                values = [evaluate(child.left), *(evaluate(value) for value in child.comparators)]
++                if any(isinstance(value, Unknown) for value in values):
++                    return unknown_union(values)
++                return all((left == right) if isinstance(op, ast.Eq) else (left != right)
++                           for left, op, right in zip(values, child.ops, values[1:]))
++            fail('condition_node_unsupported')
++        result = evaluate(node)
++        if not isinstance(result, Unknown) and type(result) is not bool:
++            fail('condition_not_boolean')
++        return result
++
++
++def selection(value):
++    return 'UNRESOLVED' if isinstance(value, Unknown) else 'SELECTED' if value is True else 'EXCLUDED'
++
++
++def safe_path(value):
++    if not isinstance(value, str) or not value or '\\' in value or ':' in value \
++            or any(part in ('', '.', '..') for part in value.split('/')) or value.startswith('/'):
++        fail('dependency_path_invalid')
++    return value
++
++
++def pinned_bytes(content, owner):
++    if not isinstance(content, bytes) or hashlib.sha256(content).hexdigest() != SOURCES[owner]['sha256'] \
++            or hashlib.sha1(b'blob ' + str(len(content)).encode() + b'\0' + content).hexdigest() != SOURCES[owner]['blob_sha1']:
++        fail('fixed_deps_bytes_mismatch:' + owner)
++
++
++def cipd_instance_kind(value):
++    if not isinstance(value, str):
++        return None
++    if SHA1.fullmatch(value):
++        return 'SHA1_INSTANCE_ID'
++    if not re.fullmatch(r'[A-Za-z0-9_-]{44}', value):
++        return None
++    try:
++        raw = base64.b64decode(value, altchars=b'-_', validate=True)
++    except (ValueError, binascii.Error):
++        return None
++    if len(raw) == 33 and raw[-1] == 2 and base64.urlsafe_b64encode(raw).decode() == value:
++        return 'SHA256_INSTANCE_ID'
++    return None
++
++
++def gitlinks_from_trees(directory):
++    if directory is None:
++        return None
++    directory = Path(directory).absolute()
++    if not directory.is_dir() or directory.is_symlink() or directory.resolve() != directory:
++        fail('canonical_tree_packet_directory_required')
++    result, visiting = {}, set()
++    def read(oid, prefix='', depth=0):
++        if depth > 64 or oid in visiting:
++            fail('tree_packet_cycle_or_depth')
++        visiting.add(oid)
++        target = directory / (oid + '.tree')
++        before = target.lstat()
++        identity = lambda value: (value.st_dev, value.st_ino, value.st_mode, value.st_nlink,
++                                  value.st_size, value.st_mtime_ns, value.st_ctime_ns)
++        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or not 0 <= before.st_size <= 16 * 1024 ** 2:
++            fail('tree_packet_file_invalid')
++        with target.open('rb') as stream:
++            if identity(os.fstat(stream.fileno())) != identity(before):
++                fail('tree_packet_file_changed')
++            content = stream.read(16 * 1024 ** 2 + 1)
++            if identity(os.fstat(stream.fileno())) != identity(before) or identity(target.lstat()) != identity(before):
++                fail('tree_packet_file_changed')
++        if len(content) != before.st_size or hashlib.sha1(b'tree ' + str(len(content)).encode() + b'\0' + content).hexdigest() != oid:
++            fail('tree_packet_hash_mismatch')
++        offset = 0
++        while offset < len(content):
++            space, end = content.find(b' ', offset), content.find(b'\0', offset)
++            if space < 0 or end < space or end + 21 > len(content):
++                fail('tree_packet_encoding')
++            mode, name = content[offset:space].decode(), content[space + 1:end].decode('utf-8', 'strict')
++            safe_path(name)
++            child, path = content[end + 1:end + 21].hex(), prefix + name
++            offset = end + 21
++            if mode == '40000':
++                read(child, path + '/', depth + 1)
++            elif mode == '160000':
++                if path in result:
++                    fail('duplicate_gitlink')
++                result[path] = child
++            elif mode not in ('100644', '100755', '120000'):
++                fail('tree_packet_mode')
++        visiting.remove(oid)
++    read(CHROMIUM_TREE)
++    return result
++
++
++def derive_manifest(electron_bytes, chromium_bytes, chromium_tree_objects=None):
++    for owner, content in (('electron', electron_bytes), ('chromium', chromium_bytes)):
++        pinned_bytes(content, owner)
++    electron = StaticDeps(electron_bytes, 'electron')
++    chromium = StaticDeps(chromium_bytes, 'chromium', electron.defaults)
++    links = gitlinks_from_trees(chromium_tree_objects)
++    dependencies, hooks, recursion, missing = [], [], [], []
++    for document in (electron, chromium):
++        for path, declared in document.data.get('deps', {}).items():
++            safe_path(path)
++            if declared is None:
++                dependencies.append({'owner': document.owner, 'path': path,
++                    'kind': 'disabled', 'selection': 'EXCLUDED'})
++                continue
++            entry = {'url': declared} if isinstance(declared, (str, Unknown)) else declared
++            if not isinstance(entry, dict):
++                fail('dependency_schema')
++            kind = entry.get('dep_type', 'git')
++            fields = {'git': {'url', 'condition', 'dep_type'},
++                'cipd': {'packages', 'condition', 'dep_type'},
++                'gcs': {'bucket', 'objects', 'condition', 'dep_type'}}
++            if kind not in fields or set(entry) - fields[kind]:
++                fail('dependency_kind_or_fields')
++            condition = entry.get('condition')
++            state = document.condition(condition)
++            row = {'owner': document.owner, 'path': path, 'kind': kind,
++                   'condition': condition, 'selection': selection(state),
++                   'condition_result': json_value(state)}
++            reasons = []
++            if isinstance(state, Unknown):
++                reasons.extend(sorted(state.reasons))
++            if kind == 'git':
++                url = entry.get('url')
++                row['url'] = json_value(url)
++                revision = url.rsplit('@', 1)[1] if isinstance(url, str) and '@' in url else None
++                alias = RESOLVED_ALIASES.get((url.rsplit('@', 1)[0], revision)) if isinstance(url, str) and revision else None
++                link = links.get(path.removeprefix('src/')) if links is not None and document.owner == 'chromium' else None
++                if revision and SHA1.fullmatch(revision):
++                    row.update(revision=revision, revision_source='DEPS_EXACT_COMMIT')
++                    if link and link != revision:
++                        reasons.append('DEPS_GITLINK_REVISION_CONFLICT')
++                elif alias:
++                    row.update(revision=alias, declared_alias=revision,
++                               revision_source='FIXED_INDEPENDENT_ALIAS_EVIDENCE')
++                elif link:
++                    row.update(revision=link, revision_source='HASHED_CHROMIUM_GITLINK')
++                else:
++                    row.update(revision=revision, revision_source='UNRESOLVED')
++                    reasons.append('GIT_REVISION_OBJECT_PIN_UNAVAILABLE')
++            elif kind == 'cipd':
++                packages = entry.get('packages')
++                if not isinstance(packages, list):
++                    fail('cipd_packages_schema')
++                row['packages'] = json_value(packages)
++                for package in packages:
++                    if not isinstance(package, dict) or set(package) not in ({'package', 'version'}, {'package', 'version_file'}):
++                        fail('cipd_package_schema')
++                    if 'version_file' in package:
++                        safe_path(package['version_file'])
++                        reasons.append('CIPD_VERSION_FILE_OBJECT_UNAVAILABLE:' + package['version_file'])
++                    else:
++                        version = package['version']
++                        if cipd_instance_kind(version) is None:
++                            reasons.append('CIPD_IMMUTABLE_INSTANCE_PIN_UNAVAILABLE')
++                    if not isinstance(package['package'], str) or '${' in package['package']:
++                        reasons.append('CIPD_PLATFORM_EXPANSION_UNQUALIFIED')
++                reasons.append('CIPD_PAYLOAD_MEMBERSHIP_UNVERIFIED')
++            else:
++                objects = entry.get('objects')
++                if not isinstance(entry.get('bucket'), str) or not isinstance(objects, list):
++                    fail('gcs_schema')
++                row['bucket'], row['objects'] = entry['bucket'], []
++                for obj in objects:
++                    required = {'object_name', 'sha256sum', 'size_bytes', 'generation'}
++                    if not isinstance(obj, dict) or not required <= set(obj) or set(obj) - required - {'output_file', 'condition'}:
++                        fail('gcs_object_schema')
++                    if not isinstance(obj['sha256sum'], str) or not SHA256.fullmatch(obj['sha256sum']) \
++                            or type(obj['size_bytes']) is not int or obj['size_bytes'] <= 0 \
++                            or type(obj['generation']) is not int or obj['generation'] <= 0:
++                        fail('gcs_object_pin_schema')
++                    object_state = document.condition(obj.get('condition'))
++                    combined = False if state is False or object_state is False else unknown_union((state, object_state)) \
++                        if isinstance(state, Unknown) or isinstance(object_state, Unknown) else True
++                    row['objects'].append({**obj, 'selection': selection(combined),
++                        'condition_result': json_value(combined)})
++                reasons.append('GCS_PAYLOAD_CONTENT_UNVERIFIED')
++            row['missing'] = sorted(set(reasons))
++            dependencies.append(row)
++            if state is not False:
++                missing.extend({'owner': document.owner, 'path': path, 'reason': reason} for reason in row['missing'])
++        for phase in ('pre_deps_hooks', 'hooks'):
++            for index, hook in enumerate(document.data.get(phase, [])):
++                if not isinstance(hook, dict) or set(hook) - {'name', 'condition', 'action', 'pattern', 'cwd'} \
++                        or not isinstance(hook.get('action'), list):
++                    fail('hook_schema')
++                state = document.condition(hook.get('condition'))
++                hooks.append({'owner': document.owner, 'phase': phase, 'index': index,
++                    **json_value(hook), 'selection': selection(state),
++                    'condition_result': json_value(state), 'executed': False})
++        for item in document.data.get('recursedeps', []):
++            if not isinstance(item, str):
++                fail('recursive_deps_schema')
++            recursion.append({'owner': document.owner, 'path': safe_path(item),
++                'deps_file': 'DEPS', 'qualified': False})
++    blockers = ['DEPOT_TOOLS_GCLIENT_INTERPRETER_IDENTITY', 'GCLIENT_PHASE_AND_CUSTOM_VARS_IDENTITY',
++        'DECLARED_PROFILE_SELECTION_NOT_OPERATIONAL', 'RECURSIVE_DEPS_OBJECT_CLOSURE_UNAVAILABLE',
++        'ELECTRON_PATCHED_DEPS_RECONCILIATION_UNAVAILABLE', 'HOOK_GENERATED_OUTPUTS_UNVERIFIED',
++        'ENABLED_GIT_CIPD_GCS_PHYSICAL_CONTENT_UNVERIFIED']
++    if links is None:
++        blockers.append('CHROMIUM_GITLINK_TREE_OBJECTS_UNAVAILABLE')
++    return {
++        'schema': 'metaengine.enabled-deps-inventory.v1', 'scope': 'PINNED_TOP_LEVEL_DEPS_ONLY',
++        'disposition': 'HOLD', 'analysis': 'DECLARED_PROFILE_ANALYSIS',
++        'profile': {'name': 'DECLARED_NATIVE_WIN_X64_INITIAL_SYNC',
++                    'variables': json_value(declared_profile()), 'observed_sync_spec': False},
++        'sources': [{'name': owner, **record} for owner, record in SOURCES.items()],
++        'declarations': [{'owner': document.owner,
++            'variables': [{'name': name, 'value': json_value(value),
++                           'literal_str': isinstance(value, LiteralString)}
++                          for name, value in sorted(document.defaults.items())],
++            'semantic_fields': {name: json_value(value) for name, value in document.data.items()
++                if name not in ('vars', 'deps', 'hooks', 'pre_deps_hooks', 'recursedeps')}}
++            for document in (electron, chromium)],
++        'chromium_gitlink_tree': CHROMIUM_TREE,
++        'gitlink_packet_checked': links is not None,
++        'gitlink_count': len(links) if links is not None else None,
++        'selection_qualified': False, 'source_closure_qualified': False, 'authority_effect': False,
++        'parent_variable_conflicts': sorted(chromium.parent_conflicts),
++        'dependencies': dependencies, 'hooks': hooks, 'recursion': recursion,
++        'summary': {'dependency_kinds': dict(Counter(row['kind'] for row in dependencies)),
++                    'dependency_selection': dict(Counter(row['selection'] for row in dependencies)),
++                    'hook_selection': dict(Counter(row['selection'] for row in hooks)),
++                    'hook_count': len(hooks), 'recursion_count': len(recursion)},
++        'missing_pins_and_content': sorted(missing, key=lambda row: (row['owner'], row['path'], row['reason'])),
++        'blockers': blockers,
++    }
++
++
++def canonical_bytes(manifest):
++    return (json.dumps(manifest, sort_keys=True, separators=(',', ':'), ensure_ascii=False) + '\n').encode()
++
++
++def derive_from_git(electron_repo, chromium_repo):
++    """Read only fixed base objects; never execute DEPS or fetch missing input.
++
++    These are base declarations. Electron's patch-modified DEPS and the actual
++    sync interpreter/spec remain explicit HOLDs in the resulting inventory.
++    """
++    path = Path(__file__).with_name('custom-electron-source-policy.py')
++    spec = importlib.util.spec_from_file_location('fixed_deps_component_object_reader', path)
++    component = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(component)
++    objects, contents = [], {}
++    try:
++        with tempfile.TemporaryDirectory(prefix='guardian-fixed-deps-trees-') as temporary:
++            packet = Path(temporary)
++            for owner, repository in (('electron', electron_repo), ('chromium', chromium_repo)):
++                repository = component.repository_controls(repository)
++                reader = component.Objects(repository)
++                objects.append(reader)
++                tree = component.commit_tree(reader, SOURCES[owner]['commit'])
++                if tree != SOURCE_TREES[owner]:
++                    fail('fixed_deps_commit_tree_mismatch')
++                _, root = reader.read(tree)
++                def rows(content):
++                    offset = 0
++                    while offset < len(content):
++                        space, end = content.find(b' ', offset), content.find(b'\0', offset)
++                        if space < 0 or end < space or end + 21 > len(content):
++                            fail('fixed_tree_encoding')
++                        mode = content[offset:space].decode('ascii', 'strict')
++                        name = content[space + 1:end].decode('utf-8', 'strict')
++                        safe_path(name)
++                        yield mode, name, content[end + 1:end + 21].hex()
++                        offset = end + 21
++                deps = [(mode, child) for mode, name, child in rows(root) if name == 'DEPS']
++                if deps != [('100644', SOURCES[owner]['blob_sha1'])]:
++                    fail('fixed_deps_tree_membership_mismatch')
++                kind, content = reader.read(deps[0][1])
++                if kind != 'blob':
++                    fail('fixed_deps_not_blob')
++                pinned_bytes(content, owner)
++                contents[owner] = content
++                if owner == 'chromium':
++                    seen = set()
++                    def export(oid):
++                        if oid in seen:
++                            return
++                        seen.add(oid)
++                        kind, content = reader.read(oid)
++                        if kind != 'tree':
++                            fail('fixed_tree_object_type')
++                        (packet / (oid + '.tree')).write_bytes(content)
++                        for mode, _, child in rows(content):
++                            if mode == '40000':
++                                export(child)
++                    export(tree)
++            return derive_manifest(contents['electron'], contents['chromium'], packet)
++    finally:
++        for reader in objects:
++            reader.close()
++
++
++def verify_derived_manifest(candidate, electron_bytes, chromium_bytes, chromium_tree_objects=None):
++    expected = canonical_bytes(derive_manifest(electron_bytes, chromium_bytes, chromium_tree_objects))
++    if not isinstance(candidate, bytes) or candidate != expected:
++        fail('derived_manifest_bytes_mismatch')
++    return hashlib.sha256(expected).hexdigest()
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--electron-deps', required=True, type=Path)
++    parser.add_argument('--chromium-deps', required=True, type=Path)
++    parser.add_argument('--chromium-tree-objects', type=Path)
++    parser.add_argument('--output', required=True, type=Path)
++    args = parser.parse_args()
++    try:
++        manifest = derive_manifest(args.electron_deps.read_bytes(), args.chromium_deps.read_bytes(), args.chromium_tree_objects)
++        content = canonical_bytes(manifest)
++        with args.output.open('xb') as stream:
++            stream.write(content)
++        print(json.dumps({'schema': manifest['schema'], 'disposition': 'HOLD',
++            'selection_qualified': False, 'manifest_sha256': hashlib.sha256(content).hexdigest(),
++            'summary': manifest['summary'], 'blockers': manifest['blockers']}))
++    except (OSError, ValueError, RecursionError) as error:
++        reason = str(error) if str(error).startswith('custom_electron_deps_policy_') else 'custom_electron_deps_policy_unavailable'
++        parser.exit(1, reason + '\n')
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/apps/metaengine-browser/scripts/custom-electron-hook-inputs.py b/apps/metaengine-browser/scripts/custom-electron-hook-inputs.py
+new file mode 100644
+index 0000000..42e1af5
+--- /dev/null
++++ b/apps/metaengine-browser/scripts/custom-electron-hook-inputs.py
+@@ -0,0 +1,276 @@
++#!/usr/bin/env python3
++"""Data-only base hook/tool input inventory; never execute a hook or downloader.
++
++The fixed DEPS parser derives selections again from pinned source bytes. No
++caller manifest, hook exit status or "verified" boolean can authorize a build.
++Known raw files are checked against a fixed upstream-base blob catalog. Their
++patched phase, imported code, host programs, payload members and generated
++outputs remain separate producers; every composed inventory stays HOLD.
++"""
++import argparse
++import base64
++from collections import Counter
++import hashlib
++import importlib.util
++import json
++import os
++from pathlib import Path
++import re
++
++APP = Path(__file__).resolve().parents[1]
++CATALOG = APP / 'build/custom-electron-hook-inputs.json'
++HEX256 = re.compile(r'^[0-9a-f]{64}$')
++PROFILE = 'DECLARED_NATIVE_WIN_X64_INITIAL_SYNC'
++COMMON_HOLDS = [
++    'GCLIENT_PHASE_AND_CUSTOM_VARS_NOT_OPERATIONALLY_BOUND',
++    'PATCHED_DEPS_AND_HOOK_SOURCE_RECONCILIATION_UNAVAILABLE',
++    'RECURSIVE_HOOK_GRAPH_AND_GLOBAL_EXECUTION_ORDER_UNAVAILABLE',
++    'HOST_INTERPRETER_STDLIB_BOOTSTRAP_AND_SUBPROCESS_BYTES_UNBOUND',
++    'GENERATED_OUTPUT_NAMESPACE_AND_CONTENT_PRODUCER_UNAVAILABLE',
++]
++SPECIAL_HOLDS = {
++    'generate_mtime_cache': ['FILESYSTEM_MTIME_INPUTS_NOT_CANONICAL_SOURCE_BYTES'],
++    'apply_mtime_cache': ['FILESYSTEM_MTIME_INPUTS_NOT_CANONICAL_SOURCE_BYTES'],
++    'patch_chromium': ['ALL_PATCH_CONFIG_TARGET_REPOSITORIES_MUST_BE_PRESENT_NO_EXIT_STATUS_SUBSTITUTE'],
++    'electron_npm_deps': ['BARE_PATH_NODE_NOT_PINNED_NODE_SOURCE', 'YARN_LOCK_PAYLOAD_AND_INSTALL_OUTPUT_CLOSURE_UNBOUND'],
++    'gen_siso_revision': ['BARE_PATH_NODE_NOT_PINNED_NODE_SOURCE', 'ADJACENT_PATCHED_DEPS_AND_GENERATED_SISO_OUTPUT_UNBOUND'],
++    'electron_pgo_profiles_win': ['ALL_REQUESTED_WIN_X64_AND_ARM64_PROFILE_PAYLOADS_UNAVAILABLE'],
++    'electron_pgo_profiles_v8_builtins': ['V8_BUILTINS_PROFILE_PAYLOAD_UNAVAILABLE'],
++    'vpython3_common': ['VPYTHON_PLATFORM_FILTER_AND_RESOLVED_WHEEL_INSTANCES_UNBOUND'],
++    'landmines': ['LANDMINE_SCRIPT_IMPORTS_AND_CLOBBER_NAMESPACE_UNBOUND'],
++    'disable_depot_tools_selfupdate': ['DEPOT_TOOLS_BOOTSTRAP_CLIENT_AND_HOOK_SCRIPT_BYTES_UNBOUND'],
++    'remove_stale_files': ['DECLARED_REMOVAL_NAMESPACE_UNBOUND'],
++    'remove_stale_pyc_files': ['DECLARED_REMOVAL_NAMESPACE_UNBOUND'],
++    'win_toolchain': ['SDK_ARTIFACT_LABEL_NOT_STRONG_PAYLOAD_DIGEST', 'DEPOT_TOOLS_SDK_DOWNLOADER_AND_EXTRACTED_MEMBERS_UNBOUND'],
++    'lastchange': ['GIT_HISTORY_AND_ENVIRONMENT_DERIVED_OUTPUTS_UNBOUND'],
++    'gpu_lists_version': ['GIT_HISTORY_AND_ENVIRONMENT_DERIVED_OUTPUTS_UNBOUND'],
++    'lastchange_skia': ['GIT_HISTORY_AND_ENVIRONMENT_DERIVED_OUTPUTS_UNBOUND'],
++    'lastchange_dawn': ['GIT_HISTORY_AND_ENVIRONMENT_DERIVED_OUTPUTS_UNBOUND'],
++    'rc_win': ['LEGACY_SHA1_DESCRIPTOR_NOT_STRONG_PAYLOAD_PROOF', 'DEPOT_TOOLS_GCS_DOWNLOADER_UNBOUND'],
++    'apache_win32': ['RECURSIVE_SHA1_DESCRIPTOR_AND_DOWNLOADER_CLOSURE_UNBOUND'],
++    'configure_reclient_cfgs': ['GENERATED_RECLIENT_TEMPLATES_AND_CONFIG_NAMESPACE_UNBOUND'],
++    'configure_siso': ['GENERATED_SISO_ENV_AND_BACKEND_CONFIG_NAMESPACE_UNBOUND'],
++    'tast_control': ['TAST_TEMPLATE_FILTER_AND_GENERATED_OUTPUT_BYTES_UNBOUND'],
++}
++KNOWN_OVERRIDES = frozenset(name.casefold() for name in (
++    'EXTRA_LANDMINES_SCRIPT', 'CHROMIUM_OUT_DIR', 'DEPOT_TOOLS_WIN_TOOLCHAIN',
++    'GYP_MSVS_OVERRIDE_PATH', 'WINDOWSSDKDIR', 'BASE_COMMIT_HASH',
++    'BASE_COMMIT_SUBMISSION_MS', 'PYTHONPATH', 'PYTHONHOME', 'NODE_OPTIONS',
++    'NODE_PATH', 'ELECTRON_PGO_CDN_URL', 'CDS_CLANG_BUCKET_OVERRIDE'))
++
++
++def fail(reason):
++    raise ValueError('custom_electron_hook_inputs_' + reason)
++
++
++def deps_policy():
++    spec = importlib.util.spec_from_file_location('metaengine_fixed_deps_policy',
++        Path(__file__).with_name('custom-electron-deps-policy.py'))
++    module = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(module)  # Our data parser, never an upstream script.
++    return module
++
++
++def sha256(content):
++    return hashlib.sha256(content).hexdigest()
++
++
++def canonical(value):
++    return json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()
++
++
++def catalog():
++    value = json.loads(CATALOG.read_bytes())
++    if value.get('schema') != 'metaengine.custom-electron.hook-source-catalog.v1':
++        fail('catalog_schema')
++    return value
++
++
++def compare_source_bytes(source_files):
++    """Compare bytes only; no script import/exec, patch-phase or closure claim."""
++    pins = {row['owner'] + '/' + row['path']: row for row in catalog()['files']}
++    if set(source_files) - set(pins):
++        fail('unknown_source_key')
++    result = []
++    for key, pin in pins.items():
++        content = source_files.get(key)
++        if content is not None:
++            if not isinstance(content, bytes) or len(content) != pin['bytes'] or sha256(content) != pin['sha256'] \
++                    or hashlib.sha1(b'blob ' + str(len(content)).encode() + b'\0' + content).hexdigest() != pin['blob_sha1']:
++                fail('known_source_bytes_mismatch:' + key)
++        result.append({'path': key, 'blob_sha1': pin['blob_sha1'], 'sha256': pin['sha256'],
++            'phase': pin['phase'], 'content': 'MISSING' if content is None else 'MATCHES_BASE_BLOB_BYTES'})
++    return result
++
++
++def classify_cipd_reference(version):
++    """CIPD instance syntax is not package membership, extraction or execution."""
++    if not isinstance(version, str):
++        return {'kind': 'UNRESOLVED_REFERENCE', 'disposition': 'HOLD'}
++    if re.fullmatch(r'[0-9a-f]{40}', version):
++        return {'kind': 'LEGACY_SHA1_INSTANCE', 'sha1': version, 'disposition': 'HOLD'}
++    if re.fullmatch(r'[A-Za-z0-9_-]{44}', version):
++        decoded = base64.urlsafe_b64decode(version)
++        if len(decoded) == 33 and decoded[-1] == 2 and base64.urlsafe_b64encode(decoded).decode().rstrip('=') == version:
++            return {'kind': 'SHA256_INSTANCE', 'sha256': decoded[:-1].hex(), 'disposition': 'HOLD'}
++        return {'kind': 'UNSUPPORTED_INSTANCE_ENCODING', 'disposition': 'HOLD'}
++    return {'kind': 'SYMBOLIC_REFERENCE_REQUIRES_RESOLUTION', 'disposition': 'HOLD'}
++
++
++def compare_gcs_bytes(descriptor, content):
++    """Pure descriptor comparison. Only a source-derived selector adds origin."""
++    if (not isinstance(descriptor, dict) or not isinstance(descriptor.get('sha256sum'), str)
++            or not HEX256.fullmatch(descriptor['sha256sum'])
++            or type(descriptor.get('size_bytes')) is not int or descriptor['size_bytes'] <= 0
++            or type(descriptor.get('generation')) is not int or descriptor['generation'] <= 0):
++        fail('gcs_descriptor_invalid')
++    if not isinstance(content, bytes) or len(content) != descriptor['size_bytes']:
++        fail('gcs_payload_size_mismatch')
++    if sha256(content) != descriptor['sha256sum']:
++        fail('gcs_payload_digest_mismatch')
++    return {'scope': 'DECLARED_GCS_DESCRIPTOR_BYTES_ONLY', 'bytes': len(content),
++        'sha256': sha256(content), 'disposition': 'HOLD', 'authority_effect': False}
++
++
++def verify_selected_gcs_bytes(electron_bytes, chromium_bytes, owner, path, object_name, content):
++    derived = deps_policy().derive_manifest(electron_bytes, chromium_bytes)
++    matches = [(row, obj) for row in derived['dependencies'] if row['owner'] == owner
++        and row['path'] == path and row['kind'] == 'gcs' for obj in row['objects']
++        if obj['object_name'] == object_name]
++    if len(matches) != 1 or matches[0][0]['selection'] != 'SELECTED' or matches[0][1]['selection'] != 'SELECTED':
++        fail('gcs_source_selection_not_resolved')
++    result = compare_gcs_bytes(matches[0][1], content)
++    return {**result, 'scope': 'PINNED_BASE_DEPS_SELECTED_GCS_BYTES_ONLY', 'owner': owner,
++        'path': path, 'object_name': object_name, 'generation': matches[0][1]['generation']}
++
++
++def known_override_keys(environment):
++    # Windows names are case-insensitive; present empty values still override.
++    return sorted({key.upper() for key in environment if key.casefold() in KNOWN_OVERRIDES
++        or key.casefold().startswith('gyp_msvs_hash_')})
++
++
++def reject_known_overrides(environment):
++    keys = known_override_keys(environment)
++    if keys:
++        fail('environment_override_forbidden:' + ','.join(keys))
++
++
++def pgo_state(content):
++    fields = content.decode('utf-8', 'strict').split()
++    if len(fields) != 2 or not re.fullmatch(r'[A-Za-z0-9._-]+', fields[0]) \
++            or fields[0] in ('.', '..') or not HEX256.fullmatch(fields[1]):
++        fail('pgo_strong_digest_state_required')
++    return {'file': fields[0], 'sha256': fields[1], 'size_bytes': None,
++        'payload': 'UNAVAILABLE', 'disposition': 'HOLD'}
++
++
++def base_siso_expected(chromium_bytes):
++    deps_policy().pinned_bytes(chromium_bytes, 'chromium')
++    found = re.findall(rb"'siso_version':\s*'git_revision:([0-9a-f]{40})'", chromium_bytes)
++    if len(found) != 1:
++        fail('base_siso_literal_unavailable')
++    return found[0] + b'\n'
++
++
++def toolchain_defaults(source_files):
++    # Called only after compare_source_bytes; literals are data, never exec.
++    source = source_files.get('chromium/build/vs_toolchain.py')
++    result = {'scope': 'UPSTREAM_BASE_DECLARATIONS_ONLY', 'disposition': 'HOLD',
++        'sdk_payload_sha256': None, 'sdk_payload_size_bytes': None}
++    if source is not None:
++        for name in ('TOOLCHAIN_HASH', 'SDK_VERSION'):
++            found = re.findall(rb'^' + name.encode() + rb" = '([A-Za-z0-9.]+)'$", source, re.MULTILINE)
++            if len(found) != 1:
++                fail('known_toolchain_literal_missing:' + name)
++            result[name.lower()] = found[0].decode('ascii')
++    descriptor = source_files.get('chromium/build/toolchain/win/rc/win/rc.exe.sha1')
++    if descriptor is not None:
++        value = descriptor.decode('ascii').strip()
++        if not re.fullmatch('[0-9a-f]{40}', value):
++            fail('legacy_rc_descriptor_invalid')
++        result['rc_legacy_sha1'] = value
++    return result
++
++
++def derive_inventory(electron_bytes, chromium_bytes, source_files, chromium_tree_objects=None):
++    parser = deps_policy()
++    derived = parser.derive_manifest(electron_bytes, chromium_bytes, chromium_tree_objects)
++    pins = catalog()
++    if derived['sources'] != pins['sources'] or derived['profile']['name'] != PROFILE:
++        fail('source_profile_catalog_mismatch')
++    sources = compare_source_bytes(source_files)
++    source_state = {row['path']: row['content'] for row in sources}
++    recipes = {(row['owner'], row['phase'], row['index']): row for row in pins['hooks']}
++    hooks = []
++    for hook in derived['hooks']:
++        if hook['selection'] == 'EXCLUDED':
++            continue
++        recipe = recipes.get((hook['owner'], hook['phase'], hook['index']))
++        holds = list(COMMON_HOLDS)
++        if recipe is None:
++            holds.append('HOOK_DATA_HANDLER_UNAVAILABLE')
++            paths = []
++        else:
++            if recipe['name'] != hook.get('name') or recipe['action_sha256'] != sha256(canonical(hook['action'])):
++                fail('catalog_action_mismatch')
++            paths = recipe['source_paths']
++        if hook['selection'] != 'SELECTED':
++            holds.append('HOOK_SELECTION_UNRESOLVED')
++        holds.extend(SPECIAL_HOLDS.get(hook.get('name'), ['GENERATED_INPUT_HANDLER_UNAVAILABLE']))
++        holds.extend('BASE_SOURCE_BYTES_UNAVAILABLE:' + path for path in paths
++            if source_state.get(path) != 'MATCHES_BASE_BLOB_BYTES')
++        hooks.append({**hook, 'disposition': 'HOLD', 'source_paths': paths,
++            'declared_host_command': hook['action'][0], 'blockers': sorted(set(holds))})
++    pgo = []
++    for target in ('win-x64', 'win-arm64', 'v8-builtins'):
++        key = 'electron/build/pgo_profiles/' + target + '.pgo.txt'
++        pgo.append({'target': target, 'state_source': key,
++            **(pgo_state(source_files[key]) if key in source_files else {'payload': 'STATE_SOURCE_UNAVAILABLE', 'disposition': 'HOLD'})})
++    siso = base_siso_expected(chromium_bytes)
++    gcs = [{**row, 'payloads': 'NOT_DOWNLOADED_OR_EXTRACTED'} for row in derived['dependencies']
++        if row['kind'] == 'gcs' and row['selection'] != 'EXCLUDED']
++    cipd = [{**row, 'reference_formats': [classify_cipd_reference(item.get('version')) for item in row['packages']]}
++        for row in derived['dependencies'] if row['kind'] == 'cipd' and row['selection'] != 'EXCLUDED']
++    return {'schema': 'metaengine.hook-tool-input-inventory.v1', 'scope': 'PINNED_TOP_LEVEL_BASE_DECLARATIONS_ONLY',
++        'disposition': 'HOLD', 'profile': derived['profile'], 'sources': sources,
++        'hooks': hooks, 'gcs_declarations': gcs, 'cipd_declarations': cipd, 'electron_pgo': pgo,
++        'windows_toolchain_defaults': toolchain_defaults(source_files),
++        'base_siso_output': {'path': 'src/electron/build/siso_revision', 'bytes': len(siso),
++            'sha256': sha256(siso), 'expected_base_text': siso.decode(), 'actual_hook_output': 'UNQUALIFIED'},
++        'known_environment_override_keys': known_override_keys(os.environ),
++        'blockers': COMMON_HOLDS + ['CIPD_PACKAGE_MEMBERSHIP_AND_EXTRACTED_GCS_PAYLOADS_UNBOUND',
++            'DECLARED_PROFILE_NOT_ACTUAL_GCLIENT_EXECUTION_SPEC', 'KNOWN_ENVIRONMENT_KEY_CHECK_IS_NOT_COMPLETE_ENVIRONMENT_IDENTITY'],
++        'summary': {'hook_selection': dict(Counter(row['selection'] for row in hooks)),
++            'source_content': dict(Counter(row['content'] for row in sources)), 'all_hook_count': len(derived['hooks'])},
++        'hooks_executed': False, 'tool_payloads_downloaded': False, 'authority_effect': False}
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--electron-deps', required=True, type=Path)
++    parser.add_argument('--chromium-deps', required=True, type=Path)
++    parser.add_argument('--sources', type=Path, help='Read-only owner/path byte capture; never execute it')
++    parser.add_argument('--chromium-tree-objects', type=Path)
++    args = parser.parse_args()
++    try:
++        sources = {}
++        if args.sources:
++            for row in catalog()['files']:
++                key = row['owner'] + '/' + row['path']
++                path = args.sources / key
++                if path.is_symlink():
++                    fail('source_symlink_forbidden')
++                if path.is_file():
++                    sources[key] = path.read_bytes()
++        result = derive_inventory(args.electron_deps.read_bytes(), args.chromium_deps.read_bytes(),
++            sources, args.chromium_tree_objects)
++        print(json.dumps(result, indent=2))
++    except (ValueError, OSError, KeyError, TypeError, UnicodeError) as error:
++        parser.exit(1, str(error) + '\n')
++    # An inventory is never a hook execution/build admission result.
++    raise SystemExit(1)
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/apps/metaengine-browser/scripts/custom-electron-source-build.py b/apps/metaengine-browser/scripts/custom-electron-source-build.py
+index 29c7f22..d1edc23 100644
+--- a/apps/metaengine-browser/scripts/custom-electron-source-build.py
++++ b/apps/metaengine-browser/scripts/custom-electron-source-build.py
+@@ -195,13 +195,29 @@ def load_source_policy():
+     return module
+ 
+ 
+-def require_gclient_dependency_closure():
++def load_deps_policy():
++    path = APP / 'scripts/custom-electron-deps-policy.py'
++    spec = importlib.util.spec_from_file_location('guardian_fixed_deps_inventory_policy', path)
++    module = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(module)
++    return module
++
++
++def require_gclient_dependency_closure(chromium=None):
+     # Complete named component trees do not authenticate other enabled DEPS
+     # repositories, CIPD payloads, hooks/generated files or compiler tools.
+     # A separately reviewed producer must bind that closure before any stage,
+     # GN/tool execution or package receipt. No JSON flag or caller callback can
+     # substitute for that missing producer.
+-    fail('gclient_deps_cipd_hook_closure_unavailable')
++    if chromium is None:
++        fail('gclient_deps_cipd_hook_closure_unavailable:source_inputs_unavailable')
++    try:
++        # Only the fixed base Git objects can supply inventory bytes. Never
++        # import a caller JSON manifest or treat its qualification bits as proof.
++        inventory = load_deps_policy().derive_from_git(chromium / 'electron', chromium)
++    except (OSError, ValueError):
++        fail('gclient_deps_cipd_hook_closure_unavailable:fixed_deps_object_inputs_unavailable')
++    fail('gclient_deps_cipd_hook_closure_unavailable:' + ','.join(inventory['blockers']))
+ 
+ 
+ def verify_source_identity(chromium, pins):
+@@ -241,7 +257,7 @@ def verify_source_identity(chromium, pins):
+             or not str(official.get('sha256', '')).startswith('5f75ae1e70e69442c9d23f7d984e8ca2')
+             or official.get('bytes') != 349406):
+         fail('official_header_pin_drift')
+-    require_gclient_dependency_closure()
++    require_gclient_dependency_closure(chromium)
+     return heads
+ 
+ 
+diff --git a/apps/metaengine-browser/test/test_custom_electron_deps_policy.py b/apps/metaengine-browser/test/test_custom_electron_deps_policy.py
+new file mode 100644
+index 0000000..4a39420
+--- /dev/null
++++ b/apps/metaengine-browser/test/test_custom_electron_deps_policy.py
+@@ -0,0 +1,228 @@
++#!/usr/bin/env python3
++"""Data-only restricted-DEPS/Merkle/derived-manifest regressions."""
++import base64
++import hashlib
++import importlib.util
++import os
++from pathlib import Path
++import subprocess
++import tempfile
++import unittest
++from unittest import mock
++
++SCRIPT = Path(__file__).resolve().parents[1] / 'scripts/custom-electron-deps-policy.py'
++spec = importlib.util.spec_from_file_location('static_deps_policy_models', SCRIPT)
++policy = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(policy)
++
++
++def oid(kind, content):
++    return hashlib.sha1(kind.encode() + b' ' + str(len(content)).encode() + b'\0' + content).hexdigest()
++
++
++def tree_row(mode, name, child):
++    return mode.encode() + b' ' + name.encode() + b'\0' + bytes.fromhex(child)
++
++
++class StaticSyntaxTests(unittest.TestCase):
++    def document(self, code):
++        return policy.StaticDeps(code.encode(), 'model')
++
++    def test_literals_var_str_and_add_only(self):
++        result = self.document(
++            "vars={'host':'https://example.invalid','flag':'True','literal':Str('not a condition')}; deps={'src/component':Var('host')+'/repo'}")
++        self.assertEqual(result.data['deps']['src/component'], 'https://example.invalid/repo')
++        self.assertTrue(result.condition('flag'))
++        self.assertIsInstance(result.defaults['literal'], policy.LiteralString)
++        self.assertTrue(result.condition('literal == "not a condition"'))
++
++    def test_unknown_names_are_never_implicit_false_or_literal_mac(self):
++        result = self.document('vars = {}')
++        self.assertIsInstance(result.condition('host_os == mac'), policy.Unknown)
++        self.assertIsInstance(result.condition('unknown and True'), policy.Unknown)
++        self.assertIsInstance(result.condition('unknown or False'), policy.Unknown)
++        self.assertFalse(result.condition('False and unknown'))
++
++    def test_defined_plain_string_semantics_are_not_reported_as_missing_variable(self):
++        result = self.document("vars={'checkout_configuration':'default'}")
++        value = result.condition('checkout_configuration != "small"')
++        self.assertEqual(value.reasons, frozenset({'STRING_VAR_SEMANTICS_UNKNOWN:checkout_configuration'}))
++
++    def test_substitution_values_cannot_inject_condition_syntax(self):
++        result = self.document("vars={'label':'\" or True or \"','empty':Str('')}")
++        self.assertFalse(result.condition('"{label}" == "known"'))
++        self.assertFalse(result.condition('"{empty}" != ""'))
++        with self.assertRaisesRegex(ValueError, 'unsafe_condition_substitution'):
++            result.condition('"{label.__class__}" == "x"')
++
++    def test_unsupported_ast_is_rejected_even_in_false_condition_branch(self):
++        result = self.document('vars = {}')
++        for expression in ('False and __import__("os")', 'False and x.attr',
++                           'False and (1 + 2 == 3)', 'False and [x for x in []]'):
++            with self.subTest(expression=expression), self.assertRaisesRegex(ValueError, 'unsupported_condition_expression'):
++                result.condition(expression)
++
++    def test_executable_statements_calls_and_comprehensions_never_run(self):
++        for text in ('import os', 'if True: vars={}', 'vars = dict()',
++                     'vars={"x":__import__("os")}', 'vars={"x":[x for x in []]}',
++                     'vars={"x":Var(123)}', 'vars={"x":Str(name)}'):
++            with self.subTest(text=text), self.assertRaises(ValueError):
++                self.document(text)
++
++    def test_duplicate_keys_and_assignments_are_refused(self):
++        cases = ('vars={"x":True,"x":False}', 'vars={};vars={}', 'unknown_field={}')
++        for text in cases:
++            with self.subTest(text=text), self.assertRaises(ValueError):
++                self.document(text)
++
++    def test_recursive_condition_variables_must_not_cycle(self):
++        result = self.document("vars={'a':'b','b':'a'}")
++        with self.assertRaisesRegex(ValueError, 'condition_variable_cycle'):
++            result.condition('a')
++
++    def test_parent_default_conflict_is_unresolved_not_assumed_precedence(self):
++        result = policy.StaticDeps(b"vars={'checkout_openxr':'checkout_win'}", 'child',
++                                   {'checkout_openxr': False})
++        self.assertIsInstance(result.condition('checkout_openxr'), policy.Unknown)
++        self.assertEqual(result.parent_conflicts, ['checkout_openxr'])
++
++
++class MerklePacketTests(unittest.TestCase):
++    def fixture(self):
++        temporary = tempfile.TemporaryDirectory(prefix='deps-merkle-model-')
++        self.addCleanup(temporary.cleanup)
++        root = Path(temporary.name)
++        child = tree_row('160000', 'dependency', 'a' * 40)
++        child_oid = oid('tree', child)
++        content = tree_row('40000', 'left', child_oid) + tree_row('40000', 'right', child_oid)
++        root_oid = oid('tree', content)
++        (root / (root_oid + '.tree')).write_bytes(content)
++        (root / (child_oid + '.tree')).write_bytes(child)
++        patch = mock.patch.object(policy, 'CHROMIUM_TREE', root_oid)
++        patch.start()
++        self.addCleanup(patch.stop)
++        return root, root_oid
++
++    def test_same_subtree_at_two_prefixes_preserves_both_gitlink_paths(self):
++        root, _ = self.fixture()
++        self.assertEqual(policy.gitlinks_from_trees(root),
++                         {'left/dependency': 'a' * 40, 'right/dependency': 'a' * 40})
++
++    def test_changed_tree_bytes_cannot_be_blessed_by_filename(self):
++        root, root_oid = self.fixture()
++        (root / (root_oid + '.tree')).write_bytes(b'changed')
++        with self.assertRaisesRegex(ValueError, 'tree_packet_hash_mismatch'):
++            policy.gitlinks_from_trees(root)
++
++    def test_packet_file_hardlink_is_refused_before_read(self):
++        root, root_oid = self.fixture()
++        os.link(root / (root_oid + '.tree'), root / 'alias')
++        with self.assertRaisesRegex(ValueError, 'tree_packet_file_invalid'):
++            policy.gitlinks_from_trees(root)
++
++
++class ManifestTests(unittest.TestCase):
++    def fixture(self):
++        electron = b"""vars={'process_deps':True};
++deps={'src':{'url':'https://chromium.googlesource.com/chromium/src.git@152.0.7977.167','condition':'process_deps'}}
++pre_deps_hooks=[{'name':'pre','action':['python3','never-executed.py']}]
++hooks=[]
++recursedeps=['src']
++"""
++        chromium = b"""git_dependencies='SYNC'
++vars={'non_git_source':'True'}
++deps={
++ 'src/dependency':{'url':'https://example.invalid/repo.git','condition':'checkout_win'},
++ 'src/cipd':{'dep_type':'cipd','packages':[{'package':'tools/${{platform}}','version':'git_revision:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'}]},
++ 'src/orderfile':{'dep_type':'cipd','condition':'checkout_android','packages':[{'package':'orderfile','version_file':'orderfile/instance'}]},
++ 'src/gcs':{'dep_type':'gcs','bucket':'model','condition':'checkout_win','objects':[{'object_name':'archive','sha256sum':'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','size_bytes':1,'generation':1,'condition':'checkout_linux'}]},
++}
++hooks=[{'name':'model','condition':'checkout_win','action':['python3','-c','never execute code from a hook inventory']}]
++recursedeps=['src/dependency']
++"""
++        sources = {}
++        for name, content in (('electron', electron), ('chromium', chromium)):
++            sources[name] = {'commit': 'a' * 40, 'blob_sha1': oid('blob', content),
++                             'sha256': hashlib.sha256(content).hexdigest()}
++        patch = mock.patch.dict(policy.SOURCES, sources)
++        patch.start()
++        self.addCleanup(patch.stop)
++        return electron, chromium
++
++    def test_complete_inventory_is_data_only_and_explicit_hold(self):
++        electron, chromium = self.fixture()
++        manifest = policy.derive_manifest(electron, chromium)
++        self.assertEqual(manifest['disposition'], 'HOLD')
++        self.assertFalse(manifest['selection_qualified'])
++        self.assertFalse(manifest['source_closure_qualified'])
++        self.assertFalse(manifest['authority_effect'])
++        self.assertEqual(len(manifest['dependencies']), 5)
++        self.assertEqual(len(manifest['hooks']), 2)
++        self.assertTrue(all(row['executed'] is False for row in manifest['hooks']))
++        self.assertEqual(manifest['dependencies'][0]['revision'], 'dd78960ccd8a03a2fe1f629543d27783885b78e9')
++        gcs = next(row for row in manifest['dependencies'] if row['kind'] == 'gcs')
++        self.assertEqual(gcs['objects'][0]['selection'], 'EXCLUDED')
++        orderfile = next(row for row in manifest['dependencies'] if row['path'] == 'src/orderfile')
++        self.assertEqual(orderfile['packages'][0]['version_file'], 'orderfile/instance')
++        self.assertEqual(orderfile['selection'], 'EXCLUDED')
++        self.assertIn('git_dependencies', manifest['declarations'][1]['semantic_fields'])
++
++    def test_candidate_json_cannot_supply_authority_or_hide_a_blocker(self):
++        electron, chromium = self.fixture()
++        manifest = policy.derive_manifest(electron, chromium)
++        canonical = policy.canonical_bytes(manifest)
++        self.assertEqual(policy.verify_derived_manifest(canonical, electron, chromium), hashlib.sha256(canonical).hexdigest())
++        for field in ('selection_qualified', 'source_closure_qualified', 'authority_effect'):
++            changed = {**manifest, field: True}
++            with self.subTest(field=field), self.assertRaisesRegex(ValueError, 'derived_manifest_bytes_mismatch'):
++                policy.verify_derived_manifest(policy.canonical_bytes(changed), electron, chromium)
++
++    def test_raw_source_drift_fails_before_derived_manifest(self):
++        electron, chromium = self.fixture()
++        with self.assertRaisesRegex(ValueError, 'fixed_deps_bytes_mismatch'):
++            policy.derive_manifest(electron + b'\n', chromium)
++
++    def test_git_input_producer_binds_base_commit_tree_and_deps_blob(self):
++        electron, chromium = self.fixture()
++        with tempfile.TemporaryDirectory(prefix='fixed-deps-git-model-') as temporary:
++            root = Path(temporary)
++            repositories, records, trees = {}, {}, {}
++            def git(directory, *arguments):
++                return subprocess.run(['git', '-c', 'core.hooksPath=' + os.devnull,
++                    '-c', 'commit.gpgsign=false', '-C', str(directory), *arguments],
++                    capture_output=True, check=True).stdout
++            for owner, content in (('electron', electron), ('chromium', chromium)):
++                directory = root / owner
++                directory.mkdir()
++                git(directory, 'init', '--quiet')
++                (directory / 'DEPS').write_bytes(content)
++                git(directory, 'add', 'DEPS')
++                git(directory, '-c', 'user.name=Fixed DEPS Model',
++                    '-c', 'user.email=model@example.invalid', 'commit', '-qm', 'fixed source model')
++                commit = git(directory, 'rev-parse', 'HEAD').decode().strip()
++                tree = git(directory, 'rev-parse', 'HEAD^{tree}').decode().strip()
++                repositories[owner], trees[owner] = directory, tree
++                records[owner] = {'commit': commit, 'blob_sha1': oid('blob', content),
++                                  'sha256': hashlib.sha256(content).hexdigest()}
++            with mock.patch.dict(policy.SOURCES, records), mock.patch.dict(policy.SOURCE_TREES, trees), \
++                    mock.patch.object(policy, 'CHROMIUM_TREE', trees['chromium']):
++                manifest = policy.derive_from_git(repositories['electron'], repositories['chromium'])
++            self.assertEqual(manifest['sources'][0]['commit'], records['electron']['commit'])
++            self.assertTrue(manifest['gitlink_packet_checked'])
++            self.assertEqual(manifest['gitlink_count'], 0)
++            self.assertFalse(manifest['selection_qualified'])
++            self.assertEqual(manifest['disposition'], 'HOLD')
++
++    def test_cipd_instance_encoding_is_canonical_and_algorithm_bound(self):
++        instance = base64.urlsafe_b64encode(bytes(range(32)) + b'\x02').decode()
++        self.assertEqual(len(instance), 44)
++        self.assertEqual(policy.cipd_instance_kind(instance), 'SHA256_INSTANCE_ID')
++        self.assertEqual(policy.cipd_instance_kind('a' * 40), 'SHA1_INSTANCE_ID')
++        for bad in (instance[:-1], instance + '=', base64.urlsafe_b64encode(bytes(range(32)) + b'\x03').decode(),
++                    'git_revision:' + 'a' * 40, 'version:1', 'A' * 40):
++            with self.subTest(value=bad):
++                self.assertIsNone(policy.cipd_instance_kind(bad))
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/apps/metaengine-browser/test/test_custom_electron_hook_inputs.py b/apps/metaengine-browser/test/test_custom_electron_hook_inputs.py
+new file mode 100644
+index 0000000..d43f9b4
+--- /dev/null
++++ b/apps/metaengine-browser/test/test_custom_electron_hook_inputs.py
+@@ -0,0 +1,161 @@
++#!/usr/bin/env python3
++"""Data-only hook contracts; no upstream script, downloader or client runs."""
++import base64
++import hashlib
++import importlib.util
++import json
++import os
++from pathlib import Path
++import unittest
++
++APP = Path(__file__).resolve().parents[1]
++spec = importlib.util.spec_from_file_location('hook_inputs', APP / 'scripts/custom-electron-hook-inputs.py')
++hooks = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(hooks)
++
++
++def fixture(case):
++    directory = os.environ.get('METAENGINE_HOOK_INPUT_FIXTURES')
++    if not directory:
++        case.skipTest('Pinned source byte capture not provided; no acquisition or install in tests')
++    root = Path(directory)
++    electron = (root / 'electron-DEPS.raw').read_bytes()
++    chromium = (root / 'chromium-DEPS.raw').read_bytes()
++    sources = {}
++    for row in hooks.catalog()['files']:
++        key = row['owner'] + '/' + row['path']
++        source = root / 'hook-sources' / key
++        if source.is_file():
++            sources[key] = source.read_bytes()
++    return electron, chromium, sources
++
++
++class ReferenceContracts(unittest.TestCase):
++    def test_sha256_instance_is_canonical_digest_plus_algorithm_byte(self):
++        digest = hashlib.sha256(b'inert package data').digest()
++        version = base64.urlsafe_b64encode(digest + b'\x02').decode()
++        result = hooks.classify_cipd_reference(version)
++        self.assertEqual(result['kind'], 'SHA256_INSTANCE')
++        self.assertEqual(result['sha256'], digest.hex())
++        self.assertEqual(result['disposition'], 'HOLD')
++
++    def test_legacy_sha1_is_preserved_without_promotion_to_strong_payload_identity(self):
++        result = hooks.classify_cipd_reference('a' * 40)
++        self.assertEqual(result['kind'], 'LEGACY_SHA1_INSTANCE')
++        self.assertEqual(result['disposition'], 'HOLD')
++
++    def test_tags_and_refs_are_not_immutable_package_instances(self):
++        for version in ['git_revision:' + 'a' * 40, 'version:1.2.3', 'latest', 'refs/heads/main',
++                        'A' * 43, 'A' * 40, None, {'verified': True}]:
++            with self.subTest(version=version):
++                self.assertNotEqual(hooks.classify_cipd_reference(version)['kind'], 'SHA256_INSTANCE')
++
++    def test_unknown_algorithm_and_padding_do_not_match_known_sha256_format(self):
++        unknown = base64.urlsafe_b64encode(b'a' * 32 + b'\x03').decode()
++        valid = base64.urlsafe_b64encode(b'a' * 32 + b'\x02').decode()
++        self.assertEqual(hooks.classify_cipd_reference(unknown)['kind'], 'UNSUPPORTED_INSTANCE_ENCODING')
++        self.assertNotEqual(hooks.classify_cipd_reference(valid + '=')['kind'], 'SHA256_INSTANCE')
++
++    def test_gcs_declared_digest_size_and_generation_compare_without_admission(self):
++        content = b'inert payload'
++        descriptor = {'object_name': 'fixture', 'sha256sum': hashlib.sha256(content).hexdigest(),
++                      'size_bytes': len(content), 'generation': 123}
++        result = hooks.compare_gcs_bytes(descriptor, content)
++        self.assertEqual(result['scope'], 'DECLARED_GCS_DESCRIPTOR_BYTES_ONLY')
++        self.assertEqual(result['disposition'], 'HOLD')
++        self.assertFalse(result['authority_effect'])
++        with self.assertRaisesRegex(ValueError, 'gcs_payload_size_mismatch'):
++            hooks.compare_gcs_bytes(descriptor, content + b'!')
++        with self.assertRaisesRegex(ValueError, 'gcs_payload_digest_mismatch'):
++            hooks.compare_gcs_bytes({**descriptor, 'verified': True}, b'x' * len(content))
++
++    def test_gcs_booleans_and_missing_pins_are_not_numeric_identity(self):
++        base = {'sha256sum': 'a' * 64, 'size_bytes': 1, 'generation': 1}
++        for patch in [{'generation': True}, {'size_bytes': True}, {'generation': 0},
++                      {'sha256sum': 'A' * 64}, {'size_bytes': -1}]:
++            with self.subTest(patch=patch), self.assertRaisesRegex(ValueError, 'gcs_descriptor_invalid'):
++                hooks.compare_gcs_bytes({**base, **patch}, b'x')
++
++    def test_pgo_legacy_hashless_unsafe_or_extra_fields_remain_unsupported(self):
++        for value in [b'profile.profdata', b'../profile ' + b'a' * 64, b'.. ' + b'a' * 64,
++                      b'name ' + b'a' * 64 + b' extra']:
++            with self.subTest(value=value), self.assertRaisesRegex(ValueError, 'pgo_strong_digest_state_required'):
++                hooks.pgo_state(value)
++        result = hooks.pgo_state(b'profile.profdata ' + b'a' * 64 + b'\n')
++        self.assertEqual(result['sha256'], 'a' * 64)
++        self.assertIsNone(result['size_bytes'])
++        self.assertEqual(result['payload'], 'UNAVAILABLE')
++
++    def test_known_windows_environment_overrides_are_case_insensitive_even_when_empty(self):
++        keys = ['EXTRA_LANDMINES_SCRIPT', 'CHROMIUM_OUT_DIR', 'GYP_MSVS_HASH_e66617bc68',
++                'DEPOT_TOOLS_WIN_TOOLCHAIN', 'GYP_MSVS_OVERRIDE_PATH', 'WINDOWSSDKDIR',
++                'BASE_COMMIT_HASH', 'BASE_COMMIT_SUBMISSION_MS', 'PYTHONPATH', 'PYTHONHOME',
++                'NODE_OPTIONS', 'NODE_PATH', 'ELECTRON_PGO_CDN_URL']
++        for key in keys:
++            for spelling in [key, key.lower()]:
++                with self.subTest(key=spelling), self.assertRaisesRegex(ValueError, 'environment_override_forbidden'):
++                    hooks.reject_known_overrides({spelling: ''})
++        hooks.reject_known_overrides({'UNRELATED_KEY': 'inert'})
++
++    def test_missing_known_sources_stay_missing_and_unknown_keys_are_refused(self):
++        self.assertTrue(all(row['content'] == 'MISSING' for row in hooks.compare_source_bytes({})))
++        with self.assertRaisesRegex(ValueError, 'unknown_source_key'):
++            hooks.compare_source_bytes({'caller/verified.py': b'verified=True'})
++
++
++class PinnedComposition(unittest.TestCase):
++    def test_real_base_sources_inventory_all_selected_and_unresolved_hooks_without_execution(self):
++        electron, chromium, sources = fixture(self)
++        result = hooks.derive_inventory(electron, chromium, sources)
++        self.assertEqual(result['disposition'], 'HOLD')
++        self.assertFalse(result['hooks_executed'])
++        self.assertFalse(result['tool_payloads_downloaded'])
++        self.assertFalse(result['authority_effect'])
++        self.assertEqual(result['summary']['hook_selection'], {'SELECTED': 22, 'UNRESOLVED': 1})
++        self.assertTrue(all(row['disposition'] == 'HOLD' for row in result['hooks']))
++        self.assertTrue(all(row['content'] == 'MATCHES_BASE_BLOB_BYTES' for row in result['sources']))
++        self.assertEqual({row['target'] for row in result['electron_pgo']}, {'win-x64', 'win-arm64', 'v8-builtins'})
++        self.assertTrue(all(len(row['sha256']) == 64 and row['payload'] == 'UNAVAILABLE' for row in result['electron_pgo']))
++        self.assertEqual(result['windows_toolchain_defaults']['toolchain_hash'], 'e66617bc68')
++        self.assertEqual(result['windows_toolchain_defaults']['sdk_version'], '10.0.26100.0')
++        self.assertIsNone(result['windows_toolchain_defaults']['sdk_payload_sha256'])
++
++    def test_changed_known_script_cannot_reuse_base_git_blob_catalog(self):
++        electron, chromium, sources = fixture(self)
++        changed = dict(sources)
++        changed['electron/script/gen-siso-revision.js'] += b'\n'
++        with self.assertRaisesRegex(ValueError, 'known_source_bytes_mismatch'):
++            hooks.derive_inventory(electron, chromium, changed)
++
++    def test_source_drift_and_caller_verified_booleans_cannot_authorize_inventory(self):
++        electron, chromium, sources = fixture(self)
++        with self.assertRaisesRegex(ValueError, 'fixed_deps_bytes_mismatch'):
++            hooks.derive_inventory(electron + b'\n', chromium, sources)
++        with self.assertRaises(TypeError):
++            hooks.derive_inventory(electron, chromium, sources, verified=True)
++        with self.assertRaises(TypeError):
++            hooks.derive_inventory(electron, chromium, sources, manifest={'source_closure_qualified': True})
++
++    def test_source_selected_gcs_rejects_excluded_or_unresolved_object_and_wrong_payload(self):
++        electron, chromium, _ = fixture(self)
++        policy = hooks.deps_policy().derive_manifest(electron, chromium)
++        known = next(row for row in policy['dependencies'] if row['path'] == 'src/third_party/llvm-build/Release+Asserts')
++        selected = next(obj for obj in known['objects'] if obj['selection'] == 'SELECTED')
++        with self.assertRaisesRegex(ValueError, 'gcs_payload_size_mismatch'):
++            hooks.verify_selected_gcs_bytes(electron, chromium, 'chromium', known['path'], selected['object_name'], b'')
++        excluded = next(obj for obj in known['objects'] if obj['selection'] == 'EXCLUDED')
++        with self.assertRaisesRegex(ValueError, 'gcs_source_selection_not_resolved'):
++            hooks.verify_selected_gcs_bytes(electron, chromium, 'chromium', known['path'], excluded['object_name'], b'')
++
++    def test_siso_base_literal_derives_41_bytes_without_running_node_or_trusting_hook_exit(self):
++        _, chromium, sources = fixture(self)
++        expected = hooks.base_siso_expected(chromium)
++        self.assertEqual(len(expected), 41)
++        self.assertEqual(expected[-1:], b'\n')
++        self.assertEqual(expected, sources['electron/build/siso_revision'])
++        with self.assertRaisesRegex(ValueError, 'fixed_deps_bytes_mismatch'):
++            hooks.base_siso_expected(chromium + b'\n')
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/apps/metaengine-browser/test/test_custom_electron_source_build.py b/apps/metaengine-browser/test/test_custom_electron_source_build.py
+index f080837..3f274cc 100644
+--- a/apps/metaengine-browser/test/test_custom_electron_source_build.py
++++ b/apps/metaengine-browser/test/test_custom_electron_source_build.py
+@@ -443,6 +443,18 @@ gate.checkDist({appRoot: process.argv[2], dist: gate.DIST_REL,
+                     root / 'dist', root / 'receipt.json', locked_heads(), {}, {}, {})
+             self.assertEqual(list(root.iterdir()), [])
+ 
++    def test_closure_inventory_uses_source_context_and_never_accepts_qualification_bits(self):
++        root = Path('/model/preprovisioned/chromium')
++        inventory = mock.Mock()
++        inventory.derive_from_git.return_value = {
++            'blockers': ['DEPOT_TOOLS_GCLIENT_INTERPRETER_IDENTITY'],
++            'selection_qualified': True, 'source_closure_qualified': True, 'authority_effect': True,
++        }
++        with mock.patch.object(builder, 'load_deps_policy', return_value=inventory), \
++                self.assertRaisesRegex(ValueError, 'DEPOT_TOOLS_GCLIENT_INTERPRETER_IDENTITY'):
++            builder.require_gclient_dependency_closure(root)
++        inventory.derive_from_git.assert_called_once_with(root / 'electron', root)
++
+     def test_replay_is_refused(self):
+         with tempfile.TemporaryDirectory() as temporary:
+             self.publish(temporary)
+diff --git a/docs/custom-electron-deps-composition-v1.md b/docs/custom-electron-deps-composition-v1.md
+new file mode 100644
+index 0000000..146f203
+--- /dev/null
++++ b/docs/custom-electron-deps-composition-v1.md
+@@ -0,0 +1,143 @@
++# Pinned DEPS and hook input inventory
++
++The data-only producers `custom-electron-deps-policy.py` and
++`custom-electron-hook-inputs.py` make the next missing composition inputs
++reviewable. Neither producer executes DEPS, hooks, a downloader, an installer,
++or a compiler. They cannot admit a build or issue a receipt. All inventories
++retain `HOLD`, `authority_effect:false`, and an unqualified source closure.
++
++## Fixed declarations and Git revisions
++
++The parser accepts only the exact Electron and Chromium DEPS blobs:
++
++| Owner | Commit | DEPS Git blob | DEPS SHA256 |
++| --- | --- | --- | --- |
++| Electron | `c542df1ecbc2c2978e8f53f8c7baf602404d166f` | `b1f99e77cb3661760f655d8fb9346351b354bdba` | `c254ca413381a28243b3808e10dc8842ff0bc09629e1663ee7e09ef79dd4514a` |
++| Chromium | `dd78960ccd8a03a2fe1f629543d27783885b78e9` | `3a60b026a4e39b2eff1ed9ab860107e9e9f57b83` | `c3cd8ae90218c260d5fadbe5d9095164693fe420812218a18dfcf65c3f1743b9` |
++
++The restricted AST interpreter allows literals, dictionaries, lists, string
++concatenation, and literal `Var`/`Str` references. Conditions use a separate
++restricted expression interpreter. Imports, calls in conditions, statements,
++dictionary unpacking, duplicate keys, and unsupported expressions refuse.
++Substitution values cannot become condition syntax. This is a reviewed subset
++for these fixed files, not a general replacement for gclient.
++
++Chromium declares `git_dependencies='SYNC'`; many dependency URLs therefore do
++not contain revisions. A packet of raw Git tree objects is independently
++hashed from the fixed root `63b2edfe4c6ae23d2fd3424cde3e529db49f7068`.
++Its 43,092 distinct objects contain 270 Gitlinks, which provide exact Git
++revision declarations. The packet contains no dependency source blobs and
++does not prove their physical content. Supplied Gitlink JSON is never trusted.
++Electron's Chromium and Node tag references use separately established fixed
++commit aliases; an arbitrary new tag remains unresolved.
++
++The manifest retains all 452 dependency declarations (278 Git, 144 CIPD,
++30 GCS), all 77 hooks, all ten `recursedeps` declarations, semantic DEPS fields,
++variables, and every unresolved condition. A declared native Windows x64
++initial-sync profile is used for analysis only. No actual `.gclient`, bootstrap
++interpreter, custom variables, host platform or sync phase has been qualified.
++Conflicting parent variables (`checkout_clang_tidy`, `checkout_openxr`,
++`generate_location_tags`) stay unresolved rather than assuming precedence.
++String-variable semantics and bare `mac` conditions likewise remain explicit.
++The fixed Electron workflows include Windows-target sync on Linux; a GN target
++argument alone does not establish the host profile used to sync dependencies.
++
++Canonical manifest verification derives the expected bytes again from fixed
++source inputs. A changed selection, revision, omitted record, or fabricated
++qualification flag cannot authenticate itself.
++
++## Hooks and toolchain inputs
++
++The hook producer rederives the DEPS manifest and inventories every selected
++or unresolved top-level hook by owner, phase and ordinal. The fixed catalog
++binds known script/spec bytes to upstream-base blob identities. Reading or
++matching those bytes never executes the script. The entire imported code,
++subprocess graph and Electron-patched phase remain separate obligations.
++
++GCS declarations retain exact object generation, SHA256 and size. In particular
++Windows Clang, Rust and libclang already have immutable archive declarations;
++Clang-tidy has the same strong declaration but its profile selection currently
++has unresolved parent precedence. Their payloads and extracted members have
++not been verified. A pure byte check can compare a supplied payload against a
++source-derived selected descriptor; it still cannot establish extraction,
++tool execution or complete source composition.
++
++CIPD platform templates, symbolic tags and `version_file` references remain
++unresolved where required. A syntactically valid SHA256 instance ID is
++distinguished from a tag and from legacy SHA1, but syntax alone does not prove
++package membership or payload files. The host CIPD/vpython bootstrap is also
++unqualified.
++
++Electron's own Windows PGO hooks request both x64 and ARM64 profiles, plus a
++separate V8 builtins profile. Chromium's PGO flag does not disable these hooks.
++All three state files contain exact SHA256 declarations; downloaded payloads,
++destination files and marker outputs remain absent. `gen_siso_revision` has a
++small data-only expected base literal producer (40 hex bytes plus LF), whose
++actual patched hook output remains unqualified.
++
++The SDK source names `TOOLCHAIN_HASH=e66617bc68` and SDK `10.0.26100.0`.
++This selector does not supply a complete SDK archive SHA256 or member inventory.
++The inventory records known Windows case-insensitive environment override keys;
++the separate explicit rejection checker refuses them, including present empty
++values. Neither operation is a complete environment identity. The
++catalog preserves the depot_tools dependency commit
++`38c391feba5fb96812f9028da12413ffc39df394`; that pin does not authenticate the
++external gclient which initially bootstraps the checkout. Target Node source
++identity likewise does not authenticate the bare PATH Node used by Yarn hooks.
++
++## Reproduce the bounded inventory
++
++Use already provisioned fixed raw blobs and raw tree objects. Outputs must be
++new. No command below runs upstream code or retrieves missing dependencies.
++
++```sh
++python3 -B apps/metaengine-browser/scripts/custom-electron-deps-policy.py \
++  --electron-deps /prepared/electron-DEPS \
++  --chromium-deps /prepared/chromium-DEPS \
++  --chromium-tree-objects /prepared/chromium-tree-objects \
++  --output /new/enabled-deps-inventory.json
++
++python3 -B apps/metaengine-browser/scripts/custom-electron-hook-inputs.py \
++  --electron-deps /prepared/electron-DEPS \
++  --chromium-deps /prepared/chromium-DEPS \
++  --chromium-tree-objects /prepared/chromium-tree-objects \
++  --sources /prepared/hook-source-byte-capture > /new/hook-inputs.json
++```
++
++The DEPS command's successful exit means inventory creation. Its JSON still
++says `HOLD`. The hook command emits its inventory and exits 1 deliberately;
++it never reports hook/build admission. Missing catalog files are reported,
++and changed provided files refuse. The optional byte capture is data only.
++
++## Concrete remaining producers
++
++1. Bind the actual gclient/depot_tools/CIPD controller binaries, interpreter
++   standard libraries and exact `.gclient`/solution/custom variable/host profile
++   and sync phase. Reconcile parent and string-variable semantics against that
++   fixed controller. Bind Electron-patched DEPS and hook sources after all
++   nineteen patch-target repositories have been independently derived.
++2. Resolve selection for all ten recursive DEPS declarations and read every
++   enabled recursive root and transitive declaration from immutable Git
++   objects; retain excluded records and apply unknown-input refusal to nested
++   conditions, Gitlinks, CIPD/GCS resources and hooks. The top-level count is
++   not a claim of recursive completeness.
++3. Resolve every enabled CIPD request to an exact instance and authenticate
++   package identity, extracted membership and physical bytes. Supply GCS/PGO
++   archive bytes, check the source-derived digest and size, and derive safe
++   member sets without executing their tools. Preserve the existing pins.
++4. Produce a complete SDK/toolchain/runtime payload identity; bind host
++   Python/vpython, Node, Git, GN, ninja and their imports. The SDK selector and
++   ambient installations cannot substitute for this producer.
++5. Derive exact generated output namespaces and bytes for mtime/patch hooks,
++   Yarn, SDK setup, landmines/version metadata, reclient/siso and tast templates.
++   Preserve history, encoding/newline, platform, environment and output effects.
++   Hook exit status alone is never proof; some upstream paths return success
++   when a target repository is missing.
++6. Verify all composed physical inputs and generated outputs, then retain
++   custody through GN/build/receipt. Until that exists, the builder and all
++   receipt/staging/publication paths keep their composition guard. Package PE
++   transformations and release authority remain independently unqualified.
++
++No Windows compilation, installation, or release qualification follows from
++this inventory. The source-only tests exercise refusal and deterministic data
++derivation, not the execution of upstream hooks.
+diff --git a/docs/custom-electron-source-producer-v1.md b/docs/custom-electron-source-producer-v1.md
+index 9243b68..316673f 100644
+--- a/docs/custom-electron-source-producer-v1.md
++++ b/docs/custom-electron-source-producer-v1.md
+@@ -15,8 +15,11 @@ The existing locked Electron commit is
+ `152.0.7977.167`. The official Chromium GitHub mirror resolves that tag to
+ `dd78960ccd8a03a2fe1f629543d27783885b78e9`; hashing the raw commit object confirms
+ that ID and its embedded tree `63b2edfe4c6ae23d2fd3424cde3e529db49f7068`.
+-The declared Chromium DEPS bytes match the existing SHA256 pin. Chromium tree
+-contents and a physical Chromium checkout were not acquired or qualified here.
++The declared Chromium DEPS bytes match the existing SHA256 pin. A later bounded
++inventory acquired and independently hashed all 43,092 raw base tree objects,
++deriving 270 Gitlink revisions. Chromium source blob closure, postpatch replay
++and a physical Chromium checkout remain unqualified. See the
++[DEPS composition producer](custom-electron-deps-composition-v1.md).
+ 
+ Node base `f14cd3aa7bf9ca8df2cc5b8bb14beb0f335b1d93` has tree
+ `409a26f676d83fa6e1b0bfdb1c10d6878845c071`. All 64 patches from the locked
+@@ -78,9 +81,11 @@ Missing objects fail locally; this command never fetches them.
+ Electron's patch configuration names 19 repositories; the five component
+ proofs do not qualify all enabled build inputs. The next producer must:
+ 
+-1. Interpret the exact pinned Electron/Chromium DEPS and conditions for the
+-   selected Windows x64/custom variables using a reviewed interpreter/tool
+-   identity, producing the complete selected repository and boundary set.
++1. Bind the actual sync controller/spec/profile and reconcile recursive and
++   patched declarations. The restricted fixed-DEPS parser now inventories all
++   top-level declarations, conditions and Gitlink revisions for a declared
++   native Windows x64 profile, with explicit unknowns. It does not authenticate
++   the actual gclient context or recursive selection.
+ 2. Verify every selected repository's immutable base and whole official patch
+    series, plus exact physical representation. Authenticate every nested
+    boundary independently; never ignore arbitrary gclient directories.
+diff --git a/docs/guardian-custom-electron-runtime-packaging-v1.md b/docs/guardian-custom-electron-runtime-packaging-v1.md
+index 7e79281..c101647 100644
+--- a/docs/guardian-custom-electron-runtime-packaging-v1.md
++++ b/docs/guardian-custom-electron-runtime-packaging-v1.md
+@@ -105,7 +105,12 @@ all canonical physical bytes/modes/links. Chromium is fixed at
+ `63b2edfe4c6ae23d2fd3424cde3e529db49f7068`. The full 64-patch Node replay yields
+ `92f36398f6bacb44cbba33fea5b902898ac8ef9a`; ancestry alone remains insufficient.
+ See [the source producer](custom-electron-source-producer-v1.md) for its exact
+-scope, representation and runnable interface. The production path still holds
++scope, representation and runnable interface. The separate
++[DEPS/hook inventory](custom-electron-deps-composition-v1.md) now checks fixed
++top-level declarations and Chromium Gitlink revisions, preserves GCS/CIPD/PGO
++inputs, and identifies missing recursive, controller, payload and output
++producers. Its declared profile is not the operational gclient context.
++The production path still holds
+ before staging/build/publication on the unimplemented enabled gclient/DEPS,
+ CIPD, hooks/generated inputs and toolchain composition producer. The remaining
+ stages, once that closure is qualified, are preimage/postimage and patched-Node byte
+diff --git a/docs/interfaces/custom-electron-runtime-integration-contract.md b/docs/interfaces/custom-electron-runtime-integration-contract.md
+index 6431027..8f01df0 100644
+--- a/docs/interfaces/custom-electron-runtime-integration-contract.md
++++ b/docs/interfaces/custom-electron-runtime-integration-contract.md
+@@ -69,7 +69,10 @@ patches. Chromium base commit/tree and the complete Node postpatch tree are now
+ established; see [source producer](../custom-electron-source-producer-v1.md).
+ An unreviewed descendant cannot substitute for the expected tree, and every
+ canonical physical source byte/mode/link is checked independently of index flags.
+-This is not the enabled DEPS/CIPD/hook/toolchain closure. Production staging,
++The [bounded DEPS/hook inventory](../custom-electron-deps-composition-v1.md)
++also authenticates fixed base declarations and Gitlink revision data, with
++explicit unresolved profile semantics and missing recursive/payload inputs.
++This does not establish the enabled DEPS/CIPD/hook/toolchain closure. Production staging,
+ receipt creation and publication still HOLD on that explicit missing producer,
+ without a caller waiver. The additional bounded checks cover the three Electron preimages; the eight
+ patched Node file hashes; the five primary-source-evidence documents; the

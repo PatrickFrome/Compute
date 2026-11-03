@@ -1,0 +1,22 @@
+{
+  "REPORT.md": {
+    "sha256": "9b48dd127112570e09f8753e8ad77d3f4d2fb4f47bf20ae7d8bbf444dd6854b2",
+    "bytes": 10045
+  },
+  "changed-files.txt": {
+    "sha256": "c028fd3f2d768dce771a25c92ed95cf2c4ad21d8ebbd7dc59164d0309a649ac2",
+    "bytes": 978
+  },
+  "metaengine-windows-exe-source-fixes-c26565e.patch": {
+    "sha256": "64409efbb80fb1134c1b4279202a21d3bb8a41e49998ffcd7dc53f0ab6eaec4a",
+    "bytes": 54291
+  },
+  "test-evidence.tar.gz": {
+    "sha256": "92c5540c34a9e147d2bacd7825d6bcd0c5eaf206320c8a3f4e436af9382d0f0d",
+    "bytes": 44984
+  },
+  "verification.json": {
+    "sha256": "c0df7a64cd272fa20fba2d584ec3e88052475d22721d97488cdd62b170d5ffde",
+    "bytes": 1370
+  }
+}

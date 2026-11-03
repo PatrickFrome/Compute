@@ -1,0 +1,1686 @@
+diff --git a/apps/metaengine-browser/scripts/custom-electron-cipd-payload.py b/apps/metaengine-browser/scripts/custom-electron-cipd-payload.py
+new file mode 100644
+index 0000000..1f5b37c
+--- /dev/null
++++ b/apps/metaengine-browser/scripts/custom-electron-cipd-payload.py
+@@ -0,0 +1,416 @@
++#!/usr/bin/env python3
++"""Offline CIPD ZIP byte identity, not installation or build admission.
++
++The instance ID hashes the entire ZIP body, not just its member contents. The
++embedded CIPD 1.1 manifest names the package; it has no member hash list. This
++module derives that list without extracting files or running package code.
++
++The supported profile is deliberately narrower than arbitrary ZIP/CIPD: ASCII
++Windows-safe regular files, Store/Deflate, ordinary 32-bit ZIP headers and data
++descriptors. Unsupported metadata/layouts fail rather than being normalized.
++All successful inventories remain HOLD. Generated deployment files, installed
++paths, patched DEPS, client/bootstrap custody and release authority are separate.
++"""
++import argparse
++import base64
++import binascii
++import hashlib
++import importlib.util
++import json
++from pathlib import Path
++import re
++import struct
++import sys
++import zlib
++
++MANIFEST = '.cipdpkg/manifest.json'
++PROFILE = 'CIPD_1_1_ASCII_WINDOWS_REGULAR_ZIP32'
++MAX_ARCHIVE_BYTES = 128 * 1024 ** 2
++MAX_MEMBER_BYTES = 64 * 1024 ** 2
++MAX_TOTAL_BYTES = 256 * 1024 ** 2
++MAX_MEMBERS = 8192
++MAX_MANIFEST_BYTES = 1024 ** 2
++CHUNK = 64 * 1024
++LUCI_COMMIT = '61fc2ffcffaa3d602e13d752206c2285ae9a637c'
++FORMAT_SOURCES = {
++    'cipd/client/cipd/local/json_descs.go': 'f65cd0c34e18061f8614801882ef755ad55c9de266db27b2d0ccaf28f66379d7',
++    'cipd/client/cipd/local/builder.go': 'fee0a2c3ba45fead82edd55ab1c6cf0c319c3908fe0548aef0539dfa39dc8eed',
++    'cipd/client/cipd/local/reader.go': '7f0f19b1f5788626d9dcb72eb30cba99e27ca93288625f30cbd528eb5b4e3eb4',
++}
++COMMON_MISSING = [
++    'PATCHED_DEPS_SYNC_PROFILE_AND_BOOTSTRAP_CLIENT_USE_UNQUALIFIED',
++    'SERVICE_TRANSPORT_AND_DOWNLOAD_CUSTODY_NOT_QUALIFIED',
++    'INSTALLED_NAMESPACE_REPARSE_AND_PHYSICAL_READBACK_NOT_QUALIFIED',
++    'GENERATED_DEPLOYMENT_OUTPUT_CLOSURE_NOT_QUALIFIED',
++]
++
++
++def fail(reason):
++    raise ValueError('custom_electron_cipd_payload_' + reason)
++
++
++def canonical_bytes(value):
++    return json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=True).encode('ascii')
++
++
++def instance_sha256(instance_id):
++    """Decode the canonical full-object SHA256 instance form, never a tag."""
++    if isinstance(instance_id, str) and re.fullmatch(r'[0-9a-f]{40}', instance_id):
++        fail('legacy_sha1_instance_unsupported')
++    if not isinstance(instance_id, str) or not re.fullmatch(r'[A-Za-z0-9_-]{44}', instance_id):
++        fail('strong_sha256_instance_required')
++    try:
++        raw = base64.b64decode(instance_id, altchars=b'-_', validate=True)
++    except (ValueError, binascii.Error):
++        fail('instance_encoding_invalid')
++    if len(raw) != 33 or base64.urlsafe_b64encode(raw).decode('ascii') != instance_id:
++        fail('instance_encoding_invalid')
++    if raw[-1] != 2:
++        fail('instance_algorithm_unsupported')
++    return raw[:-1].hex()
++
++
++def canonical_package_name(name):
++    if not isinstance(name, str) or len(name) > 1024 or not re.fullmatch(r'[a-z0-9_./-]+', name) \
++            or any(not part.strip('.') for part in name.split('/')):
++        fail('package_name_not_canonical')
++    return name
++
++
++def safe_member_path(raw):
++    """No Windows path aliasing or service-namespace admission through ZIP."""
++    if not isinstance(raw, bytes) or not 0 < len(raw) <= 1024:
++        fail('member_path_invalid')
++    try:
++        name = raw.decode('ascii', 'strict')
++    except UnicodeError:
++        fail('member_path_non_ascii_unsupported')
++    parts = name.split('/')
++    for part in parts:
++        if not part or part in ('.', '..') or len(part) > 255 or part[-1] in ' .' \
++                or any(ord(char) < 32 or ord(char) > 126 or char in '<>:"\\|?*' for char in part):
++            fail('member_path_unsafe')
++        stem = part.split('.')[0].rstrip(' .').upper()
++        if stem in ('CON', 'PRN', 'AUX', 'NUL', 'CONIN$', 'CONOUT$') \
++                or re.fullmatch(r'(?:COM|LPT)[1-9]', stem):
++            fail('member_path_device')
++    if parts[0].casefold() == '.cipd' or (parts[0].casefold() == '.cipdpkg' and name != MANIFEST):
++        fail('reserved_service_member_unsupported')
++    return name
++
++
++def _check_namespace(names):
++    files, spellings = set(), {}
++    for name in names:
++        folded = name.casefold()
++        if folded in files:
++            fail('duplicate_or_case_alias_member')
++        parts = name.split('/')
++        for index in range(1, len(parts) + 1):
++            prefix = '/'.join(parts[:index])
++            key = prefix.casefold()
++            if key in spellings and spellings[key] != prefix:
++                fail('parent_component_case_alias')
++            spellings[key] = prefix
++        files.add(folded)
++    for name in files:
++        parts = name.split('/')
++        if any('/'.join(parts[:index]) in files for index in range(1, len(parts))):
++            fail('file_directory_prefix_collision')
++
++
++def _extra_fields(raw):
++    """Only the ordinary Go ZIP writer's mtime extension is supported."""
++    offset, seen = 0, set()
++    while offset < len(raw):
++        if offset + 4 > len(raw):
++            fail('extra_field_truncated')
++        tag, length = struct.unpack_from('<HH', raw, offset)
++        offset += 4
++        if tag in seen or offset + length > len(raw):
++            fail('extra_field_duplicate_or_truncated')
++        seen.add(tag)
++        value = raw[offset:offset + length]
++        if tag == 1:
++            fail('zip64_unsupported')
++        if tag != 0x5455 or length != 5 or value[0] != 1:
++            fail('extra_field_unsupported')
++        offset += length
++
++
++def _central_members(archive):
++    # Comments, SFX preambles, ZIP64 and opaque trailing bodies are not profiled.
++    end = len(archive) - 22
++    if end < 0 or archive[end:end + 4] != b'PK\x05\x06':
++        fail('end_record_not_exact')
++    _, disk, central_disk, disk_count, count, size, start, comment = struct.unpack_from('<4s4H2IH', archive, end)
++    if disk or central_disk or disk_count != count:
++        fail('multidisk_unsupported')
++    if count == 0xffff or size == 0xffffffff or start == 0xffffffff:
++        fail('zip64_unsupported')
++    if comment or not 0 < count <= MAX_MEMBERS or start + size != end:
++        fail('central_directory_span_or_count')
++    members, offset, total = [], start, 0
++    for _ in range(count):
++        if offset + 46 > end or archive[offset:offset + 4] != b'PK\x01\x02':
++            fail('central_header_invalid')
++        values = struct.unpack_from('<4s6H3I5H2I', archive, offset)
++        (_, creator, required, flags, method, mtime, mdate, crc, compressed, size,
++         name_length, extra_length, comment_length, member_disk, internal, external, local) = values
++        record_end = offset + 46 + name_length + extra_length + comment_length
++        if record_end > end:
++            fail('central_header_truncated')
++        if member_disk:
++            fail('multidisk_unsupported')
++        if 0xffffffff in (compressed, size, local):
++            fail('zip64_unsupported')
++        if flags & 1:
++            fail('encrypted_member_unsupported')
++        if flags & ~(0x08 | 0x800):
++            fail('zip_flags_unsupported')
++        if method not in (0, 8):
++            fail('compression_unsupported')
++        if creator != 0x0314 or required != 20 or internal or comment_length:
++            fail('zip_header_metadata_unsupported')
++        mode, attributes = external >> 16, external & 0xffff
++        if mode not in (0o100400, 0o100500, 0o100600, 0o100700) or attributes & ~7:
++            fail('member_mode_or_attributes_unsupported')
++        if bool(attributes & 1) == bool(mode & 0o200):
++            fail('readonly_mode_disagreement')
++        raw_name = archive[offset + 46:offset + 46 + name_length]
++        name = safe_member_path(raw_name)
++        extra = archive[offset + 46 + name_length:offset + 46 + name_length + extra_length]
++        _extra_fields(extra)
++        if size > MAX_MEMBER_BYTES or compressed > MAX_ARCHIVE_BYTES:
++            fail('member_size_limit')
++        total += size
++        if total > MAX_TOTAL_BYTES:
++            fail('total_size_limit')
++        members.append({'path': name, 'raw_name': raw_name, 'creator': creator, 'required': required,
++                        'flags': flags, 'compression': method, 'dos_time': mtime, 'dos_date': mdate,
++                        'crc32': crc, 'compressed_bytes': compressed, 'size_bytes': size,
++                        'external_attributes': external, 'unix_mode': mode, 'extra': extra,
++                        'local_header_offset': local})
++        offset = record_end
++    if offset != end:
++        fail('central_directory_unlisted_bytes')
++    _check_namespace([row['path'] for row in members])
++    offsets = sorted(row['local_header_offset'] for row in members)
++    if offsets[0] != 0 or len(set(offsets)) != len(offsets) or offsets[-1] >= start:
++        fail('local_header_geometry')
++    return members, start
++
++
++def _member_body(archive, row, end):
++    offset = row['local_header_offset']
++    if offset + 30 > end or archive[offset:offset + 4] != b'PK\x03\x04':
++        fail('local_header_invalid_or_overlapping')
++    (_, required, flags, method, mtime, mdate, crc, compressed, size,
++     name_length, extra_length) = struct.unpack_from('<4s5H3I2H', archive, offset)
++    data_start = offset + 30 + name_length + extra_length
++    data_end = data_start + row['compressed_bytes']
++    if data_start > end or data_end > end:
++        fail('member_span_overlapping')
++    raw_name = archive[offset + 30:offset + 30 + name_length]
++    extra = archive[offset + 30 + name_length:data_start]
++    if (required, flags, method, mtime, mdate, raw_name, extra) != \
++            (row['required'], row['flags'], row['compression'], row['dos_time'], row['dos_date'], row['raw_name'], row['extra']):
++        fail('local_central_header_disagreement')
++    expected = (row['crc32'], row['compressed_bytes'], row['size_bytes'])
++    if flags & 8:
++        if (crc, compressed, size) not in ((0, 0, 0), expected):
++            fail('local_descriptor_fields_disagree')
++        trailing = archive[data_end:end]
++        if len(trailing) == 16 and trailing[:4] == b'PK\x07\x08':
++            actual = struct.unpack_from('<3I', trailing, 4)
++        elif len(trailing) == 12:
++            actual = struct.unpack('<3I', trailing)
++        else:
++            fail('data_descriptor_span_or_signature')
++        if actual != expected:
++            fail('data_descriptor_disagreement')
++    elif (crc, compressed, size) != expected or data_end != end:
++        fail('local_sizes_or_unlisted_bytes')
++    return memoryview(archive)[data_start:data_end]
++
++
++def _read_member(body, row):
++    digest, crc, produced = hashlib.sha256(), 0, 0
++    manifest = bytearray() if row['path'] == MANIFEST else None
++    if manifest is not None and row['size_bytes'] > MAX_MANIFEST_BYTES:
++        fail('manifest_size_limit')
++
++    def consume(data):
++        nonlocal produced, crc
++        produced += len(data)
++        if produced > row['size_bytes']:
++            fail('uncompressed_size_disagreement')
++        digest.update(data)
++        crc = binascii.crc32(data, crc)
++        if manifest is not None:
++            manifest.extend(data)
++
++    if row['compression'] == 0:
++        if len(body) != row['size_bytes']:
++            fail('stored_size_disagreement')
++        for offset in range(0, len(body), CHUNK):
++            consume(body[offset:offset + CHUNK])
++    else:
++        decoder = zlib.decompressobj(-15)
++        try:
++            for offset in range(0, len(body), CHUNK):
++                pending = body[offset:offset + CHUNK]
++                while True:
++                    output = decoder.decompress(pending, CHUNK)
++                    consume(output)
++                    pending = decoder.unconsumed_tail
++                    if decoder.unused_data:
++                        fail('deflate_trailing_bytes')
++                    # zlib can retain decoded output after consuming the last
++                    # input byte. Drain with b'' when max_length was reached;
++                    # an empty unconsumed_tail alone does not prove EOF.
++                    if not pending and len(output) < CHUNK:
++                        break
++            if not decoder.eof or decoder.unused_data or decoder.unconsumed_tail:
++                fail('deflate_stream_incomplete')
++        except zlib.error:
++            fail('deflate_stream_invalid')
++    if produced != row['size_bytes']:
++        fail('uncompressed_size_disagreement')
++    if crc & 0xffffffff != row['crc32']:
++        fail('member_crc_disagreement')
++    return digest.hexdigest(), bytes(manifest) if manifest is not None else None
++
++
++def _json_pairs(pairs):
++    value = {}
++    for name, item in pairs:
++        if name in value:
++            fail('manifest_duplicate_json_key')
++        value[name] = item
++    return value
++
++
++def _manifest(content, package_name, member_names):
++    if content is None:
++        fail('embedded_manifest_missing')
++    try:
++        value = json.loads(content.decode('utf-8', 'strict'), object_pairs_hook=_json_pairs,
++                           parse_constant=lambda _: fail('manifest_non_json_constant'))
++    except (UnicodeError, json.JSONDecodeError, RecursionError):
++        fail('manifest_json_invalid')
++    if not isinstance(value, dict) or not {'format_version', 'package_name'} <= set(value) \
++            or set(value) - {'format_version', 'package_name', 'version_file', 'install_mode'}:
++        fail('manifest_fields_unsupported')
++    if any(not isinstance(item, str) for item in value.values()):
++        fail('manifest_field_type')
++    if value['format_version'] != '1.1':
++        fail('manifest_format_unsupported')
++    if canonical_package_name(value['package_name']) != package_name:
++        fail('embedded_package_name_disagreement')
++    if value.get('install_mode', '') not in ('', 'copy'):
++        fail('manifest_install_mode_unsupported')
++    generated = []
++    if value.get('version_file', ''):
++        try:
++            path = safe_member_path(value['version_file'].encode('ascii', 'strict'))
++        except UnicodeError:
++            fail('member_path_non_ascii_unsupported')
++        if path == MANIFEST:
++            fail('generated_version_file_reserved')
++        _check_namespace(member_names + [path])
++        generated.append({'path': path, 'origin': 'EMBEDDED_MANIFEST_VERSION_FILE',
++                          'content': 'GENERATED_DEPLOYMENT_BYTES_NOT_PRODUCED_OR_QUALIFIED',
++                          'is_zip_member': False, 'disposition': 'HOLD'})
++    return value, generated
++
++
++def inspect_declared_archive(archive_bytes, package_name, instance_id):
++    """Compare declared bytes; external declarations are not source authority."""
++    package_name = canonical_package_name(package_name)
++    expected = instance_sha256(instance_id)
++    if not isinstance(archive_bytes, bytes) or not 0 < len(archive_bytes) <= MAX_ARCHIVE_BYTES:
++        fail('archive_type_or_size_limit')
++    measured = hashlib.sha256(archive_bytes).hexdigest()
++    if measured != expected:
++        fail('full_archive_sha256_disagreement')
++    rows, central = _central_members(archive_bytes)
++    physical = sorted(rows, key=lambda row: row['local_header_offset'])
++    inventory, manifest_bytes = [], None
++    for index, row in enumerate(physical):
++        end = physical[index + 1]['local_header_offset'] if index + 1 < len(physical) else central
++        body = _member_body(archive_bytes, row, end)
++        digest, embedded = _read_member(body, row)
++        if embedded is not None:
++            manifest_bytes = embedded
++        inventory.append({key: row[key] for key in ('path', 'compression', 'flags', 'dos_time',
++            'dos_date', 'compressed_bytes', 'size_bytes', 'external_attributes', 'unix_mode', 'local_header_offset')}
++            | {'sha256': digest, 'crc32': format(row['crc32'], '08x'),
++               'central_extra_sha256': hashlib.sha256(row['extra']).hexdigest(),
++               'kind': 'EMBEDDED_MANIFEST' if row['path'] == MANIFEST else 'PAYLOAD'})
++    inventory.sort(key=lambda row: row['path'])
++    manifest, generated = _manifest(manifest_bytes, package_name, [row['path'] for row in inventory])
++    return {'schema': 'metaengine.cipd-archive-members.v1', 'scope': 'DECLARED_SHA256_INSTANCE_ARCHIVE_BYTES_ONLY',
++            'profile': PROFILE, 'package_name': package_name, 'instance_id': instance_id,
++            'archive_sha256': measured, 'archive_size_bytes': len(archive_bytes),
++            'archive_identity': 'MATCHES_DECLARED_FULL_ZIP_SHA256_INSTANCE',
++            'manifest': manifest, 'members': inventory, 'member_count': len(inventory),
++            'payload_member_count': len(inventory) - 1,
++            'member_inventory_sha256': hashlib.sha256(canonical_bytes(inventory)).hexdigest(),
++            'generated_deployment_outputs': generated, 'disposition': 'HOLD', 'authority_effect': False,
++            'physical_readback': 'NOT_RUN', 'archive_extracted': False, 'package_code_executed': False,
++            'missing': ['SOURCE_REQUEST_BINDING_NOT_DERIVED'] + COMMON_MISSING,
++            'format_reference': {'luci_commit': LUCI_COMMIT, 'source_sha256': FORMAT_SOURCES}}
++
++
++def request_policy():
++    spec = importlib.util.spec_from_file_location('metaengine_source_cipd_policy',
++        Path(__file__).with_name('custom-electron-cipd-policy.py'))
++    module = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(module)  # Our fixed data parser, not downloaded code.
++    return module
++
++
++def verify_source_archive(electron_bytes, chromium_bytes, selector, archive_bytes, *,
++                          chromium_tree_objects=None, version_file_blobs=None):
++    """Rederive the source request; never accept request JSON or verified flags."""
++    request = request_policy().get_source_request(electron_bytes, chromium_bytes, selector,
++        chromium_tree_objects=chromium_tree_objects, version_file_blobs=version_file_blobs)
++    if request['selection'] != 'SELECTED' or request['reference_kind'] != 'SHA256_INSTANCE' \
++            or not request['package_name'] or request['instance_id'] != request['source_version']:
++        fail('source_selected_direct_sha256_instance_required')
++    result = inspect_declared_archive(archive_bytes, request['package_name'], request['instance_id'])
++    if result['archive_sha256'] != request['payload_sha256']:
++        fail('source_request_digest_disagreement')
++    # Discharge exactly the supplied byte obligation, never the phase/custody or
++    # installed-output obligations. Keep the original source plan immutable.
++    missing = [item for item in request.get('missing', []) if item != 'CIPD_PAYLOAD_BYTES_UNAVAILABLE']
++    bound_request = dict(request, payload_content='MATCHES_SOURCE_DECLARED_FULL_ZIP_SHA256_INSTANCE', missing=missing)
++    result.update(scope='SOURCE_DECLARED_SHA256_INSTANCE_ARCHIVE_MEMBERS_ONLY', source_request=bound_request,
++                  missing=list(dict.fromkeys(missing + COMMON_MISSING)))
++    return result
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--electron-deps', type=Path, required=True)
++    parser.add_argument('--chromium-deps', type=Path, required=True)
++    parser.add_argument('--owner', choices=('electron', 'chromium'), required=True)
++    parser.add_argument('--path', required=True)
++    parser.add_argument('--package-index', type=int, required=True)
++    parser.add_argument('--archive', type=Path, required=True)
++    args = parser.parse_args()
++    policy = request_policy()
++    try:
++        result = verify_source_archive(policy._regular_bytes(args.electron_deps, 1024 ** 2),
++            policy._regular_bytes(args.chromium_deps, 1024 ** 2),
++            (args.owner, args.path, args.package_index), policy._regular_bytes(args.archive, MAX_ARCHIVE_BYTES))
++        print(json.dumps(result, indent=2, sort_keys=True))
++        return 1  # A byte inventory is never build or deployment admission.
++    except (ValueError, OSError) as error:
++        print(json.dumps({'disposition': 'HOLD', 'authority_effect': False, 'error': str(error)}, sort_keys=True))
++        return 1
++
++
++if __name__ == '__main__':
++    sys.exit(main())
+diff --git a/apps/metaengine-browser/scripts/custom-electron-cipd-policy.py b/apps/metaengine-browser/scripts/custom-electron-cipd-policy.py
+new file mode 100644
+index 0000000..3ceadbf
+--- /dev/null
++++ b/apps/metaengine-browser/scripts/custom-electron-cipd-policy.py
+@@ -0,0 +1,384 @@
++#!/usr/bin/env python3
++"""Offline requests derived from fixed base DEPS, never a package trust root.
++
++The native Windows/amd64 client is a declared analysis profile. Raw DEPS brace
++escaping and CIPD expansion are separate stages; the bootstrap gclient, actual
++sync spec and client executable remain unqualified. No network, client, hook or
++package code runs here. A caller's resolution response is only an observation;
++it cannot turn a symbolic source selector into a source-pinned instance.
++"""
++import argparse
++import base64
++from collections import Counter
++import hashlib
++import importlib.util
++import json
++import os
++from pathlib import Path
++import re
++import stat
++import sys
++
++
++def _load_deps():
++    path = Path(__file__).with_name('custom-electron-deps-policy.py')
++    spec = importlib.util.spec_from_file_location('cipd_fixed_deps_policy', path)
++    module = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(module)
++    return module
++
++
++DEPS = _load_deps()
++LUCI_COMMIT = '61fc2ffcffaa3d602e13d752206c2285ae9a637c'
++SEMANTIC_SOURCES = [
++    {'path': 'cipd/client/cipd/platform/platform.go',
++     'blob_sha1': 'b303f6f58c8cde603a4fbf9bdf3369afab207f15',
++     'sha256': '9c533ba5e9282aaadfa2738052bad55e8c39503852eb7e4bd48cf99e9e17f843'},
++    {'path': 'cipd/client/cipd/template/template.go',
++     'blob_sha1': '85ba02afd19294d30864b7d23229a7981c6e6425',
++     'sha256': 'dff83dd242f30f58fc0535c066dc150472e52791430b1e37623be1416da96ce3'},
++    {'path': 'cipd/api/cipd/v1/repo.proto',
++     'blob_sha1': 'fa4a6374ee56f8335c760c73079333a8e5936b08',
++     'sha256': 'f0a20babd0cedb270f53d377a6f89d88515ae7a6eec7a588f831734636d7ed3a'},
++    {'path': 'cipd/api/cipd/v1/cas.proto',
++     'blob_sha1': '0770f848dcf353c436e8240d29cc058336542f10',
++     'sha256': '81bfbcac554e2118b406a1d675aa0a18519dd2520c8a5ff50310f535bec98149'},
++]
++PROFILE = {'os': 'windows', 'arch': 'amd64', 'platform': 'windows-amd64'}
++RESOLVE_URL = 'https://chrome-infra-packages.appspot.com/prpc/cipd.Repository/ResolveVersion'
++TREE_LIMIT = 16 * 1024 ** 2
++BLOB_LIMIT = 64 * 1024
++
++
++def fail(reason):
++    raise ValueError('custom_electron_cipd_policy_' + reason)
++
++
++def canonical_bytes(value):
++    return (json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False) + '\n').encode()
++
++
++def git_oid(kind, content):
++    return hashlib.sha1(kind.encode() + b' ' + str(len(content)).encode() + b'\0' + content).hexdigest()
++
++
++def declared_source_format(raw):
++    """Only model escaped literal braces, without assuming gclient was run.
++
++    A single brace would require source-format variable semantics, which this
++    profile does not supply. Do not merge this stage with CIPD's ${...} grammar.
++    """
++    if not isinstance(raw, str) or not raw or len(raw) > 4096:
++        fail('package_template_invalid')
++    result, offset = [], 0
++    while offset < len(raw):
++        value = raw[offset]
++        if value in '{}':
++            if offset + 1 == len(raw) or raw[offset + 1] != value:
++                fail('gclient_single_brace_phase_unqualified')
++            offset += 1
++        result.append(value)
++        offset += 1
++    return ''.join(result)
++
++
++def expand_cipd_template(template):
++    """Bounded implementation of the pinned LUCI os/arch/platform grammar.
++
++    Conditional parameters are parsed even if another parameter skips the
++    template. Unknown variables and malformed dollars cannot disappear behind
++    a nonmatching condition. Return None for a declared nonmatching template.
++    """
++    if not isinstance(template, str) or not template or len(template) > 4096:
++        fail('package_template_invalid')
++    skip = False
++    def replace(match):
++        nonlocal skip
++        value = match.group(1)
++        parts = value.split('=', 1)
++        name = parts[0]
++        if name not in PROFILE:
++            fail('cipd_template_unknown_variable:' + name)
++        if len(parts) == 2:
++            choices = parts[1].split(',')
++            if not choices or any(not choice or not re.fullmatch(r'[a-z0-9_-]+', choice) for choice in choices):
++                fail('cipd_template_constraint_invalid')
++            if PROFILE[name] not in choices:
++                skip = True
++        return PROFILE[name]
++    expanded = re.sub(r'\$\{([^{}]*)\}', replace, template)
++    if any(character in expanded for character in '${}'):
++        fail('cipd_template_malformed_or_unexpanded')
++    # Pinned LUCI common/common.go validatePathishString also forbids every
++    # dots-only component, including lengths greater than '.' and '..'.
++    if not re.fullmatch(r'[a-z0-9_./-]+', expanded) \
++            or any(not part.strip('.') for part in expanded.split('/')):
++        fail('bounded_package_name_invalid')
++    DEPS.safe_path(expanded)
++    return None if skip else expanded
++
++
++def classify_reference(version):
++    kind = DEPS.cipd_instance_kind(version)
++    if kind == 'SHA256_INSTANCE_ID':
++        return {'reference_kind': 'SHA256_INSTANCE', 'instance_id': version,
++                'payload_sha256': base64.urlsafe_b64decode(version)[:-1].hex()}
++    if kind == 'SHA1_INSTANCE_ID':
++        return {'reference_kind': 'LEGACY_SHA1_INSTANCE', 'instance_id': version,
++                'payload_sha256': None}
++    if not isinstance(version, str) or not version or len(version) > 4096 \
++            or any(ord(character) < 33 or ord(character) > 126 for character in version):
++        fail('version_invalid')
++    return {'reference_kind': 'SYMBOLIC_SELECTOR', 'instance_id': None, 'payload_sha256': None}
++
++
++def _regular_bytes(path, limit):
++    path = Path(path)
++    before = path.lstat()
++    identity = lambda value: (value.st_dev, value.st_ino, value.st_mode, value.st_nlink,
++                              value.st_size, value.st_mtime_ns, value.st_ctime_ns)
++    if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or not 0 <= before.st_size <= limit:
++        fail('source_object_file_invalid')
++    with path.open('rb') as stream:
++        if identity(os.fstat(stream.fileno())) != identity(before):
++            fail('source_object_file_changed')
++        content = stream.read(limit + 1)
++        if identity(os.fstat(stream.fileno())) != identity(before) or identity(path.lstat()) != identity(before):
++            fail('source_object_file_changed')
++    if len(content) != before.st_size:
++        fail('source_object_file_changed')
++    return content
++
++
++class FixedChromiumTrees:
++    """Targeted Merkle membership; no Git process or missing-object fetch."""
++    def __init__(self, directory):
++        self.directory = Path(directory).absolute()
++        if not self.directory.is_dir() or self.directory.is_symlink() or self.directory.resolve() != self.directory:
++            fail('canonical_tree_packet_directory_required')
++        self.cache = {}
++
++    def read(self, oid):
++        if oid in self.cache:
++            return self.cache[oid]
++        content = _regular_bytes(self.directory / (oid + '.tree'), TREE_LIMIT)
++        if git_oid('tree', content) != oid:
++            fail('source_tree_hash_mismatch')
++        result, offset = {}, 0
++        while offset < len(content):
++            space, end = content.find(b' ', offset), content.find(b'\0', offset)
++            if space < 0 or end < space or end + 21 > len(content):
++                fail('source_tree_encoding')
++            try:
++                mode = content[offset:space].decode('ascii', 'strict')
++                name = content[space + 1:end].decode('utf-8', 'strict')
++            except UnicodeError:
++                fail('source_tree_encoding')
++            DEPS.safe_path(name)
++            if '/' in name or name in result or mode not in ('40000', '100644', '100755', '120000', '160000'):
++                fail('source_tree_entry_invalid')
++            result[name] = (mode, content[end + 1:end + 21].hex())
++            offset = end + 21
++        self.cache[oid] = result
++        return result
++
++    def blob(self, path):
++        DEPS.safe_path(path)
++        parts = path.split('/')
++        if len(parts) > 64:
++            fail('version_file_path_depth')
++        tree, chain = DEPS.CHROMIUM_TREE, []
++        for index, name in enumerate(parts):
++            row = self.read(tree).get(name)
++            if row is None:
++                fail('version_file_not_in_fixed_tree')
++            mode, oid = row
++            chain.append({'tree': tree, 'name': name, 'mode': mode, 'oid': oid})
++            if index == len(parts) - 1:
++                if mode not in ('100644', '100755'):
++                    fail('version_file_not_regular_tracked_blob')
++                return {'path': path, 'root_tree': DEPS.CHROMIUM_TREE, 'mode': mode,
++                        'blob_sha1': oid, 'membership_chain': chain}
++            if mode != '40000':
++                fail('version_file_crosses_non_tree')
++            tree = oid
++        fail('version_file_path_invalid')
++
++
++def _version_file(owner, path, trees, blobs, used):
++    DEPS.safe_path(path)
++    if owner != 'chromium':
++        return {'path': path, 'content': 'UNAVAILABLE'}, None, ['VERSION_FILE_OWNER_TREE_UNSUPPORTED']
++    if trees is None:
++        return {'path': path, 'content': 'UNAVAILABLE'}, None, ['VERSION_FILE_MERKLE_PROOF_UNAVAILABLE']
++    proof = trees.blob(path)
++    oid = proof['blob_sha1']
++    used.add(oid)
++    content = blobs.get(oid)
++    if content is None:
++        return {**proof, 'content': 'UNAVAILABLE'}, None, ['VERSION_FILE_BLOB_BYTES_UNAVAILABLE:' + oid]
++    if not isinstance(content, bytes) or len(content) > BLOB_LIMIT or git_oid('blob', content) != oid:
++        fail('version_file_blob_bytes_mismatch')
++    try:
++        version = content.decode('utf-8', 'strict').strip()
++    except UnicodeError:
++        fail('version_file_encoding')
++    classify_reference(version)
++    return {**proof, 'content': 'MATCHES_FIXED_BASE_GIT_BLOB', 'size_bytes': len(content),
++            'sha256': hashlib.sha256(content).hexdigest()}, version, []
++
++
++def derive_requests(electron_bytes, chromium_bytes, *, chromium_tree_objects=None, version_file_blobs=None):
++    # Always rederive fixed declarations, not a caller's inventory JSON or flags.
++    inventory = DEPS.derive_manifest(electron_bytes, chromium_bytes)
++    blobs = {} if version_file_blobs is None else version_file_blobs
++    if not isinstance(blobs, dict) or any(not isinstance(key, str) or not re.fullmatch(r'[0-9a-f]{40}', key) for key in blobs):
++        fail('source_blob_mapping_invalid')
++    trees = FixedChromiumTrees(chromium_tree_objects) if chromium_tree_objects is not None else None
++    requests, rows, used = [], [], set()
++    for dependency in inventory['dependencies']:
++        if dependency['kind'] != 'cipd':
++            continue
++        rows.append(dependency)
++        for index, package in enumerate(dependency['packages']):
++            missing = []
++            row = {key: dependency[key] for key in ('owner', 'path', 'selection', 'condition', 'condition_result')}
++            row.update(package_index=index, source_package=package['package'])
++            template = declared_source_format(package['package'])
++            expanded = expand_cipd_template(template)
++            row.update(formatted_package_template=template, package_name=expanded,
++                       source_format_phase='DECLARED_BRACE_ESCAPE_MODEL_NOT_OBSERVED_GCLIENT',
++                       platform_phase='DECLARED_NATIVE_CLIENT_NOT_OBSERVED_BINARY')
++            if expanded is None:
++                missing.append('DECLARED_CIPD_TEMPLATE_NOT_APPLICABLE')
++            version = package.get('version')
++            if 'version_file' in package:
++                proof, version, reasons = _version_file(dependency['owner'], package['version_file'], trees, blobs, used)
++                row['version_file'] = proof
++                missing.extend(reasons)
++            row['source_version'] = version
++            reference = classify_reference(version) if version is not None else {
++                'reference_kind': 'VERSION_FILE_UNAVAILABLE', 'instance_id': None, 'payload_sha256': None}
++            row.update(reference)
++            if reference['reference_kind'] == 'SYMBOLIC_SELECTOR':
++                missing.append('SOURCE_PINNED_INSTANCE_FOR_SELECTOR_UNAVAILABLE')
++            elif reference['reference_kind'] == 'LEGACY_SHA1_INSTANCE':
++                missing.append('STRONG_PAYLOAD_DIGEST_UNAVAILABLE')
++            if dependency['selection'] == 'UNRESOLVED':
++                missing.append('DEPS_CONDITION_UNRESOLVED')
++            row['resolution_request'] = {'method': 'POST', 'url': RESOLVE_URL,
++                'body': {'package': expanded, 'version': version}} \
++                if dependency['selection'] == 'SELECTED' and expanded and reference['reference_kind'] == 'SYMBOLIC_SELECTOR' else None
++            row.update(payload_content='UNAVAILABLE', disposition='HOLD', authority_effect=False,
++                       missing=sorted(set(missing + ['CIPD_PAYLOAD_BYTES_UNAVAILABLE'])))
++            requests.append(row)
++    if set(blobs) - used:
++        fail('source_blob_key_not_in_fixed_version_files')
++    selected = [row for row in requests if row['selection'] == 'SELECTED']
++    return {'schema': 'metaengine.cipd-source-requests.v1', 'scope': 'PINNED_BASE_DEPS_DECLARED_CLIENT_REQUESTS',
++        'disposition': 'HOLD', 'authority_effect': False, 'selection_qualified': False,
++        'source_closure_qualified': False, 'client_executed': False, 'network_used': False,
++        'profile': {'name': inventory['profile']['name'], 'cipd_template_values': dict(PROFILE),
++                    'actual_sync_spec_bound': False, 'actual_cipd_executable_bound': False},
++        'sources': inventory['sources'],
++        'semantic_reference': {'repository': 'https://github.com/luci/luci-go', 'commit': LUCI_COMMIT,
++                               'files': SEMANTIC_SOURCES, 'bootstrap_client_identity': 'UNAVAILABLE'},
++        'requests': requests,
++        'summary': {'dependency_selection': dict(Counter(row['selection'] for row in rows)),
++            'package_selection': dict(Counter(row['selection'] for row in requests)),
++            'selected_reference_kinds': dict(Counter(row['reference_kind'] for row in selected)),
++            'resolution_request_count': sum(row['resolution_request'] is not None for row in requests),
++            'unique_resolution_request_count': len({canonical_bytes(row['resolution_request'])
++                for row in requests if row['resolution_request'] is not None}),
++            'version_file_count': sum('version_file' in row for row in requests)},
++        'blockers': sorted(set(inventory['blockers'] + ['GCLIENT_SOURCE_FORMAT_PHASE_UNQUALIFIED',
++            'CIPD_CLIENT_EXECUTABLE_IDENTITY_UNAVAILABLE', 'SYMBOLIC_SELECTOR_SOURCE_PINS_UNAVAILABLE',
++            'CIPD_PAYLOAD_BYTES_UNAVAILABLE', 'SERVICE_RESPONSE_IS_NOT_A_LOCAL_SIGNED_SOURCE_PIN']))}
++
++
++def get_source_request(electron_bytes, chromium_bytes, selector, **source_inputs):
++    if not isinstance(selector, (tuple, list)) or len(selector) != 3 \
++            or any(not isinstance(value, str) for value in selector[:2]) \
++            or type(selector[2]) is not int or selector[2] < 0:
++        fail('request_selector_invalid')
++    matches = [row for row in derive_requests(electron_bytes, chromium_bytes, **source_inputs)['requests']
++               if (row['owner'], row['path'], row['package_index']) == tuple(selector)]
++    if len(matches) != 1:
++        fail('request_selector_not_in_fixed_source')
++    request = matches[0]
++    if request['selection'] != 'SELECTED' or request['package_name'] is None:
++        fail('request_not_selected_by_declared_profile')
++    return request
++
++
++def inspect_resolution_response(electron_bytes, chromium_bytes, selector, response_bytes, **source_inputs):
++    """Inspect untrusted pRPC JSON without authorizing its tag-to-ID assertion."""
++    request = get_source_request(electron_bytes, chromium_bytes, selector, **source_inputs)
++    if not isinstance(response_bytes, bytes) or len(response_bytes) > BLOB_LIMIT:
++        fail('resolution_response_invalid')
++    try:
++        content = response_bytes.removeprefix(b")]}'\n")
++        def pairs(rows):
++            result = {}
++            for key, value in rows:
++                if key in result:
++                    fail('resolution_duplicate_json_key')
++                result[key] = value
++            return result
++        response = json.loads(content.decode('utf-8', 'strict'), object_pairs_hook=pairs)
++    except (UnicodeError, json.JSONDecodeError, RecursionError):
++        fail('resolution_response_invalid')
++    if not isinstance(response, dict) or set(response) - {'package', 'instance', 'registeredBy', 'registeredTs'} \
++            or response.get('package') != request['package_name']:
++        fail('resolution_package_or_schema_mismatch')
++    instance = response.get('instance')
++    if not isinstance(instance, dict) or set(instance) != {'hashAlgo', 'hexDigest'} \
++            or instance['hashAlgo'] != 'SHA256' or not isinstance(instance['hexDigest'], str) \
++            or not re.fullmatch(r'[0-9a-f]{64}', instance['hexDigest']):
++        fail('resolution_strong_instance_invalid')
++    observed = base64.urlsafe_b64encode(bytes.fromhex(instance['hexDigest']) + b'\x02').decode()
++    if request['instance_id'] is not None and request['instance_id'] != observed:
++        fail('resolution_conflicts_with_direct_source_instance')
++    return {'schema': 'metaengine.cipd-untrusted-resolution-observation.v1',
++        'package_name': request['package_name'], 'source_version': request['source_version'],
++        'source_instance_id': request['instance_id'], 'observed_instance_id': observed,
++        'origin': 'CALLER_SUPPLIED_UNAUTHENTICATED_JSON', 'selector_binding_qualified': False,
++        'disposition': 'HOLD', 'authority_effect': False,
++        'blockers': ['NO_LOCALLY_VERIFIABLE_SIGNED_SELECTOR_BINDING', 'CIPD_PAYLOAD_BYTES_UNAVAILABLE']}
++
++
++def verify_derived_plan(plan, electron_bytes, chromium_bytes, **source_inputs):
++    if canonical_bytes(plan) != canonical_bytes(derive_requests(electron_bytes, chromium_bytes, **source_inputs)):
++        fail('derived_plan_mismatch')
++    return plan
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--electron-deps', required=True, type=Path)
++    parser.add_argument('--chromium-deps', required=True, type=Path)
++    parser.add_argument('--chromium-tree-objects', type=Path)
++    parser.add_argument('--source-blob-dir', type=Path,
++                        help='preprovisioned content-addressed version-file <Git blob OID>.blob bytes')
++    options = parser.parse_args()
++    blobs = {}
++    if options.source_blob_dir is not None:
++        directory = options.source_blob_dir.absolute()
++        if not directory.is_dir() or directory.is_symlink() or directory.resolve() != directory:
++            fail('canonical_source_blob_directory_required')
++        for path in directory.iterdir():
++            if not re.fullmatch(r'[0-9a-f]{40}\.blob', path.name):
++                fail('source_blob_directory_entry_invalid')
++            blobs[path.stem] = _regular_bytes(path, BLOB_LIMIT)
++    result = derive_requests(_regular_bytes(options.electron_deps, 2 * 1024 ** 2),
++        _regular_bytes(options.chromium_deps, 2 * 1024 ** 2),
++        chromium_tree_objects=options.chromium_tree_objects, version_file_blobs=blobs)
++    sys.stdout.buffer.write(canonical_bytes(result))
++
++
++if __name__ == '__main__':
++    try:
++        main()
++    except (ValueError, OSError) as error:
++        print(str(error), file=sys.stderr)
++        sys.exit(2)
+diff --git a/apps/metaengine-browser/test/test_custom_electron_cipd_payload.py b/apps/metaengine-browser/test/test_custom_electron_cipd_payload.py
+new file mode 100644
+index 0000000..e37adb8
+--- /dev/null
++++ b/apps/metaengine-browser/test/test_custom_electron_cipd_payload.py
+@@ -0,0 +1,412 @@
++#!/usr/bin/env python3
++"""Inert hand-authored ZIP data only; no package/tool extraction or execution."""
++import base64
++import binascii
++import hashlib
++import importlib.util
++import json
++import os
++from pathlib import Path
++import struct
++import unittest
++from unittest import mock
++import zlib
++
++APP = Path(__file__).resolve().parents[1]
++spec = importlib.util.spec_from_file_location('cipd_payload', APP / 'scripts/custom-electron-cipd-payload.py')
++payload = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(payload)
++PACKAGE = 'test/inert/windows-amd64'
++
++
++def instance(content):
++    return base64.urlsafe_b64encode(hashlib.sha256(content).digest() + b'\x02').decode('ascii')
++
++
++def raw_deflate(data):
++    compressor = zlib.compressobj(wbits=-15)
++    return compressor.compress(data) + compressor.flush()
++
++
++def archive(entries=None, *, manifest=None, add_manifest=True, descriptor=None,
++            preamble=b'', gap=b'', central_tail=b'', comment=b'', disk=0):
++    """Write ZIP structures as inert bytes, including otherwise-invalid cases.
++
++    This is not a Go/CIPD client fixture or evidence of actual payload parity.
++    Each member can override local/central fields for adversarial comparisons.
++    """
++    entries = [dict(item) for item in (entries if entries is not None else [
++        {'name': 'bin/tool.exe', 'data': b'inert bytes, never a PE or executable'}])]
++    if add_manifest:
++        if manifest is None:
++            manifest = {'format_version': '1.1', 'package_name': PACKAGE}
++        if not isinstance(manifest, bytes):
++            manifest = json.dumps(manifest, separators=(',', ':')).encode()
++        entries.append({'name': payload.MANIFEST, 'data': manifest})
++    result, records = bytearray(preamble), []
++    for row in entries:
++        raw_name = row['name'].encode('ascii') if isinstance(row['name'], str) else row['name']
++        data = row.get('data', b'inert')
++        method = row.get('method', 8)
++        compressed = row.get('compressed_data', raw_deflate(data) if method == 8 else data)
++        style = row.get('descriptor', descriptor)
++        flags = row.get('flags', 8 if style else 0)
++        crc = row.get('crc', binascii.crc32(data) & 0xffffffff)
++        compressed_size, size = row.get('compressed_size', len(compressed)), row.get('size', len(data))
++        required, creator = row.get('required', 20), row.get('creator', 0x0314)
++        mtime, mdate = row.get('time', 0), row.get('date', 0)
++        mode = row.get('mode', 0o100400)
++        attributes = row.get('attributes', 0 if mode & 0o200 else 1)
++        extra = row.get('extra', b'')
++        local_name = row.get('local_name', raw_name)
++        local_extra = row.get('local_extra', extra)
++        local = len(result)
++        result.extend(struct.pack('<4s5H3I2H', b'PK\x03\x04', row.get('local_required', required),
++            row.get('local_flags', flags), row.get('local_method', method), row.get('local_time', mtime),
++            row.get('local_date', mdate), row.get('local_crc', 0 if flags & 8 else crc),
++            row.get('local_compressed_size', 0 if flags & 8 else compressed_size),
++            row.get('local_size', 0 if flags & 8 else size), len(local_name), len(local_extra)))
++        result.extend(local_name + local_extra + compressed)
++        if style:
++            result.extend(row.get('descriptor_bytes', (b'PK\x07\x08' if style == 'signed' else b'')
++                + struct.pack('<3I', crc, compressed_size, size)))
++        result.extend(gap)
++        if not row.get('omit_central'):
++            member_comment = row.get('comment', b'')
++            record = struct.pack('<4s6H3I5H2I', b'PK\x01\x02', creator, required, flags, method,
++                mtime, mdate, crc, compressed_size, size, len(raw_name), len(extra), len(member_comment),
++                row.get('disk', 0), row.get('internal', 0), (mode << 16) | attributes,
++                row.get('central_local_offset', local)) + raw_name + extra + member_comment
++            records.append(record)
++    central = len(result)
++    result.extend(b''.join(records) + central_tail)
++    result.extend(struct.pack('<4s4H2IH', b'PK\x05\x06', disk, 0, len(records), len(records),
++        len(result) - central, central, len(comment)))
++    result.extend(comment)
++    return bytes(result)
++
++
++def inspect(content):
++    return payload.inspect_declared_archive(content, PACKAGE, instance(content))
++
++
++class DeclaredArchiveIdentity(unittest.TestCase):
++    def test_every_zip_member_is_inventoried_without_inventing_manifest_files(self):
++        content = archive([{'name': 'bin/tool.exe', 'data': b'inert data'},
++                           {'name': 'share/readme.txt', 'data': b'hello', 'method': 0, 'mode': 0o100600}])
++        result = inspect(content)
++        self.assertEqual(result['scope'], 'DECLARED_SHA256_INSTANCE_ARCHIVE_BYTES_ONLY')
++        self.assertEqual(result['archive_sha256'], hashlib.sha256(content).hexdigest())
++        self.assertEqual(result['member_count'], 3)
++        self.assertEqual(result['payload_member_count'], 2)
++        self.assertNotIn('files', result['manifest'])
++        members = {row['path']: row for row in result['members']}
++        self.assertEqual(members['bin/tool.exe']['sha256'], hashlib.sha256(b'inert data').hexdigest())
++        self.assertEqual(members['share/readme.txt']['unix_mode'], 0o100600)
++        self.assertEqual(members[payload.MANIFEST]['kind'], 'EMBEDDED_MANIFEST')
++        self.assertEqual(result['member_inventory_sha256'],
++            hashlib.sha256(payload.canonical_bytes(result['members'])).hexdigest())
++        self.assertEqual(result['disposition'], 'HOLD')
++        self.assertFalse(result['authority_effect'])
++        self.assertFalse(result['archive_extracted'])
++        self.assertFalse(result['package_code_executed'])
++        self.assertEqual(result['physical_readback'], 'NOT_RUN')
++
++    def test_payload_omission_extra_content_and_modes_change_full_instance(self):
++        original = archive()
++        expected = instance(original)
++        variants = [archive([]), archive([{'name': 'extra', 'data': b'new'}]),
++                    archive([{'name': 'bin/tool.exe', 'data': b'different content'}]),
++                    archive([{'name': 'bin/tool.exe', 'data': b'inert bytes, never a PE or executable', 'mode': 0o100500}]),
++                    archive([{'name': 'bin/tool.exe', 'data': b'inert bytes, never a PE or executable', 'time': 1}])]
++        for changed in variants:
++            with self.subTest(sha=hashlib.sha256(changed).hexdigest()), \
++                    self.assertRaisesRegex(ValueError, 'full_archive_sha256_disagreement'):
++                payload.inspect_declared_archive(changed, PACKAGE, expected)
++
++    def test_declared_new_instance_binds_all_new_members_but_has_no_source_authority(self):
++        before = inspect(archive())
++        after = inspect(archive([{'name': 'new', 'data': b'new'}]))
++        self.assertNotEqual(before['member_inventory_sha256'], after['member_inventory_sha256'])
++        self.assertIn('SOURCE_REQUEST_BINDING_NOT_DERIVED', after['missing'])
++        self.assertFalse(after['authority_effect'])
++
++    def test_sha1_tags_padding_unknown_algorithms_and_caller_flags_are_not_sha256_ids(self):
++        content = archive()
++        for value, error in [('a' * 40, 'legacy_sha1_instance_unsupported'),
++                ('version:1.2.3', 'strong_sha256_instance_required'), ('latest', 'strong_sha256_instance_required'),
++                (instance(content) + '=', 'strong_sha256_instance_required'),
++                (base64.urlsafe_b64encode(b'a' * 32 + b'\x03').decode(), 'instance_algorithm_unsupported'),
++                ({'instance_id': instance(content), 'verified': True}, 'strong_sha256_instance_required')]:
++            with self.subTest(value=value), self.assertRaisesRegex(ValueError, error):
++                payload.inspect_declared_archive(content, PACKAGE, value)
++
++    def test_package_name_is_exact_canonical_and_manifest_bound(self):
++        content = archive()
++        with self.assertRaisesRegex(ValueError, 'embedded_package_name_disagreement'):
++            payload.inspect_declared_archive(content, 'test/other', instance(content))
++        for name in ['Test/inert', 'test//inert', '../inert', 'test/./inert', '...',
++                     'test/.../inert', 'test/..../inert', 'test/${platform}', {'verified': True}]:
++            with self.subTest(name=name), self.assertRaisesRegex(ValueError, 'package_name_not_canonical'):
++                payload.inspect_declared_archive(content, name, instance(content))
++        with self.assertRaisesRegex(ValueError, 'package_name_not_canonical'):
++            inspect(archive(manifest={'format_version': '1.1', 'package_name': 'test/.../inert'}))
++
++    def test_signed_unsigned_descriptors_store_deflate_and_zero_dos_times(self):
++        for method in (0, 8):
++            for style in ('signed', 'unsigned'):
++                with self.subTest(method=method, style=style):
++                    result = inspect(archive([{'name': 'data', 'data': b'inert', 'method': method}], descriptor=style))
++                    self.assertTrue(all(row['flags'] & 8 for row in result['members']))
++                    self.assertTrue(all(row['dos_time'] == row['dos_date'] == 0 for row in result['members']))
++                    self.assertEqual(result['disposition'], 'HOLD')
++
++    def test_data_descriptor_allows_exact_local_fields_as_well_as_zero(self):
++        data = b'inert'
++        result = inspect(archive([{'name': 'data', 'data': data, 'method': 0, 'descriptor': 'signed',
++            'local_crc': binascii.crc32(data) & 0xffffffff, 'local_compressed_size': len(data), 'local_size': len(data)}]))
++        self.assertEqual(result['member_count'], 2)
++
++    def test_mtime_extra_and_all_regular_modes_preserve_metadata(self):
++        extra = struct.pack('<HHBI', 0x5455, 5, 1, 123456)
++        for mode in (0o100400, 0o100500, 0o100600, 0o100700):
++            with self.subTest(mode=mode):
++                result = inspect(archive([{'name': 'data', 'data': b'inert', 'mode': mode, 'extra': extra,
++                                           'attributes': (0 if mode & 0o200 else 1) | 2 | 4}]))
++                row = next(row for row in result['members'] if row['path'] == 'data')
++                self.assertEqual(row['unix_mode'], mode)
++                self.assertEqual(row['central_extra_sha256'], hashlib.sha256(extra).hexdigest())
++
++    def test_empty_and_streaming_chunk_boundaries_read_all_deflate_and_stored_bytes(self):
++        bodies = [b'', b'a' * payload.CHUNK, b'a' * (payload.CHUNK + 1),
++                  b'a' * (payload.CHUNK * 4), hashlib.shake_256(b'inert deterministic data').digest(payload.CHUNK * 2 + 1)]
++        for body in bodies:
++            for method in (0, 8):
++                with self.subTest(size=len(body), method=method):
++                    result = inspect(archive([{'name': 'data', 'data': body, 'method': method}], descriptor='signed'))
++                    member = next(row for row in result['members'] if row['path'] == 'data')
++                    self.assertEqual(member['size_bytes'], len(body))
++                    self.assertEqual(member['sha256'], hashlib.sha256(body).hexdigest())
++
++
++class PathAndMetadataRejections(unittest.TestCase):
++    def test_windows_unsafe_paths_and_raw_nul_are_rejected_before_any_extraction(self):
++        names = [b'../escape', b'/absolute', b'C:/drive', b'\\\\server\\name', b'a\\b', b'a//b', b'./a',
++                 b'a/../b', b'file:ads', b'a/NUL.txt', b'aux', b'COM1.bin', b'LPT9', b'CONIN$', b'CONOUT$.txt',
++                 b'AUX .txt', b'end.', b'end ', b'a\x00hidden', b'a\nline', b'a?b', b'a|b', b'a*b', b'a<b',
++                 b'a/' , 'COM\u00b9'.encode(), b'\xff']
++        for name in names:
++            with self.subTest(name=name), self.assertRaisesRegex(ValueError, 'member_path_'):
++                inspect(archive([{'name': name, 'data': b'inert'}]))
++
++    def test_duplicate_full_and_parent_case_aliases_and_file_dir_prefix_are_rejected(self):
++        for names in [('same', 'same'), ('Same', 'same'), ('Dir/a', 'dir/b'), ('file', 'file/child')]:
++            with self.subTest(names=names), self.assertRaisesRegex(ValueError, 'duplicate_or_case_alias|parent_component_case_alias|file_directory_prefix'):
++                inspect(archive([{'name': name, 'data': b'inert'} for name in names]))
++
++    def test_reserved_service_content_and_scripts_are_not_executed_or_admitted(self):
++        for name in ['.cipd/state', '.CIPD/state', '.cipdpkg/hook.py', '.CIPDPKG/manifest.json', '.cipdpkg']:
++            with self.subTest(name=name), self.assertRaisesRegex(ValueError, 'reserved_service_member'):
++                inspect(archive([{'name': name, 'data': b'raise Exception("never executed")'}]))
++
++    def test_symlink_device_directory_reparse_and_unknown_modes_are_unsupported(self):
++        for patch in [{'mode': 0o120400}, {'mode': 0o040700}, {'mode': 0o020600}, {'mode': 0o100644},
++                      {'attributes': 0x401}, {'attributes': 0x11}, {'attributes': 0x21}]:
++            with self.subTest(patch=patch), self.assertRaisesRegex(ValueError, 'member_mode_or_attributes_unsupported'):
++                inspect(archive([{'name': 'data', 'data': b'inert', **patch}]))
++        with self.assertRaisesRegex(ValueError, 'readonly_mode_disagreement'):
++            inspect(archive([{'name': 'data', 'data': b'inert', 'mode': 0o100600, 'attributes': 1}]))
++
++    def test_encryption_flags_compression_and_header_metadata_are_unsupported(self):
++        for patch, error in [({'flags': 1}, 'encrypted_member'), ({'flags': 0x40}, 'zip_flags'),
++                ({'method': 99}, 'compression'), ({'creator': 20}, 'zip_header_metadata'),
++                ({'required': 45}, 'zip_header_metadata'), ({'internal': 1}, 'zip_header_metadata'),
++                ({'comment': b'comment'}, 'zip_header_metadata')]:
++            with self.subTest(patch=patch), self.assertRaisesRegex(ValueError, error):
++                inspect(archive([{'name': 'data', 'data': b'inert', **patch}]))
++
++    def test_zip64_ntfs_unknown_duplicate_and_truncated_extras_are_unsupported(self):
++        valid = struct.pack('<HHBI', 0x5455, 5, 1, 123)
++        for extra, error in [(struct.pack('<HH', 1, 0), 'zip64'), (struct.pack('<HH', 0x000a, 0), 'extra_field_unsupported'),
++                (struct.pack('<HH', 0x7075, 0), 'extra_field_unsupported'), (valid + valid, 'extra_field_duplicate'),
++                (b'\x55', 'extra_field_truncated'), (struct.pack('<HH', 0x5455, 7) + b'x', 'extra_field_duplicate_or_truncated')]:
++            with self.subTest(extra=extra), self.assertRaisesRegex(ValueError, error):
++                inspect(archive([{'name': 'data', 'data': b'inert', 'extra': extra}]))
++
++
++class ZipGeometryAndContentRejections(unittest.TestCase):
++    def test_local_central_name_method_flags_metadata_and_extra_must_match(self):
++        valid = struct.pack('<HHBI', 0x5455, 5, 1, 123)
++        for patch in [{'local_name': b'other'}, {'local_name': b'data\0tail'}, {'local_method': 0},
++                      {'local_flags': 0x800}, {'local_required': 10}, {'local_date': 1},
++                      {'local_time': 1}, {'extra': valid, 'local_extra': b''}]:
++            with self.subTest(patch=patch), self.assertRaisesRegex(ValueError, 'local_central_header_disagreement'):
++                inspect(archive([{'name': 'data', 'data': b'inert', **patch}]))
++
++    def test_descriptor_size_crc_signature_and_partial_local_fields_must_match(self):
++        for patch, error in [({'descriptor_bytes': b'PK\x07\x08' + b'\0' * 12}, 'data_descriptor_disagreement'),
++                ({'descriptor_bytes': b'bad'}, 'data_descriptor_span'), ({'local_crc': 7}, 'local_descriptor_fields')]:
++            with self.subTest(patch=patch), self.assertRaisesRegex(ValueError, error):
++                inspect(archive([{'name': 'data', 'data': b'inert', 'descriptor': 'signed', **patch}]))
++
++    def test_overlapping_duplicate_and_unlisted_local_headers_are_rejected(self):
++        variants = [archive([{'name': 'one', 'data': b'inert'}, {'name': 'two', 'data': b'inert', 'central_local_offset': 0}]),
++            archive([{'name': 'one', 'data': b'inert', 'compressed_size': 200}, {'name': 'two', 'data': b'inert'}]),
++            archive([{'name': 'one', 'data': b'inert'}, {'name': 'hidden', 'data': b'inert', 'omit_central': True}]),
++            archive(preamble=b'opaque'), archive(gap=b'opaque')]
++        for content in variants:
++            with self.subTest(sha=hashlib.sha256(content).hexdigest()), \
++                    self.assertRaisesRegex(ValueError, 'local_header_geometry|member_span_overlapping|local_sizes_or_unlisted_bytes'):
++                inspect(content)
++
++    def test_trailing_comments_multidisk_zip64_and_central_unlisted_bytes_are_rejected(self):
++        for content, error in [(archive() + b'opaque', 'end_record_not_exact'),
++                (archive(comment=b'comment'), 'end_record_not_exact'), (archive(disk=1), 'multidisk'),
++                (archive([{'name': 'data', 'data': b'inert', 'disk': 1}]), 'multidisk'),
++                (archive([{'name': 'data', 'data': b'inert', 'size': 0xffffffff}]), 'zip64'),
++                (archive(central_tail=b'opaque'), 'central_directory_unlisted_bytes')]:
++            with self.subTest(error=error), self.assertRaisesRegex(ValueError, error):
++                inspect(content)
++
++    def test_crc_and_compressed_stream_size_are_recomputed_for_all_members(self):
++        for patch, error in [({'crc': 7}, 'member_crc_disagreement'),
++                ({'size': 4}, 'uncompressed_size_disagreement'), ({'size': 6}, 'uncompressed_size_disagreement'),
++                ({'method': 0, 'size': 4}, 'stored_size_disagreement'),
++                ({'compressed_data': b'invalid'}, 'deflate_stream_invalid'),
++                ({'compressed_data': raw_deflate(b'inert') + b'tail'}, 'deflate_trailing_bytes'),
++                ({'compressed_data': raw_deflate(b'inert')[:-1]}, 'deflate_stream_incomplete')]:
++            with self.subTest(patch=patch), self.assertRaisesRegex(ValueError, error):
++                inspect(archive([{'name': 'data', 'data': b'inert', **patch}]))
++        content = archive([{'name': payload.MANIFEST, 'data': b'{}', 'crc': 7}], add_manifest=False)
++        with self.assertRaisesRegex(ValueError, 'member_crc_disagreement'):
++            inspect(content)
++
++    def test_size_count_manifest_and_total_budgets_are_bounded_before_large_allocation(self):
++        with self.assertRaisesRegex(ValueError, 'member_size_limit'):
++            inspect(archive([{'name': 'data', 'data': b'inert', 'size': payload.MAX_MEMBER_BYTES + 1}]))
++        with mock.patch.object(payload, 'MAX_TOTAL_BYTES', 10), self.assertRaisesRegex(ValueError, 'total_size_limit'):
++            inspect(archive())
++        with mock.patch.object(payload, 'MAX_MEMBERS', 1), self.assertRaisesRegex(ValueError, 'central_directory_span_or_count'):
++            inspect(archive())
++        with mock.patch.object(payload, 'MAX_MANIFEST_BYTES', 1), self.assertRaisesRegex(ValueError, 'manifest_size_limit'):
++            inspect(archive())
++        with mock.patch.object(payload, 'MAX_ARCHIVE_BYTES', 10), self.assertRaisesRegex(ValueError, 'archive_type_or_size_limit'):
++            inspect(archive())
++
++
++class EmbeddedManifestAndGeneratedOutput(unittest.TestCase):
++    def test_missing_duplicate_or_invalid_embedded_manifest_is_rejected(self):
++        with self.assertRaisesRegex(ValueError, 'embedded_manifest_missing'):
++            inspect(archive(add_manifest=False))
++        with self.assertRaisesRegex(ValueError, 'duplicate_or_case_alias_member'):
++            inspect(archive([{'name': payload.MANIFEST, 'data': b'{}'}]))
++        for content, error in [(b'{', 'manifest_json_invalid'), (b'\xef\xbb\xbf{}', 'manifest_json_invalid'),
++                (b'[]', 'manifest_fields_unsupported'), (b'{}', 'manifest_fields_unsupported'),
++                (b'{"format_version":NaN,"package_name":"x"}', 'manifest_non_json_constant'),
++                (b'[' * 1500 + b']' * 1500, 'manifest_json_invalid|manifest_fields_unsupported'),
++                (b'{"format_version":"1.1","format_version":"1.1","package_name":"x"}', 'manifest_duplicate_json_key')]:
++            with self.subTest(content=content), self.assertRaisesRegex(ValueError, error):
++                inspect(archive(manifest=content))
++
++    def test_legacy_manifest_deployed_files_unknown_fields_and_symlink_install_are_not_normalized(self):
++        base = {'format_version': '1.1', 'package_name': PACKAGE}
++        for patch, error in [({'format_version': '1'}, 'manifest_format_unsupported'),
++                ({'files': []}, 'manifest_fields_unsupported'), ({'verified': True}, 'manifest_fields_unsupported'),
++                ({'install_mode': 'symlink'}, 'manifest_install_mode_unsupported'),
++                ({'install_mode': 7}, 'manifest_field_type'), ({'version_file': []}, 'manifest_field_type')]:
++            with self.subTest(patch=patch), self.assertRaisesRegex(ValueError, error):
++                inspect(archive(manifest={**base, **patch}))
++
++    def test_manifest_version_file_is_separate_generated_deployment_obligation(self):
++        result = inspect(archive(manifest={'format_version': '1.1', 'package_name': PACKAGE,
++                                          'install_mode': 'copy', 'version_file': 'metadata/version.json'}))
++        self.assertEqual(result['member_count'], 2)
++        self.assertNotIn('metadata/version.json', {row['path'] for row in result['members']})
++        self.assertEqual(result['generated_deployment_outputs'], [{
++            'path': 'metadata/version.json', 'origin': 'EMBEDDED_MANIFEST_VERSION_FILE',
++            'content': 'GENERATED_DEPLOYMENT_BYTES_NOT_PRODUCED_OR_QUALIFIED',
++            'is_zip_member': False, 'disposition': 'HOLD'}])
++        self.assertIn('GENERATED_DEPLOYMENT_OUTPUT_CLOSURE_NOT_QUALIFIED', result['missing'])
++
++    def test_generated_path_unsafe_colliding_prefix_and_case_aliases_are_rejected(self):
++        for path in ['../escape', 'file:ads', '.cipd/state', '.cipdpkg/hook.py', payload.MANIFEST,
++                     'bin/tool.exe', 'BIN/other', 'bin/tool.exe/child', 'bin']:
++            with self.subTest(path=path), self.assertRaises(ValueError):
++                inspect(archive(manifest={'format_version': '1.1', 'package_name': PACKAGE, 'version_file': path}))
++
++
++class SourceWrapperContracts(unittest.TestCase):
++    def test_no_caller_request_json_resolution_or_verified_parameter_exists(self):
++        with self.assertRaises(TypeError):
++            payload.verify_source_archive(b'', b'', ('chromium', 'x', 0), archive(), verified=True)
++        with self.assertRaises(TypeError):
++            payload.verify_source_archive(b'', b'', ('chromium', 'x', 0), archive(), request={'verified': True})
++
++    def test_source_wrapper_discharges_only_archive_bytes_obligation_in_unit_model(self):
++        # This controlled parser double tests composition, not actual pinned
++        # source/payload availability. Production accepts no parser callback.
++        content = archive()
++        request = {'selection': 'SELECTED', 'reference_kind': 'SHA256_INSTANCE', 'package_name': PACKAGE,
++            'source_version': instance(content), 'instance_id': instance(content),
++            'payload_sha256': hashlib.sha256(content).hexdigest(), 'payload_content': 'UNAVAILABLE',
++            'missing': ['CIPD_PAYLOAD_BYTES_UNAVAILABLE', 'FIXTURE_PHASE_STILL_UNQUALIFIED']}
++        with mock.patch.object(payload, 'request_policy') as policy:
++            policy.return_value.get_source_request.return_value = request
++            result = payload.verify_source_archive(b'fixture only', b'fixture only', ('chromium', 'x', 0), content)
++            policy.return_value.get_source_request.assert_called_once()
++        self.assertEqual(result['scope'], 'SOURCE_DECLARED_SHA256_INSTANCE_ARCHIVE_MEMBERS_ONLY')
++        self.assertNotIn('CIPD_PAYLOAD_BYTES_UNAVAILABLE', result['missing'])
++        self.assertNotIn('CIPD_PAYLOAD_BYTES_UNAVAILABLE', result['source_request']['missing'])
++        self.assertIn('CIPD_PAYLOAD_BYTES_UNAVAILABLE', request['missing'])
++        self.assertEqual(result['source_request']['payload_content'], 'MATCHES_SOURCE_DECLARED_FULL_ZIP_SHA256_INSTANCE')
++        self.assertIn('FIXTURE_PHASE_STILL_UNQUALIFIED', result['missing'])
++        self.assertTrue(set(payload.COMMON_MISSING) <= set(result['missing']))
++        self.assertEqual(result['disposition'], 'HOLD')
++        self.assertFalse(result['authority_effect'])
++
++    def test_symbolic_legacy_or_excluded_request_cannot_promote_matching_bytes(self):
++        content = archive()
++        base = {'selection': 'SELECTED', 'reference_kind': 'SHA256_INSTANCE', 'package_name': PACKAGE,
++                'source_version': instance(content), 'instance_id': instance(content),
++                'payload_sha256': hashlib.sha256(content).hexdigest()}
++        for patch in [{'reference_kind': 'SYMBOLIC_SELECTOR'}, {'reference_kind': 'LEGACY_SHA1_INSTANCE'},
++                      {'selection': 'EXCLUDED'}, {'source_version': 'version:latest'}]:
++            with self.subTest(patch=patch), mock.patch.object(payload, 'request_policy') as policy:
++                policy.return_value.get_source_request.return_value = {**base, **patch}
++                with self.assertRaisesRegex(ValueError, 'source_selected_direct_sha256_instance_required'):
++                    payload.verify_source_archive(b'', b'', ('chromium', 'x', 0), content)
++
++    def test_source_wrapper_crosschecks_digest_and_embedded_name_in_unit_model(self):
++        content = archive()
++        base = {'selection': 'SELECTED', 'reference_kind': 'SHA256_INSTANCE', 'package_name': PACKAGE,
++                'source_version': instance(content), 'instance_id': instance(content),
++                'payload_sha256': hashlib.sha256(content).hexdigest()}
++        for patch, error in [({'payload_sha256': '0' * 64}, 'source_request_digest_disagreement'),
++                              ({'package_name': 'test/other'}, 'embedded_package_name_disagreement')]:
++            with self.subTest(patch=patch), mock.patch.object(payload, 'request_policy') as policy:
++                policy.return_value.get_source_request.return_value = {**base, **patch}
++                with self.assertRaisesRegex(ValueError, error):
++                    payload.verify_source_archive(b'', b'', ('chromium', 'x', 0), content)
++
++    def test_actual_fixed_source_request_is_rederived_and_rejects_synthetic_payload(self):
++        fixture_dir = os.environ.get('METAENGINE_CIPD_SOURCE_FIXTURES')
++        if not fixture_dir:
++            self.skipTest('Exact fixed DEPS bytes not provided; no acquisition in tests')
++        root = Path(fixture_dir)
++        electron = (root / 'electron-DEPS.raw').read_bytes()
++        chromium = (root / 'chromium-DEPS.raw').read_bytes()
++        policy = payload.request_policy()
++        requests = policy.derive_requests(electron, chromium)['requests']
++        direct = next(row for row in requests if row['selection'] == 'SELECTED' and row['reference_kind'] == 'SHA256_INSTANCE')
++        symbolic = next(row for row in requests if row['selection'] == 'SELECTED' and row['reference_kind'] == 'SYMBOLIC_SELECTOR')
++        selector = lambda row: (row['owner'], row['path'], row['package_index'])
++        with self.assertRaisesRegex(ValueError, 'full_archive_sha256_disagreement'):
++            payload.verify_source_archive(electron, chromium, selector(direct), archive())
++        with self.assertRaisesRegex(ValueError, 'source_selected_direct_sha256_instance_required'):
++            payload.verify_source_archive(electron, chromium, selector(symbolic), archive())
++        with self.assertRaisesRegex(ValueError, 'fixed_deps_bytes_mismatch'):
++            payload.verify_source_archive(electron + b'\n', chromium, selector(direct), archive())
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/apps/metaengine-browser/test/test_custom_electron_cipd_policy.py b/apps/metaengine-browser/test/test_custom_electron_cipd_policy.py
+new file mode 100644
+index 0000000..5d286cb
+--- /dev/null
++++ b/apps/metaengine-browser/test/test_custom_electron_cipd_policy.py
+@@ -0,0 +1,259 @@
++#!/usr/bin/env python3
++"""Offline source/request contracts; no client, download or upstream code runs."""
++import base64
++import hashlib
++import importlib.util
++import json
++import os
++from pathlib import Path
++import tempfile
++import unittest
++from unittest import mock
++
++SCRIPT = Path(__file__).resolve().parents[1] / 'scripts/custom-electron-cipd-policy.py'
++spec = importlib.util.spec_from_file_location('cipd_source_request_models', SCRIPT)
++policy = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(policy)
++
++
++def instance(content=b'inert model archive'):
++    return base64.urlsafe_b64encode(hashlib.sha256(content).digest() + b'\x02').decode()
++
++
++def tree_row(mode, name, oid):
++    return mode.encode() + b' ' + name.encode() + b'\0' + bytes.fromhex(oid)
++
++
++class SourceModels(unittest.TestCase):
++    def setUp(self):
++        self.electron = b'vars={}; deps={}; hooks=[]; recursedeps=[]\n'
++        self.version_bytes = (instance(b'excluded orderfile') + '\n').encode()
++        self.chromium = ("""vars={}
++deps={
++ 'src/strong':{'dep_type':'cipd','packages':[{'package':'model/data','version':'%s'}]},
++ 'src/tag':{'dep_type':'cipd','packages':[{'package':'infra/tool/${{platform}}','version':'git_revision:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'}]},
++ 'src/literal':{'dep_type':'cipd','packages':[{'package':'model/typescript/linux-amd64','version':'version:1'}]},
++ 'src/arm':{'dep_type':'cipd','condition':'checkout_win','packages':[{'package':'model/updater/windows-arm64','version':'version:1'}]},
++ 'src/multi':{'dep_type':'cipd','packages':[{'package':'model/${{os}}/${{arch}}','version':'version:2'},{'package':'model/literal','version':'latest'}]},
++ 'src/swift':{'dep_type':'cipd','condition':'host_os == mac','packages':[{'package':'model/swift/mac-${{arch}}','version':'version:1'}]},
++ 'src/excluded':{'dep_type':'cipd','condition':'checkout_android','packages':[{'package':'model/orderfile','version_file':'versions/orderfile.txt'}]},
++}
++hooks=[]
++recursedeps=[]
++""" % instance()).encode()
++        self.pin_sources()
++        temporary = tempfile.TemporaryDirectory(prefix='cipd-source-merkle-model-')
++        self.addCleanup(temporary.cleanup)
++        self.packet = Path(temporary.name)
++        self.blob_oid = policy.git_oid('blob', self.version_bytes)
++        child = tree_row('100644', 'orderfile.txt', self.blob_oid)
++        child_oid = policy.git_oid('tree', child)
++        root = tree_row('40000', 'versions', child_oid)
++        self.root_oid = policy.git_oid('tree', root)
++        (self.packet / (child_oid + '.tree')).write_bytes(child)
++        (self.packet / (self.root_oid + '.tree')).write_bytes(root)
++        patch = mock.patch.object(policy.DEPS, 'CHROMIUM_TREE', self.root_oid)
++        patch.start()
++        self.addCleanup(patch.stop)
++
++    def pin_sources(self):
++        sources = {owner: {'commit': 'a' * 40, 'blob_sha1': policy.git_oid('blob', content),
++                           'sha256': hashlib.sha256(content).hexdigest()}
++                   for owner, content in (('electron', self.electron), ('chromium', self.chromium))}
++        patch = mock.patch.dict(policy.DEPS.SOURCES, sources)
++        patch.start()
++        self.addCleanup(patch.stop)
++
++    def plan(self, **inputs):
++        return policy.derive_requests(self.electron, self.chromium, **inputs)
++
++    def source(self, path, index=0):
++        return policy.get_source_request(self.electron, self.chromium, ('chromium', path, index))
++
++    def test_complete_model_plan_keeps_selection_and_expansion_phases_separate(self):
++        result = self.plan()
++        self.assertEqual(result['summary']['package_selection'], {'SELECTED': 6, 'UNRESOLVED': 1, 'EXCLUDED': 1})
++        row = self.source('src/tag')
++        self.assertEqual(row['source_package'], 'infra/tool/${{platform}}')
++        self.assertEqual(row['formatted_package_template'], 'infra/tool/${platform}')
++        self.assertEqual(row['package_name'], 'infra/tool/windows-amd64')
++        self.assertIn('NOT_OBSERVED_GCLIENT', row['source_format_phase'])
++        self.assertFalse(result['selection_qualified'])
++        self.assertFalse(result['authority_effect'])
++        self.assertFalse(result['network_used'])
++        self.assertEqual(result['disposition'], 'HOLD')
++
++    def test_literal_linux_and_arm64_names_are_not_filtered_by_host(self):
++        self.assertEqual(self.source('src/literal')['package_name'], 'model/typescript/linux-amd64')
++        self.assertEqual(self.source('src/arm')['package_name'], 'model/updater/windows-arm64')
++        self.assertEqual(self.source('src/multi')['package_name'], 'model/windows/amd64')
++        self.assertEqual(self.source('src/multi', 1)['package_name'], 'model/literal')
++
++    def test_direct_digest_is_bound_to_fixed_source_without_fabricating_selector_pins(self):
++        direct = self.source('src/strong')
++        self.assertEqual(direct['reference_kind'], 'SHA256_INSTANCE')
++        self.assertEqual(direct['payload_sha256'], hashlib.sha256(b'inert model archive').hexdigest())
++        tag = self.source('src/tag')
++        self.assertIsNone(tag['instance_id'])
++        self.assertIsNone(tag['payload_sha256'])
++        self.assertEqual(tag['resolution_request']['body'], {'package': 'infra/tool/windows-amd64',
++            'version': 'git_revision:' + 'a' * 40})
++        self.assertEqual(tag['payload_content'], 'UNAVAILABLE')
++
++    def test_unknown_or_excluded_conditions_cannot_be_requested(self):
++        for path in ('src/swift', 'src/excluded'):
++            with self.subTest(path=path), self.assertRaisesRegex(ValueError, 'request_not_selected'):
++                self.source(path)
++
++    def test_selector_is_positional_and_never_accepts_boolean_or_wildcard(self):
++        for selector in [('chromium', 'src/strong', True), ('chromium', 'src/strong', '0'),
++                         ('chromium', 'src/strong', -1), {'verified': True},
++                         ('chromium', '*', 0), ('chromium', 'src/multi', 2)]:
++            with self.subTest(selector=selector), self.assertRaises(ValueError):
++                policy.get_source_request(self.electron, self.chromium, selector)
++
++    def test_changed_deps_or_caller_flags_cannot_replace_source_authority(self):
++        with self.assertRaisesRegex(ValueError, 'fixed_deps_bytes_mismatch'):
++            policy.derive_requests(self.electron, self.chromium + b'\n')
++        result = self.plan()
++        result['authority_effect'] = True
++        with self.assertRaisesRegex(ValueError, 'derived_plan_mismatch'):
++            policy.verify_derived_plan(result, self.electron, self.chromium)
++        with self.assertRaises(TypeError):
++            policy.derive_requests(self.electron, self.chromium, verified=True)
++
++    def test_version_file_uses_fixed_merkle_blob_not_package_or_caller_path(self):
++        result = self.plan(chromium_tree_objects=self.packet,
++                           version_file_blobs={self.blob_oid: self.version_bytes})
++        row = next(value for value in result['requests'] if value['path'] == 'src/excluded')
++        self.assertEqual(row['selection'], 'EXCLUDED')
++        self.assertEqual(row['source_version'], instance(b'excluded orderfile'))
++        self.assertEqual(row['version_file']['blob_sha1'], self.blob_oid)
++        self.assertEqual(row['version_file']['content'], 'MATCHES_FIXED_BASE_GIT_BLOB')
++        self.assertEqual(row['version_file']['root_tree'], self.root_oid)
++        self.assertIsNone(row['resolution_request'])
++
++    def test_version_file_bytes_and_trees_cannot_be_forged_by_filename(self):
++        with self.assertRaisesRegex(ValueError, 'version_file_blob_bytes_mismatch'):
++            self.plan(chromium_tree_objects=self.packet, version_file_blobs={self.blob_oid: b'verified=True'})
++        with self.assertRaisesRegex(ValueError, 'source_blob_key_not_in_fixed_version_files'):
++            self.plan(chromium_tree_objects=self.packet, version_file_blobs={'a' * 40: self.version_bytes})
++        target = self.packet / (self.root_oid + '.tree')
++        target.write_bytes(b'caller tree')
++        with self.assertRaisesRegex(ValueError, 'source_tree_hash_mismatch'):
++            self.plan(chromium_tree_objects=self.packet)
++
++    def test_version_file_missing_inputs_stay_explicitly_unavailable(self):
++        absent = next(row for row in self.plan()['requests'] if row['path'] == 'src/excluded')
++        self.assertIsNone(absent['instance_id'])
++        self.assertIn('VERSION_FILE_MERKLE_PROOF_UNAVAILABLE', absent['missing'])
++        missing = next(row for row in self.plan(chromium_tree_objects=self.packet)['requests']
++                       if row['path'] == 'src/excluded')
++        self.assertIn('VERSION_FILE_BLOB_BYTES_UNAVAILABLE:' + self.blob_oid, missing['missing'])
++
++    def test_version_file_symlink_and_gitlink_boundaries_are_refused(self):
++        for mode in ('120000', '160000'):
++            with self.subTest(mode=mode):
++                content = tree_row(mode, 'versions', self.blob_oid)
++                root = policy.git_oid('tree', content)
++                (self.packet / (root + '.tree')).write_bytes(content)
++                with mock.patch.object(policy.DEPS, 'CHROMIUM_TREE', root), \
++                        self.assertRaisesRegex(ValueError, 'version_file_crosses_non_tree'):
++                    self.plan(chromium_tree_objects=self.packet)
++
++    def test_tree_packet_alias_is_refused_before_read(self):
++        target = self.packet / (self.root_oid + '.tree')
++        os.link(target, self.packet / 'alias')
++        with self.assertRaisesRegex(ValueError, 'source_object_file_invalid'):
++            self.plan(chromium_tree_objects=self.packet)
++
++    def response(self, package='infra/tool/windows-amd64', digest='a' * 64):
++        return {'package': package, 'instance': {'hashAlgo': 'SHA256', 'hexDigest': digest}}
++
++    def test_matching_caller_response_is_only_an_observation_and_never_pins_tag(self):
++        result = policy.inspect_resolution_response(self.electron, self.chromium,
++            ('chromium', 'src/tag', 0), b")]}'\n" + json.dumps(self.response()).encode())
++        self.assertEqual(result['origin'], 'CALLER_SUPPLIED_UNAUTHENTICATED_JSON')
++        self.assertFalse(result['selector_binding_qualified'])
++        self.assertFalse(result['authority_effect'])
++        self.assertIsNone(result['source_instance_id'])
++        self.assertIsNone(self.source('src/tag')['instance_id'])
++        self.assertEqual(result['disposition'], 'HOLD')
++
++    def test_response_wrong_package_claimed_origin_or_malformed_instance_is_rejected(self):
++        cases = [self.response(package='model/other'), {**self.response(), 'verified': True},
++                 {**self.response(), 'service_url': policy.RESOLVE_URL},
++                 self.response(digest='A' * 64), self.response(digest='a' * 40),
++                 {'package': 'infra/tool/windows-amd64', 'instance': {'hashAlgo': 'SHA1', 'hexDigest': 'a' * 40}}]
++        for response in cases:
++            with self.subTest(response=response), self.assertRaises(ValueError):
++                policy.inspect_resolution_response(self.electron, self.chromium,
++                    ('chromium', 'src/tag', 0), json.dumps(response).encode())
++        duplicate = b'{"package":"infra/tool/windows-amd64","package":"infra/tool/windows-amd64"}'
++        with self.assertRaisesRegex(ValueError, 'resolution_duplicate_json_key'):
++            policy.inspect_resolution_response(self.electron, self.chromium, ('chromium', 'src/tag', 0), duplicate)
++
++    def test_observed_instance_cannot_override_direct_source_digest(self):
++        with self.assertRaisesRegex(ValueError, 'resolution_conflicts_with_direct_source_instance'):
++            policy.inspect_resolution_response(self.electron, self.chromium, ('chromium', 'src/strong', 0),
++                json.dumps(self.response(package='model/data')).encode())
++
++
++class TemplateContracts(unittest.TestCase):
++    def test_known_template_parameters_constraints_and_skips(self):
++        self.assertEqual(policy.expand_cipd_template('model/${os}/${arch}/${platform}'),
++                         'model/windows/amd64/windows-amd64')
++        self.assertEqual(policy.expand_cipd_template('model/${os=windows,linux}'), 'model/windows')
++        self.assertIsNone(policy.expand_cipd_template('model/${os=linux,mac}'))
++
++    def test_unknown_parameter_or_lingering_dollar_is_refused_even_after_skip(self):
++        for template in ('model/${cpu}', 'model/${os=linux}/${evil}', 'model/$PATH',
++                         'model/${platform', 'model/${{platform}}', 'model/${arch=}'):
++            with self.subTest(template=template), self.assertRaises(ValueError):
++                policy.expand_cipd_template(template)
++
++    def test_raw_deps_escapes_are_a_separate_declared_stage(self):
++        self.assertEqual(policy.declared_source_format('model/${{platform}}'), 'model/${platform}')
++        for raw in ('model/${platform}', 'model/{platform}', 'model/{x.__class__}', 'model/}'):
++            with self.subTest(raw=raw), self.assertRaisesRegex(ValueError, 'gclient_single_brace_phase'):
++                policy.declared_source_format(raw)
++
++    def test_all_dots_only_components_are_refused_even_after_template_skip(self):
++        for count in (1, 2, 3, 4, 17):
++            dots = '.' * count
++            for name in (dots, 'model/' + dots, dots + '/model',
++                         'model/' + dots + '/data', 'model/${os=linux}/' + dots):
++                with self.subTest(name=name), self.assertRaisesRegex(ValueError, 'bounded_package_name_invalid'):
++                    policy.expand_cipd_template(name)
++        for name in ('model/.hidden', 'model/v1.2.3', 'model/...data', 'model/dot...s'):
++            self.assertEqual(policy.expand_cipd_template(name), name)
++
++    def test_legacy_or_noncanonical_ids_never_become_strong_payload_pins(self):
++        self.assertEqual(policy.classify_reference('a' * 40)['reference_kind'], 'LEGACY_SHA1_INSTANCE')
++        for value in (instance() + '=', base64.urlsafe_b64encode(b'a' * 32 + b'\x03').decode(),
++                      'git_revision:' + 'a' * 40, 'version:1', 'latest'):
++            self.assertNotEqual(policy.classify_reference(value)['reference_kind'], 'SHA256_INSTANCE')
++
++
++class PinnedDeclarations(unittest.TestCase):
++    def test_real_pinned_declarations_preserve_all_150_requests_and_blocked_22_selectors(self):
++        root = os.environ.get('METAENGINE_CIPD_INPUT_FIXTURES')
++        if not root:
++            self.skipTest('Fixed raw DEPS captures not provided; tests never acquire dependencies')
++        root = Path(root)
++        result = policy.derive_requests((root / 'electron-DEPS.raw').read_bytes(),
++                                        (root / 'chromium-DEPS.raw').read_bytes())
++        self.assertEqual(result['summary']['dependency_selection'], {'EXCLUDED': 111, 'SELECTED': 31, 'UNRESOLVED': 2})
++        self.assertEqual(result['summary']['package_selection'], {'EXCLUDED': 115, 'SELECTED': 33, 'UNRESOLVED': 2})
++        self.assertEqual(result['summary']['selected_reference_kinds'], {'SYMBOLIC_SELECTOR': 22, 'SHA256_INSTANCE': 11})
++        self.assertEqual(result['summary']['resolution_request_count'], 22)
++        self.assertEqual(result['summary']['unique_resolution_request_count'], 21)
++        self.assertEqual(result['summary']['version_file_count'], 4)
++        self.assertTrue(all(row['disposition'] == 'HOLD' for row in result['requests']))
++        self.assertTrue(all(row['instance_id'] is None for row in result['requests']
++                            if row['reference_kind'] == 'SYMBOLIC_SELECTOR'))
++        self.assertFalse(result['authority_effect'])
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/docs/custom-electron-cipd-identity-v1.md b/docs/custom-electron-cipd-identity-v1.md
+new file mode 100644
+index 0000000..f4b9dad
+--- /dev/null
++++ b/docs/custom-electron-cipd-identity-v1.md
+@@ -0,0 +1,167 @@
++# Bounded CIPD request and archive identity
++
++The CIPD producers extend the fixed top-level DEPS inventory with explicit
++request names, source-derived instance declarations, and data-only archive
++membership verification. They do not execute CIPD, an archive member, a hook,
++an installer, or a compiler. Full dependency composition and build admission
++remain `HOLD`. No production receipt or release authority follows from these
++results.
++
++## Requests and concrete declared platform
++
++Inputs remain the exact Electron/Chromium DEPS blobs described in
++[the DEPS inventory](custom-electron-deps-composition-v1.md). Preserve all 150
++package declarations: 33 selected, two unresolved and 115 excluded under the
++explicit candidate native Windows x64 initial-sync profile. This does not
++qualify the actual bootstrap gclient, `.gclient`, custom variables, sync host,
++CIPD client, platform or phase.
++
++The source retains raw `${{platform}}`/`${{arch}}` strings. A separately named
++declared brace-escape model yields `${platform}`/`${arch}`; the reviewed LUCI
++template model then yields `windows-amd64`/`amd64` for this declared host.
++These model stages are not asserted to be the actual gclient invocation.
++Unknown templates or platform values cannot silently become current-host
++defaults. Seven selected requests contain platform templates. Explicit package
++names stay unchanged, including Windows ARM64/386 updater packages and an
++always-selected Linux TypeScript package. Target x64 does not permit filtering
++those source declarations out. The two bare-mac Swift conditions remain
++unresolved and cannot supply an admitted payload request.
++
++Of the 33 selected requests, eleven already declare canonical SHA256 CIPD
++instance IDs. Each identifies the full ZIP body, including archive metadata.
++The other 22 requests use symbolic selectors (21 distinct package/version
++pairs); no instance resolution was obtained for them. A version selector,
++service-shaped JSON, caller digest, `verified:true` flag or a package path
++cannot replace the missing source-bound instance declaration.
++
++## DEPS version files
++
++Four source `version_file` declarations refer to Android orderfiles:
++
++| Source path | Git blob |
++| --- | --- |
++| `chrome/build/android-arm.orderfile.txt` | `099e702efa7b6710f803404efabfb5d9e58581ac` |
++| `chrome/build/android-arm64.orderfile.txt` | `cffe236bc9ad92879ea5a8a6fcee282fda066abe` |
++| `android_webview/tools/android-webview-arm.orderfile.txt` | `959feb5896dc50b4e59cb5f873cda29ea7c1ee32` |
++| `android_webview/tools/android-webview-arm64.orderfile.txt` | `151851e05043748f3ffb8e0873f9ab339636a7db` |
++
++All four were read from the fixed Chromium commit, matched to its root through
++raw hashed Git tree chains, and checked as exact blob bytes. Each contains a
++canonical 44-character SHA256 instance ID followed by LF. They remain excluded
++under the candidate Windows profile. Their verified selector bytes do not
++enable their dependencies or prove any downloaded payload. Supplied source
++blob bytes must match their fixed Git object membership; arbitrary local
++version-file content is not authoritative.
++
++## Archive identity and member inventory
++
++The format model is tied to immutable official LUCI source
++`61fc2ffcffaa3d602e13d752206c2285ae9a637c`, with raw file Git/SHA256 evidence.
++This is a data-format reference, not qualification of the actual bootstrap
++client. CIPD SHA256 instance encoding is the archive digest plus algorithm byte
++2 encoded as canonical URL-safe base64. Legacy SHA1 or a version tag cannot
++be promoted to this strong identity.
++
++The bounded archive verifier first checks the complete ZIP SHA256 against the
++expected instance. It then verifies `.cipdpkg/manifest.json`, format `1.1`, and
++the exact expected `package_name`, and derives content/mode identity for all
++supported members. The archive manifest does **not** contain a per-file digest
++list; that list exists in a deployed manifest. No invented embedded file list
++is used as independent evidence. Complete archive binding authenticates the
++member bytes from which the inventory is derived.
++
++The supported profile is a narrow regular-file Windows namespace with Store
++or Deflate compression and CIPD-normalized owner permissions. Unsupported or
++ambiguous ZIP constructs, links, unsafe names and namespaces refuse; they do
++not trigger extraction or fallback to another installer. Archive membership
++does not qualify NTFS representation, a deployed composed filesystem, host
++execution, generated files or source custody through a build.
++
++The fixed parser limits are 128 MiB of archive bytes, 64 MiB per member,
++256 MiB of total uncompressed bytes, 8,192 members and 1 MiB for the manifest.
++ZIP64 and unsupported metadata are outside this profile. Refusal at a limit
++does not prove a package corrupt; it leaves that package unqualified. Successful
++source-bound verification discharges the supplied archive-byte obligation and
++retains every unrelated phase, custody and installed-output obligation.
++
++The archive manifest's optional `version_file` is a different field from DEPS
++`version_file`: it names a generated deployment JSON file. Its path and
++obligation remain explicit and unqualified. It must not be silently counted
++as an authenticated ZIP member or complete deployed output.
++
++## Service acquisition and minimal network requirement
++
++The only attempted CIPD service request was:
++
++```text
++POST https://chrome-infra-packages.appspot.com/prpc/cipd.Repository/ResolveVersion
++package: gn/gn/windows-amd64
++version: git_revision:641ace93dd9560e75e7add0d08f77b446fbb3b78
++```
++
++It failed before the origin POST, during proxy HTTPS CONNECT, with
++`Tunnel connection failed: 403 Forbidden`. No instance response or archive was
++received. There was no retry, alternate route, network configuration change or
++new trust root. Source-format and version-file reads use the existing permitted
++official GitHub source channel; they do not retrieve CIPD service payloads.
++
++For resolution, the minimum requested access is outbound HTTPS/CONNECT TCP443
++to `chrome-infra-packages.appspot.com`, allowing POST to the above RPC path.
++Payload acquisition additionally needs POST to
++`/prpc/cipd.Repository/GetInstanceURL` on the same host, then HTTPS GET to the
++returned `signed_url`. The exact signed-URL target host remains unknown because
++the service returned no URL. Signed URLs are temporary capabilities and must
++not be printed or published as evidence. Existing TLS verification stays in
++place; no wildcard network rule or additional CA is inferred here.
++
++## Actual proof boundary and next producers
++
++With fixed source bytes and preprovisioned raw tree objects, the request CLI is:
++
++```sh
++python3 -B apps/metaengine-browser/scripts/custom-electron-cipd-policy.py \
++  --electron-deps /prepared/electron-DEPS \
++  --chromium-deps /prepared/chromium-DEPS \
++  --chromium-tree-objects /prepared/chromium-tree-objects \
++  --source-blob-dir /prepared/version-file-blobs > /new/cipd-requests.json
++```
++
++The source blob directory contains only content-addressed `<Git OID>.blob`
++files; the supplied bytes must match the fixed-root membership. Exit 0 means
++inventory creation, while the JSON retains `HOLD`. No missing input is fetched.
++
++For one of the eleven selected direct-instance requests, the source-bound
++archive CLI accepts a separately provisioned archive:
++
++```sh
++python3 -B apps/metaengine-browser/scripts/custom-electron-cipd-payload.py \
++  --electron-deps /prepared/electron-DEPS \
++  --chromium-deps /prepared/chromium-DEPS \
++  --owner chromium --path src/tools/skia_goldctl/win --package-index 0 \
++  --archive /prepared/goldctl-instance.zip > /new/cipd-members.json
++```
++
++It rederives the source request rather than accepting expected package/digest
++JSON, and exits 1 with `HOLD` even when bounded archive verification succeeds.
++The generic declared-byte API exists for data/fixture checking and explicitly
++does not establish a fixed-source binding. No CLI accepts a caller's success
++flag or uses a resolution observation to authorize a symbolic source selector.
++
++Positive and negative archive fixtures are inert synthetic data. Actual CIPD
++payload readback is `NOT RUN`; no service resolution, ZIP digest/member proof
++for a real package, extraction, installation or Windows execution is claimed.
++The request inventory records exact remaining selectors and direct instance
++declarations separately.
++
++After network access is explicitly repaired, a producer must capture the exact
++official request/response association, resolve each selected symbolic request,
++bind reviewed immutable instances and full archive bytes, and apply the member
++verifier. A server response or caller-authored observation alone cannot become
++release trust. Resolve ambiguity and unsupported instances explicitly, preserve
++every destination/use, and do not fetch excluded or unresolved requests.
++
++The full build additionally still needs bootstrap gclient/spec/phase identity,
++enabled recursive and Electron-patched DEPS, SDK/toolchain and host interpreter
++bytes, generated-output identities, physical composed readback and custody.
++Those guards remain independent and mandatory. Windows build and client
++installation are `NOT RUN`.
+diff --git a/docs/custom-electron-deps-composition-v1.md b/docs/custom-electron-deps-composition-v1.md
+index 146f203..b04693d 100644
+--- a/docs/custom-electron-deps-composition-v1.md
++++ b/docs/custom-electron-deps-composition-v1.md
+@@ -111,6 +111,13 @@ and changed provided files refuse. The optional byte capture is data only.
+ 
+ ## Concrete remaining producers
+ 
++The next [bounded CIPD producer](custom-electron-cipd-identity-v1.md) now derives
++all top-level package requests, declared platform expansions and hash-bound
++version-file selectors. Its source-bound archive verifier checks a supplied
++direct SHA256 instance and derives regular ZIP member identities without
++extraction. Symbolic service resolution and real payload readback were blocked
++by proxy CONNECT 403; recursive/operational composition remains unqualified.
++
+ 1. Bind the actual gclient/depot_tools/CIPD controller binaries, interpreter
+    standard libraries and exact `.gclient`/solution/custom variable/host profile
+    and sync phase. Reconcile parent and string-variable semantics against that

@@ -1,0 +1,152 @@
+METAENGINE exact PE transform producer — independent source review
+
+Disposition
+There is a bounded future implementation path: compute the complete expected
+image from pristine source bytes and independently derived packaging inputs,
+then compare every output byte and separately enforce a strict loader-preserving
+profile. The currently reviewed evidence is not a complete producer or proof of
+ALL loader invariants. Ingredient collection and conservative validator tests
+can be implemented now; production admission must remain exact-byte/HOLD.
+
+No project source was edited by this reviewer. No dependency was installed, no
+downloaded package code was imported or executed, and no Windows program was run.
+The original custom EXE, its receipt, staged app.asar, and final EXE are absent
+at their declared paths. Real-image compatibility and Windows qualification are
+therefore NOT RUN, not a passing result.
+
+Reviewed source identity
+The worktree contains the full-byte gate from the preceding review. The actual
+git HEAD tree is still 2dbe253e97379532f6f4b52ef7edf26109a9266d, with subsequent
+uncommitted worktree edits; this review does not equate HEAD with the parent's
+separately recorded working-tree digest. The current package-lock SHA256 is
+99dcdb3b2f2ea3e40e35bed0d5a37c684d70b6d40cc06d7259282b002880ff8b.
+
+Exact code ingredients, read without execution
+pe-transform-dependency-manifest.json was generated from the previously saved
+resedit 1.7.2 and pe-library 0.4.1 archives, after rechecking both exact lockfile
+SHA512 SRI values. It enumerates the static literal CommonJS require closure from
+resedit/dist/index.js: 34 resedit modules, 18 pe-library modules, and both
+package.json hashes. The sole cross-package edge is resedit -> pe-library. No
+Node builtin require, nonliteral require, or dynamic import was found in that
+closure. It includes the unused signing-export modules eagerly loaded by the
+resedit entry; those exports must not be used by the proposed unsigned producer.
+
+Manifest SHA256:
+a529bc263cd4af3ae51ad836443b7a9a16f760cfb5a6aad32931ae6436ed1952.
+Reproducible collector: collect-pe-transform-dependency-manifest.py.
+Raw collection result: pe-transform-dependency-manifest.raw.log.
+The manifest is build-only source evidence, not a signature or authority input.
+Static closure analysis is not a JavaScript semantics or runtime-loader proof.
+Before later execution, a loader must resolve the explicit CJS require entry,
+validate both package roots/versions and every reached file against this
+manifest, reject links and unexpected resolutions, and address module-cache and
+check/use races. Merely reading a package version or hashing a downloaded archive
+does not verify the installed code that Node will actually execute.
+
+The existing upstream evidence at ../metaengine-followup-evidence/pe-upstream/
+already shows seven builder TypeScript sources exactly matching source-map
+sourcesContent from the lock-SRI-verified app-builder-lib 26.15.7 archive.
+The correct official release tag is electron-builder@26.15.7.
+
+Exact transform stages
+The pinned builder injects ASAR integrity before user afterPack, then writes
+fuses, then edits product resources and optionally signs. A future producer must
+derive separate expected images for afterPack and final readback. Comparing an
+afterPack candidate against a final-stage recipe is incorrect.
+https://github.com/electron-userland/electron-builder/blob/electron-builder%4026.15.7/packages/app-builder-lib/src/platformPackager.ts#L320-L356
+
+ASAR stage: addWinAsarIntegrity pushes a new INTEGRITY/ELECTRONASAR entry; it does
+not replace an existing entry. Pre-editing the distribution and letting the
+unchanged builder run would introduce duplicates. The payload is independently
+computed from all intended staged ASAR header strings, using SHA256 and normalized
+Windows paths. readAsarHeader reads the size pickle and header pickle before
+returning the string; hashing the complete ASAR file is a different operation.
+Use explicit size limits, complete reads, and independently verified staged
+inputs. Candidate EXE resources must never supply their own expected hashes.
+https://github.com/electron-userland/electron-builder/blob/electron-builder%4026.15.7/packages/app-builder-lib/src/electron/electronWin.ts#L8-L42
+https://github.com/electron-userland/electron-builder/blob/electron-builder%4026.15.7/packages/app-builder-lib/src/asar/asar.ts#L149-L171
+
+Fuse stage: the builder resolves nested @electron/fuses 1.8.0; final application
+readback uses top-level 2.1.3. For the current config the intended changes are
+only source-anchored fuse indices 4 and 5 to 0x31. A small independent fixed-wire
+operation can avoid executing the fuses package closure, provided it requires
+exactly one unambiguous valid x64 wire, preserves its sentinel/version/length and
+all other states, and rejects malformed or duplicate wires. Fuse-only support
+cannot admit this pipeline because the earlier ASAR resource edit is mandatory.
+https://github.com/electron/fuses/blob/v1.8.0/src/index.ts#L55-L118
+
+Final resource stage: exact resedit calls can reproduce version strings, fixed
+version fields, and icon-group-1 changes from source-controlled configuration,
+verified icon bytes, and the packaging context. Source appInfo defaults include
+the current year for copyright and several environment variables for build
+number. These inputs must be frozen and recorded or explicitly configured;
+current source alone does not determine every metadata byte. No execution-level
+change is requested by the current configuration. Preserve all unselected
+resources, languages, codepages, version unknown blocks, and icon groups; hold if
+resource sharing/collisions cannot be shown to preserve them.
+https://github.com/electron-userland/electron-builder/blob/electron-builder%4026.15.7/packages/app-builder-lib/src/winPackager.ts#L159-L253
+https://github.com/electron-userland/electron-builder/blob/electron-builder%4026.15.7/packages/app-builder-lib/src/util/resEdit.ts#L15-L67
+https://github.com/electron-userland/electron-builder/blob/electron-builder%4026.15.7/packages/app-builder-lib/src/appInfo.ts#L46-L77
+https://github.com/electron-userland/electron-builder/blob/electron-builder%4026.15.7/packages/app-builder-lib/src/appInfo.ts#L163-L168
+
+Why replay alone is insufficient for the requested preservation proof
+pe-library's resource parser permits only the relocation section after resources.
+Its resource serializer sorts/rebuilds directory structures, descriptor RVAs and
+payload/padding bytes. Resource growth can move the relocation section's raw
+offset/RVA and change image size. generate() reconstructs section/header/gap
+bytes, removes the certificate directory, and conditionally recalculates the PE
+checksum. Therefore whole-image equality with a replay establishes the precise
+builder transformation relation, not automatically invariant loader semantics.
+https://github.com/jet2jet/pe-library-js/blob/94974834fc131c99963fd1635e5bfbc135b160bd/src/main/NtExecutableResource.ts#L622-L664
+https://github.com/jet2jet/pe-library-js/blob/94974834fc131c99963fd1635e5bfbc135b160bd/src/main/NtExecutableResource.ts#L728-L912
+https://github.com/jet2jet/pe-library-js/blob/94974834fc131c99963fd1635e5bfbc135b160bd/src/main/NtExecutable.ts#L369-L532
+
+Minimum conservative future profile
+Require a valid, ordinary, unsigned PE32+ x64 image with bounded, non-overlapping
+headers/raw/virtual ranges, valid alignments, and exactly one read-only,
+non-executable, non-writable resource section. Its resource-directory RVA must
+start at that section. Reject duplicate/ambiguous names, directories, resources
+or wires, unsupported sections and truncated/overflowing layouts.
+
+Require unchanged section count, raw offsets/sizes, virtual addresses, aligned
+mapped spans, permissions, entry point, image base, subsystem and DLL flags.
+Resource raw capacity must already fit both serialization stages; otherwise
+HOLD. The resource virtualSize and resource-directory size may differ only by
+the exact replay-calculated values while preserving the aligned mapped span.
+Keep all other header bytes identical except the exact mathematically expected
+checksum after each serializer stage. Certificate offset and size must stay
+zero. No certificate, checksum, header, gap, overlay or section is ignored.
+
+Require exact preservation of every non-resource raw byte, file gap and overlay,
+except the validated two fuse states. The producer must compare the entire
+expected serialized resource section, not omit .rsrc from identity. Preserve all
+unselected resource payloads/metadata and reject unexplained additions/removals.
+
+Crucially, unchanged direct data-directory entries are not a complete loader
+proof: import names/thunks, exports, TLS, relocation targets, load-config fields,
+exception/debug data and related structures can indirectly reference resource
+bytes. A complete qualification needs a bounded reachable-loader-data analysis
+showing those structures do not depend on changed bytes, or must HOLD unknown
+layouts. A shallow directory-range check must not be labeled ALL-invariant
+preservation. This is a concrete remaining proof gap in a minimal validator.
+
+Meaningful negative contract tests can be run on self-authored synthetic data
+without executing packages: entry-point and each directory/header mutation,
+permission changes, raw/RVA shifts and overlaps, growth/span changes, non-resource
+data, gaps/overlay, ambiguous fuse wires, extra/duplicate resources, incorrect
+ASAR paths/hashes, unexpected icon/version values, and signed/certificate-bearing
+images must be rejected. Serializer output parity and real-image loader graph
+coverage are separate tests; neither has been run here.
+
+Recommended smallest deliverable now
+Keep production full-byte equality/HOLD. Add only the pinned ingredient manifest,
+an input collector with explicit build-only provenance, and independently tested
+strict invariant assertions for the future producer boundary. Implement no
+normalized-admission flag or receipt-based bypass. A later producer can be enabled
+only after complete expected-byte replay, input binding, installed dependency
+verification, loader-invariant coverage, and real-image parity evidence exist.
+The current missing original EXE/receipt/ASAR prevents proving those final steps.
+
+The Authenticode exception permits the designated unsigned Windows build path;
+it does not authorize certificate stripping as identity normalization, disabling
+internal release signatures, changing trust roots, or relaxing runtime admission.

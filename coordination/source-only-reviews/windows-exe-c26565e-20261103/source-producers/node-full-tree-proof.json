@@ -1,0 +1,409 @@
+{
+  "schema": "metaengine.component-git-tree-proof.v1",
+  "scope": "COMPLETE_COMPONENT_GIT_TREES",
+  "component": "node",
+  "electron_commit": "c542df1ecbc2c2978e8f53f8c7baf602404d166f",
+  "electron_tree": "328891d1f8b4d93d49c9f31332baf75fa726cb6e",
+  "base_commit": "f14cd3aa7bf9ca8df2cc5b8bb14beb0f335b1d93",
+  "base_tree": "409a26f676d83fa6e1b0bfdb1c10d6878845c071",
+  "patch_order_blob": "1c7e2099b98e73e05c251606d8a07555cfc47a42",
+  "patches": [
+    {
+      "name": "expose_get_builtin_module_function.patch",
+      "blob_sha1": "53a2691f31026d5f2cecc2233dcea4e318568167",
+      "sha256": "622580f031ae15856863fb3f53c435a64b54fa038b23faca0d4ddcf487430ba3",
+      "bytes": 1488
+    },
+    {
+      "name": "build_add_gn_build_files.patch",
+      "blob_sha1": "d3fd947c30304bae6f39c24f9180e1a8d2380f17",
+      "sha256": "1f516704523cc6c8c6779528c9693c23916396a0500de2d375bcedbcc5fc774d",
+      "bytes": 17017
+    },
+    {
+      "name": "fix_add_default_values_for_variables_in_common_gypi.patch",
+      "blob_sha1": "3a4eb269ab2244dc5990644893c3324726b7e7b6",
+      "sha256": "8da542032734b5cd09b4301571b1464e9690f318e7ccd73ab049d9aca4dea1d2",
+      "bytes": 1496
+    },
+    {
+      "name": "pass_all_globals_through_require.patch",
+      "blob_sha1": "38b352ab78eb62d38beb2278f99024c3cc9296b7",
+      "sha256": "13ff3109a95c699ac9c3919f5a08ec28b4a1ed0b5a6398305211c15aa1533b84",
+      "bytes": 1969
+    },
+    {
+      "name": "build_modify_js2c_py_to_allow_injection_of_original-fs_and_custom_embedder_js.patch",
+      "blob_sha1": "b074c5e00484578d3dac42017a890bd1c74df121",
+      "sha256": "4710a1596f2d29b2dda7ed7f8c55b6091221f31fa12a63279899ac6a3fee1bb8",
+      "bytes": 2472
+    },
+    {
+      "name": "refactor_allow_embedder_overriding_of_internal_fs_calls.patch",
+      "blob_sha1": "5859ff3b876e8e13ccd9d607e06c1e17cf829d31",
+      "sha256": "cd24c0b108e625193240bf92bdeab39a21fdcbb0d9a506dc02c3ac64861080c5",
+      "bytes": 904
+    },
+    {
+      "name": "fix_handle_boringssl_and_openssl_incompatibilities.patch",
+      "blob_sha1": "be4510df90317cf0d40f97c5fa977d8fb4096dc7",
+      "sha256": "ae1afdca6a109b3ec6c63aa5a93d56544bad51bc8044cd63ce40ac2da76aeee4",
+      "bytes": 4234
+    },
+    {
+      "name": "feat_add_uv_loop_interrupt_on_io_change_option_to_uv_loop_configure.patch",
+      "blob_sha1": "68184c900171fc19f213c01d50e49c76b9b52be6",
+      "sha256": "7cd0d5e14df005f43da3ec66f81c923a19a1968adf75c648240412c0bb67442d",
+      "bytes": 23399
+    },
+    {
+      "name": "support_v8_sandboxed_pointers.patch",
+      "blob_sha1": "4d371ab035a43421ac881e5b61a12270d7d95364",
+      "sha256": "a7bd8fcdf0891076251ac5d7c00a1fd959ee4d1a572e422a0fcb36c7b60c1536",
+      "bytes": 19425
+    },
+    {
+      "name": "build_ensure_native_module_compilation_fails_if_not_using_a_new.patch",
+      "blob_sha1": "d62ba24d1c6edbf717a3fb2b7982f38dc92e8ecf",
+      "sha256": "086c8764714693431ebad387abe055674c4690934a2af2ae75dce2c2fb8274ae",
+      "bytes": 2715
+    },
+    {
+      "name": "fix_expose_the_built-in_electron_module_via_the_esm_loader.patch",
+      "blob_sha1": "be5a2e0132173e91e8263cea4468b451674fa28f",
+      "sha256": "bb44e73f646654a0948da2a24d0471efa64ac00ac9e90baa36af4c79875683c4",
+      "bytes": 7007
+    },
+    {
+      "name": "chore_expose_importmoduledynamically_and.patch",
+      "blob_sha1": "35095de56aa2ba719e1d3ec1b740df784108ec70",
+      "sha256": "f72887814a27715a1e50cc9e430633c847499d7d95d06a9ed1afa42e3dedd563",
+      "bytes": 5703
+    },
+    {
+      "name": "fix_do_not_resolve_electron_entrypoints.patch",
+      "blob_sha1": "4a1015c267d9b02a7893fab9270bacfb7c5e184c",
+      "sha256": "ba965e5ab6beeb921da62f64b742df0f0f4824da15b9545dbeb3141c5b6f3655",
+      "bytes": 1077
+    },
+    {
+      "name": "ci_ensure_node_tests_set_electron_run_as_node.patch",
+      "blob_sha1": "4890f208967188cab986948870dee4b609b2b05c",
+      "sha256": "4c5a4390b4b7f01410ff0d6494ebc7fd60b7b266b377b41344798eca268f2143",
+      "bytes": 1539
+    },
+    {
+      "name": "fix_allow_passing_fileexists_fn_to_legacymainresolve.patch",
+      "blob_sha1": "bfbaf876d2c0bba586b5329f4799908b8d13f9a9",
+      "sha256": "cd90c5bc5b82892b18c5766e24338938fdab15027974cefb8b29ccb3b03d0ec7",
+      "bytes": 6220
+    },
+    {
+      "name": "fix_remove_deprecated_errno_constants.patch",
+      "blob_sha1": "f3e677a2ec332328480a38c0f698d8e8ebf4da99",
+      "sha256": "4e2702736e6bd0ca365563f679c779353cc077688a28980c30b46b50cc1f806d",
+      "bytes": 3903
+    },
+    {
+      "name": "chore_disable_deprecation_ftbfs_in_simdjson_header.patch",
+      "blob_sha1": "953e6de68dcd107d43b6add226f10fc8c8952c9c",
+      "sha256": "538b392e19f95552b8193bcdab4bdb5e8f67ffec6bc9f4154c3982d6d9514e1b",
+      "bytes": 3252
+    },
+    {
+      "name": "build_allow_unbundling_of_node_js_dependencies.patch",
+      "blob_sha1": "97d94705928f81a171d5fc811f868da5bc739a61",
+      "sha256": "02fd4f708449129e9f3392b03451a52eb2e6ce5869a7978929efe31713bc85e2",
+      "bytes": 1979
+    },
+    {
+      "name": "build_use_chromium_s_crdtp_std_string_traits.patch",
+      "blob_sha1": "eb9316c549d33c0e51bbadfde2d9a55a72d80d6c",
+      "sha256": "8c13c15cb3b4574b596966211ad72f7b31a05c2175abf156a1c97e883d8febe4",
+      "bytes": 2997
+    },
+    {
+      "name": "refactor_attach_cppgc_heap_on_v8_isolate_creation.patch",
+      "blob_sha1": "78924bb1281892d098b6cf176a67102e6efc0deb",
+      "sha256": "2ee56c92498db0023003951a7b0b9767782839ae020c7cf5c2d93c475f20a62a",
+      "bytes": 7581
+    },
+    {
+      "name": "fix_cppgc_initializing_twice.patch",
+      "blob_sha1": "c0628583bb348c6919ce3e5ca7a4c9961fc99d87",
+      "sha256": "0b27674f86f8df93529078d9308d75627cfe47279cd2ffc147c9871ec8c4bcc8",
+      "bytes": 1120
+    },
+    {
+      "name": "fix_expose_readfilesync_override_for_modules.patch",
+      "blob_sha1": "3276917425ef40fbb454b69758cdbddeb903431e",
+      "sha256": "4fd628daf5d7173a61617c1794a79334bc98767f75610bc7f86388964a1b1149",
+      "bytes": 5790
+    },
+    {
+      "name": "test_accomodate_v8_thenable_stack_trace_change_in_snapshot.patch",
+      "blob_sha1": "bb2cff9549a43f371d0c25770543620d998407c8",
+      "sha256": "b2c77a1757fcb79f40c63a93752f4e1de826aa574b18c14b644636ba73d26265",
+      "bytes": 1454
+    },
+    {
+      "name": "chore_exclude_electron_node_folder_from_exit-time-destructors.patch",
+      "blob_sha1": "1c4390fd5340e5166571c4a38e4262d120b8f70b",
+      "sha256": "2ef6a00400d5abe13bb5461969c5d18f3e448d5438e7a013cd6e843f81705a03",
+      "bytes": 2253
+    },
+    {
+      "name": "api_remove_deprecated_getisolate.patch",
+      "blob_sha1": "86de03ab58ff943c74cd940a71dbca4f4c05dfa7",
+      "sha256": "7459032bdbdebcfa79cbf29c6bcb9f8ee423841931acc7b512f4a35a6b747039",
+      "bytes": 43013
+    },
+    {
+      "name": "fix_redefined_macos_sdk_header_symbols.patch",
+      "blob_sha1": "83d801ad4206af1ddee7bed1ec5ebe8402c2e067",
+      "sha256": "650bee09089df2dd3307bf4fce83b454a66fa810bdf2442726fd5f6a38a7b1f7",
+      "bytes": 1476
+    },
+    {
+      "name": "feat_disable_js_source_phase_imports_by_default.patch",
+      "blob_sha1": "b1b0187c4689a9d7f1096d3a331b5cf9aba23b85",
+      "sha256": "2c1e133d88ce027bff4c0073d6792bb2b53b6e6fb2cfe66dd0ec7e8ca3997a61",
+      "bytes": 1239
+    },
+    {
+      "name": "api_delete_deprecated_fields_on_v8_isolate.patch",
+      "blob_sha1": "a40bef280cc2fa49ac2696873750698147e60d3e",
+      "sha256": "85385d7b95596e636834cca1dc562a1a9f1a4468f16cf7da84718d771938844d",
+      "bytes": 944
+    },
+    {
+      "name": "api_promote_deprecation_of_v8_context_and_v8_object_api_methods.patch",
+      "blob_sha1": "c9dbae3cbd0778d04d4f8b31cd5e1d166343ff5a",
+      "sha256": "e9af168737576573e96e7bf4278efdb7816c4cfc1b11d03dd5d6729cf24710a2",
+      "bytes": 14918
+    },
+    {
+      "name": "fix_ensure_traverseparent_bails_on_resource_path_exit.patch",
+      "blob_sha1": "9d5fa263e5a6b7b7e26b32c4ab6992bd7df36118",
+      "sha256": "739d12dd8e452cc027413045925f2409ab2deb23f06a2ecadfad446a7da22028",
+      "bytes": 2714
+    },
+    {
+      "name": "reland_temporal_unflag_temporal.patch",
+      "blob_sha1": "c265e9007141fd13fd2c119d244c933f8a73977e",
+      "sha256": "ff28cee755ff65a114086591754e7b27ed78e1e1993fbcddc1e339bb49d1b3ba",
+      "bytes": 636
+    },
+    {
+      "name": "fix_suppress_nodiscard_warning_for_copy_options_operator.patch",
+      "blob_sha1": "018003577f28db8cb3c3041c28ca1cfc3b9148f4",
+      "sha256": "064e4920706ed140b8d0ff7660c79cc77599c287c2a9d25d281ed72230309259",
+      "bytes": 1261
+    },
+    {
+      "name": "src_refactor_module_wrap_cc_to_update_fixedarray_get_params.patch",
+      "blob_sha1": "ddd10dd0ced5f2dbc040bf478fb453ce55330dc5",
+      "sha256": "b60129882eacff2641956301d6d2190a542418111352b89f3d3f699e3da81822",
+      "bytes": 3894
+    },
+    {
+      "name": "src_refactor_wasmstreaming_finish_to_accept_a_callback.patch",
+      "blob_sha1": "a64984a701a93b7643893df6b4b4e0dedbd514c4",
+      "sha256": "47f5e671d18e7ff62b0b35d49f2dc24a6ff191df57f8b68e944186d38732cb51",
+      "bytes": 986
+    },
+    {
+      "name": "src_stop_using_v8_propertycallbackinfo_t_this.patch",
+      "blob_sha1": "777724ae815ab609584b922355a8e9b0db4f9ad3",
+      "sha256": "b12264c4ed0c63dec8ea065819ae5a602cdbc1ad452d778d0f2269b763fd98b7",
+      "bytes": 7933
+    },
+    {
+      "name": "fix_add_externalpointertypetag_to_v8_external_api_calls.patch",
+      "blob_sha1": "1682b970ccdda40737d5df76519181b6b4e56ad7",
+      "sha256": "78551a05a3c2f9b8a1743583a4817b0201e19175ea0c9ced6b9ee359440aad52",
+      "bytes": 6162
+    },
+    {
+      "name": "test_update_v8_serialization_wire_format_version_to_16.patch",
+      "blob_sha1": "b9410f96d9880992401b7c13fbf9dacbb58b5219",
+      "sha256": "0bf3b2e9a3fddc63795f006773efffbe9c580e0387c4107d78b0d3fc30ecc02e",
+      "bytes": 1063
+    },
+    {
+      "name": "electron_build-time_v8_code_cache_for_the_electron_js2c_bundles.patch",
+      "blob_sha1": "a658e3039ab3f824e2209f3ee7c4227d85f2a2eb",
+      "sha256": "e22f7d84e6ff0dde180188e2ff410171285c985c3d4a96e366cd56538cd5ceee",
+      "bytes": 10249
+    },
+    {
+      "name": "electron_enable_node_startup_snapshot_generation_in_chromium_s_v8.patch",
+      "blob_sha1": "ae9500a7744367995145a23b6da75deaffa7474c",
+      "sha256": "5682a2ab8370d236a2d02f4b234c631eeb258d6c23ce4c4327cb14462eff3f1c",
+      "bytes": 26623
+    },
+    {
+      "name": "fix_preserve_node_symbols_and_vtables_under_thinlto.patch",
+      "blob_sha1": "aa03ee882325f8e54d7f1a1323f56c2f39c6802d",
+      "sha256": "55da31d50571ca68f04a208e9ce79f5798ead8652d487729e9dc0fcbb5dddc5e",
+      "bytes": 12752
+    },
+    {
+      "name": "chore_cast_const_away_when_freeing_uv_cpu_info_t_model.patch",
+      "blob_sha1": "d47360e3a4be2b2eedfea4b044830a3092d781b0",
+      "sha256": "284fb987f2a13d10e2af6a6ee4a48d5801656f5401de8f609d496e9bd03f9a8e",
+      "bytes": 1515
+    },
+    {
+      "name": "chore_silence_sign-compare_warning_in_sessionvarintgetsafe.patch",
+      "blob_sha1": "bc2a6c6ac25305a4de016f670bf13f0ef6eba449",
+      "sha256": "cba48d4a1430b1048a8b9a1e9ae56e10e3e33e12262d4ef4cecb6c90d7f9a131",
+      "bytes": 1621
+    },
+    {
+      "name": "inspector_adapt_to_crdtp_dispatchable_api_change.patch",
+      "blob_sha1": "4dba1170f33ca3436aae13b73578cdf96b646670",
+      "sha256": "8c78be1a1c1f97ee10c0483a129b61f1ba7c8fbc7e62088c6f45e7fc99d778c9",
+      "bytes": 2497
+    },
+    {
+      "name": "fix_use_a_dedicated_cppheappointertag_for_cppgc_wrappables.patch",
+      "blob_sha1": "4734121d66032c1f9b4bf7438860bd07aa939e13",
+      "sha256": "f498b67b80ee341082925108ffc734f4f80a885dbc536f64160ee7367abad1b6",
+      "bytes": 4881
+    },
+    {
+      "name": "src_stop_using_removed_v8_promise_reject_events.patch",
+      "blob_sha1": "610aa3be8c2397730a4492c8b73c4a742ae9fdf9",
+      "sha256": "1a3dc98a5e51ad1b25c2dbe3f54fb1ad24ed27b7e6b388ff5c5c0bcb229998db",
+      "bytes": 1996
+    },
+    {
+      "name": "src_stop_using_deprecated_get_setprototypev2_and_holderv2.patch",
+      "blob_sha1": "1a5a4872fe35c8d3dfebe569bcb4f3380c2ab1ae",
+      "sha256": "00de6f6ae161166b737bdfa36248229c318db7629aa104b99edc7881cfea62fd",
+      "bytes": 13340
+    },
+    {
+      "name": "v8_prepare_for_migrating_v8_microtaskqueue_to_cppgc.patch",
+      "blob_sha1": "d6ff5d0ae2ea1b3d3d50485bbee9486b3b981407",
+      "sha256": "c9d6fe88faa05a378b1edc1fd100cca38af5b4a5c8588df34df6670a53492f8f",
+      "bytes": 4250
+    },
+    {
+      "name": "v8_propagate_v8_cppgc_microtask_queue_flag_to_common_gypi.patch",
+      "blob_sha1": "d42c8a32082309d923c9bc5d86000eba945bf732",
+      "sha256": "3cb39ad4502b4bceeb48d3c7da831825908988c274a78f70d12f2a497b1d2f30",
+      "bytes": 3083
+    },
+    {
+      "name": "fix_don_t_arm_delayed_worker_task_timers_after_the_platform_s.patch",
+      "blob_sha1": "5479f4246e271c5a690f935ce273669a78be1b4c",
+      "sha256": "86f2118b6fbea81d4183b3c7bcc36ba67ee9388435acdf176ceb57dcbcab1434",
+      "bytes": 3612
+    },
+    {
+      "name": "build_perfetto-sdk.patch",
+      "blob_sha1": "5198ef3d30599e6f4c805f00d39f80cc203f3daf",
+      "sha256": "e7c8bbcb19e7e637fb6d1577a78f0878073ff365c0d0c8385bb03b26aea53f1b",
+      "bytes": 8470
+    },
+    {
+      "name": "lib_add_perfetto_support.patch",
+      "blob_sha1": "e881418205e046deec6cf6502faed3ca284b6863",
+      "sha256": "1a5fadc9b59080c77937ae041b6dda3bf727944950fe9113ac8384c061d6b32f",
+      "bytes": 13790
+    },
+    {
+      "name": "src_fix_trace_macro_compatibility.patch",
+      "blob_sha1": "91823c6340179d089bd53da9912e123f5023daf7",
+      "sha256": "8c9905a346b6a2e11938fb82714c114834e7d94728f32b32df1cb109eef8b61a",
+      "bytes": 6120
+    },
+    {
+      "name": "src_add_perfetto_trace_agent.patch",
+      "blob_sha1": "d004a9a41009df9ba9a95ebedda20cd05bf63981",
+      "sha256": "e9dccf46d00de8587a9d8d947874b8ba46290f0033d94a190626ebcf8045f9a5",
+      "bytes": 40090
+    },
+    {
+      "name": "src_fix_perfetto_build_on_gettracefilepath.patch",
+      "blob_sha1": "c7dfdc5cb1e35bfe14bc7b9395e9c9d2c870f324",
+      "sha256": "2502b4d95c3e610d289d116fd07d42fefe7b4e9f1a88de6e0e5eccf15ea7f8af",
+      "bytes": 5933
+    },
+    {
+      "name": "src_test_disable_trace_events_tests_when_perfetto_is_enabled.patch",
+      "blob_sha1": "5a83710395fa0b5f78f142a3d9534a5d77fa424a",
+      "sha256": "9bc6ce0fb2aa3d0cc547175aa0c7af0f49bde5a39c8f06cb4a710cbd4a13a260",
+      "bytes": 21535
+    },
+    {
+      "name": "test_account_for_libc_rm_error_on_electron_linux.patch",
+      "blob_sha1": "5b4e234a65857fa7ece3e05f7588b68530574137",
+      "sha256": "0b4db69b8a0d8f0aab56b6045cc35ab04bf407b551a48eebf0a2e45443d8415b",
+      "bytes": 1543
+    },
+    {
+      "name": "fix_use_embedder_perfetto_client_when_available.patch",
+      "blob_sha1": "1d574a81bad6d287dfcdf5d091b994c738f9053d",
+      "sha256": "4f274590c2a0f68709dbb711996d3f44d871df7da352b8e0deddfc876177cead",
+      "bytes": 16315
+    },
+    {
+      "name": "src_fix_external_reference_registration_for_new_cfunction_lifetime.patch",
+      "blob_sha1": "57f5094ef6742c38020f93a82f79bb34cb726346",
+      "sha256": "d255fc068701b63adcba2ba446ac0de7b3ceca03c6de111784e097f3e8b1479d",
+      "bytes": 1347
+    },
+    {
+      "name": "fix_do_not_pass_removed_jspi_v8_flag.patch",
+      "blob_sha1": "a21bf0cc78d496d84b874660a4c81ac84ff5e2c0",
+      "sha256": "4f66d86bb520a59940cbb292fbe1ad5d8e500ed4fdd378d6024ce0638487b324",
+      "bytes": 1281
+    },
+    {
+      "name": "fix_allow_electron_s_linked_bindings_under_the_permission_model.patch",
+      "blob_sha1": "7463483e32484a5e971d9d7cac776f161be79f6e",
+      "sha256": "40d80b453eeb636366b7d36cccba498ec956cf269bf49cc6c837373e8a2991fc",
+      "bytes": 2451
+    },
+    {
+      "name": "test_drop_removed_wasm_rab_integration_flag.patch",
+      "blob_sha1": "aac9dbd00239d038313d9881381fb7d883e0221a",
+      "sha256": "529dc74fc35a3ba8cce0ab7c693d9f46f7d32538872a71fe22739d7beca64eca",
+      "bytes": 1180
+    },
+    {
+      "name": "test_skip_rmsync_permission_error_test_when_running_as_root.patch",
+      "blob_sha1": "b65278558beac849c3ec9139e22b7d01bdba6cc4",
+      "sha256": "a15e6835288092aeacd990419812ef75d06c91ae7c1a43f1f8de250a1a92d222",
+      "bytes": 1476
+    },
+    {
+      "name": "test_skip_openssl_config_test_under_boringssl.patch",
+      "blob_sha1": "4e34534788200214f74d0d3672b4dbbc53b449d5",
+      "sha256": "71008e9905f968a8a7a8062b0f1cd70741508f91067bdd919b602eb348dc90f3",
+      "bytes": 1238
+    },
+    {
+      "name": "tls_reject_chains_containing_blocked_public_keys.patch",
+      "blob_sha1": "04a9256fd2b6e6e03a25fdaaaf8873d2ef7af34f",
+      "sha256": "323d583d95989692c1a54702c5e47ef65e310f5f37f9c494e03931ccde43dc72",
+      "bytes": 7207
+    }
+  ],
+  "expected_tree": "92f36398f6bacb44cbba33fea5b902898ac8ef9a",
+  "entry_count": 46474,
+  "entry_manifest_sha256": "2c8d1ca852d6737d96b36e86aab41e9889c1f89ae1c4974cf9c9b72b80201746",
+  "gitlinks": [],
+  "physical_profile": "canonical-raw-git-blobs-v1",
+  "physical_tree_verified": true,
+  "dependency_closure_verified": false,
+  "compiler_or_windows_build_executed": false,
+  "authority_effect": false,
+  "physical_file_count": 46474,
+  "gitlink_dependencies_qualified": false,
+  "windows_representation_qualified": false,
+  "physical_tree_is_separate_from_object_checkout": true
+}

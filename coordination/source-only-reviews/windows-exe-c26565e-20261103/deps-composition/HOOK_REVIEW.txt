@@ -1,0 +1,70 @@
+Final independent bounded hook-input implementation review
+
+Disposition: no remaining concrete code safety finding within the bounded
+data-only inventory scope. This is not approval of full dependency composition,
+upstream hook execution, an actual environment/toolchain, or a Windows build.
+All such qualification remains HOLD.
+
+Independent results
+- Re-ran the complete new hook-input suite against the pinned read-only source
+  capture: 14/14 passed, no skips. Log: hook-final-peer-tests.log.
+- All 34 unique catalog files independently matched the prior evidence's exact
+  SHA256, byte length and Git blob OID. No duplicate catalog keys or mismatch.
+- Four supplemental probes passed; raw results/source hashes:
+  hook-final-peer-negatives.json.
+  * Unresolved Win clang-tidy selection is refused before payload comparison.
+  * Omitting every known source leaves all 34 MISSING and all hooks HOLD.
+  * Inventory records a mixed-case, empty NODE_OPTIONS key and stays HOLD;
+    the separate explicit rejection checker refuses that same key.
+  * The actual CLI matches all 34 supplied base blobs, emits HOLD with
+    authority_effect=false, hooks_executed=false and tool_payloads_downloaded=false,
+    then deliberately exits 1.
+
+Scope corrections and documentation
+The final parser retains three parent-precedence conflicts as Unknown:
+checkout_openxr, checkout_clang_tidy and generate_location_tags. Its inventory
+has 22 SELECTED plus 1 UNRESOLVED hook among 77 declarations; every included
+hook remains HOLD. Win clang-tidy's exact archive pin is preserved while its
+selection remains UNRESOLVED. Neither case is promoted into an execution fact.
+
+The earlier independent 22-hook listing assumed parent-overrides precedence;
+hooks-toolchain-review.txt and top-level-windows-x64-hooks.json now explicitly
+label it as an alternative analysis, not the final parser's guarantee.
+
+The one concrete documentation mismatch found during review was corrected:
+the inventory records known override names, while the separate explicit checker
+rejects them, including present empty values. Neither operation authenticates
+the complete environment. Source behavior was already honest HOLD; no code
+change was required for this wording correction.
+
+Production boundaries
+The new module derives the manifest through the fixed data parser itself; no
+caller manifest/verified flag is an authority input. Missing base files remain
+missing, changed supplied files refuse, and base matches do not claim patched
+source/import closure. GCS byte comparison and CIPD instance syntax are clearly
+limited to their data scopes and never admit a build. Source builder still
+unconditionally refuses the missing full composition after its bounded inventory.
+The PE gate still requires exact whole-image bytes; its SHA256 remains identical
+to the earlier independently reviewed exact-byte gate snapshot.
+
+Final SHA256, relative to apps/metaengine-browser/:
+scripts/custom-electron-hook-inputs.py
+d5c5e20fbdc2195cddd6523d2f9da420646e51be82d6629aeaaaf8c8a3b5ad42
+build/custom-electron-hook-inputs.json
+5c2c90da17fb1a1ad5f4a1d1ac7dde37a4bd4eca7008fae95257c43a08c56277
+test/test_custom_electron_hook_inputs.py
+14cf7968ef75d4787fe7c888172a94665fb57f304948bfecf1bb2a3eed26a1a8
+scripts/custom-electron-deps-policy.py
+aaef7aa1d1f0fc37927990f9047600203c434ba33a721e62e0c38036f50d6891
+scripts/custom-electron-source-build.py
+86f2e897dc62d002983343038c143d088a21a7c85f65073634952fa2317e3f87
+scripts/custom-electron-package-gate.cjs
+3cd915d31398574bd9004e5a37f3c0bc00cd717043afc3ce67d3904b09077d50
+
+Reviewed guide (repository-relative docs/custom-electron-deps-composition-v1.md):
+500c7c97fec417b785179bc20642c39e16e4c8889024fa3e3bdfa2820f87e6af
+
+No source edits were made by this reviewer. Only review/evidence files were
+updated. Tests imported the project's data-only helpers, never upstream DEPS or
+hook/package code. No downloader, dependency installation, Windows executable,
+DB/service action, release authority change, or PR-description update occurred.
