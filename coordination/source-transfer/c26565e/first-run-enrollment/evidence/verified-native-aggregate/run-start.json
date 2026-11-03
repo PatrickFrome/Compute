@@ -1,0 +1,23 @@
+{
+  "schema": "metaengine.guardian.verified-native-aggregate.v1",
+  "name": "original-main-source",
+  "command": "python3 apps/metaengine-browser/test/native/verify-guardian-original-main-source.py --repo /workspace/metaengine-enrollment-c26565e/source/Compute --out /workspace/metaengine-enrollment-c26565e/evidence/verified-original-source",
+  "cwd": "/workspace/metaengine-enrollment-c26565e/source/Compute",
+  "started_utc": "2026-11-03T08:04:27.310485+00:00",
+  "expected_head": "f0bbb447b6dfd9d4cae05dac2b6572c302f54e0d",
+  "expected_tree": "2e00ee9976fcc939ee3021bf2cde31eccbb50f08",
+  "source_before": {
+    "head": "f0bbb447b6dfd9d4cae05dac2b6572c302f54e0d",
+    "tree": "2e00ee9976fcc939ee3021bf2cde31eccbb50f08",
+    "worktree": [],
+    "observed_utc": "2026-11-03T08:04:27.310129+00:00"
+  },
+  "runner_sha256": "6c7bfd2582e3575ff9c297e09163802aa0d5ad56eab6674f1d6211f6917ef7b3",
+  "runner_unchanged_since_audit": true,
+  "baseline_audit": "/workspace/metaengine-enrollment-c26565e/evidence/baseline-native/source-runner-audit.json",
+  "stdout_log": "/workspace/metaengine-enrollment-c26565e/evidence/verified-native-aggregate/original-main-source.stdout.log",
+  "stderr_log": "/workspace/metaengine-enrollment-c26565e/evidence/verified-native-aggregate/original-main-source.stderr.log",
+  "aggregate_output": "/workspace/metaengine-enrollment-c26565e/evidence/verified-original-source",
+  "repo_source_writes_performed_by_this_task": false,
+  "windows_execution": "NOT RUN"
+}

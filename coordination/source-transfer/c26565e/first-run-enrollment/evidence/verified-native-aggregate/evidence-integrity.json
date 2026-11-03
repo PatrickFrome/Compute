@@ -1,0 +1,137 @@
+{
+  "schema": "metaengine.guardian.verified-aggregate-log-integrity.v1",
+  "verified_utc": "2026-11-03T08:05:27.395478+00:00",
+  "source_head": "f0bbb447b6dfd9d4cae05dac2b6572c302f54e0d",
+  "source_tree": "2e00ee9976fcc939ee3021bf2cde31eccbb50f08",
+  "source_metadata_matches_expected": true,
+  "clean_before_and_after": true,
+  "verified_log_count": 25,
+  "all_hashes_match": true,
+  "logs": [
+    {
+      "file": "/workspace/metaengine-enrollment-c26565e/evidence/verified-native-aggregate/original-main-source.stdout.log",
+      "sha256": "5403a718eda5d666ff253c756fcf92ab3103235a535136e5817f4867f00edc7a",
+      "matches_recorded_sha256": true
+    },
+    {
+      "file": "/workspace/metaengine-enrollment-c26565e/evidence/verified-native-aggregate/original-main-source.stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "matches_recorded_sha256": true
+    },
+    {
+      "file": "/workspace/metaengine-enrollment-c26565e/evidence/verified-original-source/entry-compile.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "matches_recorded_sha256": true
+    },
+    {
+      "file": "/workspace/metaengine-enrollment-c26565e/evidence/verified-original-source/profile-compile.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "matches_recorded_sha256": true
+    },
+    {
+      "file": "/workspace/metaengine-enrollment-c26565e/evidence/verified-original-source/debug-image-compile.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "matches_recorded_sha256": true
+    },
+    {
+      "file": "/workspace/metaengine-enrollment-c26565e/evidence/verified-original-source/reader-transfer-compile.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "matches_recorded_sha256": true
+    },
+    {
+      "file": "/workspace/metaengine-enrollment-c26565e/evidence/verified-original-source/entry.log",
+      "sha256": "491ec06615a78a3a4434e5854c71e73f8eb7a5f9253d2462758539bb5177d18b",
+      "matches_recorded_sha256": true
+    },
+    {
+      "file": "/workspace/metaengine-enrollment-c26565e/evidence/verified-original-source/profile.log",
+      "sha256": "f5fb3eb2885cf9d28ea46a80413834840f0ae9a53bf867e79ae68b993fbb8e8a",
+      "matches_recorded_sha256": true
+    },
+    {
+      "file": "/workspace/metaengine-enrollment-c26565e/evidence/verified-original-source/debug-image.log",
+      "sha256": "6992b7e60ae35bb576bcbbbb7536bd6eafc92c5fa06daea55e0c7b95e3b2c1ab",
+      "matches_recorded_sha256": true
+    },
+    {
+      "file": "/workspace/metaengine-enrollment-c26565e/evidence/verified-original-source/reader-transfer.log",
+      "sha256": "754e561cbeafcd6966d5ecbd5c4cc50181cacdee32313545e8c7c51fec882589",
+      "matches_recorded_sha256": true
+    },
+    {
+      "file": "/workspace/metaengine-enrollment-c26565e/evidence/verified-original-source/entry-asan-ubsan-compile.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "matches_recorded_sha256": true
+    },
+    {
+      "file": "/workspace/metaengine-enrollment-c26565e/evidence/verified-original-source/profile-asan-ubsan-compile.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "matches_recorded_sha256": true
+    },
+    {
+      "file": "/workspace/metaengine-enrollment-c26565e/evidence/verified-original-source/debug-image-asan-ubsan-compile.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "matches_recorded_sha256": true
+    },
+    {
+      "file": "/workspace/metaengine-enrollment-c26565e/evidence/verified-original-source/reader-transfer-asan-ubsan-compile.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "matches_recorded_sha256": true
+    },
+    {
+      "file": "/workspace/metaengine-enrollment-c26565e/evidence/verified-original-source/entry-asan-ubsan.log",
+      "sha256": "491ec06615a78a3a4434e5854c71e73f8eb7a5f9253d2462758539bb5177d18b",
+      "matches_recorded_sha256": true
+    },
+    {
+      "file": "/workspace/metaengine-enrollment-c26565e/evidence/verified-original-source/profile-asan-ubsan.log",
+      "sha256": "f5fb3eb2885cf9d28ea46a80413834840f0ae9a53bf867e79ae68b993fbb8e8a",
+      "matches_recorded_sha256": true
+    },
+    {
+      "file": "/workspace/metaengine-enrollment-c26565e/evidence/verified-original-source/debug-image-asan-ubsan.log",
+      "sha256": "6992b7e60ae35bb576bcbbbb7536bd6eafc92c5fa06daea55e0c7b95e3b2c1ab",
+      "matches_recorded_sha256": true
+    },
+    {
+      "file": "/workspace/metaengine-enrollment-c26565e/evidence/verified-original-source/reader-transfer-asan-ubsan.log",
+      "sha256": "754e561cbeafcd6966d5ecbd5c4cc50181cacdee32313545e8c7c51fec882589",
+      "matches_recorded_sha256": true
+    },
+    {
+      "file": "/workspace/metaengine-enrollment-c26565e/evidence/verified-original-source/original-reader-source-guards.log",
+      "sha256": "11921b7f6867362909f6063611524bab064d484a8eb49b3d3c7a3533fe809c4e",
+      "matches_recorded_sha256": true
+    },
+    {
+      "file": "/workspace/metaengine-enrollment-c26565e/evidence/verified-original-source/native-mount-adapter.log",
+      "sha256": "a205e8fbd91d620cc67b27ba749615d871baad5c5c08125a0965ee5945f4e4bf",
+      "matches_recorded_sha256": true
+    },
+    {
+      "file": "/workspace/metaengine-enrollment-c26565e/evidence/verified-original-source/native-host-model.log",
+      "sha256": "27245b03c6d10c9e865ea0eb7490a74189fd438bfe6ecde7dd32f00300e9e570",
+      "matches_recorded_sha256": true
+    },
+    {
+      "file": "/workspace/metaengine-enrollment-c26565e/evidence/verified-original-source/native-host-model-asan-ubsan.log",
+      "sha256": "6315ccfcec858bc6e4ce009acb89b3fe055775c4c62efc8c5122893ff4e60d54",
+      "matches_recorded_sha256": true
+    },
+    {
+      "file": "/workspace/metaengine-enrollment-c26565e/evidence/verified-original-source/w77-openssl-compile.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "matches_recorded_sha256": true
+    },
+    {
+      "file": "/workspace/metaengine-enrollment-c26565e/evidence/verified-original-source/w77-openssl-regression.log",
+      "sha256": "0cb0570da7a52b863cc7e51d091cd162f9320aa89727c57873cd2c07fe322c20",
+      "matches_recorded_sha256": true
+    },
+    {
+      "file": "/workspace/metaengine-enrollment-c26565e/evidence/verified-original-source/node-source-regressions.log",
+      "sha256": "9ea0e971b83517a3b01facfaa0086b43f91bc6af4e34469bcfc9a6ea60d47112",
+      "matches_recorded_sha256": true
+    }
+  ]
+}

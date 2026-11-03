@@ -1,0 +1,83 @@
+{
+  "schema": "metaengine.guardian.verified-native-aggregate.v1",
+  "name": "original-main-source",
+  "command": "python3 apps/metaengine-browser/test/native/verify-guardian-original-main-source.py --repo /workspace/metaengine-enrollment-c26565e/source/Compute --out /workspace/metaengine-enrollment-c26565e/evidence/verified-original-source",
+  "cwd": "/workspace/metaengine-enrollment-c26565e/source/Compute",
+  "started_utc": "2026-11-03T08:04:27.310485+00:00",
+  "expected_head": "f0bbb447b6dfd9d4cae05dac2b6572c302f54e0d",
+  "expected_tree": "2e00ee9976fcc939ee3021bf2cde31eccbb50f08",
+  "source_before": {
+    "head": "f0bbb447b6dfd9d4cae05dac2b6572c302f54e0d",
+    "tree": "2e00ee9976fcc939ee3021bf2cde31eccbb50f08",
+    "worktree": [],
+    "observed_utc": "2026-11-03T08:04:27.310129+00:00"
+  },
+  "runner_sha256": "6c7bfd2582e3575ff9c297e09163802aa0d5ad56eab6674f1d6211f6917ef7b3",
+  "runner_unchanged_since_audit": true,
+  "baseline_audit": "/workspace/metaengine-enrollment-c26565e/evidence/baseline-native/source-runner-audit.json",
+  "stdout_log": "/workspace/metaengine-enrollment-c26565e/evidence/verified-native-aggregate/original-main-source.stdout.log",
+  "stderr_log": "/workspace/metaengine-enrollment-c26565e/evidence/verified-native-aggregate/original-main-source.stderr.log",
+  "aggregate_output": "/workspace/metaengine-enrollment-c26565e/evidence/verified-original-source",
+  "repo_source_writes_performed_by_this_task": false,
+  "windows_execution": "NOT RUN",
+  "exit_code": 0,
+  "status": "PASS",
+  "seconds": 25.139,
+  "finished_utc": "2026-11-03T08:04:52.449933+00:00",
+  "stdout_sha256": "5403a718eda5d666ff253c756fcf92ab3103235a535136e5817f4867f00edc7a",
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "source_after": {
+    "head": "f0bbb447b6dfd9d4cae05dac2b6572c302f54e0d",
+    "tree": "2e00ee9976fcc939ee3021bf2cde31eccbb50f08",
+    "worktree": [],
+    "observed_utc": "2026-11-03T08:04:52.462587+00:00"
+  },
+  "frozen_source_preserved": true,
+  "runner_summary": {
+    "schema": "metaengine.guardian.original-main-source-verification.v1",
+    "started_utc": "2026-11-03T08:04:27.356688+00:00",
+    "finished_utc": "2026-11-03T08:04:52.419881+00:00",
+    "source_head": "f0bbb447b6dfd9d4cae05dac2b6572c302f54e0d",
+    "source_tree": "2e00ee9976fcc939ee3021bf2cde31eccbb50f08",
+    "worktree_before": [],
+    "worktree_after": [],
+    "checks_passed": 23,
+    "checks_failed": 0,
+    "checks_not_run": 5,
+    "windows_execution": "NOT RUN",
+    "full_custom_electron_build": "NOT RUN",
+    "production_main_launch_grant": "NOT RUN",
+    "production_release_positive": "NOT RUN",
+    "loaded_runtime_code_attested": false,
+    "continuous_code_custody_proven": false,
+    "leak_sanitizer": "NOT RUN; disabled on ptrace host"
+  },
+  "failed_checks": [],
+  "not_run_checks": [
+    {
+      "name": "w77-pinned-openssl-regression",
+      "status": "NOT RUN",
+      "reason": "Provide the acquired+extracted pinned OpenSSL 3.5.9 source with a completed static build"
+    },
+    {
+      "name": "w77-boringssl-regression",
+      "status": "NOT RUN",
+      "reason": "Provide the exact pinned public source and its isolated static crypto build"
+    },
+    {
+      "name": "electron-source-interface",
+      "status": "NOT RUN",
+      "reason": "Provide exact Electron and Node-after-Electron-patches source files"
+    },
+    {
+      "name": "official-electron-header-syntax",
+      "status": "NOT RUN",
+      "reason": "Provide verified official Electron header archive and patched Node internal headers"
+    },
+    {
+      "name": "win64-cross-builds",
+      "status": "NOT RUN",
+      "reason": "No existing cross compiler supplied; this runner never installs one"
+    }
+  ]
+}

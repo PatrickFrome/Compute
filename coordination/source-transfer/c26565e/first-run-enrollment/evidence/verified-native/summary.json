@@ -1,0 +1,79 @@
+{
+  "source_commit": "f0bbb447b6dfd9d4cae05dac2b6572c302f54e0d",
+  "source_tree": "2e00ee9976fcc939ee3021bf2cde31eccbb50f08",
+  "runs": [
+    {
+      "name": "native-launch",
+      "command": [
+        "python3",
+        "apps/metaengine-browser/test/native/verify-guardian-original-main-launch-source.py"
+      ],
+      "exit_code": 1,
+      "stdout_sha256": "75d2ddb074700ba9a4a6d9b22ee95289cd85a74ee89d3c4276d447467ade9691",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "begin",
+      "command": [
+        "python3",
+        "apps/metaengine-browser/test/native/verify-guardian-main-begin-model.py"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "256c13a9b0e131e6dc49a27e9d2531877d5e3db901860f136fcf4c9390105ca3",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "begin-sanitize",
+      "command": [
+        "python3",
+        "apps/metaengine-browser/test/native/verify-guardian-main-begin-model.py",
+        "--sanitize"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "256c13a9b0e131e6dc49a27e9d2531877d5e3db901860f136fcf4c9390105ca3",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "owner-wait",
+      "command": [
+        "python3",
+        "apps/metaengine-browser/test/native/verify-guardian-main-owner-wait-model.py"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "25f1c1cdd842a485e290885248159a4cf918c01703a3ee50f45808bcccad8b72",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "owner-wait-sanitize",
+      "command": [
+        "python3",
+        "apps/metaengine-browser/test/native/verify-guardian-main-owner-wait-model.py",
+        "--sanitize"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "25f1c1cdd842a485e290885248159a4cf918c01703a3ee50f45808bcccad8b72",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "requester-session",
+      "command": [
+        "python3",
+        "apps/metaengine-browser/test/native/verify-guardian-requester-session-model.py"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "78fd9a1b3a788cae60ef19a83373740a09f1b54ffe09a72a5b0ce1b1898b640a",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "requester-session-sanitize",
+      "command": [
+        "python3",
+        "apps/metaengine-browser/test/native/verify-guardian-requester-session-model.py",
+        "--sanitize"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "78fd9a1b3a788cae60ef19a83373740a09f1b54ffe09a72a5b0ce1b1898b640a",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ]
+}
