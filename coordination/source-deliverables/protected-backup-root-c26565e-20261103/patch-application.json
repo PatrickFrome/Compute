@@ -1,7 +1,16 @@
 {
-  "base_tree": "2dbe253e97379532f6f4b52ef7edf26109a9266d",
-  "patch_check": "PASS",
-  "patch_apply": "PASS",
-  "result_tree": "b6c5977b519c9332158af1d5b7de295fa452c1e6",
-  "fresh_archive_extraction": true
+  "cumulative": {
+    "base_tree": "2dbe253e97379532f6f4b52ef7edf26109a9266d",
+    "fresh_archive_extraction": true,
+    "patch_check": "PASS",
+    "patch_apply": "PASS",
+    "patch_sha256": "89dd8893ac98174e37c0dc5334e6b3648856078476e64c9e263b0ba642d55636"
+  },
+  "incremental": {
+    "base_tree": "b6c5977b519c9332158af1d5b7de295fa452c1e6",
+    "patch_check": "PASS",
+    "patch_apply": "PASS",
+    "patch_sha256": "9e7fb4d3f06c129dccec97375dc21066b31d199b7d2fcdf9a2e35b6bfb5715fe"
+  },
+  "result_tree": "0139c9fd5d5d04558dbb57bbf08c9cd047062822"
 }

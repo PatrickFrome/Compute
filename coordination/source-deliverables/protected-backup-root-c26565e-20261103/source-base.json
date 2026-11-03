@@ -10,8 +10,13 @@
   "archive_sha256": "4200e492828dbb857aaa737a7ce56d0aeda3c97c84f7743b1501ef2f229d3636",
   "source_commit": "c26565e58ab92dcbcda9663c4d231bdf4a9a7ee6",
   "source_tree": "2dbe253e97379532f6f4b52ef7edf26109a9266d",
-  "result_tree": "b6c5977b519c9332158af1d5b7de295fa452c1e6",
-  "patch_sha256": "62c23c0fe581766bb319ddafc46effe2db503b10476445a655965726807e6640",
+  "result_tree": "0139c9fd5d5d04558dbb57bbf08c9cd047062822",
+  "patch_sha256": "89dd8893ac98174e37c0dc5334e6b3648856078476e64c9e263b0ba642d55636",
   "prior_patches_applied": false,
-  "repository_skills": "No AGENTS.md or .agents/skills in verified source snapshot"
+  "repository_skills": "No AGENTS.md or .agents/skills in verified source snapshot",
+  "previous_result_tree": "b6c5977b519c9332158af1d5b7de295fa452c1e6",
+  "supersedes_patch_sha256": "62c23c0fe581766bb319ddafc46effe2db503b10476445a655965726807e6640",
+  "incremental_patch": "directory-custody-hold.patch",
+  "incremental_patch_sha256": "9e7fb4d3f06c129dccec97375dc21066b31d199b7d2fcdf9a2e35b6bfb5715fe",
+  "recovery_effect_state": "HOLD_ORIGINAL_NATIVE_DIRECTORY_CUSTODY_REQUIRED"
 }

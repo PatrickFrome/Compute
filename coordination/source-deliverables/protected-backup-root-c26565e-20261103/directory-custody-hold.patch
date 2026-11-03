@@ -1,0 +1,676 @@
+diff --git a/apps/metaengine-browser/scripts/check-source.mjs b/apps/metaengine-browser/scripts/check-source.mjs
+index 27699e5..c2fd576 100644
+--- a/apps/metaengine-browser/scripts/check-source.mjs
++++ b/apps/metaengine-browser/scripts/check-source.mjs
+@@ -126,6 +126,10 @@ export const SOURCE_CHECK_FILES = Object.freeze([
+   "src/owned-protected-backup-root.mjs",
+   "src/local-runtime-recovery-composition.mjs",
+   "src/protected-root-recovery-provider.mjs",
++  "../../infra/client-state-runtime/native-coding-recovery-directory-custody.mjs",
++  "../../infra/client-state-runtime/pg17-recovery-producer.mjs",
++  "../../infra/client-state-runtime/pg17-native-recovery-process.mjs",
++  "../../infra/client-state-runtime/native-coding-host-recovery-service.mjs",
+   "src/browser-persistent-cdp-session.mjs",
+   "src/native-effect-runtime-observation.mjs",
+   "src/native-effect-binding.mjs",
+diff --git a/docs/OWNED_PROTECTED_BACKUP_ROOT_PROVIDER.md b/docs/OWNED_PROTECTED_BACKUP_ROOT_PROVIDER.md
+index 8d3df12..1e9bd4d 100644
+--- a/docs/OWNED_PROTECTED_BACKUP_ROOT_PROVIDER.md
++++ b/docs/OWNED_PROTECTED_BACKUP_ROOT_PROVIDER.md
+@@ -76,7 +76,7 @@ directory identity alone says nothing about database contents.
+ 
+ ## Validation and remaining qualification
+ 
+-The source-only Linux validation contains 404 passing focused tests and 295
++The source-only Linux validation contains 576 passing focused tests and 299
+ source syntax checks. It includes real temporary-directory identities, actual
+ sealed-state persistence over explicitly synthetic secure storage, original
+ controller/child lifecycle tests, real selector-to-Main integration, and existing
+@@ -96,6 +96,17 @@ production Host recovery-service mount still depends on `hooks.createRecoverySer
+ this patch does not supply that service or add a new user recovery command.
+ These results do not establish installation or upgrade readiness.
+ 
++## Effect custody correction
++
++Consumer tracing confirmed that the selected producer/native adapter has no
++retained kernel handles for backup/PGDATA and their mutable ancestry. The
++current source therefore applies a fixed veto before source-pool allocation or
++any backup/restore effect, and before standalone native-adapter construction.
++The retained service reports `HOLD / ORIGINAL_NATIVE_DIRECTORY_CUSTODY_REQUIRED`.
++See [Recovery directory custody required](RECOVERY_DIRECTORY_CUSTODY_REQUIRED.md)
++for the exact missing native interface and adversarial swap-after-last-read
++validation. The sealed selector remains a prerequisite; it cannot open effects.
++
+ The patch applies to source revision `c26565e58ab92dcbcda9663c4d231bdf4a9a7ee6`,
+ tree `2dbe253e97379532f6f4b52ef7edf26109a9266d`, reconstructed from the verified
+ source-only archive. It is not a patch against the public repository's older
+diff --git a/docs/PROTECTED_ROOT_HANDOFF_CONTRACT.md b/docs/PROTECTED_ROOT_HANDOFF_CONTRACT.md
+index c9a11a8..334ad96 100644
+--- a/docs/PROTECTED_ROOT_HANDOFF_CONTRACT.md
++++ b/docs/PROTECTED_ROOT_HANDOFF_CONTRACT.md
+@@ -300,3 +300,10 @@ existing encrypted identity-state slot and negative validation. This supersedes
+ the standing-selector limitation above. It does not supply the separate Host
+ recovery service, native Windows qualification, physical restore evidence or
+ upgrade permission. The original binding/producer/gate boundaries still apply.
++
++Consumer qualification subsequently confirmed the missing native directory
++custody. The selected producer and native adapter now refuse before their first
++effect; the service reports `ORIGINAL_NATIVE_DIRECTORY_CUSTODY_REQUIRED` on HOLD.
++The exact required kernel-handle interface and the swap-after-last-observation
++regression are documented in
++[Recovery directory custody required](RECOVERY_DIRECTORY_CUSTODY_REQUIRED.md).
+diff --git a/docs/RECOVERY_DIRECTORY_CUSTODY_REQUIRED.md b/docs/RECOVERY_DIRECTORY_CUSTODY_REQUIRED.md
+new file mode 100644
+index 0000000..b42d4ea
+--- /dev/null
++++ b/docs/RECOVERY_DIRECTORY_CUSTODY_REQUIRED.md
+@@ -0,0 +1,96 @@
++# Recovery directory custody required
++
++The protected root selector is a binding prerequisite. Its canonical identities,
++sealed registration, ACL readback and original request/job registries do not keep
++the selected directory objects or their pathname ancestry alive against
++replacement. The selected backup/restore path therefore remains **HOLD** until
++the existing native authority supplies actual directory-handle custody.
++
++## Actual consumer and first effect
++
++`readOriginalRecoveryProtectedRoot` rechecks the original Main phase and reads
++native directory identities. It returns a frozen observation containing paths
++and identity digests, with no retained directory handle. A successful last
++observation cannot rule out a subsequent rename/replacement.
++
++`pg17-recovery-producer.mjs` previously created its owned source connection pool,
++performed read-only SQL and pathname/ACL checks, then created a
++`restore-probe-*` directory. Password files, version children, the backup journal,
++dump and disposable restore followed. `pg17-native-recovery-process.mjs` pins
++files temporarily but closes those file handles; its Windows controller retains
++process/Job/pipe handles rather than the selected backup/PGDATA directories.
++The child runner inherits standard I/O handles only. Incidental working-directory
++retention begins after the first filesystem mutation and is not original root
++custody. Guardian's package-load handles belong to its fixed installed-image
++inventory and cannot be reused as recovery-directory authority.
++
++## Fixed refusal in the current source
++
++`native-coding-recovery-directory-custody.mjs` implements only a refusal:
++`requireOriginalRecoveryDirectoryCustody()` always throws the privately
++registered `native_recovery_original_directory_custody_required` error. There is
++no issuer, capability factory, proof reader, supplied handle, callback, boolean,
++platform override or positive branch. The classifier identifies that original
++negative condition solely to report a bounded HOLD reason.
++
++The producer calls this fixed veto after its original root observation and before
++creating any source pool, work directory, file, journal or native child. No
++backup/restore operation can pass that point in production. The native adapter
++also calls it before constructing its process controller, closing the standalone
++lower-level entry. A copied root, a matching path or a callback cannot bypass it.
++
++The retained service reports `HOLD` with
++`ORIGINAL_NATIVE_DIRECTORY_CUSTODY_REQUIRED`, null report and false proof/upgrade
++flags. Its effect-free refusal may drain successfully; it is not misclassified
++as unknown native completion. Original one-shot admission remains consumed and
++automatic retry stays false.
++
++## Exact missing native interface
++
++The following is a required implementation contract, not an available issuer or
++a new authority API. It must be supplied inside the existing original Host/native
++job registry and reviewed together with its physical effect consumer:
++
++1. **Acquire original recovery directory custody:** open and retain kernel
++   handles for the selected state/backup/PGDATA objects and every mutable
++   path-resolution component necessary to prevent substitution. Reject reparse
++   aliases. Native identity derived from those exact handles must match the
++   existing canonical volume/file/birth-time identity; no second path hash or
++   caller digest is a substitute. Windows share/delete restrictions or
++   handle-relative operations must actually prevent rename/replacement while
++   allowing the intended database activity.
++2. **Bind custody to the original operation:** keep the exact handles in the
++   existing authenticated request/job lifetime, together with canonical
++   client/device/Owner/Host generation, cancellation and the original monotonic
++   deadline. The capability must be opaque and process-local; JSON, a sealed
++   selector or a reported `handles_held:true` cannot reconstruct it.
++3. **Execute fixed effects under that custody:** backup file/work creation,
++   durable reservation and every dump/restore child must resolve the same held
++   objects. Original native admission/resume must consume the same retained
++   capability. An assertion followed by releasing handles and reopening a path
++   does not satisfy the contract. There is no arbitrary path/SQL/shell/callback
++   operation surface.
++4. **Close and join:** revoke new effects synchronously, retain required handles
++   until the exact original native children, filesystem work and SQL lifetimes
++   have settled, then close them. Lost handles, restart, substitution or unknown
++   completion remain terminal HOLD. Closing a registry row must not release
++   handles while an old child can still act, and no retry can obtain replacement
++   authority for that original job.
++
++Merely returning from the current veto is insufficient. Its removal requires
++this original handle/operation integration, not a callback or fabricated token.
++
++## Adversarial validation boundary
++
++The source test uses the real Host root provider, producer and refusal. Only the
++original native request/job/phase registries are synthetic. It captures the last
++root observation, replaces a real temporary directory before returning it, and
++confirms that the observed old identity can coexist with a new object at the
++same path. The fixed veto still prevents source connection, filesystem backup
++mutations and native launch. Tests also cover a valid unswapped selector,
++original close/drain, and the standalone adapter's refusal.
++
++Existing deep lifecycle/PG algorithm fixtures explicitly substitute the missing
++native-directory boundary only in unique test module instances. They do not
++qualify native directory custody or allow production imports to execute. No real
++database or native recovery command was run for this correction.
+diff --git a/infra/client-state-runtime/native-coding-host-recovery-retained.test.mjs b/infra/client-state-runtime/native-coding-host-recovery-retained.test.mjs
+index ae0918c..0553c4e 100644
+--- a/infra/client-state-runtime/native-coding-host-recovery-retained.test.mjs
++++ b/infra/client-state-runtime/native-coding-host-recovery-retained.test.mjs
+@@ -21,6 +21,8 @@ import {createRuntimeSetupDrain} from './runtime-host-lifecycle.mjs';
+ import {buildBackupEffectIntent,publishBackupEffectIntent,crossBackupEffectBarrier,readBackupEffectFence} from './pg17-backup-effect-barrier.mjs';
+ import {nativePhysicalSettlementUnconfirmed,markNativePhysicalSettlementUnconfirmed}
+  from '../../apps/metaengine-browser/src/native-coding-host-settlement.mjs';
++import {requireOriginalRecoveryDirectoryCustody,originalRecoveryDirectoryCustodyUnavailable}
++ from './native-coding-recovery-directory-custody.mjs';
+ 
+ const serviceUrl=new URL('./native-coding-host-recovery-service.mjs',import.meta.url).href;
+ const verifierUrl=new URL('./native-coding-device-request.mjs',import.meta.url).href;
+@@ -363,6 +365,22 @@ test('unknown operation read and cancel remain HOLD without starting or adopting
+  assert.equal(f.executions.length,0);assert.equal(f.consumptions.length,0);
+ }));
+ 
++test('missing original directory custody is explicit effect-free HOLD after original producer drain',async()=>fixture(async({f,begin,observe})=>{
++ try{requireOriginalRecoveryDirectoryCustody();assert.fail('unavailable native interface admitted');}
++ catch(error){f.executeFailure=error;}
++ assert.equal(originalRecoveryDirectoryCustodyUnavailable(f.executeFailure),true);
++ assert.equal(originalRecoveryDirectoryCustodyUnavailable(Error(f.executeFailure.message)),false);
++ const started=begin(),result=await started.work;
++ assert.ok(result.error);assert.equal(nativePhysicalSettlementUnconfirmed(result.error),false);
++ const status=await observe(NATIVE_RECOVERY_READ_ACTION,started.signed.body.input.operation_id);
++ assert.equal(status.state,'HOLD');assert.equal(status.reason,'ORIGINAL_NATIVE_DIRECTORY_CUSTODY_REQUIRED');
++ assert.equal(status.cleanup_state,'DRAINED');assert.equal(status.recovery_roundtrip_measured,false);
++ assert.equal(status.report,null);noAuthority(status);
++ assert.equal(f.executions.length,1);assert.equal(f.consumptions.length,0);
++ assert.equal(f.closes,1);assert.equal(f.drains,1);
++ assert.doesNotThrow(()=>started.facet.checkFinished(),'a refused effect is not unknown native completion');
++}));
++
+ test('a long job policy does not extend signed request freshness or allow an unbranded original context',async()=>fixture(async({f,service,packet,request})=>{
+  const stale=packet({stamp:new Date(Date.now()-31000).toISOString()});await denied(()=>service.begin(stale,request(stale).original));
+  const fresh=packet();await denied(()=>service.begin(fresh,request(fresh,{retained:false}).original));
+diff --git a/infra/client-state-runtime/native-coding-host-recovery-service.mjs b/infra/client-state-runtime/native-coding-host-recovery-service.mjs
+index 15f71ed..a1c43ad 100644
+--- a/infra/client-state-runtime/native-coding-host-recovery-service.mjs
++++ b/infra/client-state-runtime/native-coding-host-recovery-service.mjs
+@@ -6,6 +6,7 @@ import {createNativeCodingDeviceRequestVerifier,createNativeCodingAuthenticatedR
+ import {nativeCodingCanonicalSha256 as sha} from './native-coding-task-context.mjs';
+ import {assertNativeCodingHostRequestOpen} from './native-coding-host-request-lifetime.mjs';
+ import {createPg17RecoveryProducer} from './pg17-recovery-producer.mjs';
++import {originalRecoveryDirectoryCustodyUnavailable} from './native-coding-recovery-directory-custody.mjs';
+ import {consumeInstalledUpgradeRecoveryEvidence} from './upgrade-backup-gate.mjs';
+ import {takeNativeCodingRecoveryRequestLifetime,assertNativeCodingRecoveryDeadlineCap,
+  bindNativeCodingRecoveryTransportDeadlineCap,readOriginalNativeCodingRecoveryDeadlineCap,
+@@ -48,6 +49,7 @@ export function createNativeCodingHostRecoveryService({sql,hostInstanceId,hostPi
+   deadlineCap===undefined?readOriginalNativeCodingRecoveryDeadlineCap(request):deadlineCap);};
+  const sameActor=(a,b)=>a&&b&&['device_id','client_id','key_fingerprint_sha256','admin_grant_epoch'].every(key=>a[key]===b[key]);
+  const safeError=(error,stage)=>{
++  if(originalRecoveryDirectoryCustodyUnavailable(error))return Error('native_recovery_service_original_native_directory_custody_required');
+   const safe=Error('native_recovery_service_'+stage+'_unconfirmed');
+   if(nativePhysicalSettlementUnconfirmed(error)){held=true;return markNativePhysicalSettlementUnconfirmed(safe);}
+   return safe;
+@@ -110,9 +112,10 @@ export function createNativeCodingHostRecoveryService({sql,hostInstanceId,hostPi
+    // an earlier failure into COMPLETE, even if all original cleanup joined.
+    try{currentJob(row);}catch(error){problem??=error;}
+    row.held=held;
+-   row.state=held?'HOLD':problem?(row.lifetime.cancellationReason()==='OPERATION_TIMEOUT'?'TIMED_OUT'
++   const directoryCustodyRequired=originalRecoveryDirectoryCustodyUnavailable(problem);
++   row.state=held||directoryCustodyRequired?'HOLD':problem?(row.lifetime.cancellationReason()==='OPERATION_TIMEOUT'?'TIMED_OUT'
+     :row.lifetime.signal.aborted?'CANCELLED':'FAILED'):'COMPLETE';
+-   row.reason=problem?'ORIGINAL_OPERATION_UNCONFIRMED':null;
++   row.reason=directoryCustodyRequired?'ORIGINAL_NATIVE_DIRECTORY_CUSTODY_REQUIRED':problem?'ORIGINAL_OPERATION_UNCONFIRMED':null;
+    if(problem)row.report=null;
+    row.finished=true;row.lifetime.finish();
+   }
+diff --git a/infra/client-state-runtime/native-coding-recovery-directory-custody.mjs b/infra/client-state-runtime/native-coding-recovery-directory-custody.mjs
+new file mode 100644
+index 0000000..632edf8
+--- /dev/null
++++ b/infra/client-state-runtime/native-coding-recovery-directory-custody.mjs
+@@ -0,0 +1,18 @@
++// VETO ONLY. There is currently no original native recovery-directory issuer.
++// W74/W76 selectors, ACL/path observations and Windows process Job handles do
++// not retain the backup/PGDATA objects or their path-resolution ancestry.
++//
++// Keep every selected backup/restore effect on HOLD. This module deliberately
++// has no capability factory, callback, injected verifier, handle/boolean input
++// or positive return branch. A future implementation needs a separately
++// reviewed original kernel-handle/operation integration, not a true flag here.
++const unavailable=new WeakSet();
++export function requireOriginalRecoveryDirectoryCustody(){
++  const error=Error('native_recovery_original_directory_custody_required');
++  unavailable.add(error);throw error;
++}
++// Classification of an original refusal only. It grants no effect authority
++// and does not mislabel an effect-free HOLD as unknown physical completion.
++export function originalRecoveryDirectoryCustodyUnavailable(error){
++  return unavailable.has(error);
++}
+diff --git a/infra/client-state-runtime/pg17-native-recovery-process.mjs b/infra/client-state-runtime/pg17-native-recovery-process.mjs
+index 8609720..d838acc 100644
+--- a/infra/client-state-runtime/pg17-native-recovery-process.mjs
++++ b/infra/client-state-runtime/pg17-native-recovery-process.mjs
+@@ -10,6 +10,7 @@ import {markNativePhysicalSettlementUnconfirmed} from '../../apps/metaengine-bro
+ import {verifyOwnerOnlyWindowsStorage} from '../../apps/metaengine-browser/src/private-windows-storage-acl.mjs';
+ import {secureAttachedPrivateFile} from './attached-postgres-onboarding.mjs';
+ import {preparePg17RolesReplay} from './pg17-roles-replay.mjs';
++import {requireOriginalRecoveryDirectoryCustody} from './native-coding-recovery-directory-custody.mjs';
+ 
+ const tools=Object.freeze(['pg_dump','pg_restore','pg_dumpall','postgres','initdb','pg_ctl','psql']);
+ const versions=new Set(['pg_dump','postgres','pg_restore','pg_dumpall']);
+@@ -89,6 +90,10 @@ export function createPg17NativeRecoveryProcess(options={}){
+   ||!exact(options.toolHashes,tools)||tools.some(name=>!/^[a-f0-9]{64}$/.test(options.toolHashes[name]||'')))throw failure('arguments_invalid');
+  const source=connection(options.sourceConnection),target=connection(options.targetConnection),hashes=Object.freeze({...options.toolHashes});
+  if(source.port===target.port||source.username!==target.username||[55432,55433,55434].includes(target.port))throw failure('target_connection_invalid');
++ // A standalone adapter call cannot bypass the producer's effect fence.
++ // Process/Job handles and path revalidation do not hold recovery directories.
++ // Refuse before even constructing the process controller or creating files.
++ requireOriginalRecoveryDirectoryCustody();
+  let controller;try{controller=createCodexCliWindowsProcessController();}catch{throw failure('native_controller_unavailable');}
+  const rows=[],claims=new Set(),pending=new Set(),actions=new Set(),invalidOwnerWork=[],jobId=randomUUID(),rawRoles=path.join(workDirectory,'roles-original.sql');
+  let closed=false,finished=false,finishing=false,uncertain=false,poisoned=false,targetRow=null,targetStopped=false,archive=null,roles=null,targetIdentity=null,workIdentity=null;
+diff --git a/infra/client-state-runtime/pg17-native-recovery-process.test.mjs b/infra/client-state-runtime/pg17-native-recovery-process.test.mjs
+index 4cf77c6..09a59ed 100644
+--- a/infra/client-state-runtime/pg17-native-recovery-process.test.mjs
++++ b/infra/client-state-runtime/pg17-native-recovery-process.test.mjs
+@@ -6,6 +6,7 @@ import path from 'node:path';
+ import {createHash} from 'node:crypto';
+ import {registerHooks} from 'node:module';
+ import {createPg17NativeRecoveryProcess,consumePg17NativeRecoveryWitness} from './pg17-native-recovery-process.mjs';
++import {originalRecoveryDirectoryCustodyUnavailable} from './native-coding-recovery-directory-custody.mjs';
+ 
+ const moduleUrl=new URL('./pg17-native-recovery-process.mjs',import.meta.url).href;
+ const settlementUrl=new URL('../../apps/metaengine-browser/src/codex-cli-physical-settlement.mjs',import.meta.url).href;
+@@ -42,15 +43,24 @@ test('native adapter rejects caller-supplied proof, controllers, SQL and connect
+  }
+ });
+ 
+-test('default production adapter has no POSIX or bare-spawn fallback',{skip:process.platform==='win32'},()=>{
+- assert.throws(()=>createPg17NativeRecoveryProcess(options()),/native_controller_unavailable/);
++test('default production adapter requires original directory custody on every platform without fallback',()=>{
++ assert.throws(()=>createPg17NativeRecoveryProcess(options()),error=>
++  error.message==='native_recovery_original_directory_custody_required'
++   &&originalRecoveryDirectoryCustodyUnavailable(error));
+ });
+ 
+ // These fixtures exercise lifetime/identity contracts only. They do not run
+ // PostgreSQL or Windows Jobs and MUST NOT be reported as native attestation.
+ // The production constructor has no test injection parameter: only this
+-// isolated import instance resolves its two native dependencies differently.
++// exact query-scoped import substitutes native boundaries. Its explicit
++// directory-custody veto bypass reaches otherwise unreachable lifecycle and
++// artifact algorithms ONLY; it supplies no native custody or qualification.
+ let fixtureSequence=0;
++const syntheticDirectoryCustodyBypass=String.raw`
++// TEST ONLY: reach downstream algorithms without asserting kernel custody.
++export function requireOriginalRecoveryDirectoryCustody() {}
++export function originalRecoveryDirectoryCustodyUnavailable() { return false; }
++`;
+ const mockController=String.raw`
+ import fs from 'node:fs/promises';
+ import path from 'node:path';
+@@ -99,9 +109,11 @@ async function fixture(run){
+  for(const name of names)await fs.writeFile(path.join(config.pgBinDir,name+'.exe'),name);
+  const f={spawns:[],resumes:[],terminations:[],secret:'SYNTHETIC_SECRET_MUST_NOT_ESCAPE'};
+  const scope='pg17-native-contract:'+ ++fixtureSequence;
++ const syntheticModuleUrl=moduleUrl+'?synthetic='+fixtureSequence;
+  const hooks=registerHooks({
+   resolve(specifier,context,next){
+-   if(context.parentURL?.startsWith(moduleUrl+'?synthetic=')){
++   if(context.parentURL===syntheticModuleUrl){
++    if(specifier==='./native-coding-recovery-directory-custody.mjs')return {url:scope+'/directory-custody-bypass',shortCircuit:true};
+     if(specifier.endsWith('/codex-cli-windows-process-controller.mjs'))return {url:scope+'/controller',shortCircuit:true};
+     if(specifier.endsWith('/private-windows-storage-acl.mjs'))return {url:scope+'/acl',shortCircuit:true};
+     if(specifier==='./attached-postgres-onboarding.mjs')return {url:scope+'/secure',shortCircuit:true};
+@@ -109,6 +121,7 @@ async function fixture(run){
+    return next(specifier,context);
+   },
+   load(url,context,next){
++   if(url===scope+'/directory-custody-bypass')return {format:'module',source:syntheticDirectoryCustodyBypass,shortCircuit:true};
+    if(url===scope+'/controller')return {format:'module',source:mockController,shortCircuit:true};
+    if(url===scope+'/acl')return {format:'module',source:'export async function verifyOwnerOnlyWindowsStorage(){return {fixture_classification:"SYNTHETIC_CONTRACT_ONLY"};}',shortCircuit:true};
+    if(url===scope+'/secure')return {format:'module',source:'import fs from "node:fs/promises";export async function secureAttachedPrivateFile(file){await fs.chmod(file,0o600);}',shortCircuit:true};
+@@ -116,7 +129,7 @@ async function fixture(run){
+   },
+  });
+  try{
+-  const adapter=await import(moduleUrl+'?synthetic='+fixtureSequence);hooks.deregister();
++  const adapter=await import(syntheticModuleUrl);hooks.deregister();
+   globalThis.__METAENGINE_SYNTHETIC_NATIVE_RECOVERY_TEST__=f;
+   await run({f,config,adapter});
+  }finally{hooks.deregister();delete globalThis.__METAENGINE_SYNTHETIC_NATIVE_RECOVERY_TEST__;await fs.rm(root,{recursive:true,force:true});}
+@@ -240,3 +253,10 @@ test('SYNTHETIC contract: changed replay bytes invalidate completed evidence',as
+  await fs.appendFile(config.rolesPath,'-- changed\n');
+  await assert.rejects(adapter.consumePg17NativeRecoveryWitness(token,config.originalJob),/artifact_changed/);
+ }));
++
++test('query-scoped synthetic veto bypass leaves the production adapter on directory-custody HOLD',async()=>fixture(async({adapter})=>{
++ assert.notEqual(adapter.createPg17NativeRecoveryProcess,createPg17NativeRecoveryProcess);
++ assert.throws(()=>createPg17NativeRecoveryProcess(options()),error=>
++  error.message==='native_recovery_original_directory_custody_required'
++   &&originalRecoveryDirectoryCustodyUnavailable(error));
++}));
+diff --git a/infra/client-state-runtime/pg17-recovery-directory-custody.test.mjs b/infra/client-state-runtime/pg17-recovery-directory-custody.test.mjs
+new file mode 100644
+index 0000000..6ac65c9
+--- /dev/null
++++ b/infra/client-state-runtime/pg17-recovery-directory-custody.test.mjs
+@@ -0,0 +1,235 @@
++// SYNTHETIC REGISTRY/OS BOUNDARIES ONLY. The root provider, producer, fixed
++// directory-custody veto and separately imported native adapter are real and
++// unmodified. Phase frames are observations from an explicit test registry;
++// they never represent retained original kernel directory custody. No key,
++// database, native process, service, backup, restore or upgrade is started.
++import nodeTest, {mock} from 'node:test';
++import assert from 'node:assert/strict';
++import fs from 'node:fs/promises';
++import os from 'node:os';
++import path from 'node:path';
++import {createHash,randomUUID} from 'node:crypto';
++import {readDirectoryIdentity} from '../../apps/metaengine-browser/src/native-coding-fs-identity.mjs';
++import {nativePhysicalSettlementUnconfirmed}
++  from '../../apps/metaengine-browser/src/native-coding-host-settlement.mjs';
++import {requireOriginalRecoveryDirectoryCustody,originalRecoveryDirectoryCustodyUnavailable}
++  from './native-coding-recovery-directory-custody.mjs';
++
++const test=(name,body)=>nodeTest(name,{timeout:15000},body);
++const localUrl=name=>new URL('./'+name,import.meta.url).href;
++const browserUrl=name=>new URL('../../apps/metaengine-browser/src/'+name,import.meta.url).href;
++const REFUSAL='native_recovery_original_directory_custody_required';
++const jobs=new WeakMap(),servers=new WeakMap(),phases=new WeakMap();
++const nativeEffects={adapterCreators:0,witnessConsumers:0,controllerCreators:0};
++const sourceSentinel='SYNTHETIC_ORIGINAL_SOURCE_MUST_BE_PRESERVED';
++const rootSentinel='SYNTHETIC_ORIGINAL_PROTECTED_ROOT_MUST_BE_PRESERVED';
++const tools=['pg_dump','pg_restore','pg_dumpall','postgres','initdb','pg_ctl','psql'];
++const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
++const nextTurn=()=>new Promise(resolve=>setImmediate(resolve));
++function deferred(){let resolve;const promise=new Promise(done=>{resolve=done;});return {promise,resolve};}
++
++mock.module(localUrl('native-coding-host-recovery-lifetime.mjs'),{namedExports:{
++  readOriginalNativeCodingRecoveryJob:job=>jobs.get(job)??null,
++}});
++mock.module(localUrl('native-coding-host-ipc.mjs'),{namedExports:{
++  readOriginalNativeCodingRecoveryServerRequest:request=>servers.get(request)??null,
++}});
++mock.module(browserUrl('native-coding-recovery-root-phase.mjs'),{namedExports:{
++  readOriginalRecoveryRootPhase:request=>phases.get(request)??null,
++}});
++// An unexpected first native call is counted and refused, rather than
++// replacing the missing kernel directory lease with a successful test claim.
++mock.module(localUrl('pg17-native-recovery-process.mjs'),{namedExports:{
++  createPg17NativeRecoveryProcess(){nativeEffects.adapterCreators++;throw Error('SYNTHETIC_NATIVE_CREATOR_FORBIDDEN');},
++  consumePg17NativeRecoveryWitness(){nativeEffects.witnessConsumers++;throw Error('SYNTHETIC_NATIVE_WITNESS_FORBIDDEN');},
++}});
++mock.module(browserUrl('codex-cli-windows-process-controller.mjs'),{namedExports:{
++  createCodexCliWindowsProcessController(){nativeEffects.controllerCreators++;throw Error('SYNTHETIC_PROCESS_CONTROLLER_FORBIDDEN');},
++}});
++const {createPg17RecoveryProducer}=await import(localUrl('pg17-recovery-producer.mjs'));
++// The query URL selects the actual adapter source, outside the producer's
++// forbidden-creator mock. Its fixed veto remains the same real module above.
++const {createPg17NativeRecoveryProcess}=await import(localUrl('pg17-native-recovery-process.mjs?directory-custody-production-negative'));
++
++async function snapshotTree(root){
++  const records=[];
++  async function visit(file,relative){
++    const stat=await fs.lstat(file,{bigint:true});
++    const type=stat.isSymbolicLink()?'symlink':stat.isDirectory()?'directory':stat.isFile()?'file':'other';
++    const record={path:relative,type,dev:String(stat.dev),ino:String(stat.ino),birthtimeNs:String(stat.birthtimeNs),
++      mode:String(stat.mode),size:String(stat.size),mtimeNs:String(stat.mtimeNs),ctimeNs:String(stat.ctimeNs)};
++    records.push(record);
++    if(type==='symlink')record.target=await fs.readlink(file);
++    else if(type==='file')record.sha256=hash(await fs.readFile(file));
++    else if(type==='directory'){
++      const names=(await fs.readdir(file)).sort();record.names=names;
++      for(const name of names)await visit(path.join(file,name),relative?relative+'/'+name:name);
++    }
++  }
++  await visit(root,'');return records;
++}
++async function fixture(t,{swap='none',pauseRead=0}={}){
++  const parent=await fs.mkdtemp(path.join(os.tmpdir(),'pg17-directory-custody-synthetic-'));
++  const state=path.join(parent,'state'),root=path.join(state,'protected-backup-root-v1'),source=path.join(state,'pgdata');
++  const bin=path.join(parent,'bin');
++  await fs.mkdir(root,{recursive:true,mode:0o700});await fs.mkdir(source,{mode:0o700});await fs.mkdir(bin,{mode:0o700});
++  await fs.writeFile(path.join(root,'root-sentinel'),rootSentinel);
++  await fs.writeFile(path.join(source,'source-sentinel'),sourceSentinel);
++  await fs.writeFile(path.join(source,'client-vault.key'),'7'.repeat(64)+'\n');
++  await fs.writeFile(path.join(source,'PG_VERSION'),'17\n');
++  const controller=new AbortController(),deadlineAt=Date.now()+30000;
++  const actor=Object.freeze({client_id:randomUUID(),device_id:randomUUID(),key_fingerprint_sha256:'a'.repeat(64),admin_grant_epoch:7});
++  const ownerCreated=Date.now()-1000;
++  const owner=Object.freeze({schema:'metaengine.host.owner-incarnation.v1',source:'LOCAL_HOST_OWNER',authority_effect:false,
++    owner_id:actor.client_id,device_id:actor.device_id,project_id:randomUUID(),pid:process.pid,
++    created_at:new Date(ownerCreated).toISOString(),
++    process_incarnation_id:`pid:${process.pid}:created_100ns:${BigInt(ownerCreated)*10000n+116444736000000000n}`,
++    epoch:actor.admin_grant_epoch,generation:1,source_sha:'b'.repeat(40),device_key_fingerprint_sha256:actor.key_fingerprint_sha256});
++  const f={parent,state,root,source,bin,actor,owner,controller,deadlineAt,producer:null,registryOpen:true,
++    phaseReads:0,secondFrame:null,afterObservation:null,swapped:false,nativeBefore:{...nativeEffects},
++    effects:{connections:0,reservations:0,sql:0,custodyReads:0},entered:deferred(),release:deferred()};
++  const current=()=>{
++    if(!f.registryOpen||controller.signal.aborted||Date.now()>=deadlineAt)throw Error('SYNTHETIC_ORIGINAL_REQUEST_CLOSED');
++  };
++  const request=Object.freeze({}),originalJob=Object.freeze({});
++  jobs.set(originalJob,Object.freeze({request,signal:controller.signal,deadlineAt,assertCurrent:current}));
++  servers.set(request,Object.freeze({assertCurrent:current}));
++  phases.set(request,Object.freeze({assertCurrent:current,async recheck(){
++    current();f.phaseReads++;
++    // These are real final path observations. The test swaps only after both
++    // original identities were measured and the immutable frame was captured.
++    const frame=Object.freeze({schema:'metaengine.native-coding.original-recovery-root.v1',
++      scope:'W74_W76_ORIGINAL_HOST_SOURCE_ONLY',owner:{...owner,observed_at:new Date().toISOString()},
++      backup_directory:root,source_directory:source,root_identity_sha256:await readDirectoryIdentity(root),
++      source_directory_identity_sha256:await readDirectoryIdentity(source)});
++    if(f.phaseReads===pauseRead){f.entered.resolve();await f.release.promise;}
++    if(f.phaseReads===2){
++      f.secondFrame=frame;
++      if(swap==='root'||swap==='root-to-pgdata-alias'){
++        await fs.rename(root,root+'-retained');
++        if(swap==='root'){
++          await fs.mkdir(root);await fs.writeFile(path.join(root,'replacement-sentinel'),'SYNTHETIC_REPLACEMENT_ROOT');
++        }else await fs.symlink(source,root,process.platform==='win32'?'junction':'dir');
++        f.swapped=true;
++      }else if(swap==='state'){
++        await fs.rename(state,state+'-retained');await fs.mkdir(state);await fs.mkdir(root);await fs.mkdir(source);
++        await fs.writeFile(path.join(root,'replacement-sentinel'),'SYNTHETIC_REPLACEMENT_ROOT');
++        await fs.writeFile(path.join(source,'replacement-sentinel'),'SYNTHETIC_REPLACEMENT_PGDATA');f.swapped=true;
++      }else if(swap==='pgdata'){
++        await fs.rename(source,source+'-retained');await fs.mkdir(source);
++        await fs.writeFile(path.join(source,'replacement-sentinel'),'SYNTHETIC_REPLACEMENT_PGDATA');f.swapped=true;
++      }
++      // Whole-tree native identities, subtree names and byte hashes cover
++      // retained originals and all replacements. Atime is intentionally absent.
++      f.afterObservation=await snapshotTree(parent);
++    }
++    return frame;
++  }}));
++  const forbidden=name=>{f.effects[name]++;throw Error('SYNTHETIC_FIRST_EFFECT_FORBIDDEN_'+name);};
++  const sourceConnection={host:'127.0.0.1',port:15439,database:'postgres',username:'state_owner',password:'synthetic-only-not-a-real-password'};
++  f.dependencies={custody:{schema:'metaengine.host.private-custody-w76.v1',
++    readTrustedHostOwnerIncarnation:()=>forbidden('custodyReads'),readPrivateOwnPostgresBirth:()=>forbidden('custodyReads')},
++    sql:{reserve:()=>forbidden('reservations'),unsafe:()=>forbidden('sql')},connect:()=>forbidden('connections'),
++    sourceConnection,sourceDataDirectory:source,
++    postgresIdentity:{pid:process.pid,version:170006,system_identifier:'1234567890123456789',
++      started_at:new Date(ownerCreated).toISOString(),data_directory:source,port:sourceConnection.port,address:'127.0.0.1'},
++    postgresContinuity:{schema:'metaengine.client-state.postgres-continuity.v1'},pgBinDir:bin,
++    toolHashes:Object.fromEntries(tools.map(name=>[name,'c'.repeat(64)])),assertOwnerCurrent:current,assertKeeperCurrent:current};
++  f.input={originalJob,actor,signal:controller.signal,deadlineAt};
++  f.producer=createPg17RecoveryProducer(f.dependencies);
++  t.after(async()=>{
++    f.release.resolve();f.producer.close();
++    await f.producer.drainResources();f.registryOpen=false;
++    await fs.rm(parent,{recursive:true,force:true});
++  });
++  return f;
++}
++function effectsUnstarted(f){
++  assert.deepEqual(f.effects,{connections:0,reservations:0,sql:0,custodyReads:0});
++  assert.deepEqual(nativeEffects,f.nativeBefore);
++}
++async function originalDirectoryRefusal(operation){
++  let refusal;
++  await assert.rejects(operation,error=>{
++    assert.equal(error.message,REFUSAL);
++    assert.equal(originalRecoveryDirectoryCustodyUnavailable(error),true,'the real gate refusal must survive producer sanitization');
++    assert.equal(nativePhysicalSettlementUnconfirmed(error),false,'effect-free HOLD is not unknown physical completion');
++    refusal=error;return true;
++  });
++  return refusal;
++}
++
++test('the real custody gate has no positive branch for copied handle claims or caller callbacks',async()=>{
++  let calls=0;
++  const forbidden=()=>{calls++;throw Error('SYNTHETIC_HANDLE_CLAIM_MUST_NOT_RUN');};
++  const claim=Object.defineProperties({},Object.fromEntries(['handle','directory_handle_held','assertCurrent','revalidate']
++    .map(key=>[key,{enumerable:true,get:forbidden}])));
++  const proxy=new Proxy(claim,{get:forbidden,getPrototypeOf:forbidden,ownKeys:forbidden,getOwnPropertyDescriptor:forbidden});
++  const revoked=Proxy.revocable({},{});revoked.revoke();
++  for(const value of [undefined,null,{},claim,proxy,revoked.proxy]){
++    let refusal;
++    assert.throws(()=>requireOriginalRecoveryDirectoryCustody(value,forbidden),error=>{
++      refusal=error;assert.equal(error.message,REFUSAL);assert.equal(originalRecoveryDirectoryCustodyUnavailable(error),true);return true;
++    });
++    assert.equal(originalRecoveryDirectoryCustodyUnavailable(Error(refusal.message)),false);
++    assert.equal(originalRecoveryDirectoryCustodyUnavailable({...refusal}),false);
++  }
++  assert.equal(calls,0);
++});
++
++test('actual root observation and producer stay on HOLD after the final path observation, with zero effects',async t=>{
++  for(const swap of ['none','root','state','pgdata','root-to-pgdata-alias'])await t.test(swap,async t=>{
++    const f=await fixture(t,{swap});
++    await originalDirectoryRefusal(f.producer.execute(f.input));
++    assert.equal(f.phaseReads,2,'the actual Host root provider must complete both phase observations');
++    assert.ok(f.secondFrame&&f.afterObservation);assert.equal(f.swapped,swap!=='none');
++    if(swap==='root-to-pgdata-alias')assert.equal((await fs.lstat(f.root)).isSymbolicLink(),true);
++    else if(swap==='root'||swap==='state')
++      assert.notEqual(await readDirectoryIdentity(f.root),f.secondFrame.root_identity_sha256);
++    if(swap==='state'||swap==='pgdata')
++      assert.notEqual(await readDirectoryIdentity(f.source),f.secondFrame.source_directory_identity_sha256);
++    effectsUnstarted(f);
++    assert.deepEqual(await snapshotTree(f.parent),f.afterObservation,'the producer must preserve every original and replacement byte/object');
++    await assert.rejects(f.producer.execute(f.input),/pg17_recovery_one_shot_required/);
++    await assert.rejects(f.producer.execute({...f.input,originalJob:{}}),/pg17_recovery_one_shot_required/);
++    await assert.rejects(f.producer.consumeEvidence({},f.input),/pg17_recovery_original_evidence_required/);
++    assert.equal(f.phaseReads,2);effectsUnstarted(f);
++    f.producer.close();
++    assert.deepEqual(await f.producer.drainResources(),{resources_drained:true,authority_effect:false});
++    assert.deepEqual(await snapshotTree(f.parent),f.afterObservation);
++  });
++});
++
++test('close and drain join the original pending phase without starting a pool or native work',async t=>{
++  for(const pauseRead of [1,2])await t.test('phase '+pauseRead,async t=>{
++    const f=await fixture(t,{pauseRead}),pending=f.producer.execute(f.input);
++    const denial=assert.rejects(pending,/pg17_recovery_(?:closed|cancelled)/);
++    await f.entered.promise;f.producer.close();let drained=false;
++    const drain=f.producer.drainResources().then(value=>{drained=true;return value;});
++    await nextTurn();assert.equal(drained,false,'the original asynchronous read remains joined after close');
++    effectsUnstarted(f);f.release.resolve();await denial;
++    assert.deepEqual(await drain,{resources_drained:true,authority_effect:false});effectsUnstarted(f);
++    assert.deepEqual(await snapshotTree(f.parent),f.afterObservation);
++    await assert.rejects(f.producer.execute(f.input),/pg17_recovery_one_shot_required/);
++  });
++});
++
++test('actual native adapter cannot turn handle-shaped job claims or callbacks into directory custody',async t=>{
++  const f=await fixture(t),before=await snapshotTree(f.parent);let calls=0;
++  const forbidden=()=>{calls++;throw Error('SYNTHETIC_ADAPTER_CALLBACK_MUST_NOT_RUN');};
++  const workDirectory=path.join(f.root,'restore-probe-synthetic-no-creation');
++  const options={pgBinDir:f.bin,toolHashes:f.dependencies.toolHashes,sourceConnection:f.dependencies.sourceConnection,
++    targetConnection:{...f.dependencies.sourceConnection,port:15449,password:'synthetic-only-target-password'},
++    targetDataDirectory:path.join(workDirectory,'pg17'),archivePath:path.join(f.root,'postgresql-17-snapshot.dump'),
++    rolesPath:path.join(f.root,'recovery-roles.sql'),passwordFile:path.join(workDirectory,'initdb-password'),
++    workDirectory,originalJob:f.input.originalJob,signal:f.input.signal,deadlineAt:f.deadlineAt,
++    revalidate:forbidden,assertOwnerCurrent:forbidden};
++  const claims=Object.defineProperties({},Object.fromEntries(['handle','directory_handle_held','assertCurrent']
++    .map(key=>[key,{enumerable:true,get:forbidden}])));
++  for(const originalJob of [f.input.originalJob,claims,new Proxy(claims,{get:forbidden})])
++    assert.throws(()=>createPg17NativeRecoveryProcess({...options,originalJob}),error=>{
++      assert.equal(error.message,REFUSAL);assert.equal(originalRecoveryDirectoryCustodyUnavailable(error),true);return true;
++    });
++  assert.equal(calls,0);effectsUnstarted(f);
++  assert.deepEqual(await snapshotTree(f.parent),before);
++});
+diff --git a/infra/client-state-runtime/pg17-recovery-producer.mjs b/infra/client-state-runtime/pg17-recovery-producer.mjs
+index a8fed42..3c638dc 100644
+--- a/infra/client-state-runtime/pg17-recovery-producer.mjs
++++ b/infra/client-state-runtime/pg17-recovery-producer.mjs
+@@ -17,6 +17,8 @@ import {readDirectoryIdentity} from '../../apps/metaengine-browser/src/native-co
+ import {createNativePreparationTransactions,bindNativeCodingTransactionPool} from './native-coding-preparation-transaction.mjs';
+ import {runNativePhysicalSettlementScope,nativePhysicalSettlementUnconfirmed,markNativePhysicalSettlementUnconfirmed} from '../../apps/metaengine-browser/src/native-coding-host-settlement.mjs';
+ import {readOriginalRecoveryProtectedRoot} from './native-coding-recovery-root-provider.mjs';
++import {requireOriginalRecoveryDirectoryCustody,originalRecoveryDirectoryCustodyUnavailable}
++ from './native-coding-recovery-directory-custody.mjs';
+ 
+ export const PG17_RECOVERY_PRODUCER_SCHEMA='metaengine.pg17.original-recovery-diagnostic.v1';
+ const fields=['owner_id','device_id','project_id','pid','created_at','process_incarnation_id','epoch','generation','source_sha'];
+@@ -35,7 +37,8 @@ const overlaps=(a,b)=>{const relative=path.relative(a,b);return relative===''||(
+ const freeze=value=>{if(value&&typeof value==='object'&&!Object.isFrozen(value)){for(const child of Object.values(value))freeze(child);Object.freeze(value);}return value;};
+ function failure(reason){const error=Error('pg17_recovery_'+reason);ownErrors.add(error);return error;}
+ function must(condition,reason){if(!condition)throw failure(reason);}
+-function sanitized(error,stage){return ownErrors.has(error)?error:failure(stage+'_unconfirmed');}
++function sanitized(error,stage){return ownErrors.has(error)||originalRecoveryDirectoryCustodyUnavailable(error)
++ ?error:failure(stage+'_unconfirmed');}
+ const identity=info=>[info.dev,info.ino,info.birthtimeNs].map(String).join(':');
+ const contentsIdentity=info=>[identity(info),info.size,info.mtimeNs,info.ctimeNs,info.nlink].map(String).join(':');
+ const opaque=()=>Object.freeze(Object.create(null,{toJSON:{value(){throw failure('evidence_not_serializable');}}}));
+@@ -266,6 +269,12 @@ export function createPg17RecoveryProducer({custody,sql,connect,sourceConnection
+    let problem;
+    try{
+     open();
++    // Even the original W74/W76/server/job binding is a directory observation,
++    // not retained kernel custody. A swap after its final pathname read must
++    // not reach a source pool, probe directory, file, journal or native child.
++    // No native directory-handle issuer is available: fixed HOLD, no fallback.
++    await readOriginalRecoveryProtectedRoot({originalJob,actor:currentActor,signal,deadlineAt,sourceDataDirectory});
++    open();requireOriginalRecoveryDirectoryCustody();
+     const sourceTransactions=createNativePreparationTransactions();
+     row.sourcePool=bindNativeCodingTransactionPool(connect({host:sourceConfig.host,port:sourceConfig.port,user:sourceConfig.username,
+      password:sourceConfig.password,database:'postgres',max:2,prepare:false,connect_timeout:5,onnotice:()=>{},
+diff --git a/infra/client-state-runtime/test/pg17-recovery-private-loader.mjs b/infra/client-state-runtime/test/pg17-recovery-private-loader.mjs
+index 0b4f1b3..0c4bf57 100644
+--- a/infra/client-state-runtime/test/pg17-recovery-private-loader.mjs
++++ b/infra/client-state-runtime/test/pg17-recovery-private-loader.mjs
+@@ -1,7 +1,10 @@
+ // TEST ONLY: reuse the accepted synthetic seed without registering its tests.
+-// The production producer's body is unchanged. Only its direct OS/process
+-// boundary imports are substituted; the replacement owns real local children
+-// and always reports SYNTHETIC_LOCAL_CHILD_CUSTODY, never Windows evidence.
++// The producer body is unchanged in an exact query-scoped test copy. Its
++// direct OS/process boundaries are substituted, and the missing-directory-
++// custody veto is explicitly bypassed ONLY to exercise downstream PG/lifecycle
++// algorithms. These tests cannot establish production reachability, kernel
++// directory custody or native qualification. The replacement owns local test
++// children and reports SYNTHETIC_LOCAL_CHILD_CUSTODY, never Windows evidence.
+ import {registerHooks} from 'node:module';
+ import fs from 'node:fs/promises';
+ 
+@@ -17,6 +20,11 @@ const verifierUrl = new URL('../native-coding-device-request.mjs?signed-pg17-rec
+ const gateUrl = new URL('../upgrade-backup-gate.mjs?signed-pg17-recovery-qualification', import.meta.url).href;
+ const registryFile = new URL('../../../apps/metaengine-browser/src/native-coding-device-request.mjs', import.meta.url);
+ const registryUrl = registryFile.href + '?signed-pg17-recovery-qualification';
++const syntheticDirectoryCustodyBypassUrl='data:text/javascript,'+encodeURIComponent(`
++  // TEST ONLY: exercise PG algorithms, without supplying directory custody.
++  export function requireOriginalRecoveryDirectoryCustody() {}
++  export function originalRecoveryDirectoryCustodyUnavailable() { return false; }
++`);
+ 
+ export async function loadPg17RecoveryFixture() {
+   const hooks = registerHooks({
+@@ -37,6 +45,8 @@ export async function loadPg17RecoveryFixture() {
+ export async function loadSyntheticPg17RecoveryProducer() {
+   if (process.platform !== 'linux') throw Error('recovery_fixture_linux_only');
+   const hooks = registerHooks({resolve(specifier, context, next) {
++    if(context.parentURL===producerUrl&&specifier==='./native-coding-recovery-directory-custody.mjs')
++      return {url:syntheticDirectoryCustodyBypassUrl,shortCircuit:true};
+     if(context.parentURL===producerUrl&&specifier==='./native-coding-recovery-root-provider.mjs')return {url:rootProviderUrl,shortCircuit:true};
+     if(context.parentURL===rootProviderUrl&&['./native-coding-host-recovery-lifetime.mjs','./native-coding-host-ipc.mjs','../../apps/metaengine-browser/src/native-coding-recovery-root-phase.mjs'].includes(specifier))return {url:rootRegistryUrl,shortCircuit:true};
+     if (context.parentURL === producerUrl && [

@@ -5,11 +5,23 @@
     "arch": "x64"
   },
   "focused_tests": {
-    "pass": 404,
+    "pass": 576,
     "fail": 0,
     "skip": 0
   },
-  "source_checks": 295,
+  "source_checks": 299,
+  "adversarial_suite": {
+    "tests": 11,
+    "included_in_focused_tests": true,
+    "production_veto_unmodified": true,
+    "directory_identity_and_filesystem": "REAL_ISOLATED_TEMPORARY_DIRECTORIES",
+    "root_read_before_effect_swap": "ROOT_STATE_PGDATA_AND_ALIAS_SWAPS",
+    "owned_source_pool_creations": 0,
+    "native_controller_creations": 0,
+    "backup_restore_filesystem_mutations": 0
+  },
+  "recovery_effect_state": "HOLD_ORIGINAL_NATIVE_DIRECTORY_CUSTODY_REQUIRED",
+  "native_directory_issuer": "MISSING_NO_POSITIVE_BRANCH",
   "commands": [
     {
       "cwd": "apps/metaengine-browser",
@@ -39,11 +51,25 @@
         "../../infra/client-state-runtime/protected-root-gate-interface.test.mjs",
         "../../infra/client-state-runtime/upgrade-backup-gate.test.mjs",
         "../../infra/client-state-runtime/upgrade-backup-restore-gate.test.mjs",
-        "../../infra/client-state-runtime/native-coding-recovery-root-provider.production-negative.test.mjs"
+        "../../infra/client-state-runtime/native-coding-recovery-root-provider.production-negative.test.mjs",
+        "test/host-private-custody-w76.test.mjs",
+        "../../infra/client-state-runtime/pg17-recovery-directory-custody.test.mjs",
+        "../../infra/client-state-runtime/pg17-native-recovery-process.test.mjs",
+        "../../infra/client-state-runtime/pg17-recovery-producer.lifecycle.test.mjs",
+        "../../infra/client-state-runtime/pg17-recovery-root-identity.test.mjs",
+        "../../infra/client-state-runtime/native-coding-host-recovery-retained.test.mjs",
+        "../../infra/client-state-runtime/native-coding-host-recovery-service.test.mjs",
+        "../../infra/client-state-runtime/native-coding-host-recovery-root-composition.test.mjs",
+        "../../infra/client-state-runtime/native-coding-host-recovery-original-registry.test.mjs",
+        "../../infra/client-state-runtime/native-coding-host-recovery-lifetime.test.mjs",
+        "../../infra/client-state-runtime/native-coding-host-recovery-deadline.test.mjs",
+        "../../infra/client-state-runtime/native-coding-recovery-root-provider.test.mjs",
+        "../../infra/client-state-runtime/pg17-backup-effect-barrier.test.mjs",
+        "../../infra/client-state-runtime/pg17-recovery-state-producer.test.mjs"
       ],
       "exit_code": 0,
-      "tests": 397,
-      "pass": 397,
+      "tests": 576,
+      "pass": 576,
       "fail": 0,
       "skip": 0,
       "log": "focused-tests.log"
@@ -52,25 +78,10 @@
       "cwd": "apps/metaengine-browser",
       "argv": [
         "node",
-        "scripts/run-isolated-tests.mjs",
-        "--test-concurrency=1",
-        "test/host-private-custody-w76.test.mjs"
-      ],
-      "exit_code": 0,
-      "tests": 7,
-      "pass": 7,
-      "fail": 0,
-      "skip": 0,
-      "log": "w76-tests.log"
-    },
-    {
-      "cwd": "apps/metaengine-browser",
-      "argv": [
-        "node",
         "scripts/check-source.mjs"
       ],
       "exit_code": 0,
-      "source_checks": 295,
+      "source_checks": 299,
       "log": "source-check.log"
     },
     {
@@ -88,7 +99,8 @@
       "skip": 0,
       "status": "BLOCKED_FIXTURE_DEPENDENCY_ABSENT",
       "reason": "ENOENT: infra/client-state-runtime/node_modules/postgres/ (postgres@3.4.7)",
-      "log": "package-tests-blocked.log"
+      "log": "package-tests-blocked.log",
+      "note": "Previous package attempt retained; required dependency remains absent. No installation/retry performed for this correction."
     }
   ],
   "patch_application": "patch-application.json",
@@ -97,5 +109,6 @@
   "postgresql_integration": "NOT_RUN",
   "installation": "NOT_PERFORMED",
   "database_access": "NONE",
-  "trust_root_change": "NONE"
+  "trust_root_change": "NONE",
+  "test_boundary": "Existing deep native/PG algorithm fixtures explicitly bypass veto ONLY in exact synthetic query modules. Production imports and adversarial suite retain original refusal."
 }
