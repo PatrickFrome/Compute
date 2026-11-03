@@ -1,0 +1,553 @@
+TAP version 13
+# (node:5063) ExperimentalWarning: Module mocking is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:5063) DeprecationWarning: mock.module(): options.namedExports is deprecated. Use options.exports instead.
+# Subtest: actual static native composition rejects this non-native process and exposes no Node capture issuer
+ok 1 - actual static native composition rejects this non-native process and exposes no Node capture issuer
+  ---
+  duration_ms: 3.154715
+  type: 'test'
+  ...
+# Subtest: v2 support unavailability refuses before writing01 or changing application files
+ok 2 - v2 support unavailability refuses before writing01 or changing application files
+  ---
+  duration_ms: 53.762519
+  type: 'test'
+  ...
+# Subtest: Node worker nomination cannot activate without the original NSIS capture association
+ok 3 - Node worker nomination cannot activate without the original NSIS capture association
+  ---
+  duration_ms: 297.455204
+  type: 'test'
+  ...
+# Subtest: original phase scopes close after success and after interrupted activation
+ok 4 - original phase scopes close after success and after interrupted activation
+  ---
+  duration_ms: 662.907915
+  type: 'test'
+  ...
+# Subtest: material selectors reject coercible non-strings without executing caller code
+ok 5 - material selectors reject coercible non-strings without executing caller code
+  ---
+  duration_ms: 0.484508
+  type: 'test'
+  ...
+# Subtest: explicit recovery close disposes its original reader and revokes the in-process proof
+ok 6 - explicit recovery close disposes its original reader and revokes the in-process proof
+  ---
+  duration_ms: 887.363263
+  type: 'test'
+  ...
+# Subtest: v2 phase4 uses independent observer and separate completion without original finalize replay
+ok 7 - v2 phase4 uses independent observer and separate completion without original finalize replay
+  ---
+  duration_ms: 1254.101359
+  type: 'test'
+  ...
+# Subtest: v2 phase5 uses independent observer and separate completion without original finalize replay
+ok 8 - v2 phase5 uses independent observer and separate completion without original finalize replay
+  ---
+  duration_ms: 1393.314376
+  type: 'test'
+  ...
+# Subtest: actual C++ serializer sample agrees with the material interface and preserves full uint64 values
+ok 9 - actual C++ serializer sample agrees with the material interface and preserves full uint64 values
+  ---
+  duration_ms: 485.378126
+  type: 'test'
+  ...
+# Subtest: original controller EXITED does not prevent active origin capture while original installer and Job remain live
+ok 10 - original controller EXITED does not prevent active origin capture while original installer and Job remain live
+  ---
+  duration_ms: 973.193258
+  type: 'test'
+  ...
+# Subtest: legacy phase4 cannot acquire a new native origin retrospectively
+ok 11 - legacy phase4 cannot acquire a new native origin retrospectively
+  ---
+  duration_ms: 545.275043
+  type: 'test'
+  ...
+# Subtest: original unavailable retains phase4 bytes and gate with no completion
+ok 12 - original unavailable retains phase4 bytes and gate with no completion
+  ---
+  duration_ms: 387.107376
+  type: 'test'
+  ...
+# Subtest: original unknown retains phase4 bytes and gate with no completion
+ok 13 - original unknown retains phase4 bytes and gate with no completion
+  ---
+  duration_ms: 588.28976
+  type: 'test'
+  ...
+# Subtest: original live retains phase4 bytes and gate with no completion
+ok 14 - original live retains phase4 bytes and gate with no completion
+  ---
+  duration_ms: 505.631352
+  type: 'test'
+  ...
+# Subtest: original external-missing retains phase4 bytes and gate with no completion
+ok 15 - original external-missing retains phase4 bytes and gate with no completion
+  ---
+  duration_ms: 454.404271
+  type: 'test'
+  ...
+# Subtest: original external-unknown retains phase4 bytes and gate with no completion
+ok 16 - original external-unknown retains phase4 bytes and gate with no completion
+  ---
+  duration_ms: 475.859289
+  type: 'test'
+  ...
+# Subtest: original json-reader retains phase4 bytes and gate with no completion
+ok 17 - original json-reader retains phase4 bytes and gate with no completion
+  ---
+  duration_ms: 433.554799
+  type: 'test'
+  ...
+# Subtest: original raw-only retains phase4 bytes and gate with no completion
+ok 18 - original raw-only retains phase4 bytes and gate with no completion
+  ---
+  duration_ms: 495.624428
+  type: 'test'
+  ...
+# Subtest: original uninstaller retains phase4 bytes and gate with no completion
+ok 19 - original uninstaller retains phase4 bytes and gate with no completion
+  ---
+  duration_ms: 534.841853
+  type: 'test'
+  ...
+# Subtest: original fake-closed-job retains phase4 bytes and gate with no completion
+ok 20 - original fake-closed-job retains phase4 bytes and gate with no completion
+  ---
+  duration_ms: 402.126942
+  type: 'test'
+  ...
+# Subtest: original invented-external retains phase4 bytes and gate with no completion
+ok 21 - original invented-external retains phase4 bytes and gate with no completion
+  ---
+  duration_ms: 439.474821
+  type: 'test'
+  ...
+# Subtest: original borrowed-root retains phase4 bytes and gate with no completion
+ok 22 - original borrowed-root retains phase4 bytes and gate with no completion
+  ---
+  duration_ms: 509.580647
+  type: 'test'
+  ...
+# Subtest: original query-handle-missing retains phase4 bytes and gate with no completion
+ok 23 - original query-handle-missing retains phase4 bytes and gate with no completion
+  ---
+  duration_ms: 450.472536
+  type: 'test'
+  ...
+# Subtest: original limit-terminated retains phase4 bytes and gate with no completion
+ok 24 - original limit-terminated retains phase4 bytes and gate with no completion
+  ---
+  duration_ms: 512.274158
+  type: 'test'
+  ...
+# Subtest: original number-generation retains phase4 bytes and gate with no completion
+ok 25 - original number-generation retains phase4 bytes and gate with no completion
+  ---
+  duration_ms: 517.528159
+  type: 'test'
+  ...
+# Subtest: original oversized-generation retains phase4 bytes and gate with no completion
+ok 26 - original oversized-generation retains phase4 bytes and gate with no completion
+  ---
+  duration_ms: 426.00611
+  type: 'test'
+  ...
+# Subtest: original number-volume retains phase4 bytes and gate with no completion
+ok 27 - original number-volume retains phase4 bytes and gate with no completion
+  ---
+  duration_ms: 456.20434
+  type: 'test'
+  ...
+# Subtest: original hex-volume retains phase4 bytes and gate with no completion
+ok 28 - original hex-volume retains phase4 bytes and gate with no completion
+  ---
+  duration_ms: 445.968141
+  type: 'test'
+  ...
+# Subtest: original missing-scope retains phase4 bytes and gate with no completion
+ok 29 - original missing-scope retains phase4 bytes and gate with no completion
+  ---
+  duration_ms: 537.368303
+  type: 'test'
+  ...
+# Subtest: original fake-helper retains phase4 bytes and gate with no completion
+ok 30 - original fake-helper retains phase4 bytes and gate with no completion
+  ---
+  duration_ms: 492.521236
+  type: 'test'
+  ...
+# Subtest: original worker-is-installer retains phase4 bytes and gate with no completion
+ok 31 - original worker-is-installer retains phase4 bytes and gate with no completion
+  ---
+  duration_ms: 486.03207
+  type: 'test'
+  ...
+# Subtest: native installer-birth drift revokes an already acquired material proof
+ok 32 - native installer-birth drift revokes an already acquired material proof
+  ---
+  duration_ms: 394.582225
+  type: 'test'
+  ...
+# Subtest: native worker-birth drift revokes an already acquired material proof
+ok 33 - native worker-birth drift revokes an already acquired material proof
+  ---
+  duration_ms: 411.915276
+  type: 'test'
+  ...
+# Subtest: native new-generation drift revokes an already acquired material proof
+ok 34 - native new-generation drift revokes an already acquired material proof
+  ---
+  duration_ms: 461.364275
+  type: 'test'
+  ...
+# Subtest: same parsed prepared JSON with different raw bytes cannot be adopted after capture
+ok 35 - same parsed prepared JSON with different raw bytes cannot be adopted after capture
+  ---
+  duration_ms: 459.813173
+  type: 'test'
+  ...
+# Subtest: phase2 is never replayed or backfilled by independent completion
+ok 36 - phase2 is never replayed or backfilled by independent completion
+  ---
+  duration_ms: 267.992143
+  type: 'test'
+  ...
+# Subtest: phase3 is never replayed or backfilled by independent completion
+ok 37 - phase3 is never replayed or backfilled by independent completion
+  ---
+  duration_ms: 341.531612
+  type: 'test'
+  ...
+# Subtest: phase6 is never replayed or backfilled by independent completion
+ok 38 - phase6 is never replayed or backfilled by independent completion
+  ---
+  duration_ms: 547.167753
+  type: 'test'
+  ...
+# Subtest: committed observation stays read-only after legitimate runtime-status/Owner changes and has no authority brand
+ok 39 - committed observation stays read-only after legitimate runtime-status/Owner changes and has no authority brand
+  ---
+  duration_ms: 945.058004
+  type: 'test'
+  ...
+# Subtest: normal06 history reads without old native scope; alternate history remains unavailable until committed-admission linkage
+ok 40 - normal06 history reads without old native scope; alternate history remains unavailable until committed-admission linkage
+  ---
+  duration_ms: 1662.713725
+  type: 'test'
+  ...
+# Subtest: physical active drift denies completion without new effects
+ok 41 - physical active drift denies completion without new effects
+  ---
+  duration_ms: 376.98796
+  type: 'test'
+  ...
+# Subtest: physical previous drift denies completion without new effects
+ok 42 - physical previous drift denies completion without new effects
+  ---
+  duration_ms: 447.166047
+  type: 'test'
+  ...
+# Subtest: physical registration drift denies completion without new effects
+ok 43 - physical registration drift denies completion without new effects
+  ---
+  duration_ms: 547.789048
+  type: 'test'
+  ...
+# Subtest: physical owner drift denies completion without new effects
+ok 44 - physical owner drift denies completion without new effects
+  ---
+  duration_ms: 522.387646
+  type: 'test'
+  ...
+# Subtest: physical unknown-journal drift denies completion without new effects
+ok 45 - physical unknown-journal drift denies completion without new effects
+  ---
+  duration_ms: 437.59235
+  type: 'test'
+  ...
+# Subtest: physical completion-collision drift denies completion without new effects
+ok 46 - physical completion-collision drift denies completion without new effects
+  ---
+  duration_ms: 674.060869
+  type: 'test'
+  ...
+# Subtest: native loss after separate marker publication returns no proof and never overwrites its unknown outcome
+ok 47 - native loss after separate marker publication returns no proof and never overwrites its unknown outcome
+  ---
+  duration_ms: 787.049253
+  type: 'test'
+  ...
+# Subtest: request accessors, symbols, hidden fields and prototypes are rejected before native/file reads
+ok 48 - request accessors, symbols, hidden fields and prototypes are rejected before native/file reads
+  ---
+  duration_ms: 0.416227
+  type: 'test'
+  ...
+# Subtest: loss of an observed completion is a veto, never permission to recreate it
+ok 49 - loss of an observed completion is a veto, never permission to recreate it
+  ---
+  duration_ms: 998.031749
+  type: 'test'
+  ...
+# Subtest: concurrent independent completion can publish at most one exact marker
+ok 50 - concurrent independent completion can publish at most one exact marker
+  ---
+  duration_ms: 1121.708273
+  type: 'test'
+  ...
+# Subtest: NSIS checks native support before reserving/extracting a transaction and embeds the new fixed dependency closure
+ok 51 - NSIS checks native support before reserving/extracting a transaction and embeds the new fixed dependency closure
+  ---
+  duration_ms: 2.988078
+  type: 'test'
+  ...
+# Subtest: original same-root completion is single-flight before opening a second native reader or writing a marker
+ok 52 - original same-root completion is single-flight before opening a second native reader or writing a marker
+  ---
+  duration_ms: 825.431114
+  type: 'test'
+  ...
+# Subtest: original external callback failure during same-root composition leaves HOLD and no retry/second marker
+ok 53 - original external callback failure during same-root composition leaves HOLD and no retry/second marker
+  ---
+  duration_ms: 434.837539
+  type: 'test'
+  ...
+# Subtest: clean install stages and commits a real signed tree; all protected fixture data survive
+ok 54 - clean install stages and commits a real signed tree; all protected fixture data survive
+  ---
+  duration_ms: 409.087005
+  type: 'test'
+  ...
+# Subtest: an existing empty directory is retained without losing clean-install semantics
+ok 55 - an existing empty directory is retained without losing clean-install semantics
+  ---
+  duration_ms: 384.133358
+  type: 'test'
+  ...
+# Subtest: clean install allows absent unprovisioned protected roots without creating them
+ok 56 - clean install allows absent unprovisioned protected roots without creating them
+  ---
+  duration_ms: 425.350575
+  type: 'test'
+  ...
+# Subtest: upgrade legally changes registry values while retaining predecessor, Owner, PGDATA, credentials and identity
+ok 57 - upgrade legally changes registry values while retaining predecessor, Owner, PGDATA, credentials and identity
+  ---
+  duration_ms: 692.527559
+  type: 'test'
+  ...
+# Subtest: version ordering is exact beyond Number precision and denies same-version/downgrade transitions
+ok 58 - version ordering is exact beyond Number precision and denies same-version/downgrade transitions
+  ---
+  duration_ms: 88.910502
+  type: 'test'
+  ...
+# Subtest: registry absence/nonempty-tree disagreement and corrupt predecessor identity cannot become clean install
+ok 59 - registry absence/nonempty-tree disagreement and corrupt predecessor identity cannot become clean install
+  ---
+  duration_ms: 126.933281
+  type: 'test'
+  ...
+# Subtest: conflicting registry views and duplicate same-view rows fail; exact mirroring is accepted
+ok 60 - conflicting registry views and duplicate same-view rows fail; exact mirroring is accepted
+  ---
+  duration_ms: 237.129208
+  type: 'test'
+  ...
+# Subtest: per-machine and alternate uninstall registrations are never selected as an upgrade target
+ok 61 - per-machine and alternate uninstall registrations are never selected as an upgrade target
+  ---
+  duration_ms: 38.815433
+  type: 'test'
+  ...
+# Subtest: configured PGDATA or any protected root inside application/transaction aborts before publication
+ok 62 - configured PGDATA or any protected root inside application/transaction aborts before publication
+  ---
+  duration_ms: 43.674434
+  type: 'test'
+  ...
+# Subtest: an established Owner cannot admit missing or non-directory PGDATA/state as clean absence
+ok 63 - an established Owner cannot admit missing or non-directory PGDATA/state as clean absence
+  ---
+  duration_ms: 186.1381
+  type: 'test'
+  ...
+# Subtest: existing Owner bundle changes, unresolved runtime state, lock or live process keep install on HOLD
+ok 64 - existing Owner bundle changes, unresolved runtime state, lock or live process keep install on HOLD
+  ---
+  duration_ms: 130.061317
+  type: 'test'
+  ...
+# Subtest: a STOPPED status alone cannot replace OS absence readback of the exact old Host and child PIDs
+ok 65 - a STOPPED status alone cannot replace OS absence readback of the exact old Host and child PIDs
+  ---
+  duration_ms: 102.541944
+  type: 'test'
+  ...
+# Subtest: missing signed predecessor/candidate sidecar cannot fall back to fresh installation
+ok 66 - missing signed predecessor/candidate sidecar cannot fall back to fresh installation
+  ---
+  duration_ms: 83.749905
+  type: 'test'
+  ...
+# Subtest: extra project file in old signed package prevents retiring a data-containing application directory
+ok 67 - extra project file in old signed package prevents retiring a data-containing application directory
+  ---
+  duration_ms: 44.386249
+  type: 'test'
+  ...
+# Subtest: staged-byte, installer-session and registry drift after prepare fail before the write-ahead intent
+ok 68 - staged-byte, installer-session and registry drift after prepare fail before the write-ahead intent
+  ---
+  duration_ms: 508.227427
+  type: 'test'
+  ...
+# Subtest: downstream or unknown journal entries before activate cannot retire the active tree
+ok 69 - downstream or unknown journal entries before activate cannot retire the active tree
+  ---
+  duration_ms: 764.300278
+  type: 'test'
+  ...
+# Subtest: PREPARED state and no-retry flags cannot be relabelled before activation
+ok 70 - PREPARED state and no-retry flags cannot be relabelled before activation
+  ---
+  duration_ms: 454.709269
+  type: 'test'
+  ...
+# Subtest: an uninstaller excluded from W68 still must match the independent current installer input
+ok 71 - an uninstaller excluded from W68 still must match the independent current installer input
+  ---
+  duration_ms: 66.301837
+  type: 'test'
+  ...
+# Subtest: changing or replacing the independent uninstaller input after prepare cannot start activation
+ok 72 - changing or replacing the independent uninstaller input after prepare cannot start activation
+  ---
+  duration_ms: 314.108513
+  type: 'test'
+  ...
+# Subtest: editable PREPARED journal cannot relabel an observed upgrade as clean installation
+ok 73 - editable PREPARED journal cannot relabel an observed upgrade as clean installation
+  ---
+  duration_ms: 109.205885
+  type: 'test'
+  ...
+# Subtest: mutation after activation intent fails before either tree moves and preserves the no-retry barrier
+ok 74 - mutation after activation intent fails before either tree moves and preserves the no-retry barrier
+  ---
+  duration_ms: 399.251813
+  type: 'test'
+  ...
+# Subtest: journal or current-uninstaller mutation after activation intent fails before either rename
+ok 75 - journal or current-uninstaller mutation after activation intent fails before either rename
+  ---
+  duration_ms: 1640.287673
+  type: 'test'
+  ...
+# Subtest: a journal collision after retaining the predecessor cannot publish the candidate
+ok 76 - a journal collision after retaining the predecessor cannot publish the candidate
+  ---
+  duration_ms: 382.59293
+  type: 'test'
+  ...
+# Subtest: installer process incarnation and token identity must match across transaction phases
+ok 77 - installer process incarnation and token identity must match across transaction phases
+  ---
+  duration_ms: 386.494958
+  type: 'test'
+  ...
+# Subtest: lost result at activation-intent retains recoverable trees and durable no-retry barrier
+ok 78 - lost result at activation-intent retains recoverable trees and durable no-retry barrier
+  ---
+  duration_ms: 340.869076
+  type: 'test'
+  ...
+# Subtest: lost result at previous-retained retains recoverable trees and durable no-retry barrier
+ok 79 - lost result at previous-retained retains recoverable trees and durable no-retry barrier
+  ---
+  duration_ms: 279.597685
+  type: 'test'
+  ...
+# Subtest: lost result at active-renamed retains recoverable trees and durable no-retry barrier
+ok 80 - lost result at active-renamed retains recoverable trees and durable no-retry barrier
+  ---
+  duration_ms: 339.346705
+  type: 'test'
+  ...
+# Subtest: lost result at active-published retains recoverable trees and durable no-retry barrier
+ok 81 - lost result at active-published retains recoverable trees and durable no-retry barrier
+  ---
+  duration_ms: 359.012074
+  type: 'test'
+  ...
+# Subtest: lost result after registration verification retains both images and blocks repeat finalization
+ok 82 - lost result after registration verification retains both images and blocks repeat finalization
+  ---
+  duration_ms: 537.207499
+  type: 'test'
+  ...
+# Subtest: finalization refuses out-of-order files and relabelled activation receipts before writing registration evidence
+ok 83 - finalization refuses out-of-order files and relabelled activation receipts before writing registration evidence
+  ---
+  duration_ms: 2062.969685
+  type: 'test'
+  ...
+# Subtest: late code, Owner, registration, session or receipt changes cannot cross the COMMITTED fence
+ok 84 - late code, Owner, registration, session or receipt changes cannot cross the COMMITTED fence
+  ---
+  duration_ms: 6447.58504
+  type: 'test'
+  ...
+# Subtest: final registration mismatch does not produce COMMITTED or discard predecessor
+ok 85 - final registration mismatch does not produce COMMITTED or discard predecessor
+  ---
+  duration_ms: 305.805413
+  type: 'test'
+  ...
+# Subtest: transaction path, fixture scope and stale transaction cannot be relaxed by caller options
+ok 86 - transaction path, fixture scope and stale transaction cannot be relaxed by caller options
+  ---
+  duration_ms: 11.3595
+  type: 'test'
+  ...
+# Subtest: a newer version cannot bypass an unresolved earlier application transaction by choosing a fresh directory name
+ok 87 - a newer version cannot bypass an unresolved earlier application transaction by choosing a fresh directory name
+  ---
+  duration_ms: 192.176063
+  type: 'test'
+  ...
+# Subtest: a fully committed retained predecessor does not permanently prevent the next lawful upgrade
+ok 88 - a fully committed retained predecessor does not permanently prevent the next lawful upgrade
+  ---
+  duration_ms: 548.231379
+  type: 'test'
+  ...
+# Subtest: a newer version requires all six historical states and bindings to remain consistent
+ok 89 - a newer version requires all six historical states and bindings to remain consistent
+  ---
+  duration_ms: 5082.87821
+  type: 'test'
+  ...
+# Subtest: production CLI has no fixture adapter selection and refuses effects on non-Windows
+ok 90 - production CLI has no fixture adapter selection and refuses effects on non-Windows
+  ---
+  duration_ms: 21.084836
+  type: 'test'
+  ...
+1..90
+# tests 90
+# suites 0
+# pass 90
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 53513.389035

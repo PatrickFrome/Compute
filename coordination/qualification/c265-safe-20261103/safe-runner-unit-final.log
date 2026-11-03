@@ -1,0 +1,112 @@
+TAP version 13
+# Subtest: disposable interrupted NSIS replacement restores complete EXE, ASAR, native, uninstaller and directories
+ok 1 - disposable interrupted NSIS replacement restores complete EXE, ASAR, native, uninstaller and directories
+  ---
+  duration_ms: 83.755962
+  type: 'test'
+  ...
+# Subtest: failure in rename gap compensates only against unchanged exact preimage
+ok 2 - failure in rename gap compensates only against unchanged exact preimage
+  ---
+  duration_ms: 52.171225
+  type: 'test'
+  ...
+# Subtest: error after image promotion records effect UNKNOWN and forbids auto-replay
+ok 3 - error after image promotion records effect UNKNOWN and forbids auto-replay
+  ---
+  duration_ms: 50.521831
+  type: 'test'
+  ...
+# Subtest: invalid source digest or non-disposable root fails before modification
+ok 4 - invalid source digest or non-disposable root fails before modification
+  ---
+  duration_ms: 22.751206
+  type: 'test'
+  ...
+# Subtest: an existing prepared blocks restore without overwriting earlier evidence or image
+ok 5 - an existing prepared blocks restore without overwriting earlier evidence or image
+  ---
+  duration_ms: 18.308061
+  type: 'test'
+  ...
+# Subtest: an existing quarantine blocks restore without overwriting earlier evidence or image
+ok 6 - an existing quarantine blocks restore without overwriting earlier evidence or image
+  ---
+  duration_ms: 21.024357
+  type: 'test'
+  ...
+# Subtest: an existing restore-receipt.json blocks restore without overwriting earlier evidence or image
+ok 7 - an existing restore-receipt.json blocks restore without overwriting earlier evidence or image
+  ---
+  duration_ms: 26.054381
+  type: 'test'
+  ...
+# Subtest: a linked installed directory cannot redirect restore to another fixture
+ok 8 - a linked installed directory cannot redirect restore to another fixture
+  ---
+  duration_ms: 40.335745
+  type: 'test'
+  ...
+# Subtest: a linked snapshot directory cannot redirect restore to another fixture
+ok 9 - a linked snapshot directory cannot redirect restore to another fixture
+  ---
+  duration_ms: 39.083264
+  type: 'test'
+  ...
+# Subtest: a quarantined preimage cannot be compensated over a concurrent installed image
+ok 10 - a quarantined preimage cannot be compensated over a concurrent installed image
+  ---
+  duration_ms: 37.664026
+  type: 'test'
+  ...
+# Subtest: CLI cannot select arbitrary tests, commands, output paths or runtime flags
+ok 11 - CLI cannot select arbitrary tests, commands, output paths or runtime flags
+  ---
+  duration_ms: 1.314738
+  type: 'test'
+  ...
+# Subtest: allowlist is fixed and excludes DB integration, native runners and installer entrypoints
+ok 12 - allowlist is fixed and excludes DB integration, native runners and installer entrypoints
+  ---
+  duration_ms: 0.524588
+  type: 'test'
+  ...
+# Subtest: each allowlisted command uses Node, an explicit disposable profile and no shell
+ok 13 - each allowlisted command uses Node, an explicit disposable profile and no shell
+  ---
+  duration_ms: 9.686845
+  type: 'test'
+  ...
+# Subtest: actual child environment excludes DB selectors, Node hooks, sanitizers and credentials
+ok 14 - actual child environment excludes DB selectors, Node hooks, sanitizers and credentials
+  ---
+  duration_ms: 87.509064
+  type: 'test'
+  ...
+# Subtest: evidence workspaces are fresh and cannot overwrite an earlier result
+ok 15 - evidence workspaces are fresh and cannot overwrite an earlier result
+  ---
+  duration_ms: 6.267628
+  type: 'test'
+  ...
+# Subtest: an exit code or skipped-only output cannot masquerade as passed qualification
+ok 16 - an exit code or skipped-only output cannot masquerade as passed qualification
+  ---
+  duration_ms: 0.844531
+  type: 'test'
+  ...
+# Subtest: portable success never grants physical restore, native Windows or first-task proof
+ok 17 - portable success never grants physical restore, native Windows or first-task proof
+  ---
+  duration_ms: 0.224623
+  type: 'test'
+  ...
+1..17
+# tests 17
+# suites 0
+# pass 17
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 638.509458

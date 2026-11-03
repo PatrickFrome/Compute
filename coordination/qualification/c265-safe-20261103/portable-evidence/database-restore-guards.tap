@@ -1,0 +1,400 @@
+TAP version 13
+# Subtest: recovery native diagnostics require every stage and exact completion without stderr
+ok 1 - recovery native diagnostics require every stage and exact completion without stderr
+  ---
+  duration_ms: 1.815273
+  type: 'test'
+  ...
+# Subtest: recovery native diagnostics preserve a fixed stage without leaking child output
+ok 2 - recovery native diagnostics preserve a fixed stage without leaking child output
+  ---
+  duration_ms: 0.22983
+  type: 'test'
+  ...
+# Subtest: recovery safe failure getter trusts only errors created by this guard
+ok 3 - recovery safe failure getter trusts only errors created by this guard
+  ---
+  duration_ms: 0.777894
+  type: 'test'
+  ...
+# Subtest: recovery guard qualifies only bound bundle bytes and isolated fixture paths
+ok 4 - recovery guard qualifies only bound bundle bytes and isolated fixture paths
+  ---
+  duration_ms: 35.589806
+  type: 'test'
+  ...
+# Subtest: recovery guard preserves Unicode, delimiter and quote characters in physical paths
+ok 5 - recovery guard preserves Unicode, delimiter and quote characters in physical paths
+  ---
+  duration_ms: 18.944008
+  type: 'test'
+  ...
+# Subtest: recovery guard rejects missing independent manifest pin without creating files
+ok 6 - recovery guard rejects missing independent manifest pin without creating files
+  ---
+  duration_ms: 3.389596
+  type: 'test'
+  ...
+# Subtest: recovery guard rejects a truncated dump
+ok 7 - recovery guard rejects a truncated dump
+  ---
+  duration_ms: 11.59869
+  type: 'test'
+  ...
+# Subtest: recovery guard rejects a same-length substituted dump with intact custom header
+ok 8 - recovery guard rejects a same-length substituted dump with intact custom header
+  ---
+  duration_ms: 9.388753
+  type: 'test'
+  ...
+# Subtest: recovery guard rejects non-custom bytes even with an internally matching manifest
+ok 9 - recovery guard rejects non-custom bytes even with an internally matching manifest
+  ---
+  duration_ms: 6.837519
+  type: 'test'
+  ...
+# Subtest: recovery guard refuses a missing key and never regenerates it
+ok 10 - recovery guard refuses a missing key and never regenerates it
+  ---
+  duration_ms: 4.702103
+  type: 'test'
+  ...
+# Subtest: recovery guard refuses a same-length format-valid substituted key
+ok 11 - recovery guard refuses a same-length format-valid substituted key
+  ---
+  duration_ms: 7.644727
+  type: 'test'
+  ...
+# Subtest: recovery guard rejects a coordinated dump and manifest rewrite against the original pin
+ok 12 - recovery guard rejects a coordinated dump and manifest rewrite against the original pin
+  ---
+  duration_ms: 7.337791
+  type: 'test'
+  ...
+# Subtest: recovery guard rejects path traversal or authority fields in a pinned manifest
+ok 13 - recovery guard rejects path traversal or authority fields in a pinned manifest
+  ---
+  duration_ms: 21.169097
+  type: 'test'
+  ...
+# Subtest: recovery guard rejects a malformed independently pinned manifest
+ok 14 - recovery guard rejects a malformed independently pinned manifest
+  ---
+  duration_ms: 5.1855
+  type: 'test'
+  ...
+# Subtest: recovery guard binds manifest source to independent source identity and source SHA
+ok 15 - recovery guard binds manifest source to independent source identity and source SHA
+  ---
+  duration_ms: 16.233764
+  type: 'test'
+  ...
+# Subtest: recovery guard rejects restore to source PGDATA before any writer runs
+ok 16 - recovery guard rejects restore to source PGDATA before any writer runs
+  ---
+  duration_ms: 4.451887
+  type: 'test'
+  ...
+# Subtest: recovery guard rejects shared port, PID, system identifier and installed ports
+ok 17 - recovery guard rejects shared port, PID, system identifier and installed ports
+  ---
+  duration_ms: 3.569373
+  type: 'test'
+  ...
+# Subtest: recovery guard rejects a target inside source PGDATA
+ok 18 - recovery guard rejects a target inside source PGDATA
+  ---
+  duration_ms: 4.279496
+  type: 'test'
+  ...
+# Subtest: recovery guard rejects bundle and key containment within either PGDATA
+ok 19 - recovery guard rejects bundle and key containment within either PGDATA
+  ---
+  duration_ms: 8.863935
+  type: 'test'
+  ...
+# Subtest: recovery guard rejects an existing target outside the private fixture root
+ok 20 - recovery guard rejects an existing target outside the private fixture root
+  ---
+  duration_ms: 4.65279
+  type: 'test'
+  ...
+# Subtest: recovery guard rejects a real directory symlink or Windows junction ancestor
+ok 21 - recovery guard rejects a real directory symlink or Windows junction ancestor
+  ---
+  duration_ms: 4.630476
+  type: 'test'
+  ...
+# Subtest: recovery guard rejects real hardlinks to dump, key and manifest
+ok 22 - recovery guard rejects real hardlinks to dump, key and manifest
+  ---
+  duration_ms: 29.231217
+  type: 'test'
+  ...
+# Subtest: recovery guard rejects unknown filesystem readback without paths in the error
+ok 23 - recovery guard rejects unknown filesystem readback without paths in the error
+  ---
+  duration_ms: 4.316711
+  type: 'test'
+  ...
+# Subtest: journal starts with no intent and never grants retry
+ok 24 - journal starts with no intent and never grants retry
+  ---
+  duration_ms: 7.16833
+  type: 'test'
+  ...
+# Subtest: one-shot publication -> durable barrier -> restart readback fences replay
+ok 25 - one-shot publication -> durable barrier -> restart readback fences replay
+  ---
+  duration_ms: 8.520135
+  type: 'test'
+  ...
+# Subtest: concurrent starts permit at most one barrier and one effect permission
+ok 26 - concurrent starts permit at most one barrier and one effect permission
+  ---
+  duration_ms: 9.527709
+  type: 'test'
+  ...
+# Subtest: journal rejects archive reuse even for a newly generated intent
+ok 27 - journal rejects archive reuse even for a newly generated intent
+  ---
+  duration_ms: 1.687642
+  type: 'test'
+  ...
+# Subtest: cross refuses a changed existing archive and an altered intent payload
+ok 28 - cross refuses a changed existing archive and an altered intent payload
+  ---
+  duration_ms: 3.484547
+  type: 'test'
+  ...
+# Subtest: bad source identity fails closed
+ok 29 - bad source identity fails closed
+  ---
+  duration_ms: 1.062566
+  type: 'test'
+  ...
+# Subtest: physical journal alias fails closed without being relabelled as verified when unavailable
+ok 30 - physical journal alias fails closed without being relabelled as verified when unavailable
+  ---
+  duration_ms: 1.730557
+  type: 'test'
+  ...
+# Subtest: different UUIDs cannot reserve same new archive destination
+ok 31 - different UUIDs cannot reserve same new archive destination
+  ---
+  duration_ms: 4.84825
+  type: 'test'
+  ...
+# Subtest: archive outside the exact private journal is refused before intent write
+ok 32 - archive outside the exact private journal is refused before intent write
+  ---
+  duration_ms: 1.440436
+  type: 'test'
+  ...
+# Subtest: corrupted archive reservation cannot be promoted to an effect crossing
+ok 33 - corrupted archive reservation cannot be promoted to an effect crossing
+  ---
+  duration_ms: 2.92685
+  type: 'test'
+  ...
+# Subtest: TOC-qualified archive without full disposable restore is NOT restore-qualified
+ok 34 - TOC-qualified archive without full disposable restore is NOT restore-qualified
+  ---
+  duration_ms: 10.633558
+  type: 'test'
+  ...
+# Subtest: self-asserted synthetic receipt is consistent but NEVER physical restore proof
+ok 35 - self-asserted synthetic receipt is consistent but NEVER physical restore proof
+  ---
+  duration_ms: 4.67294
+  type: 'test'
+  ...
+# Subtest: restore proof rejects different archive digest
+ok 36 - restore proof rejects different archive digest
+  ---
+  duration_ms: 3.029753
+  type: 'test'
+  ...
+# Subtest: restore proof rejects different postmaster
+ok 37 - restore proof rejects different postmaster
+  ---
+  duration_ms: 1.844866
+  type: 'test'
+  ...
+# Subtest: restore proof rejects different executable pin
+ok 38 - restore proof rejects different executable pin
+  ---
+  duration_ms: 2.107395
+  type: 'test'
+  ...
+# Subtest: restore proof rejects same source PostgreSQL port
+ok 39 - restore proof rejects same source PostgreSQL port
+  ---
+  duration_ms: 1.956572
+  type: 'test'
+  ...
+# Subtest: restore proof rejects same source process pid
+ok 40 - restore proof rejects same source process pid
+  ---
+  duration_ms: 1.721914
+  type: 'test'
+  ...
+# Subtest: restore proof rejects same postmaster hash
+ok 41 - restore proof rejects same postmaster hash
+  ---
+  duration_ms: 1.698028
+  type: 'test'
+  ...
+# Subtest: restore proof rejects source connection
+ok 42 - restore proof rejects source connection
+  ---
+  duration_ms: 2.365178
+  type: 'test'
+  ...
+# Subtest: restore proof rejects external target not isolated
+ok 43 - restore proof rejects external target not isolated
+  ---
+  duration_ms: 2.036199
+  type: 'test'
+  ...
+# Subtest: restore proof rejects SQL restore failed
+ok 44 - restore proof rejects SQL restore failed
+  ---
+  duration_ms: 2.099102
+  type: 'test'
+  ...
+# Subtest: restore proof rejects no exit-on-error
+ok 45 - restore proof rejects no exit-on-error
+  ---
+  duration_ms: 1.95576
+  type: 'test'
+  ...
+# Subtest: restore proof rejects cleanup unconfirmed
+ok 46 - restore proof rejects cleanup unconfirmed
+  ---
+  duration_ms: 1.714533
+  type: 'test'
+  ...
+# Subtest: restore proof rejects insufficient table data
+ok 47 - restore proof rejects insufficient table data
+  ---
+  duration_ms: 1.778287
+  type: 'test'
+  ...
+# Subtest: restore proof rejects no row readback
+ok 48 - restore proof rejects no row readback
+  ---
+  duration_ms: 1.921739
+  type: 'test'
+  ...
+# Subtest: restore proof rejects source profile changed
+ok 49 - restore proof rejects source profile changed
+  ---
+  duration_ms: 2.630991
+  type: 'test'
+  ...
+# Subtest: restore proof rejects auto retry grant
+ok 50 - restore proof rejects auto retry grant
+  ---
+  duration_ms: 3.070904
+  type: 'test'
+  ...
+# Subtest: bad archive always blocks even a claimed perfect restore receipt
+ok 51 - bad archive always blocks even a claimed perfect restore receipt
+  ---
+  duration_ms: 1.423681
+  type: 'test'
+  ...
+# Subtest: standalone restore receipt is inert without expected trusted executable digest
+ok 52 - standalone restore receipt is inert without expected trusted executable digest
+  ---
+  duration_ms: 0.994184
+  type: 'test'
+  ...
+# Subtest: standalone receipt rejects keeperPid omitted from both bindings
+ok 53 - standalone receipt rejects keeperPid omitted from both bindings
+  ---
+  duration_ms: 0.952973
+  type: 'test'
+  ...
+# Subtest: standalone receipt rejects ownerPid omitted from both bindings
+ok 54 - standalone receipt rejects ownerPid omitted from both bindings
+  ---
+  duration_ms: 0.935157
+  type: 'test'
+  ...
+# Subtest: standalone receipt rejects postmasterSha256 omitted from both bindings
+ok 55 - standalone receipt rejects postmasterSha256 omitted from both bindings
+  ---
+  duration_ms: 1.438574
+  type: 'test'
+  ...
+# Subtest: standalone receipt rejects zero Owner PID even when matching fields agree
+ok 56 - standalone receipt rejects zero Owner PID even when matching fields agree
+  ---
+  duration_ms: 1.279557
+  type: 'test'
+  ...
+# Subtest: standalone receipt rejects string Keeper PID even when matching fields agree
+ok 57 - standalone receipt rejects string Keeper PID even when matching fields agree
+  ---
+  duration_ms: 1.133401
+  type: 'test'
+  ...
+# Subtest: standalone receipt rejects unsafe Keeper PID even when matching fields agree
+ok 58 - standalone receipt rejects unsafe Keeper PID even when matching fields agree
+  ---
+  duration_ms: 2.114326
+  type: 'test'
+  ...
+# Subtest: standalone receipt rejects same Owner and Keeper PID even when matching fields agree
+ok 59 - standalone receipt rejects same Owner and Keeper PID even when matching fields agree
+  ---
+  duration_ms: 1.181041
+  type: 'test'
+  ...
+# Subtest: standalone receipt rejects malformed source hash even when matching fields agree
+ok 60 - standalone receipt rejects malformed source hash even when matching fields agree
+  ---
+  duration_ms: 0.920375
+  type: 'test'
+  ...
+# Subtest: standalone receipt rejects non-string postmasterSha256 without coercion
+ok 61 - standalone receipt rejects non-string postmasterSha256 without coercion
+  ---
+  duration_ms: 1.184977
+  type: 'test'
+  ...
+# Subtest: standalone receipt rejects non-string qualifiedExecutorSha256 without coercion
+ok 62 - standalone receipt rejects non-string qualifiedExecutorSha256 without coercion
+  ---
+  duration_ms: 0.940455
+  type: 'test'
+  ...
+# Subtest: standalone receipt rejects substituted TOC with unchanged table-data count
+ok 63 - standalone receipt rejects substituted TOC with unchanged table-data count
+  ---
+  duration_ms: 1.134803
+  type: 'test'
+  ...
+# Subtest: standalone receipt rejects oversized ASCII TOC even with matching hashes
+ok 64 - standalone receipt rejects oversized ASCII TOC even with matching hashes
+  ---
+  duration_ms: 46.684004
+  type: 'test'
+  ...
+# Subtest: standalone receipt rejects oversized UTF-8 TOC even with matching hashes
+ok 65 - standalone receipt rejects oversized UTF-8 TOC even with matching hashes
+  ---
+  duration_ms: 48.26675
+  type: 'test'
+  ...
+1..65
+# tests 65
+# suites 0
+# pass 65
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 622.275213

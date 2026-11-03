@@ -1,0 +1,190 @@
+{
+  "schema": "metaengine.browser.safe-install-qualification.v1",
+  "evidence_class": "PORTABLE/SOURCE/FIXTURE",
+  "full_qualification": "INCOMPLETE",
+  "suites": [
+    {
+      "id": "install-upgrade-model",
+      "files": [
+        "apps/metaengine-browser/test/installer-update-transaction.test.mjs",
+        "apps/metaengine-browser/test/installer-update-recovery.test.mjs"
+      ],
+      "expectedSkipped": 0
+    },
+    {
+      "id": "disposable-image-restore",
+      "files": [
+        "apps/metaengine-browser/test/qa-disposable-image-restore.test.mjs"
+      ],
+      "expectedSkipped": 0
+    },
+    {
+      "id": "database-restore-guards",
+      "files": [
+        "infra/client-state-runtime/disposable-recovery-bundle-guard.test.mjs",
+        "infra/client-state-runtime/upgrade-backup-restore-gate.test.mjs",
+        "infra/client-state-runtime/pg17-backup-effect-barrier.test.mjs"
+      ],
+      "expectedSkipped": 0
+    },
+    {
+      "id": "acl-contract",
+      "files": [
+        "apps/metaengine-browser/test/private-windows-storage-acl.test.mjs"
+      ],
+      "expectedSkipped": 2
+    },
+    {
+      "id": "auth-first-task-admission-model",
+      "files": [
+        "apps/metaengine-browser/test/native-coding-initial-setup-main.test.mjs",
+        "apps/metaengine-browser/test/native-coding-capacity-first-dispatch.test.mjs"
+      ],
+      "expectedSkipped": 0
+    }
+  ],
+  "not_run": [
+    {
+      "domain": "Windows clean install",
+      "status": "NOT RUN",
+      "reason": "Linux-only runner; real installer NOT AUTHORIZED"
+    },
+    {
+      "domain": "Windows physical upgrade",
+      "status": "NOT RUN",
+      "reason": "Linux-only runner; real installer NOT AUTHORIZED"
+    },
+    {
+      "domain": "Windows effective ACL, native peer/key/token/Job and launch",
+      "status": "NOT RUN",
+      "reason": "Models and injected readbacks do not prove Windows behavior"
+    },
+    {
+      "domain": "Physical PostgreSQL restore",
+      "status": "NOT RUN",
+      "reason": "No database processes or restore integration tests are selected; user DB restore NOT AUTHORIZED"
+    },
+    {
+      "domain": "Installed authentication and first real task",
+      "status": "NOT RUN",
+      "reason": "Admission/executor fixtures are not a running installed product"
+    },
+    {
+      "domain": "wire_route_authenticates_then_launches",
+      "status": "NOT RUN BY THIS RUNNER",
+      "reason": "Separate mandatory source check; known FAIL due HOLD must not be relabelled as success"
+    }
+  ],
+  "production_qualified": false,
+  "physical_restore_proven": false,
+  "windows_native_proven": false,
+  "first_real_task_proven": false,
+  "upgrade_authorized": false,
+  "installer_authorization": "NOT AUTHORIZED",
+  "authority_effect": false,
+  "state": "PORTABLE_CHECKS_PASSED",
+  "platform": "linux",
+  "node_version": "v24.19.0",
+  "evidence_directory": "/tmp/metaengine-safe-install-qualification-pyuGC0/evidence",
+  "results": [
+    {
+      "id": "install-upgrade-model",
+      "files": [
+        "apps/metaengine-browser/test/installer-update-transaction.test.mjs",
+        "apps/metaengine-browser/test/installer-update-recovery.test.mjs"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "state": "PASSED",
+      "reason": "portable_tests_only",
+      "counts": {
+        "tests": 90,
+        "pass": 90,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "output": "/tmp/metaengine-safe-install-qualification-pyuGC0/evidence/install-upgrade-model.tap"
+    },
+    {
+      "id": "disposable-image-restore",
+      "files": [
+        "apps/metaengine-browser/test/qa-disposable-image-restore.test.mjs"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "state": "PASSED",
+      "reason": "portable_tests_only",
+      "counts": {
+        "tests": 10,
+        "pass": 10,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "output": "/tmp/metaengine-safe-install-qualification-pyuGC0/evidence/disposable-image-restore.tap"
+    },
+    {
+      "id": "database-restore-guards",
+      "files": [
+        "infra/client-state-runtime/disposable-recovery-bundle-guard.test.mjs",
+        "infra/client-state-runtime/upgrade-backup-restore-gate.test.mjs",
+        "infra/client-state-runtime/pg17-backup-effect-barrier.test.mjs"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "state": "PASSED",
+      "reason": "portable_tests_only",
+      "counts": {
+        "tests": 65,
+        "pass": 65,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "output": "/tmp/metaengine-safe-install-qualification-pyuGC0/evidence/database-restore-guards.tap"
+    },
+    {
+      "id": "acl-contract",
+      "files": [
+        "apps/metaengine-browser/test/private-windows-storage-acl.test.mjs"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "state": "PASSED",
+      "reason": "portable_tests_only",
+      "counts": {
+        "tests": 9,
+        "pass": 7,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 2,
+        "todo": 0
+      },
+      "output": "/tmp/metaengine-safe-install-qualification-pyuGC0/evidence/acl-contract.tap"
+    },
+    {
+      "id": "auth-first-task-admission-model",
+      "files": [
+        "apps/metaengine-browser/test/native-coding-initial-setup-main.test.mjs",
+        "apps/metaengine-browser/test/native-coding-capacity-first-dispatch.test.mjs"
+      ],
+      "exit_code": 0,
+      "signal": null,
+      "state": "PASSED",
+      "reason": "portable_tests_only",
+      "counts": {
+        "tests": 38,
+        "pass": 38,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "output": "/tmp/metaengine-safe-install-qualification-pyuGC0/evidence/auth-first-task-admission-model.tap"
+    }
+  ]
+}

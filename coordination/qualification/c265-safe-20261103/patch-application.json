@@ -1,0 +1,19 @@
+{
+  "schema": "metaengine.c265.safe-qualification.patch-application.v1",
+  "source_archive_sha256": "4200e492828dbb857aaa737a7ce56d0aeda3c97c84f7743b1501ef2f229d3636",
+  "base_tree": "2dbe253e97379532f6f4b52ef7edf26109a9266d",
+  "patch_sha256": "51b99155b63320ecf2950ff4de542d257fa7c864d2cbba0730416c9838322b1c",
+  "patch_bytes": 30830,
+  "changed_files": [
+    "apps/metaengine-browser/test/native-coding-initial-setup-main.test.mjs",
+    "apps/metaengine-browser/test/qa-disposable-image-restore.test.mjs",
+    "apps/metaengine-browser/test/safe-install-qualification.mjs",
+    "apps/metaengine-browser/test/safe-install-qualification.test.mjs"
+  ],
+  "git_diff_check": "PASS",
+  "git_apply_check_index": "PASS",
+  "git_apply_index": "PASS",
+  "result_tree": "74ac1ed259ccb6b8695a9ebf194e29bc0cb2c368",
+  "result_tree_matches_working_index": true,
+  "production_files_changed": false
+}

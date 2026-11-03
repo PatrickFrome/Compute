@@ -1,0 +1,154 @@
+TAP version 13
+# Subtest: BEGIN without explicit persisted selection cannot prepare roots or create a provider
+ok 1 - BEGIN without explicit persisted selection cannot prepare roots or create a provider
+  ---
+  duration_ms: 5.123133
+  type: 'test'
+  ...
+# Subtest: blank -> explicit approved stable two-role choice -> exact existing-provider and BEGIN inputs
+ok 2 - blank -> explicit approved stable two-role choice -> exact existing-provider and BEGIN inputs
+  ---
+  duration_ms: 14.194427
+  type: 'test'
+  ...
+# Subtest: refresh and process restart are read-only: no BEGIN, login or ACL preparation occurs
+ok 3 - refresh and process restart are read-only: no BEGIN, login or ACL preparation occurs
+  ---
+  duration_ms: 6.158267
+  type: 'test'
+  ...
+# Subtest: unknown BEGIN preserves exact IDs and restart refuses blind replay before any new root/provider effect
+ok 4 - unknown BEGIN preserves exact IDs and restart refuses blind replay before any new root/provider effect
+  ---
+  duration_ms: 6.280558
+  type: 'test'
+  ...
+# Subtest: decline is zero-effect and never persists selection or invokes ACL/provider/BEGIN
+ok 5 - decline is zero-effect and never persists selection or invokes ACL/provider/BEGIN
+  ---
+  duration_ms: 0.818533
+  type: 'test'
+  ...
+# Subtest: cancel uses only persisted workspace/operation and returns sanitized current readback
+ok 6 - cancel uses only persisted workspace/operation and returns sanitized current readback
+  ---
+  duration_ms: 6.97673
+  type: 'test'
+  ...
+# Subtest: cancel before BEGIN is read-only to Host and leaves the stable selection intact
+ok 7 - cancel before BEGIN is read-only to Host and leaves the stable selection intact
+  ---
+  duration_ms: 3.493087
+  type: 'test'
+  ...
+# Subtest: wrong authenticated Codex account is visible as drift and cannot advertise BEGIN
+ok 8 - wrong authenticated Codex account is visible as drift and cannot advertise BEGIN
+  ---
+  duration_ms: 4.022721
+  type: 'test'
+  ...
+# Subtest: BEGIN blocks lost Codex authentication before root preparation with no provider or dispatch
+ok 9 - BEGIN blocks lost Codex authentication before root preparation with no provider or dispatch
+  ---
+  duration_ms: 6.035214
+  type: 'test'
+  ...
+# Subtest: BEGIN blocks changed Codex account before root preparation with no provider or dispatch
+ok 10 - BEGIN blocks changed Codex account before root preparation with no provider or dispatch
+  ---
+  duration_ms: 4.013738
+  type: 'test'
+  ...
+# Subtest: BEGIN blocks changed ADMIN epoch before root preparation with no provider or dispatch
+ok 11 - BEGIN blocks changed ADMIN epoch before root preparation with no provider or dispatch
+  ---
+  duration_ms: 4.014905
+  type: 'test'
+  ...
+# Subtest: BEGIN blocks changed repository path before root preparation with no provider or dispatch
+ok 12 - BEGIN blocks changed repository path before root preparation with no provider or dispatch
+  ---
+  duration_ms: 4.267465
+  type: 'test'
+  ...
+# Subtest: BEGIN blocks changed source HEAD before root preparation with no provider or dispatch
+ok 13 - BEGIN blocks changed source HEAD before root preparation with no provider or dispatch
+  ---
+  duration_ms: 4.057784
+  type: 'test'
+  ...
+# Subtest: BEGIN blocks lost Codex authentication during root preparation with no provider or dispatch
+ok 14 - BEGIN blocks lost Codex authentication during root preparation with no provider or dispatch
+  ---
+  duration_ms: 5.245364
+  type: 'test'
+  ...
+# Subtest: BEGIN blocks changed Codex account during root preparation with no provider or dispatch
+ok 15 - BEGIN blocks changed Codex account during root preparation with no provider or dispatch
+  ---
+  duration_ms: 5.045618
+  type: 'test'
+  ...
+# Subtest: BEGIN blocks changed ADMIN epoch during root preparation with no provider or dispatch
+ok 16 - BEGIN blocks changed ADMIN epoch during root preparation with no provider or dispatch
+  ---
+  duration_ms: 3.725671
+  type: 'test'
+  ...
+# Subtest: BEGIN blocks changed repository path during root preparation with no provider or dispatch
+ok 17 - BEGIN blocks changed repository path during root preparation with no provider or dispatch
+  ---
+  duration_ms: 3.627716
+  type: 'test'
+  ...
+# Subtest: BEGIN blocks changed source HEAD during root preparation with no provider or dispatch
+ok 18 - BEGIN blocks changed source HEAD during root preparation with no provider or dispatch
+  ---
+  duration_ms: 3.633295
+  type: 'test'
+  ...
+# Subtest: private-root ACL preparation failure cannot reach provider or BEGIN and preserves the selection
+ok 19 - private-root ACL preparation failure cannot reach provider or BEGIN and preserves the selection
+  ---
+  duration_ms: 2.962311
+  type: 'test'
+  ...
+# Subtest: new HOLD readback during root preparation blocks provider and survives restart
+ok 20 - new HOLD readback during root preparation blocks provider and survives restart
+  ---
+  duration_ms: 6.089765
+  type: 'test'
+  ...
+# Subtest: new AMBIGUOUS readback during root preparation blocks provider and survives restart
+ok 21 - new AMBIGUOUS readback during root preparation blocks provider and survives restart
+  ---
+  duration_ms: 4.734867
+  type: 'test'
+  ...
+# Subtest: cancel after root preparation during readPrivateFacts prevents late BEGIN
+ok 22 - cancel after root preparation during readPrivateFacts prevents late BEGIN
+  ---
+  duration_ms: 5.038237
+  type: 'test'
+  ...
+# Subtest: cancel after root preparation during readSetupReadback prevents late BEGIN
+ok 23 - cancel after root preparation during readSetupReadback prevents late BEGIN
+  ---
+  duration_ms: 3.986609
+  type: 'test'
+  ...
+# Subtest: overlapping cancels have one sender
+ok 24 - overlapping cancels have one sender
+  ---
+  duration_ms: 3.891607
+  type: 'test'
+  ...
+1..24
+# tests 24
+# suites 0
+# pass 24
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 210.443297
