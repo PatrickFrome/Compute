@@ -1,0 +1,236 @@
+Independent bounded CIPD request/source review
+Reviewer: /root/autoconfig_review
+Source: /workspace/metaengine-source/Compute, reconstructed archive HEAD
+337608c86e464433f7f5693289c8ce697d4b074d. Parent confirmed staged baseline tree
+2d268fbb87d7974a53095cde68f98c1d1fe0c3f5; review binds final file hashes below.
+Disposition: full bootstrap/spec/phase/recursive/SDK/generated/build closure HOLD.
+
+1. Independent fixed-source expectations
+
+The prior fixed DEPS manifest SHA256 is
+d7c6e51ecb2d61c48997c94b28783ecec9723687a286a9c09db65cd99c4cf664.
+It was derived from pinned Electron c542df1ecbc2c2978e8f53f8c7baf602404d166f
+and Chromium dd78960ccd8a03a2fe1f629543d27783885b78e9 DEPS bytes, with the
+hash-verified Chromium root tree 63b2edfe4c6ae23d2fd3424cde3e529db49f7068.
+
+independent-cipd-shape-expectations.json retains all 144 CIPD dependency rows
+and 150 package records. For the explicit declared native-Windows-x64 model:
+  dependency rows: SELECTED31 / EXCLUDED111 / UNRESOLVED2;
+  package records: SELECTED33 / EXCLUDED115 / UNRESOLVED2.
+The two unresolved records are swift-format and swift-toolchain, whose raw
+conditions use unquoted mac, not a locally defined variable or quoted literal.
+Neither may be selected by silently fixing the source expression.
+
+Selected records include ARM64/x86 Windows updater/apache test data and literal
+TypeScript linux-amd64 data. Package names are exact source data, not a platform
+filter. Expanding host templates must not rewrite fixed names or discard these
+selected records based on their final path component. The 33 package positions
+must retain owner/path/package-index identity; equal names at separate install
+paths are separate source requests, not automatically deduplicated identities.
+
+2. Official format semantics, independently source-bound
+
+Existing official-format/source-manifest.json records 13 immutable LUCI sources
+at commit61fc2ffcffaa3d602e13d752206c2285ae9a637c. This reviewer independently
+checked every file's raw SHA256/Git blob hash and exact mode/blob membership
+using the existing local metadata repository with all protocols forbidden,
+promisor disabled, no-lazy-fetch/replacements/optional-lock guards enabled.
+Result: all13 match; independent-format-source-verification.json. These are
+format/evaluator reference objects, not the actual build bootstrap client.
+
+Additional official format files were acquired as inert bytes from their exact
+immutable raw GitHub URLs, then matched to independently located Git tree blobs:
+  cipd/client/cipd/platform/platform.go
+    blob b303f6f58c8cde603a4fbf9bdf3369afab207f15
+    SHA256 9c533ba5e9282aaadfa2738052bad55e8c39503852eb7e4bd48cf99e9e17f843
+  cipd/client/cipd/template/template.go
+    blob 85ba02afd19294d30864b7d23229a7981c6e6425
+    SHA256 dff83dd242f30f58fc0535c066dc150472e52791430b1e37623be1416da96ce3
+Full acquisition records: independent-official-format/source-manifest.json.
+Neither downloaded file was imported, compiled or executed.
+
+platform.go:26-36 derives parameters from the running CIPD Go binary's GOOS and
+GOARCH, normalizing darwin to mac and arm to armv6l. Thus windows/amd64 is a
+declared client model, not proof inferred from target_cpu=x64 or the test host.
+A different-architecture client on a 64-bit OS can have different parameters.
+template.go:51-120 allows direct variable substitution and value-list guards;
+nonmatching guards skip, while unknown variables or leftover dollar syntax are
+errors. Lines145-159 define os, arch and platform expansion parameters.
+
+Raw pinned DEPS uses doubled braces such as ${{platform}}. That text is not
+directly the CIPD ${platform} grammar. The source-format unescape step and the
+client expansion step must be named separately. The actual bootstrap gclient
+revision/spec and its formatting phase are still unbound; current LUCI source
+does not supply that missing evidence. No guessed universal formatter or host
+default may be presented as an operationally qualified dependency selection.
+
+Official cipd/common/iid.go and cas.proto establish lowercase 40-hex SHA1 IDs,
+or raw URL-safe unpadded base64(digest bytes followed by algorithm byte).
+For SHA256, the raw value is32digestbytes+marker2 and encodes to44characters.
+Check the decoded algorithm/length/canonical reencoding, not merely a C suffix.
+Tags such as git_revision:<40hex> remain symbolic version strings, not instance
+IDs. repo.proto:292-304 resolves a package+version to an instance and can fail
+for a tag matching multiple instances. A zip/manifest hash alone cannot prove
+that symbolic version association, even if its package_name matches.
+
+3. Four version-file objects independently verified, all excluded
+
+independent-version-file-membership.json independently traverses each path from
+the fixed Chromium root through hash-verified raw tree bytes. The following
+objects are regular100644 blobs, not arbitrary caller files:
+  chrome/build/android-arm.orderfile.txt
+    099e702efa7b6710f803404efabfb5d9e58581ac
+  chrome/build/android-arm64.orderfile.txt
+    cffe236bc9ad92879ea5a8a6fcee282fda066abe
+  android_webview/tools/android-webview-arm.orderfile.txt
+    959feb5896dc50b4e59cb5f873cda29ea7c1ee32
+  android_webview/tools/android-webview-arm64.orderfile.txt
+    151851e05043748f3ffb8e0873f9ab339636a7db
+
+Parent captured the four raw objects in version-files/. This reviewer compared
+each byte sequence to both its independent root-to-blob chain and the parent's
+source-manifest. Every file is exactly45bytes:44canonicalSHA256instancecharacters
+followed by one LF, with no CR or extra line. Decoded algorithm marker and hash
+length are correct. Raw SHA256, instance and decoded digest are recorded in
+independent-version-file-verification.json. All four dependency conditions are
+EXCLUDED for the declared Windows profile. Having immutable version-file bytes
+does not enable those records or authorize their payloads.
+
+4. Required boundary and negative cases
+
+Requests must be recomputed from fixed DEPS, not accepted from caller JSON or
+qualification flags. Selector identity is owner/path/package_index; only an
+exact SELECTED package may be returned for payload checking. Unknown mac and
+all EXCLUDED records must refuse selection. Path traversal, backslash/absolute
+or aliased version-file paths, changed bytes/digests, wrong platform/profile,
+template syntax injection, raw-brace phase confusion, forged symbolic-resolution
+evidence and package-position substitution must fail closed. The request module
+must not contact CIPD, run a client/helper/hook or alter a source checkout.
+
+There is no authenticated ResolveVersion response in this evidence set. A
+caller-supplied resolution receipt cannot replace that missing source-to-instance
+association. Even syntactically valid instance IDs/package manifests and all
+claimed verified/qualified booleans cannot make a symbolic version resolved.
+
+5. Final implementation review and independent verification
+
+Reviewed new local custom-electron-cipd-policy.py. It loads only the fixed local
+DEPS parser and rederives both hash-pinned declaration files. No caller plan,
+profile or claimed verification flag supplies source authority. Request identity
+is owner/path/package_index; bool/string/negative indices, owner/path aliases,
+excluded records and unresolved conditions refuse in get_source_request.
+
+declared_source_format and expand_cipd_template model the two phases separately,
+retain exact fixed literal names, reject unknown parameters/leftover dollars,
+and reject malformed hidden syntax even when another guard would skip. The
+model is intentionally narrower than a general gclient/CIPD executor and its
+actual source-format/client identities remain explicitly unqualified.
+
+FixedChromiumTrees performs targeted hash-verified root-to-blob traversal,
+rejects non-tree intermediate boundaries and nonregular leaves, and reads only
+bounded regular single-link tree files. Version bytes are indexed by exact Git
+blob ID, verified against the tree-selected object and independently hashed.
+Supplied unused/extra object keys refuse. Missing proof/bytes stay unavailable.
+Supplying proof for excluded records does not change their condition state.
+
+inspect_resolution_response parses bounded untrusted JSON, rejects duplicate
+keys/schema/package/digest mismatch, and reports CALLER_SUPPLIED_UNAUTHENTICATED_
+JSON with selector_binding_qualified=False/HOLD. Even a matching fabricated
+response cannot change a symbolic source instance_id from None. A mismatching
+response also cannot replace a direct source digest. No callback, authenticated
+service claim, JSON flag or payload hash is accepted as a symbolic pin source.
+
+Important integration condition sent to payload implementer: get_source_request
+can return a selected SYMBOLIC_SELECTOR descriptor with no source instance.
+Only a direct SHA256_INSTANCE with its exact source-pinned ID/digest may be
+used for strong offline payload-byte proof. An inspected response must never
+fill that missing source ID. Request selection is still a declared profile,
+not full operational source/build qualification.
+
+Current module SHA256:
+  f65ea01e38c762a4ae1e6bfd77df09000f2faf0d448e79d23f092f02ca0197c9
+Current implementation-test SHA256:
+  73f08f152585677e3631cd8fd112a42ae9d4ea7b2b4da89b8e669e0afacb2b5a
+Parent DEPS-parser SHA256:
+  aaef7aa1d1f0fc37927990f9047600203c434ba33a721e62e0c38036f50d6891
+Complete final snapshot: cipd-independent-final-snapshot.json.
+
+Implementation tests independently run:
+  PYTHONDONTWRITEBYTECODE=1 \
+  METAENGINE_CIPD_INPUT_FIXTURES=/workspace/metaengine-cipd-evidence/request-fixtures \
+  python3 -m unittest discover -s apps/metaengine-browser/test \
+    -p test_custom_electron_cipd_policy.py -v
+Initial result:19/19 passed, no skips; cipd-policy-independent-unit.log.
+Final name-guard follow-up:20/20 passed, no skips;
+cipd-policy-independent-unit-name-guard.log.
+
+Independent harness:
+  PYTHONDONTWRITEBYTECODE=1 python3 \
+    /workspace/metaengine-cipd-evidence/cipd-independent-negatives.py
+Initial result:14/14 passed; cipd-independent-negatives.log. Final follow-up:
+15/15 passed; cipd-independent-negatives-name-guard.log. The checks cover every
+source package/version/digest/position, exact two-stage template behavior,
+literal Linux/ARM64 fixtures, excluded/unknown/aliased selectors, swapped/extra/
+unproven version blobs, wrong paths/Merkle bytes, instance algorithm/encoding,
+forged/duplicate resolution JSON, direct-instance substitution, and modified
+plan platform/qualification/selection/digest/resolution/blocker data. Socket,
+urlopen and subprocess.Popen were prohibited during actual recomputation and
+verification; no such call occurred. No upstream DEPS/helper/package code ran.
+
+Actual CLI was independently run with fixed DEPS, root tree packet and four
+content-addressed version blobs. It emitted exactly the primary producer's
+142820canonicalbytes, SHA256
+  5292851814df791414a7c672155e8669eb223dcf305480dfb2489358f697090e.
+Output: independent-request-plan.json; stderr log is empty. The result was
+independently rederived and verified with verify_derived_plan. It retains all
+150 records, 33 selected(11directSHA256+22symbolic/21unique requests),115excluded,
+2unresolved and4version-file declarations. All authority/selection/source-closure
+qualification flags remain False and disposition stays HOLD.
+
+Late package-name follow-up: LUCI rejects every dots-only path component,
+including lengths greater than one or two. The previous requester bounded
+regex plus DEPS.safe_path accepted a component such as '...'. The independent
+new regression reproduced six failing bad-name cases on pre-fix d02676dc...;
+cipd-dots-only-before.log retains that evidence. The implementer added a narrow
+component guard, rejecting any component whose text becomes empty after dots
+are removed. Normal names containing dots, such as .hidden, ..a and a...b,
+remain accepted. This guard also applies before returning a skipped template.
+Independent tests cover lengths1/2/3/4/256 at prefix/middle/end and positive
+names with nondot characters. All pass on final f65ea01e... module above.
+
+The fixed150-request CLI was rerun after the guard in
+independent-request-plan-name-guard.json, with empty stderr. It is byte-for-byte
+identical to the prior independent and primary142820byte plans and retains
+SHA2565292851814df791414a7c672155e8669eb223dcf305480dfb2489358f697090e.
+Canonical recomputation was verified again. The final snapshot records the
+new source/test hashes,20implementation/15independent test passes and unchanged
+plan. No network action occurred in this follow-up, and no authority/HOLD guard
+was weakened. The separate payload Deflate-drain work was outside this review.
+
+No actionable source-binding or authority-promotion bypass was found in this
+request producer. No full bootstrap/composition/Windows qualification follows
+from these successful source-only inventory and fixture checks.
+
+6. Exact denied and unavailable actions
+
+Parent's first official CIPD ResolveVersion POST targeted
+https://chrome-infra-packages.appspot.com/prpc/cipd.Repository/ResolveVersion
+for gn/gn/windows-amd64 at git_revision:641ace93dd9560e75e7add0d08f77b446fbb3b78.
+It failed with URLError: Tunnel connection failed:403Forbidden; attempt1 only,
+retry_performed=False. Exact record: resolve-gn-acquisition.json. The request
+did not produce resolution evidence. No retry, alternate transport/path/host,
+or package download was attempted by this reviewer. This action is denied,
+not pending and not an uncertain write. Independent offline work continued.
+
+Reviewer's initial guessed LUCI common/platform.go and common/template.go raw
+paths returned404 (wrong paths). GitHub directory web reads were tool-restricted
+and were not retried. Separate correct immutable raw source URLs above were
+then provided/discovered from the already acquired local official Git tree,
+successfully fetched once within the explicitly permitted official-source scope,
+and verified by blob hash. No prior403Gitiles/API/header endpoint was retried.
+
+Actual enabled source/build qualification remains BLOCKED by missing bootstrap
+client/gclient/spec/phase, recursive inputs, symbolic resolution, package bytes,
+SDK/toolchain/generated outputs and physical composition. No install, native
+Windows/PC/service/DB action, new trust root, release/receipt publication or PR
+metadata action was performed. This reviewer made no production source edits.

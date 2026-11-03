@@ -1,0 +1,16 @@
+[
+  {
+    "patch": "cipd-identity-incremental.patch",
+    "baseline_tree": "2d268fbb87d7974a53095cde68f98c1d1fe0c3f5",
+    "index_apply_check_passed": true,
+    "result_tree": "4a6b3e1fae7520454f0952d7f56f6d8430e11e72",
+    "physical_vs_index_clean": true
+  },
+  {
+    "patch": "metaengine-c26565e-cipd-combined.patch",
+    "baseline_tree": "2dbe253e97379532f6f4b52ef7edf26109a9266d",
+    "index_apply_check_passed": true,
+    "result_tree": "4a6b3e1fae7520454f0952d7f56f6d8430e11e72",
+    "physical_vs_index_clean": true
+  }
+]

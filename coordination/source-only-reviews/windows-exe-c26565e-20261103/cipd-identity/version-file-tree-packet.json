@@ -1,0 +1,14 @@
+{
+  "scope": "TARGETED_MERKLE_PATH_OBJECTS_FOR_FOUR_FIXED_VERSION_FILES_ONLY",
+  "root": "63b2edfe4c6ae23d2fd3424cde3e529db49f7068",
+  "object_count": 5,
+  "objects": [
+    "2478068076943b6afb98c2ab1658bf7d1c171782",
+    "2b07511745e15f604be4a70322b31340bc05a116",
+    "63b2edfe4c6ae23d2fd3424cde3e529db49f7068",
+    "a844b0e66b187e2df433cd2eb6fd885afec769c2",
+    "c6e6c6fe28a6b010cc2cae316eba3e15fbb05d9a"
+  ],
+  "all_tree_hashes_verified": true,
+  "full_recursive_gitlink_packet": false
+}

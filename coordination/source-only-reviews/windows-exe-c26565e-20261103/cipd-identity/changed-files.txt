@@ -1,0 +1,6 @@
+apps/metaengine-browser/scripts/custom-electron-cipd-payload.py
+apps/metaengine-browser/scripts/custom-electron-cipd-policy.py
+apps/metaengine-browser/test/test_custom_electron_cipd_payload.py
+apps/metaengine-browser/test/test_custom_electron_cipd_policy.py
+docs/custom-electron-cipd-identity-v1.md
+docs/custom-electron-deps-composition-v1.md

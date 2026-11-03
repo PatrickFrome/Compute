@@ -1,0 +1,137 @@
+Independent CIPD payload/member producer final peer review
+
+Result
+No remaining concrete false-success or rejection defect was found within the
+implemented, deliberately narrow byte-only ZIP profile after the package-name
+and streaming-drain corrections. This review does not qualify any actual CIPD
+package, installation, bootstrap, hook, Windows execution, or build/release.
+Every successful inventory remains HOLD with authority_effect=false.
+
+Reviewed project source
+apps/metaengine-browser/scripts/custom-electron-cipd-payload.py
+SHA256 76d799db2f641016fd1563dcca10c01692c84b1aa758ca2ca469f94d866475a8
+apps/metaengine-browser/test/test_custom_electron_cipd_payload.py
+SHA256 20032d8122527fdca150a3749d83f1ac216c47aa9797116ac2d1582cbbf74905
+
+The reviewer made no project-source edits. Only evidence and inert fixture
+generator files under /workspace/metaengine-cipd-evidence were written.
+
+Primary-source format proof
+Official LUCI commit 61fc2ffcffaa3d602e13d752206c2285ae9a637c is a pinned format
+reference, not proof of the complete service/client/bootstrap or current package
+compatibility. Known raw official source bytes were matched to exact Git blobs
+in the commit. Paths, hashes, URLs and blob membership are in
+official-format/source-manifest.json; the detailed source review is
+cipd-format-review.txt.
+
+The verified source facts implemented by the bounded producer are:
+- The SHA256 instance form is a canonical 44-character URL-safe base64 encoding
+  of the full ZIP object's 32-byte digest followed by algorithm byte 2. Hashing
+  covers all raw ZIP bytes, rather than only decompressed members or manifest.
+- The embedded manifest is .cipdpkg/manifest.json, format 1.1, and binds the
+  exact package name. Its files[] field is deployed-only; the producer derives
+  archive inventory from the authenticated ZIP instead of inventing files[].
+- Every package-name component consisting only of dots is invalid, regardless
+  of length. This differs from simply rejecting '.' and '..'.
+- Store/Deflate and normalized owner modes 0400/0500/0600/0700 are modeled with
+  regular-file type and supported DOS attributes. Link/directory/special modes,
+  unsupported metadata/layouts and legacy manifest formats are refused.
+- A nonempty version_file describes a generated deployment output, which is
+  listed separately on HOLD; it is not claimed to be an archive member or a
+  produced/qualified installed file.
+
+Exact official source URLs for these facts:
+https://raw.githubusercontent.com/luci/luci-go/61fc2ffcffaa3d602e13d752206c2285ae9a637c/cipd/client/cipd/local/reader.go
+https://raw.githubusercontent.com/luci/luci-go/61fc2ffcffaa3d602e13d752206c2285ae9a637c/cipd/client/cipd/local/json_descs.go
+https://raw.githubusercontent.com/luci/luci-go/61fc2ffcffaa3d602e13d752206c2285ae9a637c/cipd/client/cipd/local/builder.go
+https://raw.githubusercontent.com/luci/luci-go/61fc2ffcffaa3d602e13d752206c2285ae9a637c/cipd/common/common.go
+
+Review finding and correction
+The reviewer independently reproduced acceptance of invalid expected names
+'...', 'metaengine/.../inert' and 'metaengine/..../inert' in the first reviewed
+implementation. Official common/common.go validatePathishString rejects a
+component whenever strings.Count(chunk, ".") == len(chunk). The implementer
+corrected the expected-name and embedded-name path by rejecting every dots-only
+component; the final independent probes confirm rejection of those cases.
+
+The implementer separately corrected a valid Deflate stream refusal caused by
+not draining buffered output when the input tail was empty at a max-output
+boundary. This reviewer verified the final correction with independent repeated
+and incompressible payloads; no claim is made that the reviewer reproduced that
+streaming defect against an archived pre-fix source.
+
+Independent validation
+Command: python3 -B /workspace/metaengine-cipd-evidence/independent-payload-probes.py
+Result: 99/99 cases pass; log independent-payload-probes.log; per-case evidence
+independent-payload-probe-results.json; exact self-authored generator source
+independent-payload-probes.py (SHA256 recorded by its report).
+
+These cases include the eight separately authored descriptor byte models:
+Store/Deflate x signed16/unsigned12 data descriptors x modes0400/0500, zero DOS
+timestamps. These models were also fully read and CRC-checked with stdlib
+zipfile in inert-descriptor-fixture-selfcheck.json. They are not actual Go-
+produced or service packages and their synthetic instance IDs bind no production
+source request. The attempted Go fixture generator did not run because the host
+'go' command was an unrelated tool; inert-go-fixture-build.log records that limit.
+
+Supplemental probes cover 0/1/65535/65536/65537/131072/131073/262144-byte repeated
+data, incompressible multi-chunk data, Store/Deflate and signed/unsigned
+descriptors. Full member sizes and SHA256 values were independently checked.
+Negatives cover unchanged expected IID after raw ZIP change, opaque tail under
+redeclared IID, unsupported algorithm/tag/SHA1, wrong embedded package, all-dot
+package components, raw NUL/traversal/ADS/Windows-device/trailing-dot names,
+duplicate/full/parent case aliases, file-directory prefix collision, symlink and
+reparse metadata, local-central disagreements, encryption, unsupported extras,
+overlap/gaps, member CRC, oversized expansion, concatenated Deflate streams,
+wrong descriptor CRC, reserved service metadata, duplicate JSON keys, deployed-
+only fields, generated-file collisions, and mutable/non-bytes API inputs.
+
+Independent targeted unit rerun:
+env METAENGINE_CIPD_SOURCE_FIXTURES=/workspace/metaengine-cipd-evidence/request-fixtures
+python3 -B -m unittest discover -s apps/metaengine-browser/test -p test_custom_electron_cipd_payload.py -v
+Result: 30/30 pass, no skips. Raw log independent-payload-unit-tests.log. The
+actual fixed DEPS test derives a selected direct identity and a symbolic request
+from exact source data, then rejects the synthetic archive and mutated DEPS.
+Its matching-source-wrapper positive is an explicitly labeled parser-double unit
+model, not actual package proof. Root independently tested all 33 selected source
+requests negatively; root-all-selected-source-negatives.json is root's evidence,
+not an additional reviewer-run experiment.
+
+Scope and API assessment
+The public generic API compares immutable bytes with caller-declared name/IID,
+labels this declared scope, and retains SOURCE_REQUEST_BINDING_NOT_DERIVED. The
+source wrapper rederives the requester through the fixed parser; it requires a
+selected direct SHA256 identity and exact source version, package name, archive
+digest and manifest binding. It accepts no caller verified flag or request JSON.
+Only the supplied archive-byte obligation can be discharged. Phase/profile,
+bootstrap/client, custody and installed-output obligations remain missing.
+
+ZIP parsing accounts for every accepted physical range, compares raw local and
+central names/flags/method/metadata, checks signed/unsigned descriptors, rejects
+overlaps/opaque gaps, and fully decompresses each accepted member with bounded
+output, EOF, exact size and CRC checks. The implementation inventories raw modes,
+attributes and metadata hashes and never extracts files. Unsupported profiles
+refuse rather than normalizing ambiguous layouts.
+
+The pure API hashes and parses the same immutable bytes. The CLI's regular-file
+reader additionally checks object identity before/open/after the bounded read.
+Neither establishes future path custody, installed namespace alias/reparse
+safety, or installed tool identity; those are explicitly unqualified. No new
+production gate/admission, trust root, release signature exception, installer,
+or downloaded-code execution is introduced by this helper.
+
+Exact remaining blocker
+Root's single CIPD ResolveVersion POST targeted
+https://chrome-infra-packages.appspot.com/prpc/cipd.Repository/ResolveVersion
+for gn/gn/windows-amd64, version
+git_revision:641ace93dd9560e75e7add0d08f77b446fbb3b78.
+It failed with URLError: Tunnel connection failed: 403 Forbidden, before any
+resolved ID or payload was received. See resolve-gn-acquisition.json. The network
+request is blocked/failed; no uncertain operation outcome is claimed. Root
+explicitly prohibited another service/download route/transport/host or retry;
+this review attempted none. Real instance-resolution and payload readback remain
+NOT RUN. No fabricated production catalog or real-package positive is reported.
+
+Complete bootstrap/spec/phase qualification, patched/recursive DEPS and CIPD
+closure, SDK/generated build outputs, installation and Windows build/release
+remain HOLD independently of this passing inert byte-profile review.

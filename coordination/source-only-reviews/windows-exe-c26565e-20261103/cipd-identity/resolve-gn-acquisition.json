@@ -1,0 +1,14 @@
+{
+  "action": "CIPD ResolveVersion POST",
+  "url": "https://chrome-infra-packages.appspot.com/prpc/cipd.Repository/ResolveVersion",
+  "request": {
+    "package": "gn/gn/windows-amd64",
+    "version": "git_revision:641ace93dd9560e75e7add0d08f77b446fbb3b78"
+  },
+  "time_utc": "2026-11-03T09:43:58.004738+00:00",
+  "attempt": 1,
+  "retry_performed": false,
+  "outcome": "FAILED",
+  "error_type": "URLError",
+  "error": "<urlopen error Tunnel connection failed: 403 Forbidden>"
+}
