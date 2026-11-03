@@ -1,0 +1,477 @@
+diff --git a/apps/metaengine-browser/test/native/verify-guardian-original-main-authorization-model.py b/apps/metaengine-browser/test/native/verify-guardian-original-main-authorization-model.py
+index 40d66c6..da1ab4a 100644
+--- a/apps/metaengine-browser/test/native/verify-guardian-original-main-authorization-model.py
++++ b/apps/metaengine-browser/test/native/verify-guardian-original-main-authorization-model.py
+@@ -1,14 +1,18 @@
+ #!/usr/bin/env python3
+ """Exercise the actual Main grant authorizer with synthetic external objects.
+ 
+-The real wire parser, connection challenge and private grant constructor run in
+-this harness. Windows identity, device-signature verification, clock, RNG and
+-retained-root objects are stand-ins, not production evidence. The calibration
+-case does not authorize a process or prove that a pre-Main issuer exists.
++The real authorizer, object-duplication method, observation helper, wire parser,
++connection challenge and private grant constructor run in this harness. Windows
++identity, device-signature verification, clock, RNG, startup custody and native
++objects are stand-ins, not production evidence. The calibration case does not
++authorize a process or prove that a pre-Main issuer exists.
+ """
+ from pathlib import Path
+ import argparse
++import hashlib
++import json
+ import os
++import re
+ import subprocess
+ import tempfile
+ 
+@@ -24,6 +28,33 @@ begin = source.index('std::unique_ptr<GuardianOriginalMainLaunchGrant>\n'
+                      'GuardianNativeRootSession::authorizeOriginalMainLaunch(')
+ end = source.index('\nbool GuardianNativeRootSession::duplicateOriginalMainLaunchObjects(', begin)
+ method = source[begin:end]
++duplicate_method = source[end:]
++
++
++def scope_declaration(header):
++    text = (root / header).read_text()
++    fields = re.findall(r'std::shared_ptr<const char>\s+original_main_scope_\s*=\s*[^;]+;', text)
++    if len(fields) != 1 or text.index(fields[0]) < text.index('private:'):
++        raise RuntimeError(f'expected one private native scope declaration in {header}')
++    return fields[0] + '\n'
++
++
++pipe_header = (root / 'browser-guardian-owner-enrollment-observer.hpp').read_text()
++live_begin = pipe_header.index('    bool originalMainConnectionLive() const noexcept {')
++live_end = pipe_header.index('\n    }', live_begin) + len('\n    }')
++getter_begin = pipe_header.index('    bool impersonationRevertFailed() const noexcept {')
++getter_end = pipe_header.index('\n', getter_begin)
++actuator = (root / 'browser-guardian-update-actuator.cpp').read_text()
++helper_begin = actuator.index('OwnerEnrollmentObservation observeOriginalClientOrStop(')
++helper_end = actuator.index('\n}', helper_begin) + len('\n}')
++fragments = {
++    'model-wire-limit.inc.hpp': re.search(r'constexpr std::size_t kMaxWireBytes = [^;]+;', actuator).group(0) + '\n',
++    'model-session-scope.inc.hpp': scope_declaration('browser-guardian-native-root-session.hpp'),
++    'model-pipe-scope.inc.hpp': scope_declaration('browser-guardian-owner-enrollment-observer.hpp'),
++    'model-pipe-live.inc.hpp': pipe_header[live_begin:live_end] + '\n',
++    'model-pipe-revert.inc.hpp': pipe_header[getter_begin:getter_end] + '\n',
++    'model-observe-original.inc.hpp': actuator[helper_begin:helper_end] + '\n',
++}
+ 
+ pre = r'''
+ #define METAENGINE_GUARDIAN_MAIN_CHALLENGE_TEST 1
+@@ -31,8 +62,11 @@ pre = r'''
+ #include "browser-guardian-original-main-launch-grant.hpp"
+ #include "browser-guardian-original-main-launch-wire.hpp"
+ #include <cassert>
++#include <array>
+ #include <cstdint>
+ #include <cstring>
++#include <cwchar>
++#include <functional>
+ #include <iostream>
+ #include <limits>
+ #include <memory>
+@@ -41,9 +75,23 @@ pre = r'''
+ 
+ using ULONGLONG = std::uint64_t;
+ using PUCHAR = unsigned char*;
++using DWORD = std::uint32_t;
++struct LUID { DWORD LowPart = 0; int HighPart = 0; };
++struct SyntheticHandle {
++    enum Kind { Service, Stop, Pipe, Token, Requester } kind;
++    bool duplicate = false;
++    const bool* connected = nullptr;
++};
++using HANDLE = SyntheticHandle*;
++const HANDLE INVALID_HANDLE_VALUE = reinterpret_cast<HANDLE>(static_cast<std::intptr_t>(-1));
++constexpr unsigned WAIT_TIMEOUT = 258, WAIT_FAILED = 0xffffffff;
++constexpr unsigned TOKEN_QUERY = 8, TOKEN_DUPLICATE = 2, TOKEN_ASSIGN_PRIMARY = 1;
++constexpr unsigned SYNCHRONIZE = 0x100000, PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
++constexpr int FALSE = 0;
+ constexpr unsigned BCRYPT_USE_SYSTEM_PREFERRED_RNG = 2;
+ 
+ namespace metaengine::guardian {
++#include "model-wire-limit.inc.hpp"
+ namespace {
+ constexpr std::uint64_t issued = 100, deadline = 300;
+ const std::string nonce(43, 'A'), key_x(43, 'B'), key_y(43, 'C');
+@@ -53,12 +101,60 @@ struct Inputs {
+     bool stopped = false, identity_exact = true, tuple_exact = true;
+     bool root_held = true, release_bound = true, token_valid = true;
+     bool token_logon_valid = true, random_available = true, correlation_nonzero = true;
++    bool startup_held = true, stop_signaled = false, requester_valid = true;
+     bool expire_during_signature = false, expire_during_final_root_check = false;
+     bool cancel_during_signature = false;
+     int observations = 0, signatures = 0, root_checks = 0, random_calls = 0;
++    int startup_checks = 0, store_reads = 0, stop_signals = 0;
++    int fatal_observation_at = 0, duplicate_failure_at = 0, duplicate_calls = 0, live_duplicates = 0;
++    LUID token_logon{4, 0};
++    std::function<void()> signature_hook;
++    std::array<std::function<void()>, 2> duplicate_hooks;
+ } input;
+ }
++void fire(std::function<void()>& hook) {
++    auto once = std::move(hook);
++    hook = {};
++    if (once) once();
++}
+ ULONGLONG GetTickCount64() { return input.now; }
++unsigned WaitForSingleObject(HANDLE handle, unsigned timeout) {
++    assert(timeout == 0);
++    if (!handle || handle == INVALID_HANDLE_VALUE) return WAIT_FAILED;
++    assert(handle->kind == SyntheticHandle::Stop);
++    return input.stop_signaled ? 0 : WAIT_TIMEOUT;
++}
++bool SetEvent(HANDLE handle) {
++    assert(handle && handle != INVALID_HANDLE_VALUE && handle->kind == SyntheticHandle::Stop);
++    input.stop_signaled = true;
++    ++input.stop_signals;
++    return true;
++}
++bool PeekNamedPipe(HANDLE handle, void* data, unsigned length, unsigned* read, unsigned* available, unsigned* left) {
++    assert(!data && !length && !read && !available && !left);
++    return handle && handle != INVALID_HANDLE_VALUE && handle->kind == SyntheticHandle::Pipe &&
++        handle->connected && *handle->connected;
++}
++HANDLE GetCurrentProcess() { static SyntheticHandle service{SyntheticHandle::Service}; return &service; }
++bool CloseHandle(HANDLE handle) {
++    assert(handle && handle != INVALID_HANDLE_VALUE && handle->duplicate);
++    --input.live_duplicates;
++    delete handle;
++    return true;
++}
++bool DuplicateHandle(HANDLE source_process, HANDLE original, HANDLE target_process,
++    HANDLE* output, unsigned rights, int inherit, unsigned options) {
++    assert(source_process == GetCurrentProcess() && target_process == GetCurrentProcess() && !inherit && !options);
++    ++input.duplicate_calls;
++    if (!original || input.duplicate_calls == input.duplicate_failure_at) return false;
++    assert((original->kind == SyntheticHandle::Token && rights == (TOKEN_QUERY | TOKEN_DUPLICATE | TOKEN_ASSIGN_PRIMARY)) ||
++        (original->kind == SyntheticHandle::Requester && rights == (SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION)));
++    *output = new SyntheticHandle{original->kind, true};
++    ++input.live_duplicates;
++    if (input.duplicate_calls <= 2) fire(input.duplicate_hooks[input.duplicate_calls - 1]);
++    return true;
++}
++int _wcsicmp(const wchar_t* left, const wchar_t* right) { return std::wcscmp(left, right); }
+ int BCryptGenRandom(void*, PUCHAR out, std::size_t length, unsigned flags) {
+     ++input.random_calls;
+     assert(flags == BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+@@ -78,18 +174,34 @@ struct Identity {
+     std::uint64_t client_creation_time_100ns = 3;
+     std::wstring user_sid = L"S-1-5-21-1";
+ };
++using OwnerEnrollmentObservation = Identity;
+ struct DurableOwner {};
+ struct OwnerEnrollmentPipe {
++    bool connected = true;
++    OwnerEnrollmentPipe() { handle_.connected = &connected; }
++    OwnerEnrollmentPipe(const OwnerEnrollmentPipe&) = delete;
++    OwnerEnrollmentPipe& operator=(const OwnerEnrollmentPipe&) = delete;
++    bool valid() const { return true; } // The retained server HANDLE survives client disconnect.
++#include "model-pipe-revert.inc.hpp"
+     Identity observeClientIdentity(bool retain) {
+         ++input.observations;
+         assert(retain);
++        if (input.fatal_observation_at == input.observations) impersonation_revert_failed_ = true;
+         return {};
+     }
++private:
++#include "model-pipe-scope.inc.hpp"
++#include "model-pipe-live.inc.hpp"
++    friend class GuardianNativeRootSession;
++    bool impersonation_revert_failed_ = false;
++    SyntheticHandle handle_{SyntheticHandle::Pipe};
++    HANDLE pipe_ = &handle_;
+ };
++#include "model-observe-original.inc.hpp"
+ std::wstring browserGuardianOwnerEnrollmentStoreDefaultRoot() { return L"TEST_ONLY"; }
+ struct OwnerEnrollmentStore {
+     explicit OwnerEnrollmentStore(const std::wstring&) {}
+-    DurableOwner read() const { return {}; }
++    DurableOwner read() const { ++input.store_reads; return {}; }
+ };
+ bool ownerAndClientExact(const Identity&, const DurableOwner&) {
+     return input.identity_exact;
+@@ -105,43 +217,75 @@ bool deviceProofExact(const std::string& x, const std::string& y,
+                        "purpose=ORIGINAL_MAIN_LAUNCH\nrequest_nonce=" + nonce + "\n");
+     if (input.expire_during_signature) input.now = deadline;
+     if (input.cancel_during_signature) input.stopped = true;
++    fire(input.signature_hook);
+     return x == key_x && y == key_y && proof == signature;
+ }
+ // Only a syntactically valid digest is needed by the real grant constructor.
+ // No cryptographic digest assertion is made by this synthetic harness.
+ std::string sha256Text(const std::string&) { return std::string(64, 'a'); }
++class ScopedHandle {
++    HANDLE handle_;
++public:
++    explicit ScopedHandle(HANDLE handle) : handle_(handle) {}
++    ~ScopedHandle() { if (handle_) CloseHandle(handle_); }
++    ScopedHandle(const ScopedHandle&) = delete;
++    ScopedHandle& operator=(const ScopedHandle&) = delete;
++    HANDLE release() { return std::exchange(handle_, nullptr); }
++};
++struct GuardianInstalledNamespace {
++    bool releaseSignatureBound() const { return input.release_bound; }
++};
++struct GuardianStartupCodeCustody {
++    bool recheck() { ++input.startup_checks; return input.startup_held; }
++};
+ 
+ class GuardianNativeRootSession {
+ public:
+     struct State {
+         struct Token {
++            SyntheticHandle handle{SyntheticHandle::Token};
+             bool valid() const { return input.token_valid; }
+-            const Token& get() const { return *this; }
++            HANDLE get() { return &handle; }
+         } user_token;
+-        struct Installed {
+-            bool releaseSignatureBound() const { return input.release_bound; }
+-        };
+-        std::unique_ptr<Installed> installed = std::make_unique<Installed>();
+-        std::uint64_t logon_id = 0;
+-        bool sameTuple(const Identity&, const DurableOwner&) const { return input.tuple_exact; }
++        struct Process {
++            SyntheticHandle handle{SyntheticHandle::Requester};
++            bool valid() const { return input.requester_valid; }
++            HANDLE get() { return &handle; }
++        } client_process;
++        Identity client;
++        std::unique_ptr<GuardianInstalledNamespace> installed = std::make_unique<GuardianInstalledNamespace>();
++        LUID logon_id{4, 0};
++        bool sameTuple(const Identity& observed, const DurableOwner&) const {
++            return input.tuple_exact && observed.session_id == client.session_id && observed.client_pid == client.client_pid &&
++                observed.client_creation_time_100ns == client.client_creation_time_100ns && observed.user_sid == client.user_sid;
++        }
+         bool recheck() {
+             ++input.root_checks;
+             if (input.expire_during_final_root_check && input.root_checks == 2)
+                 input.now = deadline;
+             return !input.stopped && input.root_held && bool(installed);
+         }
+-        static bool tokenLogonId(const Token&, std::uint64_t* out) {
++        bool originalProcessExact() const { return input.root_held && input.requester_valid; }
++        static bool tokenLogonId(HANDLE token, LUID* out) {
++            assert(token && token->kind == SyntheticHandle::Token);
+             if (!input.token_logon_valid) return false;
+-            *out = 4;
++            *out = input.token_logon;
+             return true;
+         }
+     };
+     struct Admission { bool stopped() const { return input.stopped; } } admission_;
+     std::unique_ptr<State> state_ = std::make_unique<State>();
+-    static constexpr std::size_t kMaxWireBytes = 4096;
++    GuardianStartupCodeCustody original_startup;
++    GuardianStartupCodeCustody* startup_ = &original_startup;
++    SyntheticHandle original_stop{SyntheticHandle::Stop};
++    HANDLE stop_event_ = &original_stop;
+     void expireReplacementPreparation() {}
+     std::unique_ptr<GuardianOriginalMainLaunchGrant> authorizeOriginalMainLaunch(
+         const std::string&, OwnerEnrollmentPipe&, GuardianOriginalMainChallenge&, std::string*);
++    bool duplicateOriginalMainLaunchObjects(const GuardianOriginalMainLaunchGrant&, OwnerEnrollmentPipe&,
++        HANDLE*, HANDLE*, std::unique_ptr<GuardianInstalledNamespace>*, std::string*);
++private:
++#include "model-session-scope.inc.hpp"
+ };
+ '''
+ 
+@@ -173,6 +317,22 @@ struct Attempt {
+         assert(input.observations == 0 && input.signatures == 0);
+     }
+ };
++struct LaunchObjects {
++    HANDLE token = nullptr, requester = nullptr;
++    std::unique_ptr<GuardianInstalledNamespace> package;
++    ~LaunchObjects() { if (token) CloseHandle(token); if (requester) CloseHandle(requester); }
++    bool empty() const { return !token && !requester && !package; }
++};
++void expectObjectsRefused(GuardianNativeRootSession& session, OwnerEnrollmentPipe& pipe,
++    const GuardianOriginalMainLaunchGrant& grant, const char* reason) {
++    LaunchObjects objects;
++    const auto* original_package = session.state_->installed.get();
++    std::string failure;
++    assert(!session.duplicateOriginalMainLaunchObjects(grant, pipe,
++        &objects.token, &objects.requester, &objects.package, &failure));
++    assert(failure == reason && objects.empty());
++    assert(session.state_->installed.get() == original_package && input.live_duplicates == 0);
++}
+ bool malformedFrameIsTerminal() {
+     input = Inputs{}; Attempt a;
+     a.expect("ORIGINAL_MAIN_LAUNCH_FRAME_INVALID", frame() + "extra=x\n");
+@@ -207,7 +367,8 @@ int main(int argc, char** argv) {
+         assert(grant->bound().session_id == 1 && grant->bound().client_pid == 2);
+         assert(grant->bound().client_birth_100ns == 3 && grant->bound().user_sid == L"S-1-5-21-1");
+         assert(grant->bound().monotonic_deadline_ms == 150 + GuardianOriginalMainLaunchGrant::kAdmissionWindowMs);
+-        assert(input.observations == 1 && input.signatures == 1 && input.root_checks == 2);
++        assert(input.observations == 2 && input.signatures == 1 && input.root_checks == 2);
++        assert(input.startup_checks == 2 && input.store_reads == 1 && input.stop_signals == 0);
+         a.expectSpent();
+         pass("calibration_and_replay");
+     }
+@@ -336,6 +497,119 @@ int main(int argc, char** argv) {
+         assert(!GuardianOriginalMainChallengeTest::arm(a.challenge, &a.pipe));
+         a.expectSpent(); pass("revoke_after_consumption_is_terminal");
+     }
++    {
++        input = Inputs{}; Attempt a; a.session.startup_ = nullptr;
++        a.expect("ORIGINAL_MAIN_LAUNCH_ORIGINAL_ROOT_CUSTODY_UNPROVEN");
++        assert(input.root_checks == 0);
++        a.expectSpent(); pass("missing_original_startup_custody");
++    }
++    {
++        input = Inputs{}; Attempt a; input.startup_held = false;
++        a.expect("ORIGINAL_MAIN_LAUNCH_ORIGINAL_ROOT_CUSTODY_UNPROVEN");
++        assert(input.startup_checks == 1 && input.root_checks == 0);
++        a.expectSpent(); pass("revoked_original_startup_custody");
++    }
++    {
++        input = Inputs{}; Attempt a; a.session.stop_event_ = nullptr;
++        a.expect("ORIGINAL_MAIN_LAUNCH_ORIGINAL_ROOT_CUSTODY_UNPROVEN");
++        assert(input.root_checks == 0);
++        a.expectSpent(); pass("missing_original_stop_event");
++    }
++    {
++        input = Inputs{}; Attempt a; input.stop_signaled = true;
++        a.expect("ORIGINAL_MAIN_LAUNCH_ORIGINAL_ROOT_CUSTODY_UNPROVEN");
++        assert(input.root_checks == 0);
++        a.expectSpent(); pass("original_stop_event_already_signaled");
++    }
++    {
++        input = Inputs{}; Attempt a;
++        input.signature_hook = [] { input.startup_held = false; };
++        a.expect("ORIGINAL_MAIN_LAUNCH_ORIGINAL_ROOT_CUSTODY_UNPROVEN");
++        assert(input.signatures == 1 && input.root_checks == 0);
++        a.expectSpent(); pass("startup_revoked_during_device_verification");
++    }
++    {
++        input = Inputs{}; Attempt a;
++        input.signature_hook = [] { input.stop_signaled = true; };
++        a.expect("ORIGINAL_MAIN_LAUNCH_ORIGINAL_ROOT_CUSTODY_UNPROVEN");
++        assert(input.signatures == 1 && input.root_checks == 0);
++        a.expectSpent(); pass("stop_signaled_during_device_verification");
++    }
++    for (bool high_part : {false, true}) {
++        input = Inputs{}; Attempt a;
++        if (high_part) ++input.token_logon.HighPart;
++        else ++input.token_logon.LowPart;
++        a.expect("ORIGINAL_MAIN_LAUNCH_ORIGINAL_WTS_TOKEN_UNAVAILABLE");
++        assert(a.session.state_->logon_id.LowPart == 4 && a.session.state_->logon_id.HighPart == 0);
++        a.expectSpent(); pass(high_part ? "original_logon_high_part_drift_not_rebound" : "original_logon_low_part_drift_not_rebound");
++    }
++    {
++        input = Inputs{}; Attempt a; a.pipe.connected = false;
++        a.expect("ORIGINAL_MAIN_LAUNCH_EXISTING_OWNER_DEVICE_SCOPE_REQUIRED");
++        assert(input.signatures == 0);
++        a.expectSpent(); pass("closed_original_pipe_with_retained_server_handle");
++    }
++    {
++        input = Inputs{}; Attempt a;
++        input.signature_hook = [&a] { a.pipe.connected = false; };
++        a.expect("ORIGINAL_MAIN_LAUNCH_ORIGINAL_ROOT_OR_CHALLENGE_POSTCHECK_FAILED");
++        assert(input.signatures == 1);
++        a.expectSpent(); pass("original_pipe_closes_during_verification");
++    }
++    for (bool other_session : {false, true}) {
++        input = Inputs{}; Attempt a;
++        auto grant = a.authorize(); assert(grant);
++        OwnerEnrollmentPipe other_pipe;
++        GuardianNativeRootSession other;
++        auto& target = other_session ? other : a.session;
++        auto& pipe = other_session ? a.pipe : other_pipe;
++        expectObjectsRefused(target, pipe, *grant, "ORIGINAL_MAIN_LAUNCH_GRANT_SCOPE_CHANGED");
++        assert(input.duplicate_calls == 0 && a.session.state_->installed);
++        // The original pair remains usable, so the negative control is not a
++        // blanket refusal and did not consume or transfer the original scope.
++        {
++            LaunchObjects objects;
++            const auto* original_package = a.session.state_->installed.get();
++            assert(a.session.duplicateOriginalMainLaunchObjects(*grant, a.pipe,
++                &objects.token, &objects.requester, &objects.package, &a.failure));
++            assert(objects.token && objects.requester && objects.package.get() == original_package);
++            assert(a.failure.empty() && !a.session.state_->installed && input.live_duplicates == 2);
++        }
++        assert(input.live_duplicates == 0);
++        a.expectSpent(); pass(other_session ? "grant_cannot_cross_original_session" : "grant_cannot_cross_original_pipe");
++    }
++    {
++        input = Inputs{}; Attempt a; const auto grant = a.authorize(); assert(grant);
++        input.duplicate_failure_at = 2;
++        expectObjectsRefused(a.session, a.pipe, *grant, "ORIGINAL_MAIN_LAUNCH_ORIGINAL_REQUESTER_DUPLICATE_FAILED");
++        assert(input.duplicate_calls == 2);
++        a.expectSpent(); pass("partial_duplication_failure_preserves_original_objects");
++    }
++    {
++        input = Inputs{}; Attempt a; const auto grant = a.authorize(); assert(grant);
++        input.duplicate_hooks[0] = [] { input.stop_signaled = true; };
++        expectObjectsRefused(a.session, a.pipe, *grant, "ORIGINAL_MAIN_LAUNCH_ORIGINAL_INCARNATION_POSTCHECK_FAILED");
++        assert(input.duplicate_calls == 2);
++        a.expectSpent(); pass("stop_during_duplication_closes_handles_and_retains_package");
++    }
++    for (int observation : {1, 2}) {
++        input = Inputs{}; Attempt a; input.fatal_observation_at = observation;
++        const auto* original_package = a.session.state_->installed.get();
++        a.expect("ORIGINAL_MAIN_LAUNCH_IMPERSONATION_REVERT_FAILED");
++        assert(a.pipe.impersonationRevertFailed() && input.stop_signaled && input.stop_signals == 1);
++        assert(input.store_reads == (observation == 1 ? 0 : 1));
++        assert(input.duplicate_calls == 0 && a.session.state_->installed.get() == original_package);
++        a.expectSpent(); pass(observation == 1 ? "fatal_first_authorization_observation" : "fatal_final_authorization_observation");
++    }
++    for (int observation : {1, 2}) {
++        input = Inputs{}; Attempt a; const auto grant = a.authorize(); assert(grant);
++        input.fatal_observation_at = input.observations + observation;
++        expectObjectsRefused(a.session, a.pipe, *grant, "ORIGINAL_MAIN_LAUNCH_IMPERSONATION_REVERT_FAILED");
++        assert(a.pipe.impersonationRevertFailed() && input.stop_signaled && input.stop_signals == 1);
++        assert(input.store_reads == (observation == 1 ? 1 : 2));
++        assert(input.duplicate_calls == (observation == 1 ? 0 : 2));
++        a.expectSpent(); pass(observation == 1 ? "fatal_first_duplication_observation" : "fatal_final_duplication_observation");
++    }
+     std::cout << "original_main_authorization_synthetic: " << passed
+               << " PASS; WINDOWS: NOT RUN; CRYPTO: STAND-IN; PRE-MAIN ISSUER: UNPROVEN\n";
+ }
+@@ -344,25 +618,37 @@ int main(int argc, char** argv) {
+ with tempfile.TemporaryDirectory(prefix='guardian-main-authorization-model-') as temp:
+     cpp = Path(temp) / 'model.cpp'
+     binary = Path(temp) / 'model'
+-    cpp.write_text(pre + method + post)
+-    flags = ['-fsanitize=address,undefined', '-fno-omit-frame-pointer'] if args.sanitize else []
++    for name, text in fragments.items():
++        (Path(temp) / name).write_text(text)
++    cpp.write_text(pre + method + duplicate_method + post)
++    flags = ['-fsanitize=address,undefined', '-fno-omit-frame-pointer', '-g', '-no-pie'] if args.sanitize else []
+     subprocess.run(['g++', '-std=c++20', '-Wall', '-Wextra', '-Werror', '-pedantic',
+-                    *flags, '-I', str(root), str(cpp), '-o', str(binary)], check=True)
+-    environment = {**os.environ, 'ASAN_OPTIONS': 'detect_leaks=0'} if args.sanitize else None
++                    *flags, '-I', temp, '-I', str(root), str(cpp), '-o', str(binary)], check=True)
++    environment = {**os.environ, 'ASAN_OPTIONS': 'detect_leaks=0:halt_on_error=1',
++                   'UBSAN_OPTIONS': 'halt_on_error=1:print_stacktrace=1'} if args.sanitize else None
+     subprocess.run([str(binary)], check=True, env=environment)
++    print('ASAN+UBSAN: ' + ('PASS' if args.sanitize else 'NOT RUN') +
++          '; LSAN: NOT RUN (' + ('detect_leaks=0' if args.sanitize else 'not enabled in this build') + ')', flush=True)
++    print(json.dumps({'actual_source_sha256': {
++        'authorizer': hashlib.sha256(method.encode()).hexdigest(),
++        'duplicate_method': hashlib.sha256(duplicate_method.encode()).hexdigest(),
++        **{name: hashlib.sha256(text.encode()).hexdigest() for name, text in fragments.items()},
++    }}, sort_keys=True), flush=True)
+     if args.mutation_check:
+         if method.count('originalChallenge.revoke();') != 1:
+             raise RuntimeError('expected exactly one original challenge rejection revocation')
+         mutated = method.replace('originalChallenge.revoke();', '', 1)
+-        cpp.write_text(pre + mutated + post)
++        cpp.write_text(pre + mutated + duplicate_method + post)
+         mutant = Path(temp) / 'pre-revocation-model'
+         subprocess.run(['g++', '-std=c++20', '-Wall', '-Wextra', '-Werror', '-pedantic',
+-                        *flags, '-I', str(root), str(cpp), '-o', str(mutant)], check=True)
++                        *flags, '-I', temp, '-I', str(root), str(cpp), '-o', str(mutant)], check=True)
+         result = subprocess.run([str(mutant), '--malformed-only'], env=environment,
+                                 capture_output=True, text=True)
+         expected = 'REGRESSION malformed_frame_retry_minted_synthetic_grant'
+         if result.returncode != 7 or expected not in result.stderr:
+             raise RuntimeError(f'mutation escaped regression: exit={result.returncode}\n'
+                                f'{result.stdout}{result.stderr}')
++        print(json.dumps({'mutation_result': {'compile_exit_code': 0, 'exit_code': result.returncode,
++              'stdout': result.stdout, 'stderr': result.stderr}}, sort_keys=True), flush=True)
+         print('PASS mutation: removing rejection revocation reproduces malformed-frame retry\n'
+               'MUTANT: EXPECTED FAIL (exit 7); production source was not modified')
