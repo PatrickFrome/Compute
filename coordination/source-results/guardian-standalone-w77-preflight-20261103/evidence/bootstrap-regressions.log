@@ -1,0 +1,55 @@
+✔ release bundle cross-binds physical manifest, Guardian manifest, and exact GitHub assets (8.093674ms)
+✔ release bundle rejects incomplete physical proof instead of trusting a flattened verified flag (5.47788ms)
+✔ release bundle rejects source, version, channel and machine-root drift (0.616157ms)
+✔ release bundle rejects activation-bearing Guardian evidence (0.394133ms)
+✔ release bundle rejects Guardian manifest byte digest drift (0.214983ms)
+✔ release bundle rejects missing, duplicate, digest-drifted and size-drifted native release assets (1.682331ms)
+✔ draft or non-prerelease GitHub release cannot become bootstrap authority (0.634194ms)
+✔ external stop is terminal for bootstrap planning without acquiring effect authority (0.668466ms)
+✔ unverified release bundle is held before a machine plan exists (1.064311ms)
+✔ absent target slot produces copy-only contract from exact verified GitHub release assets (0.654284ms)
+✔ an existing slot with identity drift is quarantined instead of overwritten (0.583918ms)
+✔ incomplete slot never advances to SCM configuration (0.279721ms)
+✔ exact machine-secure slot with no service is the only initial SCM configuration candidate (1.020776ms)
+✔ exact active service and exact slot are a no-op (1.264772ms)
+✔ active old or different Guardian is never replaced by raw bootstrap planning (0.217858ms)
+✔ service identity and machine path drift fail closed before any copy/config transition (1.379956ms)
+✔ target digest binds exact release evidence as well as Guardian binary identity (4.330704ms)
+✔ origin link keeps original-process access private and mechanics friends compile guarded (1.437011ms)
+✔ native original-process and bootstrap payload file identities are retained on real call paths (2.304346ms)
+✔ origin link probe covers native pending cancellation and exact bounded messages without effects (0.549116ms)
+✔ invalid hello oracle distinguishes oversized I/O refusal from complete malformed frames (0.594064ms)
+﹣ actual Windows original-origin pipe transcript refuses forged frames and joins cancellation (0.358119ms) # requires actual Windows pipe/token/process APIs; crossbuild is separate evidence
+✔ actual production portable framing and terminal cancellation refuse replay and caller identity claims (1838.980392ms)
+✔ machine bootstrap preserves fixed install boundaries and isolates origin observation (1.867088ms)
+✔ all embedded bytes are digest-checked before durable machine effects (0.266371ms)
+✔ exclusive flushed intent gates physical copy/config/start and forbids blind recovery (0.274994ms)
+✔ same Package Smoke producer packages and physically qualifies the companion bytes (0.907555ms)
+✔ protected binding accepts only exact build/version/name/bytes contract (3.269528ms)
+✔ packaged executable must match protected digest and size (31.13949ms)
+✔ absent service requires explicit activation but status never invokes UAC (9.04087ms)
+✔ pre-existing Guardian with missing owner binds approved device without launching UAC (8.895811ms)
+✔ unchanged packaged bootstrap requires native custody before any OS launch or polling (31.430494ms)
+✔ same-size byte tampering during Guardian observation cannot reach an OS launch callback (6.132536ms)
+✔ pathname replacement during Guardian observation cannot reach an OS launch callback (6.698326ms)
+✔ verified digest and fabricated launch or subsequent readback JSON do not provide native custody (5.757582ms)
+✔ ambiguous owner enrollment is terminal for this activation and is never auto-retried (3.246209ms)
+✔ tampered packaged bootstrap holds before UAC (10.330304ms)
+✔ repeated and concurrent activation remain HOLD without OS callbacks or enrollment (4.294865ms)
+✔ launcher contract exposes no renderer path/args and no startup elevation or retry (0.369235ms)
+✔ unproven pipe observation guardian_update_actuator_pipe_timeout cannot request UAC or enrollment (3.292327ms)
+✔ unproven pipe observation guardian_update_actuator_pipe_ended_without_result cannot request UAC or enrollment (2.617544ms)
+✔ unproven pipe observation guardian_update_actuator_pipe_closed_without_result cannot request UAC or enrollment (3.041591ms)
+✔ unproven pipe observation guardian_update_actuator_pipe_error:ENOENT cannot request UAC or enrollment (7.719251ms)
+✔ unproven pipe observation guardian_update_actuator_pipe_error:EACCES cannot request UAC or enrollment (3.54023ms)
+✔ unproven pipe observation guardian_update_actuator_pipe_error:ECONNRESET cannot request UAC or enrollment (2.389711ms)
+✔ missing authenticated local owner bridge is explicit HOLD, not generic failure or READY (2.787449ms)
+﹣ actual Windows original-user token/process/pipe custody and revocation stay SOURCE_ONLY (1.111872ms) # requires actual Windows process/token/messagepipe kernel; Linux is not Windows qualification
+ℹ tests 47
+ℹ suites 0
+ℹ pass 45
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 2
+ℹ todo 0
+ℹ duration_ms 2041.96332

@@ -1,0 +1,29 @@
+✔ staged peer, service and actual bootstrap file bytes agree (9.719928ms)
+✔ reject changed actual staged bytes: guardian/METAENGINEBrowserGuardian.exe (2.253259ms)
+✔ reject changed actual staged bytes: guardian/METAENGINEBrowserGuardianConfigure.exe (1.912517ms)
+✔ reject changed actual staged bytes: guardian-peer/guardian-connected-peer.node (1.356901ms)
+✔ reject changed actual staged bytes: guardian-bootstrap/METAENGINE-Guardian-Bootstrap-0.7.0-dev.12345.1-x64.exe (1.579335ms)
+✔ reject unlinked peer (6.360846ms)
+✔ reject old peer source (1.563962ms)
+✔ reject different crypto build (2.164926ms)
+✔ reject duplicate service rows (5.086209ms)
+✔ reject bootstrap bound to other service (2.133869ms)
+✔ reject bootstrap path traversal (3.791773ms)
+✔ package verifier requires the compatibility catalog even when there are no approved predecessors (1.331652ms)
+✔ changed canonical compatibility bytes cannot reuse the previous bootstrap digest (1.474778ms)
+✔ package verifier refuses partial/interrupted catalog (1.498884ms)
+✔ package verifier refuses wrong catalog schema (1.046955ms)
+✔ package verifier refuses noncanonical catalog even with a matching bootstrap digest (1.33656ms)
+✔ package verifier independently binds target_source_head to this exact staging payload (1.276099ms)
+✔ package verifier independently binds target_manifest_sha256 to this exact staging payload (1.191592ms)
+✔ package verifier independently binds target_service_sha256 to this exact staging payload (1.31635ms)
+✔ package verifier independently binds target_configurator_sha256 to this exact staging payload (1.309149ms)
+✔ bootstrap must pin the exact compatibility catalog hash (1.71523ms)
+ℹ tests 21
+ℹ suites 0
+ℹ pass 21
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 144.150012

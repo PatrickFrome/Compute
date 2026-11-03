@@ -1,0 +1,30 @@
+{
+  "baseline_integrated_prelaunch_hold_tree": "cc5ac21ed40e48d07c051c8019a83fb361e0e30e",
+  "baseline_is_local_reconstruction": true,
+  "original_transfer_commit": "accb28e72c87c059e780efb8e6681886b33e9b4f",
+  "original_declared_source_commit": "c26565e58ab92dcbcda9663c4d231bdf4a9a7ee6",
+  "original_archive_sha256": "4200e492828dbb857aaa737a7ce56d0aeda3c97c84f7743b1501ef2f229d3636",
+  "original_tree": "2dbe253e97379532f6f4b52ef7edf26109a9266d",
+  "baseline_patch_file": "base/integrated-prelaunch-hold.patch",
+  "baseline_patch_sha256": "4ae48c040f9e6954aa8813c2b9120baffb5f99b0c63ae578cb96ac9889b8cd89",
+  "patch_file": "guardian-standalone-w77-preflight.patch",
+  "patch_sha256": "3a10a7ebfbd89fc2c2604ed8098380f3116ee7ae62d36afeec0ace61237ff35a",
+  "patched_tree": "810ef3b8a52d31ce43f843a067c7982b47a8c001",
+  "patch_apply_check": "PASS against exact integrated prelaunch HOLD tree",
+  "files": [
+    "apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-activation-package.cpp",
+    "apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-activation-package.hpp",
+    "apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis.cpp",
+    "apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis.hpp",
+    "apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-genesis-preexecution-design.md",
+    "apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-original-package-path-data.hpp",
+    "apps/metaengine-browser/scripts/build-guardian-machine-bootstrap.ps1",
+    "apps/metaengine-browser/scripts/build-guardian-native-package.ps1",
+    "apps/metaengine-browser/test/native/browser-guardian-original-package-path-data-tests.cpp",
+    "apps/metaengine-browser/test/native/verify-guardian-genesis-launch-binding-model.py",
+    "apps/metaengine-browser/test/native/verify-guardian-original-package-capture-model.py"
+  ],
+  "windows_execution": "NOT_RUN",
+  "launch_state": "HOLD",
+  "full_original_archive_patch_chain_check": "PASS original tree -> integrated HOLD tree -> standalone preflight tree"
+}

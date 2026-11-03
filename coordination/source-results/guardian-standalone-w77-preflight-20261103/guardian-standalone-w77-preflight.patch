@@ -1,0 +1,1233 @@
+diff --git a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-activation-package.cpp b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-activation-package.cpp
+index 9ad4d4e..6c8db7c 100644
+--- a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-activation-package.cpp
++++ b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-activation-package.cpp
+@@ -1,7 +1,9 @@
+ #include "browser-guardian-active-policy-activation-package.hpp"
+ 
+ #include "browser-guardian-active-policy-data.hpp"
++#include "browser-guardian-active-policy-activation-native.hpp"
+ #include "browser-guardian-installed-namespace.hpp"
++#include "browser-guardian-original-package-path-data.hpp"
+ #include "browser-guardian-release-signature.hpp"
+ #include "browser-guardian-upgrade-custody.hpp"
+ #include <shlobj.h>
+@@ -56,6 +58,9 @@ std::wstring image(HANDLE process) {
+ } // namespace active_policy_package_detail
+ 
+ struct GuardianActivePolicyPackage::State {
++    // Namespace stop_event borrows original_cancel. Declare original scope
++    // first so all namespace I/O and handles are destroyed before that scope.
++    active_policy_native::Handle original_coordinator, original_primary, original_cancel;
+     std::unique_ptr<GuardianInstalledNamespace> original;
+     std::unique_ptr<GuardianUpgradeRetainedAncestors> ancestors;
+     std::vector<std::unique_ptr<GuardianUpgradeRetainedPath>> directories;
+@@ -63,8 +68,31 @@ struct GuardianActivePolicyPackage::State {
+     replacement::protocol::Identity guardian;
+     std::wstring executable;
+     std::string namespace_sha, reason = "ACTIVE_POLICY_PACKAGE_NOT_CAPTURED";
++    active_policy_native::Owner original_owner;
++    DWORD original_coordinator_pid = 0;
++    std::uint64_t original_coordinator_birth = 0;
++    std::wstring original_coordinator_image;
++    bool standalone_original = false;
+     bool revoked = false;
+     bool fail(const char* why) { revoked = true; reason = why; return false; }
++    bool originalScopeExact() const {
++        if (!standalone_original) return true; // Existing captureFixed behavior.
++        if (!active_policy_native::live(original_coordinator.value, original_coordinator_pid, original_coordinator_birth) ||
++            !original_primary.valid() || !original_cancel.valid() ||
++            WaitForSingleObject(original_cancel.value, 0) != WAIT_TIMEOUT ||
++            active_policy_package_detail::image(original_coordinator.value) != original_coordinator_image)
++            return false;
++        HANDLE raw = nullptr;
++        if (!OpenProcessToken(original_coordinator.value, TOKEN_QUERY, &raw)) return false;
++        active_policy_native::Handle current(raw);
++        active_policy_native::Owner actual, retained;
++        return active_policy_native::sameObject(current.value, original_primary.value) &&
++            active_policy_native::owner(current.value, &actual) &&
++            active_policy_native::owner(original_primary.value, &retained) &&
++            active_policy_native::sameOwner(original_owner, actual) &&
++            active_policy_native::sameOwner(original_owner, retained) &&
++            WaitForSingleObject(original_cancel.value, 0) == WAIT_TIMEOUT;
++    }
+ };
+ 
+ GuardianActivePolicyPackage::GuardianActivePolicyPackage() : state_(std::make_unique<State>()) {}
+@@ -117,11 +145,53 @@ std::unique_ptr<GuardianActivePolicyPackage> GuardianActivePolicyPackage::captur
+     } catch (...) { return reject("ACTIVE_POLICY_PACKAGE_CAPTURE_UNAVAILABLE"); }
+ }
+ 
++std::unique_ptr<GuardianActivePolicyPackage> GuardianActivePolicyPackage::captureOriginalCoordinator(
++    HANDLE original_coordinator, HANDLE original_primary, HANDLE original_cancel, std::string* failure) {
++    const auto reject = [failure](const char* why) {
++        if (failure) *failure = why;
++        return std::unique_ptr<GuardianActivePolicyPackage>{};
++    };
++    try {
++        auto out = std::unique_ptr<GuardianActivePolicyPackage>(new GuardianActivePolicyPackage());
++        auto& s = *out->state_;
++        s.standalone_original = true;
++        s.original_coordinator = active_policy_native::duplicate(original_coordinator,
++            PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE);
++        s.original_primary = active_policy_native::duplicate(original_primary, TOKEN_QUERY);
++        s.original_cancel = active_policy_native::duplicate(original_cancel, SYNCHRONIZE);
++        s.original_coordinator_pid = GetProcessId(s.original_coordinator.value);
++        s.original_coordinator_birth = active_policy_native::birth(s.original_coordinator.value);
++        s.original_coordinator_image = active_policy_package_detail::image(s.original_coordinator.value);
++        if (!active_policy_native::sameObject(original_coordinator, s.original_coordinator.value) ||
++            !active_policy_native::sameObject(original_primary, s.original_primary.value) ||
++            !active_policy_native::sameObject(original_cancel, s.original_cancel.value) ||
++            !active_policy_native::owner(s.original_primary.value, &s.original_owner) || !s.originalScopeExact())
++            return reject("ACTIVE_POLICY_ORIGINAL_COORDINATOR_SCOPE_REQUIRED");
++        const auto executable = original_package_path_data::fixedExecutableFromOriginalCoordinatorImage(s.original_coordinator_image);
++        if (!executable) return reject("ACTIVE_POLICY_ORIGINAL_COORDINATOR_FIXED_PACKAGE_REQUIRED");
++        s.executable = *executable;
++        s.original = GuardianInstalledNamespace::capture(s.executable, s.original_cancel.value);
++        if (!s.original || !s.originalScopeExact() || !s.original->recheck() || !s.original->bindRetainedReleaseSignature())
++            return reject("ACTIVE_POLICY_EXISTING_W77_PACKAGE_SIGNATURE_REQUIRED");
++        s.namespace_sha = s.original->namespaceSha256();
++        if (!out->readOriginal(&s.capsule, &s.guardian) || !out->recheck())
++            return reject("ACTIVE_POLICY_ORIGINAL_SIGNED_CAPSULE_OR_TUPLE_REFUSED");
++        const auto& version = s.capsule.selection.policy.target_package_version;
++        const std::wstring relative = std::wstring(L"resources\\guardian-bootstrap\\METAENGINE-Guardian-Install-Origin-") +
++            std::wstring(version.begin(), version.end()) + L"-x64.exe";
++        if (!out->originalImageExact(s.original_coordinator.value, relative) || !out->recheck())
++            return reject("ACTIVE_POLICY_ORIGINAL_COORDINATOR_SIGNED_IMAGE_REQUIRED");
++        if (failure) failure->clear();
++        return out;
++    } catch (...) { return reject("ACTIVE_POLICY_ORIGINAL_COORDINATOR_CAPTURE_UNAVAILABLE"); }
++}
++
+ bool GuardianActivePolicyPackage::readOriginal(active_policy::CapsuleBytes* capsule,
+     replacement::protocol::Identity* guardian) {
+     using namespace active_policy_package_detail;
+     auto& s = *state_;
+-    if (!capsule || !guardian || !s.original || !s.original->recheck() || !s.original->releaseSignatureBound()) return false;
++    if (!capsule || !guardian || !s.original || !s.originalScopeExact() ||
++        !s.original->recheck() || !s.original->releaseSignatureBound()) return false;
+     const auto* release = s.original->boundReleaseManifest();
+     std::string native, schema, source, version;
+     if (!release || release->exe_name != "METAENGINE Browser Test.exe" ||
+@@ -144,7 +214,7 @@ bool GuardianActivePolicyPackage::readOriginal(active_policy::CapsuleBytes* caps
+     if (!replacement::protocol::validIdentity(*guardian) || !active_policy::policyMatchesTuple(*policy, tuple) ||
+         s.original->retainedFileSha256(kPeer) != policy->peer_module_sha256 ||
+         s.original->retainedFileSha256(kInventory) != release->package_code_sha256 ||
+-        !s.original->recheck() || !s.original->releaseSignatureBound()) return false;
++        !s.original->recheck() || !s.original->releaseSignatureBound() || !s.originalScopeExact()) return false;
+     // Exact package target only. No predecessor or compatibility catalog is
+     // expanded by a policy or by the activation operation.
+     capsule->selection = {*policy, policy_sha};
+@@ -155,6 +225,7 @@ bool GuardianActivePolicyPackage::recheck() noexcept {
+     try {
+         auto& s = *state_;
+         if (s.revoked || !s.original) return false;
++        if (!s.originalScopeExact()) return s.fail("ACTIVE_POLICY_ORIGINAL_COORDINATOR_SCOPE_LOST");
+         if (s.ancestors && !s.ancestors->recheck()) return s.fail("ACTIVE_POLICY_PACKAGE_ROOT_DRIFT");
+         for (const auto& directory : s.directories)
+             if (!directory || !directory->recheck()) return s.fail("ACTIVE_POLICY_PACKAGE_DIRECTORY_DRIFT");
+@@ -188,6 +259,12 @@ const std::string& GuardianActivePolicyPackage::namespaceSha256() const noexcept
+ const std::wstring& GuardianActivePolicyPackage::installedExecutable() const noexcept { return state_->executable; }
+ const std::string& GuardianActivePolicyPackage::reason() const noexcept { return state_->reason; }
+ std::unique_ptr<GuardianInstalledNamespace> GuardianActivePolicyPackage::releaseOriginalNamespace() noexcept {
++    if (state_->standalone_original) {
++        state_->revoked = true;
++        try { state_->reason = "ACTIVE_POLICY_ORIGINAL_COORDINATOR_HANDOFF_REQUIRED"; }
++        catch (...) { state_->reason.clear(); }
++        return {};
++    }
+     state_->revoked = true;
+     return std::move(state_->original);
+ }
+diff --git a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-activation-package.hpp b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-activation-package.hpp
+index e769760..e70dc1b 100644
+--- a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-activation-package.hpp
++++ b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-activation-package.hpp
+@@ -36,6 +36,12 @@ private:
+     static std::unique_ptr<GuardianActivePolicyPackage> captureFixed(
+         HANDLE original_primary, Location, const std::string& bound_transaction,
+         HANDLE original_cancel, std::string* failure);
++    // Candidate location comes only from the retained original coordinator's
++    // image. The existing W77 namespace/signature and final signed image check
++    // qualify it; path data never grants installation or launch permission.
++    static std::unique_ptr<GuardianActivePolicyPackage> captureOriginalCoordinator(
++        HANDLE original_coordinator, HANDLE original_primary, HANDLE original_cancel,
++        std::string* failure);
+     bool readOriginal(active_policy::CapsuleBytes*, replacement::protocol::Identity*);
+     bool originalImageExact(HANDLE original_process, const std::wstring& fixed_relative);
+     bool containsFile(const std::wstring& fixed_relative) const;
+diff --git a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis.cpp b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis.cpp
+index c35b696..d597498 100644
+--- a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis.cpp
++++ b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis.cpp
+@@ -47,8 +47,7 @@ std::unique_ptr<GuardianActivePolicyPackage> GuardianActivePolicyGenesis::qualif
+         if (!bootstrap_path || !active_policy_native::sameObject(coordinator, GetCurrentProcess()) ||
+             !original.capture(coordinator, primary, cancel, deadline))
+             return reject("GENESIS_ORIGINAL_UNELEVATED_COORDINATOR_REQUIRED");
+-        auto package = GuardianActivePolicyPackage::captureFixed(primary,
+-            GuardianActivePolicyPackage::Location::Installed, {}, cancel, failure);
++        auto package = GuardianActivePolicyPackage::captureOriginalCoordinator(coordinator, primary, cancel, failure);
+         if (!package || package->capsule().selection.policy.generation != 1 ||
+             !package->containsFile(active_policy_genesis_detail::relative(package->capsule().selection, true)) ||
+             !package->originalImageExact(coordinator, active_policy_genesis_detail::relative(package->capsule().selection, false)))
+@@ -80,8 +79,7 @@ std::unique_ptr<GuardianActivePolicyGenesis> GuardianActivePolicyGenesis::captur
+         auto& s = *out->state_;
+         if (!s.original.capture(coordinator, primary, cancel, deadline))
+             return reject("GENESIS_ORIGINAL_INSTALL_USER_SCOPE_REQUIRED");
+-        s.package = GuardianActivePolicyPackage::captureFixed(primary,
+-            GuardianActivePolicyPackage::Location::Installed, {}, cancel, failure);
++        s.package = GuardianActivePolicyPackage::captureOriginalCoordinator(coordinator, primary, cancel, failure);
+         if (!s.package || s.package->capsule().selection.policy.generation != 1 ||
+             !s.package->originalImageExact(coordinator, active_policy_genesis_detail::relative(s.package->capsule().selection, false)) ||
+             !s.package->originalImageExact(bootstrap, active_policy_genesis_detail::relative(s.package->capsule().selection, true)) ||
+diff --git a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis.hpp b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis.hpp
+index 5575e9f..4bd4bdb 100644
+--- a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis.hpp
++++ b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis.hpp
+@@ -38,8 +38,8 @@ private:
+         HANDLE original_install_coordinator, HANDLE original_install_primary,
+         HANDLE original_bootstrap, HANDLE original_cancel, std::uint64_t original_deadline,
+         std::string* failure);
+-    // The outer original coordinator checks the SAME fixed signed package and
+-    // payload paths before the one narrow existing runas effect is reachable.
++    // Prepare the SAME fixed signed package from the original coordinator
++    // without an installed-profile prerequisite. Preparation grants no launch.
+     static std::unique_ptr<GuardianActivePolicyPackage> qualifyOriginalCoordinator(
+         HANDLE original_coordinator, HANDLE original_primary, HANDLE original_cancel,
+         std::uint64_t original_deadline, std::wstring* fixed_bootstrap_path, std::string* failure);
+diff --git a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-genesis-preexecution-design.md b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-genesis-preexecution-design.md
+new file mode 100644
+index 0000000..2c1627f
+--- /dev/null
++++ b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-genesis-preexecution-design.md
+@@ -0,0 +1,47 @@
++# Genesis pre-execution binding: source-only design
++
++**Windows qualification: NOT RUN. No installer, UAC, process-creation, service or database effect was exercised.** The production elevation route remains HOLD with `GENESIS_ORIGINAL_PRELAUNCH_BINDING_UNPROVEN`. This document neither authorizes installation nor implements a creation owner.
++
++The standalone W77 capture contribution is a **read-only** boundary: derive the fixed package from the original native image, retain its namespace, and validate its release/inventory using the same existing verifier linked into the outer coordinator and inner bootstrap. It does not issue elevated installation custody. The debugger creation owner described below is **not implemented**.
++
++## Supported Windows building blocks
++
++`CREATE_SUSPENDED` prevents the primary thread from running until `ResumeThread`; alone it returns process/thread handles, not an image-file handle. `DEBUG_ONLY_THIS_PROCESS` makes the creating thread the debugger. Windows documents `CREATE_PROCESS_DEBUG_EVENT` before any user-mode execution and before other events for that new process. All threads remain stopped while the event is pending. The event supplies the actual image-file handle with read access/read-sharing. These are documented guarantees, unlike a later pathname observation. [Process creation flags](https://learn.microsoft.com/en-us/windows/win32/procthread/process-creation-flags), [debugging events](https://learn.microsoft.com/en-us/windows/win32/debug/debugging-events).
++
++The creator thread must also own the debug pump and continuations. An event file handle can be NULL; absence must refuse. Its I/O mode is not documented: compare its volume/FileID with the already retained W77 file and hash that known-mode original handle; do not request an oplock on the event handle or substitute a pathname reopen. [WaitForDebugEvent](https://learn.microsoft.com/en-us/windows/win32/api/debugapi/nf-debugapi-waitfordebugevent), [ContinueDebugEvent](https://learn.microsoft.com/en-us/windows/win32/api/debugapi/nf-debugapi-continuedebugevent), [CREATE_PROCESS_DEBUG_INFO](https://learn.microsoft.com/en-us/windows/win32/api/minwinbase/ns-minwinbase-create_process_debug_info).
++
++## Conditional private composition
++
++Only an independently authorized **original elevated native installation owner** could perform this sequence:
++
++1. Retain the original installation consent/context, intended unelevated user, process/token incarnations, cancellation object and one absolute deadline. Consume the original W77 package, exact source/version/policy and fixed bootstrap role. Creation itself is an effect requiring authority, even when suspended.
++2. Create only the internally derived bootstrap with `CreateProcessW`, `DEBUG_ONLY_THIS_PROCESS | CREATE_SUSPENDED`, fixed arguments and a bounded owned Job. Retain actual creation handles before fallible readbacks; establish Job ownership before continuation/resume.
++3. Hold the first CREATE event. Bind its process/thread to those original objects and its image `hFile` to the same retained signed W77 leaf. Recheck package, scope and deadline. Missing, foreign or uncertain objects refuse before continuation.
++4. Continue only admitted events, resume the original primary thread once, and retain ownership through terminal process/Job readback. Apply the separate loader profile below before permitting corresponding execution.
++
++The interface must remain private to that genuine native owner. It accepts no caller path, key/root, verifier callback, claimed token, JSON capability, copied debug event or positive flag. No new trust root is needed. Handle inheritance defaults to disabled; any required transfer must use a narrow original native handle list, not numeric handle assertions. [Handle-list requirements](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-updateprocthreadattribute).
++
++## Missing first elevated issuer
++
++`GuardianOriginalInstallUser` rejects elevated tokens (`browser-guardian-original-install-user.cpp:80–88`). Its retained token has query/duplicate/impersonate rights, not `TOKEN_ASSIGN_PRIMARY` (`:219–222`). It observes the intended user; it is not an elevated creator grant. `CreateProcessAsUser` requires an appropriate primary token and privileges. Ordinary `CreateProcess` rejects a required elevation; Shell/AppInfo obtains consent and creates the elevated process. [CreateProcessAsUser](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessasuserw), [UAC architecture](https://learn.microsoft.com/en-us/windows/security/application-security/application-control/user-account-control/architecture).
++
++`runas` does not document transfer of the original coordinator's creator-thread/debug-pump ownership. `ICreatingProcess` can modify creation flags, but its contract does not establish that provenance across AppInfo. A returned process handle, later attach, or a debugged child of an already executing helper cannot retroactively fence that first helper. Consequently, the elevated issuer prerequisite is genuinely absent; no factory or flag may manufacture it. [Shell execution information](https://learn.microsoft.com/en-us/windows/win32/api/shellapi/ns-shellapi-shellexecuteinfow), [ICreatingProcess](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nn-shobjidl_core-icreatingprocess).
++
++## Loader scope and existing Main code
++
++The future owner requires a fixed **bootstrap-specific profile**, authenticated inside the existing W77 closure, covering package modules and the approved Windows baseline. DLL events expose actual loaded-file handles. The documented initial breakpoint precedes static DLL initialization, but this does not establish all TLS, dynamic-loader or relocation ordering. Unknown modules, missing handles or unsupported phases remain HOLD; image-file identity alone is not continuous mapped-code attestation. [DLL debug information](https://learn.microsoft.com/en-us/windows/win32/api/minwinbase/ns-minwinbase-load_dll_debug_info), [initial breakpoint](https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/initial-breakpoint).
++
++`GuardianOriginalMainDebugOwner` provides relevant mechanics, but its private `startOwned` requires Main grant/barrier/admission/policy. Do not reuse those grants, enrollment, Main profiles or recovery permissions for Genesis. Its scope restrictions remain unchanged.
++
++## Negative acceptance matrix — Windows NOT RUN
++
++| Class | Required outcome |
++|---|---|
++| Swap | Different file object, bytes, signed source/version or event image refuses before continuation/resume; same pathname/digest assertions cannot replace originals. |
++| Rename | Preserve real descendant handles and verify ordinary rename refusal. Metadata-only ancestor sharing alone is not the proof; retained descendants independently protect ordinary directory rename. No arbitrary-image exploit is claimed. [Rename rules](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/ns-ntifs-_file_rename_information). |
++| Reparse | Reparse/alias ancestry, changed route/FileID or ambiguous canonical resolution refuses; never repair the route to qualify it. |
++| Early effect | Later attach/postlaunch checks cannot pass as pre-execution evidence. Missing first event, foreign DLL, unsupported TLS/loader phase or child outside coverage refuses. |
++| Cancel | Before creation, consume/refuse without launch. After creation, retain original debug/process/Job custody, terminate only owned objects when required, drain events/I/O and independently join termination. Unknown cleanup stays unresolved. |
++| Restart | Do not rehydrate capabilities, adopt prior roots or relaunch from receipts. Preserve intent/history and reconcile unknown outcomes; no automatic retry, deadline renewal or claimed rollback. |
++
++Positive source/model tests cannot qualify these Windows cases or clear the current prelaunch HOLD.
+diff --git a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-original-package-path-data.hpp b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-original-package-path-data.hpp
+new file mode 100644
+index 0000000..6ef2af7
+--- /dev/null
++++ b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-original-package-path-data.hpp
+@@ -0,0 +1,81 @@
++#pragma once
++
++#include <optional>
++#include <string>
++#include <string_view>
++
++namespace metaengine::guardian::original_package_path_data {
++namespace detail {
++
++inline wchar_t lowerAscii(wchar_t value) {
++    return value >= L'A' && value <= L'Z' ? static_cast<wchar_t>(value - L'A' + L'a') : value;
++}
++
++inline bool deviceComponent(std::wstring_view component) {
++    const auto dot = component.find(L'.');
++    const auto name = component.substr(0, dot);
++    std::wstring folded;
++    folded.reserve(name.size());
++    for (const auto value : name) folded.push_back(lowerAscii(value));
++    return folded == L"con" || folded == L"prn" || folded == L"aux" || folded == L"nul" ||
++        (folded.size() == 4 && (folded.starts_with(L"com") || folded.starts_with(L"lpt")) &&
++            folded[3] >= L'1' && folded[3] <= L'9');
++}
++
++inline bool localAbsolute(std::wstring_view image) {
++    // Same local DOS path grammar and 2048-character budget as namespace
++    // capture. Conservatively refuse potential short-name aliases as well.
++    if (image.size() < 4 || image.size() > 2048 || image[1] != L':' || image[2] != L'\\' ||
++        !((image[0] >= L'A' && image[0] <= L'Z') || (image[0] >= L'a' && image[0] <= L'z')) ||
++        image.back() == L'\\') return false;
++    std::size_t start = 3;
++    while (start < image.size()) {
++        auto end = image.find(L'\\', start);
++        if (end == std::wstring_view::npos) end = image.size();
++        const auto part = image.substr(start, end - start);
++        if (part.empty() || part == L"." || part == L".." || part.back() == L'.' || part.back() == L' ' ||
++            part.find_first_of(L":/*?\"<>|~") != std::wstring_view::npos ||
++            part.find(L'\0') != std::wstring_view::npos || deviceComponent(part)) return false;
++        for (const auto value : part) if (value < 0x20) return false;
++        start = end + 1;
++    }
++    return true;
++}
++
++inline bool versionShape(std::wstring_view version) {
++    constexpr std::wstring_view prefix = L"0.7.0-dev.", suffix = L".1";
++    if (version.size() > 64 || !version.starts_with(prefix) || !version.ends_with(suffix) ||
++        version.size() <= prefix.size() + suffix.size()) return false;
++    const auto digits = version.substr(prefix.size(), version.size() - prefix.size() - suffix.size());
++    if (digits.front() == L'0') return false;
++    for (const auto digit : digits) if (digit < L'0' || digit > L'9') return false;
++    return true;
++}
++
++}  // namespace detail
++
++// DATA ONLY: derive an untrusted candidate from an already original process's
++// observed image spelling. This performs no path resolution, metadata lookup,
++// signature verification or launch. Real namespace custody and the final
++// signed-policy-derived originalImageExact check remain mandatory.
++[[nodiscard]] inline std::optional<std::wstring> fixedExecutableFromOriginalCoordinatorImage(
++    std::wstring_view image) {
++    constexpr std::wstring_view middle = L"\\resources\\guardian-bootstrap\\";
++    constexpr std::wstring_view prefix = L"METAENGINE-Guardian-Install-Origin-";
++    constexpr std::wstring_view suffix = L"-x64.exe";
++    if (!detail::localAbsolute(image)) return {};
++    const auto leaf_at = image.find_last_of(L'\\');
++    const auto leaf = image.substr(leaf_at + 1);
++    if (!leaf.starts_with(prefix) || !leaf.ends_with(suffix) ||
++        leaf.size() <= prefix.size() + suffix.size()) return {};
++    const auto version = leaf.substr(prefix.size(), leaf.size() - prefix.size() - suffix.size());
++    if (!detail::versionShape(version) || leaf_at + 1 < middle.size()) return {};
++    const auto root_size = leaf_at + 1 - middle.size();
++    if (root_size <= 3 || image.substr(root_size, middle.size()) != middle) return {};
++    std::wstring executable(image.substr(0, root_size));
++    executable += L"\\METAENGINE Browser Test.exe";
++    if (executable.size() > 2048) return {};
++    return executable;
++}
++
++}  // namespace metaengine::guardian::original_package_path_data
+diff --git a/apps/metaengine-browser/scripts/build-guardian-machine-bootstrap.ps1 b/apps/metaengine-browser/scripts/build-guardian-machine-bootstrap.ps1
+index 32b0bee..a78d60e 100644
+--- a/apps/metaengine-browser/scripts/build-guardian-machine-bootstrap.ps1
++++ b/apps/metaengine-browser/scripts/build-guardian-machine-bootstrap.ps1
+@@ -102,18 +102,35 @@ constexpr wchar_t kBootstrapSlotIdW[] = L"$slotId";
+   $exe = Join-Path $out $exeName
+   $source = Join-Path $root 'native\browser-guardian-scm\browser-guardian-machine-bootstrap.cpp'
+   $native = Split-Path $source -Parent
+-  $originSource = Join-Path $native 'browser-guardian-original-install-user.cpp'
+-  $originLink = Join-Path $native 'browser-guardian-install-origin-link.cpp'
+-  $observer = Join-Path $native 'browser-guardian-owner-enrollment-observer.cpp'
+-  $replacementDrain = Join-Path $native 'browser-guardian-replacement-drain.cpp'
+-  $replacementContinuity = Join-Path $native 'browser-guardian-replacement-continuity.cpp'
+-  $replacementRuntime = Join-Path $native 'browser-guardian-replacement-runtime.cpp'
+-  $ownerStore = Join-Path $native 'browser-guardian-owner-enrollment-store.cpp'
+-  $activePolicyCandidate = Join-Path $native 'browser-guardian-active-policy-candidate.cpp'
+-  $namespaceSource = Join-Path $native 'browser-guardian-installed-namespace.cpp'
+-  foreach ($path in @($activePolicyCandidate,$namespaceSource)) {
+-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "bootstrap_active_policy_source_missing:$path" }
++  # Both entrypoints use this exact source closure. Namespace lease/publication
++  # definitions reference the existing retirement/activation components even
++  # while the clean-install producer remains read-only and refuses dispatch.
++  # scm-configure.cpp is included by the inner entrypoint; never compile it twice.
++  $commonSourceNames = @(
++    'browser-guardian-original-install-user.cpp',
++    'browser-guardian-install-origin-link.cpp',
++    'browser-guardian-owner-enrollment-observer.cpp',
++    'browser-guardian-installed-namespace.cpp',
++    'browser-guardian-active-policy-activation-package.cpp',
++    'browser-guardian-active-policy-genesis.cpp',
++    'browser-guardian-active-policy-genesis-ownership.cpp',
++    'browser-guardian-active-policy-publication.cpp',
++    'browser-guardian-active-policy-activation.cpp',
++    'browser-guardian-active-policy-activation-intent.cpp',
++    'browser-guardian-active-policy-namespace-handoff.cpp',
++    'browser-guardian-active-policy-candidate.cpp',
++    'browser-guardian-replacement-drain.cpp',
++    'browser-guardian-replacement-continuity.cpp',
++    'browser-guardian-replacement-runtime.cpp',
++    'browser-guardian-owner-enrollment-store.cpp'
++  )
++  $commonSources = @($commonSourceNames | ForEach-Object { Join-Path $native $_ })
++  foreach ($path in $commonSources) {
++    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "bootstrap_common_source_missing:$path" }
++    Assert-GuardianCommandPath $path
+   }
++  $commonCompile = ($commonSources | ForEach-Object { '"{0}"' -f $_ }) -join ' '
++  $nativeLibraries = 'advapi32.lib bcrypt.lib shell32.lib ole32.lib userenv.lib wtsapi32.lib mincore.lib'
+   $bootstrapMap = Join-Path $temp 'bootstrap.map'
+   $cryptoCompile = ''; $cryptoLink = ''
+   if ($crypto) {
+@@ -124,8 +141,8 @@ constexpr wchar_t kBootstrapSlotIdW[] = L"$slotId";
+   }
+   # An explicit UnlinkedTestBuild leaves both arguments empty. The existing
+   # installed-namespace verifier refuses release binding; policy capture fails.
+-  foreach ($path in @($vcvars,$temp,$source,$exe,$originSource,$originLink,$observer,$service,$configure,$manifestPath,$compatibilityPath,$replacementPath,$replacementDrain,$replacementContinuity,$replacementRuntime,$ownerStore,$activePolicyCandidate,$namespaceSource,$bootstrapMap)) { Assert-GuardianCommandPath $path }
+-  $command = 'call "{0}" >nul && set CL=&& set _CL_=&& set LINK=&& set _LINK_=&& rc.exe /nologo /fo bootstrap.res guardian-bootstrap.rc && cl.exe /nologo /std:c++20 /EHsc /MT /W4 /WX /DUNICODE /D_UNICODE /D_WIN32_WINNT=0x0A00 /DWINVER=0x0A00 {13} /I"{1}" "{2}" "{4}" "{5}" "{6}" "{7}" "{8}" "{9}" "{10}" "{11}" "{12}" bootstrap.res /Fe:"{3}" /link advapi32.lib bcrypt.lib shell32.lib ole32.lib userenv.lib wtsapi32.lib mincore.lib {14} /MANIFEST:EMBED /MANIFESTUAC:"level=''requireAdministrator'' uiAccess=''false''"' -f $vcvars,$temp,$source,$exe,$originSource,$originLink,$observer,$replacementDrain,$replacementContinuity,$ownerStore,$replacementRuntime,$activePolicyCandidate,$namespaceSource,$cryptoCompile,$cryptoLink
++  foreach ($path in @($vcvars,$temp,$source,$exe,$service,$configure,$manifestPath,$compatibilityPath,$replacementPath,$bootstrapMap)) { Assert-GuardianCommandPath $path }
++  $command = 'call "{0}" >nul && set CL=&& set _CL_=&& set LINK=&& set _LINK_=&& rc.exe /nologo /fo bootstrap.res guardian-bootstrap.rc && cl.exe /nologo /std:c++20 /EHsc /MT /W4 /WX /DUNICODE /D_UNICODE /D_WIN32_WINNT=0x0A00 /DWINVER=0x0A00 {4} /I"{1}" "{2}" {5} bootstrap.res /Fe:"{3}" /link {6} {7} /MANIFEST:EMBED /MANIFESTUAC:"level=''requireAdministrator'' uiAccess=''false''"' -f $vcvars,$temp,$source,$exe,$cryptoCompile,$commonCompile,$nativeLibraries,$cryptoLink
+   Push-Location $temp
+   try { & $env:ComSpec /d /s /c $command; if ($LASTEXITCODE -ne 0) { throw "bootstrap_compile_exit_$LASTEXITCODE" } }
+   finally { Pop-Location }
+@@ -163,12 +180,28 @@ constexpr wchar_t kBootstrapSlotIdW[] = L"$slotId";
+   $coordinatorName = 'METAENGINE-Guardian-Install-Origin-' + [string]$manifest.package_version + '-x64.exe'
+   $coordinatorExe = Join-Path $out $coordinatorName
+   $coordinatorSource = Join-Path $native 'browser-guardian-install-origin-coordinator.cpp'
+-  $outerCommand = 'call "{0}" >nul && set CL=&& set _CL_=&& set LINK=&& set _LINK_=&& cl.exe /nologo /std:c++20 /EHsc /MT /W4 /WX /DUNICODE /D_UNICODE "{1}" "{2}" "{3}" "{4}" /Fe:"{5}" /link advapi32.lib bcrypt.lib /MANIFEST:EMBED /MANIFESTUAC:"level=''asInvoker'' uiAccess=''false''"' -f $vcvars,$coordinatorSource,$originSource,$originLink,$observer,$coordinatorExe
++  $coordinatorMap = Join-Path $temp 'install-origin-coordinator.map'
++  foreach ($path in @($coordinatorSource,$coordinatorExe,$coordinatorMap)) { Assert-GuardianCommandPath $path }
++  $coordinatorCryptoCompile = ''; $coordinatorCryptoLink = ''
++  if ($CryptoBuild) {
++    # Revalidate the SAME retained build context, public key and static archives.
++    $crypto = Get-GuardianCryptoLink $CryptoBuild
++    $coordinatorCryptoCompile = $crypto.Compile
++    $coordinatorCryptoLink = $crypto.Link + (' /MAP:"{0}"' -f $coordinatorMap)
++  }
++  $outerCommand = 'call "{0}" >nul && set CL=&& set _CL_=&& set LINK=&& set _LINK_=&& cl.exe /nologo /std:c++20 /EHsc /MT /W4 /WX /DUNICODE /D_UNICODE /D_WIN32_WINNT=0x0A00 /DWINVER=0x0A00 {3} "{1}" {4} /Fe:"{2}" /link {5} {6} /MANIFEST:EMBED /MANIFESTUAC:"level=''asInvoker'' uiAccess=''false''"' -f $vcvars,$coordinatorSource,$coordinatorExe,$coordinatorCryptoCompile,$commonCompile,$nativeLibraries,$coordinatorCryptoLink
+   Push-Location $temp
+   try { & $env:ComSpec /d /s /c $outerCommand; if ($LASTEXITCODE -ne 0) { throw "origin_coordinator_compile_exit_$LASTEXITCODE" } }
+   finally { Pop-Location }
++  if ($CryptoBuild) {
++    $null = Assert-GuardianStaticPe $coordinatorExe $vcvars (Join-Path $crypto.EvidenceDirectory 'install-origin-coordinator-pe') -MapPath $coordinatorMap
++    Remove-Item -LiteralPath $coordinatorMap
++    $null = Get-GuardianCryptoLink $CryptoBuild
++  }
+   $originBinding = [ordered]@{
+     schema='metaengine.browser-guardian.install-origin-staging.v1'
++    static_crypto=$(if ($crypto) { $crypto.Binding } else { $null })
++    unlinked_test_build=[bool]$UnlinkedTestBuild
+     source_head=$sourceHead
+     package_version=[string]$manifest.package_version
+     name=$coordinatorName
+@@ -192,6 +225,7 @@ constexpr wchar_t kBootstrapSlotIdW[] = L"$slotId";
+     Assert-GuardianNativeOutput $CryptoBuild 'compatibility-catalog' $compatibilityPath
+     Assert-GuardianNativeOutput $CryptoBuild 'replacement-catalog' $replacementPath
+     Register-GuardianNativeOutput $CryptoBuild 'bootstrap' $exe
++    Register-GuardianNativeOutput $CryptoBuild 'install-origin-coordinator' $coordinatorExe
+   }
+   Write-Output ($binding | ConvertTo-Json -Depth 4 -Compress)
+ } finally {
+diff --git a/apps/metaengine-browser/scripts/build-guardian-native-package.ps1 b/apps/metaengine-browser/scripts/build-guardian-native-package.ps1
+index c9d99b4..116e1b0 100644
+--- a/apps/metaengine-browser/scripts/build-guardian-native-package.ps1
++++ b/apps/metaengine-browser/scripts/build-guardian-native-package.ps1
+@@ -16,8 +16,8 @@ try {
+   $staging = Join-Path $OutputRoot 'guardian'
+   & (Join-Path $PSScriptRoot 'build-guardian-native-staging.ps1') -CryptoBuild $context -OutputDir $staging -VcVarsPath $VcVarsPath -CompatibilityCatalogPath $CompatibilityCatalogPath
+   & (Join-Path $PSScriptRoot 'build-guardian-native-peer.ps1') -CryptoBuild $context -OutputDir (Join-Path $OutputRoot 'guardian-peer') -VcVarsPath $VcVarsPath
+-  # Bootstrap embeds the actual held service/configurator/manifest. It does not
+-  # consume the signature API and must not get an unrelated crypto link flag.
++  # Both bootstrap entrypoints consume the existing W77 verifier from this
++  # same retained crypto build while embedding the held service package.
+   & (Join-Path $PSScriptRoot 'build-guardian-machine-bootstrap.ps1') -CryptoBuild $context -StagingDir $staging -OutputDir (Join-Path $OutputRoot 'guardian-bootstrap') -VcVarsPath $VcVarsPath
+   if ($TestLinkedNamespace) {
+     & (Join-Path $PSScriptRoot 'test-guardian-linked-namespace.ps1') -CryptoBuild $context -OutputDir (Join-Path $CryptoOutputDir 'evidence/linked-namespace') -VcVarsPath $VcVarsPath
+diff --git a/apps/metaengine-browser/test/native/browser-guardian-original-package-path-data-tests.cpp b/apps/metaengine-browser/test/native/browser-guardian-original-package-path-data-tests.cpp
+new file mode 100644
+index 0000000..950e9a0
+--- /dev/null
++++ b/apps/metaengine-browser/test/native/browser-guardian-original-package-path-data-tests.cpp
+@@ -0,0 +1,118 @@
++// Generated inert path DATA only. This directly exercises the production
++// lexical helper; it supplies no native process, package or signing authority.
++#include "../../native/browser-guardian-scm/browser-guardian-original-package-path-data.hpp"
++
++#include <iostream>
++#include <stdexcept>
++#include <string>
++#include <utility>
++#include <vector>
++
++namespace {
++using metaengine::guardian::original_package_path_data::fixedExecutableFromOriginalCoordinatorImage;
++constexpr std::wstring_view kLeaf = L"METAENGINE-Guardian-Install-Origin-0.7.0-dev.123.1-x64.exe";
++
++std::wstring image(std::wstring_view root = L"C:\\Package", std::wstring_view leaf = kLeaf) {
++    return std::wstring(root) + L"\\resources\\guardian-bootstrap\\" + std::wstring(leaf);
++}
++
++std::string quote(std::string_view value) {
++    std::string result = "\"";
++    for (const auto character : value) {
++        if (character == '\\' || character == '"') result.push_back('\\');
++        result.push_back(character);
++    }
++    return result + '"';
++}
++}
++
++int main() {
++    std::vector<std::string> cases;
++    try {
++        const auto accept = [&](const std::string& name, const std::wstring& value, const std::wstring& expected) {
++            const auto result = fixedExecutableFromOriginalCoordinatorImage(value);
++            if (!result || *result != expected) throw std::runtime_error(name);
++            cases.push_back(name);
++        };
++        const auto reject = [&](const std::string& name, const std::wstring& value) {
++            if (fixedExecutableFromOriginalCoordinatorImage(value)) throw std::runtime_error(name);
++            cases.push_back(name);
++        };
++
++        accept("fixed_resource_layout", image(), L"C:\\Package\\METAENGINE Browser Test.exe");
++        accept("lowercase_drive", image(L"c:\\Package"), L"c:\\Package\\METAENGINE Browser Test.exe");
++        accept("nested_original_root", image(L"D:\\Stage\\one\\Two"), L"D:\\Stage\\one\\Two\\METAENGINE Browser Test.exe");
++        accept("unicode_ancestor_spelling_is_data", image(L"C:\\\u041f\u0430\u043a\u0435\u0442"),
++            L"C:\\\u041f\u0430\u043a\u0435\u0442\\METAENGINE Browser Test.exe");
++        accept("minimum_version_counter", image(L"C:\\P", L"METAENGINE-Guardian-Install-Origin-0.7.0-dev.1.1-x64.exe"),
++            L"C:\\P\\METAENGINE Browser Test.exe");
++        const std::wstring maximum_version = L"0.7.0-dev." + std::wstring(52, L'1') + L".1";
++        accept("maximum_version_length", image(L"C:\\Package", L"METAENGINE-Guardian-Install-Origin-" + maximum_version + L"-x64.exe"),
++            L"C:\\Package\\METAENGINE Browser Test.exe");
++        const auto suffix_size = image(L"C:\\").size() - 3;
++        const auto maximum_root = L"C:\\" + std::wstring(2048 - suffix_size - 3, L'a');
++        const auto maximum_image = image(maximum_root);
++        if (maximum_image.size() != 2048) throw std::runtime_error("maximum_path_fixture_size");
++        accept("maximum_path_budget", maximum_image, maximum_root + L"\\METAENGINE Browser Test.exe");
++        reject("path_budget_exceeded", image(maximum_root + L"a"));
++
++        for (const auto& [name, value] : std::vector<std::pair<std::string, std::wstring>>{
++            {"empty", L""}, {"relative", L"Package\\resources\\guardian-bootstrap\\" + std::wstring(kLeaf)},
++            {"drive_relative", L"C:Package\\resources\\guardian-bootstrap\\" + std::wstring(kLeaf)},
++            {"unc", L"\\\\server\\share\\Package\\resources\\guardian-bootstrap\\" + std::wstring(kLeaf)},
++            {"extended_device", L"\\\\?\\" + image()}, {"nt_device", L"\\??\\" + image()},
++            {"device_namespace", L"\\\\.\\" + image()}, {"root_relative", L"\\Package\\resources\\guardian-bootstrap\\" + std::wstring(kLeaf)},
++            {"numeric_drive", image(L"1:\\Package")}, {"forward_slash_root", image(L"C:/Package")},
++            {"forward_slash_component", image(L"C:\\Package/child")}, {"ads_ancestor", image(L"C:\\Package:stream")},
++            {"ads_leaf", image() + L":stream"}, {"empty_component", image(L"C:\\Package\\\\child")},
++            {"dot_component", image(L"C:\\Package\\.\\child")}, {"dotdot_component", image(L"C:\\Package\\..\\child")},
++            {"trailing_dot_component", image(L"C:\\Package.")}, {"trailing_space_component", image(L"C:\\Package ")},
++            {"asterisk_component", image(L"C:\\Pack*age")}, {"question_component", image(L"C:\\Pack?age")},
++            {"quote_component", image(L"C:\\Pack\"age")}, {"less_than_component", image(L"C:\\Pack<age")},
++            {"greater_than_component", image(L"C:\\Pack>age")}, {"pipe_component", image(L"C:\\Pack|age")},
++            {"tilde_short_alias", image(L"C:\\PROGRA~1\\Package")}, {"trailing_separator", image() + L"\\"},
++            {"drive_root_package", image(L"C:")}, {"resources_spelling", L"C:\\Package\\Resources\\guardian-bootstrap\\" + std::wstring(kLeaf)},
++            {"bootstrap_directory_spelling", L"C:\\Package\\resources\\Guardian-Bootstrap\\" + std::wstring(kLeaf)},
++            {"missing_resource_directory", L"C:\\Package\\guardian-bootstrap\\" + std::wstring(kLeaf)},
++            {"foreign_resource_directory", L"C:\\Package\\resources-old\\guardian-bootstrap\\" + std::wstring(kLeaf)},
++            {"extra_resource_component", L"C:\\Package\\resources\\extra\\guardian-bootstrap\\" + std::wstring(kLeaf)},
++            {"wrong_purpose", image(L"C:\\Package", L"METAENGINE-Guardian-Bootstrap-0.7.0-dev.123.1-x64.exe")},
++            {"wrong_leaf_case", image(L"C:\\Package", L"metaengine-Guardian-Install-Origin-0.7.0-dev.123.1-x64.exe")},
++            {"wrong_architecture", image(L"C:\\Package", L"METAENGINE-Guardian-Install-Origin-0.7.0-dev.123.1-arm64.exe")},
++            {"wrong_extension", image(L"C:\\Package", L"METAENGINE-Guardian-Install-Origin-0.7.0-dev.123.1-x64.dll")},
++            {"wrong_extension_case", image(L"C:\\Package", L"METAENGINE-Guardian-Install-Origin-0.7.0-dev.123.1-x64.EXE")},
++            {"leaf_trailing_bytes", image() + L".exe"},
++        }) reject(name, value);
++
++        for (const auto& name : {L"CON", L"prn", L"AuX.bin", L"NUL", L"com1", L"COM9.dat", L"lpt1", L"LPT9.log"})
++            reject("reserved_device_component_" + std::to_string(cases.size()), image(std::wstring(L"C:\\") + name));
++        accept("nonreserved_numbered_component", image(L"C:\\COM10"), L"C:\\COM10\\METAENGINE Browser Test.exe");
++
++        for (const auto& version : {L"", L"0.7.0-dev.0.1", L"0.7.0-dev.0123.1", L"0.7.0-dev..1", L"0.7.0-dev.-1.1",
++                L"0.7.0-dev.+1.1", L"0.7.0-dev.1a.1", L"0.7.0-dev.1.2", L"0.7.1-dev.1.1", L"0.7.0.1",
++                L"0.7.0-dev.1.1.extra", L"0.7.0-dev.1.1 ", L"0.7.0-DEV.1.1", L"0.7.0-dev.\u0661.1"})
++            reject("invalid_version_shape_" + std::to_string(cases.size()),
++                image(L"C:\\Package", std::wstring(L"METAENGINE-Guardian-Install-Origin-") + version + L"-x64.exe"));
++        reject("version_budget_exceeded", image(L"C:\\Package",
++            L"METAENGINE-Guardian-Install-Origin-0.7.0-dev." + std::wstring(53, L'1') + L".1-x64.exe"));
++        auto control = image(L"C:\\Package");
++        control.insert(5, 1, L'\x1f');
++        reject("control_in_ancestor", control);
++        auto nul = image();
++        nul.insert(5, 1, L'\0');
++        reject("embedded_nul", nul);
++
++        std::cout << "{\"schema\":\"metaengine.guardian.original-package-path-data-tests.v1\","
++            "\"fixture_classification\":\"GENERATED_PORTABLE_PATH_DATA\",\"passed\":" << cases.size() <<
++            ",\"failed\":0,\"cases\":[";
++        for (std::size_t index = 0; index < cases.size(); ++index)
++            std::cout << (index ? "," : "") << quote(cases[index]);
++        std::cout << "],\"windows_qualification\":\"NOT_RUN\",\"release_signature_verification\":\"NOT_RUN\","
++            "\"package_verified\":false,\"launch_authorized\":false,\"authority_effect\":false}\n";
++        return 0;
++    } catch (const std::exception& error) {
++        std::cout << "{\"schema\":\"metaengine.guardian.original-package-path-data-tests.v1\",\"passed\":" << cases.size()
++            << ",\"failed\":1,\"reason\":" << quote(error.what()) << ",\"authority_effect\":false}\n";
++        return 1;
++    }
++}
+diff --git a/apps/metaengine-browser/test/native/verify-guardian-genesis-launch-binding-model.py b/apps/metaengine-browser/test/native/verify-guardian-genesis-launch-binding-model.py
+index 8d7e923..367898c 100644
+--- a/apps/metaengine-browser/test/native/verify-guardian-genesis-launch-binding-model.py
++++ b/apps/metaengine-browser/test/native/verify-guardian-genesis-launch-binding-model.py
+@@ -84,7 +84,7 @@ constexpr DWORD ERROR_SUCCESS = 0, ERROR_ACCESS_DENIED = 5, ERROR_INVALID_DATA =
+ constexpr DWORD WAIT_TIMEOUT = 258, WAIT_OBJECT_0 = 0;
+ struct NativeObject {};
+ using HANDLE = NativeObject*;
+-enum class Attack { Route, Oplock, Bytes, Cancel, Deadline };
++enum class Attack { Swap, Rename, Reparse, Oplock, Bytes, Cancel, Deadline, Restart };
+ struct Counters {
+     unsigned qualification = 0, package_rechecks = 0, signed_window_observations = 0;
+     unsigned shell = 0, connect = 0, window_frames = 0, packet_writes = 0;
+@@ -93,9 +93,10 @@ struct Counters {
+ struct SyntheticWorld {
+     NativeObject coordinator, primary, cancel, child;
+     Counters calls;
+-    Attack attack = Attack::Route;
++    Attack attack = Attack::Swap;
+     bool package_available = true, package_live = true, origin_live = true, custody_live = true;
+-    bool route_intact = true, oplock_intact = true, bytes_intact = true;
++    bool route_intact = true, reparse_intact = true, oplock_intact = true, bytes_intact = true;
++    unsigned original_incarnation = 1;
+     bool cancel_signalled = false, fence_cancelled = false, clock_available = true, window_valid = true;
+     std::uint64_t tick = 1000, wall = 1'000'000'000, monotonic = 1000;
+     std::uint64_t policy_not_after = 2'000'000'000, tick_after_qualification = 0;
+@@ -117,7 +118,10 @@ bool ShellExecuteExW(SHELLEXECUTEINFOW* effect) {
+     ++world.calls.shell;
+     ++world.calls.early_effects;
+     switch (world.attack) {
+-        case Attack::Route: world.route_intact = false; break;
++        case Attack::Swap: world.route_intact = false; break;
++        case Attack::Rename: world.route_intact = false; break;
++        case Attack::Reparse: world.reparse_intact = false; break;
++        case Attack::Restart: ++world.original_incarnation; break;
+         case Attack::Oplock: world.oplock_intact = false; break;
+         case Attack::Bytes: world.bytes_intact = false; break;
+         case Attack::Cancel: world.cancel_signalled = true; break;
+@@ -128,7 +132,8 @@ bool ShellExecuteExW(SHELLEXECUTEINFOW* effect) {
+ }
+ bool historicalPostlaunchCheck(HANDLE process) {
+     ++world.calls.postchecks;
+-    return process == &world.child && world.route_intact && world.oplock_intact && world.bytes_intact &&
++    return process == &world.child && world.route_intact && world.reparse_intact &&
++        world.original_incarnation == 1 && world.oplock_intact && world.bytes_intact &&
+         !world.cancel_signalled && world.tick < world.launch_deadline;
+ }
+ 
+@@ -184,7 +189,8 @@ struct Handle {
+     bool valid() const { return value != nullptr; }
+ };
+ struct SyntheticOriginalUser {
+-    bool recheck() const { return world.origin_live; }
++    unsigned captured_incarnation = world.original_incarnation;
++    bool recheck() const { return world.origin_live && captured_incarnation == world.original_incarnation; }
+     HANDLE retainedProcess() const { return &world.coordinator; }
+     HANDLE retainedToken() const { return &world.primary; }
+ };
+@@ -250,13 +256,15 @@ int main() {
+     };
+     const auto restoreSyntheticCustody = [&] {
+         world.package_available = world.package_live = world.origin_live = world.custody_live = true;
+-        world.route_intact = world.oplock_intact = world.bytes_intact = true;
++        world.route_intact = world.reparse_intact = world.oplock_intact = world.bytes_intact = true;
+         world.cancel_signalled = world.fence_cancelled = false;
+         world.clock_available = world.window_valid = true;
+         world.tick = 1000; world.tick_after_qualification = 0;
+     };
+     const std::vector<std::pair<Attack, std::string>> attacks{
+-        {Attack::Route, "route_substitution"}, {Attack::Oplock, "oplock_break"},
++        {Attack::Swap, "file_swap"}, {Attack::Rename, "ancestor_rename"},
++        {Attack::Reparse, "reparse_substitution"}, {Attack::Restart, "creator_restart"},
++        {Attack::Oplock, "oplock_break"},
+         {Attack::Bytes, "byte_drift"}, {Attack::Cancel, "cancellation"},
+         {Attack::Deadline, "deadline_consumed_inside_dispatch"},
+     };
+@@ -279,7 +287,8 @@ int main() {
+         auto& state = GenesisRequestModelProbe::state(link);
+         require(state.attempted && !state.closed && !world.cancel_signalled &&
+             world.calls.qualification == 1 && world.calls.package_rechecks == 1 &&
+-            world.calls.signed_window_observations == 1 && world.route_intact && world.oplock_intact && world.bytes_intact,
++            world.calls.signed_window_observations == 1 && world.route_intact && world.reparse_intact &&
++            world.original_incarnation == 1 && world.oplock_intact && world.bytes_intact,
+             "valid synthetic signed fixture did not reach consumed prelaunch HOLD");
+         const auto qualified = world.calls.qualification;
+         const auto observed_window = world.calls.signed_window_observations;
+@@ -300,6 +309,22 @@ int main() {
+         require(world.calls.qualification == 1, "late package qualification rearmed failed request");
+         passed.push_back("missing_package_then_late_qualification_cannot_rearm_actual_request");
+     }
++    {
++        world = SyntheticWorld{};
++        GuardianInstallOriginLink previous;
++        hold(previous, "GENESIS_ORIGINAL_PRELAUNCH_BINDING_UNPROVEN");
++        ++world.original_incarnation; // Synthetic original incarnation changed; no PID lookup.
++        restoreSyntheticCustody();
++        hold(previous, "GENESIS_ORIGINAL_COORDINATOR_REQUIRED");
++        const auto qualifications = world.calls.qualification;
++        GuardianInstallOriginLink restarted;
++        hold(restarted, "GENESIS_ORIGINAL_PRELAUNCH_BINDING_UNPROVEN");
++        require(world.calls.qualification == qualifications + 1 &&
++            GenesisRequestModelProbe::state(restarted).attempted,
++            "fresh native scope did not remain read-only prelaunch HOLD after restart");
++        noEffects();
++        passed.push_back("restart_cannot_resume_previous_scope_or_mint_launch_from_fresh_preflight_NOT_KERNEL_PROOF");
++    }
+     const auto refused = [&](const std::string& name, const std::string& reason, unsigned qualified,
+                              const std::function<void(GuardianInstallOriginLink&)>& prepare) {
+         world = SyntheticWorld{};
+diff --git a/apps/metaengine-browser/test/native/verify-guardian-original-package-capture-model.py b/apps/metaengine-browser/test/native/verify-guardian-original-package-capture-model.py
+new file mode 100644
+index 0000000..99e962e
+--- /dev/null
++++ b/apps/metaengine-browser/test/native/verify-guardian-original-package-capture-model.py
+@@ -0,0 +1,542 @@
++#!/usr/bin/env python3
++"""Exercise actual original-package capture methods with synthetic boundaries.
++
++The production State, captureOriginalCoordinator, recheck and originalImageExact
++are extracted unchanged. Win32 handles/tokens, W77 readOriginal and namespace
++custody are explicit simulations. Portable path DATA tests use the real helper.
++This is not Windows, NTFS, ACL, oplock, signature or installation qualification.
++"""
++from pathlib import Path
++import argparse
++import hashlib
++import json
++import os
++import re
++import shutil
++import subprocess
++import tempfile
++
++
++def segment(text, start, end):
++    begin = text.index(start)
++    return text[begin:text.index(end, begin)]
++
++
++def digest(text):
++    return hashlib.sha256(text.encode()).hexdigest()
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--sanitize', action='store_true')
++    args = parser.parse_args()
++    tests = Path(__file__).resolve().parent
++    native = tests.parents[1] / 'native/browser-guardian-scm'
++    source = (native / 'browser-guardian-active-policy-activation-package.cpp').read_text()
++    header = (native / 'browser-guardian-active-policy-activation-package.hpp').read_text()
++    genesis = (native / 'browser-guardian-active-policy-genesis.cpp').read_text()
++    build = (native.parents[1] / 'scripts/build-guardian-machine-bootstrap.ps1').read_text()
++    state = segment(source, 'struct GuardianActivePolicyPackage::State {',
++                    'GuardianActivePolicyPackage::GuardianActivePolicyPackage()')
++    constructor = segment(source, 'GuardianActivePolicyPackage::GuardianActivePolicyPackage()',
++                          'std::unique_ptr<GuardianActivePolicyPackage> GuardianActivePolicyPackage::captureFixed(')
++    fixed = segment(source, 'std::unique_ptr<GuardianActivePolicyPackage> GuardianActivePolicyPackage::captureFixed(',
++                    'std::unique_ptr<GuardianActivePolicyPackage> GuardianActivePolicyPackage::captureOriginalCoordinator(')
++    factory = segment(source, 'std::unique_ptr<GuardianActivePolicyPackage> GuardianActivePolicyPackage::captureOriginalCoordinator(',
++                      'bool GuardianActivePolicyPackage::readOriginal(')
++    original_reader = segment(source, 'bool GuardianActivePolicyPackage::readOriginal(',
++                              'bool GuardianActivePolicyPackage::recheck()')
++    recheck = segment(source, 'bool GuardianActivePolicyPackage::recheck()',
++                      'bool GuardianActivePolicyPackage::originalImageExact(')
++    image_check = segment(source, 'bool GuardianActivePolicyPackage::originalImageExact(',
++                          'bool GuardianActivePolicyPackage::containsFile(')
++    release = segment(source, 'std::unique_ptr<GuardianInstalledNamespace> GuardianActivePolicyPackage::releaseOriginalNamespace()',
++                      '} // namespace metaengine::guardian')
++    image = segment(source, 'std::wstring image(HANDLE process) {',
++                    '} // namespace active_policy_package_detail')
++    baseline_fixed_sha = '2585e46f154f6f4dbaba5ae0da6bf4cc440bcd9fb9493a96ea314bdf3f3542af'
++    common_names = (
++        'browser-guardian-original-install-user.cpp', 'browser-guardian-install-origin-link.cpp',
++        'browser-guardian-owner-enrollment-observer.cpp', 'browser-guardian-installed-namespace.cpp',
++        'browser-guardian-active-policy-activation-package.cpp', 'browser-guardian-active-policy-genesis.cpp',
++        'browser-guardian-active-policy-genesis-ownership.cpp', 'browser-guardian-active-policy-publication.cpp',
++        'browser-guardian-active-policy-activation.cpp', 'browser-guardian-active-policy-activation-intent.cpp',
++        'browser-guardian-active-policy-namespace-handoff.cpp', 'browser-guardian-active-policy-candidate.cpp',
++        'browser-guardian-replacement-drain.cpp', 'browser-guardian-replacement-continuity.cpp',
++        'browser-guardian-replacement-runtime.cpp', 'browser-guardian-owner-enrollment-store.cpp',
++    )
++    declared_names = tuple(re.findall(r"'([^']+\.cpp)'", segment(build, '$commonSourceNames = @(', '\n  )')))
++    command = next(line for line in build.splitlines() if line.startswith('  $command = '))
++    outer_command = next(line for line in build.splitlines() if line.startswith('  $outerCommand = '))
++    checks = {
++        'factory_is_private_and_existing_friends_only':
++            header.index('private:') < header.index('static std::unique_ptr<GuardianActivePolicyPackage> captureOriginalCoordinator(')
++            and 'friend class GuardianInstallOriginLink;' not in header,
++        'factory_uses_original_image_data_not_installed_profile':
++            'fixedExecutableFromOriginalCoordinatorImage(s.original_coordinator_image)' in factory
++            and all(token not in factory for token in ('folder(', 'FOLDERID_', 'Location::', 'GetModuleFileName')),
++        'original_process_token_cancel_objects_are_duplicated_and_compared':
++            all(token in factory for token in (
++                'active_policy_native::duplicate(original_coordinator,',
++                'active_policy_native::duplicate(original_primary, TOKEN_QUERY)',
++                'active_policy_native::duplicate(original_cancel, SYNCHRONIZE)',
++                'active_policy_native::sameObject(original_coordinator, s.original_coordinator.value)',
++                'active_policy_native::sameObject(original_primary, s.original_primary.value)',
++                'active_policy_native::sameObject(original_cancel, s.original_cancel.value)')),
++        'scope_retains_birth_image_current_token_and_owner':
++            all(token in state for token in (
++                'active_policy_native::live(original_coordinator.value, original_coordinator_pid, original_coordinator_birth)',
++                'active_policy_package_detail::image(original_coordinator.value) != original_coordinator_image',
++                'OpenProcessToken(original_coordinator.value, TOKEN_QUERY, &raw)',
++                'active_policy_native::sameObject(current.value, original_primary.value)',
++                'active_policy_native::sameOwner(original_owner, actual)',
++                'active_policy_native::sameOwner(original_owner, retained)')),
++        'existing_namespace_signature_and_policy_derived_image_remain_required':
++            'GuardianInstalledNamespace::capture(s.executable, s.original_cancel.value)' in factory
++            and 's.original->bindRetainedReleaseSignature()' in factory
++            and 's.capsule.selection.policy.target_package_version' in factory
++            and 'out->originalImageExact(s.original_coordinator.value, relative)' in factory,
++        'production_reader_has_original_scope_fences': original_reader.count('s.originalScopeExact()') == 2,
++        'recheck_revokes_original_scope_loss':
++            'if (!s.originalScopeExact()) return s.fail("ACTIVE_POLICY_ORIGINAL_COORDINATOR_SCOPE_LOST");' in recheck
++            and 'if (s.revoked || !s.original) return false;' in recheck,
++        'capture_fixed_body_is_unchanged_from_authoritative_baseline': digest(fixed) == baseline_fixed_sha,
++        'capture_fixed_scope_behavior_stays_passthrough':
++            'bool standalone_original = false;' in state
++            and 'if (!standalone_original) return true;' in state,
++        'borrowed_cancel_outlives_namespace_destruction':
++            state.index('active_policy_native::Handle original_coordinator, original_primary, original_cancel;') <
++            state.index('std::unique_ptr<GuardianInstalledNamespace> original;'),
++        'standalone_namespace_cannot_escape_original_scope':
++            'if (state_->standalone_original)' in release
++            and release.index('return {};') < release.index('return std::move(state_->original);')
++            and 'state_->revoked = true;' in release,
++        'both_genesis_paths_use_original_coordinator_capture':
++            genesis.count('GuardianActivePolicyPackage::captureOriginalCoordinator(coordinator, primary, cancel, failure)') == 2,
++        'extracted_methods_have_no_process_reselection_or_effect':
++            all(token not in state + factory + recheck + image_check + release for token in (
++                'OpenProcess(', 'CreateProcess', 'ShellExecute', 'StartService', 'CreateService')),
++        'bootstrap_exact_sixteen_common_translation_units_exist':
++            declared_names == common_names and all((native / name).is_file() for name in common_names),
++        'both_entrypoints_share_source_closure_and_their_crypto_compile_link':
++            '$cryptoCompile,$commonCompile,$nativeLibraries,$cryptoLink' in command
++            and '$coordinatorCryptoCompile,$commonCompile,$nativeLibraries,$coordinatorCryptoLink' in outer_command
++            and '$cryptoCompile = $crypto.Compile' in build and '$coordinatorCryptoCompile = $crypto.Compile' in build
++            and "$cryptoLink = $crypto.Link + (' /MAP:" in build
++            and "$coordinatorCryptoLink = $crypto.Link + (' /MAP:" in build,
++        'both_entrypoints_have_independent_existing_pe_map_gates':
++            "Assert-GuardianStaticPe $exe $vcvars (Join-Path $crypto.EvidenceDirectory 'bootstrap-pe') -MapPath $bootstrapMap" in build
++            and "Assert-GuardianStaticPe $coordinatorExe $vcvars (Join-Path $crypto.EvidenceDirectory 'install-origin-coordinator-pe') -MapPath $coordinatorMap" in build,
++        'existing_crypto_context_has_no_new_public_root_override':
++            digest(build[:build.index('$ErrorActionPreference')]) == '5f2bb0c19dd4f51096a16c1d435a9d99afd1460a756b924f1536831a59477342'
++            and build.count('Get-GuardianCryptoLink $CryptoBuild') >= 5,
++    }
++    if not all(checks.values()):
++        raise RuntimeError('source guards failed: ' + ', '.join(k for k, okay in checks.items() if not okay))
++
++    harness = r'''
++#include "browser-guardian-original-package-path-data.hpp"
++#include <algorithm>
++#include <array>
++#include <cstdint>
++#include <cwctype>
++#include <functional>
++#include <iostream>
++#include <memory>
++#include <stdexcept>
++#include <string>
++#include <utility>
++#include <vector>
++
++using DWORD = std::uint32_t;
++constexpr DWORD TOKEN_QUERY = 8, PROCESS_QUERY_LIMITED_INFORMATION = 0x1000, SYNCHRONIZE = 0x100000;
++constexpr DWORD WAIT_TIMEOUT = 258, WAIT_OBJECT_0 = 0;
++struct OwnerData {
++    std::string sid = "SYNTHETIC-USER";
++    unsigned session = 1;
++    std::uint64_t token_id = 20, auth_id = 30;
++    bool operator==(const OwnerData&) const = default;
++};
++enum class Kind { Invalid, Process, Token, Cancel };
++struct Object {
++    Kind kind = Kind::Invalid;
++    DWORD pid = 0;
++    std::uint64_t birth = 0;
++    bool live = true, signalled = false;
++    std::wstring image;
++    OwnerData owner;
++    Object* token = nullptr;
++};
++using HANDLE = Object*;
++Object invalid;
++const HANDLE INVALID_HANDLE_VALUE = &invalid;
++struct Counters {
++    unsigned duplicates = 0, owners = 0, token_opens = 0, waits = 0, images = 0;
++    unsigned namespaces = 0, namespace_rechecks = 0, signatures = 0, capsule_reads = 0, image_binds = 0;
++};
++struct World {
++    Object coordinator, primary, cancel, restarted, replacement_token, unrelated;
++    Counters calls;
++    std::wstring expected_executable = L"C:\\Uninstalled\\Release\\METAENGINE Browser Test.exe";
++    bool namespace_available = true, namespace_live = true, signature_valid = true, signature_linked = true, metadata_valid = true;
++    bool renamed = false, reparse = false, image_bound = true, throw_namespace = false;
++    bool cancel_in_namespace_capture = false;
++    unsigned wrong_duplicate = 0, cancel_on_owner = 0;
++    std::uint64_t root_identity = 100, file_identity = 200;
++    std::string namespace_digest = "SYNTHETIC-NAMESPACE", policy = "SYNTHETIC-POLICY", envelope = "SYNTHETIC-ENVELOPE";
++    std::string inventory = "SYNTHETIC-INVENTORY", guardian = "SYNTHETIC-GUARDIAN", version = "0.7.0-dev.123.1";
++} world;
++void reset() {
++    world = World{};
++    world.coordinator.kind = Kind::Process; world.coordinator.pid = 10; world.coordinator.birth = 1000;
++    world.coordinator.image = L"C:\\Uninstalled\\Release\\resources\\guardian-bootstrap\\METAENGINE-Guardian-Install-Origin-0.7.0-dev.123.1-x64.exe";
++    world.primary.kind = Kind::Token; world.cancel.kind = Kind::Cancel;
++    world.coordinator.token = &world.primary;
++    world.restarted = world.coordinator; world.restarted.birth = 1001;
++    world.replacement_token = world.primary;
++}
++DWORD GetProcessId(HANDLE process) { return process && process->kind == Kind::Process ? process->pid : 0; }
++DWORD WaitForSingleObject(HANDLE handle, DWORD timeout) {
++    ++world.calls.waits;
++    if (!handle || handle == INVALID_HANDLE_VALUE || timeout != 0) return 0xffffffff;
++    return handle->kind == Kind::Cancel ? (handle->signalled ? WAIT_OBJECT_0 : WAIT_TIMEOUT) :
++        (handle->live ? WAIT_TIMEOUT : WAIT_OBJECT_0);
++}
++bool OpenProcessToken(HANDLE process, DWORD access, HANDLE* token) {
++    ++world.calls.token_opens;
++    if (!process || process->kind != Kind::Process || !process->live || access != TOKEN_QUERY || !token || !process->token)
++        return false;
++    *token = process->token; return true;
++}
++bool QueryFullProcessImageNameW(HANDLE process, DWORD flags, wchar_t* bytes, DWORD* size) {
++    ++world.calls.images;
++    if (!process || process->kind != Kind::Process || flags || !bytes || !size || process->image.size() >= *size) return false;
++    std::copy(process->image.begin(), process->image.end(), bytes);
++    *size = static_cast<DWORD>(process->image.size()); return true;
++}
++
++namespace metaengine::guardian {
++namespace active_policy {
++struct Policy { std::string target_package_version; bool operator==(const Policy&) const = default; };
++struct PolicySelection { Policy policy; bool operator==(const PolicySelection&) const = default; };
++struct CapsuleBytes {
++    PolicySelection selection;
++    std::string policy, release_envelope, package_inventory;
++    bool operator==(const CapsuleBytes&) const = default;
++};
++}
++namespace replacement::protocol {
++struct Identity { std::string bytes; bool operator==(const Identity&) const = default; };
++}
++namespace active_policy_native {
++struct Handle { HANDLE value = nullptr; bool valid() const { return value && value != INVALID_HANDLE_VALUE; } };
++using Owner = OwnerData;
++Handle duplicate(HANDLE original, DWORD access) {
++    const auto call = ++world.calls.duplicates;
++    if (!original || original == INVALID_HANDLE_VALUE) return {};
++    const DWORD expected = original->kind == Kind::Process ? PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE :
++        (original->kind == Kind::Token ? TOKEN_QUERY : SYNCHRONIZE);
++    if (access != expected) throw std::runtime_error("changed original duplication access");
++    return {world.wrong_duplicate == call ? &world.unrelated : original};
++}
++bool sameObject(HANDLE a, HANDLE b) { return a && a != INVALID_HANDLE_VALUE && a == b; }
++std::uint64_t birth(HANDLE process) { return process && process->kind == Kind::Process ? process->birth : 0; }
++bool live(HANDLE process, DWORD pid, std::uint64_t created) {
++    return process && process->kind == Kind::Process && pid && created && process->pid == pid &&
++        process->birth == created && process->live;
++}
++bool owner(HANDLE token, Owner* result) {
++    const auto call = ++world.calls.owners;
++    if (world.cancel_on_owner == call) world.cancel.signalled = true;
++    if (!token || token->kind != Kind::Token || !token->live || !result) return false;
++    *result = token->owner; return true;
++}
++bool sameOwner(const Owner& a, const Owner& b) { return a == b; }
++}
++namespace guardian_upgrade_custody_detail {
++std::wstring lower(std::wstring value) {
++    std::transform(value.begin(), value.end(), value.begin(), [](wchar_t c) { return std::towlower(c); });
++    return value;
++}
++}
++class GuardianUpgradeRetainedAncestors { public: bool recheck() const { return true; } };
++class GuardianUpgradeRetainedPath { public: bool recheck() const { return true; } };
++// These are injected namespace/W77 boundary models. No signature, ACL, oplock,
++// rename, reparse-point or real filesystem API executes here.
++class GuardianInstalledNamespace {
++    std::uint64_t root_ = world.root_identity, file_ = world.file_identity;
++    bool signature_bound_ = false;
++public:
++    static std::unique_ptr<GuardianInstalledNamespace> capture(const std::wstring& executable, HANDLE cancel) {
++        ++world.calls.namespaces;
++        if (world.cancel_in_namespace_capture) world.cancel.signalled = true;
++        if (!world.namespace_available || world.renamed || world.reparse || executable != world.expected_executable ||
++            cancel != &world.cancel) return {};
++        return std::make_unique<GuardianInstalledNamespace>();
++    }
++    bool recheck() const {
++        ++world.calls.namespace_rechecks;
++        if (world.throw_namespace) throw std::runtime_error("injected namespace failure");
++        return world.namespace_live && !world.renamed && !world.reparse && root_ == world.root_identity && file_ == world.file_identity;
++    }
++    bool bindRetainedReleaseSignature() { ++world.calls.signatures; return signature_bound_ = world.signature_valid && world.signature_linked; }
++    bool releaseSignatureBound() const { return signature_bound_ && world.signature_valid && world.signature_linked; }
++    std::string namespaceSha256() const { return world.namespace_digest; }
++    bool retainedImageMatchesOriginalProcess(const std::wstring&, HANDLE process) const {
++        ++world.calls.image_binds;
++        return process == &world.coordinator && world.image_bound && recheck();
++    }
++};
++struct OriginalPackageModelProbe;
++class GuardianActivePolicyPackage {
++public:
++    ~GuardianActivePolicyPackage();
++    bool recheck() noexcept;
++private:
++    GuardianActivePolicyPackage();
++    static std::unique_ptr<GuardianActivePolicyPackage> captureOriginalCoordinator(HANDLE, HANDLE, HANDLE, std::string*);
++    bool readOriginal(active_policy::CapsuleBytes*, replacement::protocol::Identity*);
++    bool originalImageExact(HANDLE, const std::wstring&);
++    std::unique_ptr<GuardianInstalledNamespace> releaseOriginalNamespace() noexcept;
++    struct State;
++    std::unique_ptr<State> state_;
++    friend struct OriginalPackageModelProbe;
++};
++namespace active_policy_package_detail {
++// Exact production image query, without test replacement.
++__IMAGE__
++}
++// Exact production State, originalScopeExact, constructor/destructor and factory.
++__STATE__
++__CONSTRUCTOR__
++__FACTORY__
++// The policy/inventory/signature reader is an explicit synthetic boundary.
++// The production reader's scope fences are source-guarded separately.
++bool GuardianActivePolicyPackage::readOriginal(active_policy::CapsuleBytes* capsule, replacement::protocol::Identity* guardian) {
++    ++world.calls.capsule_reads;
++    auto& s = *state_;
++    if (!capsule || !guardian || !s.original || !s.originalScopeExact() || !s.original->recheck() ||
++        !s.original->releaseSignatureBound() || !world.metadata_valid) return false;
++    *capsule = {{{world.version}}, world.policy, world.envelope, world.inventory};
++    *guardian = {world.guardian};
++    return s.originalScopeExact();
++}
++// Exact production recheck and original image predicate, without replacement.
++__RECHECK__
++__IMAGE_CHECK__
++__RELEASE__
++struct OriginalPackageModelProbe {
++    static std::unique_ptr<GuardianActivePolicyPackage> capture(std::string* reason, HANDLE process = nullptr, HANDLE token = nullptr, HANDLE cancel = nullptr) {
++        return GuardianActivePolicyPackage::captureOriginalCoordinator(process ? process : &world.coordinator,
++            token ? token : &world.primary, cancel ? cancel : &world.cancel, reason);
++    }
++    static GuardianActivePolicyPackage::State& state(GuardianActivePolicyPackage& value) { return *value.state_; }
++    static bool image(GuardianActivePolicyPackage& value, HANDLE process, const std::wstring& relative) {
++        return value.originalImageExact(process, relative);
++    }
++    static std::unique_ptr<GuardianInstalledNamespace> release(GuardianActivePolicyPackage& value) {
++        return value.releaseOriginalNamespace();
++    }
++};
++}
++
++int main() {
++    using namespace metaengine::guardian;
++    std::vector<std::string> passed;
++    const auto require = [](bool condition, const std::string& name) { if (!condition) throw std::runtime_error(name); };
++    const auto capture = [&] {
++        std::string reason = "must-clear";
++        auto package = OriginalPackageModelProbe::capture(&reason);
++        require(package && reason.empty() && package->recheck(), "valid original uninstalled package refused: " + reason);
++        return package;
++    };
++    const auto rejectCapture = [&](const std::string& name, const std::string& reason, const std::function<void()>& prepare) {
++        reset(); prepare(); std::string actual;
++        require(!OriginalPackageModelProbe::capture(&actual) && actual == reason, name + ": " + actual);
++        passed.push_back(name);
++    };
++    const auto sticky = [&](const std::string& name, const std::function<void()>& mutate, const std::function<void()>& restore) {
++        reset(); auto package = capture(); mutate();
++        require(!package->recheck() && OriginalPackageModelProbe::state(*package).revoked, name + ": drift accepted");
++        const auto reason = OriginalPackageModelProbe::state(*package).reason;
++        const auto reads = world.calls.capsule_reads, opens = world.calls.namespaces;
++        restore();
++        require(!package->recheck() && OriginalPackageModelProbe::state(*package).revoked &&
++            OriginalPackageModelProbe::state(*package).reason == reason &&
++            world.calls.capsule_reads == reads && world.calls.namespaces == opens,
++            name + ": restoration revived or reopened revoked package");
++        passed.push_back(name);
++    };
++    reset();
++    {
++        auto package = capture();
++        auto& s = OriginalPackageModelProbe::state(*package);
++        require(s.executable == world.expected_executable && s.standalone_original &&
++            s.original_coordinator.value == &world.coordinator && s.original_primary.value == &world.primary &&
++            s.original_cancel.value == &world.cancel && world.calls.duplicates == 3 && world.calls.signatures == 1 &&
++            world.calls.image_binds == 1, "original package did not retain required objects/boundaries");
++        passed.push_back("valid_uninstalled_original_package_from_retained_process_image_NOT_WINDOWS_PROOF");
++    }
++    rejectCapture("wrong_install_origin_suffix_refuses", "ACTIVE_POLICY_ORIGINAL_COORDINATOR_FIXED_PACKAGE_REQUIRED", [] {
++        world.coordinator.image = L"C:\\Uninstalled\\Release\\resources\\guardian-bootstrap\\evil.exe";
++    });
++    rejectCapture("bootstrap_purpose_cannot_substitute_install_origin", "ACTIVE_POLICY_ORIGINAL_COORDINATOR_FIXED_PACKAGE_REQUIRED", [] {
++        world.coordinator.image = L"C:\\Uninstalled\\Release\\resources\\guardian-bootstrap\\METAENGINE-Guardian-Bootstrap-0.7.0-dev.123.1-x64.exe";
++    });
++    for (unsigned call = 1; call <= 3; ++call) rejectCapture("duplicate_object_mismatch_" + std::to_string(call),
++        "ACTIVE_POLICY_ORIGINAL_COORDINATOR_SCOPE_REQUIRED", [=] { world.wrong_duplicate = call; });
++    rejectCapture("original_process_already_exited_refuses", "ACTIVE_POLICY_ORIGINAL_COORDINATOR_SCOPE_REQUIRED", [] { world.coordinator.live = false; });
++    rejectCapture("original_process_token_object_mismatch_refuses", "ACTIVE_POLICY_ORIGINAL_COORDINATOR_SCOPE_REQUIRED", [] {
++        world.coordinator.token = &world.replacement_token;
++    });
++    rejectCapture("cancellation_before_capture_refuses", "ACTIVE_POLICY_ORIGINAL_COORDINATOR_SCOPE_REQUIRED", [] { world.cancel.signalled = true; });
++    rejectCapture("cancellation_during_scope_token_checks_refuses", "ACTIVE_POLICY_ORIGINAL_COORDINATOR_SCOPE_REQUIRED", [] { world.cancel_on_owner = 2; });
++    rejectCapture("cancellation_inside_namespace_capture_refuses", "ACTIVE_POLICY_EXISTING_W77_PACKAGE_SIGNATURE_REQUIRED", [] {
++        world.cancel_in_namespace_capture = true;
++    });
++    rejectCapture("missing_original_namespace_refuses", "ACTIVE_POLICY_EXISTING_W77_PACKAGE_SIGNATURE_REQUIRED", [] { world.namespace_available = false; });
++    rejectCapture("modeled_reparse_namespace_refuses", "ACTIVE_POLICY_EXISTING_W77_PACKAGE_SIGNATURE_REQUIRED", [] { world.reparse = true; });
++    rejectCapture("modeled_renamed_namespace_refuses", "ACTIVE_POLICY_EXISTING_W77_PACKAGE_SIGNATURE_REQUIRED", [] { world.renamed = true; });
++    rejectCapture("missing_existing_signature_refuses", "ACTIVE_POLICY_EXISTING_W77_PACKAGE_SIGNATURE_REQUIRED", [] { world.signature_valid = false; });
++    rejectCapture("unlinked_existing_w77_verifier_refuses", "ACTIVE_POLICY_EXISTING_W77_PACKAGE_SIGNATURE_REQUIRED", [] { world.signature_linked = false; });
++    rejectCapture("invalid_capsule_metadata_refuses", "ACTIVE_POLICY_ORIGINAL_SIGNED_CAPSULE_OR_TUPLE_REFUSED", [] { world.metadata_valid = false; });
++    rejectCapture("policy_version_cannot_substitute_original_image", "ACTIVE_POLICY_ORIGINAL_COORDINATOR_SIGNED_IMAGE_REQUIRED", [] {
++        world.version = "0.7.0-dev.124.1";
++    });
++    rejectCapture("namespace_image_binding_refusal_blocks_factory", "ACTIVE_POLICY_ORIGINAL_COORDINATOR_SIGNED_IMAGE_REQUIRED", [] { world.image_bound = false; });
++    rejectCapture("namespace_exception_is_refusal", "ACTIVE_POLICY_ORIGINAL_COORDINATOR_CAPTURE_UNAVAILABLE", [] { world.throw_namespace = true; });
++    sticky("original_process_exit_is_sticky", [] { world.coordinator.live = false; }, [] { world.coordinator.live = true; });
++    sticky("original_process_birth_drift_is_sticky", [] { ++world.coordinator.birth; }, [] { --world.coordinator.birth; });
++    sticky("original_process_pid_drift_is_sticky", [] { ++world.coordinator.pid; }, [] { --world.coordinator.pid; });
++    {
++        reset(); auto package = capture();
++        auto& s = OriginalPackageModelProbe::state(*package);
++        world.coordinator.live = false;
++        world.restarted.live = true;
++        world.restarted.pid = s.original_coordinator_pid;
++        world.restarted.image = s.original_coordinator_image;
++        require(world.restarted.birth != s.original_coordinator_birth &&
++            s.original_coordinator.value == &world.coordinator && s.original_coordinator.value != &world.restarted &&
++            !package->recheck() && s.revoked, "same-PID live restart replaced original retained handle");
++        const auto reads = world.calls.capsule_reads;
++        world.coordinator.live = true;
++        require(!package->recheck() && world.calls.capsule_reads == reads &&
++            s.original_coordinator.value == &world.coordinator && s.original_coordinator.value != &world.restarted,
++            "restoring original after PID reuse revived prior revoked lease");
++        passed.push_back("same_pid_live_restart_never_replaces_retained_handle_and_revocation_is_sticky");
++    }
++    sticky("process_token_replacement_same_owner_is_sticky", [] { world.coordinator.token = &world.replacement_token; }, [] { world.coordinator.token = &world.primary; });
++    sticky("retained_token_owner_drift_is_sticky", [] { ++world.primary.owner.token_id; }, [] { --world.primary.owner.token_id; });
++    sticky("original_image_spelling_drift_is_sticky", [] { world.coordinator.image += L".renamed"; }, [] { world.coordinator.image.resize(world.coordinator.image.size() - 8); });
++    sticky("namespace_root_identity_swap_is_sticky", [] { ++world.root_identity; }, [] { --world.root_identity; });
++    sticky("namespace_file_identity_swap_is_sticky", [] { ++world.file_identity; }, [] { --world.file_identity; });
++    sticky("namespace_digest_drift_is_sticky", [] { world.namespace_digest += "-changed"; }, [] { world.namespace_digest = "SYNTHETIC-NAMESPACE"; });
++    sticky("capsule_policy_bytes_drift_is_sticky", [] { world.policy += "-changed"; }, [] { world.policy = "SYNTHETIC-POLICY"; });
++    sticky("capsule_inventory_bytes_drift_is_sticky", [] { world.inventory += "-changed"; }, [] { world.inventory = "SYNTHETIC-INVENTORY"; });
++    sticky("capsule_envelope_bytes_drift_is_sticky", [] { world.envelope += "-changed"; }, [] { world.envelope = "SYNTHETIC-ENVELOPE"; });
++    sticky("guardian_metadata_drift_is_sticky", [] { world.guardian += "-changed"; }, [] { world.guardian = "SYNTHETIC-GUARDIAN"; });
++    sticky("modeled_namespace_rename_is_sticky", [] { world.renamed = true; }, [] { world.renamed = false; });
++    sticky("modeled_reparse_rejection_is_sticky", [] { world.reparse = true; }, [] { world.reparse = false; });
++    sticky("signature_boundary_revocation_is_sticky", [] { world.signature_valid = false; }, [] { world.signature_valid = true; });
++    sticky("cancellation_during_recheck_is_sticky", [] { world.cancel_on_owner = world.calls.owners + 1; }, [] {
++        world.cancel.signalled = false; world.cancel_on_owner = 0;
++    });
++    sticky("namespace_exception_revocation_is_sticky", [] { world.throw_namespace = true; }, [] { world.throw_namespace = false; });
++    {
++        reset(); auto package = capture();
++        auto& s = OriginalPackageModelProbe::state(*package);
++        const auto* original = s.original.get();
++        require(!OriginalPackageModelProbe::release(*package) && s.original.get() == original && s.revoked &&
++            s.reason == "ACTIVE_POLICY_ORIGINAL_COORDINATOR_HANDOFF_REQUIRED", "standalone namespace escaped retained cancel scope");
++        world.cancel.signalled = false; world.namespace_live = true;
++        require(!package->recheck() && !OriginalPackageModelProbe::release(*package) && s.original.get() == original,
++            "standalone restoration split original scope/namespace lifetime");
++        passed.push_back("standalone_namespace_handoff_refuses_and_stays_revoked_without_split_lifetime");
++    }
++    {
++        reset(); auto package = capture();
++        auto& s = OriginalPackageModelProbe::state(*package);
++        s.standalone_original = false;
++        const auto* original = s.original.get();
++        auto transferred = OriginalPackageModelProbe::release(*package);
++        require(transferred && transferred.get() == original && !s.original && s.revoked && !package->recheck() &&
++            !OriginalPackageModelProbe::release(*package), "synthetic fixed namespace transfer changed or repeated");
++        passed.push_back("legacy_fixed_namespace_transfer_moves_original_exactly_once_NOT_CAPTURE_FIXED_QUALIFICATION");
++    }
++    {
++        reset(); auto package = capture();
++        for (const std::wstring relative : {L"", L"..\\evil.exe", L"C:\\evil.exe", L"\\evil.exe"})
++            require(!OriginalPackageModelProbe::image(*package, &world.coordinator, relative), "invalid relative image accepted");
++        require(!OriginalPackageModelProbe::image(*package, &world.restarted,
++            L"resources\\guardian-bootstrap\\METAENGINE-Guardian-Install-Origin-0.7.0-dev.123.1-x64.exe"),
++            "restarted handle inherited original namespace lease");
++        passed.push_back("image_predicate_rejects_untrusted_relative_and_restarted_process");
++    }
++    {
++        reset(); auto package = capture();
++        auto& s = OriginalPackageModelProbe::state(*package);
++        s.standalone_original = false;
++        world.coordinator.live = false; world.cancel.signalled = true;
++        const auto opens = world.calls.token_opens;
++        require(s.originalScopeExact() && world.calls.token_opens == opens, "captureFixed passthrough behavior changed");
++        passed.push_back("legacy_fixed_scope_passthrough_preserved_NOT_CAPTURE_FIXED_QUALIFICATION");
++    }
++    std::cout << "{\"model_cases\":" << passed.size() << ",\"passed\":[";
++    for (std::size_t i = 0; i < passed.size(); ++i) std::cout << (i ? "," : "") << '"' << passed[i] << '"';
++    std::cout << "]}\n";
++}
++'''
++    for marker, text in {'__IMAGE__': image, '__STATE__': state, '__CONSTRUCTOR__': constructor,
++                         '__FACTORY__': factory, '__RECHECK__': recheck, '__IMAGE_CHECK__': image_check,
++                         '__RELEASE__': release}.items():
++        harness = harness.replace(marker, text)
++    compiler = shutil.which('c++') or shutil.which('g++')
++    if not compiler:
++        raise RuntimeError('C++ compiler unavailable; original package model NOT RUN')
++    with tempfile.TemporaryDirectory(prefix='guardian-original-package-model-') as temporary:
++        temporary = Path(temporary)
++        environment = os.environ.copy()
++        flags = ['-std=c++20', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g']
++        if args.sanitize:
++            flags += ['-fsanitize=address,undefined', '-fno-omit-frame-pointer']
++            environment['ASAN_OPTIONS'] = 'detect_leaks=0:halt_on_error=1'
++            environment['UBSAN_OPTIONS'] = 'halt_on_error=1:print_stacktrace=1'
++        def build_run(name, source_path, extra_flags=()):
++            binary = temporary / name
++            built = subprocess.run([compiler, *flags, *extra_flags, str(source_path), '-o', str(binary)],
++                                   text=True, capture_output=True, timeout=60)
++            if built.returncode:
++                raise RuntimeError(name + ' compile failed:\n' + built.stdout + built.stderr)
++            run = subprocess.run([str(binary)], text=True, capture_output=True, env=environment, timeout=30)
++            if run.returncode:
++                raise RuntimeError(name + ' execution failed:\n' + run.stdout + run.stderr)
++            return json.loads(run.stdout)
++        model_source = temporary / 'model.cpp'
++        model_source.write_text(harness)
++        model = build_run('capture-model', model_source, ['-I', str(native)])
++        portable = build_run('path-data', tests / 'browser-guardian-original-package-path-data-tests.cpp')
++        if portable.get('failed') != 0 or portable.get('package_verified') is not False or portable.get('launch_authorized') is not False:
++            raise RuntimeError('portable path DATA summary violated classification')
++    print(json.dumps({
++        'schema': 'metaengine.guardian.original-package-capture-model.v1',
++        'classification': 'SOURCE_EXTRACTED_SYNTHETIC_MODEL_ONLY', 'state': 'PASS',
++        'source_guards': checks,
++        'actual_source_sha256': {name: digest(text) for name, text in {
++            'State_including_originalScopeExact': state, 'captureOriginalCoordinator': factory,
++            'recheck': recheck, 'originalImageExact': image_check, 'releaseOriginalNamespace': release,
++            'captureFixed_unchanged': fixed}.items()},
++        **model,
++        'portable_path_data': {'schema': portable['schema'], 'passed': portable['passed'], 'failed': portable['failed']},
++        'simulated_boundaries': ['WIN32_PROCESS_AND_TOKEN_OBJECTS', 'W77_READ_ORIGINAL_CAPSULE', 'NAMESPACE_CUSTODY'],
++        'adversary_scope': 'ABSTRACT_IDENTITY_DRIFT_AND_NAMESPACE_REJECTIONS_NOT_NTFS_BYPASS_PROOF',
++        'address_undefined_sanitizers': 'PASS' if args.sanitize else 'NOT_RUN',
++        'leak_sanitizer': 'NOT_RUN', 'windows_qualification': 'NOT_RUN', 'ntfs_namespace_qualification': 'NOT_RUN',
++        'acl_oplock_qualification': 'NOT_RUN', 'release_signature_verification': 'NOT_RUN',
++        'windows_build_and_link_qualification': 'NOT_RUN',
++        'installer_effects': 'NOT_RUN', 'full_package_verified': False,
++        'loaded_runtime_code_attested': False, 'authority_effect': False,
++    }, indent=2))
++
++
++if __name__ == '__main__':
++    main()
