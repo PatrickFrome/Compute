@@ -1,0 +1,16 @@
+apps/metaengine-browser/electron-builder.test.json
+apps/metaengine-browser/scripts/bootstrap-install-and-launch.ps1
+apps/metaengine-browser/scripts/custom-electron-package-gate.cjs
+apps/metaengine-browser/scripts/custom-electron-source-build.py
+apps/metaengine-browser/scripts/electron-builder-after-all-artifact-build.cjs
+apps/metaengine-browser/scripts/electron-builder-before-pack.cjs
+apps/metaengine-browser/test/bootstrap-install-and-launch.test.mjs
+apps/metaengine-browser/test/custom-electron-package-gate.test.mjs
+apps/metaengine-browser/test/test_custom_electron_source_build.py
+docs/guardian-custom-electron-runtime-packaging-v1.md
+docs/interfaces/custom-electron-runtime-integration-contract.md
+infra/client-state-runtime/local-vault-key.mjs
+infra/client-state-runtime/local-vault-key.test.mjs
+infra/client-state-runtime/owned-postgres-process.mjs
+infra/client-state-runtime/owned-postgres-process.test.mjs
+infra/client-state-runtime/startup-source-manifest.test.mjs

@@ -1,0 +1,38 @@
+{
+  "schema": "metaengine.windows-exe.source-only-verification.v1",
+  "source_transfer_commit": "accb28e72c87c059e780efb8e6681886b33e9b4f",
+  "source_revision": "c26565e58ab92dcbcda9663c4d231bdf4a9a7ee6",
+  "base_tree": "2dbe253e97379532f6f4b52ef7edf26109a9266d",
+  "result_tree": "219e5e2b468154fd3e6a1c1f34c8cdea81d5628f",
+  "patch_sha256": "64409efbb80fb1134c1b4279202a21d3bb8a41e49998ffcd7dc53f0ab6eaec4a",
+  "patch_apply_check": true,
+  "clean_apply_result_tree_matches": true,
+  "windows_build": "NOT RUN",
+  "installer_execution": "NOT RUN",
+  "release_ready": false,
+  "expected_launch_static_failure": "wire_route_authenticates_then_launches",
+  "guardian_original_source": {
+    "pass": 23,
+    "fail": 0,
+    "not_run": 5
+  },
+  "browser_source_checks": 292,
+  "required_node_protocol": {
+    "pass": 17,
+    "fail": 0
+  },
+  "models_normal_and_sanitized": {
+    "begin": 9,
+    "owner_wait": 13,
+    "requester_session": 15
+  },
+  "packaging_python_models": 16,
+  "packaging_independent_node_pass": 150,
+  "runtime_full_dependency_failures": 19,
+  "runtime_full_dependency_failure_cause": "absent locked postgres package",
+  "asar_binding_dependency_blocked": "@electron/asar absent",
+  "all_new_tests_are_source_models_or_disposable_fixtures": true,
+  "installation_database_service_effects": false,
+  "new_trust_roots": false,
+  "weakened_guards": false
+}
