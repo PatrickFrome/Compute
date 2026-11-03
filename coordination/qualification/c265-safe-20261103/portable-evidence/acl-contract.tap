@@ -1,0 +1,64 @@
+TAP version 13
+# Subtest: DACL operator is a fixed PowerShell program, never a private path assembled into script or argv
+ok 1 - DACL operator is a fixed PowerShell program, never a private path assembled into script or argv
+  ---
+  duration_ms: 5.444793
+  type: 'test'
+  ...
+# Subtest: a cold child taking longer than 15 seconds can complete its ACL receipt within the bounded attempt
+ok 2 - a cold child taking longer than 15 seconds can complete its ACL receipt within the bounded attempt
+  ---
+  duration_ms: 16048.997365
+  type: 'test'
+  ...
+# Subtest: timeout stays fail-closed with sanitized last-phase evidence and never retries
+ok 3 - timeout stays fail-closed with sanitized last-phase evidence and never retries
+  ---
+  duration_ms: 5.023136
+  type: 'test'
+  ...
+# Subtest: Win32 DACL operator rejects unreadable receipt, unsupported platform and unknown operation
+ok 4 - Win32 DACL operator rejects unreadable receipt, unsupported platform and unknown operation
+  ---
+  duration_ms: 3.49524
+  type: 'test'
+  ...
+# Subtest: fixed native denial markers distinguish a rejected grant from timeout without stderr disclosure
+ok 5 - fixed native denial markers distinguish a rejected grant from timeout without stderr disclosure
+  ---
+  duration_ms: 2.974099
+  type: 'test'
+  ...
+# Subtest: Win32 real ACL protects fresh private directory and verifies inheriting config and copied Vault
+ok 6 - Win32 real ACL protects fresh private directory and verifies inheriting config and copied Vault # SKIP
+  ---
+  duration_ms: 0.481243
+  type: 'test'
+  ...
+# Subtest: Win32 DACL protection can repeat on existing private state without changing owner or group
+ok 7 - Win32 DACL protection can repeat on existing private state without changing owner or group # SKIP
+  ---
+  duration_ms: 0.204894
+  type: 'test'
+  ...
+# Subtest: a cancelled ACL read never starts a native process or accepts a late successful receipt
+ok 8 - a cancelled ACL read never starts a native process or accepts a late successful receipt
+  ---
+  duration_ms: 3.525401
+  type: 'test'
+  ...
+# Subtest: ACL cancellation reaches an actual child process without waiting for the native timeout
+ok 9 - ACL cancellation reaches an actual child process without waiting for the native timeout
+  ---
+  duration_ms: 3.898234
+  type: 'test'
+  ...
+1..9
+# tests 9
+# suites 0
+# pass 7
+# fail 0
+# cancelled 0
+# skipped 2
+# todo 0
+# duration_ms 16137.623834

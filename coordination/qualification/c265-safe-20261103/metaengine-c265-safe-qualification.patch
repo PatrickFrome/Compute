@@ -1,0 +1,477 @@
+diff --git a/apps/metaengine-browser/test/native-coding-initial-setup-main.test.mjs b/apps/metaengine-browser/test/native-coding-initial-setup-main.test.mjs
+index 99c197162d4e62ea077d3396869acec945afd5bf..0cd2abf25b7c1c5acfe14b0c5f3acd26cc03c695 100644
+--- a/apps/metaengine-browser/test/native-coding-initial-setup-main.test.mjs
++++ b/apps/metaengine-browser/test/native-coding-initial-setup-main.test.mjs
+@@ -1,14 +1,16 @@
++// Source-only controller/contract checks. Private-root, provider and BEGIN
++// boundaries are simulated; these tests do not qualify native ACLs or agent work.
+ import test from 'node:test';
+ import assert from 'node:assert/strict';
+ import {createInitialNativeSetupMainController} from '../src/native-coding-initial-setup-main.mjs';
+ import {initialNativeSetupProviderChoices,initialNativeSetupBeginInput} from '../src/native-coding-initial-selection-contract.mjs';
+ import {initialFixture,choice,allocator,uuid,setupReadback,configurationReadback} from './native-coding-initial-setup-fixture.mjs';
+ 
+-function harness({unknown=false,initialSelection=null}={}){
++function harness({unknown=false,initialSelection=null,prepareRoots=async()=>({state:'PREPARED'})}={}){
+   const fixture=initialFixture();let persisted=initialSelection,setupState=initialSelection?'NOT_STARTED':'NOT_STARTED';
+   const counters={write:0,prepare:0,provider:0,begin:0,cancel:0,login:0};let lastProvider=null,lastBegin=null;
+   const store={stateDirectory:fixture.stateDirectory,async read(){return persisted;},async writeOnce(value){counters.write++;persisted=structuredClone(value);return persisted;},
+-    async preparePrivateRoots(){counters.prepare++;return {state:'PREPARED'};}};
++    async preparePrivateRoots(...args){counters.prepare++;return prepareRoots(...args);}};
+   const readSetupReadback=async()=>persisted?setupReadback(persisted,setupState):null;
+   const readConfigurationReadback=async()=>persisted?configurationReadback(persisted):null;
+   const createProvider=options=>{counters.provider++;lastProvider=options;return Object.freeze({opaque:true});};
+@@ -20,6 +22,16 @@ function harness({unknown=false,initialSelection=null}={}){
+   return {fixture,counters,newController,get persisted(){return persisted;},get setupState(){return setupState;},set setupState(v){setupState=v;},get lastProvider(){return lastProvider;},get lastBegin(){return lastBegin;}};
+ }
+ 
++function deferred(){let resolve;const promise=new Promise(done=>{resolve=done;});return {promise,resolve};}
++
++test('BEGIN without explicit persisted selection cannot prepare roots or create a provider',async()=>{
++  const h=harness(),controller=h.newController();
++  await controller.snapshot();
++  await assert.rejects(controller.begin(),{message:'native_initial_setup_main_selection_required'});
++  assert.equal(h.persisted,null);
++  assert.deepEqual(h.counters,{write:0,prepare:0,provider:0,begin:0,cancel:0,login:0});
++});
++
+ test('blank -> explicit approved stable two-role choice -> exact existing-provider and BEGIN inputs',async()=>{
+   const h=harness(),controller=h.newController(allocator(1100));
+   const blank=await controller.snapshot();assert.equal(blank.state,'NOT_CONFIGURED');assert.equal(blank.roster_state,'EMPTY');
+@@ -80,11 +92,63 @@ test('wrong authenticated Codex account is visible as drift and cannot advertise
+   const view=await controller.snapshot();assert.equal(view.authentication,'AUTHENTICATED');assert.equal(view.environment_state,'DRIFTED');assert.equal(view.can_begin,false);
+ });
+ 
+-test('HEAD/admin/path drift rejects BEGIN before root preparation',async()=>{
+-  const h=harness(),controller=h.newController(allocator(1800)),blank=await controller.snapshot();await controller.confirm(choice(blank.proposal_id));
+-  h.fixture.facts.repository.head='c'.repeat(40);
+-  await assert.rejects(()=>controller.begin(),/native_initial_selection_source_changed/);
+-  assert.equal(h.counters.prepare,0);assert.equal(h.counters.provider,0);assert.equal(h.counters.begin,0);
++const beginDriftCases=[
++  ['lost Codex authentication',f=>{f.facts.codex_auth={state:'AUTHENTICATION_REQUIRED',account_id:null};},'codex_authentication_required'],
++  ['changed Codex account',f=>{f.facts.codex_auth.account_id='other-codex-account';},'codex_account_changed'],
++  ['changed ADMIN epoch',f=>{f.facts.device.admin_grant_epoch++;},'admin_epoch_or_device_changed'],
++  ['changed repository path',f=>{f.facts.repository.repo_root='C:\\METAENGINE\\other-repo';},'repository_path_changed'],
++  ['changed source HEAD',f=>{f.facts.repository.head='c'.repeat(40);},'source_changed'],
++];
++for(const phase of ['before root preparation','during root preparation'])for(const [name,drift,reason] of beginDriftCases){
++  test('BEGIN blocks '+name+' '+phase+' with no provider or dispatch', {timeout:5000}, async t=>{
++    const entered=deferred(),release=deferred();t.after(()=>release.resolve());
++    const h=harness({prepareRoots:async()=>{entered.resolve();await release.promise;return {state:'PREPARED'};}});
++    const controller=h.newController(allocator(1800)),blank=await controller.snapshot();await controller.confirm(choice(blank.proposal_id));
++    const before=structuredClone(h.persisted),late=phase==='during root preparation';
++    let pending;
++    if(late){
++      pending=controller.begin();pending.catch(()=>{});await entered.promise;
++      assert.deepEqual(h.counters,{write:1,prepare:1,provider:0,begin:0,cancel:0,login:0});
++      drift(h.fixture);release.resolve();
++    }else{drift(h.fixture);pending=controller.begin();}
++    await assert.rejects(pending,{message:'native_initial_selection_'+reason});
++    const expected={write:1,prepare:late?1:0,provider:0,begin:0,cancel:0,login:0};
++    assert.deepEqual(h.counters,expected);assert.deepEqual(h.persisted,before);
++    assert.equal(h.lastProvider,null);assert.equal(h.lastBegin,null);assert.equal(h.setupState,'NOT_STARTED');
++    const restarted=h.newController(allocator(2800)),view=await restarted.snapshot();
++    assert.equal(view.can_begin,false);assert.equal(view.automatic_retry_allowed,false);assert.equal(view.authority_effect,false);
++    assert.ok(view.roles.every(role=>role.state==='CONFIGURED_NOT_ADMITTED'));
++    await assert.rejects(restarted.begin(),{message:'native_initial_selection_'+reason});
++    assert.deepEqual(h.counters,expected);assert.deepEqual(h.persisted,before);
++  });
++}
++
++test('private-root ACL preparation failure cannot reach provider or BEGIN and preserves the selection',async()=>{
++  const failure=Error('simulated_owner_acl_unverified');
++  const h=harness({prepareRoots:async()=>{throw failure;}}),controller=h.newController(allocator(2850));
++  const blank=await controller.snapshot();await controller.confirm(choice(blank.proposal_id));
++  const before=structuredClone(h.persisted);
++  await assert.rejects(controller.begin(),error=>error===failure);
++  assert.deepEqual(h.counters,{write:1,prepare:1,provider:0,begin:0,cancel:0,login:0});
++  assert.deepEqual(h.persisted,before);assert.equal(h.lastProvider,null);assert.equal(h.lastBegin,null);
++  const view=await controller.snapshot();
++  assert.equal(view.state,'CONFIGURED_NOT_ADMITTED');assert.equal(view.setup_readback.state,'NOT_STARTED');
++  assert.equal(view.setup_readback.execution_ready,false);assert.equal(view.setup_readback.prepared,false);
++  assert.equal(view.configuration_readback.mounted,false);assert.equal(view.authority_effect,false);
++});
++
++for(const state of ['HOLD','AMBIGUOUS'])test('new '+state+' readback during root preparation blocks provider and survives restart',async()=>{
++  let h;h=harness({prepareRoots:async()=>{await Promise.resolve();h.setupState=state;return {state:'PREPARED'};}});
++  const controller=h.newController(allocator(2900)),blank=await controller.snapshot();await controller.confirm(choice(blank.proposal_id));
++  const before=structuredClone(h.persisted);
++  await assert.rejects(controller.begin(),{message:'native_initial_setup_main_existing_operation_requires_readback'});
++  const restarted=h.newController(allocator(3000)),view=await restarted.snapshot();
++  assert.equal(view.setup_readback.state,state);assert.equal(view.setup_readback.execution_ready,false);
++  assert.equal(view.setup_readback.prepared,false);assert.equal(view.can_begin,false);
++  assert.equal(view.automatic_retry_allowed,false);assert.equal(view.authority_effect,false);
++  await assert.rejects(restarted.begin(),{message:'native_initial_setup_main_existing_operation_requires_readback'});
++  assert.deepEqual(h.counters,{write:1,prepare:1,provider:0,begin:0,cancel:0,login:0});
++  assert.deepEqual(h.persisted,before);assert.equal(h.lastProvider,null);assert.equal(h.lastBegin,null);
+ });
+ 
+ for(const boundary of ['readPrivateFacts','readSetupReadback'])test('cancel after root preparation during '+boundary+' prevents late BEGIN',async()=>{
+diff --git a/apps/metaengine-browser/test/qa-disposable-image-restore.test.mjs b/apps/metaengine-browser/test/qa-disposable-image-restore.test.mjs
+index bdbe4cb0981bacaf680a0eeebdd11952dab6080e..6dc8394ea8e3acf55295e04c1b0e2346168fb04c 100644
+--- a/apps/metaengine-browser/test/qa-disposable-image-restore.test.mjs
++++ b/apps/metaengine-browser/test/qa-disposable-image-restore.test.mjs
+@@ -78,3 +78,62 @@ test('invalid source digest or non-disposable root fails before modification',as
+     {expectedSnapshotSha256:f.expected}),/qa_disposable_restore_outside_disposable_fixture/);
+   assert.equal((await captureInstalledTreeFingerprint(f.installed)).tree_sha256,f.preimage);
+ });
++
++// These controls use only generated images in mkdtemp fixtures. They qualify
++// preservation and fail-closed replay behavior, not a Windows/DB restoration.
++for(const name of ['prepared','quarantine','restore-receipt.json'])
++test('an existing '+name+' blocks restore without overwriting earlier evidence or image',async t=>{
++  const f=await fixture(t),existing=path.join(f.root,name);
++  const marker=name==='restore-receipt.json'?existing:path.join(existing,'retained.bin');
++  if(name!=='restore-receipt.json')await fs.mkdir(existing);
++  await fs.writeFile(marker,'prior-attempt-must-survive');
++  const before=(await fs.readdir(f.root)).sort();let checkpoints=0;
++  await assert.rejects(qualifyDisposableFullImageRestore(f.root,{expectedSnapshotSha256:f.expected,
++    onCheckpoint:async()=>{checkpoints++;}}),/existing_attempt_requires_readback/);
++  assert.equal(checkpoints,0);
++  assert.equal(await fs.readFile(marker,'utf8'),'prior-attempt-must-survive');
++  assert.deepEqual((await fs.readdir(f.root)).sort(),before);
++  assert.equal((await captureInstalledTreeFingerprint(f.installed)).tree_sha256,f.preimage);
++  assert.equal((await captureInstalledTreeFingerprint(f.snapshot)).tree_sha256,f.expected);
++});
++
++for(const name of ['installed','snapshot'])
++test('a linked '+name+' directory cannot redirect restore to another fixture',async t=>{
++  const f=await fixture(t),outside=await fixture(t),linked=path.join(f.root,name);
++  await fs.rm(linked,{recursive:true});
++  try{await fs.symlink(outside.installed,linked,process.platform==='win32'?'junction':'dir');}
++  catch(error){
++    if(process.platform==='win32'&&['EPERM','EACCES'].includes(error.code)){
++      t.skip('junction creation denied; native alias rejection remains NOT RUN');return;
++    }
++    throw error;
++  }
++  let checkpoints=0;
++  await assert.rejects(qualifyDisposableFullImageRestore(f.root,{expectedSnapshotSha256:f.expected,
++    onCheckpoint:async()=>{checkpoints++;}}),/directory_not_physical/);
++  assert.equal(checkpoints,0);
++  assert.equal((await captureInstalledTreeFingerprint(outside.installed)).tree_sha256,outside.preimage);
++  assert.equal((await captureInstalledTreeFingerprint(outside.snapshot)).tree_sha256,outside.expected);
++  for(const file of ['prepared','quarantine','restore-receipt.json'])
++    await assert.rejects(fs.lstat(path.join(f.root,file)),{code:'ENOENT'});
++});
++
++test('a quarantined preimage cannot be compensated over a concurrent installed image',async t=>{
++  const f=await fixture(t);let concurrent;
++  await assert.rejects(qualifyDisposableFullImageRestore(f.root,{expectedSnapshotSha256:f.expected,
++    onCheckpoint:async stage=>{
++      if(stage!=='PREIMAGE_QUARANTINED')return;
++      await fs.mkdir(f.installed);
++      await fs.writeFile(path.join(f.installed,'concurrent.bin'),'another-operation');
++      concurrent=(await captureInstalledTreeFingerprint(f.installed)).tree_sha256;
++      throw Error('injected_concurrent_image');
++    }}),/injected_concurrent_image/);
++  assert.equal((await captureInstalledTreeFingerprint(f.installed)).tree_sha256,concurrent);
++  assert.equal((await captureInstalledTreeFingerprint(path.join(f.root,'quarantine'))).tree_sha256,f.preimage);
++  const journal=JSON.parse(await fs.readFile(path.join(f.root,'restore-receipt.json')));
++  assert.equal(journal.state,'EFFECT_UNKNOWN_REQUIRES_READBACK');
++  assert.equal(journal.automatic_retry_allowed,false);
++  await assert.rejects(qualifyDisposableFullImageRestore(f.root,{expectedSnapshotSha256:f.expected}),
++    /existing_attempt_requires_readback/);
++  assert.equal((await captureInstalledTreeFingerprint(f.installed)).tree_sha256,concurrent);
++});
+diff --git a/apps/metaengine-browser/test/safe-install-qualification.mjs b/apps/metaengine-browser/test/safe-install-qualification.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..a6d0074f4005f0602e0c7048c63b9b69efaf5bd5
+--- /dev/null
++++ b/apps/metaengine-browser/test/safe-install-qualification.mjs
+@@ -0,0 +1,170 @@
++#!/usr/bin/env node
++// Reviewed source/fixture tests only. This runner is not an OS sandbox and does
++// not qualify a Windows installation, native authority, or a real DB restore.
++import {execFile} from 'node:child_process';
++import fs from 'node:fs/promises';
++import os from 'node:os';
++import path from 'node:path';
++import {fileURLToPath} from 'node:url';
++import {promisify} from 'node:util';
++
++const execute=promisify(execFile);
++const repositoryRoot=fileURLToPath(new URL('../../../',import.meta.url));
++const browserTest='apps/metaengine-browser/test/';
++const runtimeTest='infra/client-state-runtime/';
++const entry=(id,files,expectedSkipped=0)=>Object.freeze({id,
++  files:Object.freeze(files),expectedSkipped});
++
++export const SAFE_QUALIFICATION_SUITES=Object.freeze([
++  entry('install-upgrade-model',[
++    browserTest+'installer-update-transaction.test.mjs',
++    browserTest+'installer-update-recovery.test.mjs',
++  ]),
++  entry('disposable-image-restore',[browserTest+'qa-disposable-image-restore.test.mjs']),
++  entry('database-restore-guards',[
++    runtimeTest+'disposable-recovery-bundle-guard.test.mjs',
++    runtimeTest+'upgrade-backup-restore-gate.test.mjs',
++    runtimeTest+'pg17-backup-effect-barrier.test.mjs',
++  ]),
++  // This mixed suite has exactly two physical Windows cases. Linux skips are
++  // counted explicitly; any additional skip fails the portable qualification.
++  entry('acl-contract',[browserTest+'private-windows-storage-acl.test.mjs'],2),
++  entry('auth-first-task-admission-model',[
++    browserTest+'native-coding-initial-setup-main.test.mjs',
++    browserTest+'native-coding-capacity-first-dispatch.test.mjs',
++  ]),
++]);
++
++const notRun=Object.freeze([
++  Object.freeze({domain:'Windows clean install',status:'NOT RUN',
++    reason:'Linux-only runner; real installer NOT AUTHORIZED'}),
++  Object.freeze({domain:'Windows physical upgrade',status:'NOT RUN',
++    reason:'Linux-only runner; real installer NOT AUTHORIZED'}),
++  Object.freeze({domain:'Windows effective ACL, native peer/key/token/Job and launch',status:'NOT RUN',
++    reason:'Models and injected readbacks do not prove Windows behavior'}),
++  Object.freeze({domain:'Physical PostgreSQL restore',status:'NOT RUN',
++    reason:'No database processes or restore integration tests are selected; user DB restore NOT AUTHORIZED'}),
++  Object.freeze({domain:'Installed authentication and first real task',status:'NOT RUN',
++    reason:'Admission/executor fixtures are not a running installed product'}),
++  Object.freeze({domain:'wire_route_authenticates_then_launches',status:'NOT RUN BY THIS RUNNER',
++    reason:'Separate mandatory source check; known FAIL due HOLD must not be relabelled as success'}),
++]);
++
++export function safeQualificationPlan(){
++  return {schema:'metaengine.browser.safe-install-qualification.v1',
++    evidence_class:'PORTABLE/SOURCE/FIXTURE',full_qualification:'INCOMPLETE',
++    suites:SAFE_QUALIFICATION_SUITES,not_run:notRun,
++    production_qualified:false,physical_restore_proven:false,windows_native_proven:false,
++    first_real_task_proven:false,upgrade_authorized:false,
++    installer_authorization:'NOT AUTHORIZED',authority_effect:false};
++}
++
++export function parseSafeQualificationArguments(args){
++  if(args.length===0||(args.length===1&&args[0]==='--list'))return 'list';
++  if(args.length===1&&args[0]==='--run')return 'run';
++  throw Error('safe_qualification_arguments_invalid');
++}
++
++// No parent environment is spread or consulted. In particular PG*, database
++// URLs, NODE_OPTIONS/NODE_PATH, ASAN/LSAN/UBSAN and loader hooks cannot opt a
++// selected source test into an environment-selected integration path.
++export function safeQualificationEnvironment(profileRoot){
++  if(typeof profileRoot!=='string'||!path.isAbsolute(profileRoot))
++    throw Error('safe_qualification_profile_invalid');
++  const home=path.join(profileRoot,'home'),temporary=path.join(profileRoot,'tmp');
++  return Object.freeze({PATH:'/usr/bin:/bin',LANG:'C.UTF-8',LC_ALL:'C.UTF-8',TZ:'UTC',
++    HOME:home,USERPROFILE:home,APPDATA:path.join(profileRoot,'roaming'),
++    LOCALAPPDATA:path.join(profileRoot,'local'),
++    XDG_CONFIG_HOME:path.join(profileRoot,'config'),XDG_CACHE_HOME:path.join(profileRoot,'cache'),
++    XDG_DATA_HOME:path.join(profileRoot,'data'),XDG_STATE_HOME:path.join(profileRoot,'state'),
++    TMPDIR:temporary,TMP:temporary,TEMP:temporary});
++}
++
++export function safeQualificationInvocation(id,profileRoot){
++  const suite=SAFE_QUALIFICATION_SUITES.find(value=>value.id===id);
++  if(!suite)throw Error('safe_qualification_suite_not_allowlisted');
++  return {executable:process.execPath,
++    args:['--experimental-test-module-mocks','--experimental-vm-modules',
++      '--test','--test-concurrency=1','--test-reporter=tap',...suite.files],
++    options:{cwd:repositoryRoot,env:safeQualificationEnvironment(profileRoot),
++      shell:false,windowsHide:true,timeout:120000,maxBuffer:8*1024*1024}};
++}
++
++export function classifySafeQualificationResult({exitCode,signal=null,stdout='',expectedSkipped=0}){
++  const counts={};
++  for(const key of ['tests','pass','fail','cancelled','skipped','todo']){
++    const matches=[...stdout.matchAll(new RegExp('^# '+key+' (\\d+)\\r?$','gm'))];
++    if(matches.length!==1)return {state:'FAILED',reason:'test_summary_missing_or_ambiguous'};
++    counts[key]=Number(matches[0][1]);
++  }
++  const sum=counts.pass+counts.fail+counts.cancelled+counts.skipped+counts.todo;
++  const passed=exitCode===0&&signal===null&&counts.tests===sum&&counts.pass>0
++    &&counts.fail===0&&counts.cancelled===0&&counts.todo===0
++    &&counts.skipped===expectedSkipped;
++  return {state:passed?'PASSED':'FAILED',reason:passed?'portable_tests_only':'test_failure_or_unexpected_skip',counts};
++}
++
++export async function createSafeQualificationWorkspace(){
++  // No caller-provided output path; every run owns a new, initially empty
++  // directory and every evidence file is written with exclusive creation.
++  const temporaryParent=process.platform==='linux'?'/tmp':os.tmpdir();
++  const root=await fs.mkdtemp(path.join(temporaryParent,'metaengine-safe-install-qualification-'));
++  await fs.chmod(root,0o700);
++  const evidence=path.join(root,'evidence');await fs.mkdir(evidence,{mode:0o700});
++  return {root,evidence};
++}
++
++export async function runSafeQualification(){
++  // Some reviewed suites contain platform-gated physical Windows branches.
++  // Refuse that platform entirely instead of accidentally executing them.
++  if(process.platform!=='linux')throw Error('safe_qualification_linux_required');
++  const workspace=await createSafeQualificationWorkspace(),results=[];
++  for(const suite of SAFE_QUALIFICATION_SUITES){
++    const profileRoot=path.join(workspace.root,'profiles',suite.id);
++    const invocation=safeQualificationInvocation(suite.id,profileRoot);
++    for(const directory of new Set(Object.values(invocation.options.env)
++      .filter(value=>path.isAbsolute(value)&&value.startsWith(profileRoot+path.sep))))
++      await fs.mkdir(directory,{recursive:true,mode:0o700});
++    // Test filenames are fixed source inputs, never globs, CLI arguments or
++    // environment-selected binaries. Native/source mandatory runners are absent.
++    for(const file of suite.files){
++      const stat=await fs.lstat(path.join(repositoryRoot,file));
++      if(!stat.isFile()||stat.isSymbolicLink())throw Error('safe_qualification_test_not_regular');
++    }
++    process.stderr.write('Portable qualification: '+suite.id+'\n');
++    let stdout='',stderr='',exitCode=0,signal=null;
++    try{
++      ({stdout,stderr}=await execute(invocation.executable,invocation.args,invocation.options));
++    }catch(error){
++      stdout=typeof error.stdout==='string'?error.stdout:'';
++      stderr=typeof error.stderr==='string'?error.stderr:'';
++      exitCode=Number.isInteger(error.code)?error.code:1;signal=error.signal||null;
++    }
++    const output=path.join(workspace.evidence,suite.id+'.tap');
++    await fs.writeFile(output,stdout,{flag:'wx',mode:0o600});
++    await fs.writeFile(path.join(workspace.evidence,suite.id+'.stderr'),stderr,{flag:'wx',mode:0o600});
++    results.push({id:suite.id,files:suite.files,exit_code:exitCode,signal,
++      ...classifySafeQualificationResult({exitCode,signal,stdout,expectedSkipped:suite.expectedSkipped}),
++      output});
++  }
++  const report={...safeQualificationPlan(),state:results.every(value=>value.state==='PASSED')
++    ?'PORTABLE_CHECKS_PASSED':'PORTABLE_CHECKS_FAILED',
++    platform:process.platform,node_version:process.version,evidence_directory:workspace.evidence,
++    results};
++  await fs.writeFile(path.join(workspace.evidence,'report.json'),JSON.stringify(report,null,2)+'\n',
++    {flag:'wx',mode:0o600});
++  return report;
++}
++
++if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
++  try{
++    const mode=parseSafeQualificationArguments(process.argv.slice(2));
++    const report=mode==='list'?safeQualificationPlan():await runSafeQualification();
++    process.stdout.write(JSON.stringify(report,null,2)+'\n');
++    if(report.state==='PORTABLE_CHECKS_FAILED')process.exitCode=1;
++  }catch(error){
++    const reason=error?.message?.startsWith('safe_qualification_')?error.message:'safe_qualification_execution_incomplete';
++    process.stdout.write(JSON.stringify({...safeQualificationPlan(),state:'NOT RUN OR INCOMPLETE',reason})+'\n');
++    process.exitCode=2;
++  }
++}
+diff --git a/apps/metaengine-browser/test/safe-install-qualification.test.mjs b/apps/metaengine-browser/test/safe-install-qualification.test.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..c236fc7fb4f443c876aa278da377bc5e7483dba2
+--- /dev/null
++++ b/apps/metaengine-browser/test/safe-install-qualification.test.mjs
+@@ -0,0 +1,119 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import {execFile} from 'node:child_process';
++import fs from 'node:fs/promises';
++import path from 'node:path';
++import {promisify} from 'node:util';
++import {SAFE_QUALIFICATION_SUITES,safeQualificationPlan,parseSafeQualificationArguments,
++  safeQualificationEnvironment,safeQualificationInvocation,classifySafeQualificationResult,
++  createSafeQualificationWorkspace} from './safe-install-qualification.mjs';
++
++const execute=promisify(execFile);
++const summary=({pass=1,fail=0,cancelled=0,skipped=0,todo=0}={})=>
++  Object.entries({tests:pass+fail+cancelled+skipped+todo,pass,fail,cancelled,skipped,todo})
++    .map(([key,value])=>'# '+key+' '+value).join('\n')+'\n';
++
++test('CLI cannot select arbitrary tests, commands, output paths or runtime flags',()=>{
++  assert.equal(parseSafeQualificationArguments([]),'list');
++  assert.equal(parseSafeQualificationArguments(['--list']),'list');
++  assert.equal(parseSafeQualificationArguments(['--run']),'run');
++  for(const args of [['--run','test/*.test.mjs'],['--run','--execute'],['--run','--out','existing'],
++    ['--run','--test-name-pattern','.*'],['--run','--run'],['--unknown']])
++    assert.throws(()=>parseSafeQualificationArguments(args),/arguments_invalid/);
++});
++
++test('allowlist is fixed and excludes DB integration, native runners and installer entrypoints',()=>{
++  assert.ok(Object.isFrozen(SAFE_QUALIFICATION_SUITES));
++  const files=SAFE_QUALIFICATION_SUITES.flatMap(value=>value.files);
++  assert.equal(new Set(files).size,files.length);
++  for(const suite of SAFE_QUALIFICATION_SUITES){
++    assert.ok(Object.isFrozen(suite)&&Object.isFrozen(suite.files));
++    for(const file of suite.files){
++      assert.match(file,/^(apps\/metaengine-browser\/test|infra\/client-state-runtime)\/[a-z0-9-]+\.test\.mjs$/);
++      assert.doesNotMatch(file,/integration|\.pg17\.|\/native\/|[?*]|\.ps1$/);
++    }
++  }
++  assert.ok(files.includes('apps/metaengine-browser/test/native-coding-initial-setup-main.test.mjs'));
++  assert.ok(files.includes('apps/metaengine-browser/test/native-coding-capacity-first-dispatch.test.mjs'));
++  assert.throws(()=>safeQualificationInvocation('../../installer.exe','/tmp/fixture'),/not_allowlisted/);
++});
++
++test('each allowlisted command uses Node, an explicit disposable profile and no shell',async t=>{
++  const workspace=await createSafeQualificationWorkspace();
++  t.after(()=>fs.rm(workspace.root,{recursive:true,force:true}));
++  const before={HOME:process.env.HOME,CODEX_HOME:process.env.CODEX_HOME};
++  for(const suite of SAFE_QUALIFICATION_SUITES){
++    const profile=path.join(workspace.root,suite.id),command=safeQualificationInvocation(suite.id,profile);
++    assert.equal(command.executable,process.execPath);assert.equal(command.options.shell,false);
++    assert.deepEqual(command.args.slice(5),suite.files);
++    for(const key of ['HOME','USERPROFILE','APPDATA','LOCALAPPDATA','TMPDIR','TMP','TEMP',
++      'XDG_CONFIG_HOME','XDG_CACHE_HOME','XDG_DATA_HOME','XDG_STATE_HOME'])
++      assert.ok(command.options.env[key].startsWith(profile+path.sep),key);
++  }
++  assert.deepEqual({HOME:process.env.HOME,CODEX_HOME:process.env.CODEX_HOME},before);
++});
++
++test('actual child environment excludes DB selectors, Node hooks, sanitizers and credentials',async t=>{
++  const workspace=await createSafeQualificationWorkspace();
++  t.after(()=>fs.rm(workspace.root,{recursive:true,force:true}));
++  const profile=path.join(workspace.root,'profile'),env=safeQualificationEnvironment(profile);
++  await fs.mkdir(env.TMPDIR,{recursive:true});
++  const moduleUrl=new URL('./safe-install-qualification.mjs',import.meta.url).href;
++  // Contaminate only a disposable child env, never the test process or OS env.
++  const hostile={...env,NODE_OPTIONS:'--trace-warnings',NODE_PATH:'/untrusted-modules',
++    ASAN_OPTIONS:'detect_leaks=0',LSAN_OPTIONS:'exitcode=0',UBSAN_OPTIONS:'halt_on_error=0',
++    LOCAL_STATE_TEST_PG_BIN_DIR:'/untrusted-postgres',METAENGINE_PG_TEST_PORT:'55432',
++    METAENGINE_PGLITE_MODE:'1',PGHOST:'user-db.invalid',PGPASSWORD:'fixture-secret',
++    DATABASE_URL:'postgresql://fixture-secret@user-db.invalid/db',OPENAI_API_KEY:'fixture-secret'};
++  const script=`import {execFile} from 'node:child_process';
++    import {promisify} from 'node:util';
++    import {safeQualificationEnvironment} from ${JSON.stringify(moduleUrl)};
++    const result=await promisify(execFile)(process.execPath,['-e','process.stdout.write(JSON.stringify(process.env))'],
++      {env:safeQualificationEnvironment(${JSON.stringify(profile)}),shell:false});
++    process.stdout.write(result.stdout);`;
++  const output=await execute(process.execPath,['--input-type=module','-e',script],
++    {env:hostile,shell:false,timeout:10000,maxBuffer:32768});
++  const actual=JSON.parse(output.stdout);
++  for(const key of Object.keys(hostile).filter(key=>!Object.hasOwn(env,key)))
++    assert.equal(actual[key],undefined,key);
++  assert.equal(actual.HOME,env.HOME);assert.equal(actual.TMPDIR,env.TMPDIR);
++  assert.throws(()=>safeQualificationEnvironment('relative'),/profile_invalid/);
++});
++
++test('evidence workspaces are fresh and cannot overwrite an earlier result',async t=>{
++  const first=await createSafeQualificationWorkspace(),second=await createSafeQualificationWorkspace();
++  t.after(()=>Promise.all([first,second].map(value=>fs.rm(value.root,{recursive:true,force:true}))));
++  assert.notEqual(first.root,second.root);
++  assert.deepEqual(await fs.readdir(first.evidence),[]);
++  assert.deepEqual(await fs.readdir(second.evidence),[]);
++  const report=path.join(first.evidence,'report.json');
++  await fs.writeFile(report,'earlier-evidence',{flag:'wx'});
++  await assert.rejects(fs.writeFile(report,'replacement',{flag:'wx'}),{code:'EEXIST'});
++  assert.equal(await fs.readFile(report,'utf8'),'earlier-evidence');
++});
++
++test('an exit code or skipped-only output cannot masquerade as passed qualification',()=>{
++  assert.equal(classifySafeQualificationResult({exitCode:0,stdout:summary()}).state,'PASSED');
++  for(const result of [
++    {exitCode:1,stdout:summary()},
++    {exitCode:0,signal:'SIGTERM',stdout:summary()},
++    {exitCode:0,stdout:summary({pass:0,skipped:1}),expectedSkipped:1},
++    {exitCode:0,stdout:summary({skipped:1})},
++    {exitCode:0,stdout:summary({todo:1})},
++    {exitCode:0,stdout:summary({fail:1})},
++    {exitCode:0,stdout:'TAP version 13\n'},
++    {exitCode:0,stdout:summary()+summary()},
++  ])assert.equal(classifySafeQualificationResult(result).state,'FAILED');
++  assert.equal(classifySafeQualificationResult({exitCode:0,stdout:summary({skipped:2}),expectedSkipped:2}).state,'PASSED');
++});
++
++test('portable success never grants physical restore, native Windows or first-task proof',()=>{
++  const plan=safeQualificationPlan();
++  assert.equal(plan.full_qualification,'INCOMPLETE');
++  for(const key of ['production_qualified','physical_restore_proven','windows_native_proven','first_real_task_proven',
++    'upgrade_authorized','authority_effect'])assert.equal(plan[key],false,key);
++  for(const domain of ['Physical PostgreSQL restore','Installed authentication and first real task'])
++    assert.equal(plan.not_run.find(value=>value.domain===domain).status,'NOT RUN');
++  assert.equal(plan.installer_authorization,'NOT AUTHORIZED');
++  assert.match(plan.not_run.find(value=>value.domain==='wire_route_authenticates_then_launches').reason,/FAIL due HOLD/);
++});

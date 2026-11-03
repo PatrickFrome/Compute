@@ -1,0 +1,238 @@
+TAP version 13
+# Subtest: issued budget-one lease remains retained through busy setup; generic reads cannot dispatch; first tick does not double count
+ok 1 - issued budget-one lease remains retained through busy setup; generic reads cannot dispatch; first tick does not double count
+  ---
+  duration_ms: 15.394807
+  type: 'test'
+  ...
+# Subtest: budget greater than one counts setup and real claims once, keeping both leases when resources shrink
+ok 2 - budget greater than one counts setup and real claims once, keeping both leases when resources shrink
+  ---
+  duration_ms: 8.974691
+  type: 'test'
+  ...
+# Subtest: retained first dispatch refuses lease-generation
+ok 3 - retained first dispatch refuses lease-generation
+  ---
+  duration_ms: 0.730703
+  type: 'test'
+  ...
+# Subtest: retained first dispatch refuses agent
+ok 4 - retained first dispatch refuses agent
+  ---
+  duration_ms: 0.781639
+  type: 'test'
+  ...
+# Subtest: retained first dispatch refuses target
+ok 5 - retained first dispatch refuses target
+  ---
+  duration_ms: 0.624476
+  type: 'test'
+  ...
+# Subtest: retained first dispatch refuses control
+ok 6 - retained first dispatch refuses control
+  ---
+  duration_ms: 2.16564
+  type: 'test'
+  ...
+# Subtest: retained first dispatch refuses host
+ok 7 - retained first dispatch refuses host
+  ---
+  duration_ms: 1.532301
+  type: 'test'
+  ...
+# Subtest: retained first dispatch refuses expired
+ok 8 - retained first dispatch refuses expired
+  ---
+  duration_ms: 1.937336
+  type: 'test'
+  ...
+# Subtest: retained first dispatch refuses unrepresented
+ok 9 - retained first dispatch refuses unrepresented
+  ---
+  duration_ms: 0.898652
+  type: 'test'
+  ...
+# Subtest: retained first dispatch refuses unknown
+ok 10 - retained first dispatch refuses unknown
+  ---
+  duration_ms: 0.909068
+  type: 'test'
+  ...
+# Subtest: changed admission during a held preparation remains never-attempted; only a fresh explicit tick may start
+ok 11 - changed admission during a held preparation remains never-attempted; only a fresh explicit tick may start
+  ---
+  duration_ms: 1.539292
+  type: 'test'
+  ...
+# Subtest: shutdown during held preparation joins it, never starts, and retains its real lease
+ok 12 - shutdown during held preparation joins it, never starts, and retains its real lease
+  ---
+  duration_ms: 1.017569
+  type: 'test'
+  ...
+# Subtest: fresh authorization/expiry/cancel failure in preparation cannot fall through or automatically retry
+ok 13 - fresh authorization/expiry/cancel failure in preparation cannot fall through or automatically retry
+  ---
+  duration_ms: 1.108833
+  type: 'test'
+  ...
+# Subtest: duplicate dispatch and forged completion cannot release a retained never-attempted or UNKNOWN slot
+ok 14 - duplicate dispatch and forged completion cannot release a retained never-attempted or UNKNOWN slot
+  ---
+  duration_ms: 2.207252
+  type: 'test'
+  ...
+# Subtest: BEGIN without explicit persisted selection cannot prepare roots or create a provider
+ok 15 - BEGIN without explicit persisted selection cannot prepare roots or create a provider
+  ---
+  duration_ms: 4.158334
+  type: 'test'
+  ...
+# Subtest: blank -> explicit approved stable two-role choice -> exact existing-provider and BEGIN inputs
+ok 16 - blank -> explicit approved stable two-role choice -> exact existing-provider and BEGIN inputs
+  ---
+  duration_ms: 15.2109
+  type: 'test'
+  ...
+# Subtest: refresh and process restart are read-only: no BEGIN, login or ACL preparation occurs
+ok 17 - refresh and process restart are read-only: no BEGIN, login or ACL preparation occurs
+  ---
+  duration_ms: 9.444067
+  type: 'test'
+  ...
+# Subtest: unknown BEGIN preserves exact IDs and restart refuses blind replay before any new root/provider effect
+ok 18 - unknown BEGIN preserves exact IDs and restart refuses blind replay before any new root/provider effect
+  ---
+  duration_ms: 8.125448
+  type: 'test'
+  ...
+# Subtest: decline is zero-effect and never persists selection or invokes ACL/provider/BEGIN
+ok 19 - decline is zero-effect and never persists selection or invokes ACL/provider/BEGIN
+  ---
+  duration_ms: 0.810592
+  type: 'test'
+  ...
+# Subtest: cancel uses only persisted workspace/operation and returns sanitized current readback
+ok 20 - cancel uses only persisted workspace/operation and returns sanitized current readback
+  ---
+  duration_ms: 3.289436
+  type: 'test'
+  ...
+# Subtest: cancel before BEGIN is read-only to Host and leaves the stable selection intact
+ok 21 - cancel before BEGIN is read-only to Host and leaves the stable selection intact
+  ---
+  duration_ms: 4.510425
+  type: 'test'
+  ...
+# Subtest: wrong authenticated Codex account is visible as drift and cannot advertise BEGIN
+ok 22 - wrong authenticated Codex account is visible as drift and cannot advertise BEGIN
+  ---
+  duration_ms: 3.183028
+  type: 'test'
+  ...
+# Subtest: BEGIN blocks lost Codex authentication before root preparation with no provider or dispatch
+ok 23 - BEGIN blocks lost Codex authentication before root preparation with no provider or dispatch
+  ---
+  duration_ms: 5.675312
+  type: 'test'
+  ...
+# Subtest: BEGIN blocks changed Codex account before root preparation with no provider or dispatch
+ok 24 - BEGIN blocks changed Codex account before root preparation with no provider or dispatch
+  ---
+  duration_ms: 5.604376
+  type: 'test'
+  ...
+# Subtest: BEGIN blocks changed ADMIN epoch before root preparation with no provider or dispatch
+ok 25 - BEGIN blocks changed ADMIN epoch before root preparation with no provider or dispatch
+  ---
+  duration_ms: 4.198123
+  type: 'test'
+  ...
+# Subtest: BEGIN blocks changed repository path before root preparation with no provider or dispatch
+ok 26 - BEGIN blocks changed repository path before root preparation with no provider or dispatch
+  ---
+  duration_ms: 4.262869
+  type: 'test'
+  ...
+# Subtest: BEGIN blocks changed source HEAD before root preparation with no provider or dispatch
+ok 27 - BEGIN blocks changed source HEAD before root preparation with no provider or dispatch
+  ---
+  duration_ms: 3.395763
+  type: 'test'
+  ...
+# Subtest: BEGIN blocks lost Codex authentication during root preparation with no provider or dispatch
+ok 28 - BEGIN blocks lost Codex authentication during root preparation with no provider or dispatch
+  ---
+  duration_ms: 5.331748
+  type: 'test'
+  ...
+# Subtest: BEGIN blocks changed Codex account during root preparation with no provider or dispatch
+ok 29 - BEGIN blocks changed Codex account during root preparation with no provider or dispatch
+  ---
+  duration_ms: 5.539291
+  type: 'test'
+  ...
+# Subtest: BEGIN blocks changed ADMIN epoch during root preparation with no provider or dispatch
+ok 30 - BEGIN blocks changed ADMIN epoch during root preparation with no provider or dispatch
+  ---
+  duration_ms: 3.743008
+  type: 'test'
+  ...
+# Subtest: BEGIN blocks changed repository path during root preparation with no provider or dispatch
+ok 31 - BEGIN blocks changed repository path during root preparation with no provider or dispatch
+  ---
+  duration_ms: 3.42736
+  type: 'test'
+  ...
+# Subtest: BEGIN blocks changed source HEAD during root preparation with no provider or dispatch
+ok 32 - BEGIN blocks changed source HEAD during root preparation with no provider or dispatch
+  ---
+  duration_ms: 5.061152
+  type: 'test'
+  ...
+# Subtest: private-root ACL preparation failure cannot reach provider or BEGIN and preserves the selection
+ok 33 - private-root ACL preparation failure cannot reach provider or BEGIN and preserves the selection
+  ---
+  duration_ms: 3.11044
+  type: 'test'
+  ...
+# Subtest: new HOLD readback during root preparation blocks provider and survives restart
+ok 34 - new HOLD readback during root preparation blocks provider and survives restart
+  ---
+  duration_ms: 3.980099
+  type: 'test'
+  ...
+# Subtest: new AMBIGUOUS readback during root preparation blocks provider and survives restart
+ok 35 - new AMBIGUOUS readback during root preparation blocks provider and survives restart
+  ---
+  duration_ms: 4.096522
+  type: 'test'
+  ...
+# Subtest: cancel after root preparation during readPrivateFacts prevents late BEGIN
+ok 36 - cancel after root preparation during readPrivateFacts prevents late BEGIN
+  ---
+  duration_ms: 5.190713
+  type: 'test'
+  ...
+# Subtest: cancel after root preparation during readSetupReadback prevents late BEGIN
+ok 37 - cancel after root preparation during readSetupReadback prevents late BEGIN
+  ---
+  duration_ms: 3.146934
+  type: 'test'
+  ...
+# Subtest: overlapping cancels have one sender
+ok 38 - overlapping cancels have one sender
+  ---
+  duration_ms: 3.690751
+  type: 'test'
+  ...
+1..38
+# tests 38
+# suites 0
+# pass 38
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 310.182805

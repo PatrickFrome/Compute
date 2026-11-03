@@ -1,0 +1,25 @@
+✔ native new enrollment is deny-only without hosted, localhost or caller-selected transport (1.548852ms)
+✔ owner probe binds a single-use ticket digest into the device signature material (0.257992ms)
+✔ absent owner record requires exact ticket while an existing durable record uses independent SID and P-256 checks (0.361855ms)
+✔ native bridge HOLD precedes every durable owner CAS while existing bound-owner readback remains separate (0.421814ms)
+✔ staging build links exact ticket/reconciler sources and WinHTTP (0.339513ms)
+✔ portable compiled native consumer refuses valid-looking ticket with no network dependency (441.658961ms)
+✔ challenge response parser validates format without invoking accessors (1.768627ms)
+✔ synthetic signed launch frame matches the actual portable native parser (434.20078ms)
+✔ loaded Guardian read owns original close after valid response; duplicate close cannot resend (5.858458ms)
+✔ loaded Guardian read error retains held close; delayed=false (1.364619ms)
+✔ loaded Guardian read error retains held close; delayed=true (0.779754ms)
+✔ absolute caller deadline is not cleanup while original socket close is withheld (1.487851ms)
+✔ cancellation fences send and retains exact original close (0.908624ms)
+✔ already cancelled read opens no socket; alternate pipe/effect wire refused (0.624054ms)
+✔ original legacy transport still returns its result without new joined-close semantics (0.385811ms)
+✔ default loaded observer uses joined fixed transport and never legacy signer/transport (1.571225ms)
+✔ loaded signer shares canonical bytes, never ensures/writes, and refuses ticket/unloaded identity (13.075016ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 17
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 512.514214

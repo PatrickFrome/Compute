@@ -1,0 +1,98 @@
+[
+  {
+    "name": "launch-source",
+    "command": [
+      "python3",
+      "apps/metaengine-browser/test/native/verify-guardian-original-main-launch-source.py"
+    ],
+    "exit_code": 1,
+    "seconds": 0.02,
+    "log": "launch-source.log"
+  },
+  {
+    "name": "begin-model",
+    "command": [
+      "python3",
+      "apps/metaengine-browser/test/native/verify-guardian-main-begin-model.py"
+    ],
+    "exit_code": 0,
+    "seconds": 0.6,
+    "log": "begin-model.log"
+  },
+  {
+    "name": "begin-model-sanitize",
+    "command": [
+      "python3",
+      "apps/metaengine-browser/test/native/verify-guardian-main-begin-model.py",
+      "--sanitize"
+    ],
+    "exit_code": 0,
+    "seconds": 0.82,
+    "log": "begin-model-sanitize.log"
+  },
+  {
+    "name": "owner-wait-model",
+    "command": [
+      "python3",
+      "apps/metaengine-browser/test/native/verify-guardian-main-owner-wait-model.py"
+    ],
+    "exit_code": 0,
+    "seconds": 0.68,
+    "log": "owner-wait-model.log"
+  },
+  {
+    "name": "owner-wait-model-sanitize",
+    "command": [
+      "python3",
+      "apps/metaengine-browser/test/native/verify-guardian-main-owner-wait-model.py",
+      "--sanitize"
+    ],
+    "exit_code": 0,
+    "seconds": 0.9,
+    "log": "owner-wait-model-sanitize.log"
+  },
+  {
+    "name": "requester-session-model",
+    "command": [
+      "python3",
+      "apps/metaengine-browser/test/native/verify-guardian-requester-session-model.py"
+    ],
+    "exit_code": 0,
+    "seconds": 0.36,
+    "log": "requester-session-model.log"
+  },
+  {
+    "name": "requester-session-model-sanitize",
+    "command": [
+      "python3",
+      "apps/metaengine-browser/test/native/verify-guardian-requester-session-model.py",
+      "--sanitize"
+    ],
+    "exit_code": 0,
+    "seconds": 0.51,
+    "log": "requester-session-model-sanitize.log"
+  },
+  {
+    "name": "node-protocol-enrollment",
+    "command": [
+      "node",
+      "--test",
+      "apps/metaengine-browser/test/browser-guardian-original-main-launch-protocol.test.mjs",
+      "apps/metaengine-browser/test/guardian-owner-loaded-read.test.mjs",
+      "apps/metaengine-browser/test/browser-guardian-native-ticket-enrollment-contract.test.mjs"
+    ],
+    "exit_code": 0,
+    "seconds": 0.58,
+    "log": "node-protocol-enrollment.log"
+  },
+  {
+    "name": "syntax",
+    "command": [
+      "node",
+      "scripts/check-source.mjs"
+    ],
+    "exit_code": 0,
+    "seconds": 8.67,
+    "log": "syntax.log"
+  }
+]

@@ -1,0 +1,70 @@
+TAP version 13
+# Subtest: disposable interrupted NSIS replacement restores complete EXE, ASAR, native, uninstaller and directories
+ok 1 - disposable interrupted NSIS replacement restores complete EXE, ASAR, native, uninstaller and directories
+  ---
+  duration_ms: 60.397003
+  type: 'test'
+  ...
+# Subtest: failure in rename gap compensates only against unchanged exact preimage
+ok 2 - failure in rename gap compensates only against unchanged exact preimage
+  ---
+  duration_ms: 34.368271
+  type: 'test'
+  ...
+# Subtest: error after image promotion records effect UNKNOWN and forbids auto-replay
+ok 3 - error after image promotion records effect UNKNOWN and forbids auto-replay
+  ---
+  duration_ms: 26.946323
+  type: 'test'
+  ...
+# Subtest: invalid source digest or non-disposable root fails before modification
+ok 4 - invalid source digest or non-disposable root fails before modification
+  ---
+  duration_ms: 18.724071
+  type: 'test'
+  ...
+# Subtest: an existing prepared blocks restore without overwriting earlier evidence or image
+ok 5 - an existing prepared blocks restore without overwriting earlier evidence or image
+  ---
+  duration_ms: 20.069752
+  type: 'test'
+  ...
+# Subtest: an existing quarantine blocks restore without overwriting earlier evidence or image
+ok 6 - an existing quarantine blocks restore without overwriting earlier evidence or image
+  ---
+  duration_ms: 13.648785
+  type: 'test'
+  ...
+# Subtest: an existing restore-receipt.json blocks restore without overwriting earlier evidence or image
+ok 7 - an existing restore-receipt.json blocks restore without overwriting earlier evidence or image
+  ---
+  duration_ms: 15.955396
+  type: 'test'
+  ...
+# Subtest: a linked installed directory cannot redirect restore to another fixture
+ok 8 - a linked installed directory cannot redirect restore to another fixture
+  ---
+  duration_ms: 26.019645
+  type: 'test'
+  ...
+# Subtest: a linked snapshot directory cannot redirect restore to another fixture
+ok 9 - a linked snapshot directory cannot redirect restore to another fixture
+  ---
+  duration_ms: 20.780786
+  type: 'test'
+  ...
+# Subtest: a quarantined preimage cannot be compensated over a concurrent installed image
+ok 10 - a quarantined preimage cannot be compensated over a concurrent installed image
+  ---
+  duration_ms: 26.895084
+  type: 'test'
+  ...
+1..10
+# tests 10
+# suites 0
+# pass 10
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 326.645945

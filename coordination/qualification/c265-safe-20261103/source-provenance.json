@@ -1,0 +1,37 @@
+{
+  "schema": "metaengine.safe-qualification.provenance.v1",
+  "source_transport": {
+    "repository": "PatrickFrome/Compute",
+    "branch": "work/source-transfer-c26565e-20261103",
+    "commit": "accb28e72c87c059e780efb8e6681886b33e9b4f",
+    "parts": [
+      "coordination/source-transfer/c26565e/archive.part00",
+      "coordination/source-transfer/c26565e/archive.part01",
+      "coordination/source-transfer/c26565e/archive.part02"
+    ]
+  },
+  "archive_sha256": "4200e492828dbb857aaa737a7ce56d0aeda3c97c84f7743b1501ef2f229d3636",
+  "archive_sha256_verified": true,
+  "declared_source_revision": "c26565e58ab92dcbcda9663c4d231bdf4a9a7ee6",
+  "verified_baseline_tree": "2dbe253e97379532f6f4b52ef7edf26109a9266d",
+  "local_reconstructed_base_commit": "42419989870759b3b9033b3bb39bea8b0b68b26d",
+  "history_note": "Local reconstructed commit; not the original Git history or a released installer",
+  "previous_patches_applied": false,
+  "repository_instructions": {
+    "AGENTS.md": "absent recursively",
+    "SKILL.md": "absent recursively",
+    ".agents/skills": "absent"
+  },
+  "tools": {
+    "node": "v24.19.0",
+    "g++": "Debian 14.2.0",
+    "python": "3.12.14"
+  },
+  "platform": "Linux x86_64",
+  "windows_execution": "NOT RUN",
+  "installer_execution": "NOT RUN; no subsequent authorization",
+  "user_database_accessed": false,
+  "trust_roots_added": false,
+  "protections_weakened": false,
+  "publication_authorized": true
+}
