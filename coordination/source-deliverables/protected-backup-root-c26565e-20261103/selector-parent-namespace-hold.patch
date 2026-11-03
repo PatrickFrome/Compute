@@ -1,0 +1,1203 @@
+diff --git a/apps/metaengine-browser/src/local-runtime-recovery-composition.mjs b/apps/metaengine-browser/src/local-runtime-recovery-composition.mjs
+index dfafde6..8e186fd 100755
+--- a/apps/metaengine-browser/src/local-runtime-recovery-composition.mjs
++++ b/apps/metaengine-browser/src/local-runtime-recovery-composition.mjs
+@@ -87,11 +87,12 @@ export async function bindOwnedRuntimeHostRecoveryComposition(input){
+     const checked=createHostPrivateCustodyW76({identity,recoveryRootConfiguration:configuration});checked.close();
+     return Object.freeze({mounted:true,reason:null,
+       composition:Object.freeze({identity,app,recoveryRootConfiguration:configuration,protectedBackupRootProvider})});
+-  }catch{
++  }catch(error){
+     if(protectedBackupRootProvider){
+       closeOwnedProtectedBackupRootProvider(protectedBackupRootProvider);
+       await drainOwnedProtectedBackupRootProvider(protectedBackupRootProvider);
+     }
+-    return refused('protected_backup_root_unavailable');
++    return refused(error?.message==='owned_protected_backup_root_original_parent_namespace_custody_required'
++      ?'original_parent_namespace_custody_required':'protected_backup_root_unavailable');
+   }
+ }
+diff --git a/apps/metaengine-browser/src/owned-protected-backup-root.mjs b/apps/metaengine-browser/src/owned-protected-backup-root.mjs
+index b3bc72c..25a1171 100644
+--- a/apps/metaengine-browser/src/owned-protected-backup-root.mjs
++++ b/apps/metaengine-browser/src/owned-protected-backup-root.mjs
+@@ -3,12 +3,11 @@
+ // The exact owned Host and already loaded enrolled identity are mandatory.
+ import fs from 'node:fs/promises';
+ import path from 'node:path';
+-import {randomUUID} from 'node:crypto';
+ import {types} from 'node:util';
+ import {ownedLocalRuntimeHostReady,readOriginalOwnedRuntimeHostRecoveryConfiguration}
+   from './local-runtime-host-controller.mjs';
+-import {readOriginalLoadedRecoveryIdentityW74,readOriginalProtectedBackupRootRegistrationW74,
+-  persistOriginalProtectedBackupRootRegistrationW74} from './supervisor-device-identity.mjs';
++import {readOriginalLoadedRecoveryIdentityW74,readOriginalProtectedBackupRootRegistrationW74}
++  from './supervisor-device-identity.mjs';
+ import {readDirectoryIdentity} from './native-coding-fs-identity.mjs';
+ import {verifyOwnerOnlyWindowsStorage} from './private-windows-storage-acl.mjs';
+ 
+@@ -104,15 +103,16 @@ export function createOwnedProtectedBackupRootProvider(input){
+     ||!HASH.test(device.key_fingerprint_sha256))fail('loaded_identity_required');
+   const token=Object.freeze(Object.create(null,{toJSON:{value(){fail('not_serializable');}}}));
+   providers.set(token,{identity,summary,device,closed:false,abort:new AbortController(),pending:new Set(),
+-    reading:false,directories:null,registration:null});
++    reading:false,directories:null});
+   return token;
+ }
+ 
+-// The existing identity class alone reads/seals this fixed registration. No
+-// copied scope, supplied record or callback can register a root in its state.
++// Read-only scope. This selector cannot issue REGISTERING/READY, even through
++// the identity class's retained persistence interface. Original parent-namespace
++// custody does not exist, so no production scope supplies a writable record.
+ export function readOriginalProtectedBackupRootRegistrationScope(token){
+   const row=providers.get(token);if(!row)return null;
+-  try{current(row);return Object.freeze({identity:row.identity,registration:row.registration,
++  try{current(row);return Object.freeze({identity:row.identity,registration:null,
+     assertCurrent:()=>{current(row);}});}catch{return null;}
+ }
+ 
+@@ -135,31 +135,12 @@ export function readOwnedProtectedBackupRootConfiguration(token){
+         if(pin.state!=='READY')fail('registration_incomplete');
+         if(!await present(dirs.root))fail('registered_root_missing');current(row);
+       }else{
+-        if(await present(dirs.root))fail('unregistered_root_present');current(row);
+-        row.registration=Object.freeze({schema:'metaengine.protected-backup-root-selector.v1',state:'REGISTERING',
+-          registration_id:randomUUID(),client_id:row.device.client_id,device_id:row.device.device_id,
+-          key_fingerprint_sha256:row.device.key_fingerprint_sha256,state_directory_identity_sha256:first.state,
+-          source_directory_identity_sha256:first.source,root_identity_sha256:null});
+-        // Persist intent in the EXISTING sealed identity before creating a
+-        // directory. Unknown persistence or interrupted creation cannot rotate
+-        // the destination or silently consume a new root after restart.
+-        await persistOriginalProtectedBackupRootRegistrationW74(row.identity,token);current(row);
+-        await directories(row);
+-        const beforeCreate=await identities(row,dirs);
+-        if(!same(first,beforeCreate,['state','source']))fail('directory_changed');
+-        await fs.mkdir(dirs.root,{mode:0o700});current(row); // exclusive; no recursive/adopt/repair
+-        const created=await identities(row,dirs,true);
+-        if(!same(first,created,['state','source']))fail('directory_changed');
+-        // The new child must inherit sufficient protection from the already
+-        // verified private state. Never repair a path's DACL: path replacement
+-        // could otherwise mutate an existing object before post-check refusal.
+-        await verify(row,[dirs.root]);
+-        const after=await identities(row,dirs,true);
+-        if(!same(created,after,['state','source','root']))fail('directory_changed');
+-        await directories(row);current(row);
+-        pin=Object.freeze({...row.registration,state:'READY',root_identity_sha256:after.root});
+-        row.registration=pin;
+-        await persistOriginalProtectedBackupRootRegistrationW74(row.identity,token);current(row);
++        // Observation is not a lease of the state/identity-store namespaces.
++        // A parent can be swapped after the last read and before either the
++        // REGISTERING persistence or mkdir. No actual original native holder
++        // binds those effects, so refuse BEFORE issuing a registration record,
++        // generating an ID, persisting a seal or creating any directory.
++        fail('original_parent_namespace_custody_required');
+       }
+       await verify(row,[dirs.stateDirectory,dirs.sourceDataDirectory,dirs.root]);
+       const last=await identities(row,dirs,true);bound(pin,row,last);
+diff --git a/apps/metaengine-browser/test/owned-protected-backup-root.test.mjs b/apps/metaengine-browser/test/owned-protected-backup-root.test.mjs
+index c64bef5..3e932a5 100644
+--- a/apps/metaengine-browser/test/owned-protected-backup-root.test.mjs
++++ b/apps/metaengine-browser/test/owned-protected-backup-root.test.mjs
+@@ -1,114 +1,110 @@
+-// SYNTHETIC MODULE-BOUNDARY TESTS ONLY. The production provider is unmodified;
+-// original Host/W74 and Windows ACL issuers are explicit test doubles. Real
+-// isolated directories and native filesystem identities exercise retention,
+-// replacement and alias refusal. No device key, installed Owner, database,
+-// Windows ACL operation, service, restore or upgrade is created or exercised.
++// SYNTHETIC MODULE BOUNDARIES ONLY. The selector and Main provider are real.
++// Existing READY pins below are explicitly seeded test records, never records
++// issued by the selector. Real isolated directories and native filesystem
++// identities exercise readonly requalification. Every selector filesystem or
++// sealed-state mutation is counted and forbidden. No key, database, native
++// process, service, backup, restore or installation authority is created.
+ import nodeTest, {mock} from 'node:test';
+ import assert from 'node:assert/strict';
+ import fs from 'node:fs/promises';
++import {constants as fsConstants} from 'node:fs';
+ import os from 'node:os';
+ import path from 'node:path';
+-import {randomUUID} from 'node:crypto';
++import {createHash,randomUUID} from 'node:crypto';
+ import {performance} from 'node:perf_hooks';
+-import {readDirectoryIdentity} from '../src/native-coding-fs-identity.mjs';
++import {readDirectoryIdentity as nativeDirectoryIdentity} from '../src/native-coding-fs-identity.mjs';
+ 
+-const moduleUrl=name=>new URL('../src/'+name,import.meta.url).href;
+ const test=(name,body)=>nodeTest(name,{timeout:15000},body);
++const moduleUrl=name=>new URL('../src/'+name,import.meta.url).href;
+ const PREFIX=/^owned_protected_backup_root_/;
++const NAMESPACE_HOLD='owned_protected_backup_root_original_parent_namespace_custody_required';
+ const ROOT_NAME='protected-backup-root-v1';
+ const SOURCE_SENTINEL='SYNTHETIC_SOURCE_MUST_REMAIN_UNCHANGED';
+ const RETAINED_SENTINEL='SYNTHETIC_RETAINED_ORIGINAL_BACKUP_EVIDENCE';
+ const identities=new WeakMap(),summaries=new WeakMap(),fixtures=new Set();
+ const hostCapabilities=new WeakMap(),clientRequests=new WeakMap(),custodies=new WeakMap(),handoffs=new WeakMap();
++const filesystemWrites=[];
+ let api,mainApi;
+-
+ const clone=value=>value===null?null:structuredClone(value);
+-const exists=async file=>fs.lstat(file).then(()=>true,error=>{
+-  if(error.code==='ENOENT')return false;
+-  throw error;
+-});
+ const nextTurn=()=>new Promise(resolve=>setImmediate(resolve));
+-function deferred(){
+-  let resolve,reject;
+-  const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});
+-  return {promise,resolve,reject};
+-}
+-function currentSummary(summary){
+-  const f=summaries.get(summary);
+-  return Boolean(f&&f.currentSummary===summary&&f.hostOpen);
+-}
++function deferred(){let resolve;const promise=new Promise(done=>{resolve=done;});return {promise,resolve};}
++function currentSummary(summary){const f=summaries.get(summary);return Boolean(f&&f.currentSummary===summary&&f.hostOpen);}
+ function currentIdentity(identity){
+   const f=identities.get(identity);
+   return f?.identityOpen&&f.canonical?.enrolled===true?Object.freeze({...f.canonical}):null;
+ }
+-function originalScope(identity,token){
+-  const scope=api.readOriginalProtectedBackupRootRegistrationScope(token);
+-  assert.ok(scope,'the fixed provider registry must issue the sealed-storage scope');
+-  assert.equal(scope.identity,identity);
+-  assert.equal(typeof scope.assertCurrent,'function');
+-  scope.assertCurrent();
+-  return scope;
++function fixtureForDirectory(directory){
++  return [...fixtures].find(f=>[f.directories.stateDirectory,f.directories.sourceDataDirectory,f.backupDirectory].includes(directory));
+ }
+-
++function mutation(operation,args){
++  filesystemWrites.push({operation,paths:args.filter(value=>typeof value==='string')});
++  throw Error('SYNTHETIC_SELECTOR_FILESYSTEM_MUTATION_FORBIDDEN');
++}
++// Keep test setup/swaps/snapshots on the originally imported real fs object.
++// Production imports receive read-through functions and forbidden write spies.
++const readonlyFs={...fs};
++for(const name of ['mkdir','mkdtemp','writeFile','appendFile','rename','unlink','rm','rmdir','copyFile','cp',
++  'chmod','chown','lchown','link','symlink','truncate'])readonlyFs[name]=(...args)=>mutation(name,args);
++readonlyFs.open=(file,flags,...rest)=>{
++  const writeMask=fsConstants.O_WRONLY|fsConstants.O_RDWR|fsConstants.O_CREAT|fsConstants.O_TRUNC|fsConstants.O_APPEND;
++  if(typeof flags==='number'?Boolean(flags&writeMask):typeof flags==='string'&&/[wa+]/.test(flags))
++    return mutation('open',[file,flags]);
++  return fs.open(file,flags,...rest);
++};
++mock.module('node:fs/promises',{defaultExport:readonlyFs});
++mock.module(moduleUrl('native-coding-fs-identity.mjs'),{namedExports:{
++  readDirectoryIdentity:async directory=>{
++    const observed=await nativeDirectoryIdentity(directory),f=fixtureForDirectory(directory);
++    if(f){
++      const count=(f.nativeReads.get(directory)??0)+1;f.nativeReads.set(directory,count);
++      if(f.nativeReadHook)await f.nativeReadHook({directory,count,observed});
++    }
++    return observed;
++  },
++}});
+ mock.module(moduleUrl('local-runtime-host-controller.mjs'),{namedExports:{
+   ownedLocalRuntimeHostReady:currentSummary,
+   readOriginalOwnedNativeHostBinding:capability=>{
+-    const row=hostCapabilities.get(capability);
+-    return row&&currentSummary(row.summary)?row.binding:null;
++    const row=hostCapabilities.get(capability);return row&&currentSummary(row.summary)?row.binding:null;
+   },
+   readOriginalOwnedRuntimeHostRecoveryConfiguration:async summary=>{
+-    assert.equal(currentSummary(summary),true,'only an exact current registered Host may be read');
+-    const f=summaries.get(summary);
+-    f.events.push({type:'host-configuration'});
+-    if(f.readConfigurationHook)return f.readConfigurationHook();
+-    return Object.freeze({...f.directories});
++    assert.equal(currentSummary(summary),true);
++    const f=summaries.get(summary);f.events.push({type:'host-configuration'});
++    return f.readConfigurationHook?f.readConfigurationHook():Object.freeze({...f.directories});
+   },
+ }});
+ mock.module(moduleUrl('supervisor-device-identity.mjs'),{namedExports:{
+   readOriginalLoadedRecoveryIdentityW74:currentIdentity,
+-  bindOriginalRecoveryOwnerW74:(identity,session)=>{
+-    const f=identities.get(identity);
+-    assert.ok(currentIdentity(identity));
+-    assert.ok(mainApi.readOriginalMainRecoveryOwnerScope(session));
+-    f.events.push({type:'owner-bind'});
+-    return ()=>{f.events.push({type:'owner-unbind'});};
+-  },
+   readOriginalProtectedBackupRootRegistrationW74:async(identity,token)=>{
+-    const scope=originalScope(identity,token),f=identities.get(identity);
+-    f.events.push({type:'read-registration'});
++    const scope=api.readOriginalProtectedBackupRootRegistrationScope(token),f=identities.get(identity);
++    assert.ok(scope);assert.equal(scope.identity,identity);assert.equal(scope.registration,null,'selector scopes are permanently readonly');
++    scope.assertCurrent();f.events.push({type:'read-registration'});
+     if(f.readRegistrationHook)await f.readRegistrationHook(scope);
+-    scope.assertCurrent();
+-    return clone(f.seal.value);
++    scope.assertCurrent();return clone(f.seal.value);
++  },
++  persistOriginalProtectedBackupRootRegistrationW74:(identity)=>{
++    identities.get(identity).secretWrites++;throw Error('SYNTHETIC_SEALED_WRITE_FORBIDDEN');
+   },
+-  persistOriginalProtectedBackupRootRegistrationW74:async(identity,token)=>{
+-    const scope=originalScope(identity,token),f=identities.get(identity);
+-    assert.ok(scope.registration&&Object.isFrozen(scope.registration));
+-    const registration=clone(scope.registration);
+-    const event={type:'persist-registration',registration,rootExists:await exists(f.backupDirectory)};
+-    f.events.push(event);
+-    if(f.persistRegistrationHook)await f.persistRegistrationHook(scope,event);
+-    scope.assertCurrent();
+-    // Explicitly synthetic sealed storage. A token, rather than a caller's
+-    // JSON/callback, is the only route to the statically imported issuer.
+-    f.seal.value=clone(registration);
++  bindOriginalRecoveryOwnerW74:(identity,session)=>{
++    const f=identities.get(identity);assert.ok(currentIdentity(identity));
++    assert.ok(mainApi.readOriginalMainRecoveryOwnerScope(session));f.events.push({type:'owner-bind'});
++    return ()=>{f.events.push({type:'owner-unbind'});};
+   },
+ }});
+-async function syntheticAcl(target,options={}){
+-    const f=[...fixtures].find(row=>
+-      [row.directories.stateDirectory,row.directories.sourceDataDirectory,row.backupDirectory].includes(target));
+-    assert.ok(f,'an unowned ACL target must never be used');
+-    const event={type:'acl',target,operation:options.operation};
+-    f.events.push(event);
+-    assert.equal(options.operation,'VERIFY_DIRECTORY','the selector must never mutate or repair any DACL');
++mock.module(moduleUrl('private-windows-storage-acl.mjs'),{namedExports:{
++  verifyOwnerOnlyWindowsStorage:async(target,options={})=>{
++    const f=fixtureForDirectory(target);assert.ok(f,'unowned ACL target');
++    const event={type:'acl',target,operation:options.operation};f.events.push(event);
++    assert.equal(options.operation,'VERIFY_DIRECTORY','no DACL mutation or repair is allowed');
+     const result=f.aclHook?await f.aclHook(event,options):undefined;
+     return result??Object.freeze({owner_dacl_verified:true,operation:options.operation});
+-}
+-mock.module(moduleUrl('private-windows-storage-acl.mjs'),{namedExports:{
+-  verifyOwnerOnlyWindowsStorage:syntheticAcl,
+-  protectOwnerOnlyWindowsDirectory:(target,options={})=>syntheticAcl(target,{...options,operation:'PROTECT_DIRECTORY'}),
++  },
++  protectOwnerOnlyWindowsDirectory:(target)=>{
++    fixtureForDirectory(target).daclWrites++;throw Error('SYNTHETIC_DACL_MUTATION_FORBIDDEN');
++  },
+ }});
+-// These additional doubles isolate only the existing native authority/IPC
+-// boundary for the real selector -> real Main-provider integration below.
++// Existing native issuer boundaries are explicit doubles for readonly selector
++// -> real Main-provider integration. They supply no directory-handle custody.
+ mock.module(moduleUrl('native-coding-host-ipc-client.mjs'),{namedExports:{
+   readOriginalNativeCodingRecoveryClientRequest:token=>clientRequests.get(token)??null,
+ }});
+@@ -116,16 +112,14 @@ mock.module(moduleUrl('host-private-custody-w76.mjs'),{namedExports:{
+   createHostPrivateCustodyW76:({identity,recoveryRootConfiguration})=>{
+     const f=identities.get(identity),custody=Object.freeze({close(){custodies.get(custody).closed=true;}});
+     assert.ok(f);f.events.push({type:'w76-create'});
+-    custodies.set(custody,{f,configuration:recoveryRootConfiguration,closed:false,custodyScope:Symbol('SYNTHETIC_W76')});
+-    return custody;
++    custodies.set(custody,{f,configuration:recoveryRootConfiguration,closed:false,custodyScope:Symbol('SYNTHETIC_W76')});return custody;
+   },
+   readOriginalW76ProtectedRoot:async custody=>{
+-    const row=custodies.get(custody);if(!row||row.closed)return null;
+-    row.f.events.push({type:'w76-read'});
++    const row=custodies.get(custody);if(!row||row.closed)return null;row.f.events.push({type:'w76-read'});
+     return Object.freeze({owner:row.f.integration.owner,custody_scope:row.custodyScope,
+       backup_directory:row.configuration.backupDirectory,source_directory:row.configuration.sourceDataDirectory,
+-      root_identity_sha256:await readDirectoryIdentity(row.configuration.backupDirectory),
+-      source_directory_identity_sha256:await readDirectoryIdentity(row.configuration.sourceDataDirectory)});
++      root_identity_sha256:await nativeDirectoryIdentity(row.configuration.backupDirectory),
++      source_directory_identity_sha256:await nativeDirectoryIdentity(row.configuration.sourceDataDirectory)});
+   },
+ }});
+ mock.module(moduleUrl('protected-backup-root-handoff.mjs'),{namedExports:{
+@@ -137,440 +131,304 @@ mock.module(moduleUrl('protected-backup-root-handoff.mjs'),{namedExports:{
+     const row=handoffs.get(input.handoff),custody=custodies.get(input.custody);
+     assert.ok(row&&!row.closed&&custody&&!custody.closed);custody.f.events.push({type:'handoff-inspect'});
+     return Object.freeze({root_binding_current:true,evidence_scope:'W74_W76_ORIGINAL_HOST_SOURCE_ONLY',
+-      root_identity_sha256:await readDirectoryIdentity(custody.configuration.backupDirectory),
+-      source_directory_identity_sha256:await readDirectoryIdentity(custody.configuration.sourceDataDirectory)});
++      root_identity_sha256:await nativeDirectoryIdentity(custody.configuration.backupDirectory),
++      source_directory_identity_sha256:await nativeDirectoryIdentity(custody.configuration.sourceDataDirectory)});
+   },
+   closeOriginalProtectedRootHandoff:handoff=>{const row=handoffs.get(handoff);assert.ok(row);row.closed=true;},
+   drainOriginalProtectedRootHandoff:async handoff=>{assert.equal(handoffs.get(handoff)?.closed,true);},
+ }});
+ api=await import(moduleUrl('owned-protected-backup-root.mjs'));
+ mainApi=await import(moduleUrl('protected-root-recovery-provider.mjs'));
+-const {
+-  createOwnedProtectedBackupRootProvider:createProvider,
+-  readOwnedProtectedBackupRootConfiguration:readConfiguration,
+-  closeOwnedProtectedBackupRootProvider:closeProvider,
+-  drainOwnedProtectedBackupRootProvider:drainProvider,
+-}=api;
++const {bindOwnedRuntimeHostRecoveryComposition}=await import(moduleUrl('local-runtime-recovery-composition.mjs'));
++const {createOwnedProtectedBackupRootProvider:createProvider,readOwnedProtectedBackupRootConfiguration:readConfiguration,
++  closeOwnedProtectedBackupRootProvider:closeProvider,drainOwnedProtectedBackupRootProvider:drainProvider}=api;
+ 
+-async function fixture(t){
+-  const parent=await fs.mkdtemp(path.join(os.tmpdir(),'owned-root-synthetic-'));
+-  const stateDirectory=path.join(parent,'state');
+-  const sourceDataDirectory=path.join(stateDirectory,'pgdata');
++async function snapshotTree(parent){
++  const records=[];
++  async function visit(file,relative){
++    const stat=await fs.lstat(file,{bigint:true});
++    const type=stat.isSymbolicLink()?'symlink':stat.isDirectory()?'directory':stat.isFile()?'file':'other';
++    const record={path:relative,type,dev:String(stat.dev),ino:String(stat.ino),birth:String(stat.birthtimeNs),
++      mode:String(stat.mode),size:String(stat.size),mtime:String(stat.mtimeNs),ctime:String(stat.ctimeNs)};records.push(record);
++    if(type==='symlink')record.target=await fs.readlink(file);
++    else if(type==='file')record.sha256=createHash('sha256').update(await fs.readFile(file)).digest('hex');
++    else if(type==='directory'){
++      const names=(await fs.readdir(file)).sort();record.names=names;
++      for(const name of names)await visit(path.join(file,name),relative?relative+'/'+name:name);
++    }
++  }
++  await visit(parent,'');return records;
++}
++async function seedRegistration(f,state='READY'){
++  // Explicit fixture setup only. The real selector has no registration issuer.
++  if(state==='READY'){
++    await fs.mkdir(f.backupDirectory,{mode:0o700});
++    await fs.writeFile(path.join(f.backupDirectory,'retained-evidence'),RETAINED_SENTINEL);
++  }
++  f.seal.value=Object.freeze({schema:'metaengine.protected-backup-root-selector.v1',state,registration_id:randomUUID(),
++    client_id:f.canonical.client_id,device_id:f.canonical.device_id,key_fingerprint_sha256:f.canonical.key_fingerprint_sha256,
++    state_directory_identity_sha256:await nativeDirectoryIdentity(f.directories.stateDirectory),
++    source_directory_identity_sha256:await nativeDirectoryIdentity(f.directories.sourceDataDirectory),
++    root_identity_sha256:state==='READY'?await nativeDirectoryIdentity(f.backupDirectory):null});
++}
++async function fixture(t,{registration=null}={}){
++  const parent=await fs.mkdtemp(path.join(os.tmpdir(),'owned-root-readonly-synthetic-'));
++  const stateDirectory=path.join(parent,'state'),sourceDataDirectory=path.join(stateDirectory,'pgdata');
+   const configFile=path.join(parent,'runtime-host-config.json');
+   await fs.mkdir(sourceDataDirectory,{recursive:true,mode:0o700});
+   await fs.writeFile(path.join(sourceDataDirectory,'source-sentinel'),SOURCE_SENTINEL);
+   await fs.writeFile(configFile,JSON.stringify({schema:'SYNTHETIC_HOST_CONFIG',stateDirectory,sourceDataDirectory}));
+-  const f={parent,directories:{configFile,stateDirectory,sourceDataDirectory},
+-    backupDirectory:path.join(stateDirectory,ROOT_NAME),events:[],tokens:[],mainSessions:[],releases:[],seal:{value:null},
++  const f={parent,directories:{configFile,stateDirectory,sourceDataDirectory},backupDirectory:path.join(stateDirectory,ROOT_NAME),
++    events:[],tokens:[],mainSessions:[],releases:[],seal:{value:null},secretWrites:0,daclWrites:0,writeBaseline:filesystemWrites.length,
++    nativeReads:new Map(),nativeReadHook:null,readConfigurationHook:null,readRegistrationHook:null,aclHook:null,
+     canonical:{client_id:randomUUID(),device_id:randomUUID(),key_fingerprint_sha256:'a'.repeat(64),enrolled:true},
+-    hostOpen:true,identityOpen:true,readConfigurationHook:null,readRegistrationHook:null,
+-    persistRegistrationHook:null,aclHook:null};
++    hostOpen:true,identityOpen:true};
+   f.identity=Object.freeze({});identities.set(f.identity,f);
+   f.currentSummary=Object.freeze({instance_id:randomUUID()});summaries.set(f.currentSummary,f);
+-  f.provider=()=>{
+-    const token=createProvider({identity:f.identity,summary:f.currentSummary});
+-    f.tokens.push(token);return token;
+-  };
++  f.provider=()=>{const token=createProvider({identity:f.identity,summary:f.currentSummary});f.tokens.push(token);return token;};
+   f.restart=({newIdentity=false}={})=>{
+     f.currentSummary=Object.freeze({instance_id:randomUUID()});summaries.set(f.currentSummary,f);
+     if(newIdentity){f.identity=Object.freeze({});identities.set(f.identity,f);}
+   };
+-  f.assertSourceUnchanged=async()=>{
+-    assert.equal(await fs.readFile(path.join(f.directories.sourceDataDirectory,'source-sentinel'),'utf8'),SOURCE_SENTINEL);
+-  };
+-  fixtures.add(f);
++  fixtures.add(f);if(registration)await seedRegistration(f,registration);
+   t.after(async()=>{
+     for(const release of f.releases)release();
+     for(const session of f.mainSessions)mainApi.closeOriginalMainRecoveryRoot(session);
+     await Promise.all(f.mainSessions.map(session=>mainApi.drainOriginalMainRecoveryRoot(session)));
+     for(const token of f.tokens)closeProvider(token);
+-    await Promise.allSettled(f.tokens.map(token=>drainProvider(token)));
+-    fixtures.delete(f);
++    await Promise.all(f.tokens.map(token=>drainProvider(token)));fixtures.delete(f);
+     await fs.rm(parent,{recursive:true,force:true});
+-  });
+-  return f;
++  });return f;
+ }
+-const aclEvents=f=>f.events.filter(event=>event.type==='acl');
+-const persisted=f=>f.events.filter(event=>event.type==='persist-registration');
+-const protectedEvents=f=>aclEvents(f).filter(event=>event.operation==='PROTECT_DIRECTORY');
+-const refused=promise=>assert.rejects(promise,error=>{
+-  assert.match(error.message,PREFIX);return true;
+-});
++function noWrites(f){
++  assert.deepEqual(filesystemWrites.slice(f.writeBaseline),[],'no mkdir/open/write/rename/unlink or other filesystem mutation');
++  assert.equal(f.secretWrites,0,'no sealed REGISTERING/READY write');assert.equal(f.daclWrites,0,'no DACL mutation');
++}
++const refused=promise=>assert.rejects(promise,error=>{assert.match(error.message,PREFIX);return true;});
+ function pauseAcl(f,predicate){
+-  const entered=deferred(),release=deferred();let paused=false;
+-  f.releases.push(release.resolve);
+-  f.aclHook=async event=>{
+-    if(!paused&&predicate(event)){
+-      paused=true;entered.resolve(event);await release.promise;
+-    }
+-  };
++  const entered=deferred(),release=deferred();let paused=false;f.releases.push(release.resolve);
++  f.aclHook=async event=>{if(!paused&&predicate(event)){paused=true;entered.resolve();await release.promise;}};
+   return {entered:entered.promise,release:release.resolve};
+ }
+ async function mainComposition(f){
+-  const root=f.provider(),configuration=await readConfiguration(root),hostCapability=Object.freeze({});
+-  const admittedSummary=f.currentSummary;
+-  const hostBinding=Object.freeze({instance_id:f.currentSummary.instance_id,host_pid:process.pid,generation_ordinal:1});
+-  hostCapabilities.set(hostCapability,{summary:f.currentSummary,binding:hostBinding});
++  const root=f.provider(),configuration=await readConfiguration(root),hostCapability=Object.freeze({}),summary=f.currentSummary;
++  const hostBinding=Object.freeze({instance_id:summary.instance_id,host_pid:process.pid,generation_ordinal:1});
++  hostCapabilities.set(hostCapability,{summary,binding:hostBinding});
+   const actor=Object.freeze({device_id:f.canonical.device_id,client_id:f.canonical.client_id,
+     key_fingerprint_sha256:f.canonical.key_fingerprint_sha256,admin_grant_epoch:7});
+   const ownerScope=Object.freeze({project_id:randomUUID(),device_id:actor.device_id,client_id:actor.client_id,
+     admin_grant_epoch:actor.admin_grant_epoch,observed_at:new Date().toISOString()});
+-  const owner=Object.freeze({owner_id:actor.client_id,device_id:actor.device_id,project_id:ownerScope.project_id,
++  f.integration={actor,ownerScope,owner:Object.freeze({owner_id:actor.client_id,device_id:actor.device_id,project_id:ownerScope.project_id,
+     epoch:actor.admin_grant_epoch,generation:1,pid:process.pid,created_at:new Date().toISOString(),
+-    process_incarnation_id:`SYNTHETIC_PROCESS_${process.pid}`,source_sha:'c'.repeat(40),
+-    device_key_fingerprint_sha256:actor.key_fingerprint_sha256});
+-  f.integration={actor,ownerScope,owner};
+-  const binding=Object.freeze({instance_id:hostBinding.instance_id,host_pid:hostBinding.host_pid,
+-    request_id:randomUUID(),action:'VERIFY_PRE_UPGRADE_RECOVERY_V1',request_sha256:'b'.repeat(64),body_sha256:'c'.repeat(64)});
++    process_incarnation_id:`SYNTHETIC_PROCESS_${process.pid}`,source_sha:'c'.repeat(40),device_key_fingerprint_sha256:actor.key_fingerprint_sha256})};
++  const binding=Object.freeze({instance_id:summary.instance_id,host_pid:process.pid,request_id:randomUUID(),
++    action:'VERIFY_PRE_UPGRADE_RECOVERY_V1',request_sha256:'b'.repeat(64),body_sha256:'c'.repeat(64)});
+   const requestToken=Object.freeze({}),deadlineAt=Date.now()+30000,expiresMono=performance.now()+30000;
+   clientRequests.set(requestToken,Object.freeze({client:hostCapability,binding,operationId:randomUUID(),deadlineAt,expiresMono,
+-    assertCurrent(){assert.equal(currentSummary(admittedSummary),true);assert.ok(Date.now()<deadlineAt&&performance.now()<expiresMono);}}));
+-  const argumentsForProvider={identity:f.identity,hostCapability,app:{},recoveryRootConfiguration:configuration,
+-    protectedBackupRootProvider:root};
+-  const provider=mainApi.createOriginalMainRecoveryRootProvider(argumentsForProvider);
+-  return {root,configuration,argumentsForProvider,provider,
+-    async open(){
+-      const session=await mainApi.openOriginalMainRecoveryRoot(provider,binding,actor,ownerScope,requestToken);
+-      f.mainSessions.push(session);return session;
+-    }};
++    assertCurrent(){assert.equal(currentSummary(summary),true);assert.ok(Date.now()<deadlineAt&&performance.now()<expiresMono);}}));
++  const args={identity:f.identity,hostCapability,app:{},recoveryRootConfiguration:configuration,protectedBackupRootProvider:root};
++  const provider=mainApi.createOriginalMainRecoveryRootProvider(args);
++  return {root,args,async open(){
++    const session=await mainApi.openOriginalMainRecoveryRoot(provider,binding,actor,ownerScope,requestToken);
++    f.mainSessions.push(session);return session;
++  }};
+ }
+ 
+-test('new root is durably reserved before creation and sealed with real native identities',async t=>{
+-  const f=await fixture(t),token=f.provider();
+-  assert.equal(Object.isFrozen(token),true);
+-  assert.throws(()=>JSON.stringify(token));
+-  const configuration=await readConfiguration(token);
+-  assert.equal(Object.isFrozen(configuration),true);
+-  assert.deepEqual(configuration,{backupDirectory:f.backupDirectory,
+-    sourceDataDirectory:f.directories.sourceDataDirectory});
+-  assert.deepEqual(await fs.readdir(f.backupDirectory),[]);
+-  const writes=persisted(f);
+-  assert.deepEqual(writes.map(event=>event.registration.state),['REGISTERING','READY']);
+-  assert.deepEqual(writes.map(event=>event.rootExists),[false,true]);
+-  assert.equal(writes[0].registration.root_identity_sha256,null);
+-  assert.equal(writes[0].registration.registration_id,writes[1].registration.registration_id);
+-  const record=f.seal.value;
+-  assert.equal(record.schema,'metaengine.protected-backup-root-selector.v1');
+-  assert.equal(record.client_id,f.canonical.client_id);assert.equal(record.device_id,f.canonical.device_id);
+-  assert.equal(record.key_fingerprint_sha256,f.canonical.key_fingerprint_sha256);
+-  assert.equal(record.state_directory_identity_sha256,await readDirectoryIdentity(f.directories.stateDirectory));
+-  assert.equal(record.source_directory_identity_sha256,await readDirectoryIdentity(f.directories.sourceDataDirectory));
+-  assert.equal(record.root_identity_sha256,await readDirectoryIdentity(f.backupDirectory));
+-  assert.notEqual(record.root_identity_sha256,record.source_directory_identity_sha256);
+-  assert.deepEqual(Object.keys(record).sort(),['schema','state','registration_id','client_id','device_id',
+-    'key_fingerprint_sha256','state_directory_identity_sha256','source_directory_identity_sha256',
+-    'root_identity_sha256'].sort(),'the sealed pin contains no paths or transferable execution evidence');
+-  assert.deepEqual(protectedEvents(f),[],'even a newly created child is verified without DACL mutation');
+-  for(const target of [f.directories.stateDirectory,f.directories.sourceDataDirectory,f.backupDirectory])
+-    assert.ok(aclEvents(f).some(event=>event.operation==='VERIFY_DIRECTORY'&&event.target===target));
+-  assert.deepEqual(await readConfiguration(token),configuration);
+-  assert.equal(persisted(f).length,2);assert.equal(protectedEvents(f).length,0);
+-  await f.assertSourceUnchanged();
++test('absent registration always holds before seal issuance, mkdir or any other write',async t=>{
++  for(const orphan of [false,true])await t.test(orphan?'orphan root preserved':'absent root remains absent',async t=>{
++    const f=await fixture(t);
++    if(orphan){await fs.mkdir(f.backupDirectory);await fs.writeFile(path.join(f.backupDirectory,'orphan-evidence'),RETAINED_SENTINEL);}
++    const before=await snapshotTree(f.parent),token=f.provider();
++    assert.equal(api.readOriginalProtectedBackupRootRegistrationScope(token).registration,null);
++    await assert.rejects(readConfiguration(token),{message:NAMESPACE_HOLD});
++    assert.equal(f.seal.value,null);noWrites(f);assert.deepEqual(await snapshotTree(f.parent),before);
++    await refused(readConfiguration(token));noWrites(f);
++  });
+ });
+ 
+-test('fake, copied, stale and Proxy Host/identity objects are rejected before caller code or effects',async t=>{
+-  const f=await fixture(t);let calls=0;
+-  const forbidden=()=>{calls++;throw Error('SYNTHETIC_CALLER_MUST_NOT_RUN');};
+-  const fake=Object.defineProperties({},Object.fromEntries(['instance_id','snapshot','ensure']
+-    .map(key=>[key,{enumerable:true,get:forbidden}])));
+-  const proxy=new Proxy(fake,{get:forbidden,getPrototypeOf:forbidden,ownKeys:forbidden,getOwnPropertyDescriptor:forbidden});
+-  const revoked=Proxy.revocable({},{});revoked.revoke();
+-  for(const summary of [{...f.currentSummary},Object.create(f.currentSummary),fake,proxy,revoked.proxy,null,undefined])
+-    assert.throws(()=>createProvider({identity:f.identity,summary}),{message:PREFIX});
+-  for(const identity of [{...f.identity},Object.create(f.identity),fake,proxy,revoked.proxy,null,undefined])
+-    assert.throws(()=>createProvider({identity,summary:f.currentSummary}),{message:PREFIX});
+-  const stale=f.currentSummary;f.restart();
+-  assert.throws(()=>createProvider({identity:f.identity,summary:stale}),{message:PREFIX});
+-  assert.equal(calls,0);assert.equal(f.events.length,0);
+-  assert.equal(await exists(f.backupDirectory),false);await f.assertSourceUnchanged();
++test('real composition preserves the exact missing namespace-custody HOLD without writing',async t=>{
++  const f=await fixture(t),before=await snapshotTree(f.parent);
++  const result=await bindOwnedRuntimeHostRecoveryComposition({identity:f.identity,app:{},summary:f.currentSummary});
++  assert.deepEqual(result,{mounted:false,composition:null,reason:'original_parent_namespace_custody_required'});
++  assert.equal(f.seal.value,null);noWrites(f);assert.deepEqual(await snapshotTree(f.parent),before);
+ });
+ 
+-test('copied and Proxy provider tokens cannot read or acquire a sealed-registration scope',async t=>{
+-  const f=await fixture(t),token=f.provider();let calls=0;
+-  const forbidden=()=>{calls++;throw Error('SYNTHETIC_TOKEN_TRAP_MUST_NOT_RUN');};
+-  const proxy=new Proxy(token,{get:forbidden,getPrototypeOf:forbidden,ownKeys:forbidden,getOwnPropertyDescriptor:forbidden});
+-  const revoked=Proxy.revocable(token,{});revoked.revoke();
+-  for(const value of [{...token},Object.create(token),proxy,revoked.proxy,null,undefined]){
+-    await refused(readConfiguration(value));
+-    assert.equal(api.readOriginalProtectedBackupRootRegistrationScope(value),null);
+-  }
+-  assert.equal(calls,0);assert.equal(f.events.length,0);
+-  assert.equal(await exists(f.backupDirectory),false);await f.assertSourceUnchanged();
++test('post-observation ancestor replacement cannot cross the missing original namespace-custody fence',async t=>{
++  for(const mode of ['replacement-directory','ancestor-alias-to-original-pgdata'])await t.test(mode,async t=>{
++    const f=await fixture(t),stateObserved=deferred();let afterSwap,swapped=false;
++    f.nativeReadHook=async({directory,count})=>{
++      if(directory===f.directories.stateDirectory&&count===2)stateObserved.resolve();
++      if(directory===f.directories.sourceDataDirectory&&count===2){
++        await stateObserved.promise;
++        const retained=f.directories.stateDirectory+'-retained';await fs.rename(f.directories.stateDirectory,retained);
++        if(mode==='replacement-directory'){
++          await fs.mkdir(f.directories.stateDirectory);await fs.mkdir(f.directories.sourceDataDirectory);
++          await fs.writeFile(path.join(f.directories.sourceDataDirectory,'replacement-sentinel'),'SYNTHETIC_REPLACEMENT_PGDATA');
++        }else await fs.symlink(path.join(retained,'pgdata'),f.directories.stateDirectory,process.platform==='win32'?'junction':'dir');
++        swapped=true;afterSwap=await snapshotTree(f.parent);
++      }
++    };
++    const token=f.provider();await assert.rejects(readConfiguration(token),{message:NAMESPACE_HOLD});
++    assert.equal(swapped,true,'swap occurs only after both final real state/source observations');
++    assert.equal(f.nativeReads.get(f.directories.stateDirectory),2);assert.equal(f.nativeReads.get(f.directories.sourceDataDirectory),2);
++    noWrites(f);assert.equal(f.seal.value,null);assert.deepEqual(await snapshotTree(f.parent),afterSwap);
++    assert.equal(await fs.readFile(path.join(f.directories.stateDirectory+'-retained','pgdata','source-sentinel'),'utf8'),SOURCE_SENTINEL);
++  });
+ });
+ 
+-test('constructor refuses caller-selected roots, authority callbacks and accessor or Proxy argument records',async t=>{
+-  const f=await fixture(t);let calls=0;
+-  const forbidden=()=>{calls++;throw Error('SYNTHETIC_CONSTRUCTOR_CALLBACK_MUST_NOT_RUN');};
+-  const original={identity:f.identity,summary:f.currentSummary};
+-  const accessor=Object.defineProperty({summary:f.currentSummary},'identity',{enumerable:true,get:forbidden});
+-  const proxy=new Proxy(original,{get:forbidden,getPrototypeOf:forbidden,ownKeys:forbidden,getOwnPropertyDescriptor:forbidden});
+-  const revoked=Proxy.revocable(original,{});revoked.revoke();
+-  for(const input of [{...original,backupDirectory:path.join(f.parent,'caller-selected')},
+-    {...original,readBackupDirectory:forbidden},{...original,verifyStorage:forbidden},accessor,proxy,revoked.proxy])
+-    assert.throws(()=>createProvider(input),{message:PREFIX});
+-  assert.equal(calls,0);assert.equal(f.events.length,0);
+-  assert.equal(await exists(f.backupDirectory),false);await f.assertSourceUnchanged();
++test('a synthetic READY pin can only be requalified readonly and never becomes effect authority',async t=>{
++  const f=await fixture(t,{registration:'READY'}),before=await snapshotTree(f.parent),sealed=clone(f.seal.value),token=f.provider();
++  assert.equal(Object.isFrozen(token),true);assert.throws(()=>JSON.stringify(token));
++  const configuration=await readConfiguration(token);
++  assert.equal(Object.isFrozen(configuration),true);
++  assert.deepEqual(configuration,{backupDirectory:f.backupDirectory,sourceDataDirectory:f.directories.sourceDataDirectory});
++  assert.equal(api.readOriginalProtectedBackupRootRegistrationScope(token).registration,null);
++  for(const target of [f.directories.stateDirectory,f.directories.sourceDataDirectory,f.backupDirectory])
++    assert.ok(f.events.some(event=>event.type==='acl'&&event.operation==='VERIFY_DIRECTORY'&&event.target===target));
++  assert.deepEqual(await readConfiguration(token),configuration);assert.deepEqual(f.seal.value,sealed);
++  noWrites(f);assert.deepEqual(await snapshotTree(f.parent),before);
+ });
+ 
+-test('unregistered existing roots are preserved and never adopted or protected',async t=>{
+-  for(const populated of [false,true])await t.test(populated?'populated root':'empty root',async t=>{
+-    const f=await fixture(t);await fs.mkdir(f.backupDirectory);
+-    const sentinel=path.join(f.backupDirectory,'retained-evidence');
+-    if(populated)await fs.writeFile(sentinel,RETAINED_SENTINEL);
+-    const physical=await readDirectoryIdentity(f.backupDirectory),token=f.provider();
+-    await refused(readConfiguration(token));
+-    assert.equal(await readDirectoryIdentity(f.backupDirectory),physical);
+-    assert.equal(protectedEvents(f).length,0);assert.equal(persisted(f).length,0);
+-    if(populated)assert.equal(await fs.readFile(sentinel,'utf8'),RETAINED_SENTINEL);
+-    await refused(readConfiguration(token));await f.assertSourceUnchanged();
+-  });
++test('synthetic READY evidence retains its physical root through fresh readonly Host and identity composition',async t=>{
++  const f=await fixture(t,{registration:'READY'}),before=await snapshotTree(f.parent),first=f.provider(),configuration=await readConfiguration(first);
++  closeProvider(first);await drainProvider(first);f.restart({newIdentity:true});const second=f.provider();
++  assert.deepEqual(await readConfiguration(second),configuration);await refused(readConfiguration(first));
++  noWrites(f);assert.deepEqual(await snapshotTree(f.parent),before);
+ });
+ 
+-test('READY pin retains the same populated physical root through fresh Host and identity composition',async t=>{
+-  const f=await fixture(t),first=f.provider(),before=await readConfiguration(first);
+-  const physical=await readDirectoryIdentity(f.backupDirectory);
+-  const sentinel=path.join(f.backupDirectory,'retained-evidence');await fs.writeFile(sentinel,RETAINED_SENTINEL);
+-  const sealed=clone(f.seal.value),writes=persisted(f).length;
+-  closeProvider(first);await drainProvider(first);f.restart({newIdentity:true});
+-  const second=f.provider(),after=await readConfiguration(second);
+-  assert.deepEqual(after,before);assert.equal(await readDirectoryIdentity(f.backupDirectory),physical);
+-  assert.deepEqual(f.seal.value,sealed);assert.equal(persisted(f).length,writes);
+-  assert.equal(protectedEvents(f).length,0,'restart verifies the old root without DACL mutation');
+-  assert.equal(await fs.readFile(sentinel,'utf8'),RETAINED_SENTINEL);
+-  assert.deepEqual((await fs.readdir(f.directories.stateDirectory)).sort(),['pgdata',ROOT_NAME].sort());
+-  await refused(readConfiguration(first));await f.assertSourceUnchanged();
++test('REGISTERING and missing READY roots remain holds without repair, recreation or rotation',async t=>{
++  for(const state of ['REGISTERING','READY'])await t.test(state,async t=>{
++    const f=await fixture(t,{registration:state});if(state==='READY')await fs.rm(f.backupDirectory,{recursive:true});
++    const before=await snapshotTree(f.parent),sealed=clone(f.seal.value),token=f.provider();await refused(readConfiguration(token));
++    noWrites(f);assert.deepEqual(f.seal.value,sealed);assert.deepEqual(await snapshotTree(f.parent),before);
++    f.restart();await refused(readConfiguration(f.provider()));noWrites(f);
++  });
+ });
+ 
+-test('a missing sealed READY root is never recreated or replaced with a new sibling',async t=>{
+-  const f=await fixture(t),first=f.provider();await readConfiguration(first);
+-  closeProvider(first);await drainProvider(first);
+-  await fs.rmdir(f.backupDirectory);const sealed=clone(f.seal.value),protections=protectedEvents(f).length;
+-  f.restart();const second=f.provider();await refused(readConfiguration(second));
+-  assert.equal(await exists(f.backupDirectory),false);assert.deepEqual(f.seal.value,sealed);
+-  assert.equal(protectedEvents(f).length,protections);
+-  assert.deepEqual(await fs.readdir(f.directories.stateDirectory),['pgdata']);
+-  await f.assertSourceUnchanged();
++test('fake/copy/proxy identities, summaries, argument records and provider tokens cannot invoke caller code',async t=>{
++  const f=await fixture(t);let called=0;const forbidden=()=>{called++;throw Error('SYNTHETIC_CALLER_FORBIDDEN');};
++  const fake=Object.defineProperties({},Object.fromEntries(['instance_id','snapshot','ensure'].map(key=>[key,{get:forbidden}])));
++  const proxy=new Proxy(fake,{get:forbidden,getPrototypeOf:forbidden,ownKeys:forbidden,getOwnPropertyDescriptor:forbidden});
++  const revoked=Proxy.revocable({},{});revoked.revoke();
++  for(const summary of [{...f.currentSummary},Object.create(f.currentSummary),fake,proxy,revoked.proxy,null])
++    assert.throws(()=>createProvider({identity:f.identity,summary}),{message:PREFIX});
++  for(const identity of [{...f.identity},Object.create(f.identity),fake,proxy,revoked.proxy,null])
++    assert.throws(()=>createProvider({identity,summary:f.currentSummary}),{message:PREFIX});
++  const input={identity:f.identity,summary:f.currentSummary};
++  const accessor=Object.defineProperty({summary:f.currentSummary},'identity',{enumerable:true,get:forbidden});
++  for(const candidate of [{...input,backupDirectory:f.parent},{...input,verifyStorage:forbidden},accessor,
++    new Proxy(input,{get:forbidden,getPrototypeOf:forbidden,ownKeys:forbidden}),revoked.proxy])
++    assert.throws(()=>createProvider(candidate),{message:PREFIX});
++  const token=f.provider();
++  for(const copied of [{...token},Object.create(token),new Proxy(token,{get:forbidden}),revoked.proxy,null]){
++    await refused(readConfiguration(copied));assert.equal(api.readOriginalProtectedBackupRootRegistrationScope(copied),null);
++  }
++  const stale=f.currentSummary;f.restart();assert.throws(()=>createProvider({identity:f.identity,summary:stale}),{message:PREFIX});
++  assert.equal(called,0);assert.equal(f.events.length,0);noWrites(f);
+ });
+ 
+-test('replacement of root, source or state cannot be adopted from matching pathnames',async t=>{
+-  for(const changed of ['root','source','state'])await t.test(changed,async t=>{
+-    const f=await fixture(t),token=f.provider();await readConfiguration(token);
+-    const sealed=clone(f.seal.value),protections=protectedEvents(f).length;
+-    const selected=changed==='root'?f.backupDirectory:changed==='source'?
+-      f.directories.sourceDataDirectory:f.directories.stateDirectory;
+-    const retained=selected+'-original';await fs.rename(selected,retained);await fs.mkdir(selected);
+-    if(changed==='state'){
+-      await fs.mkdir(f.directories.sourceDataDirectory);
+-      await fs.mkdir(f.backupDirectory);
+-    }
+-    await refused(readConfiguration(token));
+-    assert.deepEqual(f.seal.value,sealed);assert.equal(protectedEvents(f).length,protections);
+-    f.restart();const fresh=f.provider();await refused(readConfiguration(fresh));
+-    assert.equal(protectedEvents(f).length,protections);
+-    const originalSource=changed==='source'?retained:changed==='state'?path.join(retained,'pgdata'):f.directories.sourceDataDirectory;
+-    assert.equal(await fs.readFile(path.join(originalSource,'source-sentinel'),'utf8'),SOURCE_SENTINEL);
+-    // Restoring the original directory cannot revive a provider whose prior
+-    // asynchronous observation failed. No new authority is inferred here.
+-    await fs.rename(selected,selected+'-replacement');await fs.rename(retained,selected);
+-    await refused(readConfiguration(token));await f.assertSourceUnchanged();
++test('malformed and Proxy current-directory records fail before ACL reads or writes',async t=>{
++  for(const kind of ['extra-field','accessor','proxy','revoked-proxy','relative-source','overlap'])await t.test(kind,async t=>{
++    const f=await fixture(t);let calls=0;const forbidden=()=>{calls++;throw Error('SYNTHETIC_DIRECTORY_TRAP');};let value={...f.directories};
++    if(kind==='extra-field')value.backupDirectory=f.parent;
++    if(kind==='accessor')Object.defineProperty(value,'sourceDataDirectory',{enumerable:true,get:forbidden});
++    // Allow only the inert `then` read imposed by Promise settlement itself.
++    if(kind==='proxy')value=new Proxy(value,{get:(_target,key)=>key==='then'?undefined:forbidden(),
++      getPrototypeOf:forbidden,ownKeys:forbidden,getOwnPropertyDescriptor:forbidden});
++    if(kind==='revoked-proxy'){const revoked=Proxy.revocable(value,{});revoked.revoke();value=revoked.proxy;}
++    if(kind==='relative-source')value.sourceDataDirectory='relative';if(kind==='overlap')value.sourceDataDirectory=f.directories.stateDirectory;
++    f.readConfigurationHook=async()=>value;await refused(readConfiguration(f.provider()));
++    assert.equal(calls,0);assert.equal(f.events.filter(event=>event.type==='acl').length,0);noWrites(f);
+   });
+ });
+ 
+-test('root and source symlink aliases are refused without protection or source changes',async t=>{
+-  for(const aliased of ['root','source'])await t.test(aliased,async t=>{
+-    const f=await fixture(t);
+-    if(aliased==='root')await fs.symlink(f.directories.sourceDataDirectory,f.backupDirectory,'dir');
+-    else{
+-      const realSource=f.directories.sourceDataDirectory+'-original';
+-      await fs.rename(f.directories.sourceDataDirectory,realSource);
+-      await fs.symlink(realSource,f.directories.sourceDataDirectory,'dir');
+-    }
+-    const token=f.provider();await refused(readConfiguration(token));
+-    assert.equal(protectedEvents(f).length,0);await f.assertSourceUnchanged();
++test('replacement or alias of a READY root, source or state cannot be adopted from its old pathname',async t=>{
++  for(const changed of ['root','source','state','root-alias'])await t.test(changed,async t=>{
++    const f=await fixture(t,{registration:'READY'}),token=f.provider();await readConfiguration(token);const sealed=clone(f.seal.value);
++    const selected=changed.startsWith('root')?f.backupDirectory:changed==='source'?f.directories.sourceDataDirectory:f.directories.stateDirectory;
++    const retained=selected+'-retained';await fs.rename(selected,retained);
++    if(changed==='root-alias')await fs.symlink(f.directories.sourceDataDirectory,selected,process.platform==='win32'?'junction':'dir');
++    else{await fs.mkdir(selected);if(changed==='state'){await fs.mkdir(f.directories.sourceDataDirectory);await fs.mkdir(f.backupDirectory);}}
++    const afterSwap=await snapshotTree(f.parent);await refused(readConfiguration(token));f.restart();await refused(readConfiguration(f.provider()));
++    noWrites(f);assert.deepEqual(f.seal.value,sealed);assert.deepEqual(await snapshotTree(f.parent),afterSwap);
++    const originalSource=changed==='source'?retained:changed==='state'?path.join(retained,'pgdata'):f.directories.sourceDataDirectory;
++    assert.equal(await fs.readFile(path.join(originalSource,'source-sentinel'),'utf8'),SOURCE_SENTINEL);
+   });
+ });
+ 
+-test('canonical device, client and key mismatches cannot adopt an existing sealed pin',async t=>{
++test('canonical device, client or key changes cannot reuse another synthetic READY pin',async t=>{
+   for(const field of ['device_id','client_id','key_fingerprint_sha256'])await t.test(field,async t=>{
+-    const f=await fixture(t),first=f.provider();await readConfiguration(first);
+-    closeProvider(first);await drainProvider(first);const sealed=clone(f.seal.value);
+-    f.canonical={...f.canonical,[field]:field==='key_fingerprint_sha256'?'b'.repeat(64):randomUUID()};
+-    f.restart({newIdentity:true});const second=f.provider();await refused(readConfiguration(second));
+-    assert.deepEqual(f.seal.value,sealed);assert.equal(protectedEvents(f).length,0);
+-    await f.assertSourceUnchanged();
++    const f=await fixture(t,{registration:'READY'}),sealed=clone(f.seal.value),before=await snapshotTree(f.parent);
++    f.canonical={...f.canonical,[field]:field==='key_fingerprint_sha256'?'b'.repeat(64):randomUUID()};f.restart({newIdentity:true});
++    await refused(readConfiguration(f.provider()));noWrites(f);assert.deepEqual(f.seal.value,sealed);assert.deepEqual(await snapshotTree(f.parent),before);
+   });
+ });
+ 
+-test('malformed and Proxy current-directory records fail without invoking accessors or effects',async t=>{
+-  for(const kind of ['extra-field','accessor','proxy','revoked-proxy','relative-source','overlapping-source'])
+-    await t.test(kind,async t=>{
+-      const f=await fixture(t);let calls=0;
+-      const forbidden=()=>{calls++;throw Error('SYNTHETIC_DIRECTORY_TRAP_MUST_NOT_RUN');};
+-      let record={...f.directories};
+-      if(kind==='extra-field')record.backupDirectory=path.join(f.parent,'caller-selected');
+-      if(kind==='accessor')Object.defineProperty(record,'sourceDataDirectory',{enumerable:true,get:forbidden});
+-      // Promise settlement necessarily observes `then` before an awaited
+-      // result reaches the provider. Keep that property inert; every actual
+-      // directory-member or introspection trap remains forbidden.
+-      if(kind==='proxy')record=new Proxy(record,{get:(_target,key)=>key==='then'?undefined:forbidden(),
+-        getPrototypeOf:forbidden,ownKeys:forbidden,getOwnPropertyDescriptor:forbidden});
+-      if(kind==='revoked-proxy'){const p=Proxy.revocable(record,{});p.revoke();record=p.proxy;}
+-      if(kind==='relative-source')record.sourceDataDirectory='relative-source';
+-      if(kind==='overlapping-source')record.sourceDataDirectory=f.directories.stateDirectory;
+-      f.readConfigurationHook=async()=>record;
+-      const token=f.provider();await refused(readConfiguration(token));
+-      assert.equal(calls,0);assert.equal(aclEvents(f).length,0);
+-      assert.equal(persisted(f).length,0);assert.equal(await exists(f.backupDirectory),false);
+-      await f.assertSourceUnchanged();
+-    });
++test('close during ACL verification refuses late results and drain joins the original readonly work',async t=>{
++  const f=await fixture(t,{registration:'READY'}),before=await snapshotTree(f.parent),pause=pauseAcl(f,event=>event.target===f.backupDirectory);
++  const token=f.provider(),denial=refused(readConfiguration(token));await pause.entered;closeProvider(token);let drained=false;
++  const drain=drainProvider(token).then(()=>{drained=true;});await nextTurn();assert.equal(drained,false);
++  pause.release();await denial;await drain;await refused(readConfiguration(token));noWrites(f);assert.deepEqual(await snapshotTree(f.parent),before);
+ });
+ 
+-test('close during native ACL work refuses late success and drain joins the exact pending work',async t=>{
+-  const f=await fixture(t),pause=pauseAcl(f,event=>event.target===f.backupDirectory);
+-  const token=f.provider(),reading=readConfiguration(token),denial=refused(reading);
+-  await pause.entered;assert.equal(f.seal.value.state,'REGISTERING');
+-  closeProvider(token);let drained=false;
+-  const drain=drainProvider(token).then(()=>{drained=true;});
+-  await nextTurn();assert.equal(drained,false);
+-  pause.release();await denial;await drain;
+-  assert.equal(f.seal.value.state,'REGISTERING');assert.equal(await exists(f.backupDirectory),true);
+-  await refused(readConfiguration(token));
+-  f.aclHook=null;f.restart();const restarted=f.provider();
+-  await refused(readConfiguration(restarted));
+-  assert.equal(protectedEvents(f).length,0,'interrupted registration never mutates DACL or rotates root');
+-  await f.assertSourceUnchanged();
+-});
+-
+-test('Host restart or canonical identity change during ACL cannot publish a late configuration',async t=>{
+-  for(const change of ['Host','device_id','client_id','key_fingerprint_sha256'])await t.test(change,async t=>{
+-    const f=await fixture(t),pause=pauseAcl(f,event=>event.operation==='VERIFY_DIRECTORY');
++test('Host restart or identity drift during ACL verification permanently refuses that provider',async t=>{
++  for(const changed of ['Host','device_id','client_id','key_fingerprint_sha256'])await t.test(changed,async t=>{
++    const f=await fixture(t,{registration:'READY'}),before=await snapshotTree(f.parent),pause=pauseAcl(f,()=>true);
+     const token=f.provider(),denial=refused(readConfiguration(token));await pause.entered;
+-    if(change==='Host')f.restart();
+-    else f.canonical={...f.canonical,[change]:change==='key_fingerprint_sha256'?'b'.repeat(64):randomUUID()};
+-    pause.release();await denial;
+-    assert.equal(persisted(f).length,0);assert.equal(protectedEvents(f).length,0);
+-    await refused(readConfiguration(token));await f.assertSourceUnchanged();
++    if(changed==='Host')f.restart();else f.canonical={...f.canonical,[changed]:changed==='key_fingerprint_sha256'?'b'.repeat(64):randomUUID()};
++    pause.release();await denial;await refused(readConfiguration(token));noWrites(f);assert.deepEqual(await snapshotTree(f.parent),before);
+   });
+ });
+ 
+-test('directory replacement during an awaited ACL observation cannot be sealed READY',async t=>{
+-  const f=await fixture(t),pause=pauseAcl(f,event=>event.target===f.backupDirectory);
+-  const token=f.provider(),denial=refused(readConfiguration(token));await pause.entered;
+-  const retained=f.backupDirectory+'-original';await fs.rename(f.backupDirectory,retained);
+-  await fs.mkdir(f.backupDirectory);await fs.writeFile(path.join(f.backupDirectory,'untrusted'),'SYNTHETIC_REPLACEMENT');
+-  pause.release();await denial;
+-  assert.equal(f.seal.value.state,'REGISTERING');
+-  assert.equal(await fs.readFile(path.join(f.backupDirectory,'untrusted'),'utf8'),'SYNTHETIC_REPLACEMENT');
+-  assert.equal(await exists(retained),true);await f.assertSourceUnchanged();
+-});
+-
+-test('ACL denial, wrong-operation claims and native errors permanently refuse the provider',async t=>{
+-  for(const mode of ['unverified','wrong-operation','native-error'])await t.test(mode,async t=>{
+-    const f=await fixture(t),privateMarker='SYNTHETIC_PRIVATE_NATIVE_DETAIL';
+-    f.aclHook=async event=>{
++test('ACL or sealed-read failure is sanitized and terminal without any repair attempt',async t=>{
++  for(const mode of ['unverified','wrong-operation','native-error','sealed-read-error'])await t.test(mode,async t=>{
++    const f=await fixture(t,{registration:'READY'}),before=await snapshotTree(f.parent),privateMarker='SYNTHETIC_PRIVATE_NATIVE_DETAIL';
++    if(mode==='sealed-read-error')f.readRegistrationHook=()=>{throw Error(privateMarker);};
++    else f.aclHook=async event=>{
+       if(mode==='native-error')throw Error(privateMarker);
+       return {owner_dacl_verified:mode!=='unverified',operation:mode==='wrong-operation'?'VERIFY_FILE':event.operation};
+     };
+-    const token=f.provider();
+-    await assert.rejects(readConfiguration(token),error=>{
++    const token=f.provider();await assert.rejects(readConfiguration(token),error=>{
+       assert.match(error.message,PREFIX);assert.equal(error.message.includes(privateMarker),false);return true;
+-    });
+-    f.aclHook=null;await refused(readConfiguration(token));
+-    assert.equal(await exists(f.backupDirectory),false);assert.equal(persisted(f).length,0);
+-    await f.assertSourceUnchanged();
+-  });
+-});
+-
+-test('sealed-read or REGISTERING-write failure cannot create a root or gain a later retry',async t=>{
+-  for(const failure of ['read','REGISTERING'])await t.test(failure,async t=>{
+-    const f=await fixture(t);
+-    const denied=()=>{throw Error('SYNTHETIC_SEALED_STORAGE_FAILURE');};
+-    if(failure==='read')f.readRegistrationHook=denied;
+-    else f.persistRegistrationHook=(_scope,event)=>{if(event.registration.state==='REGISTERING')denied();};
+-    const token=f.provider();await refused(readConfiguration(token));
+-    assert.equal(await exists(f.backupDirectory),false);assert.equal(protectedEvents(f).length,0);
+-    f.readRegistrationHook=null;f.persistRegistrationHook=null;
+-    await refused(readConfiguration(token));assert.equal(f.seal.value,null);
+-    await f.assertSourceUnchanged();
+-  });
+-});
+-
+-test('physical state or source changes during REGISTERING persistence are refused before mkdir',async t=>{
+-  for(const changed of ['state','source'])await t.test(changed,async t=>{
+-    const f=await fixture(t),entered=deferred(),release=deferred();f.releases.push(release.resolve);
+-    f.persistRegistrationHook=async(_scope,event)=>{
+-      if(event.registration.state==='REGISTERING'){entered.resolve();await release.promise;}
+-    };
+-    const token=f.provider(),denial=refused(readConfiguration(token));await entered.promise;
+-    const target=changed==='state'?f.directories.stateDirectory:f.directories.sourceDataDirectory;
+-    await fs.rename(target,target+'-original');await fs.mkdir(target);
+-    if(changed==='state')await fs.mkdir(f.directories.sourceDataDirectory);
+-    release.resolve();await denial;
+-    assert.equal(await exists(f.backupDirectory),false,'changed physical custody must be refused before any root creation');
+-    assert.equal(protectedEvents(f).length,0);assert.equal(f.seal.value?.state,'REGISTERING');
+-    const retainedSource=changed==='state'?path.join(target+'-original','pgdata'):target+'-original';
+-    assert.equal(await fs.readFile(path.join(retainedSource,'source-sentinel'),'utf8'),SOURCE_SENTINEL);
++    });f.aclHook=null;f.readRegistrationHook=null;await refused(readConfiguration(token));noWrites(f);
++    assert.deepEqual(await snapshotTree(f.parent),before);
+   });
+ });
+ 
+-test('READY-write uncertainty retains REGISTERING and the original directory without automatic cleanup or reuse',async t=>{
+-  const f=await fixture(t);
+-  f.persistRegistrationHook=(_scope,event)=>{
+-    if(event.registration.state==='READY')throw Error('SYNTHETIC_READY_WRITE_UNKNOWN');
+-  };
+-  const token=f.provider();await refused(readConfiguration(token));
+-  assert.equal(f.seal.value.state,'REGISTERING');assert.equal(await exists(f.backupDirectory),true);
+-  const physical=await readDirectoryIdentity(f.backupDirectory);
+-  await fs.writeFile(path.join(f.backupDirectory,'retained-evidence'),RETAINED_SENTINEL);
+-  f.persistRegistrationHook=null;f.restart();const fresh=f.provider();await refused(readConfiguration(fresh));
+-  assert.equal(await readDirectoryIdentity(f.backupDirectory),physical);
+-  assert.equal(await fs.readFile(path.join(f.backupDirectory,'retained-evidence'),'utf8'),RETAINED_SENTINEL);
+-  assert.equal(protectedEvents(f).length,0);await f.assertSourceUnchanged();
+-});
+-
+-test('real Main recovery provider requires the exact current selector token',async t=>{
+-  const f=await fixture(t),composition=await mainComposition(f);let called=0;
+-  const proxy=new Proxy(composition.root,{get(){called++;throw Error('SYNTHETIC_ROOT_TOKEN_TRAP');}});
++test('real Main provider requires an exact readonly selector token, including for a synthetic READY pin',async t=>{
++  const f=await fixture(t,{registration:'READY'}),before=await snapshotTree(f.parent),composition=await mainComposition(f);let calls=0;
++  const proxy=new Proxy(composition.root,{get(){calls++;throw Error('SYNTHETIC_SELECTOR_TOKEN_TRAP');}});
+   for(const token of [null,{},Object.create(composition.root),{...composition.root},proxy])
+-    assert.throws(()=>mainApi.createOriginalMainRecoveryRootProvider({...composition.argumentsForProvider,
+-      protectedBackupRootProvider:token}),/original_main_recovery_root_original_protected_selector_required/);
+-  assert.equal(called,0);assert.equal(f.events.filter(event=>event.type==='owner-bind').length,0);
+-  const session=await composition.open();
++    assert.throws(()=>mainApi.createOriginalMainRecoveryRootProvider({...composition.args,protectedBackupRootProvider:token}),
++      /original_main_recovery_root_original_protected_selector_required/);
++  assert.equal(calls,0);const session=await composition.open();
+   const observed=await mainApi.readOriginalMainRecoveryRoot(session,f.integration.ownerScope);
+-  assert.equal(observed.backup_directory,f.backupDirectory);
+-  assert.equal(observed.source_directory,f.directories.sourceDataDirectory);
+   assert.equal(observed.root_identity_sha256,f.seal.value.root_identity_sha256);
+   assert.equal(observed.source_directory_identity_sha256,f.seal.value.source_directory_identity_sha256);
+   assert.notEqual(observed.physical_restore_proven,true);assert.notEqual(observed.upgrade_authorized,true);
+-  mainApi.closeOriginalMainRecoveryRoot(session);await mainApi.drainOriginalMainRecoveryRoot(session);
+-  assert.throws(()=>mainApi.createOriginalMainRecoveryRootProvider(composition.argumentsForProvider),
+-    /original_main_recovery_root_original_protected_selector_required/);
+-  await f.assertSourceUnchanged();
++  noWrites(f);assert.deepEqual(await snapshotTree(f.parent),before);
+ });
+ 
+-test('root replaced after composition refuses Main admission before Owner binding or handoff work',async t=>{
+-  const f=await fixture(t),composition=await mainComposition(f);
+-  const sealed=clone(f.seal.value),writes=persisted(f).length,protections=protectedEvents(f).length;
+-  const factoryReads=f.events.filter(event=>event.type==='w76-create').length;
+-  await fs.rename(f.backupDirectory,f.backupDirectory+'-retained');await fs.mkdir(f.backupDirectory);
++test('READY root replaced before Main admission refuses before Owner binding or handoff work',async t=>{
++  const f=await fixture(t,{registration:'READY'}),composition=await mainComposition(f);
++  const nativeFactories=f.events.filter(event=>event.type==='w76-create').length;
++  await fs.rename(f.backupDirectory,f.backupDirectory+'-retained');await fs.mkdir(f.backupDirectory);const afterSwap=await snapshotTree(f.parent);
+   await assert.rejects(composition.open(),/owned_protected_backup_root_registered_root_changed/);
+   assert.equal(f.events.filter(event=>event.type==='owner-bind'||event.type==='handoff-bind').length,0);
+-  assert.equal(f.events.filter(event=>event.type==='w76-create').length,factoryReads);
+-  assert.deepEqual(f.seal.value,sealed);assert.equal(persisted(f).length,writes);
+-  assert.equal(protectedEvents(f).length,protections);await f.assertSourceUnchanged();
++  assert.equal(f.events.filter(event=>event.type==='w76-create').length,nativeFactories);noWrites(f);
++  assert.deepEqual(await snapshotTree(f.parent),afterSwap);
+ });
+ 
+-test('physical root or sealed root-pin change before Main read refuses native handoff observations',async t=>{
+-  for(const changed of ['physical root','sealed root pin'])await t.test(changed,async t=>{
+-    const f=await fixture(t),composition=await mainComposition(f),session=await composition.open();
++test('physical or sealed READY root-pin change before Main read refuses further native observations',async t=>{
++  for(const changed of ['physical root','sealed pin'])await t.test(changed,async t=>{
++    const f=await fixture(t,{registration:'READY'}),composition=await mainComposition(f),session=await composition.open();
+     const nativeReads=f.events.filter(event=>['handoff-inspect','w76-read'].includes(event.type)).length;
+-    if(changed==='physical root'){
+-      await fs.rename(f.backupDirectory,f.backupDirectory+'-retained');await fs.mkdir(f.backupDirectory);
+-    }else f.seal.value={...f.seal.value,root_identity_sha256:'f'.repeat(64)};
+-    await assert.rejects(mainApi.readOriginalMainRecoveryRoot(session,f.integration.ownerScope),
++    if(changed==='physical root'){await fs.rename(f.backupDirectory,f.backupDirectory+'-retained');await fs.mkdir(f.backupDirectory);}
++    else f.seal.value={...f.seal.value,root_identity_sha256:'f'.repeat(64)};
++    const before=await snapshotTree(f.parent);await assert.rejects(mainApi.readOriginalMainRecoveryRoot(session,f.integration.ownerScope),
+       /owned_protected_backup_root_registered_root_changed/);
+     assert.equal(f.events.filter(event=>['handoff-inspect','w76-read'].includes(event.type)).length,nativeReads);
+     await assert.rejects(mainApi.readOriginalMainRecoveryRoot(session,f.integration.ownerScope),/original_main_recovery_root_closed/);
+-    assert.equal(protectedEvents(f).length,0);await f.assertSourceUnchanged();
++    noWrites(f);assert.deepEqual(await snapshotTree(f.parent),before);
+   });
+ });
+diff --git a/apps/metaengine-browser/test/protected-backup-root-sealed-registration.test.mjs b/apps/metaengine-browser/test/protected-backup-root-sealed-registration.test.mjs
+index d39df9e..c02e005 100644
+--- a/apps/metaengine-browser/test/protected-backup-root-sealed-registration.test.mjs
++++ b/apps/metaengine-browser/test/protected-backup-root-sealed-registration.test.mjs
+@@ -1,5 +1,9 @@
+ // Isolated synthetic storage/scopes only. No installed key, Guardian, native
+ // ACL, PostgreSQL, backup, installer or production proof is used by this suite.
++// Transition/CAS tests use an explicit MOCK ISSUER to exercise dormant sealed
++// algorithms. Production currently issues only read-only scopes and cannot
++// register a root without original parent-namespace custody. The focused
++// read-only-scope regression below uses the unchanged actual scope export.
+ import test from 'node:test';
+ import assert from 'node:assert/strict';
+ import fs from 'node:fs/promises';
+@@ -90,6 +94,75 @@ async function ready(f){
+   return {token,pending,complete};
+ }
+ 
++async function loadReadOnlyScopeContract(){
++  const query='?synthetic-readonly-scope-persistence-refusal';
++  const selectedIdentityUrl=identityUrl+query,selectedScopeUrl=scopeUrl+query;
++  // Simulate ONLY the owning Host observation. There is no mocked scope
++  // issuer in this graph: the actual selector mints its opaque token and
++  // exports its actual, permanently null registration.
++  const hostUrl='data:text/javascript,'+encodeURIComponent(`
++    export const summary=Object.freeze({instance_id:'20000000-0000-4000-8000-000000000001'});
++    export function ownedLocalRuntimeHostReady(value){return value===summary;}
++    export function readOriginalOwnedRuntimeHostRecoveryConfiguration(){throw Error('unexpected_host_config_read');}
++  `);
++  const hooks=registerHooks({resolve(specifier,context,next){
++    if(context.parentURL===selectedIdentityUrl&&specifier==='./owned-protected-backup-root.mjs')
++      return {url:selectedScopeUrl,shortCircuit:true};
++    if(context.parentURL===selectedScopeUrl){
++      if(specifier==='./supervisor-device-identity.mjs')return {url:selectedIdentityUrl,shortCircuit:true};
++      if(specifier==='./local-runtime-host-controller.mjs')return {url:hostUrl,shortCircuit:true};
++    }
++    return next(specifier,context);
++  }});
++  try{
++    return {identityApi:await import(selectedIdentityUrl),rootApi:await import(selectedScopeUrl),host:await import(hostUrl)};
++  }finally{hooks.deregister();}
++}
++
++test('actual read-only opaque scope cannot reach sealing or persistence through caller records or flags',async t=>{
++  const {identityApi,rootApi,host}=await loadReadOnlyScopeContract();
++  const directory=await fs.mkdtemp(path.join(os.tmpdir(),'readonly-sealed-scope-'));
++  t.after(()=>fs.rm(directory,{recursive:true,force:true}));
++  const file=path.join(directory,'device.json'),storage=syntheticStorage();
++  const identity=new identityApi.SupervisorDeviceIdentity({statePath:file,secureStorage:storage});
++  await identity.ensure();await identity.bindDevice(randomUUID());
++  identity.bindGuardianOwnerEvidenceW67({status:()=>{throw Error('native read forbidden');},
++    statusLoaded:()=>{throw Error('native read forbidden');}});
++  const token=rootApi.createOwnedProtectedBackupRootProvider({identity,summary:host.summary});
++  const view=rootApi.readOriginalProtectedBackupRootRegistrationScope(token);
++  assert.equal(view.identity,identity);assert.equal(view.registration,null);assert.equal(Object.isFrozen(view),true);
++  const record=registration(identity),before=await fs.readFile(file,'utf8');
++  const encrypts=storage.counts.encrypt,decrypts=storage.counts.decrypt;
++  let filesystemWrites=0,callerReads=0,initializations=0;
++  const forbiddenRead=()=>{callerReads++;throw Error('caller record read forbidden');};
++  const extra=Object.defineProperty({parent_namespace_custody:true,verified:true},'registration',{get:forbiddenRead});
++  const copied=Object.freeze({...view,registration:record,verified:true,parent_namespace_custody:true});
++  const proxy=new Proxy(token,{get:forbiddenRead,getPrototypeOf:forbiddenRead,ownKeys:forbiddenRead});
++  const methods=['mkdir','open','rename','unlink','writeFile'];
++  const originalMethods=new Map(methods.map(name=>[name,fs[name]]));
++  for(const name of methods)fs[name]=async()=>{filesystemWrites++;throw Error('unexpected_persistence_write');};
++  identity.ensure=()=>{initializations++;throw Error('identity initialization forbidden');};
++  storage.onEncrypt=()=>{throw Error('unexpected_sealing');};
++  storage.onDecrypt=()=>{throw Error('unexpected_decryption');};
++  try{
++    assert.throws(()=>{view.registration=record;},TypeError);
++    for(const suppliedScope of [token,view,copied,Object.create(token),proxy]){
++      await assert.rejects(identityApi.persistOriginalProtectedBackupRootRegistrationW74(identity,suppliedScope,extra),
++        /w74_protected_backup_root_original_registration_required/);
++      await assert.rejects(identityApi.SupervisorDeviceIdentity.persistOriginalProtectedBackupRootRegistrationW74(identity,suppliedScope,record),
++        /w74_protected_backup_root_original_registration_required/);
++    }
++    assert.equal(rootApi.readOriginalProtectedBackupRootRegistrationScope(token).registration,null);
++  }finally{
++    for(const [name,method] of originalMethods)fs[name]=method;
++    rootApi.closeOwnedProtectedBackupRootProvider(token);await rootApi.drainOwnedProtectedBackupRootProvider(token);
++  }
++  assert.equal(filesystemWrites,0);assert.equal(callerReads,0);assert.equal(initializations,0);
++  assert.equal(storage.counts.encrypt,encrypts);assert.equal(storage.counts.decrypt,decrypts);
++  assert.equal(await fs.readFile(file,'utf8'),before);
++  assert.deepEqual(await fs.readdir(directory),['device.json']);
++});
++
+ test('sealed registration uses loaded original identity only and rejects copied authority without reads',async t=>{
+   const f=await fixture(t);let invoked=0;
+   const forbidden=()=>{invoked++;throw Error('caller method forbidden');};
+diff --git a/docs/OWNED_PROTECTED_BACKUP_ROOT_PROVIDER.md b/docs/OWNED_PROTECTED_BACKUP_ROOT_PROVIDER.md
+index 1e9bd4d..0eb176d 100644
+--- a/docs/OWNED_PROTECTED_BACKUP_ROOT_PROVIDER.md
++++ b/docs/OWNED_PROTECTED_BACKUP_ROOT_PROVIDER.md
+@@ -1,7 +1,9 @@
+ # Owned protected backup root provider
+ 
+-The Main composition now obtains its recovery destination from the exact owned
+-Host and an immutable selector sealed in the existing Supervisor device store.
++The Main composition can read an existing recovery destination from the exact
++owned Host and an immutable selector sealed in the existing Supervisor device
++store. Fresh registration and directory creation remain on HOLD because no
++original parent-namespace custody is available.
+ The selector does not prove a backup or restore and grants no upgrade, rollback,
+ database overwrite or installation permission. W74/W76, the original request/job
+ registries, the native producer and the existing gates remain mandatory.
+@@ -25,23 +27,31 @@ directory. It cannot equal or overlap PGDATA. Parent, source and root use the
+ existing `readDirectoryIdentity` encoding of volume/file/birth-time identity;
+ content changes do not manufacture a different directory identity.
+ 
+-## Durable registration and preservation
+-
+-Registration adds `encrypted_protected_backup_root_record_b64` to the existing
+-device state. It uses the original secure storage and queued atomic persistence,
+-preserves private-key and Owner ciphertext, and is omitted from public snapshots.
+-No new key, enrollment, trust root, alternate state file or SQL API is created.
+-Registration refuses active W74 Owner or per-request setup custody.
+-
+-1. Verify the current private parent/source and canonical client/device/key.
+-2. Seal `REGISTERING`, including a fresh registration correlation ID and native
+-   parent/source identities, before creating any directory.
+-3. Recheck configuration and physical parent/source after the persistence await.
+-   Exclusively create the fixed child; never adopt an existing unregistered path.
+-4. Require the child to inherit sufficient protection from the verified parent
+-   and pass the existing `VERIFY_DIRECTORY` policy. No DACL is changed or repaired.
+-5. Recheck physical identities and seal immutable `READY` with the root identity.
+-   Only the exact original registering scope may complete that transition.
++## Read-only registration and preservation
++
++The existing `encrypted_protected_backup_root_record_b64` field is hidden from
++public snapshots and preserves the canonical client/device/key and native
++state/source/root identities. Existing READY records may be requalified by
++read-only observations. Existing REGISTERING records remain terminal HOLD.
++
++The selector has no registration-write or directory-creation branch. If the
++sealed record is absent, it throws
++`owned_protected_backup_root_original_parent_namespace_custody_required` before
++generating a registration ID, persisting REGISTERING or creating any directory.
++Every actual selector scope hardcodes `registration:null`; therefore the
++retained identity persistence method refuses before encryption or `#persist`.
++The transition/CAS machinery is dormant in production and its synthetic scope
++algorithm tests do not supply a current original namespace issuer.
++
++A final identity/ACL read followed by `mkdir(path)` cannot retain the parent
++namespace. A parent or ancestor may be replaced between those operations; even
++an immediately following post-check cannot undo an earlier write. No new key,
++trust root, callback or reported lease is introduced to bridge this gap. The
++required original interface must hold the Host-state and identity-store parent
++namespaces before the first write, perform fixed-name exclusive creation
++relative to that held parent, and retain the exact new child through the sealed
++commit and cleanup. See the required contract in
++[Recovery directory custody required](RECOVERY_DIRECTORY_CUSTODY_REQUIRED.md).
+ 
+ Missing/replaced registered roots, malformed seals, identity changes and
+ interrupted registration fail closed. An uncertain state replacement poisons
+@@ -57,11 +67,13 @@ directory is not permission to replay a backup or overwrite current data.
+ 
+ ## Main and retained request integration
+ 
+-`bindOwnedRuntimeHostRecoveryComposition` uses this fixed producer; caller path,
++`bindOwnedRuntimeHostRecoveryComposition` uses this fixed read-only selector; caller path,
+ ACL and proof callbacks are no longer composition inputs. Main passes a mounted
+ composition into its owned capability. If original authority is unavailable,
+ recovery remains unmounted while unrelated native admission keeps its existing
+-guards. There is no recovery fallback from a failed original selector.
++guards. Missing registration is explicitly unmounted with
++`original_parent_namespace_custody_required`. There is no recovery fallback from
++a failed original selector.
+ 
+ The original Main recovery provider requires the opaque selector. It rechecks
+ the sealed physical root before binding W74 and before each root observation.
+@@ -76,10 +88,10 @@ directory identity alone says nothing about database contents.
+ 
+ ## Validation and remaining qualification
+ 
+-The source-only Linux validation contains 576 passing focused tests and 299
+-source syntax checks. It includes real temporary-directory identities, actual
+-sealed-state persistence over explicitly synthetic secure storage, original
+-controller/child lifecycle tests, real selector-to-Main integration, and existing
++The source-only Linux validation contains 572 passing focused tests and 299
++source syntax checks. It includes real temporary-directory identities, zero-write
++selector/real-scope regressions, explicit mock-issuer sealed-state CAS algorithm
++tests, original controller/child lifecycle tests, real selector-to-Main integration, and existing
+ W74/W76, handoff, phase, deadline and upgrade-gate regressions. Native Windows,
+ Guardian and database authority boundaries in positive tests are explicitly
+ synthetic; they do not attest an installed runtime.
+diff --git a/docs/PROTECTED_ROOT_HANDOFF_CONTRACT.md b/docs/PROTECTED_ROOT_HANDOFF_CONTRACT.md
+index 334ad96..b94221b 100644
+--- a/docs/PROTECTED_ROOT_HANDOFF_CONTRACT.md
++++ b/docs/PROTECTED_ROOT_HANDOFF_CONTRACT.md
+@@ -307,3 +307,9 @@ effect; the service reports `ORIGINAL_NATIVE_DIRECTORY_CUSTODY_REQUIRED` on HOLD
+ The exact required kernel-handle interface and the swap-after-last-observation
+ regression are documented in
+ [Recovery directory custody required](RECOVERY_DIRECTORY_CUSTODY_REQUIRED.md).
++
++The selector's own registration/create effects are also withheld. Without
++original parent-namespace custody, absent registration now gives
++`owned_protected_backup_root_original_parent_namespace_custody_required` before
++REGISTERING or mkdir. Actual selector scopes are read-only (`registration:null`);
++existing READY observations do not discharge the unchanged recovery-effect veto.
+diff --git a/docs/RECOVERY_DIRECTORY_CUSTODY_REQUIRED.md b/docs/RECOVERY_DIRECTORY_CUSTODY_REQUIRED.md
+index b42d4ea..7159fd5 100644
+--- a/docs/RECOVERY_DIRECTORY_CUSTODY_REQUIRED.md
++++ b/docs/RECOVERY_DIRECTORY_CUSTODY_REQUIRED.md
+@@ -6,6 +6,30 @@ the selected directory objects or their pathname ancestry alive against
+ replacement. The selected backup/restore path therefore remains **HOLD** until
+ the existing native authority supplies actual directory-handle custody.
+ 
++## Selector effects are also withheld
++
++Registration is an effect before backup/restore. The former selector branch
++persisted REGISTERING and created the root through a pathname, without holding
++its parent namespace. A swap after the final before-create identity observation
++could redirect creation before a post-check refused the result.
++
++The selector now has no creation/write branch. An absent sealed record gives
++`owned_protected_backup_root_original_parent_namespace_custody_required` before
++ID generation, REGISTERING, temporary-state writes or mkdir. Its actual opaque
++scopes always expose `registration:null`, so they cannot reach the identity
++persistence method. Existing READY requalification remains read-only; it does
++not bypass the unchanged recovery-effect veto.
++
++The original native interface must protect BOTH mutation namespaces: the
++Supervisor identity-store parent/ancestors used by its temporary create and
++atomic replacement, and the exact owned Host state parent/ancestors used for
++fixed-name root creation. It must retain the same original parent objects from
++before the first sealed write until creation, READY commit and all joins finish.
++Creation must be exclusive and relative to the held original parent, atomically
++returning/retaining the original new child object. `mkdir(path)` followed by
++`open(path)` leaves another substitution gap. Numeric handle reuse, reopening,
++callbacks or JSON cannot establish original same-object custody.
++
+ ## Actual consumer and first effect
+ 
+ `readOriginalRecoveryProtectedRoot` rechecks the original Main phase and reads
+@@ -90,6 +114,12 @@ same path. The fixed veto still prevents source connection, filesystem backup
+ mutations and native launch. Tests also cover a valid unswapped selector,
+ original close/drain, and the standalone adapter's refusal.
+ 
++The selector regression separately swaps a real state ancestor after the last
++physical observation before the absent-registration branch. The unchanged
++production selector refuses before any persistence, entropy or filesystem
++mutation. Original and replacement namespaces and identity-store bytes remain
++unchanged after the adversarial fixture's own swap.
++
+ Existing deep lifecycle/PG algorithm fixtures explicitly substitute the missing
+ native-directory boundary only in unique test module instances. They do not
+ qualify native directory custody or allow production imports to execute. No real

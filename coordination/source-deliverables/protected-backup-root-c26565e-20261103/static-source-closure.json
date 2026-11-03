@@ -1,0 +1,43 @@
+{
+  "scope": "STATIC_SOURCE_ONLY",
+  "modes": {
+    "base": {
+      "file_count": 88,
+      "npm": [
+        "npm:postgres@3.4.7"
+      ],
+      "provider_included": false,
+      "veto_included": false
+    },
+    "host": {
+      "file_count": 268,
+      "npm": [
+        "npm:postgres@3.4.7"
+      ],
+      "provider_included": true,
+      "veto_included": false
+    },
+    "replacement": {
+      "file_count": 269,
+      "npm": [
+        "npm:postgres@3.4.7"
+      ],
+      "provider_included": true,
+      "veto_included": false
+    },
+    "provider": {
+      "file_count": 67,
+      "npm": [],
+      "provider_included": true,
+      "veto_included": false
+    },
+    "recovery_consumers": {
+      "file_count": 152,
+      "npm": [],
+      "provider_included": true,
+      "veto_included": true
+    }
+  },
+  "production_recovery_service": "UNMOUNTED",
+  "package_verification": "BLOCKED_MISSING_POSTGRES_3_4_7"
+}

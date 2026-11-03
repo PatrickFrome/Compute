@@ -1,0 +1,31 @@
+{
+  "cumulative": {
+    "base_tree": "2dbe253e97379532f6f4b52ef7edf26109a9266d",
+    "fresh_archive_extraction": true,
+    "patch_check": "PASS",
+    "patch_apply": "PASS",
+    "patch_sha256": "9889999dfe35be42cd8d3b6d5d4fa3e3ce56a51bd321ec7bd0f9329d89c7b54e"
+  },
+  "selector_incremental": {
+    "patch": "selector-parent-namespace-hold.patch",
+    "base_tree": "0139c9fd5d5d04558dbb57bbf08c9cd047062822",
+    "patch_check": "PASS",
+    "patch_apply": "PASS",
+    "patch_sha256": "5efe66806b88a711a98a7ea7b74e2900b27aedf999984f0103b12ed2a1294bb8"
+  },
+  "historical_recovery_incremental": {
+    "patch": "directory-custody-hold.patch",
+    "base_tree": "b6c5977b519c9332158af1d5b7de295fa452c1e6",
+    "result_tree": "0139c9fd5d5d04558dbb57bbf08c9cd047062822",
+    "patch_sha256": "9e7fb4d3f06c129dccec97375dc21066b31d199b7d2fcdf9a2e35b6bfb5715fe",
+    "previously_verified": true
+  },
+  "result_tree": "cf8cbe232fef42c5ebf6c76316544e9e1cbe743b",
+  "recovery_veto_and_consumer_blobs_unchanged": {
+    "infra/client-state-runtime/native-coding-recovery-directory-custody.mjs": "632edf8932dd7226bcf25145945eefe75a2ee692",
+    "infra/client-state-runtime/pg17-recovery-producer.mjs": "3c638dc222010265e81bc141b37004be9fc1a7e8",
+    "infra/client-state-runtime/pg17-native-recovery-process.mjs": "d838acc21297f08c386ca077bebcf95bfb6d2903",
+    "infra/client-state-runtime/native-coding-host-recovery-service.mjs": "a1c43ad3be7b3bb9d5127bb246075df4f7adbedd",
+    "infra/client-state-runtime/pg17-recovery-directory-custody.test.mjs": "6ac65c9654aa47599a44838e07fc3d75b73b55d3"
+  }
+}

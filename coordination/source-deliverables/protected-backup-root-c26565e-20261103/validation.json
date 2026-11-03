@@ -1,0 +1,138 @@
+{
+  "runtime": {
+    "node": "v24.19.0",
+    "platform": "linux",
+    "arch": "x64"
+  },
+  "focused_tests": {
+    "pass": 572,
+    "fail": 0,
+    "skip": 0
+  },
+  "source_checks": 299,
+  "selector_namespace_suite": {
+    "tests": 45,
+    "included_in_focused_tests": true,
+    "selector_and_main_provider": "UNMODIFIED_PRODUCTION_SOURCE",
+    "physical_reads": "REAL_NATIVE_IDENTITY_READS_WITH_BOUNDARY_SWAP_WRAPPER",
+    "filesystem": "REAL_TEMPORARY_TREES_WITH_FORBIDDEN_WRITE_SPIES",
+    "post_observation_ancestor_swaps": [
+      "REPLACEMENT_DIRECTORY",
+      "ALIAS_TO_RETAINED_PGDATA"
+    ],
+    "filesystem_write_attempts": 0,
+    "sealed_persist_attempts": 0,
+    "dacl_mutation_attempts": 0,
+    "original_and_replacement_trees": "UNCHANGED_AFTER_FIXTURE_SWAP"
+  },
+  "sealed_scope_regression": {
+    "suite_tests": 16,
+    "actual_opaque_scope_registration": null,
+    "encrypt": 0,
+    "decrypt": 0,
+    "ensure": 0,
+    "filesystem_mutations": 0,
+    "device_file_bytes": "UNCHANGED",
+    "dormant_transition_tests": "EXPLICIT_MOCK_ISSUER_ALGORITHMS_ONLY"
+  },
+  "recovery_effect_suite": {
+    "tests": 11,
+    "included_in_focused_tests": true,
+    "production_veto_unmodified": true,
+    "owned_source_pool_creations": 0,
+    "native_controller_creations": 0,
+    "backup_restore_filesystem_mutations": 0
+  },
+  "selector_creation_state": "HOLD_ORIGINAL_PARENT_NAMESPACE_CUSTODY_REQUIRED",
+  "recovery_effect_state": "HOLD_ORIGINAL_NATIVE_DIRECTORY_CUSTODY_REQUIRED",
+  "original_parent_namespace_issuer": "MISSING",
+  "original_recovery_directory_issuer": "MISSING",
+  "commands": [
+    {
+      "cwd": "apps/metaengine-browser",
+      "argv": [
+        "node",
+        "scripts/run-isolated-tests.mjs",
+        "--test-concurrency=1",
+        "test/owned-protected-backup-root.test.mjs",
+        "test/protected-backup-root-sealed-registration.test.mjs",
+        "test/owned-host-recovery-configuration.test.mjs",
+        "test/local-runtime-recovery-composition.test.mjs",
+        "test/protected-root-recovery-provider.test.mjs",
+        "test/protected-root-original-interface.test.mjs",
+        "test/protected-backup-root-handoff.test.mjs",
+        "test/native-coding-recovery-root-phase.test.mjs",
+        "test/protected-root-main-deadline-transfer.test.mjs",
+        "test/local-runtime-host-terminal.test.mjs",
+        "test/local-runtime-host-controller.test.mjs",
+        "test/supervisor-device-identity-concurrency.test.mjs",
+        "test/host-owner-protected-identity-w74.test.mjs",
+        "test/host-owner-genesis-custody-w74.test.mjs",
+        "test/native-coding-setup-owner-main.test.mjs",
+        "test/native-coding-main-prepared-composition.test.mjs",
+        "test/startup-independence-diagnostic.test.mjs",
+        "test/native-supervisor-initialization-lifetime.test.mjs",
+        "test/native-tools-main-host-composition.test.mjs",
+        "../../infra/client-state-runtime/protected-root-gate-interface.test.mjs",
+        "../../infra/client-state-runtime/upgrade-backup-gate.test.mjs",
+        "../../infra/client-state-runtime/upgrade-backup-restore-gate.test.mjs",
+        "../../infra/client-state-runtime/native-coding-recovery-root-provider.production-negative.test.mjs",
+        "test/host-private-custody-w76.test.mjs",
+        "../../infra/client-state-runtime/pg17-recovery-directory-custody.test.mjs",
+        "../../infra/client-state-runtime/pg17-native-recovery-process.test.mjs",
+        "../../infra/client-state-runtime/pg17-recovery-producer.lifecycle.test.mjs",
+        "../../infra/client-state-runtime/pg17-recovery-root-identity.test.mjs",
+        "../../infra/client-state-runtime/native-coding-host-recovery-retained.test.mjs",
+        "../../infra/client-state-runtime/native-coding-host-recovery-service.test.mjs",
+        "../../infra/client-state-runtime/native-coding-host-recovery-root-composition.test.mjs",
+        "../../infra/client-state-runtime/native-coding-host-recovery-original-registry.test.mjs",
+        "../../infra/client-state-runtime/native-coding-host-recovery-lifetime.test.mjs",
+        "../../infra/client-state-runtime/native-coding-host-recovery-deadline.test.mjs",
+        "../../infra/client-state-runtime/native-coding-recovery-root-provider.test.mjs",
+        "../../infra/client-state-runtime/pg17-backup-effect-barrier.test.mjs",
+        "../../infra/client-state-runtime/pg17-recovery-state-producer.test.mjs"
+      ],
+      "exit_code": 0,
+      "tests": 572,
+      "pass": 572,
+      "fail": 0,
+      "skip": 0,
+      "log": "focused-tests.log"
+    },
+    {
+      "cwd": "apps/metaengine-browser",
+      "argv": [
+        "node",
+        "scripts/check-source.mjs"
+      ],
+      "exit_code": 0,
+      "source_checks": 299,
+      "log": "source-check.log"
+    },
+    {
+      "cwd": "infra/client-state-runtime",
+      "argv": [
+        "node",
+        "--test",
+        "--test-concurrency=1",
+        "package-runtime-resources.test.mjs"
+      ],
+      "exit_code": 1,
+      "tests": 19,
+      "pass": 1,
+      "fail": 18,
+      "skip": 0,
+      "status": "BLOCKED_FIXTURE_DEPENDENCY_ABSENT",
+      "reason": "ENOENT: infra/client-state-runtime/node_modules/postgres/ (postgres@3.4.7)",
+      "log": "package-tests-blocked.log",
+      "note": "Previous package attempt retained; required dependency remains absent. No installation/retry performed for this correction."
+    }
+  ],
+  "patch_application": "patch-application.json",
+  "static_closure": "static-source-closure.json",
+  "native_windows": "NOT_RUN",
+  "postgresql_integration": "NOT_RUN",
+  "installation": "NOT_PERFORMED",
+  "database_access": "NONE",
+  "trust_root_change": "NONE"
+}
