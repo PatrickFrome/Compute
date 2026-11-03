@@ -2,157 +2,157 @@ TAP version 13
 # Subtest: native primitive RFC vector and pinned-production-root rejection stay distinct
 ok 1 - native primitive RFC vector and pinned-production-root rejection stay distinct
   ---
-  duration_ms: 18.97889
+  duration_ms: 14.093719
   type: 'test'
   ...
 # Subtest: native compiled root is exactly existing public Ed25519 SPKI, not a fixture root
 ok 2 - native compiled root is exactly existing public Ed25519 SPKI, not a fixture root
   ---
-  duration_ms: 7.759504
+  duration_ms: 7.273205
   type: 'test'
   ...
 # Subtest: native W68 domain/canonical bytes equal actual W77 serializer: METAENGINE Browser Test.exe
 ok 3 - native W68 domain/canonical bytes equal actual W77 serializer: METAENGINE Browser Test.exe
   ---
-  duration_ms: 5.116637
+  duration_ms: 4.192545
   type: 'test'
   ...
 # Subtest: native W68 domain/canonical bytes equal actual W77 serializer: METAENGINE-Browser.exe
 ok 4 - native W68 domain/canonical bytes equal actual W77 serializer: METAENGINE-Browser.exe
   ---
-  duration_ms: 3.360161
+  duration_ms: 3.129414
   type: 'test'
   ...
 # Subtest: native canonical refuses duplicate
 ok 5 - native canonical refuses duplicate
   ---
-  duration_ms: 3.112287
+  duration_ms: 3.040565
   type: 'test'
   ...
 # Subtest: native canonical refuses reordered
 ok 6 - native canonical refuses reordered
   ---
-  duration_ms: 5.836827
+  duration_ms: 3.054521
   type: 'test'
   ...
 # Subtest: native canonical refuses extra
 ok 7 - native canonical refuses extra
   ---
-  duration_ms: 3.37873
+  duration_ms: 2.90083
   type: 'test'
   ...
 # Subtest: native canonical refuses trailing
 ok 8 - native canonical refuses trailing
   ---
-  duration_ms: 4.968613
+  duration_ms: 4.324564
   type: 'test'
   ...
 # Subtest: native canonical refuses concatenated
 ok 9 - native canonical refuses concatenated
   ---
-  duration_ms: 2.750059
+  duration_ms: 3.343145
   type: 'test'
   ...
 # Subtest: native canonical refuses escaped
 ok 10 - native canonical refuses escaped
   ---
-  duration_ms: 3.429596
+  duration_ms: 3.364208
   type: 'test'
   ...
 # Subtest: native canonical refuses nul
 ok 11 - native canonical refuses nul
   ---
-  duration_ms: 2.728976
+  duration_ms: 3.438054
   type: 'test'
   ...
 # Subtest: native canonical refuses oversize
 ok 12 - native canonical refuses oversize
   ---
-  duration_ms: 2.776668
+  duration_ms: 3.313301
   type: 'test'
   ...
 # Subtest: native canonical refuses upperhex
 ok 13 - native canonical refuses upperhex
   ---
-  duration_ms: 2.681555
+  duration_ms: 4.039099
   type: 'test'
   ...
 # Subtest: native canonical refuses versionzero
 ok 14 - native canonical refuses versionzero
   ---
-  duration_ms: 4.703182
+  duration_ms: 4.287784
   type: 'test'
   ...
 # Subtest: native canonical refuses negative
 ok 15 - native canonical refuses negative
   ---
-  duration_ms: 4.725035
+  duration_ms: 3.06683
   type: 'test'
   ...
 # Subtest: native canonical refuses path
 ok 16 - native canonical refuses path
   ---
-  duration_ms: 3.96114
+  duration_ms: 3.127832
   type: 'test'
   ...
 # Subtest: native canonical refuses nonstring
 ok 17 - native canonical refuses nonstring
   ---
-  duration_ms: 3.08125
+  duration_ms: 2.765886
   type: 'test'
   ...
 # Subtest: native canonical refuses missing
 ok 18 - native canonical refuses missing
   ---
-  duration_ms: 2.535675
+  duration_ms: 3.211879
   type: 'test'
   ...
 # Subtest: native preserves W77 reserved identity refusal: 0.7.0-dev.2728883494179.1
 ok 19 - native preserves W77 reserved identity refusal: 0.7.0-dev.2728883494179.1
   ---
-  duration_ms: 3.201321
+  duration_ms: 3.396897
   type: 'test'
   ...
 # Subtest: native preserves W77 reserved identity refusal: 0.7.0-dev.2656093458019.1
 ok 20 - native preserves W77 reserved identity refusal: 0.7.0-dev.2656093458019.1
   ---
-  duration_ms: 2.610347
+  duration_ms: 2.951225
   type: 'test'
   ...
 # Subtest: native preserves W77 reserved identity refusal: 0.7.0-dev.2529132193489.1
 ok 21 - native preserves W77 reserved identity refusal: 0.7.0-dev.2529132193489.1
   ---
-  duration_ms: 2.556866
+  duration_ms: 2.961
   type: 'test'
   ...
 # Subtest: native preserves W77 reserved identity refusal: 0.7.0-dev.2457446823794.1
 ok 22 - native preserves W77 reserved identity refusal: 0.7.0-dev.2457446823794.1
   ---
-  duration_ms: 2.583136
+  duration_ms: 2.865045
   type: 'test'
   ...
 # Subtest: native preserves W77 reserved identity refusal: 0.7.0-dev.37781000062.1
 ok 23 - native preserves W77 reserved identity refusal: 0.7.0-dev.37781000062.1
   ---
-  duration_ms: 2.5757
+  duration_ms: 2.9874
   type: 'test'
   ...
 # Subtest: native preserves W77 reserved identity refusal: 0.7.0-dev.842024784850.1
 ok 24 - native preserves W77 reserved identity refusal: 0.7.0-dev.842024784850.1
   ---
-  duration_ms: 2.630468
+  duration_ms: 3.700234
   type: 'test'
   ...
 # Subtest: native preserves W77 reserved identity refusal: 0.7.0-dev.2309832227245.1
 ok 25 - native preserves W77 reserved identity refusal: 0.7.0-dev.2309832227245.1
   ---
-  duration_ms: 2.809108
+  duration_ms: 3.900526
   type: 'test'
   ...
 # Subtest: native preserves W77 reserved identity refusal: 0.7.0-dev.2257027431866.1
 ok 26 - native preserves W77 reserved identity refusal: 0.7.0-dev.2257027431866.1
   ---
-  duration_ms: 2.878398
+  duration_ms: 3.152118
   type: 'test'
   ...
 1..26
@@ -163,4 +163,4 @@ ok 26 - native preserves W77 reserved identity refusal: 0.7.0-dev.2257027431866.
 # cancelled 0
 # skipped 0
 # todo 0
-# duration_ms 184.0073
+# duration_ms 183.109803

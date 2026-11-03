@@ -1,64 +1,61 @@
-# METAENGINE Windows bootstrap custody
+# METAENGINE bootstrap prelaunch HOLD
 
-Source-only security patch against the verified c26565e snapshot. A clean Windows installation without Guardian and PostgreSQL remains HOLD. The change closes an unsafe JavaScript launch route and binds the native genesis window handoff to the actual returned bootstrap process in the same existing signed package. It does not establish final NSIS installer authority or installation readiness.
+Source-only review revision for draft PR 1434. Native genesis now stops BEFORE elevation with `GENESIS_ORIGINAL_PRELAUNCH_BINDING_UNPROVEN`, even after existing package qualification succeeds. The post-ShellExecute process predicate and reachable launch/window path have been removed. Clean Windows installation remains HOLD; final installer launch safety is not claimed.
 
-## Verified source base
+## Why the previous postcheck was insufficient
 
-Repository: PatrickFrome/Compute. Transfer commit: `accb28e72c87c059e780efb8e6681886b33e9b4f`, branch `work/source-transfer-c26565e-20261103`. Concatenated archive.part00, archive.part01, archive.part02 in that order. SHA256: `4200e492828dbb857aaa737a7ce56d0aeda3c97c84f7743b1501ef2f229d3636`.
+A child may execute image initialization, imported DLL code or effects before ShellExecuteExW returns its process handle. SEE_MASK_NOASYNC waits for launching work; it does not establish a suspended-before-first-instruction contract. A negative returned-process check cannot erase an earlier effect. The earlier private predicate was useful only as a consistency observation, not prelaunch permission. [Microsoft SHELLEXECUTEINFO](https://learn.microsoft.com/en-us/windows/win32/api/shellapi/ns-shellapi-shellexecuteinfow).
 
-Declared source commit: `c26565e58ab92dcbcda9663c4d231bdf4a9a7ee6`. The extracted tracked tree independently matches `2dbe253e97379532f6f4b52ef7edf26109a9266d`. No previous incremental patches were applied. The archive contains no AGENTS.md or .agents/skills instructions. Local Git history was reconstructed solely to verify the tree and generate the delta; it is not the original history.
+The existing retainedImageMatchesOriginalProcess implementation explicitly limits itself to consistency for an already original process. It checks QueryFullProcessImageNameW and the identity of a file reopened at that pathname; it does not inspect the original kernel image section or issue startup custody. This is a source finding in browser-guardian-active-policy-activation-namespace.inc.hpp:1–27.
 
-Patch: `guardian-bootstrap-custody-c265.patch`. SHA256: `35227f6d03637c4a3c759fd4f8a00c9cab37fecb6eeeeb50a9e8cfadc8c9917f`. Patched tree: `c90b4494cf3cae6a6a90d5b1e2821a0e6a8ad864`. Applying the patch to a separate index of the verified base passed and produced that exact patched tree. Seven changed files are listed in source-base.json.
+## What retained W77 custody actually provides
 
-## Changes and evidence
+W77 keeps original GENERIC_READ file handles with FILE_SHARE_READ, hashes through those handles, checks FileID/link count/path/ACL and retains Read oplocks. These are meaningful barriers against ordinary incompatible writable/delete opens. Acquisition rejects existing writable mapped sections; a later writable-section operation breaks the oplock without waiting for acknowledgment. That latter rule alone does not demonstrate a writable-section bypass because sharing restrictions also apply. [Granting oplocks](https://learn.microsoft.com/en-us/windows-hardware/drivers/ifs/granting-oplocks), [section synchronization](https://learn.microsoft.com/en-us/windows-hardware/drivers/ifs/fs-filter-acquire-for-section-synchronization2).
 
-The JavaScript launcher previously hashed a bootstrap file, awaited service observation, then passed a mutable pathname to openPath. An inert regression rewrites the file with the same size during observation. Before the fix it reached one launch callback; after the fix it reaches zero. No installer process was started in either test. Logs: evidence/bootstrap-tamper-before.log and evidence/bootstrap-tamper-after.log.
+Ancestor directory opens request FILE_READ_ATTRIBUTES|READ_CONTROL. Those rights alone are outside the data/execute/write/delete access mask participating in the sharing algorithm, so absent FILE_SHARE_DELETE on the metadata handle alone is not a rename proof. [MS-FSA sharing algorithm](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fsa/8c0e3f4f-0729-49f4-a14d-7f7add593819).
 
-The missing-service activation now returns `HOLD / GUARDIAN_BOOTSTRAP_NATIVE_CUSTODY_REQUIRED`, `uac_launch_requested=false`, `original_file_launch_binding_proven=false`, and `physical_effect_outcome=NOT_ATTEMPTED`. The path callback, launch timer and post-launch polling were removed. Main no longer passes shell.openPath. Digest/size observation, fabricated JSON and repeated or concurrent calls cannot provide native custody or cause a launch. Existing read-only status and existing-owner bridge behavior are preserved.
+However, directory rename separately checks open descendants. Retained matching child opens can independently block the rename, irrespective of that sharing-access mask. W77 retains those descendants and requests Read-only oplocks rather than handle caching. Thus ordinary ancestor rename appears protected by subtree rules. No successful NTFS substitution was reproduced or claimed. [FileRenameInformation](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fsa/87f86c9b-6c2a-4803-84b7-131a74a434fa), [open descendants](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fsa/133840e4-778e-44ca-9b41-da2323615075).
 
-The native install-origin coordinator retains the actual ShellExecuteExW hProcess immediately. A new private Genesis predicate checks that original live handle against the fixed versioned bootstrap entry in the SAME retained W77 package. It requires generation 1, existing package.originalImageExact and package/lifetime fences before connecting and again before handing over the scoped window. The elevated bootstrap's independent signed-image check remains. No public path factory, verifier callback, new key, root or enrollment/Main permission was added. This post-creation check gates the window handoff; it is not proof that no code ran before the check or that all loaded code remains in custody.
+The remaining gap is a qualified composition from retained signed file/namespace to the exact system image open and permitted early loader inputs before execution. Path-based launch is not inherently unsafe, but source rechecks and a postlaunch pathname/FileID comparison do not establish that complete property. Windows/UAC/loader qualification remains absent.
 
-## Final checks
+## Current implementation
 
-Exact commands, working directories, exit codes and logs are in evidence/final/results.json. The final source runner records the reconstructed base HEAD and the explicit modified working-tree paths.
+requestVerifiedGenesisElevation preserves original-coordinator checks, consumes its attempt before qualification, retains existing W77 package/user custody and checks its signed window. It then returns HOLD with ERROR_ACCESS_DENIED. It cannot call ShellExecute, CreateProcess, connectOriginalBootstrap, window-frame construction or packet transmission. Repeating the consumed request cannot requalify or dispatch. The coordinator contract now reports `uac_implemented=false` and `prelaunch_file_binding_qualified=false`.
 
-| Check | Result |
+The prior originalCoordinatorBootstrapExact addition is removed from Genesis .hpp/.cpp, restoring those files to the base. The independent elevated consumer checks are preserved. Shared installed-namespace mechanics, Main/challenge/recovery flows, trust roots and other threads' scopes were not changed by this review.
+
+The earlier JS closure remains: missing-service activation cannot launch through openPath, even with unchanged bytes, mutation during observation, fabricated JSON or concurrent calls. No new callback, flag, hash or caller path acts as authority.
+
+## Adversarial regression and final checks
+
+The runner extracts the entire ACTUAL request method and compiles it with synthetic package/user/clock/OS boundaries. Its positive package fixture is explicitly not signature authority. Five abstract historical controls mutate route/oplock/bytes, cancellation or deadline inside fake dispatch and preserve one early effect each despite false postchecks. These controls do not claim those namespace attacks are feasible against retained NTFS descendants. The current extracted method reaches zero dispatch/connect/window/early effects, and restored custody or late package availability cannot rearm the consumed attempt.
+
+| Final check | Result |
 | --- | --- |
+| Actual request model | 21 cases PASS, including 5 historical controls; 11 source guards PASS |
+| ASan and UBSan model | PASS; production dispatch/early effects 0, historical early effects 5 |
 | Bootstrap regression group | 45 PASS, 0 FAIL, 2 Windows SKIP |
-| Launcher tests within that group | 19 PASS |
-| Actual-source Genesis predicate model | 21 synthetic cases and 10 source/order guards PASS |
-| Same Genesis model with ASan and UBSan | PASS; leak sanitizer NOT RUN |
-| Original Main launch source guard | 81 PASS, 1 expected FAIL: wire_route_authenticates_then_launches |
-| BEGIN model, normal and ASan/UBSan | 9 PASS each |
-| Owner wait model, normal and ASan/UBSan | 13 PASS each |
-| Requester session model, normal and ASan/UBSan | 15 PASS each |
-| Original Main protocol and loaded-owner/enrollment group | 17 PASS |
-| Client check-source | 292 PASS |
-| Original Main source verification | 23 PASS, 0 FAIL, 5 NOT RUN |
-| Patch whitespace and exact-base applicability | PASS |
+| Original Main protocol and owner/enrollment | 17 PASS |
+| BEGIN / owner wait / requester session models | 9 / 13 / 15 PASS, each normal and ASan/UBSan |
+| Client source check | 292 PASS |
+| Original Main source runner | 23 PASS, 0 FAIL, 5 NOT RUN |
+| Original Main launch guard | 81 PASS, unchanged expected FAIL wire_route_authenticates_then_launches |
+| Exact-base cumulative patch and previous-revision delta | Both apply checks PASS |
 
-The existing Main FAIL is present before and after this patch; the route intentionally remains HOLD without an authenticated grant. It was not hidden or converted into a positive claim.
+Commands/exit codes/logs are in evidence/final/results.json. The five source-runner NOT RUN checks are pinned OpenSSL 3.5.9 static regression, pinned BoringSSL regression, patched Electron source interface, official Electron header syntax, and Win64 cross-build. Actual Windows process/pipe/Job/WTS/ACL/UAC/NTFS/loader tests, full custom Electron build, production release-positive and Main grant, continuous loaded code custody and leak sanitizer are NOT RUN. The two bootstrap tests and one source-regression subgroup test requiring Windows remain skipped.
 
-The source runner's five named NOT RUN checks are w77-pinned-openssl-regression (pinned 3.5.9 static source/build absent), w77-boringssl-regression (exact pinned static build absent), electron-source-interface (exact patched sources absent), official-electron-header-syntax (verified headers absent), and win64-cross-builds (compiler absent). The two bootstrap skips require actual Windows original-origin pipe and original-user kernel custody. The source-regression subgroup also skips actual original pipe/process references and SCM readback. Windows compilation/linking, actual UAC/process/pipe/Job/WTS/ACL/filesystem behavior, full custom Electron build, production release-positive inputs, production Main grant and continuous loaded-code custody are NOT RUN. Synthetic positives do not qualify them.
+## Minimal compatible composition to qualify next
 
-## Remaining blockers and required original interface
+Keep the same existing W77 root, signed package, original coordinator/user/token and bounded one-shot scope. Introduce only a PRIVATE launch lease/operation whose original producer retains the verified executable and complete namespace until the system image-open and permitted early loader inputs are bound before effects. Qualify the exact volume/device mapping, reparse/ancestor/subtree behavior, sharing/mapping restrictions and loading environment on Windows. A caller-supplied path, digest, bool, JSON, arbitrary transport or returned process check cannot mint that lease.
 
-1. scripts/release-proof-producer-w77.mjs:369–399 explicitly reports BLOCKED: the existing protected release-root signer is not connected, authenticated NSIS sidecar placement is unproven, and the immutable artifact handoff is not runtime-qualified. Existing signature validation remains mandatory; deferred installer Authenticode does not disable it.
-2. GuardianActivePolicyGenesis::qualifyOriginalCoordinator still captures Location::Installed. The fixed LocalAppData package must already exist and pass bindRetainedReleaseSignature. This is not a pre-install producer for an empty PC. Genesis authorizes only initial policy; it cannot become enrollment, Main, PostgreSQL provisioning or upgrade authority.
-3. The minimal next native interface must privately consume the genuine existing signed release/package scope, select the final installer by its signed installer_sha256 and fixed purpose, and retain original file plus ancestor/security/FILE_ID/oplock custody through the launch effect and original process/Job handoff. Existing upgrade-only GuardianInstallerCustody mechanics provide a pattern, not a clean-install grant. No caller hash, bool, path, PID or JSON can mint this scope. The missing original producer is not fabricated in this patch, so JS launch stays HOLD.
-4. scripts/install-package-bounded.ps1:14–20 closes its hash stream before CreateProcess at 79–82 and accepts a caller digest. This separate explicit QA installation helper is not a production authority bridge and has not been invoked or qualified here.
-5. First-owner enrollment/local bridge, trusted pre-Main producer, single-instance handoff, absent PostgreSQL provisioning and a distinct data-preserving upgrade path remain unresolved. Existing-root refusal and uncertain-effect/no-retry rules remain unchanged. No installer was launched and no installed client, service, user database or machine policy was modified.
+A path launch can be reconsidered only after that retained-namespace composition is demonstrated; otherwise it remains HOLD before the OS boundary. No replacement elevation broker or custom low-level process launcher was invented here. The current producer does not provide this qualification. Existing W77 signer and authenticated sidecar handoff also remain blockers; genesis does not authorize enrollment/Main/PostgreSQL provisioning or upgrade.
 
-## Apply and review
+## Base and patch identities
 
-Obtain the three source-transfer parts from the exact transfer commit, concatenate them, verify the archive SHA256 and extract Compute in isolation. Confirm the base tree before applying this patch. Do not apply the old e6-to-c265 patches again.
+Source was reconstructed from transfer commit `accb28e72c87c059e780efb8e6681886b33e9b4f`, archive SHA256 `4200e492828dbb857aaa737a7ce56d0aeda3c97c84f7743b1501ef2f229d3636`, declared source commit `c26565e58ab92dcbcda9663c4d231bdf4a9a7ee6`. The verified base tree is `2dbe253e97379532f6f4b52ef7edf26109a9266d`; no previous e6-to-c265 patches were applied. No AGENTS.md or .agents/skills is present in the source archive. Local history is reconstructed, not original.
 
-```sh
-git apply --check guardian-bootstrap-custody-c265.patch
-git apply guardian-bootstrap-custody-c265.patch
-node --test apps/metaengine-browser/test/browser-guardian-machine-bootstrap-launcher.test.mjs
-python3 apps/metaengine-browser/test/native/verify-guardian-genesis-launch-binding-model.py
-python3 apps/metaengine-browser/test/native/verify-guardian-genesis-launch-binding-model.py --sanitize
-```
+Cumulative patch `guardian-bootstrap-custody-c265.patch` SHA256: `4ae48c040f9e6954aa8813c2b9120baffb5f99b0c63ae578cb96ac9889b8cd89`. It applies ONLY to the verified c265 base.
 
-Publication contains patch/report/test evidence only in an independent branch. It does not merge or install the change. No signed download URLs, credentials, private keys or completion tokens are included.
+Review delta `guardian-bootstrap-prelaunch-review.delta.patch` SHA256: `1316e225bf01f8bfc1f390feb590e9b13eedb020f95aa34ec39e7feb16ddd406`. It applies ONLY after the prior patch tree `c90b4494cf3cae6a6a90d5b1e2821a0e6a8ad864`. Both yield `cc5ac21ed40e48d07c051c8019a83fb361e0e30e`. Choose one route; do not apply both to the same tree. The superseded cumulative patch digest is recorded in source-base.json. The current cumulative patch changes six files.
+
+No installer, Windows effects, installed client, services, user DB or machine settings were run or modified. Publication is limited to this independent source-only patch/report branch; no merge or shared-branch change is performed. Credentials, signed transfer URLs and private keys are excluded.
