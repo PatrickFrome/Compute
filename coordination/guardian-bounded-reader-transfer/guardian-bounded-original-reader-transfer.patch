@@ -1,0 +1,2840 @@
+diff --git a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-connected-peer.cpp b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-connected-peer.cpp
+index 10d13b7..73bb1b6 100644
+--- a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-connected-peer.cpp
++++ b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-connected-peer.cpp
+@@ -34,6 +34,14 @@ constexpr wchar_t kExe[] = L"METAENGINEBrowserGuardian.exe";
+ constexpr wchar_t kPackageExe[] = L"Programs\\METAENGINE Browser Test\\METAENGINE Browser Test.exe";
+ constexpr DWORD kClientAccess = FILE_READ_DATA | FILE_WRITE_DATA | FILE_READ_ATTRIBUTES | SYNCHRONIZE;
+ 
++// A transfer can strand no more than the sender's two original seed handles
++// in this native process, even if several peer objects are created after loss.
++// This is a resource budget, never evidence of sender identity or code custody.
++bool beginOriginalReaderTransfer() noexcept {
++    static std::atomic_flag attempted = ATOMIC_FLAG_INIT;
++    return !attempted.test_and_set(std::memory_order_acq_rel);
++}
++
+ struct Handle {
+     HANDLE value = INVALID_HANDLE_VALUE;
+     explicit Handle(HANDLE h = INVALID_HANDLE_VALUE) : value(h) {}
+@@ -137,8 +145,8 @@ struct GuardianConnectedPeer::State {
+     Handle cancelled{CreateEventW(nullptr, TRUE, FALSE, nullptr)};
+     Handle pipe;
+     Handle server_process;
+-    Handle original_service_reader; // the sole creation-owner grant, not OpenProcess(PID)
+-    Handle original_service_token; // TOKEN_QUERY only; no token DACL edit
++    Handle original_service_reader; // locally owned duplicate of the borrowed original seed
++    Handle original_service_token; // locally owned TOKEN_QUERY duplicate; no token DACL edit
+     original_reader_wire::Once reader_once;
+     original_reader_wire::Grant reader_grant;
+     bool reader_bound = false;
+@@ -191,24 +199,132 @@ struct GuardianConnectedPeer::State {
+         return false;
+     }
+ 
++    bool failOriginalNativeHost(const char* text, DWORD code = ERROR_SUCCESS) noexcept {
++        // A diagnostic allocation failure must not leave a live original pipe
++        // behind after the receiver's native scope has already been revoked.
++        try { fail(text, code); }
++        catch (...) { error = ERROR_NOT_ENOUGH_MEMORY; }
++        // All acquisition I/O has either completed or been cancelled and
++        // physically joined before this point. Dropping this original endpoint
++        // notifies its creation owner; it does not prove child/Job exit here.
++        pipe.reset();
++        loaded_images.reset();
++        server_process.reset();
++        original_service_reader.reset();
++        original_service_token.reset();
++        reader_bound = false;
++        return false;
++    }
++
+     std::uint64_t birthOfReader() const noexcept {
+         FILETIME c{}, e{}, k{}, u{};
+         return original_service_reader.valid() && GetProcessTimes(original_service_reader.value, &c, &e, &k, &u)
+             ? ticks(c) : 0;
+     }
+ 
+-    // Consume this attempt before the native-host entry handshake can proceed.
++    // Exactly one reader acquisition on the original creation-owned pipe.
++    // A random correlation is an anti-cross-talk marker, NEVER authority.
+     bool acquireOriginalReader() {
++        using namespace original_reader_wire;
+         if (!reader_once.begin() || !pipe.valid() || !cancelled.valid() ||
+-            WaitForSingleObject(cancelled.value, 0) != WAIT_TIMEOUT) return fail("ORIGINAL_READER_ONCE_OR_CANCELLED");
+-        // The current wire carries child-local HANDLE numbers, with no native
+-        // ownership producer that lets this receiver distinguish a transferred
+-        // original from an unrelated existing local handle. Kernel object
+-        // identity, request correlation and later SCM/release checks cannot
+-        // establish that ownership. Do not request a transfer, adopt/close the
+-        // supplied numbers or strand sender-created originals on each attempt.
+-        // A locally owned duplicate would still leave the original unproven.
+-        return fail("ORIGINAL_READER_HANDLE_OWNERSHIP_UNPROVEN", ERROR_NOT_SUPPORTED);
++            WaitForSingleObject(cancelled.value, 0) != WAIT_TIMEOUT) return failOriginalNativeHost("ORIGINAL_READER_ONCE_OR_CANCELLED");
++        ULONG pipe_server = 0, pipe_client = 0;
++        DWORD flags = 0;
++        if (!GetNamedPipeInfo(pipe.value, &flags, nullptr, nullptr, nullptr) ||
++            (flags & PIPE_SERVER_END) || !(flags & PIPE_TYPE_MESSAGE) ||
++            !GetNamedPipeClientProcessId(pipe.value, &pipe_client) || pipe_client != GetCurrentProcessId() ||
++            !GetNamedPipeServerProcessId(pipe.value, &pipe_server) || !pipe_server)
++            return failOriginalNativeHost("ORIGINAL_READER_PIPE_KERNEL_IDENTITY_UNAVAILABLE");
++        // One request per native process lifetime, including unknown/late
++        // publication. The original sender also spends its retained child gate.
++        if (!beginOriginalReaderTransfer())
++            return failOriginalNativeHost("ORIGINAL_READER_PROCESS_TRANSFER_ALREADY_ATTEMPTED");
++        Request request;
++        if (!BCRYPT_SUCCESS(BCryptGenRandom(nullptr, reinterpret_cast<PUCHAR>(&request.correlation),
++                sizeof(request.correlation), BCRYPT_USE_SYSTEM_PREFERRED_RNG)) || !request.correlation)
++            return failOriginalNativeHost("ORIGINAL_READER_CORRELATION_UNAVAILABLE");
++        auto bytes = encode(request);
++        std::array<std::uint8_t,kReplyBytes> response{};
++        auto io = [&](bool writing, void* buffer, DWORD size) {
++            Handle completion(CreateEventW(nullptr, TRUE, FALSE, nullptr));
++            if (!completion.valid()) return false;
++            OVERLAPPED operation{}; operation.hEvent = completion.value;
++            DWORD done = 0;
++            const BOOL immediate = writing ? WriteFile(pipe.value, buffer, size, &done, &operation)
++                : ReadFile(pipe.value, buffer, size, &done, &operation);
++            if (!immediate) {
++                if (GetLastError() != ERROR_IO_PENDING) return false;
++                const HANDLE waits[] = {cancelled.value, completion.value};
++                if (WaitForMultipleObjects(2, waits, FALSE, 10000) != WAIT_OBJECT_0 + 1) {
++                    cancelAndJoinGuardianPipeIo(pipe.value, &operation); return false;
++                }
++                if (!GetOverlappedResult(pipe.value, &operation, &done, FALSE)) {
++                    cancelAndJoinGuardianPipeIo(pipe.value, &operation); return false;
++                }
++            }
++            return done == size && WaitForSingleObject(cancelled.value, 0) == WAIT_TIMEOUT;
++        };
++        if (!io(true, bytes.data(), static_cast<DWORD>(bytes.size())) ||
++            !io(false, response.data(), static_cast<DWORD>(response.size())))
++            return failOriginalNativeHost("ORIGINAL_READER_TRANSFER_CANCELLED_OR_INCOMPLETE");
++        Grant grant;
++        if (!decode(response.data(), response.size(), &grant) ||
++            !grant.service_birth || grant.child_local_handle > UINTPTR_MAX || grant.child_local_token > UINTPTR_MAX)
++            return failOriginalNativeHost("ORIGINAL_READER_TRANSFER_TUPLE_INVALID");
++        const auto borrowed = [](std::uint64_t value) -> HANDLE {
++            // Reject both native/sign-extended pseudo handles and their 32-bit
++            // zero-extended spellings before DuplicateHandle can interpret one.
++            if (!value || value > UINTPTR_MAX || value >= UINT64_MAX - 15 ||
++                (value >= UINT32_MAX - 15ULL && value <= UINT32_MAX)) return nullptr;
++            return reinterpret_cast<HANDLE>(static_cast<std::uintptr_t>(value));
++        };
++        const HANDLE borrowed_reader = borrowed(grant.child_local_handle);
++        const HANDLE borrowed_token = borrowed(grant.child_local_token);
++        if (!borrowed_reader || !borrowed_token)
++            return failOriginalNativeHost("ORIGINAL_READER_BORROWED_HANDLE_INVALID");
++        // Wire values are BORROWED process-lifetime seed slots. They never
++        // acquire RAII ownership, even after object identity matches. Only the
++        // outputs of these local, non-closing duplicates belong to this scope.
++        // The sender retains its original child and at most two inserted seeds
++        // until process exit; neither endpoint closes a borrowed slot by number.
++        HANDLE owned_reader = INVALID_HANDLE_VALUE;
++        if (!DuplicateHandle(GetCurrentProcess(), borrowed_reader, GetCurrentProcess(), &owned_reader,
++                kRequiredAccess, FALSE, 0))
++            return failOriginalNativeHost("ORIGINAL_READER_LOCAL_PROCESS_DUPLICATION_FAILED");
++        Handle candidate(owned_reader);
++        if (!candidate.valid() || GetProcessId(candidate.value) != pipe_server ||
++            WaitForSingleObject(candidate.value, 0) != WAIT_TIMEOUT) return failOriginalNativeHost("ORIGINAL_READER_KERNEL_OBJECT_MISMATCH");
++        FILETIME c{}, e{}, k{}, u{};
++        FILETIME child_created{}, child_exited{}, child_kernel{}, child_user{};
++        if (!GetProcessTimes(candidate.value, &c, &e, &k, &u) ||
++            !GetProcessTimes(GetCurrentProcess(), &child_created, &child_exited, &child_kernel, &child_user) ||
++            !matches(grant, request, GetCurrentProcessId(), ticks(child_created), pipe_server, ticks(c)))
++            return failOriginalNativeHost("ORIGINAL_READER_SERVICE_OR_CHILD_BIRTH_MISMATCH");
++        // The grant may only be used after the retained SCM + release checks
++        // below; the wire record itself does not establish their truth.
++        HANDLE owned_token = INVALID_HANDLE_VALUE;
++        if (!DuplicateHandle(GetCurrentProcess(), borrowed_token, GetCurrentProcess(), &owned_token,
++                TOKEN_QUERY, FALSE, 0))
++            return failOriginalNativeHost("ORIGINAL_READER_LOCAL_TOKEN_DUPLICATION_FAILED");
++        Handle candidate_token(owned_token);
++        DWORD used = 0;
++        TOKEN_STATISTICS statistics{};
++        if (!candidate_token.valid() || !GetTokenInformation(candidate_token.value, TokenStatistics,
++                &statistics, sizeof(statistics), &used) || used != sizeof(statistics) ||
++            WaitForSingleObject(cancelled.value, 0) != WAIT_TIMEOUT)
++            return failOriginalNativeHost("ORIGINAL_READER_TOKEN_KERNEL_OBJECT_INVALID");
++        ULONG server_after = 0, client_after = 0;
++        if (!GetNamedPipeServerProcessId(pipe.value, &server_after) || server_after != pipe_server ||
++            !GetNamedPipeClientProcessId(pipe.value, &client_after) || client_after != GetCurrentProcessId() ||
++            GetProcessId(candidate.value) != server_after || WaitForSingleObject(candidate.value, 0) != WAIT_TIMEOUT ||
++            WaitForSingleObject(cancelled.value, 0) != WAIT_TIMEOUT)
++            return failOriginalNativeHost("ORIGINAL_READER_PIPE_POST_TRANSFER_FENCE_LOST");
++        original_service_reader = std::move(candidate);
++        original_service_token = std::move(candidate_token);
++        reader_grant = grant; reader_bound = true;
++        if (WaitForSingleObject(cancelled.value, 0) != WAIT_TIMEOUT)
++            return failOriginalNativeHost("ORIGINAL_READER_CANCELLED_AFTER_BINDING", ERROR_OPERATION_ABORTED);
++        return true;
+     }
+ 
+     bool originalKernel(LifetimeCheck lifetime = LifetimeCheck::Connected) {
+@@ -616,49 +732,66 @@ bool GuardianConnectedPeer::connectOriginal() {
+ 
+ bool GuardianConnectedPeer::connectOriginalNativeHostAuthority() {
+     std::lock_guard<std::mutex> guard(state_->lock);
++    try {
+     if (state_->closed || state_->connect_attempted || state_->pipe.valid() || !state_->cancelled.valid() ||
+         WaitForSingleObject(state_->cancelled.value, 0) != WAIT_TIMEOUT)
+-        return state_->fail("ORIGINAL_NATIVE_HOST_PIPE_NOT_REPLACEABLE", ERROR_OPERATION_ABORTED);
++        return state_->failOriginalNativeHost("ORIGINAL_NATIVE_HOST_PIPE_NOT_REPLACEABLE", ERROR_OPERATION_ABORTED);
+     state_->connect_attempted = true;
+     state_->pipe.reset(CreateFileW(original_main_wire::kPipe, kClientAccess | FILE_WRITE_ATTRIBUTES, 0, nullptr, OPEN_EXISTING,
+         FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION, nullptr));
+-    if (!state_->pipe.valid()) return state_->fail("ORIGINAL_NATIVE_HOST_PIPE_UNAVAILABLE");
++    if (!state_->pipe.valid()) return state_->failOriginalNativeHost("ORIGINAL_NATIVE_HOST_PIPE_UNAVAILABLE");
+     DWORD mode = PIPE_READMODE_MESSAGE, observed_mode = 0;
+     // CreateFile clients start in byte mode even for a message-type pipe. A
+     // byte-prefix read would otherwise accept an oversized reply as 112 bytes.
+     if (!SetNamedPipeHandleState(state_->pipe.value, &mode, nullptr, nullptr) ||
+         !GetNamedPipeHandleStateW(state_->pipe.value, &observed_mode, nullptr, nullptr, nullptr, nullptr, 0) ||
+         !(observed_mode & PIPE_READMODE_MESSAGE) || (observed_mode & PIPE_NOWAIT))
+-        return state_->fail("ORIGINAL_NATIVE_HOST_MESSAGE_MODE_UNAVAILABLE");
++        return state_->failOriginalNativeHost("ORIGINAL_NATIVE_HOST_MESSAGE_MODE_UNAVAILABLE");
+     if (!state_->acquireOriginalReader() || !state_->captureKernel())
+-        return state_->fail("ORIGINAL_NATIVE_HOST_READER_OR_KERNEL_UNAVAILABLE");
++        return state_->failOriginalNativeHost("ORIGINAL_NATIVE_HOST_READER_OR_KERNEL_UNAVAILABLE");
+     // observe() deliberately ends in broad-runtime HOLD. Retain that result;
+     // use only the separately established SCM/W77/currentness facts to bind
+     // this live transport to the existing authority, never as child birth proof.
+     state_->observe();
+-    return !state_->observation_revoked && state_->kernel_exact && state_->scm_exact && state_->package_bound &&
++    const bool authority = !state_->observation_revoked && state_->kernel_exact && state_->scm_exact && state_->package_bound &&
+         state_->current_release_policy_bound && state_->bounded_loaded_image_observed && state_->releaseClockFence();
++    return authority || state_->failOriginalNativeHost("ORIGINAL_NATIVE_HOST_AUTHORITY_UNAVAILABLE");
++    } catch (...) {
++        return state_->failOriginalNativeHost("ORIGINAL_NATIVE_HOST_AUTHORITY_EXCEPTION", ERROR_INVALID_DATA);
++    }
+ }
+ 
+ bool GuardianConnectedPeer::recheckOriginalNativeHostAuthority() {
+     std::lock_guard<std::mutex> guard(state_->lock);
++    try {
+     state_->observe();
+-    return !state_->observation_revoked && state_->kernel_exact && state_->scm_exact && state_->package_bound &&
++    const bool authority = !state_->observation_revoked && state_->kernel_exact && state_->scm_exact && state_->package_bound &&
+         state_->current_release_policy_bound && state_->bounded_loaded_image_observed && state_->releaseClockFence();
++    return authority || state_->failOriginalNativeHost("ORIGINAL_NATIVE_HOST_AUTHORITY_UNAVAILABLE");
++    } catch (...) {
++        return state_->failOriginalNativeHost("ORIGINAL_NATIVE_HOST_AUTHORITY_EXCEPTION", ERROR_INVALID_DATA);
++    }
+ }
+ 
+ bool GuardianConnectedPeer::originalNativeHostFinalFence() {
+     std::lock_guard<std::mutex> guard(state_->lock);
+-    return !state_->observation_revoked && state_->scm_exact && state_->package_bound &&
++    try {
++    const bool authority = !state_->observation_revoked && state_->scm_exact && state_->package_bound &&
+         state_->current_release_policy_bound && state_->bounded_loaded_image_observed &&
+         state_->originalKernel() && state_->currentScm() && state_->systemAccount() && state_->releaseClockFence();
++    return authority || state_->failOriginalNativeHost("ORIGINAL_NATIVE_HOST_FINAL_FENCE_LOST");
++    } catch (...) {
++        return state_->failOriginalNativeHost("ORIGINAL_NATIVE_HOST_AUTHORITY_EXCEPTION", ERROR_INVALID_DATA);
++    }
+ }
+ 
+ bool GuardianConnectedPeer::originalNativeHostFacts(OriginalNativeHostBinding* binding) {
+     std::lock_guard<std::mutex> guard(state_->lock);
++    try {
+     if (!binding || binding->guardian_process || state_->observation_revoked ||
+         !state_->scm_exact || !state_->package_bound || !state_->current_release_policy_bound ||
+-        !state_->bounded_loaded_image_observed || !state_->originalKernel() || !state_->releaseClockFence()) return false;
++        !state_->bounded_loaded_image_observed || !state_->originalKernel() || !state_->releaseClockFence())
++        return state_->failOriginalNativeHost("ORIGINAL_NATIVE_HOST_FACTS_UNAVAILABLE");
+     // Copy the original deadline, never recompute remaining time to extend it.
+     binding->pipe = state_->pipe.value; binding->pid = state_->server_pid; binding->birth = state_->server_birth;
+     binding->policy_sha256 = state_->release_policy_sha256;
+@@ -666,8 +799,12 @@ bool GuardianConnectedPeer::originalNativeHostFacts(OriginalNativeHostBinding* b
+     binding->not_after = state_->release_policy->not_after_100ns;
+     binding->monotonic_deadline = state_->release_window.monotonicDeadline100ns();
+     if (!binding->monotonic_deadline || !DuplicateHandle(GetCurrentProcess(), state_->server_process.value,
+-        GetCurrentProcess(), &binding->guardian_process, SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, 0)) return false;
++        GetCurrentProcess(), &binding->guardian_process, SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, 0))
++        return state_->failOriginalNativeHost("ORIGINAL_NATIVE_HOST_FACTS_DUPLICATION_FAILED");
+     return true;
++    } catch (...) {
++        return state_->failOriginalNativeHost("ORIGINAL_NATIVE_HOST_AUTHORITY_EXCEPTION", ERROR_INVALID_DATA);
++    }
+ }
+ 
+ void GuardianConnectedPeer::requestCancel() noexcept {
+diff --git a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-original-main-debug-owner.cpp b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-original-main-debug-owner.cpp
+index 2c04f47..0e1cec2 100644
+--- a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-original-main-debug-owner.cpp
++++ b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-original-main-debug-owner.cpp
+@@ -168,6 +168,10 @@ struct GuardianOriginalMainDebugOwner::State {
+     wire::Sequence sequence;
+     reader_wire::Once reader_once;
+     bool reader_granted = false;
++    // Issuance observations only. A failed DuplicateHandle may have an unknown
++    // outcome; attempts bound this owner's inserts, not all child-held copies.
++    std::uint8_t reader_seed_duplicate_attempts = 0, reader_seed_insertions_observed = 0;
++    Handle reader_process_readback, reader_service_token, reader_token_readback;
+     std::array<std::uint8_t, wire::kRequestBytes> request{};
+     std::array<std::uint8_t, wire::kReplyBytes> reply{};
+     std::array<std::uint8_t,32> policy_digest{};
+@@ -512,6 +516,8 @@ struct GuardianOriginalMainDebugOwner::State {
+         // kernel object and independently recheck service, SCM and token.
+         reader_wire::Request acquire;
+         if (reader_wire::decode(request.data(), request.size(), &acquire)) {
++            // Spend the original child's one attempt BEFORE preflight and the
++            // first insert. No failure, timeout or reconnect resets this gate.
+             if (!reader_once.begin() || reader_granted || hello || sequence.lost() ||
+                 GetTickCount64() - created_tick >= kHelloDeadlineMs ||
+                 !pipeIdentity() || !completedFence() || !lease() ||
+@@ -520,55 +526,50 @@ struct GuardianOriginalMainDebugOwner::State {
+             HANDLE remote = nullptr;
+             constexpr DWORD rights = PROCESS_QUERY_INFORMATION | PROCESS_VM_READ | SYNCHRONIZE;
+             static_assert(rights == reader_wire::kRequiredAccess);
++            ++reader_seed_duplicate_attempts;
+             if (!DuplicateHandle(GetCurrentProcess(), GetCurrentProcess(), original_process.value,
+                     &remote, rights, FALSE, 0) || !remote)
+                 return fail("ORIGINAL_MAIN_SERVICE_READER_TRANSFER_FAILED", GetLastError());
++            ++reader_seed_insertions_observed;
+             // An object created in the ORIGINAL child table, not an external
+             // HANDLE or PID. Readback through that SAME target table while it
+-            // is retained by this owner. Never reopen a replacement service.
+-            Handle returned;
++            // is retained by this owner. Neither the numeric slot nor readback
++            // reserves that child slot against closure/reuse by the live child.
+             const bool checked = DuplicateHandle(original_process.value, remote, GetCurrentProcess(),
+-                    &returned.value, rights, FALSE, 0) && returned.valid() &&
+-                GetProcessId(returned.value) == guardian_pid && birth(returned.value) == guardian_born &&
+-                WaitForSingleObject(returned.value, 0) == WAIT_TIMEOUT &&
++                    &reader_process_readback.value, rights, FALSE, 0) && reader_process_readback.valid() &&
++                GetProcessId(reader_process_readback.value) == guardian_pid && birth(reader_process_readback.value) == guardian_born &&
++                WaitForSingleObject(reader_process_readback.value, 0) == WAIT_TIMEOUT &&
+                 originalAlive() && pipeIdentity() && policy->finalClockFence() && !cancelled() &&
+                 GetTickCount64() - created_tick < kHelloDeadlineMs;
+-            if (!checked) {
+-                // Even if an operation was interrupted, never knowingly leave
+-                // a grant resident in a still-live child after refusal.
+-                DuplicateHandle(original_process.value, remote, nullptr, nullptr, 0, FALSE, DUPLICATE_CLOSE_SOURCE);
++            if (!checked)
+                 return fail("ORIGINAL_MAIN_SERVICE_READER_OBJECT_READBACK_FAILED");
+-            }
++            // Every refusal revokes this owner and enters its original process/
++            // Job/I/O drain. NEVER close a late child-table numeric slot: the
++            // executing child may already have closed it and reused that value.
+             // PROCESS_QUERY_INFORMATION is not a grant through the TOKEN
+             // object's separate DACL. Transfer the service's own ORIGINAL
+             // TOKEN_QUERY object as well, never a newly opened PID token.
+-            Handle service_token, original_token_readback;
+             HANDLE token_raw = nullptr, remote_token = nullptr;
+-            if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token_raw)) {
+-                DuplicateHandle(original_process.value, remote, nullptr, nullptr, 0, FALSE, DUPLICATE_CLOSE_SOURCE);
++            if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token_raw))
+                 return fail("ORIGINAL_MAIN_SERVICE_TOKEN_UNAVAILABLE");
+-            }
+-            service_token = Handle(token_raw);
+-            if (!DuplicateHandle(GetCurrentProcess(), service_token.value, original_process.value,
+-                    &remote_token, TOKEN_QUERY, FALSE, 0) || !remote_token) {
+-                DuplicateHandle(original_process.value, remote, nullptr, nullptr, 0, FALSE, DUPLICATE_CLOSE_SOURCE);
++            reader_service_token = Handle(token_raw);
++            ++reader_seed_duplicate_attempts;
++            if (!DuplicateHandle(GetCurrentProcess(), reader_service_token.value, original_process.value,
++                    &remote_token, TOKEN_QUERY, FALSE, 0) || !remote_token)
+                 return fail("ORIGINAL_MAIN_SERVICE_TOKEN_TRANSFER_FAILED");
+-            }
++            ++reader_seed_insertions_observed;
+             TOKEN_STATISTICS issued{}, echoed{};
+             DWORD got_issued = 0, got_echoed = 0;
+             const bool token_checked = DuplicateHandle(original_process.value, remote_token, GetCurrentProcess(),
+-                    &original_token_readback.value, TOKEN_QUERY, FALSE, 0) && original_token_readback.valid() &&
+-                GetTokenInformation(service_token.value, TokenStatistics, &issued, sizeof(issued), &got_issued) &&
+-                GetTokenInformation(original_token_readback.value, TokenStatistics, &echoed, sizeof(echoed), &got_echoed) &&
++                    &reader_token_readback.value, TOKEN_QUERY, FALSE, 0) && reader_token_readback.valid() &&
++                GetTokenInformation(reader_service_token.value, TokenStatistics, &issued, sizeof(issued), &got_issued) &&
++                GetTokenInformation(reader_token_readback.value, TokenStatistics, &echoed, sizeof(echoed), &got_echoed) &&
+                 got_issued == sizeof(issued) && got_echoed == sizeof(echoed) &&
+                 issued.TokenId.HighPart == echoed.TokenId.HighPart && issued.TokenId.LowPart == echoed.TokenId.LowPart &&
+                 originalAlive() && pipeIdentity() && policy->finalClockFence() && !cancelled() &&
+                 GetTickCount64() - created_tick < kHelloDeadlineMs;
+-            if (!token_checked) {
+-                DuplicateHandle(original_process.value, remote_token, nullptr, nullptr, 0, FALSE, DUPLICATE_CLOSE_SOURCE);
+-                DuplicateHandle(original_process.value, remote, nullptr, nullptr, 0, FALSE, DUPLICATE_CLOSE_SOURCE);
++            if (!token_checked)
+                 return fail("ORIGINAL_MAIN_SERVICE_TOKEN_OBJECT_READBACK_FAILED");
+-            }
+             reader_wire::Grant grant;
+             grant.correlation = acquire.correlation;
+             grant.child_pid = pid; grant.child_birth = born;
+@@ -578,6 +579,8 @@ struct GuardianOriginalMainDebugOwner::State {
+             grant.child_local_handle = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(remote));
+             grant.child_local_token = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(remote_token));
+             reply = reader_wire::encode(grant);
++            // Publication may become possible once WriteFile is issued. This
++            // proves neither delivery/client read nor code or slot ownership.
+             reader_granted = true; // irrevocable, even on broken/late write
+             return armPipe(PipeStage::Write);
+         }
+@@ -982,6 +985,7 @@ void GuardianOriginalMainDebugOwner::close() noexcept {
+     state_->pipe.reset();
+     state_->images.clear(); state_->threads.clear(); state_->sources.clear();
+     state_->package.reset(); state_->policy.reset();
++    state_->reader_token_readback = Handle(); state_->reader_service_token = Handle(); state_->reader_process_readback = Handle();
+     state_->job = Handle(); state_->original_thread = Handle(); state_->original_process = Handle(); state_->token = Handle(); state_->requester = Handle();
+ }
+ } // namespace metaengine::guardian
+diff --git a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-original-main-native-host.cpp b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-original-main-native-host.cpp
+index 873ff26..1ed8162 100644
+--- a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-original-main-native-host.cpp
++++ b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-original-main-native-host.cpp
+@@ -5,6 +5,7 @@
+ #include "browser-guardian-pipe-io-lifetime.hpp"
+ #include <atomic>
+ #include <cstring>
++#include <exception>
+ #include <memory>
+ #include <mutex>
+ #include <string>
+@@ -25,9 +26,11 @@ std::uint64_t birth(HANDLE handle) noexcept {
+ }
+ struct OriginalEntryScope final {
+     using InterruptClock = VOID (WINAPI*)(PULONGLONG);
++    enum class TransactionPhase { Idle, Active, RetirePending, Retired };
+     InterruptClock interrupt_clock = nullptr;
+     GuardianOriginalMainEntryState lifetime;
+     std::mutex transaction, clock_gate;
++    std::atomic<TransactionPhase> transaction_phase{TransactionPhase::Idle};
+     GuardianOriginalMainExpiryFence expiry;
+     Handle main, initial_thread, cancelled, guardian;
+     DWORD main_pid = 0, entry_thread = 0, guardian_pid = 0;
+@@ -44,12 +47,82 @@ std::atomic<OriginalEntryScope*> original{nullptr};
+ std::atomic<bool> attempted{false};
+ std::atomic<bool> revoked_before_entry{false};
+ 
++// The caller owns transaction, so every user of the published borrowed pipe
++// has returned and every host exchange has completed or physically joined.
++void retireLocked(OriginalEntryScope& scope) noexcept {
++    if (scope.transaction_phase.load(std::memory_order_acquire) !=
++        OriginalEntryScope::TransactionPhase::RetirePending) return;
++    scope.original_pipe = nullptr;
++    if (scope.authority) scope.authority->close();
++    // Keep the peer allocation and its published cancellation address stable
++    // until process exit. Retirement proves closure here, never Main/Job exit.
++    scope.transaction_phase.store(OriginalEntryScope::TransactionPhase::Retired, std::memory_order_release);
++}
++
++void requestRetirement(OriginalEntryScope& scope) noexcept {
++    using Phase = OriginalEntryScope::TransactionPhase;
++    auto phase = scope.transaction_phase.load(std::memory_order_acquire);
++    for (;;) {
++        if (phase == Phase::RetirePending || phase == Phase::Retired) return;
++        if (!scope.transaction_phase.compare_exchange_weak(phase, Phase::RetirePending,
++                std::memory_order_acq_rel, std::memory_order_acquire)) continue;
++        // A reentrant revoke during Connect/Wait only publishes cancellation.
++        // The active owner closes after its I/O has physically joined.
++        if (phase == Phase::Active) return;
++        try {
++            // An old owner may have CASed Active -> Idle just before unlocking.
++            // We own Pending, so its unlock cannot lose this retirement request.
++            std::lock_guard<std::mutex> lock(scope.transaction);
++            retireLocked(scope);
++        } catch (...) {
++            // Unknown synchronization outcome stays permanently refused and
++            // retained; it cannot be described as completed retirement.
++        }
++        return;
++    }
++}
++
++bool fail(OriginalEntryScope* scope, const char* reason) noexcept;
++
++class OriginalTransaction final {
++    OriginalEntryScope& scope_;
++    std::unique_lock<std::mutex> lock_;
++    int uncaught_ = std::uncaught_exceptions();
++    bool active_ = false;
++public:
++    explicit OriginalTransaction(OriginalEntryScope& scope) : scope_(scope), lock_(scope.transaction) {
++        auto expected = OriginalEntryScope::TransactionPhase::Idle;
++        active_ = scope_.transaction_phase.compare_exchange_strong(expected,
++            OriginalEntryScope::TransactionPhase::Active, std::memory_order_acq_rel);
++        // A new caller can win the mutex ahead of an idle revoker. It may help
++        // finish Pending, but can never revive that transaction as Active.
++        if (!active_) retireLocked(scope_);
++    }
++    OriginalTransaction(const OriginalTransaction&) = delete;
++    OriginalTransaction& operator=(const OriginalTransaction&) = delete;
++    bool active() const noexcept { return active_; }
++    ~OriginalTransaction() {
++        if (!active_) return;
++        // Revoke and retire while the throwing transaction still owns the
++        // mutex. Exception unwinding cannot hand an admitted pipe to a waiter.
++        if (std::uncaught_exceptions() > uncaught_)
++            fail(&scope_, "ORIGINAL_MAIN_NATIVE_TRANSACTION_EXCEPTION");
++        if (scope_.lifetime.phase() == GuardianOriginalMainEntryState::Phase::Revoked)
++            requestRetirement(scope_);
++        auto expected = OriginalEntryScope::TransactionPhase::Active;
++        if (!scope_.transaction_phase.compare_exchange_strong(expected,
++                OriginalEntryScope::TransactionPhase::Idle, std::memory_order_acq_rel))
++            retireLocked(scope_);
++    }
++};
++
+ bool fail(OriginalEntryScope* scope, const char* reason) noexcept {
+     if (scope) {
+         scope->lifetime.revoke();
+         scope->reason.store(reason, std::memory_order_release);
+         if (scope->cancelled.valid()) SetEvent(scope->cancelled.value);
+         if (auto* authority = scope->published_authority.load(std::memory_order_acquire)) authority->requestCancel();
++        requestRetirement(*scope);
+     } else revoked_before_entry.store(true, std::memory_order_release);
+     return false;
+ }
+@@ -74,7 +147,7 @@ bool originalPipe(OriginalEntryScope& scope) noexcept {
+         (mode & PIPE_READMODE_MESSAGE) && !(mode & PIPE_NOWAIT) &&
+         GetNamedPipeServerProcessId(scope.original_pipe, &server) && server == scope.guardian_pid &&
+         GetNamedPipeClientProcessId(scope.original_pipe, &client) && client == scope.main_pid &&
+-        PeekNamedPipe(scope.original_pipe, nullptr, 0, nullptr, nullptr, nullptr);
++        PeekNamedPipe(scope.original_pipe, nullptr, 0, nullptr, nullptr, nullptr) && originalMain(scope);
+ }
+ bool clockFence(OriginalEntryScope& scope) noexcept {
+     try {
+@@ -85,6 +158,12 @@ bool clockFence(OriginalEntryScope& scope) noexcept {
+         return scope.expiry.observe(ticks(utc), monotonic);
+     } catch (...) { return false; }
+ }
++// transaction is already held. Calling the public cheap fence here would
++// recursively lock the same original pipe owner.
++bool peerObservationAdmittedLocked(OriginalEntryScope& scope) noexcept {
++    return (scope.lifetime.admitted() && originalPipe(scope) && clockFence(scope) && scope.lifetime.admitted()) ||
++        fail(&scope, "ORIGINAL_MAIN_ORIGINAL_CONNECTION_OR_WINDOW_LOST");
++}
+ bool digest(std::string_view hex, std::array<std::uint8_t,32>* out) noexcept {
+     if (!out || hex.size() != 64) return false;
+     auto digit = [](char c) { return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1; };
+@@ -167,7 +246,8 @@ bool GuardianOriginalMainNativeHost::mountBeforeAppCode() noexcept {
+     auto* scope = original.load(std::memory_order_acquire);
+     if (!scope) return fail(nullptr, "ORIGINAL_MAIN_SOURCE_ENTRY_MISSING");
+     try {
+-        std::lock_guard<std::mutex> lock(scope->transaction);
++        OriginalTransaction transaction(*scope);
++        if (!transaction.active()) return false;
+         if (GetCurrentThreadId() != scope->entry_thread || !originalMain(*scope) || !scope->lifetime.beginMount())
+             return fail(scope, "ORIGINAL_MAIN_ENTRY_ORDER_OR_THREAD_MISMATCH");
+         scope->authority = GuardianConnectedPeer::create();
+@@ -178,6 +258,8 @@ bool GuardianOriginalMainNativeHost::mountBeforeAppCode() noexcept {
+         }
+         if (!scope->authority->connectOriginalNativeHostAuthority())
+             return fail(scope, "ORIGINAL_MAIN_EXISTING_GUARDIAN_AUTHORITY_UNAVAILABLE");
++        if (scope->lifetime.phase() != GuardianOriginalMainEntryState::Phase::Mounting || !originalMain(*scope))
++            return fail(scope, "ORIGINAL_MAIN_REVOKED_DURING_AUTHORITY_CONNECT");
+         GuardianConnectedPeer::OriginalNativeHostBinding binding;
+         if (!scope->authority->originalNativeHostFacts(&binding))
+             return fail(scope, "ORIGINAL_MAIN_AUTHORITY_TUPLE_UNBOUND");
+@@ -197,25 +279,32 @@ bool GuardianOriginalMainNativeHost::mountBeforeAppCode() noexcept {
+             !scope->lifetime.completeMount())
+             return fail(scope, "ORIGINAL_MAIN_BIRTH_IMAGE_SCOPE_NOT_HELD");
+         scope->reason.store("ORIGINAL_MAIN_IMAGE_EVENT_SCOPE_HELD_RUNTIME_ATTESTATION_FALSE", std::memory_order_release);
+-        return true;
++        return peerObservationAdmittedLocked(*scope);
+     } catch (...) { return fail(scope, "ORIGINAL_MAIN_NATIVE_MOUNT_EXCEPTION"); }
+ }
+ 
+ bool GuardianOriginalMainNativeHost::peerObservationAdmitted() noexcept {
+     auto* scope = original.load(std::memory_order_acquire);
++    // During initial mount, synchronous fixture/OS callbacks can ask this
++    // question reentrantly. No admitted pipe has been published to them yet.
+     if (!scope || !scope->lifetime.admitted()) return false;
+-    return (originalPipe(*scope) && clockFence(*scope)) || fail(scope, "ORIGINAL_MAIN_ORIGINAL_CONNECTION_OR_WINDOW_LOST");
++    try {
++        OriginalTransaction transaction(*scope);
++        if (!transaction.active()) return false;
++        return peerObservationAdmittedLocked(*scope);
++    } catch (...) { return fail(scope, "ORIGINAL_MAIN_NATIVE_ADMISSION_EXCEPTION"); }
+ }
+ bool GuardianOriginalMainNativeHost::fencePeerObservation() noexcept {
+     auto* scope = original.load(std::memory_order_acquire);
+     if (!scope || !scope->lifetime.admitted()) return false;
+     try {
+-        std::lock_guard<std::mutex> lock(scope->transaction);
++        OriginalTransaction transaction(*scope);
++        if (!transaction.active()) return false;
+         if (!scope->lifetime.admitted() || !scope->authority ||
+             !scope->authority->recheckOriginalNativeHostAuthority() || !exchange(*scope) ||
+             !scope->authority->originalNativeHostFinalFence())
+             return fail(scope, "ORIGINAL_MAIN_ORIGINAL_AUTHORITY_FENCE_LOST");
+-        return peerObservationAdmitted();
++        return peerObservationAdmittedLocked(*scope);
+     } catch (...) { return fail(scope, "ORIGINAL_MAIN_NATIVE_FENCE_EXCEPTION"); }
+ }
+ void GuardianOriginalMainNativeHost::revoke() noexcept {
+diff --git a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-original-main-native-host.hpp b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-original-main-native-host.hpp
+index 9d25c68..064d684 100644
+--- a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-original-main-native-host.hpp
++++ b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-original-main-native-host.hpp
+@@ -19,12 +19,15 @@ public:
+     // Blocking authentication is intentionally before the application event
+     // loop. Legacy/unowned launches refuse; no adoption or reconnect exists.
+     static bool mountBeforeAppCode() noexcept;
+-    // Cheap kernel lifetime fence for native API entry/completion (no hashes).
++    // Kernel lifetime fence for native API entry/completion (no hashes here).
++    // Serializes use of the original pipe with exchange and retirement.
+     static bool peerObservationAdmitted() noexcept;
+     // Worker-side bounded request to the same original creation owner plus
+     // retained W77/currentness checks. It does NOT resample to mint an origin.
+     static bool fencePeerObservation() noexcept;
+-    // Revocation publishes first and never waits for a hashing worker.
++    // Revocation publishes first. An idle owner closes immediately; an active
++    // owner performs retirement after its original I/O physically joins.
++    // Never waits for the hashing worker or closes beneath its transaction.
+     static void revoke() noexcept;
+     static const char* reason() noexcept;
+     // The supported composition has no dynamic-addon exception, including the
+diff --git a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-original-reader-transfer.hpp b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-original-reader-transfer.hpp
+index 4787695..6b26736 100644
+--- a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-original-reader-transfer.hpp
++++ b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-original-reader-transfer.hpp
+@@ -1,10 +1,15 @@
+ #pragma once
+ 
+-// An ORIGINAL creation-owner pipe transfers one *kernel object*, not a PID
+-// permit. These bytes never authorize custody. The receiver MUST validate the
+-// received process handle against its retained pipe/SCM/token/image owners.
+-// The sender MUST duplicate its own process object into the original child,
+-// with no inheritable rights and no client-supplied PID or HANDLE.
++// An ORIGINAL creation-owner pipe publishes at most two seed entries created
++// in the retained original child's handle table, never a PID permit.
++// These bytes never authorize custody. Wire numbers are borrowed selectors: the
++// receiver owns only the local duplicates returned by its own DuplicateHandle
++// calls, and independently validates the original pipe/SCM/token/image scope.
++// The sender duplicates only its own process/token into the original child,
++// without inheritable rights or a caller-selected target PID/HANDLE. Once that
++// child can execute, seed numbers are never used for remote close: failed or
++// uncertain transfer retires the original child/Job/I/O/worker instead. A write
++// completion or ACK is neither client-read nor executing-code proof.
+ #include <array>
+ #include <cstddef>
+ #include <cstdint>
+@@ -21,7 +26,7 @@ struct Grant {
+     std::uint64_t correlation = 0, child_birth = 0, service_birth = 0, event_serial = 0;
+     std::uint32_t child_pid = 0, service_pid = 0, retained_images = 0;
+     std::array<std::uint8_t,32> policy_sha256{};
+-    std::uint64_t child_local_handle = 0, child_local_token = 0;
++    std::uint64_t child_local_handle = 0, child_local_token = 0; // borrowed seeds, never receiver-owned slots
+ };
+ template<std::size_t N> inline void put(std::array<std::uint8_t,N>& bytes, std::size_t offset,
+     std::uint64_t value, unsigned length) noexcept {
+diff --git a/apps/metaengine-browser/test/native/browser-guardian-original-main-lifecycle-tests.cpp b/apps/metaengine-browser/test/native/browser-guardian-original-main-lifecycle-tests.cpp
+index b0b98ad..9febce5 100644
+--- a/apps/metaengine-browser/test/native/browser-guardian-original-main-lifecycle-tests.cpp
++++ b/apps/metaengine-browser/test/native/browser-guardian-original-main-lifecycle-tests.cpp
+@@ -27,6 +27,12 @@
+ namespace fixture {
+ using namespace std::chrono_literals;
+ enum class Kind { Event, Worker, Process, Thread, Job, Token, File, Pipe };
++enum class ReaderFault {
++    None, ProcessInsertFailed, ProcessInsertUnknown, ProcessReadbackFailed, ProcessReadbackMismatch,
++    TokenOpenFailed, TokenInsertFailed, TokenInsertUnknown, TokenReadbackFailed, TokenReadbackMismatch,
++    WriteFailed, WritePartial, WriteUnknown, ReceiverPipeBreak, CancelDuringWrite, LateWriteCompletion,
++    ReplayAcquire, PublishedThenExit
++};
+ struct Object {
+     explicit Object(Kind value) : kind(value) {}
+     Kind kind;
+@@ -35,7 +41,7 @@ struct Object {
+     DWORD pid = 0, event_number = 0;
+     std::uint64_t born = 100;
+ };
+-struct Slot { std::shared_ptr<Object> object; };
++struct Slot { std::shared_ptr<Object> object; bool remote = false, reader_local = false; };
+ struct Config {
+     bool stop_before_registration = false, registration_refused = false, registration_throws = false;
+     bool thread_failed = false, gate_signal_failed = false, duplicate_failed = false, prepare_failed = false;
+@@ -44,6 +50,7 @@ struct Config {
+     bool diagnostic_allocation_failed = false, natural_exit = false;
+     bool hold_worker_exit = false, cancellation_failed = false;
+     bool pipe_early_failure = false, pipe_revert_failure = false;
++    ReaderFault reader_fault = ReaderFault::None;
+     int process_kill_failures = 0, job_kill_failures = 0, continue_failures = 0;
+     int job_query_failures = 0, descendants_after_exit = 0, descendant_queries = 0;
+     int process_exit_waits = 0, pipe_incomplete_results = 0, worker_wait_failures = 0;
+@@ -53,7 +60,7 @@ struct Model {
+         job_failures(value.job_kill_failures), continue_errors(value.continue_failures),
+         query_errors(value.job_query_failures), descendant_waits(value.descendant_queries),
+         process_waits(value.process_exit_waits), io_incomplete(value.pipe_incomplete_results),
+-        worker_wait_errors(value.worker_wait_failures) {}
++        worker_wait_errors(value.worker_wait_failures) { service->pid = 500; }
+     Config config;
+     std::mutex mutex;
+     std::condition_variable changed;
+@@ -63,6 +70,13 @@ struct Model {
+     std::deque<DEBUG_EVENT> debug_events;
+     std::shared_ptr<Object> stop, worker, process, primary, job;
+     DEBUG_EVENT current_debug_event{};
++    std::shared_ptr<Object> service = std::make_shared<Object>(Kind::Process);
++    OVERLAPPED* reader_operation = nullptr;
++    enum class IoStage { Connect, Read, Write } reader_io_stage = IoStage::Connect;
++    void* reader_buffer = nullptr;
++    DWORD reader_size = 0;
++    bool reader_cancel_requested = false, reader_write_completed = false;
++    std::atomic<int> seed_attempts{0}, seed_inserted{0}, seed_reclaimed{0}, reader_reads{0}, reader_writes{0};
+     std::atomic<int> errors{0}, callbacks{0}, worker_retained{0}, job_retained{0}, custody_holds{0};
+     std::atomic<int> process_creations{0}, resumes{0}, process_kills{0}, job_kills{0}, job_queries{0};
+     std::atomic<int> event_files_closed{0}, pipe_joins{0}, io_cancels{0}, io_results{0}, worker_waits{0};
+@@ -71,17 +85,26 @@ struct Model {
+     std::atomic<bool> registration_active{false}, registration_entered{false}, worker_gate_woken{false}, pipe_pending{false};
+     std::atomic<bool> worker_returned{false}, allow_worker_signal{false}, exit_queued{false}, natural_exit_queued{false};
+     int event_count = 0;
+-    HANDLE add(std::shared_ptr<Object> object) {
++    HANDLE add(std::shared_ptr<Object> object, bool remote = false, bool reader_local = false) {
+         auto slot = std::make_unique<Slot>(); slot->object = std::move(object);
++        slot->remote = remote; slot->reader_local = reader_local;
+         const auto raw = static_cast<HANDLE>(slot.get());
+         std::lock_guard guard(mutex); slots.push_back(std::move(slot)); return raw;
+     }
+     HANDLE make(Kind kind) { return add(std::make_shared<Object>(kind)); }
+     std::shared_ptr<Object> get(HANDLE value) {
++        if (value == reinterpret_cast<HANDLE>(std::uintptr_t{1})) return service;
+         std::lock_guard guard(mutex);
+         for (const auto& slot : slots) if (slot.get() == value) return slot->object;
+         return {};
+     }
++    void reclaimSeeds() {
++        std::lock_guard guard(mutex);
++        for (const auto& slot : slots) if (slot->remote && slot->object) {
++            slot->object.reset(); ++seed_reclaimed;
++        }
++        events.push_back("child-table-destroyed");
++    }
+     void record(const std::string& value) { std::lock_guard guard(mutex); events.push_back(value); changed.notify_all(); }
+     void queueExit() {
+         if (exit_queued.exchange(true)) return;
+@@ -136,13 +159,43 @@ public:
+ 
+ DWORD GetLastError() { return fixture::last_error; }
+ HANDLE GetCurrentProcess() { return reinterpret_cast<HANDLE>(std::uintptr_t{1}); }
++DWORD GetCurrentProcessId() { return 500; }
+ BOOL DuplicateHandle(HANDLE source_process, HANDLE source, HANDLE target_process, HANDLE* output,
+-    DWORD, BOOL inherit, DWORD) {
++    DWORD rights, BOOL inherit, DWORD options) {
+     auto& m = *fixture::model;
+-    if (source_process != GetCurrentProcess() || target_process != GetCurrentProcess() || inherit || !output) {
++    using fixture::ReaderFault;
++    if (options & DUPLICATE_CLOSE_SOURCE) { ++m.errors; m.record("forbidden-remote-slot-close"); return FALSE; }
++    const auto object = m.get(source);
++    if (m.config.reader_fault != ReaderFault::None && target_process != GetCurrentProcess()) {
++        if (source_process != GetCurrentProcess() || m.get(target_process) != m.process || inherit || options || !output || !object) {
++            ++m.errors; return FALSE;
++        }
++        const bool token = object->kind == fixture::Kind::Token;
++        if (rights != (token ? TOKEN_QUERY : metaengine::guardian::original_reader_wire::kRequiredAccess)) ++m.errors;
++        ++m.seed_attempts;
++        const auto fault = m.config.reader_fault;
++        if ((!token && fault == ReaderFault::ProcessInsertFailed) || (token && fault == ReaderFault::TokenInsertFailed)) return FALSE;
++        *output = m.add(object, true); ++m.seed_inserted; m.record(token ? "token-seed-inserted" : "process-seed-inserted");
++        if ((!token && fault == ReaderFault::ProcessInsertUnknown) || (token && fault == ReaderFault::TokenInsertUnknown)) return FALSE;
++        return TRUE;
++    }
++    if (m.config.reader_fault != ReaderFault::None && source_process != GetCurrentProcess()) {
++        if (m.get(source_process) != m.process || target_process != GetCurrentProcess() || inherit || options || !output || !object) {
++            ++m.errors; return FALSE;
++        }
++        const bool token = object->kind == fixture::Kind::Token;
++        if (rights != (token ? TOKEN_QUERY : metaengine::guardian::original_reader_wire::kRequiredAccess)) ++m.errors;
++        const auto fault = m.config.reader_fault;
++        if ((!token && fault == ReaderFault::ProcessReadbackFailed) || (token && fault == ReaderFault::TokenReadbackFailed)) return FALSE;
++        auto copy = object;
++        if ((!token && fault == ReaderFault::ProcessReadbackMismatch) || (token && fault == ReaderFault::TokenReadbackMismatch)) {
++            copy = std::make_shared<fixture::Object>(object->kind); copy->pid = 999;
++        }
++        *output = m.add(std::move(copy), false, true); return TRUE;
++    }
++    if (source_process != GetCurrentProcess() || target_process != GetCurrentProcess() || inherit || options || !output) {
+         ++m.errors; return FALSE;
+     }
+-    const auto object = m.get(source);
+     if (!object || m.config.duplicate_failed) { fixture::last_error = ERROR_ACCESS_DENIED; return FALSE; }
+     *output = m.add(object); return TRUE;
+ }
+@@ -152,6 +205,8 @@ BOOL CloseHandle(HANDLE value) {
+     for (const auto& slot : m.slots) if (slot.get() == value) {
+         const auto object = slot->object;
+         if (!object) { ++m.errors; return FALSE; }
++        if (slot->remote) ++m.errors;
++        if (slot->reader_local && m.worker && !m.worker->signaled) ++m.errors;
+         if (object->kind == fixture::Kind::Process && object->pid == 480 && !object->signaled) ++m.errors;
+         if (object->kind == fixture::Kind::Job && object->active.load() != 0) ++m.errors;
+         if (object->kind == fixture::Kind::Pipe && m.pipe_pending) ++m.errors;
+@@ -177,7 +232,7 @@ DWORD WaitForSingleObject(HANDLE value, DWORD timeout) {
+     }
+     if (object->kind == fixture::Kind::Process && object->pid == 480 && object->exit_continued) {
+         if (fixture::consume(m.process_waits)) return WAIT_TIMEOUT;
+-        object->signaled = true;
++        if (!object->signaled.exchange(true)) m.reclaimSeeds();
+     }
+     if (object->signaled) {
+         if (object->kind == fixture::Kind::Worker) m.record("worker-joined");
+@@ -215,11 +270,23 @@ BOOL SetEvent(HANDLE value) {
+ }
+ void Sleep(DWORD) { std::this_thread::yield(); }
+ BOOL GetTokenInformation(HANDLE value, TOKEN_INFORMATION_CLASS kind, void* output, DWORD, DWORD* written) {
+-    if (!fixture::model->get(value)) return FALSE;
++    const auto object = fixture::model->get(value);
++    if (!object) return FALSE;
++    if (kind == TokenStatistics) {
++        static_cast<TOKEN_STATISTICS*>(output)->TokenId.LowPart = object->pid;
++        *written = sizeof(TOKEN_STATISTICS); return TRUE;
++    }
+     if (kind == TokenType) { *static_cast<TOKEN_TYPE*>(output) = TokenPrimary; *written = sizeof(TOKEN_TYPE); }
+     else { *static_cast<DWORD*>(output) = 2; *written = sizeof(DWORD); }
+     return TRUE;
+ }
++BOOL OpenProcessToken(HANDLE process, DWORD rights, HANDLE* output) {
++    auto& m = *fixture::model;
++    if (process != GetCurrentProcess() || rights != TOKEN_QUERY) { ++m.errors; return FALSE; }
++    if (m.config.reader_fault == fixture::ReaderFault::TokenOpenFailed) return FALSE;
++    auto token = std::make_shared<fixture::Object>(fixture::Kind::Token); token->pid = 77;
++    *output = m.add(std::move(token), false, true); return TRUE;
++}
+ HANDLE CreateThread(void*, std::size_t, DWORD (WINAPI* entry)(void*), void* argument, DWORD, DWORD* id) {
+     auto& m = *fixture::model;
+     if (m.config.thread_failed) { fixture::last_error = ERROR_NOT_ENOUGH_MEMORY; return nullptr; }
+@@ -335,7 +402,9 @@ BOOL ContinueDebugEvent(DWORD pid, DWORD tid, DWORD) {
+ BOOL WaitForDebugEvent(DEBUG_EVENT* output, DWORD) {
+     auto& m = *fixture::model;
+     if (!fixture::debugger_thread) ++m.errors;
+-    if (m.config.natural_exit && m.resumes && !m.natural_exit_queued.exchange(true)) m.queueExit();
++    if (m.config.natural_exit && m.resumes &&
++        (m.config.reader_fault == fixture::ReaderFault::None || m.reader_write_completed) &&
++        !m.natural_exit_queued.exchange(true)) m.queueExit();
+     std::lock_guard guard(m.mutex);
+     if (m.debug_events.empty()) { fixture::last_error = ERROR_SEM_TIMEOUT; return FALSE; }
+     *output = m.debug_events.front(); m.debug_events.pop_front(); m.current_debug_event = *output;
+@@ -348,13 +417,75 @@ DWORD ResumeThread(HANDLE value) {
+ }
+ BOOL CancelIoEx(HANDLE, OVERLAPPED*) {
+     auto& m = *fixture::model; ++m.io_cancels; m.record("pipe-cancel-requested");
++    m.reader_cancel_requested = true;
+     return !m.config.cancellation_failed;
+ }
+-BOOL GetOverlappedResult(HANDLE, OVERLAPPED* operation, DWORD*, BOOL) {
++BOOL GetOverlappedResult(HANDLE, OVERLAPPED* operation, DWORD* transferred, BOOL) {
+     auto& m = *fixture::model; ++m.io_results;
++    using fixture::ReaderFault;
++    const auto fault = m.config.reader_fault;
++    if (fault != ReaderFault::None && !m.reader_cancel_requested) {
++        if (operation != m.reader_operation) ++m.errors;
++        if (m.reader_io_stage == fixture::Model::IoStage::Read && m.reader_reads > 1 &&
++            fault != ReaderFault::ReplayAcquire) {
++            if (fault == ReaderFault::PublishedThenExit) { fixture::last_error = ERROR_IO_INCOMPLETE; return FALSE; }
++            operation->Internal = ERROR_BROKEN_PIPE; m.pipe_pending = false; fixture::last_error = ERROR_BROKEN_PIPE; return FALSE;
++        }
++        operation->Internal = 0; m.pipe_pending = false; *transferred = m.reader_size;
++        if (m.reader_io_stage == fixture::Model::IoStage::Write) {
++            if (fault == ReaderFault::WritePartial) --*transferred;
++            if (fault == ReaderFault::WriteUnknown) {
++                operation->Internal = ERROR_BROKEN_PIPE; fixture::last_error = ERROR_BROKEN_PIPE;
++                m.record("grant-write-outcome-unknown"); return FALSE;
++            }
++            m.reader_write_completed = true; m.record("grant-write-completed");
++        }
++        return TRUE;
++    }
+     if (fixture::consume(m.io_incomplete)) { fixture::last_error = ERROR_IO_INCOMPLETE; return FALSE; }
+     operation->Internal = ERROR_OPERATION_ABORTED; m.pipe_pending = false;
+-    ++m.pipe_joins; m.record("pipe-terminal"); fixture::last_error = ERROR_OPERATION_ABORTED; return FALSE;
++    ++m.pipe_joins; m.record("pipe-terminal");
++    if (fault == ReaderFault::LateWriteCompletion) {
++        operation->Internal = 0; *transferred = m.reader_size; m.record("late-grant-write-after-revoke"); return TRUE;
++    }
++    fixture::last_error = ERROR_OPERATION_ABORTED; return FALSE;
++}
++BOOL ResetEvent(HANDLE value) {
++    const auto object = fixture::model->get(value);
++    if (!object) return FALSE;
++    object->signaled = false; return TRUE;
++}
++namespace fixture {
++BOOL issueReaderIo(Model::IoStage stage, void* buffer, DWORD length, OVERLAPPED* operation) {
++    auto& m = *model;
++    m.reader_io_stage = stage; m.reader_buffer = buffer; m.reader_size = length; m.reader_operation = operation;
++    operation->Internal = 0x103U; m.pipe_pending = true;
++    if (stage == Model::IoStage::Read) {
++        ++m.reader_reads;
++        const auto request = metaengine::guardian::original_reader_wire::encode(
++            metaengine::guardian::original_reader_wire::Request{42});
++        if (length != request.size()) ++m.errors;
++        std::copy(request.begin(), request.end(), static_cast<std::uint8_t*>(buffer));
++    }
++    if (stage == Model::IoStage::Write) {
++        ++m.reader_writes;
++        if (m.config.reader_fault == ReaderFault::WriteFailed) {
++            operation->Internal = ERROR_BROKEN_PIPE; m.pipe_pending = false; last_error = ERROR_BROKEN_PIPE; return FALSE;
++        }
++        if (m.config.reader_fault == ReaderFault::CancelDuringWrite || m.config.reader_fault == ReaderFault::LateWriteCompletion)
++            m.stop->signaled = true;
++    }
++    last_error = ERROR_IO_PENDING; return FALSE;
++}
++}
++BOOL ConnectNamedPipe(HANDLE, OVERLAPPED* operation) {
++    return fixture::issueReaderIo(fixture::Model::IoStage::Connect, nullptr, 0, operation);
++}
++BOOL ReadFile(HANDLE, void* buffer, DWORD length, DWORD*, OVERLAPPED* operation) {
++    return fixture::issueReaderIo(fixture::Model::IoStage::Read, buffer, length, operation);
++}
++BOOL WriteFile(HANDLE, const void* buffer, DWORD length, DWORD*, OVERLAPPED* operation) {
++    return fixture::issueReaderIo(fixture::Model::IoStage::Write, const_cast<void*>(buffer), length, operation);
+ }
+ 
+ namespace metaengine::guardian {
+@@ -461,12 +592,15 @@ struct GuardianOriginalMainDebugOwner::State {
+ #include "guardian-main-lifecycle-original-alive.inc.hpp"
+     bool prepare() {
+         executable_path = L"C:\\fixture\\inert.exe"; package_root = L"C:\\fixture";
++        guardian_pid = 500; guardian_born = 100;
+         return !fixture::model->config.prepare_failed;
+     }
+     bool lease() { return !cancelled(); }
+     bool sourcesCurrent() { return true; }
+     bool requesterSessionCurrent() const { return requesterAlive(); }
++    bool completedFence() { return originalAlive() && lease(); }
+     bool armPipe(PipeStage stage) {
++        if (fixture::model->config.reader_fault != fixture::ReaderFault::None) return productionArmPipe(stage);
+         pipe_stage = stage; pipe_pending = true; pipe_io.hEvent = pipe_event.value; pipe_io.Internal = 0x103U;
+         fixture::model->pipe_pending = true; return true;
+     }
+@@ -485,11 +619,20 @@ struct GuardianOriginalMainDebugOwner::State {
+     }
+     void publish() {}
+     bool pumpPipe() {
++        if (fixture::model->config.reader_fault != fixture::ReaderFault::None) return productionPumpPipe();
+         if ((fixture::model->config.pipe_early_failure || fixture::model->config.pipe_revert_failure) && !pipeIdentity())
+             return fail("FIXTURE_PIPE_IDENTITY_REFUSED");
+         if (fixture::model->config.natural_exit) return true;
+         return fail("FIXTURE_CANCELS_AFTER_ORIGINAL_CREATE", ERROR_OPERATION_ABORTED);
+     }
++    // Test-only naming seams select the unedited production bodies for the
++    // transfer cases while preserving all 25 older lifecycle scenarios.
++#define armPipe productionArmPipe
++#include "guardian-main-lifecycle-arm-pipe.inc.hpp"
++#undef armPipe
++#define pumpPipe productionPumpPipe
++#include "guardian-main-lifecycle-pump-pipe.inc.hpp"
++#undef pumpPipe
+ #include "guardian-main-lifecycle-pipe-identity.inc.hpp"
+ #include "guardian-main-lifecycle-create.inc.hpp"
+ #include "guardian-main-lifecycle-worker.inc.hpp"
+@@ -500,12 +643,19 @@ struct GuardianOriginalMainDebugOwner::State {
+ // package validation and actual drain registry are not linked into this test.
+ class GuardianScmEffectOwner {
+ public:
++    struct ReaderObservations { bool attempted, publication_possible; unsigned calls, successes; bool local_readbacks_held; };
+     GuardianScmEffectOwner() : coverage_(new GuardianReplacementDrain(admission_)) {}
+     std::unique_ptr<GuardianOriginalMainDebugOwner> start(HANDLE stop, HANDLE token, HANDLE requester) {
+         return GuardianOriginalMainDebugOwner::startOwned(token, std::make_unique<GuardianInstalledNamespace>(),
+             std::make_unique<GuardianActiveLoadedPolicy>(), admission_, stop, coverage_->beginOriginalCallback(),
+             requester, 420, 100, 10'000);
+     }
++    ReaderObservations readerObservations(const GuardianOriginalMainDebugOwner& owner) const {
++        const auto& state = *owner.state_;
++        return {state.reader_once.used(), state.reader_granted, state.reader_seed_duplicate_attempts,
++            state.reader_seed_insertions_observed, state.reader_process_readback.valid() ||
++                state.reader_service_token.valid() || state.reader_token_readback.valid()};
++    }
+ private:
+     GuardianEffectAdmission admission_;
+     std::unique_ptr<GuardianReplacementDrain> coverage_;
+@@ -514,6 +664,7 @@ private:
+ 
+ int main(int argc, char** argv) {
+     using fixture::Config;
++    using fixture::ReaderFault;
+     struct Case { const char* name; Config config; int created, resumed, workers, jobs, holds; };
+     const std::vector<Case> cases{
+         {"STOP during original worker registration", {.stop_before_registration = true}, 0, 0, 1, 0, 0},
+@@ -545,6 +696,27 @@ int main(int argc, char** argv) {
+         {"closed observation and failed waits never replace physical worker join", {.hold_worker_exit = true,
+             .worker_wait_failures = 3}, 1, 1, 1, 1, 0},
+         {"natural original exit drains pipe Job and worker", {.natural_exit = true}, 1, 1, 1, 1, 0},
++        {"reader process insertion failure drains original child", {.reader_fault = ReaderFault::ProcessInsertFailed}, 1, 1, 1, 1, 0},
++        {"reader unknown process insertion outcome drains original child", {.reader_fault = ReaderFault::ProcessInsertUnknown}, 1, 1, 1, 1, 0},
++        {"reader process readback API failure drains original child", {.reader_fault = ReaderFault::ProcessReadbackFailed}, 1, 1, 1, 1, 0},
++        {"reader process readback object mismatch drains original child", {.reader_fault = ReaderFault::ProcessReadbackMismatch}, 1, 1, 1, 1, 0},
++        {"reader original service token failure drains original child", {.reader_fault = ReaderFault::TokenOpenFailed}, 1, 1, 1, 1, 0},
++        {"reader token insertion failure drains original child", {.reader_fault = ReaderFault::TokenInsertFailed}, 1, 1, 1, 1, 0},
++        {"reader unknown token insertion outcome drains original child", {.reader_fault = ReaderFault::TokenInsertUnknown}, 1, 1, 1, 1, 0},
++        {"reader token readback API failure drains original child", {.reader_fault = ReaderFault::TokenReadbackFailed}, 1, 1, 1, 1, 0},
++        {"reader token readback object mismatch drains original child", {.reader_fault = ReaderFault::TokenReadbackMismatch}, 1, 1, 1, 1, 0},
++        {"reader grant WriteFile failure still drains original child", {.reader_fault = ReaderFault::WriteFailed}, 1, 1, 1, 1, 0},
++        {"reader partial grant completion drains original child", {.reader_fault = ReaderFault::WritePartial}, 1, 1, 1, 1, 0},
++        {"reader unknown grant publication outcome drains original child", {.reader_fault = ReaderFault::WriteUnknown}, 1, 1, 1, 1, 0},
++        {"reader receiver pipe break drains original child", {.reader_fault = ReaderFault::ReceiverPipeBreak}, 1, 1, 1, 1, 0},
++        {"reader cancellation during pending grant drains and joins original I/O", {.cancellation_failed = true,
++            .reader_fault = ReaderFault::CancelDuringWrite, .pipe_incomplete_results = 4}, 1, 1, 1, 1, 0},
++        {"reader late grant completion after revoke cannot reissue or revive", {.reader_fault = ReaderFault::LateWriteCompletion}, 1, 1, 1, 1, 0},
++        {"reader replay acquire cannot introduce another pair", {.reader_fault = ReaderFault::ReplayAcquire}, 1, 1, 1, 1, 0},
++        {"reader published seeds persist until physical original process exit", {.natural_exit = true,
++            .reader_fault = ReaderFault::PublishedThenExit}, 1, 1, 1, 1, 0},
++        {"reader local readbacks remain held until physical worker signal", {.hold_worker_exit = true,
++            .reader_fault = ReaderFault::LateWriteCompletion}, 1, 1, 1, 1, 0},
+     };
+     int passed = 0, failed = 0;
+     for (const auto& c : cases) {
+@@ -581,7 +753,23 @@ int main(int argc, char** argv) {
+             const auto snapshot = owner->snapshot();
+             observations = observations && snapshot.closed && !snapshot.scope_live;
+             observations = observations && m.stop->signaled ==
+-                (c.config.stop_before_registration || c.config.cancel_after_creation || c.config.pipe_revert_failure);
++                (c.config.stop_before_registration || c.config.cancel_after_creation || c.config.pipe_revert_failure ||
++                    c.config.reader_fault == ReaderFault::CancelDuringWrite || c.config.reader_fault == ReaderFault::LateWriteCompletion);
++            if (c.config.reader_fault != ReaderFault::None) {
++                const auto reader = factory.readerObservations(*owner);
++                const auto fault = c.config.reader_fault;
++                const unsigned attempts = fault <= ReaderFault::TokenOpenFailed ? 1 : 2;
++                const unsigned successes = fault <= ReaderFault::ProcessInsertUnknown ? 0 :
++                    fault <= ReaderFault::TokenInsertUnknown ? 1 : 2;
++                const bool publication = fault >= ReaderFault::WriteFailed;
++                observations = observations && reader.attempted && reader.calls == attempts && reader.successes == successes &&
++                    reader.publication_possible == publication && !reader.local_readbacks_held &&
++                    m.seed_attempts == static_cast<int>(attempts) && m.seed_inserted <= m.seed_attempts && m.seed_attempts <= 2 &&
++                    m.seed_reclaimed == m.seed_inserted && m.reader_writes == (publication ? 1 : 0) &&
++                    m.before("child-table-destroyed", "callback-released");
++                if (fault == ReaderFault::LateWriteCompletion)
++                    observations = observations && m.before("pipe-cancel-requested", "late-grant-write-after-revoke");
++            }
+             if (c.config.diagnostic_allocation_failed) observations = observations && snapshot.win32_error == ERROR_NOT_ENOUGH_MEMORY;
+             if (c.created) observations = observations && snapshot.physical_process_exit_observed && snapshot.original_job_empty_observed &&
+                 m.event_files_closed == 1 && m.before("exit-continued", "callback-released") && m.before("job-empty", "callback-released");
+diff --git a/apps/metaengine-browser/test/native/browser-guardian-original-reader-ownership-model.cpp.in b/apps/metaengine-browser/test/native/browser-guardian-original-reader-ownership-model.cpp.in
+index 86c70d7..a47b970 100644
+--- a/apps/metaengine-browser/test/native/browser-guardian-original-reader-ownership-model.cpp.in
++++ b/apps/metaengine-browser/test/native/browser-guardian-original-reader-ownership-model.cpp.in
+@@ -1,14 +1,18 @@
+ // Synthetic handle-table model. @ACTUAL_* markers are replaced by production
+-// source without changing method bodies. No Windows qualification is claimed.
++// source without rewriting method bodies. Each case runs in a fresh process;
++// the production process-wide transfer budget has no reset seam.
+ #include "browser-guardian-original-reader-transfer.hpp"
+ #include "browser-guardian-original-main-entry-protocol.hpp"
+ #include <array>
++#include <atomic>
+ #include <cstdint>
+ #include <cstring>
++#include <functional>
+ #include <iostream>
+ #include <map>
+ #include <memory>
+ #include <mutex>
++#include <new>
+ #include <stdexcept>
+ #include <string>
+ #include <utility>
+@@ -23,69 +27,146 @@ using PUCHAR = unsigned char*;
+ #define BCRYPT_SUCCESS(status) ((status) >= 0)
+ constexpr BOOL TRUE = 1, FALSE = 0;
+ constexpr DWORD ERROR_SUCCESS = 0, ERROR_ACCESS_DENIED = 5, ERROR_INVALID_DATA = 13;
+-constexpr DWORD ERROR_NOT_SUPPORTED = 50, ERROR_OPERATION_ABORTED = 995, ERROR_IO_PENDING = 997;
++constexpr DWORD ERROR_NOT_ENOUGH_MEMORY = 8, ERROR_NOT_SUPPORTED = 50;
++constexpr DWORD ERROR_OPERATION_ABORTED = 995, ERROR_IO_INCOMPLETE = 996, ERROR_IO_PENDING = 997;
+ constexpr DWORD WAIT_OBJECT_0 = 0, WAIT_TIMEOUT = 258, WAIT_FAILED = 0xffffffff;
+ constexpr DWORD FILE_READ_DATA = 1, FILE_WRITE_DATA = 2, FILE_READ_ATTRIBUTES = 0x80;
+ constexpr DWORD FILE_WRITE_ATTRIBUTES = 0x100, SYNCHRONIZE = 0x100000, OPEN_EXISTING = 3;
++constexpr DWORD PROCESS_QUERY_INFORMATION = 0x400, PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
++constexpr DWORD PROCESS_VM_READ = 0x10, TOKEN_QUERY = 8, FILE_TYPE_PIPE = 3;
+ constexpr DWORD FILE_FLAG_OVERLAPPED = 0x40000000, SECURITY_SQOS_PRESENT = 0x100000;
+ constexpr DWORD SECURITY_IDENTIFICATION = 0x10000, PIPE_TYPE_MESSAGE = 4, PIPE_SERVER_END = 1;
+ constexpr DWORD PIPE_READMODE_MESSAGE = 2, PIPE_NOWAIT = 1, BCRYPT_USE_SYSTEM_PREFERRED_RNG = 2;
+ constexpr DWORD DUPLICATE_CLOSE_SOURCE = 1, DUPLICATE_SAME_ACCESS = 2;
+ struct FILETIME { DWORD dwLowDateTime = 0, dwHighDateTime = 0; };
+-struct OVERLAPPED { HANDLE hEvent = nullptr; };
++struct OVERLAPPED { std::uintptr_t Internal = 0; HANDLE hEvent = nullptr; };
++#define HasOverlappedIoCompleted(operation) ((operation)->Internal != 0x103U)
+ struct TOKEN_STATISTICS { std::uint64_t TokenId = 12; };
+ constexpr int TokenStatistics = 10;
+ namespace wire = metaengine::guardian::original_reader_wire;
+ 
++// Ownership belongs to a table slot, while duplicates share the same object.
++// Reuse erases one slot without changing the object retained by another slot.
+ enum class Kind { Event, Pipe, Process, Token };
+-struct Object { Kind kind; bool peer_owned = false, signaled = false; DWORD pid = 0; std::uint64_t birth = 0; };
++struct Object {
++    Kind kind;
++    bool signaled = false;
++    DWORD pid = 0;
++    std::uint64_t birth = 0, identity = 0;
++    std::wstring image = L"C:\\synthetic\\METAENGINEBrowserGuardian.exe";
++};
++struct Slot { std::shared_ptr<Object> object; bool peer_owned; DWORD rights; bool seed = false; };
++struct Pending {
++    HANDLE pipe;
++    OVERLAPPED* operation;
++    void* buffer;
++    DWORD count;
++    bool writing;
++};
+ struct World {
+     static constexpr DWORD child = 1042, server = 2042;
+     static constexpr std::uint64_t child_birth = 134000000000000001ULL, server_birth = child_birth - 100;
+-    std::map<std::uintptr_t, Object> table;
++    std::map<std::uintptr_t, Slot> table;
+     std::uintptr_t next = 0x1000;
+-    HANDLE event_sentinel = nullptr, process_sentinel = nullptr, token_sentinel = nullptr;
++    std::uint64_t next_identity = 1;
++    HANDLE event_sentinel = nullptr, process_sentinel = nullptr, token_sentinel = nullptr, cancel = nullptr;
++    std::vector<Pending> pending;
+     wire::Grant grant;
+     int reads = 0, writes = 0, duplicates = 0, transferred = 0, closes_foreign = 0, closes_invalid = 0;
+-    int opens = 0, capture = 0, observations = 0, clock_fences = 0, joins = 0;
++    int closes_while_pending = 0, close_source = 0, opens = 0, observations = 0, clock_fences = 0;
++    int cancel_requests = 0, incomplete_polls = 0, completion_polls = 0, sleeps = 0, diagnostics_failed = 0;
++    int duplicate_fail_at = 0, cancel_on_duplicate = 0, server_queries = 0, client_queries = 0;
++    int cancellation_polls = 0, cancel_on_poll = 0;
+     bool open_ok = true, set_mode_ok = true, get_mode_ok = true, legitimate_sender = false;
++    bool rng_ok = true, short_write = false, short_read = false, server_changed = false, client_changed = false;
++    bool pending_write = false, pending_read = false, cancel_wait = false, timeout_wait = false;
++    bool get_result_fails_once = false, late_write = false, cancelled_after_read = false;
++    bool reuse_borrowed_process = false, reuse_borrowed_token = false, observe_throws = false;
++    bool pipe_alive = true, image_throws = false, diagnostic_throws = false;
+     DWORD mode = PIPE_READMODE_MESSAGE, last_error = ERROR_SUCCESS;
+-    HANDLE create(Object object) { auto h = reinterpret_cast<HANDLE>(next); next += 4; table.emplace(key(h), object); return h; }
++    std::vector<std::pair<DWORD,DWORD>> duplicate_rights;
+     static std::uintptr_t key(HANDLE h) { return reinterpret_cast<std::uintptr_t>(h); }
+-    Object* object(HANDLE h) { auto it = table.find(key(h)); return it == table.end() ? nullptr : &it->second; }
++    Slot* slot(HANDLE h) { auto it = table.find(key(h)); return it == table.end() ? nullptr : &it->second; }
++    Object* object(HANDLE h) { auto s = slot(h); return s ? s->object.get() : nullptr; }
++    HANDLE insert(std::shared_ptr<Object> object, bool owned, DWORD rights, bool seed = false) {
++        auto h = reinterpret_cast<HANDLE>(next); next += 4;
++        table.emplace(key(h), Slot{std::move(object), owned, rights, seed}); return h;
++    }
++    HANDLE create(Kind kind, bool owned, DWORD rights = 0xffffffff, DWORD pid = 0, std::uint64_t birth = 0, bool seed = false) {
++        auto object = std::make_shared<Object>(Object{kind, false, pid, birth, next_identity++});
++        return insert(std::move(object), owned, rights, seed);
++    }
++    void replace_borrowed(HANDLE h) {
++        auto s = slot(h); if (!s || s->peer_owned) throw std::runtime_error("bad slot reuse fixture");
++        s->object = std::make_shared<Object>(Object{Kind::Event, false, 0, 0, next_identity++});
++    }
+     void reset() {
+         *this = World{};
+-        event_sentinel = create({Kind::Event});
+-        process_sentinel = create({Kind::Process, false, false, server, server_birth});
+-        token_sentinel = create({Kind::Token});
++        event_sentinel = create(Kind::Event, false);
++        process_sentinel = create(Kind::Process, false, wire::kRequiredAccess, server, server_birth);
++        token_sentinel = create(Kind::Token, false, TOKEN_QUERY);
+         grant.correlation = 0xabc123;
+         grant.child_pid = child; grant.service_pid = server;
+         grant.child_birth = child_birth; grant.service_birth = server_birth;
+         grant.event_serial = 7; grant.retained_images = 3; grant.policy_sha256.fill(0x41);
+         grant.child_local_handle = key(process_sentinel); grant.child_local_token = key(token_sentinel);
+     }
+-    bool sentinels_open() { return object(event_sentinel) && object(process_sentinel) && object(token_sentinel); }
++    bool sentinels_open() { return slot(event_sentinel) && slot(process_sentinel) && slot(token_sentinel); }
+     bool no_transfer() const { return reads == 0 && writes == 0 && duplicates == 0 && transferred == 0; }
+-    bool no_followup() const { return capture == 0 && observations == 0 && clock_fences == 0; }
+-    bool all_peer_handles_closed() const { for (const auto& [h, o] : table) { (void)h; if (o.peer_owned) return false; } return true; }
++    bool all_peer_handles_closed() const { for (const auto& [h, s] : table) { (void)h; if (s.peer_owned) return false; } return true; }
++    int seed_slots() const { int count = 0; for (const auto& [h, s] : table) { (void)h; count += s.seed; } return count; }
++    void receive_request(void* bytes, DWORD count) {
++        wire::Request request;
++        if (!wire::decode(static_cast<std::uint8_t*>(bytes), count, &request)) throw std::runtime_error("invalid request fixture");
++        grant.correlation = request.correlation;
++        if (legitimate_sender && !transferred) {
++            grant.child_local_handle = key(create(Kind::Process, false, wire::kRequiredAccess, server, server_birth, true));
++            grant.child_local_token = key(create(Kind::Token, false, TOKEN_QUERY, 0, 0, true));
++            transferred += 2;
++        }
++    }
++    void send_reply(void* bytes, DWORD count) {
++        const auto reply = wire::encode(grant);
++        if (count != reply.size()) throw std::runtime_error("unexpected response size");
++        std::memcpy(bytes, reply.data(), reply.size());
++        if (cancelled_after_read) object(cancel)->signaled = true;
++    }
+ } world;
+ 
++// A narrow diagnostic throw seam around the actual std::string field. This
++// does not edit production fail(); it exercises its real assignment/caller.
++struct DiagnosticString : std::string {
++    using std::string::operator=;
++    DiagnosticString& operator=(const char* text) {
++        if (world.diagnostic_throws) { ++world.diagnostics_failed; throw std::bad_alloc(); }
++        std::string::operator=(text); return *this;
++    }
++};
+ HANDLE GetCurrentProcess() { return INVALID_HANDLE_VALUE; }
+ DWORD GetCurrentProcessId() { return World::child; }
+ DWORD GetLastError() { return world.last_error; }
+ BOOL CloseHandle(HANDLE h) {
+-    auto object = world.object(h);
+-    if (!object) { ++world.closes_invalid; return FALSE; }
+-    if (!object->peer_owned) ++world.closes_foreign;
++    for (const auto& p : world.pending) if (p.pipe == h || p.operation->hEvent == h) ++world.closes_while_pending;
++    auto slot = world.slot(h);
++    if (!slot) { ++world.closes_invalid; return FALSE; }
++    if (!slot->peer_owned) ++world.closes_foreign;
+     world.table.erase(World::key(h)); return TRUE;
+ }
+-HANDLE CreateEventW(void*, BOOL, BOOL signaled, const wchar_t*) { return world.create({Kind::Event, true, !!signaled}); }
++HANDLE CreateEventW(void*, BOOL, BOOL signaled, const wchar_t*) {
++    auto h = world.create(Kind::Event, true); world.object(h)->signaled = !!signaled;
++    if (!world.cancel) world.cancel = h;
++    return h;
++}
+ DWORD WaitForSingleObject(HANDLE h, DWORD) {
+     if (h == GetCurrentProcess()) return WAIT_TIMEOUT;
++    if (h == world.cancel && ++world.cancellation_polls == world.cancel_on_poll) world.object(h)->signaled = true;
+     auto object = world.object(h);
+     return !object ? WAIT_FAILED : object->signaled ? WAIT_OBJECT_0 : WAIT_TIMEOUT;
+ }
+-DWORD WaitForMultipleObjects(DWORD, const HANDLE*, BOOL, DWORD) { return WAIT_OBJECT_0 + 1; }
++DWORD WaitForMultipleObjects(DWORD, const HANDLE*, BOOL, DWORD) {
++    if (world.cancel_wait) { world.object(world.cancel)->signaled = true; return WAIT_OBJECT_0; }
++    return world.timeout_wait ? WAIT_TIMEOUT : WAIT_OBJECT_0 + 1;
++}
+ HANDLE CreateFileW(const wchar_t* name, DWORD access, DWORD sharing, void*, DWORD creation, DWORD flags, HANDLE) {
+     ++world.opens;
+     if (std::wstring(name) != metaengine::guardian::original_main_wire::kPipe ||
+@@ -93,185 +174,382 @@ HANDLE CreateFileW(const wchar_t* name, DWORD access, DWORD sharing, void*, DWOR
+         sharing != 0 || creation != OPEN_EXISTING ||
+         flags != (FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION))
+         throw std::runtime_error("native-host caller changed its fixed pipe open");
+-    return world.open_ok ? world.create({Kind::Pipe, true}) : INVALID_HANDLE_VALUE;
++    return world.open_ok ? world.create(Kind::Pipe, true) : INVALID_HANDLE_VALUE;
+ }
+ BOOL SetNamedPipeHandleState(HANDLE, DWORD*, void*, void*) { return world.set_mode_ok; }
+ BOOL GetNamedPipeHandleStateW(HANDLE, DWORD* mode, void*, void*, void*, void*, DWORD) { *mode = world.mode; return world.get_mode_ok; }
+ BOOL GetNamedPipeInfo(HANDLE, DWORD* flags, void*, void*, void*) { *flags = PIPE_TYPE_MESSAGE; return TRUE; }
+-BOOL GetNamedPipeClientProcessId(HANDLE, ULONG* pid) { *pid = World::child; return TRUE; }
+-BOOL GetNamedPipeServerProcessId(HANDLE, ULONG* pid) { *pid = World::server; return TRUE; }
+-DWORD GetProcessId(HANDLE h) { auto object = world.object(h); return object && object->kind == Kind::Process ? object->pid : 0; }
++BOOL GetNamedPipeClientProcessId(HANDLE, ULONG* pid) {
++    ++world.client_queries; *pid = World::child + (world.client_changed && world.client_queries > 1); return TRUE;
++}
++BOOL GetNamedPipeServerProcessId(HANDLE, ULONG* pid) {
++    ++world.server_queries; *pid = World::server + (world.server_changed && world.server_queries > 1); return TRUE;
++}
++DWORD GetFileType(HANDLE h) { auto o = world.object(h); return o && o->kind == Kind::Pipe ? FILE_TYPE_PIPE : 0; }
++BOOL PeekNamedPipe(HANDLE h, void*, DWORD, void*, void*, void*) { return world.object(h) && world.pipe_alive; }
++DWORD GetProcessId(HANDLE h) { auto o = world.object(h); return o && o->kind == Kind::Process ? o->pid : 0; }
+ BOOL GetProcessTimes(HANDLE h, FILETIME* c, FILETIME*, FILETIME*, FILETIME*) {
+-    auto object = world.object(h);
+-    const auto birth = h == GetCurrentProcess() ? World::child_birth : object && object->kind == Kind::Process ? object->birth : 0;
++    auto o = world.object(h);
++    const auto birth = h == GetCurrentProcess() ? World::child_birth : o && o->kind == Kind::Process ? o->birth : 0;
+     c->dwLowDateTime = static_cast<DWORD>(birth); c->dwHighDateTime = static_cast<DWORD>(birth >> 32); return birth != 0;
+ }
+ BOOL GetTokenInformation(HANDLE h, int, void* out, DWORD count, DWORD* used) {
+-    auto object = world.object(h);
+-    if (!object || object->kind != Kind::Token || count < sizeof(TOKEN_STATISTICS)) return FALSE;
++    auto o = world.object(h);
++    if (!o || o->kind != Kind::Token || count < sizeof(TOKEN_STATISTICS)) return FALSE;
+     *static_cast<TOKEN_STATISTICS*>(out) = {}; *used = sizeof(TOKEN_STATISTICS); return TRUE;
+ }
+-int BCryptGenRandom(void*, PUCHAR out, ULONG count, ULONG) { std::memset(out, 0x41, count); return 0; }
+-BOOL WriteFile(HANDLE, void* bytes, DWORD count, DWORD* done, OVERLAPPED*) {
++int BCryptGenRandom(void*, PUCHAR out, ULONG count, ULONG) { std::memset(out, 0x41, count); return world.rng_ok ? 0 : -1; }
++BOOL WriteFile(HANDLE pipe, void* bytes, DWORD count, DWORD* done, OVERLAPPED* operation) {
+     ++world.writes;
+-    wire::Request request;
+-    if (!wire::decode(static_cast<std::uint8_t*>(bytes), count, &request)) return FALSE;
+-    world.grant.correlation = request.correlation;
+-    if (world.legitimate_sender && !world.transferred) {
+-        world.grant.child_local_handle = World::key(world.create({Kind::Process, false, false, World::server, World::server_birth}));
+-        world.grant.child_local_token = World::key(world.create({Kind::Token}));
+-        world.transferred += 2;
++    if (world.pending_write) {
++        operation->Internal = 0x103U; world.pending.push_back({pipe, operation, bytes, count, true});
++        world.last_error = ERROR_IO_PENDING; return FALSE;
++    }
++    world.receive_request(bytes, count); *done = count - world.short_write; return TRUE;
++}
++BOOL ReadFile(HANDLE pipe, void* bytes, DWORD count, DWORD* done, OVERLAPPED* operation) {
++    ++world.reads;
++    if (world.pending_read) {
++        operation->Internal = 0x103U; world.pending.push_back({pipe, operation, bytes, count, false});
++        world.last_error = ERROR_IO_PENDING; return FALSE;
+     }
+-    *done = count; return TRUE;
++    world.send_reply(bytes, count); *done = count - world.short_read; return TRUE;
+ }
+-BOOL ReadFile(HANDLE, void* bytes, DWORD count, DWORD* done, OVERLAPPED*) {
+-    ++world.reads; const auto reply = wire::encode(world.grant);
+-    if (count != reply.size()) return FALSE;
+-    std::memcpy(bytes, reply.data(), reply.size()); *done = count; return TRUE;
++BOOL CancelIoEx(HANDLE pipe, OVERLAPPED* operation) {
++    ++world.cancel_requests;
++    if (world.pending.empty() || world.pending.front().pipe != pipe || world.pending.front().operation != operation)
++        throw std::runtime_error("cancellation lost original pending operation");
++    return TRUE;
++}
++void Sleep(DWORD) { ++world.sleeps; }
++BOOL GetOverlappedResult(HANDLE pipe, OVERLAPPED* operation, DWORD* done, BOOL) {
++    ++world.completion_polls;
++    if (world.pending.empty() || world.pending.front().pipe != pipe || world.pending.front().operation != operation)
++        throw std::runtime_error("completion lost original pending operation");
++    if (world.get_result_fails_once) { world.get_result_fails_once = false; world.last_error = ERROR_IO_INCOMPLETE; return FALSE; }
++    if (world.cancel_requests && world.incomplete_polls++ < 2) { world.last_error = ERROR_IO_INCOMPLETE; return FALSE; }
++    auto pending = world.pending.front();
++    if (pending.writing) {
++        if (!world.cancel_requests || world.late_write) world.receive_request(pending.buffer, pending.count);
++    } else if (!world.cancel_requests) world.send_reply(pending.buffer, pending.count);
++    operation->Internal = 0;
++    *done = pending.count;
++    world.pending.erase(world.pending.begin());
++    return TRUE;
+ }
+-BOOL GetOverlappedResult(HANDLE, OVERLAPPED*, DWORD* done, BOOL) { *done = wire::kReplyBytes; return TRUE; }
+-void cancelAndJoinGuardianPipeIo(HANDLE, OVERLAPPED*) { ++world.joins; }
+-BOOL DuplicateHandle(HANDLE, HANDLE source, HANDLE, HANDLE* target, DWORD, BOOL, DWORD flags) {
+-    ++world.duplicates; auto object = world.object(source);
+-    if (!object) return FALSE;
+-    if (target) { auto copy = *object; copy.peer_owned = true; *target = world.create(copy); }
+-    if (flags & DUPLICATE_CLOSE_SOURCE) CloseHandle(source);
++BOOL DuplicateHandle(HANDLE source_process, HANDLE source, HANDLE target_process, HANDLE* target, DWORD rights, BOOL inherit, DWORD flags) {
++    ++world.duplicates; world.duplicate_rights.emplace_back(rights, flags);
++    if (source_process != GetCurrentProcess() || target_process != GetCurrentProcess() || inherit || flags)
++        throw std::runtime_error("receiver duplicated with foreign process, inheritance or closing flags");
++    if (flags & DUPLICATE_CLOSE_SOURCE) ++world.close_source;
++    if (world.duplicates == world.duplicate_fail_at) return FALSE;
++    auto slot = world.slot(source);
++    if (!slot || !target || (rights & ~slot->rights)) return FALSE;
++    const auto object = slot->object;
++    *target = world.insert(object, true, rights);
++    if (world.reuse_borrowed_process && World::key(source) == world.grant.child_local_handle) world.replace_borrowed(source);
++    if (world.reuse_borrowed_token && World::key(source) == world.grant.child_local_token) world.replace_borrowed(source);
++    if (world.duplicates == world.cancel_on_duplicate) world.object(world.cancel)->signaled = true;
+     return TRUE;
+ }
++HANDLE OpenProcess(DWORD rights, BOOL, DWORD pid) {
++    if (pid != World::server) return nullptr;
++    return world.insert(world.slot(world.process_sentinel)->object, true, rights);
++}
+ 
+ namespace metaengine::guardian {
+ @ACTUAL_CLIENT_ACCESS@
++@ACTUAL_PROCESS_BUDGET@
+ @ACTUAL_HANDLE@
++@ACTUAL_IO_JOIN@
+ std::uint64_t ticks(const FILETIME& time) { return (static_cast<std::uint64_t>(time.dwHighDateTime) << 32) | time.dwLowDateTime; }
++std::wstring imagePath(HANDLE h) {
++    if (world.image_throws) throw std::bad_alloc();
++    auto object = world.object(h); return object ? object->image : L"";
++}
+ class GuardianConnectedPeer {
+ public:
+     struct State {
++        enum class LifetimeCheck { Connected, OriginalMaterialEof };
+         std::mutex lock;
+-        Handle cancelled{CreateEventW(nullptr, TRUE, FALSE, nullptr)}, pipe;
++        Handle cancelled{CreateEventW(nullptr, TRUE, FALSE, nullptr)}, pipe, server_process;
+         Handle original_service_reader, original_service_token;
++        std::unique_ptr<int> loaded_images;
+         original_reader_wire::Once reader_once;
+         original_reader_wire::Grant reader_grant;
+         bool reader_bound = false, closed = false, connect_attempted = false, observation_revoked = false;
+         bool kernel_exact = false, scm_exact = false, package_bound = false;
+         bool current_release_policy_bound = false, bounded_loaded_image_observed = false;
+         bool guardian_compatibility_preserved = false;
+-        std::string account, source_sha, installed_guardian_source_sha, installed_guardian_manifest_sha256, reason;
++        DWORD server_pid = 0; std::uint64_t server_birth = 0; std::wstring server_image;
++        std::string account, source_sha, installed_guardian_source_sha, installed_guardian_manifest_sha256;
++        DiagnosticString reason;
+         DWORD error = ERROR_SUCCESS;
+-        struct ReleaseWindow { int invalidations = 0; void invalidate() { ++invalidations; } } release_window;
++        struct ReleaseWindow { int invalidations = 0; void invalidate() noexcept { ++invalidations; } } release_window;
+ @ACTUAL_FAIL@
++@ACTUAL_BIRTH@
+ @ACTUAL_ACQUIRE@
+-        // Deliberately permissive followups: an accidental success from the
+-        // actual acquisition would let the actual caller return true, failing
+-        // this model. Their invocation is separately forbidden by each case.
+-        bool captureKernel() { ++world.capture; kernel_exact = true; return true; }
+-        bool observe() { ++world.observations; kernel_exact = scm_exact = package_bound = true;
+-            current_release_policy_bound = bounded_loaded_image_observed = true; return true; }
+-        bool releaseClockFence() { ++world.clock_fences; return true; }
++@ACTUAL_KERNEL@
++        // This fixture cannot prove SCM/W77/current release authority. A valid
++        // reader transfer must therefore still fail the actual public caller.
++        bool observe() {
++            ++world.observations;
++            if (world.observe_throws) throw std::bad_alloc();
++            return fail("SYNTHETIC_AUTHORITY_NOT_PROVEN", ERROR_ACCESS_DENIED);
++        }
++        bool currentScm() { return fail("SYNTHETIC_SCM_NOT_PROVEN", ERROR_ACCESS_DENIED); }
++        bool systemAccount() { return fail("SYNTHETIC_TOKEN_AUTHORITY_NOT_PROVEN", ERROR_ACCESS_DENIED); }
++        bool releaseClockFence() { ++world.clock_fences; return fail("SYNTHETIC_POLICY_NOT_PROVEN", ERROR_ACCESS_DENIED); }
+     };
+     std::unique_ptr<State> state_ = std::make_unique<State>();
+     bool connectOriginalNativeHostAuthority();
++    bool recheckOriginalNativeHostAuthority();
++    bool originalNativeHostFinalFence();
+ };
+ @ACTUAL_CONNECT@
++@ACTUAL_RECHECK@
++@ACTUAL_FINAL_FENCE@
+ } // namespace metaengine::guardian
+ 
+ using Peer = metaengine::guardian::GuardianConnectedPeer;
+ void require(bool condition, const char* message) { if (!condition) throw std::runtime_error(message); }
++void no_authority(const Peer& peer) {
++    const auto& s = *peer.state_;
++    require(!s.kernel_exact && !s.scm_exact && !s.package_bound && !s.current_release_policy_bound &&
++        !s.bounded_loaded_image_observed, "wire created authority facts");
++}
++void transport_dropped(const Peer& peer) {
++    const auto& s = *peer.state_;
++    require(s.observation_revoked && !s.pipe.valid() && !s.reader_bound && !s.original_service_reader.valid() &&
++        !s.original_service_token.valid() && !s.server_process.valid(), "failed native transport retained pipe or owned readers");
++    no_authority(peer);
++}
+ void reader_refused(Peer& peer) {
+-    const bool connected = peer.connectOriginalNativeHostAuthority();
+-    require(world.closes_foreign == 0 && world.closes_invalid == 0 && world.sentinels_open(), "unowned handle was closed");
+-    require(!connected, "forged native-host authority success");
+-    require(peer.state_->reason == "ORIGINAL_READER_HANDLE_OWNERSHIP_UNPROVEN", "ownership refusal missing");
+-    require(peer.state_->error == ERROR_NOT_SUPPORTED, "ownership refusal error changed");
+-    require(peer.state_->reader_once.used() && !peer.state_->reader_bound, "reader is not one-shot/refused");
+-    require(peer.state_->observation_revoked && !peer.state_->kernel_exact && !peer.state_->scm_exact &&
+-        !peer.state_->package_bound && !peer.state_->current_release_policy_bound &&
+-        !peer.state_->bounded_loaded_image_observed, "unproven authority facts survived");
+-    require(world.no_transfer() && world.no_followup(), "reader transfer or authority followup was reached");
++    require(!peer.connectOriginalNativeHostAuthority(), "synthetic reader forged native-host authority success");
++    transport_dropped(peer);
+ }
+-int passed = 0, failed = 0;
+-template<class Function> void run(const std::string& name, Function function) {
+-    world.reset();
+-    try {
+-        function();
+-        require(world.no_transfer() && world.no_followup(), "transfer, duplication or followup occurred");
+-        require(world.sentinels_open() && world.closes_foreign == 0 && world.closes_invalid == 0,
+-            "unowned sentinel or pseudo handle was closed");
+-        require(world.all_peer_handles_closed(), "locally created handle was leaked");
+-        ++passed; std::cout << "{\"case\":\"" << name << "\",\"state\":\"PASS\"}\n";
+-    } catch (const std::exception& error) {
+-        ++failed; std::cout << "{\"case\":\"" << name << "\",\"state\":\"FAIL\",\"reason\":\"" << error.what() << "\"}\n";
+-    }
++void attach(Peer& peer) { peer.state_->pipe.reset(world.create(Kind::Pipe, true)); }
++void reader_acquired(Peer& peer) {
++    attach(peer);
++    require(peer.state_->acquireOriginalReader(), "valid reader acquisition failed");
++    require(peer.state_->reader_once.used() && peer.state_->reader_bound && peer.state_->pipe.valid(), "reader did not bind once");
++    require(World::key(peer.state_->original_service_reader.value) != world.grant.child_local_handle &&
++        World::key(peer.state_->original_service_token.value) != world.grant.child_local_token, "wire number was adopted");
++    require(world.duplicate_rights.size() == 2 && world.duplicate_rights[0] == std::pair<DWORD,DWORD>{wire::kRequiredAccess,0} &&
++        world.duplicate_rights[1] == std::pair<DWORD,DWORD>{TOKEN_QUERY,0}, "reader duplicate rights changed");
++    no_authority(peer);
+ }
+-int main() {
+-    run("hostile_existing_event_number_never_requested_or_closed", [] {
++struct Case { std::string name; std::function<void()> function; };
++std::vector<Case> cases() {
++    std::vector<Case> result;
++    auto add = [&](std::string name, std::function<void()> fn) { result.push_back({std::move(name), std::move(fn)}); };
++    // All 29 previous scenarios remain, adapted from the blanket gate to
++    // bounded borrowing. Names now describe operations that really execute.
++    add("hostile_existing_event_number_never_adopted_or_closed", [] {
+         world.grant.child_local_handle = World::key(world.event_sentinel); Peer peer; reader_refused(peer);
++        require(world.duplicates == 1 && world.observations == 0, "hostile process slot reached authority");
++    });
++    add("matching_existing_process_and_token_are_not_authority", [] {
++        Peer peer; reader_refused(peer); require(world.observations == 1, "independent authority observation bypassed");
+     });
+-    run("matching_existing_process_and_token_are_not_ownership", [] { Peer peer; reader_refused(peer); });
+-    run("token_field_existing_event_number_never_requested_or_closed", [] {
++    add("token_field_existing_event_number_never_adopted_or_closed", [] {
+         world.grant.child_local_token = World::key(world.event_sentinel); Peer peer; reader_refused(peer);
++        require(world.duplicates == 2 && world.observations == 0, "invalid token reached authority");
+     });
+     for (unsigned i = 1; i <= 6; ++i) {
+         const auto pseudo = UINT64_MAX - i + 1;
+-        run("process_pseudo_handle_" + std::to_string(i) + "_never_consumed", [pseudo] {
+-            world.grant.child_local_handle = pseudo; Peer peer; reader_refused(peer);
++        add("process_pseudo_handle_" + std::to_string(i) + "_never_duplicated", [pseudo] {
++            world.grant.child_local_handle = pseudo; Peer peer; reader_refused(peer); require(world.duplicates == 0, "pseudo process duplicated");
+         });
+-        run("token_pseudo_handle_" + std::to_string(i) + "_never_consumed", [pseudo] {
+-            world.grant.child_local_token = pseudo; Peer peer; reader_refused(peer);
++        add("token_pseudo_handle_" + std::to_string(i) + "_never_duplicated", [pseudo] {
++            world.grant.child_local_token = pseudo; Peer peer; reader_refused(peer); require(world.duplicates == 0, "pseudo token duplicated");
+         });
+     }
+-    run("zero_extended_32bit_pseudo_numbers_never_consumed", [] {
++    add("zero_extended_32bit_pseudo_numbers_never_duplicated", [] {
+         world.grant.child_local_handle = 0xfffffffeULL; world.grant.child_local_token = 0xfffffffcULL;
+-        Peer peer; reader_refused(peer);
++        Peer peer; reader_refused(peer); require(world.duplicates == 0, "32-bit pseudo handle duplicated");
+     });
+-    run("malformed_reply_never_requested", [] { world.grant = {}; Peer peer; reader_refused(peer); });
+-    run("legitimate_sender_never_strands_originals", [] { world.legitimate_sender = true; Peer peer; reader_refused(peer); });
+-    run("many_peer_instances_create_zero_transferred_handles", [] {
++    add("malformed_reply_never_adopted", [] { world.grant = {}; Peer peer; reader_refused(peer); require(world.duplicates == 0, "malformed grant duplicated"); });
++    add("legitimate_sender_retains_two_seed_slots_until_process_exit", [] {
++        world.legitimate_sender = true; Peer peer; reader_acquired(peer);
++        require(world.transferred == 2 && world.seed_slots() == 2, "process-lifetime seed bound missing");
++    });
++    add("many_peer_instances_can_request_at_most_one_pair", [] {
+         world.legitimate_sender = true;
+         for (int i = 0; i < 256; ++i) { Peer peer; reader_refused(peer); }
+-        require(world.opens == 256 && world.table.size() == 3, "peer resources accumulated");
++        require(world.writes == 1 && world.reads == 1 && world.transferred == 2 && world.seed_slots() == 2 &&
++            world.table.size() == 5, "per-process transfer budget or private cleanup failed");
+     });
+-    run("same_peer_cannot_reconnect_after_ownership_refusal", [] {
++    add("same_peer_cannot_reconnect_after_refusal", [] {
+         Peer peer; reader_refused(peer);
+         require(!peer.connectOriginalNativeHostAuthority() && world.opens == 1, "one-shot caller reopened pipe");
+     });
+-    run("direct_acquisition_is_one_shot_and_revokes_stale_facts", [] {
+-        Peer peer; auto& state = *peer.state_;
+-        state.pipe.reset(world.create({Kind::Pipe, true}));
++    add("direct_acquisition_is_one_shot_and_revokes_stale_facts", [] {
++        Peer peer; attach(peer); auto& state = *peer.state_;
+         state.kernel_exact = state.scm_exact = state.package_bound = true;
+         state.current_release_policy_bound = state.bounded_loaded_image_observed = state.guardian_compatibility_preserved = true;
+         state.account = state.source_sha = state.installed_guardian_source_sha = state.installed_guardian_manifest_sha256 = "stale";
++        world.grant.child_local_handle = World::key(world.event_sentinel);
+         require(!state.acquireOriginalReader() && !state.acquireOriginalReader(), "direct acquisition succeeded/rearmed");
+-        require(state.reader_once.used() && state.observation_revoked && state.release_window.invalidations == 1 &&
+-            !state.kernel_exact && !state.scm_exact && !state.package_bound && !state.current_release_policy_bound &&
+-            !state.bounded_loaded_image_observed && !state.guardian_compatibility_preserved &&
++        transport_dropped(peer);
++        require(state.reader_once.used() && state.release_window.invalidations == 1 && !state.guardian_compatibility_preserved &&
+             state.account == "UNAVAILABLE" && state.source_sha.empty() && state.installed_guardian_source_sha.empty() &&
+             state.installed_guardian_manifest_sha256.empty(), "stale authority survived");
+     });
+-    run("cancel_before_connect_never_opens_or_transfers", [] {
++    add("cancel_before_connect_never_opens_or_transfers", [] {
+         Peer peer; world.object(peer.state_->cancelled.value)->signaled = true;
+-        require(!peer.connectOriginalNativeHostAuthority() && world.opens == 0, "cancelled connect opened pipe");
++        reader_refused(peer); require(world.opens == 0 && world.no_transfer(), "cancelled connect opened pipe");
+     });
+-    run("failed_open_never_requests_transfer", [] {
+-        world.open_ok = false; Peer peer;
+-        require(!peer.connectOriginalNativeHostAuthority() && !peer.state_->reader_once.used(), "failed open reached acquisition");
++    add("failed_open_never_requests_transfer", [] {
++        world.open_ok = false; Peer peer; reader_refused(peer);
++        require(!peer.state_->reader_once.used() && world.no_transfer(), "failed open reached acquisition");
+     });
+-    for (unsigned failure = 0; failure < 4; ++failure) run("message_mode_failure_" + std::to_string(failure), [failure] {
++    for (unsigned failure = 0; failure < 4; ++failure) add("message_mode_failure_" + std::to_string(failure), [failure] {
+         if (failure == 0) world.set_mode_ok = false;
+         if (failure == 1) world.get_mode_ok = false;
+         if (failure == 2) world.mode = 0;
+         if (failure == 3) world.mode |= PIPE_NOWAIT;
+-        Peer peer; require(!peer.connectOriginalNativeHostAuthority() && !peer.state_->reader_once.used(), "invalid mode reached acquisition");
++        Peer peer; reader_refused(peer);
++        require(!peer.state_->reader_once.used() && world.no_transfer(), "invalid mode reached acquisition");
+     });
+-    run("missing_original_pipe_consumes_reader_attempt_without_transfer", [] {
++    add("missing_original_pipe_consumes_reader_attempt_without_transfer", [] {
+         Peer peer; require(!peer.state_->acquireOriginalReader() && peer.state_->reader_once.used(), "missing pipe admitted reader");
++        transport_dropped(peer); require(world.no_transfer(), "missing pipe issued transfer");
+     });
+-    run("cancelled_direct_acquisition_consumes_attempt_without_transfer", [] {
+-        Peer peer; peer.state_->pipe.reset(world.create({Kind::Pipe, true}));
+-        world.object(peer.state_->cancelled.value)->signaled = true;
++    add("cancelled_direct_acquisition_consumes_attempt_without_transfer", [] {
++        Peer peer; attach(peer); world.object(peer.state_->cancelled.value)->signaled = true;
+         require(!peer.state_->acquireOriginalReader() && peer.state_->reader_once.used(), "cancelled reader admitted/rearmed");
++        transport_dropped(peer); require(world.no_transfer(), "cancelled reader issued transfer");
++    });
++    add("valid_reader_owns_only_local_duplicates", [] { Peer peer; reader_acquired(peer); });
++    for (bool token : {false,true}) add(std::string(token ? "token" : "process") + "_zero_wire_value_refused", [token] {
++        if (token) world.grant.child_local_token = 0; else world.grant.child_local_handle = 0;
++        Peer peer; reader_refused(peer); require(world.duplicates == 0, "zero wire value duplicated");
++    });
++    for (bool token : {false,true}) add(std::string(token ? "token" : "process") + "_wide_wire_value_is_not_truncated", [token] {
++        if (token) world.grant.child_local_token += 1ULL << 32; else world.grant.child_local_handle += 1ULL << 32;
++        Peer peer; reader_refused(peer); require(world.observations == 0, "wide wire number aliased existing local handle");
++    });
++    add("reused_borrowed_process_slot_cannot_change_owned_reference", [] {
++        world.reuse_borrowed_process = true; Peer peer; reader_acquired(peer);
++        require(world.object(world.process_sentinel)->kind == Kind::Event &&
++            GetProcessId(peer.state_->original_service_reader.value) == World::server, "borrowed slot reuse changed duplicate object");
++    });
++    add("reused_borrowed_token_slot_cannot_change_owned_reference", [] {
++        world.reuse_borrowed_token = true; Peer peer; reader_acquired(peer);
++        require(world.object(world.token_sentinel)->kind == Kind::Event &&
++            world.object(peer.state_->original_service_token.value)->kind == Kind::Token, "borrowed token reuse changed duplicate object");
++    });
++    for (unsigned i = 1; i <= 6; ++i) for (bool token : {false,true}) add(
++        std::string(token ? "token" : "process") + "_zero_extended_32bit_pseudo_" + std::to_string(i), [i,token] {
++            const std::uint64_t pseudo = UINT32_MAX - i + 1ULL;
++            if (token) world.grant.child_local_token = pseudo; else world.grant.child_local_handle = pseudo;
++            Peer peer; reader_refused(peer); require(world.duplicates == 0, "zero-extended pseudo duplicated");
++        });
++    for (unsigned duplicate = 1; duplicate <= 2; ++duplicate) add("local_duplicate_failure_" + std::to_string(duplicate), [duplicate] {
++        world.duplicate_fail_at = duplicate; Peer peer; reader_refused(peer);
++        require(world.observations == 0, "partial duplicate reached authority");
++    });
++    for (unsigned duplicate = 1; duplicate <= 2; ++duplicate) add("cancel_after_local_duplicate_" + std::to_string(duplicate), [duplicate] {
++        world.cancel_on_duplicate = duplicate; Peer peer; reader_refused(peer);
++    });
++    add("cancel_after_binding_drops_owned_duplicates", [] {
++        Peer peer; attach(peer); world.cancel_on_poll = 6;
++        require(!peer.state_->acquireOriginalReader() && world.duplicates == 2, "after-binding cancellation fixture missed boundary");
++        transport_dropped(peer);
++    });
++    add("kernel_capture_duplicate_failure_drops_acquired_reader", [] {
++        world.duplicate_fail_at = 3; Peer peer; reader_refused(peer);
++        require(world.duplicates == 3 && world.observations == 0, "actual kernel capture failure was bypassed");
++    });
++    add("disconnected_original_pipe_refused_by_actual_kernel_capture", [] {
++        world.pipe_alive = false; Peer peer; reader_refused(peer);
++        require(world.duplicates == 3 && world.observations == 0, "actual connected-kernel postcheck was bypassed");
++    });
++    add("exited_server_object_cannot_qualify_reader", [] {
++        world.object(world.process_sentinel)->signaled = true; Peer peer; reader_refused(peer);
++        require(world.observations == 0, "exited server reached authority");
++    });
++    add("short_request_never_retries", [] { world.short_write = true; Peer peer; reader_refused(peer); require(world.reads == 0, "short write retried"); });
++    add("short_reply_closes_only_local_pipe", [] { world.short_read = true; Peer peer; reader_refused(peer); require(world.duplicates == 0, "short reply used handles"); });
++    add("cancel_after_reply_closes_only_local_pipe", [] { world.cancelled_after_read = true; Peer peer; reader_refused(peer); require(world.duplicates == 0, "cancelled reply used handles"); });
++    add("pending_request_cancel_joins_before_pipe_close", [] {
++        world.pending_write = world.cancel_wait = true; Peer peer; reader_refused(peer);
++        require(world.cancel_requests == 1 && world.incomplete_polls >= 3 && world.reads == 0, "pending write did not physically join");
+     });
+-    std::cout << "{\"schema\":\"metaengine.guardian.original-reader-ownership.synthetic-tests.v1\",\"passed\":"
+-        << passed << ",\"failed\":" << failed << ",\"windows\":\"NOT RUN\",\"positive_transfer_proven\":false,"
+-        "\"kernel_provenance_proven\":false,\"authority_effect\":false}\n";
+-    return failed ? 1 : 0;
++    add("pending_request_timeout_joins_before_pipe_close", [] {
++        world.pending_write = world.timeout_wait = true; Peer peer; reader_refused(peer);
++        require(world.cancel_requests == 1 && world.incomplete_polls >= 3 && world.reads == 0, "timed out write did not physically join");
++    });
++    add("late_request_completion_strands_no_more_than_two_seeds", [] {
++        world.pending_write = world.cancel_wait = world.late_write = world.legitimate_sender = true;
++        Peer peer; reader_refused(peer);
++        require(world.cancel_requests == 1 && world.transferred == 2 && world.seed_slots() == 2 && world.reads == 0,
++            "late request completion exceeded seed budget or was treated as accepted");
++    });
++    add("pending_reply_cancel_joins_before_pipe_close", [] {
++        world.pending_read = world.cancel_wait = true; Peer peer; reader_refused(peer);
++        require(world.cancel_requests == 1 && world.incomplete_polls >= 3 && world.duplicates == 0, "pending reply did not join");
++    });
++    add("pending_result_error_still_joins_original_operation", [] {
++        world.pending_read = world.get_result_fails_once = true; Peer peer; reader_refused(peer);
++        require(world.cancel_requests == 1 && world.incomplete_polls >= 3 && world.duplicates == 0, "completion error skipped join");
++    });
++    add("pending_reply_success_produces_only_owned_duplicates", [] { world.pending_read = true; Peer peer; reader_acquired(peer); });
++    add("changed_pipe_server_after_transfer_refused", [] { world.server_changed = true; Peer peer; reader_refused(peer); require(world.observations == 0, "changed server reached authority"); });
++    add("changed_pipe_client_after_transfer_refused", [] { world.client_changed = true; Peer peer; reader_refused(peer); require(world.observations == 0, "changed client reached authority"); });
++    add("service_birth_mismatch_refused", [] { ++world.grant.service_birth; Peer peer; reader_refused(peer); require(world.observations == 0, "birth mismatch reached authority"); });
++    add("child_birth_mismatch_refused", [] { ++world.grant.child_birth; Peer peer; reader_refused(peer); require(world.observations == 0, "child mismatch reached authority"); });
++    add("rng_failure_spends_process_budget_without_transfer", [] {
++        world.rng_ok = false;
++        { Peer peer; reader_refused(peer); }
++        world.rng_ok = true;
++        { Peer peer; reader_refused(peer); }
++        require(world.no_transfer(), "failed request correlation allowed a second process attempt");
++    });
++    add("successful_acquisition_cannot_be_replayed", [] {
++        Peer peer; reader_acquired(peer);
++        require(!peer.state_->acquireOriginalReader(), "reader acquisition replay succeeded");
++        transport_dropped(peer); require(world.writes == 1 && world.reads == 1, "reader replay emitted another request");
++    });
++    add("authority_observation_allocation_exception_drops_transport", [] {
++        world.observe_throws = true; Peer peer; reader_refused(peer);
++        require(world.observations == 1, "exception fixture never reached independent observation");
++    });
++    add("kernel_image_allocation_exception_drops_transport", [] { world.image_throws = true; Peer peer; reader_refused(peer); });
++    add("diagnostic_allocation_exception_still_drops_transport", [] {
++        world.diagnostic_throws = true; world.grant.child_local_handle = World::key(world.event_sentinel);
++        Peer peer; reader_refused(peer); require(world.diagnostics_failed == 1, "actual diagnostic assignment did not throw");
++    });
++    add("recheck_failure_drops_previously_acquired_transport", [] {
++        Peer peer; reader_acquired(peer); require(!peer.recheckOriginalNativeHostAuthority(), "synthetic recheck forged authority"); transport_dropped(peer);
++    });
++    add("recheck_exception_drops_previously_acquired_transport", [] {
++        Peer peer; reader_acquired(peer); world.observe_throws = true;
++        require(!peer.recheckOriginalNativeHostAuthority(), "exceptional recheck succeeded"); transport_dropped(peer);
++    });
++    add("final_fence_failure_drops_previously_acquired_transport", [] {
++        Peer peer; reader_acquired(peer); require(!peer.originalNativeHostFinalFence(), "synthetic final fence forged authority"); transport_dropped(peer);
++    });
++    return result;
++}
++int main(int argc, char** argv) {
++    const auto all = cases();
++    if (argc == 2 && std::string(argv[1]) == "--list") { for (const auto& item : all) std::cout << item.name << '\n'; return 0; }
++    if (argc != 2) return 2;
++    for (const auto& item : all) if (item.name == argv[1]) {
++        world.reset();
++        try {
++            item.function();
++            require(world.sentinels_open() && world.closes_foreign == 0 && world.closes_invalid == 0,
++                "unowned sentinel, seed or pseudo handle was closed");
++            require(world.close_source == 0 && world.all_peer_handles_closed(), "receiver closed source or leaked its own handles");
++            require(world.closes_while_pending == 0 && world.pending.empty(), "pipe/event closed before original I/O completion");
++            require(world.transferred <= 2 && world.seed_slots() <= 2, "unbounded process-lifetime seeds");
++            std::cout << "{\"case\":\"" << item.name << "\",\"state\":\"PASS\"}\n"; return 0;
++        } catch (const std::exception& error) {
++            std::cout << "{\"case\":\"" << item.name << "\",\"state\":\"FAIL\",\"reason\":\"" << error.what() << "\"}\n"; return 1;
++        }
++    }
++    return 2;
+ }
+diff --git a/apps/metaengine-browser/test/native/browser-guardian-original-reader-transfer-composition-model.cpp b/apps/metaengine-browser/test/native/browser-guardian-original-reader-transfer-composition-model.cpp
+new file mode 100644
+index 0000000..5f86c8b
+--- /dev/null
++++ b/apps/metaengine-browser/test/native/browser-guardian-original-reader-transfer-composition-model.cpp
+@@ -0,0 +1,551 @@
++// Actual transport bodies + synthetic two-table Win32 model. Policy, native
++// identity, SCM, loaded code and device signatures are independent test seams.
++// Protocol failure is not process exit, public HOLD, or native cleanup proof.
++#include "browser-guardian-original-reader-transfer.hpp"
++#include "browser-guardian-original-main-entry-protocol.hpp"
++#include <algorithm>
++#include <array>
++#include <atomic>
++#include <cstdint>
++#include <cstring>
++#include <functional>
++#include <iostream>
++#include <map>
++#include <memory>
++#include <mutex>
++#include <set>
++#include <stdexcept>
++#include <string>
++#include <thread>
++#include <tuple>
++#include <utility>
++#include <vector>
++
++using HANDLE = void*;
++using DWORD = std::uint32_t;
++using ULONG = std::uint32_t;
++using BOOL = int;
++using ULONGLONG = std::uint64_t;
++using PUCHAR = unsigned char*;
++#define INVALID_HANDLE_VALUE reinterpret_cast<HANDLE>(UINTPTR_MAX)
++#define BCRYPT_SUCCESS(value) ((value) >= 0)
++constexpr BOOL TRUE = 1, FALSE = 0;
++constexpr DWORD ERROR_SUCCESS = 0, ERROR_ACCESS_DENIED = 5, ERROR_INVALID_HANDLE = 6, ERROR_NOT_ENOUGH_MEMORY = 8, ERROR_INVALID_DATA = 13;
++constexpr DWORD ERROR_BROKEN_PIPE = 109, ERROR_OPERATION_ABORTED = 995, ERROR_IO_INCOMPLETE = 996, ERROR_IO_PENDING = 997;
++constexpr DWORD ERROR_PIPE_CONNECTED = 535, WAIT_OBJECT_0 = 0, WAIT_TIMEOUT = 258, WAIT_FAILED = 0xffffffff;
++constexpr DWORD PROCESS_QUERY_INFORMATION = 0x400, PROCESS_VM_READ = 0x10, SYNCHRONIZE = 0x100000, TOKEN_QUERY = 8;
++constexpr DWORD PIPE_SERVER_END = 1, PIPE_TYPE_MESSAGE = 4, BCRYPT_USE_SYSTEM_PREFERRED_RNG = 2;
++constexpr DWORD DUPLICATE_CLOSE_SOURCE = 1;
++struct FILETIME { DWORD dwLowDateTime = 0, dwHighDateTime = 0; };
++struct LUID { DWORD LowPart = 0; int HighPart = 0; };
++struct TOKEN_STATISTICS { LUID TokenId; };
++constexpr int TokenStatistics = 10;
++struct OVERLAPPED { std::uintptr_t Internal = 0; HANDLE hEvent = nullptr; };
++#define HasOverlappedIoCompleted(op) ((op)->Internal != 0x103U)
++namespace rw = metaengine::guardian::original_reader_wire;
++namespace ew = metaengine::guardian::original_main_wire;
++static void require(bool value, const char* reason) { if (!value) throw std::runtime_error(reason); }
++
++enum class Side { Service, Child };
++enum class Kind { Process, Token, Event, Pipe };
++enum class Owner { Native, Seed, LocalCopy, Readback, Sentinel };
++struct Object {
++    Kind kind;
++    unsigned identity;
++    DWORD pid = 0;
++    std::uint64_t birth = 0;
++    LUID token{12, 7};
++    bool signaled = false;
++};
++struct Slot { std::shared_ptr<Object> object; DWORD access; Owner owner; unsigned generation; };
++struct Operation { bool pending = false, cancelled = false; DWORD bytes = 0, error = 0; Side side; unsigned polls = 0; };
++struct Table {
++    std::map<std::uintptr_t, Slot> slots;
++    std::map<std::uintptr_t, unsigned> generations;
++    std::uintptr_t next = 0x1000;
++};
++struct World {
++    static constexpr DWORD service_pid = 2042, child_pid = 1042;
++    static constexpr std::uint64_t child_birth = 134000000000000001ULL, service_birth = child_birth - 100;
++    Side side = Side::Service;
++    Table service, child;
++    unsigned identity = 0, last_error = 0;
++    std::shared_ptr<Object> service_process, child_process, service_token, connection;
++    bool pipe_open = true, child_alive = true;
++    bool pipe_scope = true, root_scope = true, policy_scope = true;
++    std::string scenario;
++    std::map<OVERLAPPED*, Operation> operations;
++    std::vector<std::uint8_t> request, reply;
++    std::vector<std::string> events;
++    std::set<std::tuple<Side, std::uintptr_t, unsigned>> closed;
++    std::function<bool()> dispatch, complete_sender_write;
++    std::function<void()> before_local_process, after_local_process, after_local_token;
++    unsigned seed_attempts = 0, seeds_created = 0, local_dups = 0, remote_closes = 0;
++    unsigned foreign_closes = 0, invalid_closes = 0, process_exits = 0, seed_reclaims = 0;
++    unsigned request_writes = 0, joins = 0;
++    HANDLE process_seed = nullptr, token_seed = nullptr, sentinel = nullptr;
++    bool pending_child_cancel = false, sender_result = true, wrong_readback_used = false;
++    HANDLE child_cancel = nullptr;
++
++    explicit World(std::string name) : scenario(std::move(name)) {
++        service_process = object(Kind::Process, service_pid, service_birth);
++        child_process = object(Kind::Process, child_pid, child_birth);
++        service_token = object(Kind::Token);
++        connection = object(Kind::Pipe);
++    }
++    std::shared_ptr<Object> object(Kind kind, DWORD pid = 0, std::uint64_t birth = 0) {
++        return std::make_shared<Object>(Object{kind, ++identity, pid, birth, {12, 7}, false});
++    }
++    Table& table(Side which) { return which == Side::Service ? service : child; }
++    static std::uintptr_t number(HANDLE handle) { return reinterpret_cast<std::uintptr_t>(handle); }
++    HANDLE add(Side which, std::shared_ptr<Object> object, DWORD access, Owner owner, std::uintptr_t at = 0) {
++        auto& t = table(which);
++        if (!at) { at = t.next; t.next += 4; }
++        require(!t.slots.contains(at), "slot allocation collided");
++        t.slots.emplace(at, Slot{std::move(object), access, owner, ++t.generations[at]});
++        return reinterpret_cast<HANDLE>(at);
++    }
++    Slot* slot(Side which, HANDLE handle) {
++        auto& slots = table(which).slots;
++        const auto found = slots.find(number(handle));
++        return found == slots.end() ? nullptr : &found->second;
++    }
++    std::shared_ptr<Object> get(Side which, HANDLE handle) {
++        if (handle == INVALID_HANDLE_VALUE) return which == Side::Service ? service_process : child_process;
++        const auto* found = slot(which, handle);
++        return found ? found->object : nullptr;
++    }
++    Side processTable(HANDLE process) {
++        const auto p = get(side, process);
++        require(p && p->kind == Kind::Process, "duplicate process table selector invalid");
++        return p->pid == child_pid ? Side::Child : Side::Service;
++    }
++    unsigned count(Side which, Owner owner) {
++        return static_cast<unsigned>(std::count_if(table(which).slots.begin(), table(which).slots.end(),
++            [owner](const auto& entry) { return entry.second.owner == owner; }));
++    }
++    void replaceBorrowed(HANDLE handle, bool reuse) {
++        auto& t = child;
++        require(t.slots.erase(number(handle)) == 1, "borrowed source absent before explicit child action");
++        events.push_back("child-closes-borrowed");
++        if (reuse) {
++            add(Side::Child, object(Kind::Event), SYNCHRONIZE, Owner::Sentinel, number(handle));
++            sentinel = handle;
++        }
++    }
++    void kernelExit() {
++        child_alive = false; child_process->signaled = true;
++        seed_reclaims += count(Side::Child, Owner::Seed);
++        child.slots.clear(); ++process_exits;
++        events.push_back("MODELED_OS_PROCESS_EXIT_TABLE_RETIREMENT");
++    }
++};
++static World* active = nullptr;
++static World& world() { require(active != nullptr, "model world absent"); return *active; }
++struct Context {
++    Side previous;
++    explicit Context(Side side) : previous(world().side) { world().side = side; }
++    ~Context() { world().side = previous; }
++};
++DWORD GetLastError() { return world().last_error; }
++HANDLE GetCurrentProcess() { return INVALID_HANDLE_VALUE; }
++DWORD GetCurrentProcessId() { return world().side == Side::Child ? World::child_pid : World::service_pid; }
++ULONGLONG GetTickCount64() { return 150; }
++BOOL CloseHandle(HANDLE handle) {
++    auto& w = world(); auto& t = w.table(w.side);
++    const auto found = t.slots.find(World::number(handle));
++    if (found == t.slots.end()) { ++w.invalid_closes; return FALSE; }
++    const auto& slot = found->second;
++    if (slot.owner == Owner::Seed || slot.owner == Owner::Sentinel) ++w.foreign_closes;
++    require(w.closed.emplace(w.side, World::number(handle), slot.generation).second, "owned slot generation closed twice");
++    if (slot.object->kind == Kind::Pipe && w.side == Side::Child) {
++        for (const auto& [operation, pending] : w.operations) {
++            (void)operation;
++            require(!pending.pending || pending.side != Side::Child, "receiver pipe closed before pending I/O joined");
++        }
++        w.pipe_open = false; w.events.push_back("receiver-pipe-close");
++    }
++    t.slots.erase(found); return TRUE;
++}
++HANDLE CreateEventW(void*, BOOL, BOOL signal, const wchar_t*) {
++    auto object = world().object(Kind::Event); object->signaled = signal;
++    return world().add(world().side, object, SYNCHRONIZE, Owner::Native);
++}
++BOOL SetEvent(HANDLE handle) { const auto object = world().get(world().side, handle); if (!object) return FALSE; object->signaled = true; return TRUE; }
++BOOL ResetEvent(HANDLE handle) { const auto object = world().get(world().side, handle); if (!object) return FALSE; object->signaled = false; return TRUE; }
++DWORD WaitForSingleObject(HANDLE handle, DWORD) {
++    const auto object = world().get(world().side, handle);
++    if (!object) return WAIT_FAILED;
++    return object->signaled ? WAIT_OBJECT_0 : WAIT_TIMEOUT;
++}
++DWORD WaitForMultipleObjects(DWORD count, const HANDLE* handles, BOOL all, DWORD) {
++    require(count == 2 && !all, "unexpected acquisition wait shape");
++    if (world().pending_child_cancel) { SetEvent(handles[0]); return WAIT_OBJECT_0; }
++    return WAIT_OBJECT_0 + 1;
++}
++void Sleep(DWORD) {}
++DWORD GetProcessId(HANDLE handle) { const auto object = world().get(world().side, handle); return object && object->kind == Kind::Process ? object->pid : 0; }
++BOOL GetProcessTimes(HANDLE handle, FILETIME* created, FILETIME*, FILETIME*, FILETIME*) {
++    const auto object = world().get(world().side, handle);
++    if (!object || object->kind != Kind::Process) return FALSE;
++    created->dwLowDateTime = static_cast<DWORD>(object->birth);
++    created->dwHighDateTime = static_cast<DWORD>(object->birth >> 32); return TRUE;
++}
++BOOL GetTokenInformation(HANDLE handle, int kind, void* output, DWORD bytes, DWORD* written) {
++    const auto object = world().get(world().side, handle);
++    if (!object || object->kind != Kind::Token || kind != TokenStatistics || bytes != sizeof(TOKEN_STATISTICS)) return FALSE;
++    *static_cast<TOKEN_STATISTICS*>(output) = {object->token}; *written = sizeof(TOKEN_STATISTICS); return TRUE;
++}
++BOOL OpenProcessToken(HANDLE process, DWORD rights, HANDLE* output) {
++    auto& w = world();
++    require(GetProcessId(process) == World::service_pid && rights == TOKEN_QUERY, "sender token must come from original self");
++    if (w.scenario == "sender_token_open_failure") return FALSE;
++    *output = w.add(w.side, w.service_token, TOKEN_QUERY, Owner::Native); return TRUE;
++}
++BOOL GetNamedPipeInfo(HANDLE, DWORD* flags, void*, void*, void*) { *flags = PIPE_TYPE_MESSAGE | (world().side == Side::Service ? PIPE_SERVER_END : 0); return world().pipe_open; }
++BOOL GetNamedPipeClientProcessId(HANDLE, ULONG* pid) { *pid = World::child_pid; return world().pipe_open; }
++BOOL GetNamedPipeServerProcessId(HANDLE, ULONG* pid) { *pid = World::service_pid; return world().pipe_open; }
++int BCryptGenRandom(void*, PUCHAR output, ULONG count, ULONG) { std::memset(output, 0x41, count); return 0; }
++BOOL DuplicateHandle(HANDLE source_process, HANDLE source, HANDLE target_process, HANDLE* output,
++    DWORD rights, BOOL inherit, DWORD flags) {
++    auto& w = world();
++    if (flags & DUPLICATE_CLOSE_SOURCE) { ++w.remote_closes; return FALSE; }
++    require(!inherit && !flags && output, "transfer must duplicate without closing source");
++    const Side from = w.processTable(source_process), to = w.processTable(target_process);
++    auto object = w.get(from, source);
++    if (from == Side::Service && to == Side::Child) {
++        ++w.seed_attempts;
++        const bool token = rights == TOKEN_QUERY;
++        const std::string phase = token ? "sender_token_seed_" : "sender_process_seed_";
++        if (w.scenario == phase + "failure") return FALSE;
++        if (!object) return FALSE;
++        *output = w.add(to, object, rights, Owner::Seed); ++w.seeds_created;
++        if (token) w.token_seed = *output; else w.process_seed = *output;
++        if (w.scenario == "sender_seed_reused_before_readback" && !token) w.replaceBorrowed(*output, true);
++        if (w.scenario == phase + "unknown") { *output = nullptr; return FALSE; }
++        return TRUE;
++    }
++    if (from == Side::Child && to == Side::Service && object) {
++        const bool token = rights == TOKEN_QUERY;
++        if ((!token && w.scenario == "sender_process_readback_wrong") || (token && w.scenario == "sender_token_readback_wrong")) {
++            object = w.object(token ? Kind::Token : Kind::Process, token ? 0 : 999, 1);
++            object->token.LowPart = 999;
++            w.wrong_readback_used = true;
++        }
++        *output = w.add(to, object, rights, Owner::Readback); return TRUE;
++    }
++    require(from == Side::Child && to == Side::Child, "unexpected duplication direction");
++    ++w.local_dups;
++    if (w.local_dups == 1 && w.before_local_process) w.before_local_process();
++    object = w.get(from, source);
++    if (!object || (w.local_dups == 1 && w.scenario == "local_process_dup_failure") ||
++        (w.local_dups == 2 && w.scenario == "local_token_dup_failure")) return FALSE;
++    require(rights == (w.local_dups == 1 ? rw::kRequiredAccess : TOKEN_QUERY), "receiver local-copy access widened");
++    *output = w.add(to, object, rights, Owner::LocalCopy);
++    if (w.local_dups == 1 && w.after_local_process) w.after_local_process();
++    if (w.local_dups == 2 && w.after_local_token) w.after_local_token();
++    return TRUE;
++}
++static void setOperation(OVERLAPPED* operation, bool pending, DWORD count, DWORD error = 0) {
++    operation->Internal = pending ? 0x103U : 0;
++    world().operations[operation] = {pending, false, count, error, world().side, 0};
++}
++BOOL ConnectNamedPipe(HANDLE, OVERLAPPED* operation) { setOperation(operation, false, 0); return TRUE; }
++BOOL WriteFile(HANDLE, void* bytes, DWORD count, DWORD* done, OVERLAPPED* operation) {
++    auto& w = world();
++    if (w.side == Side::Child) {
++        ++w.request_writes;
++        w.request.assign(static_cast<std::uint8_t*>(bytes), static_cast<std::uint8_t*>(bytes) + count);
++        if (w.scenario != "cancel_pending_request") {
++            Context sender(Side::Service); w.sender_result = w.dispatch();
++        }
++        if (w.scenario == "cancel_pending_request" || w.scenario == "unknown_late_write") {
++            setOperation(operation, true, count); w.pending_child_cancel = true; w.last_error = ERROR_IO_PENDING; return FALSE;
++        }
++        setOperation(operation, false, count); *done = count; return TRUE;
++    }
++    const DWORD published = w.scenario == "sender_partial_write" ? 8 : count;
++    w.reply.assign(static_cast<std::uint8_t*>(bytes), static_cast<std::uint8_t*>(bytes) + published);
++    if (w.scenario == "sender_failed_write") { w.reply.clear(); w.last_error = ERROR_BROKEN_PIPE; setOperation(operation, false, 0, ERROR_BROKEN_PIPE); return FALSE; }
++    const bool pending = w.scenario == "unknown_late_write";
++    setOperation(operation, pending, published); *done = published;
++    if (pending) { w.last_error = ERROR_IO_PENDING; return FALSE; }
++    return TRUE;
++}
++BOOL ReadFile(HANDLE, void* bytes, DWORD count, DWORD* done, OVERLAPPED* operation) {
++    auto& w = world();
++    if (w.side == Side::Service) { setOperation(operation, true, 0); w.last_error = ERROR_IO_PENDING; return FALSE; }
++    if (w.scenario == "cancel_pending_reply") {
++        setOperation(operation, true, 0); w.pending_child_cancel = true; w.last_error = ERROR_IO_PENDING; return FALSE;
++    }
++    if (w.scenario == "peer_close_during_reply" || w.reply.empty()) { w.last_error = ERROR_BROKEN_PIPE; return FALSE; }
++    if (w.complete_sender_write) { Context sender(Side::Service); w.complete_sender_write(); }
++    rw::Grant grant;
++    if (w.reply.size() == rw::kReplyBytes && rw::decode(w.reply.data(), w.reply.size(), &grant)) {
++        if (w.scenario == "forged_process_event" || w.scenario == "forged_token_event") {
++            w.sentinel = w.add(Side::Child, w.object(Kind::Event), SYNCHRONIZE, Owner::Sentinel);
++            if (w.scenario == "forged_process_event") grant.child_local_handle = World::number(w.sentinel);
++            else grant.child_local_token = World::number(w.sentinel);
++            const auto encoded = rw::encode(grant); w.reply.assign(encoded.begin(), encoded.end());
++        }
++    }
++    const DWORD got = std::min(count, static_cast<DWORD>(w.reply.size()));
++    std::memcpy(bytes, w.reply.data(), got); *done = got; setOperation(operation, false, got); return TRUE;
++}
++BOOL GetOverlappedResult(HANDLE, OVERLAPPED* operation, DWORD* done, BOOL) {
++    auto& w = world(); auto& record = w.operations[operation];
++    if (record.pending && record.cancelled && ++record.polls >= 3) {
++        record.pending = false; record.error = ERROR_OPERATION_ABORTED; operation->Internal = 0;
++        ++w.joins; w.events.push_back(record.side == Side::Child ? "receiver-io-join" : "sender-io-join");
++    }
++    if (record.pending) { w.last_error = ERROR_IO_INCOMPLETE; return FALSE; }
++    *done = record.bytes;
++    if (record.error) { w.last_error = record.error; return FALSE; }
++    return TRUE;
++}
++BOOL CancelIoEx(HANDLE, OVERLAPPED* operation) { world().operations[operation].cancelled = true; return TRUE; }
++
++namespace metaengine::guardian {
++#include "actual-reader-once.inc.hpp"
++#include "actual-reader-handle.inc.hpp"
++#include "actual-pipe-join.inc.hpp"
++static std::uint64_t ticks(const FILETIME& value) { return (std::uint64_t(value.dwHighDateTime) << 32) | value.dwLowDateTime; }
++static std::uint64_t birth(HANDLE value) { FILETIME c{}, e{}, k{}, u{}; return GetProcessTimes(value, &c, &e, &k, &u) ? ticks(c) : 0; }
++namespace wire = original_main_wire;
++namespace reader_wire = original_reader_wire;
++constexpr ULONGLONG kHelloDeadlineMs = 30000;
++struct Admission { bool stopped() const { return false; } };
++struct Ledger { bool live = true; void revoke() { live = false; } bool held() const { return live; } std::uint64_t serial() const { return 7; } };
++struct Policy { bool finalClockFence() { return world().policy_scope; } };
++struct Pipe {
++    Handle owned{world().add(Side::Service, world().connection, 0, Owner::Native)};
++    HANDLE handle() const { return owned.value; }
++};
++struct Sender {
++    enum class PipeStage { Connect, Read, Write };
++    std::mutex lock;
++    std::atomic<bool> revoked{false};
++    Admission admission_object; const Admission* admission = &admission_object;
++    Handle stop{CreateEventW(nullptr, TRUE, FALSE, nullptr)}, cancel{CreateEventW(nullptr, TRUE, FALSE, nullptr)};
++    Handle original_process{world().add(Side::Service, world().child_process, 0, Owner::Native)};
++    std::unique_ptr<Pipe> pipe = std::make_unique<Pipe>();
++    Handle pipe_event{CreateEventW(nullptr, TRUE, FALSE, nullptr)};
++    OVERLAPPED pipe_io{};
++    PipeStage pipe_stage = PipeStage::Read;
++    bool pipe_pending = false, pipe_ready = false, hello = false, hello_reply_completed = false;
++    bool initial_fence_pending = false, initial_fence_completed = false;
++    wire::Sequence sequence;
++    reader_wire::Once reader_once;
++    bool reader_granted = false;
++    std::uint8_t reader_seed_duplicate_attempts = 0, reader_seed_insertions_observed = 0;
++    Handle reader_process_readback, reader_service_token, reader_token_readback;
++    std::array<std::uint8_t, wire::kRequestBytes> request{};
++    std::array<std::uint8_t, wire::kReplyBytes> reply{};
++    std::array<std::uint8_t, 32> policy_digest{};
++    ULONGLONG created_tick = 100;
++    DWORD pid = World::child_pid, guardian_pid = World::service_pid;
++    std::uint64_t born = World::child_birth, guardian_born = World::service_birth;
++    Ledger ledger;
++    std::vector<unsigned> images{1, 2, 3};
++    std::unique_ptr<Policy> policy = std::make_unique<Policy>();
++    struct Status { DWORD win32_error = 0; std::string reason; bool original_create_event_held = true,
++        entry_connection_held = true, hello_reply_written = false, initial_fence_reply_written = false; } status;
++    Sender() { policy_digest.fill(0x41); }
++#include "actual-sender-cancel-fail.inc.hpp"
++    // These independent native boundaries deliberately do not consult wire
++    // assertions. Their implementations and Windows qualification are external.
++    bool originalAlive() { return world().child_alive && !cancelled(); }
++    bool pipeIdentity() { return world().pipe_scope && world().pipe_open && originalAlive(); }
++    bool completedFence() { return world().root_scope && world().policy_scope && originalAlive(); }
++    bool lease() { return world().policy_scope && !cancelled(); }
++    bool requesterSessionCurrent() { return world().root_scope; }
++    void publish() {}
++#include "actual-sender-arm.inc.hpp"
++#include "actual-sender-pump.inc.hpp"
++};
++struct Receiver {
++    Handle cancelled{CreateEventW(nullptr, TRUE, FALSE, nullptr)};
++    Handle pipe{world().add(Side::Child, world().connection, 0, Owner::Native)};
++    Handle server_process, original_service_reader, original_service_token;
++    std::unique_ptr<int> loaded_images;
++    original_reader_wire::Once reader_once;
++    original_reader_wire::Grant reader_grant;
++    bool reader_bound = false, observation_revoked = false;
++    bool kernel_exact = false, scm_exact = false, package_bound = false;
++    bool current_release_policy_bound = false, bounded_loaded_image_observed = false;
++    bool guardian_compatibility_preserved = false;
++    std::string account, source_sha, installed_guardian_source_sha, installed_guardian_manifest_sha256, reason;
++    DWORD error = 0;
++    struct ReleaseWindow { void invalidate() {} } release_window;
++#include "actual-reader-fail.inc.hpp"
++#include "actual-reader-acquire.inc.hpp"
++};
++} // namespace metaengine::guardian
++
++using Sender = metaengine::guardian::Sender;
++using Receiver = metaengine::guardian::Receiver;
++struct Fixture {
++    World data;
++    std::unique_ptr<Sender> sender;
++    std::unique_ptr<Receiver> receiver;
++    explicit Fixture(const std::string& name) : data(name) {
++        require(!active, "nested model world"); active = &data;
++        { Context service(Side::Service); sender = std::make_unique<Sender>(); }
++        { Context child(Side::Child); receiver = std::make_unique<Receiver>(); data.child_cancel = receiver->cancelled.value; }
++        data.dispatch = [&] {
++            require(data.request.size() == sender->request.size(), "queued request size changed");
++            std::copy(data.request.begin(), data.request.end(), sender->request.begin());
++            sender->pipe_pending = false; sender->pipe_ready = true; sender->pipe_stage = Sender::PipeStage::Read;
++            setOperation(&sender->pipe_io, false, static_cast<DWORD>(data.request.size()));
++            return sender->pumpPipe();
++        };
++        data.complete_sender_write = [&] { return sender->pumpPipe(); };
++        configure();
++    }
++    ~Fixture() {
++        { Context child(Side::Child); receiver.reset(); }
++        { Context service(Side::Service);
++          if (sender && sender->pipe_pending) {
++              metaengine::guardian::cancelAndJoinGuardianPipeIo(sender->pipe->handle(), &sender->pipe_io);
++              sender->pipe_pending = false;
++          }
++          sender.reset(); }
++        active = nullptr;
++    }
++    void configure() {
++        const auto& name = data.scenario;
++        if (name == "process_seed_closed_before_local_dup" || name == "process_seed_reused_before_local_dup")
++            data.before_local_process = [&] { data.replaceBorrowed(data.process_seed, name == "process_seed_reused_before_local_dup"); };
++        if (name == "token_seed_closed_before_local_dup" || name == "token_seed_reused_before_local_dup")
++            data.after_local_process = [&] { data.replaceBorrowed(data.token_seed, name == "token_seed_reused_before_local_dup"); };
++        if (name == "process_seed_reused_after_local_dup" || name == "reuse_then_cancel_after_local_dup")
++            data.after_local_process = [&] {
++                data.replaceBorrowed(data.process_seed, true);
++                if (name == "reuse_then_cancel_after_local_dup") SetEvent(data.child_cancel);
++            };
++        if (name == "token_seed_reused_after_local_dup") data.after_local_token = [&] { data.replaceBorrowed(data.token_seed, true); };
++        if (name == "late_hello_after_revoke") data.after_local_process = [&] { SetEvent(data.child_cancel); };
++        if (name == "independent_pipe_scope_refused") data.pipe_scope = false;
++        if (name == "independent_root_scope_refused") data.root_scope = false;
++        if (name == "independent_policy_refused") data.policy_scope = false;
++        if (name == "cancel_before_acquire") { Context child(Side::Child); SetEvent(data.child_cancel); }
++    }
++    bool acquire() { Context child(Side::Child); return receiver->acquireOriginalReader(); }
++    void closeReceiver() { Context child(Side::Child); receiver.reset(); }
++    void exitThroughModeledOs() { data.kernelExit(); }
++};
++
++static void runCase(const std::string& name) {
++    if (name == "atomic_process_budget") {
++        std::atomic<unsigned> winners{0}; std::vector<std::thread> threads;
++        for (unsigned i = 0; i < 32; ++i) threads.emplace_back([&] {
++            if (metaengine::guardian::beginOriginalReaderTransfer()) winners.fetch_add(1);
++        });
++        for (auto& thread : threads) thread.join();
++        require(winners.load() == 1 && !metaengine::guardian::beginOriginalReaderTransfer(), "process-wide native gate admitted multiple threads");
++        return;
++    }
++    Fixture f(name);
++    const bool okay = f.acquire();
++    const bool expected = name == "original_pair" || name == "entry_hello_after_reader" ||
++        name == "process_seed_reused_after_local_dup" || name == "token_seed_reused_after_local_dup" ||
++        name == "same_peer_double_acquire" || name == "second_peer_process_budget" || name == "peer_crash_modeled_os_exit";
++    require(okay == expected, "unexpected actual receiver acquisition result");
++    require(f.data.seed_attempts <= 2 && f.sender->reader_seed_duplicate_attempts <= 2 && f.data.seeds_created <= 2,
++        "original sender exceeded its fixed two seed budget");
++    require(f.sender->reader_seed_insertions_observed <= f.sender->reader_seed_duplicate_attempts,
++        "observed insert count claims unknown effects absent");
++    if (okay) {
++        require(f.receiver->reader_bound, "actual receiver did not bind owned copies");
++        auto* process = f.data.slot(Side::Child, f.receiver->original_service_reader.value);
++        auto* token = f.data.slot(Side::Child, f.receiver->original_service_token.value);
++        require(process && token && process->owner == Owner::LocalCopy && token->owner == Owner::LocalCopy,
++            "receiver adopted a borrowed numeric seed");
++        require(process->object == f.data.service_process && token->object == f.data.service_token,
++            "owned copies lost original object identity");
++        require(process->access == rw::kRequiredAccess && token->access == TOKEN_QUERY, "owned-copy access changed");
++    } else {
++        require(f.receiver->observation_revoked && !f.receiver->reader_bound && !f.receiver->pipe.valid(),
++            "failed receiver kept a live pipe or authorization facts");
++        require(f.data.count(Side::Child, Owner::LocalCopy) == 0, "partial receiver copies leaked");
++        require(f.data.child_alive && !f.data.process_exits, "receiver false was incorrectly treated as child exit");
++    }
++    if (f.data.sentinel) {
++        const auto* sentinel = f.data.slot(Side::Child, f.data.sentinel);
++        require(sentinel && sentinel->owner == Owner::Sentinel, "borrowed slot reuse closed unrelated sentinel");
++    }
++    if (name == "entry_hello_after_reader") {
++        const auto request = ew::encode(ew::Request{ew::Operation::Hello, 1});
++        f.data.request.assign(request.begin(), request.end());
++        { Context service(Side::Service); require(f.data.dispatch(), "actual sender rejected entry Hello after reader"); }
++        ew::Reply reply;
++        require(ew::decode(f.data.reply.data(), f.data.reply.size(), &reply) && reply.sequence == 1 && f.sender->hello,
++            "actual entry wire response missing");
++        require(f.data.seeds_created == 2, "entry Hello reissued seed handles");
++    }
++    if (name == "same_peer_double_acquire") {
++        const auto writes = f.data.request_writes;
++        require(!f.acquire() && f.data.request_writes == writes, "same peer retried transfer");
++    }
++    if (name == "second_peer_process_budget") {
++        const auto writes = f.data.request_writes;
++        { Context child(Side::Child); Receiver second;
++          require(!second.acquireOriginalReader() && second.reason == "ORIGINAL_READER_PROCESS_TRANSFER_ALREADY_ATTEMPTED",
++              "second native peer bypassed process lifetime budget"); }
++        require(f.data.request_writes == writes && f.data.seeds_created == 2, "second peer requested more seeds");
++    }
++    if (name == "late_hello_after_revoke" || name == "unknown_late_write") {
++        const auto attempts = f.data.seed_attempts;
++        { Context service(Side::Service); f.sender->fail("TEST_RECEIVER_PIPE_BREAK_OBSERVED");
++          const auto hello = ew::encode(ew::Request{ew::Operation::Hello, 1});
++          f.data.request.assign(hello.begin(), hello.end());
++          require(!f.data.dispatch(), "late entry bytes revived revoked sender"); }
++        require(f.data.seed_attempts == attempts && !f.sender->hello && !f.sender->status.hello_reply_written,
++            "late acknowledgement reissued or resurrected sender status");
++    }
++    if (name == "sender_process_readback_wrong" || name == "sender_token_readback_wrong")
++        require(f.data.wrong_readback_used && f.sender->revoked.load(), "sender readback mismatch was not exercised");
++    if (name == "cancel_pending_request" || name == "cancel_pending_reply" || name == "unknown_late_write") {
++        const auto joined = std::find(f.data.events.begin(), f.data.events.end(), "receiver-io-join");
++        const auto close = std::find(f.data.events.begin(), f.data.events.end(), "receiver-pipe-close");
++        require(joined != f.data.events.end() && close != f.data.events.end() && joined < close,
++            "receiver released endpoint before actual pending-I/O helper completed");
++    }
++    require(f.data.remote_closes == 0 && f.data.foreign_closes == 0 && f.data.invalid_closes == 0,
++        "protocol closed a borrowed, remote-source, or invalid slot");
++    if (name == "peer_crash_modeled_os_exit") {
++        const auto closes_before_crash = f.data.closed.size();
++        require(f.data.count(Side::Child, Owner::Seed) == 2 && f.data.count(Side::Child, Owner::LocalCopy) == 2,
++            "crash scenario did not hold both seeds and owned copies");
++        f.exitThroughModeledOs();
++        // A crashed process executes no C++ destructor. Retire the fixture's
++        // inert wrapper memory without invoking any simulated CloseHandle.
++        f.receiver->cancelled.value = f.receiver->pipe.value = f.receiver->server_process.value = INVALID_HANDLE_VALUE;
++        f.receiver->original_service_reader.value = f.receiver->original_service_token.value = INVALID_HANDLE_VALUE;
++        f.receiver.reset();
++        require(f.data.child.slots.empty() && f.data.seed_reclaims == 2 && f.data.closed.size() == closes_before_crash,
++            "modeled crash was incorrectly credited to a C++ cleanup callback");
++        return;
++    }
++    f.closeReceiver();
++    require(f.data.count(Side::Child, Owner::LocalCopy) == 0, "owned copies survived receiver destruction");
++    const auto seeds = f.data.count(Side::Child, Owner::Seed);
++    require(f.data.child_alive && f.data.process_exits == 0, "local cleanup claimed native process death");
++    // This is explicitly a modeled OS exit, not a C++ callback, native drain,
++    // public response, durable recovery completion, or Windows qualification.
++    f.exitThroughModeledOs();
++    require(f.data.child.slots.empty() && f.data.seed_reclaims == seeds, "process exit failed to retire original table");
++}
++
++int main(int argc, char** argv) {
++    if (argc != 2) return 2;
++    try {
++        runCase(argv[1]);
++        std::cout << "{\"case\":\"" << argv[1] << "\",\"state\":\"PASS\",\"Windows\":\"NOT RUN\","
++            "\"authority\":\"SYNTHETIC_BOUNDARIES_NOT_QUALIFIED\"}\n";
++        return 0;
++    } catch (const std::exception& error) {
++        std::cerr << argv[1] << ": " << error.what() << '\n';
++        return 1;
++    }
++}
+diff --git a/apps/metaengine-browser/test/native/guardian-original-main-host-fixture/host-fixture.cpp b/apps/metaengine-browser/test/native/guardian-original-main-host-fixture/host-fixture.cpp
+index 17fd688..8ba1a87 100644
+--- a/apps/metaengine-browser/test/native/guardian-original-main-host-fixture/host-fixture.cpp
++++ b/apps/metaengine-browser/test/native/guardian-original-main-host-fixture/host-fixture.cpp
+@@ -7,11 +7,16 @@
+ #include <windows.h>
+ 
+ #include <array>
++#include <condition_variable>
+ #include <cstring>
++#include <exception>
+ #include <iostream>
+ #include <memory>
++#include <mutex>
++#include <new>
+ #include <stdexcept>
+ #include <string>
++#include <thread>
+ #include <utility>
+ #include <vector>
+ 
+@@ -42,12 +47,17 @@ HANDLE main_handle = nullptr, thread_handle = nullptr, guardian_handle = nullptr
+ HANDLE kernel_module = nullptr;
+ int create_calls = 0, connect_calls = 0, facts_calls = 0, rechecks = 0, authority_final_fences = 0;
+ int cancel_requests = 0, reads = 0, writes = 0, cancel_io_calls = 0, join_polls = 0, waits = 0, sleeps = 0;
+-int closed_while_pending = 0;
++    int closed_while_pending = 0, close_calls = 0, pipe_closes = 0, queries_after_pipe_close = 0;
++    bool closed_during_unwind = false;
+ int fail_read_sequence = 0; bool admitted_during_initial_fence = false;
+ bool cancel_in_create = false, cancel_in_connect = false, expire_after_ack = false, monotonic_after_ack = false;
+ bool guardian_exit_after_ack = false, oversized_reply = false, short_reply = false;
+ bool wrong_tuple = false, wrong_policy = false, replay_reply = false, serial_regression = false;
+-enum class PendingMode { None, Cancel, Timeout, ResultFailure, Success };
++    bool throw_in_create = false, throw_in_connect = false, throw_in_recheck = false, revoke_in_peek = false;
++    std::mutex peek_gate;
++    std::condition_variable peek_condition;
++    bool block_next_peek = false, peek_entered = false, release_peek = false;
++    enum class PendingMode { None, Cancel, Timeout, ResultFailure, Success, LateSuccess };
+ PendingMode pending_mode = PendingMode::None;
+ OVERLAPPED* pending_operation = nullptr;
+ DWORD pending_length = 0;
+@@ -95,6 +105,17 @@ void refusedAndSticky() {
+     require(!Host::mountBeforeAppCode() && !Host::peerObservationAdmitted(), "late adoption or reconnect occurred");
+     require(connect_calls == prior_connections, "reconnected after original scope loss");
+ }
++    void retired() {
++        require(close_calls == 1 && pipe_closes == 1 && pipe_handle->closed && !pipe_object->connected,
++            "original authority endpoint was not retired exactly once");
++        require(!pending && !closed_while_pending && main_object->alive,
++            "retirement closed pending I/O or claimed original Main exit");
++        const auto old_queries = queries_after_pipe_close;
++        Host::revoke(); Host::revoke();
++        refusedAndSticky();
++        require(close_calls == 1 && pipe_closes == 1 && queries_after_pipe_close == old_queries,
++            "late cancellation reused a closed pipe or retired twice");
++    }
+ } // namespace fixture
+ 
+ HANDLE GetCurrentProcess() { return fixture::main_handle; }
+@@ -114,9 +135,13 @@ BOOL DuplicateHandle(HANDLE, HANDLE source, HANDLE, HANDLE* output, DWORD, BOOL,
+ }
+ BOOL CloseHandle(HANDLE handle) {
+     if (!fixture::valid(handle)) return FALSE;
+-    if (fixture::pending && fixture::pending_operation && handle == fixture::pending_operation->hEvent) {
++    if (fixture::pending && fixture::pending_operation &&
++        (handle == fixture::pending_operation->hEvent || handle == fixture::pipe_handle)) {
+         ++fixture::closed_while_pending; return FALSE;
+     }
++    if (handle == fixture::pipe_handle) {
++        ++fixture::pipe_closes; handle->object->connected = false;
++    }
+     handle->closed = true; return TRUE;
+ }
+ HANDLE CreateEventW(void*, BOOL, BOOL initial, const wchar_t*) {
+@@ -141,13 +166,17 @@ DWORD WaitForSingleObject(HANDLE handle, DWORD) {
+ }
+ DWORD WaitForMultipleObjects(DWORD count, const HANDLE*, BOOL, DWORD) {
+     if (count != 2 || !fixture::pending) return WAIT_FAILED;
+-    if (fixture::pending_mode == fixture::PendingMode::Cancel) {
+-        fixture::Host::revoke(); return WAIT_OBJECT_0;
++    if (fixture::pending_mode == fixture::PendingMode::Cancel || fixture::pending_mode == fixture::PendingMode::LateSuccess) {
++        fixture::Host::revoke();
++        fixture::require(!fixture::pipe_handle->closed && !fixture::close_calls,
++            "reentrant cancellation closed beneath the active exchange");
++        return WAIT_OBJECT_0;
+     }
+     if (fixture::pending_mode == fixture::PendingMode::Timeout) return WAIT_TIMEOUT;
+     return WAIT_OBJECT_0 + 1;
+ }
+ DWORD GetFileType(HANDLE handle) {
++    if (handle == fixture::pipe_handle && handle->closed) ++fixture::queries_after_pipe_close;
+     return fixture::valid(handle) && handle->object->kind == ObjectKind::Pipe ? FILE_TYPE_PIPE : 0;
+ }
+ BOOL GetNamedPipeInfo(HANDLE handle, DWORD* flags, DWORD*, DWORD*, DWORD*) {
+@@ -167,6 +196,20 @@ BOOL GetNamedPipeClientProcessId(HANDLE handle, ULONG* pid) {
+     *pid = fixture::kMainPid; return TRUE;
+ }
+ BOOL PeekNamedPipe(HANDLE handle, void*, DWORD, DWORD*, DWORD*, DWORD*) {
++    if (fixture::revoke_in_peek) {
++        fixture::revoke_in_peek = false;
++        fixture::Host::revoke();
++        fixture::require(!fixture::pipe_handle->closed && !fixture::close_calls,
++            "reentrant revocation closed beneath the cheap pipe fence");
++    }
++    {
++        std::unique_lock<std::mutex> lock(fixture::peek_gate);
++        if (fixture::block_next_peek) {
++            fixture::block_next_peek = false; fixture::peek_entered = true;
++            fixture::peek_condition.notify_all();
++            fixture::peek_condition.wait(lock, [] { return fixture::release_peek; });
++        }
++    }
+     return fixture::valid(handle) && handle->object->connected;
+ }
+ void QueryInterruptTimePrecise(ULONGLONG* value) { *value = fixture::monotonic; }
+@@ -241,7 +284,11 @@ BOOL GetOverlappedResult(HANDLE, OVERLAPPED* operation, DWORD* transferred, BOOL
+         fixture::error = fixture::join_polls == 2 ? ERROR_INVALID_HANDLE : ERROR_IO_INCOMPLETE;
+         return FALSE; // Internal is STILL STATUS_PENDING, including failed API.
+     }
+-    fixture::pending = false; operation->Internal = 0xc0000120; // terminal cancellation status
++    fixture::pending = false;
++    if (fixture::pending_mode == fixture::PendingMode::LateSuccess) {
++        operation->Internal = 0; *transferred = fixture::pending_length; return TRUE;
++    }
++    operation->Internal = 0xc0000120; // terminal cancellation status
+     fixture::error = ERROR_OPERATION_ABORTED; return FALSE;
+ }
+ void Sleep(DWORD) { ++fixture::sleeps; }
+@@ -249,12 +296,13 @@ void Sleep(DWORD) { ++fixture::sleeps; }
+ namespace metaengine::guardian {
+ // All methods below implement only the fixture link of the actual public type.
+ // Production uses browser-guardian-connected-peer.cpp instead, never this file.
+-struct GuardianConnectedPeer::State { bool cancelled = false; };
++struct GuardianConnectedPeer::State { bool cancelled = false, closed = false, owns_pipe = false; };
+ GuardianConnectedPeer::GuardianConnectedPeer() : state_(std::make_unique<State>()) {}
+ GuardianConnectedPeer::~GuardianConnectedPeer() = default;
+ std::unique_ptr<GuardianConnectedPeer> GuardianConnectedPeer::create() {
+     ++fixture::create_calls;
+     auto value = std::unique_ptr<GuardianConnectedPeer>(new GuardianConnectedPeer());
++    if (fixture::throw_in_create) throw std::bad_alloc();
+     if (fixture::cancel_in_create) GuardianOriginalMainNativeHost::revoke();
+     return value;
+ }
+@@ -262,16 +310,31 @@ std::unique_ptr<GuardianConnectedPeer> GuardianConnectedPeer::connect() { return
+ bool GuardianConnectedPeer::connectOriginal() { return false; }
+ bool GuardianConnectedPeer::recheck() { return false; }
+ std::string GuardianConnectedPeer::snapshotJson() const { return "FIXTURE_ONLY_NO_AUTHORITY"; }
+-void GuardianConnectedPeer::close() noexcept { requestCancel(); }
++void GuardianConnectedPeer::close() noexcept {
++    requestCancel();
++    if (state_->closed) return;
++    state_->closed = true; ++fixture::close_calls;
++    fixture::closed_during_unwind |= std::uncaught_exceptions() != 0;
++    if (state_->owns_pipe) { CloseHandle(fixture::pipe_handle); state_->owns_pipe = false; }
++}
+ void GuardianConnectedPeer::requestCancel() noexcept { ++fixture::cancel_requests; state_->cancelled = true; }
+ bool GuardianConnectedPeer::connectOriginalNativeHostAuthority() {
+     ++fixture::connect_calls;
++    state_->owns_pipe = true;
++    if (fixture::throw_in_connect) throw std::bad_alloc();
+     if (fixture::cancel_in_connect) GuardianOriginalMainNativeHost::revoke();
++    if (fixture::cancel_in_connect)
++        fixture::require(!fixture::pipe_handle->closed && !fixture::close_calls,
++            "reentrant connect cancellation closed before the active caller returned");
+     // Deliberately returns true even after test cancellation so production host
+     // must perform its OWN publication/lifetime fences, not trust a stub bool.
+     return true;
+ }
+-bool GuardianConnectedPeer::recheckOriginalNativeHostAuthority() { ++fixture::rechecks; return true; }
++bool GuardianConnectedPeer::recheckOriginalNativeHostAuthority() {
++    ++fixture::rechecks;
++    if (fixture::throw_in_recheck) throw std::bad_alloc();
++    return true;
++}
+ bool GuardianConnectedPeer::originalNativeHostFinalFence() { ++fixture::authority_final_fences; return true; }
+ bool GuardianConnectedPeer::originalNativeHostFacts(OriginalNativeHostBinding* output) {
+     ++fixture::facts_calls;
+@@ -296,6 +359,55 @@ int main(int argc, char** argv) {
+             require(reads == 4 && writes == 4 && authority_final_fences >= 3, "missing actual exchange/final fence");
+             require(!admitted_during_initial_fence, "admitted before initial fences completed");
+             Host::revoke(); refusedAndSticky();
++        } else if (scenario == "idle_revoke_closes_original_pipe") {
++            mounted(); Host::revoke(); retired();
++        } else if (scenario == "cheap_fence_reentrant_revoke") {
++            mounted(); revoke_in_peek = true;
++            require(!Host::peerObservationAdmitted(), "cheap fence resurrected a reentrantly revoked scope");
++            retired();
++        } else if (scenario == "concurrent_cheap_fence_retirement") {
++            mounted(); block_next_peek = true;
++            bool admitted = true;
++            std::thread caller([&] { admitted = Host::peerObservationAdmitted(); });
++            {
++                std::unique_lock<std::mutex> lock(peek_gate);
++                peek_condition.wait(lock, [] { return peek_entered; });
++            }
++            Host::revoke();
++            const bool retained = !pipe_handle->closed && close_calls == 0;
++            const bool refused = !Host::peerObservationAdmitted();
++            {
++                std::lock_guard<std::mutex> lock(peek_gate); release_peek = true;
++            }
++            peek_condition.notify_all(); caller.join();
++            require(retained && refused && !admitted, "concurrent pipe use escaped revocation or closed before its lease ended");
++            require(!queries_after_pipe_close, "cheap fence used a recycled pipe slot");
++            retired();
++        } else if (scenario == "allocation_exception_before_authority_publication") {
++            throw_in_create = true; Host::enterOriginalImage();
++            require(!Host::mountBeforeAppCode() && create_calls == 1 && !connect_calls && !close_calls,
++                "unpublished allocation failure entered authority or closed an unowned endpoint");
++            refusedAndSticky();
++        } else if (scenario == "allocation_exception_during_connect") {
++            throw_in_connect = true; Host::enterOriginalImage();
++            require(!Host::mountBeforeAppCode() && connect_calls == 1 && !facts_calls && closed_during_unwind,
++                "allocation exception released its transaction before retiring the published authority");
++            retired();
++        } else if (scenario == "allocation_exception_during_recheck") {
++            mounted(); throw_in_recheck = true;
++            require(!Host::fencePeerObservation() && closed_during_unwind,
++                "throwing active fence handed off its pipe before retirement");
++            retired();
++        } else if (scenario == "active_fence_cancel_retires_after_join" ||
++                   scenario == "active_fence_late_success_stays_retired" ||
++                   scenario == "active_fence_timeout_retires_after_join") {
++            mounted();
++            pending_mode = scenario == "active_fence_cancel_retires_after_join" ? PendingMode::Cancel :
++                scenario == "active_fence_late_success_stays_retired" ? PendingMode::LateSuccess : PendingMode::Timeout;
++            require(!Host::fencePeerObservation(), "cancelled/timed-out active fence returned success");
++            require(cancel_io_calls == 1 && join_polls == 4 && waits >= 2 && sleeps >= 1,
++                "active fence retirement did not wait for its original physical I/O join");
++            retired();
+         } else if (scenario == "missing_entry_then_late_adoption") {
+             require(!Host::mountBeforeAppCode(), "mount without native entry");
+             Host::enterOriginalImage(); require(!Host::mountBeforeAppCode() && connect_calls == 0, "late entry adopted");
+diff --git a/apps/metaengine-browser/test/native/guardian-original-main-lifecycle-model/windows.h b/apps/metaengine-browser/test/native/guardian-original-main-lifecycle-model/windows.h
+index 6628aa9..d0d7ca6 100644
+--- a/apps/metaengine-browser/test/native/guardian-original-main-lifecycle-model/windows.h
++++ b/apps/metaengine-browser/test/native/guardian-original-main-lifecycle-model/windows.h
+@@ -19,9 +19,11 @@ constexpr DWORD ERROR_SUCCESS = 0, ERROR_ACCESS_DENIED = 5, ERROR_INVALID_HANDLE
+ constexpr DWORD ERROR_NOT_ENOUGH_MEMORY = 8, ERROR_SEM_TIMEOUT = 121;
+ constexpr DWORD ERROR_OPERATION_ABORTED = 995, ERROR_PROCESS_ABORTED = 1067;
+ constexpr DWORD ERROR_IO_INCOMPLETE = 996;
++constexpr DWORD ERROR_IO_PENDING = 997, ERROR_PIPE_CONNECTED = 535, ERROR_BROKEN_PIPE = 109;
+ constexpr DWORD WAIT_OBJECT_0 = 0, WAIT_TIMEOUT = 258, WAIT_FAILED = 0xffffffffU, INFINITE = 0xffffffffU;
+ constexpr DWORD SYNCHRONIZE = 0x00100000, EVENT_MODIFY_STATE = 2;
+ constexpr DWORD PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
++constexpr DWORD PROCESS_QUERY_INFORMATION = 0x400, PROCESS_VM_READ = 0x10, DUPLICATE_CLOSE_SOURCE = 1;
+ constexpr DWORD TOKEN_QUERY = 8, TOKEN_DUPLICATE = 2, TOKEN_ASSIGN_PRIMARY = 1;
+ constexpr DWORD JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000;
+ constexpr DWORD DEBUG_ONLY_THIS_PROCESS = 2, CREATE_SUSPENDED = 4, CREATE_UNICODE_ENVIRONMENT = 0x400;
+@@ -30,10 +32,12 @@ constexpr DWORD CREATE_PROCESS_DEBUG_EVENT = 3, EXIT_PROCESS_DEBUG_EVENT = 5;
+ constexpr DWORD EXCEPTION_DEBUG_EVENT = 1, LOAD_DLL_DEBUG_EVENT = 6;
+ constexpr DWORD DBG_CONTINUE = 0x10002, DBG_EXCEPTION_NOT_HANDLED = 0x80010001U;
+ enum TOKEN_TYPE { TokenPrimary = 1, TokenImpersonation = 2 };
+-enum TOKEN_INFORMATION_CLASS { TokenType, TokenSessionId };
++enum TOKEN_INFORMATION_CLASS { TokenType, TokenSessionId, TokenStatistics };
+ enum JOBOBJECTINFOCLASS { JobObjectExtendedLimitInformation, JobObjectBasicAccountingInformation };
+ enum PROCESS_MITIGATION_POLICY { ProcessDynamicCodePolicy };
+ struct FILETIME { DWORD dwLowDateTime = 0, dwHighDateTime = 0; };
++struct LUID { DWORD LowPart = 0; std::int32_t HighPart = 0; };
++struct TOKEN_STATISTICS { LUID TokenId; };
+ struct SECURITY_ATTRIBUTES { DWORD nLength; PSECURITY_DESCRIPTOR lpSecurityDescriptor; BOOL bInheritHandle; };
+ struct STARTUPINFOW { DWORD cb = 0; LPWSTR lpDesktop = nullptr; };
+ struct PROCESS_INFORMATION { HANDLE hProcess = nullptr, hThread = nullptr; DWORD dwProcessId = 0, dwThreadId = 0; };
+@@ -53,6 +57,8 @@ struct DEBUG_EVENT {
+ 
+ DWORD GetLastError();
+ HANDLE GetCurrentProcess();
++DWORD GetCurrentProcessId();
++BOOL OpenProcessToken(HANDLE, DWORD, HANDLE*);
+ BOOL DuplicateHandle(HANDLE, HANDLE, HANDLE, HANDLE*, DWORD, BOOL, DWORD);
+ BOOL CloseHandle(HANDLE);
+ DWORD GetProcessId(HANDLE);
+@@ -61,6 +67,10 @@ DWORD WaitForSingleObject(HANDLE, DWORD);
+ DWORD WaitForMultipleObjects(DWORD, const HANDLE*, BOOL, DWORD);
+ HANDLE CreateEventW(void*, BOOL, BOOL, const wchar_t*);
+ BOOL SetEvent(HANDLE);
++BOOL ResetEvent(HANDLE);
++BOOL ConnectNamedPipe(HANDLE, OVERLAPPED*);
++BOOL ReadFile(HANDLE, void*, DWORD, DWORD*, OVERLAPPED*);
++BOOL WriteFile(HANDLE, const void*, DWORD, DWORD*, OVERLAPPED*);
+ void Sleep(DWORD);
+ BOOL GetTokenInformation(HANDLE, TOKEN_INFORMATION_CLASS, void*, DWORD, DWORD*);
+ HANDLE CreateThread(void*, std::size_t, DWORD (WINAPI*)(void*), void*, DWORD, DWORD*);
+diff --git a/apps/metaengine-browser/test/native/verify-guardian-original-main-host.py b/apps/metaengine-browser/test/native/verify-guardian-original-main-host.py
+index b71cd14..05f5437 100644
+--- a/apps/metaengine-browser/test/native/verify-guardian-original-main-host.py
++++ b/apps/metaengine-browser/test/native/verify-guardian-original-main-host.py
+@@ -17,6 +17,10 @@ CASES = (
+     "post_ack_guardian_exit", "cancellation_before_connect_publication", "cancellation_during_connect",
+     "pending_cancel_join", "pending_timeout_join", "pending_result_failure_join", "pending_io_success",
+     "clock_rollback_sticky", "initial_fence_one_read_failure", "initial_fence_two_read_failure",
++    "idle_revoke_closes_original_pipe", "cheap_fence_reentrant_revoke", "concurrent_cheap_fence_retirement",
++    "allocation_exception_before_authority_publication", "allocation_exception_during_connect",
++    "allocation_exception_during_recheck", "active_fence_cancel_retires_after_join",
++    "active_fence_late_success_stays_retired", "active_fence_timeout_retires_after_join",
+ )
+ 
+ 
+diff --git a/apps/metaengine-browser/test/native/verify-guardian-original-reader-ownership-model.py b/apps/metaengine-browser/test/native/verify-guardian-original-reader-ownership-model.py
+index facf321..31e0b76 100644
+--- a/apps/metaengine-browser/test/native/verify-guardian-original-reader-ownership-model.py
++++ b/apps/metaengine-browser/test/native/verify-guardian-original-reader-ownership-model.py
+@@ -1,14 +1,16 @@
+ #!/usr/bin/env python3
+ """Run actual reader acquisition, failure, RAII and native-host connect code.
+ 
+-The surrounding handle table and hostile endpoint are synthetic. This proves
+-the source composition's fail-closed behavior, not Windows handle provenance,
+-service authentication, a working reader transfer, or launch qualification.
++The surrounding handle table and endpoint are synthetic. This exercises reader
++borrowing, local duplication, one-shot bounds and refusal cleanup, not Windows
++handle provenance, service authentication, or launch qualification.
+ """
+ from pathlib import Path
+ import argparse
++import json
+ import os
+ import subprocess
++import sys
+ import tempfile
+ 
+ 
+@@ -19,18 +21,29 @@ def between(source, first, after):
+ 
+ parser = argparse.ArgumentParser(description=__doc__)
+ parser.add_argument('--sanitize', action='store_true')
++parser.add_argument('--mutation-check', action='store_true',
++                    help='prove raw wire adoption is rejected by the hostile-sentinel case')
+ parser.add_argument('--peer-source', type=Path,
+                     help='alternate connected-peer source for regression checks')
+ args = parser.parse_args()
+ here = Path(__file__).resolve().parent
+ native = here.parents[1] / 'native/browser-guardian-scm'
+ source = (args.peer_source or native / 'browser-guardian-connected-peer.cpp').read_text()
++io_source = (native / 'browser-guardian-pipe-io-lifetime.hpp').read_text()
+ fragments = {
+     '@ACTUAL_HANDLE@': between(source, 'struct Handle {', 'struct ServiceHandle {'),
+     '@ACTUAL_FAIL@': between(source, '    bool fail(', '    std::uint64_t birthOfReader()'),
++    '@ACTUAL_PROCESS_BUDGET@': between(source, 'bool beginOriginalReaderTransfer() noexcept', 'struct Handle {'),
++    '@ACTUAL_IO_JOIN@': between(io_source, 'constexpr DWORD kGuardianIoJoinPollMs', '}  // namespace metaengine::guardian'),
++    '@ACTUAL_BIRTH@': between(source, '    std::uint64_t birthOfReader()', '    // Exactly one reader acquisition'),
+     '@ACTUAL_ACQUIRE@': between(source, '    bool acquireOriginalReader()', '    bool originalKernel('),
++    '@ACTUAL_KERNEL@': between(source, '    bool originalKernel(', '    bool systemAccount()'),
+     '@ACTUAL_CONNECT@': between(source, 'bool GuardianConnectedPeer::connectOriginalNativeHostAuthority()',
+                                'bool GuardianConnectedPeer::recheckOriginalNativeHostAuthority()'),
++    '@ACTUAL_RECHECK@': between(source, 'bool GuardianConnectedPeer::recheckOriginalNativeHostAuthority()',
++                               'bool GuardianConnectedPeer::originalNativeHostFinalFence()'),
++    '@ACTUAL_FINAL_FENCE@': between(source, 'bool GuardianConnectedPeer::originalNativeHostFinalFence()',
++                                   'bool GuardianConnectedPeer::originalNativeHostFacts('),
+     '@ACTUAL_CLIENT_ACCESS@': between(source, 'constexpr DWORD kClientAccess =', '\n'),
+ }
+ model = (here / 'browser-guardian-original-reader-ownership-model.cpp.in').read_text()
+@@ -42,7 +55,46 @@ with tempfile.TemporaryDirectory(prefix='guardian-reader-ownership-model-') as t
+     generated = Path(temporary) / 'model.cpp'
+     generated.write_text(model)
+     binary = Path(temporary) / 'model'
+-    flags = ['-fsanitize=address,undefined', '-fno-omit-frame-pointer'] if args.sanitize else []
++    flags = ['-fsanitize=address,undefined', '-fno-omit-frame-pointer', '-fno-pie', '-no-pie'] if args.sanitize else []
+     subprocess.run(['g++', '-std=c++20', '-Wall', '-Wextra', '-Werror', '-pedantic',
+                     '-pthread', *flags, '-I', str(native), str(generated), '-o', str(binary)], check=True)
+-    subprocess.run([str(binary)], check=True, env={**os.environ, 'ASAN_OPTIONS': 'detect_leaks=1'})
++    environment = {**os.environ, 'ASAN_OPTIONS': 'detect_leaks=1:halt_on_error=1',
++                   'UBSAN_OPTIONS': 'halt_on_error=1:print_stacktrace=1'}
++    names = subprocess.run([str(binary), '--list'], check=True, capture_output=True,
++                           text=True, env=environment).stdout.splitlines()
++    failed = 0
++    for name in names:
++        # A real new process resets the native process-wide budget; there is no
++        # production reset helper, macro, source edit, or bool authority seam.
++        result = subprocess.run([str(binary), name], capture_output=True, text=True, env=environment)
++        print(result.stdout, end='')
++        if result.stderr:
++            print(result.stderr, end='', file=sys.stderr)
++        failed += result.returncode != 0
++    if args.mutation_check:
++        marker = 'Handle candidate(owned_reader);'
++        if model.count(marker) != 1:
++            raise RuntimeError('raw-adoption mutation anchor changed')
++        mutant_source = Path(temporary) / 'mutant.cpp'
++        mutant_source.write_text(model.replace(marker, 'Handle candidate(borrowed_reader);', 1))
++        mutant = Path(temporary) / 'mutant'
++        subprocess.run(['g++', '-std=c++20', '-Wall', '-Wextra', '-Werror', '-pedantic',
++                        '-pthread', *flags, '-I', str(native), str(mutant_source), '-o', str(mutant)], check=True)
++        result = subprocess.run([str(mutant), 'hostile_existing_event_number_never_adopted_or_closed'],
++                                capture_output=True, text=True, env=environment)
++        expected = {'case': 'hostile_existing_event_number_never_adopted_or_closed', 'state': 'FAIL',
++                    'reason': 'unowned sentinel, seed or pseudo handle was closed'}
++        okay = result.returncode == 1 and result.stdout.strip() == json.dumps(expected, separators=(',', ':'))
++        if not okay:
++            print(result.stdout, end='')
++            print(result.stderr, end='', file=sys.stderr)
++            failed += 1
++        print(json.dumps({'mutation': 'raw_wire_adoption', 'compiled': True,
++                          'expected_behavioral_failure_observed': okay}))
++    print(json.dumps({'schema': 'metaengine.guardian.original-reader-ownership.synthetic-tests.v2',
++                      'passed': len(names) - failed, 'failed': failed, 'windows': 'NOT RUN',
++                      'sanitizers': 'ASAN_UBSAN' if args.sanitize else 'NOT RUN',
++                      'leak_sanitizer': 'ENABLED_detect_leaks=1' if args.sanitize else 'NOT RUN',
++                      'synthetic_reader_transfer_exercised': True, 'kernel_provenance_proven': False,
++                      'service_authentication_proven': False, 'authority_effect': False}))
++    sys.exit(1 if failed else 0)
+diff --git a/apps/metaengine-browser/test/native/verify-guardian-original-reader-source.py b/apps/metaengine-browser/test/native/verify-guardian-original-reader-source.py
+index 449390a..bef90b0 100644
+--- a/apps/metaengine-browser/test/native/verify-guardian-original-reader-source.py
++++ b/apps/metaengine-browser/test/native/verify-guardian-original-reader-source.py
+@@ -9,6 +9,10 @@ owner = (root / 'browser-guardian-original-main-debug-owner.cpp').read_text()
+ peer = (root / 'browser-guardian-connected-peer.cpp').read_text()
+ protocol = (root / 'browser-guardian-original-reader-transfer.hpp').read_text()
+ loaded = (root / 'browser-guardian-loaded-image.hpp').read_text()
++connect = peer[peer.index('bool GuardianConnectedPeer::connectOriginalNativeHostAuthority()'):
++               peer.index('bool GuardianConnectedPeer::recheckOriginalNativeHostAuthority()')]
++acquire = peer[peer.index('    bool acquireOriginalReader()'):
++               peer.index('    bool originalKernel(')]
+ 
+ checks = {
+     'service_child_creation_remains_noninheriting': 'FALSE, DEBUG_ONLY_THIS_PROCESS | CREATE_SUSPENDED' in owner,
+@@ -20,16 +24,21 @@ checks = {
+     'service_checks_child_table_object_before_publication': 'DuplicateHandle(original_process.value, remote, GetCurrentProcess()' in owner,
+     'service_checks_token_id_same_as_original': 'issued.TokenId.HighPart == echoed.TokenId.HighPart' in owner,
+     'service_checks_post_grant_authority': 'originalAlive() && pipeIdentity() && policy->finalClockFence() && !cancelled()' in owner,
+-    'service_fail_close_source': 'DUPLICATE_CLOSE_SOURCE' in owner,
++    'service_refusal_drains_original_scope_without_remote_seed_close':
++        'DUPLICATE_CLOSE_SOURCE' not in owner and 'else terminateAndDrain();' in owner and
++        'drainJob();' in owner and 'cancelAndJoinGuardianPipeIo' in owner,
+     'service_writes_once_over_original_pipe': 'reader_granted = true' in owner and 'armPipe(PipeStage::Write)' in owner,
+     'process_reader_rights_exact': 'PROCESS_QUERY_INFORMATION | PROCESS_VM_READ | SYNCHRONIZE' in owner,
+     'token_reader_rights_exact': '&remote_token, TOKEN_QUERY, FALSE, 0)' in owner,
+     'client_uses_existing_creation_owner_pipe': 'CreateFileW(original_main_wire::kPipe' in peer,
+-    'client_acquires_before_first_observation': peer.index('if (!state_->acquireOriginalReader() || !state_->captureKernel())') < peer.index('state_->observe();\n    return !state_->observation_revoked'),
++    'client_acquires_before_first_observation':
++        0 <= connect.find('state_->acquireOriginalReader()') < connect.find('state_->observe();'),
+     'client_never_reopens_read_handle_by_pid': 'original_service_reader.value, cancelled.value, expected' in peer and 'captureOwnedReader' in peer,
+-    'client_holds_before_unproven_transfer_ownership':
+-        'return fail("ORIGINAL_READER_HANDLE_OWNERSHIP_UNPROVEN", ERROR_NOT_SUPPORTED);' in peer and
+-        'Handle candidate(reinterpret_cast<HANDLE>' not in peer,
++    'client_owns_only_locally_duplicated_borrowed_seeds':
++        'DuplicateHandle(GetCurrentProcess(), borrowed_reader, GetCurrentProcess(), &owned_reader,' in acquire and
++        'DuplicateHandle(GetCurrentProcess(), borrowed_token, GetCurrentProcess(), &owned_token,' in acquire and
++        'Handle candidate(owned_reader)' in acquire and 'Handle candidate_token(owned_token)' in acquire and
++        'DUPLICATE_CLOSE_SOURCE' not in acquire and 'Handle candidate(reinterpret_cast<HANDLE>' not in acquire,
+     'client_checks_system_token_on_real_object': 'original_service_token.value' in peer and 'IsWellKnownSid(user->User.Sid, WinLocalSystemSid)' in peer,
+     'client_policy_digest_matches_original_grant': 'digest_bytes != reader_grant.policy_sha256' in peer,
+     'original_image_reader_rechecks_two_original_kernel_objects': 'for (HANDLE process : {original_.value, reader_.value})' in loaded,
+diff --git a/apps/metaengine-browser/test/native/verify-guardian-original-reader-transfer-composition-model.py b/apps/metaengine-browser/test/native/verify-guardian-original-reader-transfer-composition-model.py
+new file mode 100644
+index 0000000..b75c56b
+--- /dev/null
++++ b/apps/metaengine-browser/test/native/verify-guardian-original-reader-transfer-composition-model.py
+@@ -0,0 +1,147 @@
++#!/usr/bin/env python3
++"""Compose actual reader sender/receiver code with two synthetic handle tables.
++
++The protocol fixture runs complete, unedited sender and receiver methods. A
++complementary existing lifecycle fixture executes the actual native owner drain
++and worker join path. Neither model qualifies Windows, code identity, SCM,
++cryptography, public launch admission, installation, or recovery after a crash.
++"""
++import argparse
++import hashlib
++import json
++import os
++from pathlib import Path
++import subprocess
++import tempfile
++
++
++CASES = (
++    'original_pair', 'entry_hello_after_reader', 'forged_process_event', 'forged_token_event',
++    'process_seed_closed_before_local_dup', 'process_seed_reused_before_local_dup',
++    'token_seed_closed_before_local_dup', 'token_seed_reused_before_local_dup',
++    'process_seed_reused_after_local_dup', 'token_seed_reused_after_local_dup',
++    'reuse_then_cancel_after_local_dup', 'local_process_dup_failure', 'local_token_dup_failure',
++    'sender_process_seed_failure', 'sender_process_seed_unknown',
++    'sender_token_seed_failure', 'sender_token_seed_unknown',
++    'sender_process_readback_wrong', 'sender_token_readback_wrong', 'sender_token_open_failure',
++    'sender_seed_reused_before_readback', 'cancel_before_acquire', 'cancel_pending_request',
++    'cancel_pending_reply', 'sender_partial_write', 'sender_failed_write', 'unknown_late_write',
++    'peer_close_during_reply', 'peer_crash_modeled_os_exit', 'late_hello_after_revoke',
++    'same_peer_double_acquire', 'second_peer_process_budget', 'independent_pipe_scope_refused',
++    'independent_root_scope_refused', 'independent_policy_refused', 'atomic_process_budget',
++)
++
++
++def between(source, first, after):
++    if source.count(first) != 1:
++        raise RuntimeError(f'Expected one production extraction anchor: {first}')
++    start = source.index(first)
++    return source[start:source.index(after, start)]
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    instrumentation = parser.add_mutually_exclusive_group()
++    instrumentation.add_argument('--sanitize', action='store_true')
++    instrumentation.add_argument('--tsan', action='store_true')
++    parser.add_argument('--evidence', type=Path)
++    parser.add_argument('--case', choices=CASES)
++    parser.add_argument('--protocol-only', action='store_true', help='Diagnostic mode; native owner lifecycle remains NOT RUN')
++    args = parser.parse_args()
++    here = Path(__file__).resolve().parent
++    tree = here.parents[3]
++    native = here.parents[1] / 'native/browser-guardian-scm'
++    sender_path = native / 'browser-guardian-original-main-debug-owner.cpp'
++    receiver_path = native / 'browser-guardian-connected-peer.cpp'
++    sender, receiver = sender_path.read_text(), receiver_path.read_text()
++    io = (native / 'browser-guardian-pipe-io-lifetime.hpp').read_text()
++    fragments = {
++        'actual-reader-once.inc.hpp': between(receiver, 'bool beginOriginalReaderTransfer()', 'struct Handle {'),
++        'actual-reader-handle.inc.hpp': between(receiver, 'struct Handle {', 'struct ServiceHandle {'),
++        'actual-reader-fail.inc.hpp': between(receiver, '    bool fail(', '    std::uint64_t birthOfReader()'),
++        'actual-reader-acquire.inc.hpp': between(receiver, '    bool acquireOriginalReader()', '    bool originalKernel('),
++        'actual-sender-cancel-fail.inc.hpp': between(sender, '    bool cancelled()', '    void publish()'),
++        'actual-sender-arm.inc.hpp': between(sender, '    bool armPipe(', '    bool pipeIdentity()'),
++        'actual-sender-pump.inc.hpp': between(sender, '    bool pumpPipe()', '    bool createOriginal()'),
++        'actual-pipe-join.inc.hpp': between(io, 'constexpr DWORD kGuardianIoJoinPollMs', '}  // namespace metaengine::guardian'),
++    }
++    temporary = tempfile.TemporaryDirectory(prefix='guardian-reader-composition-') if args.evidence is None else None
++    evidence = Path(temporary.name) if temporary else args.evidence.resolve()
++    if not temporary:
++        evidence.mkdir(parents=True, exist_ok=False)
++    for name, body in fragments.items():
++        (evidence / name).write_text(body)
++    fixture = here / 'browser-guardian-original-reader-transfer-composition-model.cpp'
++    source_paths = [sender_path, receiver_path, fixture,
++                    native / 'browser-guardian-original-reader-transfer.hpp',
++                    native / 'browser-guardian-original-main-entry-protocol.hpp',
++                    native / 'browser-guardian-pipe-io-lifetime.hpp']
++    source_hashes = {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in source_paths}
++    binary = evidence / 'reader-composition'
++    sanitizer = 'thread' if args.tsan else 'address,undefined' if args.sanitize else 'none'
++    flags = [f'-fsanitize={sanitizer}', '-fno-omit-frame-pointer', '-g', '-no-pie'] if sanitizer != 'none' else []
++    compile_command = ['g++', '-std=c++20', '-Wall', '-Wextra', '-Werror', '-pedantic', '-pthread',
++                       *flags, '-I', str(evidence), '-I', str(native), str(fixture), '-o', str(binary)]
++    compiled = subprocess.run(compile_command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=90)
++    (evidence / 'compile.log').write_text(compiled.stdout)
++    if compiled.returncode:
++        raise SystemExit(compiled.stdout)
++    environment = dict(os.environ)
++    if args.sanitize:
++        environment['ASAN_OPTIONS'] = 'detect_leaks=1:halt_on_error=1'
++        environment['UBSAN_OPTIONS'] = 'halt_on_error=1:print_stacktrace=1'
++    if args.tsan:
++        environment['TSAN_OPTIONS'] = 'halt_on_error=1'
++    cases = [args.case] if args.case else list(CASES)
++    if args.tsan and 'atomic_process_budget' in cases:
++        cases.remove('atomic_process_budget')
++        cases.insert(0, 'atomic_process_budget')
++    results = []
++    for case in cases:
++        result = subprocess.run([str(binary), case], text=True, stdout=subprocess.PIPE,
++                                stderr=subprocess.STDOUT, env=environment, timeout=20)
++        (evidence / f'{case}.log').write_text(result.stdout)
++        if args.tsan and result.returncode and 'ThreadSanitizer: unexpected memory mapping' in result.stdout:
++            report = {'status': 'NOT RUN', 'reason': 'ThreadSanitizer runtime rejected the host address layout',
++                      'sanitizer': sanitizer, 'windows_execution': 'NOT RUN'}
++            (evidence / 'summary.json').write_text(json.dumps(report, indent=2) + '\n')
++            print(json.dumps(report), flush=True)
++            raise SystemExit(77)
++        print(result.stdout, end='', flush=True)
++        results.append({'case': case, 'exit_code': result.returncode})
++        if result.returncode:
++            raise SystemExit(result.returncode)
++    lifecycle = {'status': 'NOT RUN', 'reason': 'Explicit protocol-only diagnostic mode'}
++    if not args.protocol_only:
++        lifecycle_runner = here.parent / 'run-guardian-original-main-lifecycle-composition.py'
++        command = ['python3', str(lifecycle_runner), '--tree', str(tree), '--evidence', str(evidence / 'native-owner-lifecycle'),
++                   '--sanitizer', sanitizer]
++        result = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
++                                env=environment, timeout=180)
++        (evidence / 'native-owner-lifecycle.log').write_text(result.stdout)
++        print(result.stdout, end='', flush=True)
++        lifecycle = {'status': 'PASS' if result.returncode == 0 else 'FAIL', 'exit_code': result.returncode,
++                     'scope': 'COMPLEMENTARY_ACTUAL_NATIVE_OWNER_LIFECYCLE; PUBLIC_SCM_RESULT_BOUNDARY_NOT_TESTED_HERE'}
++        if result.returncode:
++            raise SystemExit(result.returncode)
++    report = {'schema': 'metaengine.guardian.reader-transfer-composition-model.v1',
++              'passed': len(results), 'failed': 0, 'sanitizer': sanitizer,
++              'leak_sanitizer': 'PASS: detect_leaks=1' if args.sanitize else 'NOT RUN',
++              'protocol_scope': 'ACTUAL_SENDER_AND_RECEIVER_WITH_TWO_SYNTHETIC_HANDLE_TABLES',
++              'native_owner_lifecycle': lifecycle,
++              'windows_execution': 'NOT RUN', 'native_authority': 'NOT QUALIFIED',
++              'crash_scope': 'MODELED_OS_TABLE_RETIREMENT_ONLY; NO_CALLBACK_OR_GRACEFUL_HOLD_PROOF',
++              'source_sha256': source_hashes,
++              'source_unchanged': all(hashlib.sha256(path.read_bytes()).hexdigest() == source_hashes[str(path)]
++                                      for path in source_paths),
++              'actual_fragments_sha256': {name: hashlib.sha256(body.encode()).hexdigest() for name, body in fragments.items()}}
++    (evidence / 'summary.json').write_text(json.dumps(report, indent=2) + '\n')
++    print(json.dumps(report, sort_keys=True), flush=True)
++    if not report['source_unchanged']:
++        raise SystemExit('Source changed during the composed model run')
++    if temporary:
++        temporary.cleanup()
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/apps/metaengine-browser/test/run-guardian-original-main-lifecycle-composition.py b/apps/metaengine-browser/test/run-guardian-original-main-lifecycle-composition.py
+index 0082905..1117183 100644
+--- a/apps/metaengine-browser/test/run-guardian-original-main-lifecycle-composition.py
++++ b/apps/metaengine-browser/test/run-guardian-original-main-lifecycle-composition.py
+@@ -53,6 +53,8 @@ def main() -> None:
+         "original-alive": fragment(text, "    bool originalAlive()", "    // WTS and the requester's"),
+         "create": fragment(text, "    bool createOriginal()", "    bool event("),
+         "pipe-identity": fragment(text, "    bool pipeIdentity()", "    bool pumpPipe()"),
++        "arm-pipe": fragment(text, "    bool armPipe(", "    bool pipeIdentity()"),
++        "pump-pipe": fragment(text, "    bool pumpPipe()", "\n    bool createOriginal()"),
+         "worker": fragment(text, "    bool continuePending(", "\n};\n\nGuardianOriginalMainDebugOwner::GuardianOriginalMainDebugOwner"),
+         "owner": fragment(text, "GuardianOriginalMainDebugOwner::GuardianOriginalMainDebugOwner()", "} // namespace metaengine::guardian"),
+     }
