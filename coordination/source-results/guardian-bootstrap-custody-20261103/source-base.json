@@ -1,0 +1,33 @@
+{
+  "materialized_from_repository": "PatrickFrome/Compute",
+  "transfer_branch": "work/source-transfer-c26565e-20261103",
+  "transfer_commit": "accb28e72c87c059e780efb8e6681886b33e9b4f",
+  "parts": [
+    "coordination/source-transfer/c26565e/archive.part00",
+    "coordination/source-transfer/c26565e/archive.part01",
+    "coordination/source-transfer/c26565e/archive.part02"
+  ],
+  "archive_sha256": "4200e492828dbb857aaa737a7ce56d0aeda3c97c84f7743b1501ef2f229d3636",
+  "declared_source_commit": "c26565e58ab92dcbcda9663c4d231bdf4a9a7ee6",
+  "verified_base_tree": "2dbe253e97379532f6f4b52ef7edf26109a9266d",
+  "previous_incremental_patches_applied": false,
+  "repo_AGENTS_or_agents_skills_files": [],
+  "local_history_is_reconstruction": true,
+  "patch_file": "guardian-bootstrap-custody-c265.patch",
+  "patch_sha256": "4ae48c040f9e6954aa8813c2b9120baffb5f99b0c63ae578cb96ac9889b8cd89",
+  "patched_tree": "cc5ac21ed40e48d07c051c8019a83fb361e0e30e",
+  "patch_apply_check": "PASS cumulative against verified base; PASS review delta against prior patch tree",
+  "files": [
+    "apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis-origin.inc.hpp",
+    "apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-install-origin-coordinator.cpp",
+    "apps/metaengine-browser/src/browser-guardian-machine-bootstrap-launcher.mjs",
+    "apps/metaengine-browser/src/main.mjs",
+    "apps/metaengine-browser/test/browser-guardian-machine-bootstrap-launcher.test.mjs",
+    "apps/metaengine-browser/test/native/verify-guardian-genesis-launch-binding-model.py"
+  ],
+  "review_version": 2,
+  "supersedes_patch_sha256": "35227f6d03637c4a3c759fd4f8a00c9cab37fecb6eeeeb50a9e8cfadc8c9917f",
+  "review_delta_file": "guardian-bootstrap-prelaunch-review.delta.patch",
+  "review_delta_base_tree": "c90b4494cf3cae6a6a90d5b1e2821a0e6a8ad864",
+  "review_delta_sha256": "1316e225bf01f8bfc1f390feb590e9b13eedb020f95aa34ec39e7feb16ddd406"
+}

@@ -1,0 +1,106 @@
+TAP version 13
+# Subtest: vendored Node-API headers and license retain the existing upstream byte pins
+ok 1 - vendored Node-API headers and license retain the existing upstream byte pins
+  ---
+  duration_ms: 3.382415
+  type: 'test'
+  ...
+# Subtest: autocrlf checkout preserves pinned Node-API bytes and still rejects a one-byte mutation
+ok 2 - autocrlf checkout preserves pinned Node-API bytes and still rejects a one-byte mutation
+  ---
+  duration_ms: 24.736841
+  type: 'test'
+  ...
+# Subtest: actual N-API async ownership and immediate cancellation with an explicit synthetic core
+ok 3 - actual N-API async ownership and immediate cancellation with an explicit synthetic core
+  ---
+  duration_ms: 9014.364323
+  type: 'test'
+  ...
+# Subtest: connected peer production factory accepts no caller path, PID, handle or verified object
+ok 4 - connected peer production factory accepts no caller path, PID, handle or verified object
+  ---
+  duration_ms: 2.176018
+  type: 'test'
+  ...
+# Subtest: Windows mechanics probe uses disposable pipes and its own child without SCM or credential mutations
+ok 5 - Windows mechanics probe uses disposable pipes and its own child without SCM or credential mutations
+  ---
+  duration_ms: 0.513844
+  type: 'test'
+  ...
+# Subtest: actual Windows original pipe and process references survive caller close and refuse stale/replaced peers
+ok 6 - actual Windows original pipe and process references survive caller close and refuse stale/replaced peers # SKIP requires actual Windows named pipes, process handles and SCM readback
+  ---
+  duration_ms: 0.191539
+  type: 'test'
+  ...
+# Subtest: real static NAPI wrapper respects original-host loss before, during and after async observations
+ok 7 - real static NAPI wrapper respects original-host loss before, during and after async observations
+  ---
+  duration_ms: 2755.129154
+  type: 'test'
+  ...
+# Subtest: stock JavaScript entry resolves only the static exact binding and preserves legacy HOLD
+ok 8 - stock JavaScript entry resolves only the static exact binding and preserves legacy HOLD
+  ---
+  duration_ms: 0.369987
+  type: 'test'
+  ...
+# Subtest: source interface: original entry begins before SCM dispatch and seals before worker publication
+ok 9 - source interface: original entry begins before SCM dispatch and seals before worker publication
+  ---
+  duration_ms: 0.893956
+  type: 'test'
+  ...
+# Subtest: source interface: missing legacy epoch holds before owner reads or effect handling
+ok 10 - source interface: missing legacy epoch holds before owner reads or effect handling
+  ---
+  duration_ms: 0.266091
+  type: 'test'
+  ...
+# Subtest: source interface: policy or module loss after an effect preserves ambiguity and physical facts
+ok 11 - source interface: policy or module loss after an effect preserves ambiguity and physical facts
+  ---
+  duration_ms: 0.343898
+  type: 'test'
+  ...
+# Subtest: source interface: worker physical exit precedes original custody close
+ok 12 - source interface: worker physical exit precedes original custody close
+  ---
+  duration_ms: 0.323287
+  type: 'test'
+  ...
+# Subtest: source interface: narrow entry diagnostics never become whole-runtime or launch proof
+ok 13 - source interface: narrow entry diagnostics never become whole-runtime or launch proof
+  ---
+  duration_ms: 0.226561
+  type: 'test'
+  ...
+# Subtest: production PE import/export resolver and irreversible load transitions on generated inert bytes
+ok 14 - production PE import/export resolver and irreversible load transitions on generated inert bytes
+  ---
+  duration_ms: 2138.713911
+  type: 'test'
+  ...
+# Subtest: native startup capability has no public observed-now or helper-claim factory and no test issuer
+ok 15 - native startup capability has no public observed-now or helper-claim factory and no test issuer
+  ---
+  duration_ms: 0.835979
+  type: 'test'
+  ...
+# Subtest: native consumer has one fixed loader call, original reader, exact IAT validation and conservative cleanup
+ok 16 - native consumer has one fixed loader call, original reader, exact IAT validation and conservative cleanup
+  ---
+  duration_ms: 0.897202
+  type: 'test'
+  ...
+1..16
+# tests 16
+# suites 0
+# pass 15
+# fail 0
+# cancelled 0
+# skipped 1
+# todo 0
+# duration_ms 9112.588695

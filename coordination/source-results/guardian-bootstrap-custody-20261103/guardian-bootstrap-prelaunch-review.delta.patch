@@ -1,0 +1,681 @@
+diff --git a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis-origin.inc.hpp b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis-origin.inc.hpp
+index 3d3f7b3..28c98ae 100644
+--- a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis-origin.inc.hpp
++++ b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis-origin.inc.hpp
+@@ -2,84 +2,40 @@
+ // metaengine::guardian. Existing identity observation alone never reaches a
+ // machine write: the original fixed W77 package is required independently.
+ bool GuardianInstallOriginLink::requestVerifiedGenesisElevation() {
+-    Handle original_bootstrap;
+-    {
+-        std::lock_guard<std::mutex> lock(state_->mutex);
+-        if (!state_->is_coordinator || state_->attempted || !state_->active() || !state_->origin ||
+-            !state_->origin->recheck() || !state_->coordinator_payload.recheck())
+-            return state_->fail("GENESIS_ORIGINAL_COORDINATOR_REQUIRED", ERROR_ACCESS_DENIED);
+-        state_->attempted = true;
+-        const auto now = GetTickCount64();
+-        if (now > (std::numeric_limits<ULONGLONG>::max)() - 60'000)
+-            return state_->fail("GENESIS_ORIGINAL_CLOCK_UNAVAILABLE", ERROR_INVALID_DATA);
+-        state_->genesis_deadline = now + 60'000;
+-        std::wstring executable;
+-        std::string failure;
+-        state_->genesis_package = GuardianActivePolicyGenesis::qualifyOriginalCoordinator(
+-            state_->origin->retainedProcess(), state_->origin->retainedToken(), state_->cancelled.value,
+-            state_->genesis_deadline, &executable, &failure);
+-        if (!state_->genesis_package) return state_->fail(
+-            failure.empty() ? "GENESIS_EXISTING_SIGNED_INSTALLER_PACKAGE_REQUIRED" : failure.c_str(), ERROR_ACCESS_DENIED);
+-        if (!state_->genesis_package->recheck() || !state_->origin->recheck() || !state_->coordinator_payload.recheck())
+-            return state_->fail("GENESIS_ORIGINAL_VERIFIED_PACKAGE_DRIFT", ERROR_ACCESS_DENIED);
+-        const auto& selected = state_->genesis_package->capsule().selection;
+-        std::uint64_t wall = 0, monotonic = 0;
+-        const auto tick = GetTickCount64();
+-        if (!state_->active() || tick >= state_->genesis_deadline ||
+-            !active_policy_native::clock(&wall, &monotonic) || wall >= selected.policy.not_after_100ns ||
+-            state_->genesis_deadline - tick > (selected.policy.not_after_100ns - wall) / 10'000 ||
+-            !state_->genesis_window.observe(selected.policy, {selected.policy.generation, selected.policy_sha256},
+-                selected.policy_sha256, wall, monotonic))
+-            return state_->fail("GENESIS_ORIGINAL_SIGNED_WINDOW_EXPIRED", ERROR_TIMEOUT);
+-        const std::wstring arguments = L"--genesis-install-origin " + state_->routing_id;
+-        SHELLEXECUTEINFOW effect{};
+-        effect.cbSize = sizeof(effect); effect.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC;
+-        effect.lpVerb = L"runas"; effect.lpFile = executable.c_str(); effect.lpParameters = arguments.c_str();
+-        effect.nShow = SW_SHOWNORMAL;
+-        // Exactly one fixed W77-inventory executable. No caller path, arbitrary
+-        // command, shell text, key creation, credentials or alternate verifier.
+-        if (!state_->active() || GetTickCount64() >= state_->genesis_deadline)
+-            return state_->fail("GENESIS_ORIGINAL_SCOPE_EXPIRED_BEFORE_ELEVATION", ERROR_TIMEOUT);
+-        state_->genesis_elevation_attempted = true;
+-        if (!ShellExecuteExW(&effect) || !effect.hProcess)
+-            return state_->fail("GENESIS_ORIGINAL_ELEVATION_NOT_CONFIRMED");
+-        original_bootstrap.reset(effect.hProcess);
+-        if (!state_->active() || !state_->origin->recheck() || !state_->coordinator_payload.recheck() ||
+-            !state_->genesis_package->recheck() ||
+-            !GuardianActivePolicyGenesis::originalCoordinatorBootstrapExact(*state_->genesis_package, original_bootstrap.value) ||
+-            GetTickCount64() >= state_->genesis_deadline)
+-            return state_->fail("GENESIS_ORIGINAL_CREATED_BOOTSTRAP_PACKAGE_UNPROVEN", ERROR_ACCESS_DENIED);
+-    }
+-    // The original creator passes its actual hProcess, not the command's PID.
+-    if (!connectOriginalBootstrap(original_bootstrap.value)) return false;
+     std::lock_guard<std::mutex> lock(state_->mutex);
+-    if (!state_->active() || !state_->kernel_bound || !state_->genesis_package ||
+-        !state_->genesis_package->recheck() ||
+-        !GuardianActivePolicyGenesis::originalCoordinatorBootstrapExact(*state_->genesis_package, original_bootstrap.value) ||
+-        !state_->bootstrapExact(state_->client_pipe.value) ||
+-        GetTickCount64() >= state_->genesis_deadline)
+-        return state_->fail("GENESIS_ORIGINAL_POST_ELEVATION_SCOPE_LOST", ERROR_TIMEOUT);
+-    auto frame = active_policy::genesisOriginWindow(state_->genesis_deadline, state_->challenge);
+-    if (!state_->packet(state_->client_pipe.value, &frame, true) || GetTickCount64() >= state_->genesis_deadline)
+-        return state_->fail("GENESIS_ORIGINAL_WINDOW_HANDOFF_UNCONFIRMED", ERROR_TIMEOUT);
+-    // Keep this ORIGINAL unelevated process/token and verified package alive
+-    // until the original bootstrap exits. Write completion is not an ACK that
+-    // the child consumed the window, published an anchor or reached READY.
+-    HANDLE waits[]{state_->cancelled.value, state_->bootstrap_process.value};
+-    const auto before_wait = GetTickCount64();
+-    if (before_wait >= state_->genesis_deadline || state_->genesis_deadline - before_wait > 60'000 ||
+-        WaitForSingleObject(state_->cancelled.value, 0) != WAIT_TIMEOUT)
+-        return state_->fail("GENESIS_ORIGINAL_COMPLETION_WINDOW_EXPIRED", ERROR_TIMEOUT);
+-    const auto remaining = state_->genesis_deadline - before_wait;
+-    const auto waited = WaitForMultipleObjects(2, waits, FALSE, static_cast<DWORD>(remaining));
+-    DWORD exit_code = STILL_ACTIVE;
+-    if (GetTickCount64() >= state_->genesis_deadline || WaitForSingleObject(state_->cancelled.value, 0) != WAIT_TIMEOUT ||
+-        waited != WAIT_OBJECT_0 + 1 || !GetExitCodeProcess(state_->bootstrap_process.value, &exit_code))
+-        return state_->fail("GENESIS_ORIGINAL_BOOTSTRAP_COMPLETION_UNPROVEN", ERROR_TIMEOUT);
+-    state_->reason = exit_code == 0 ? "ORIGINAL_GENESIS_BOOTSTRAP_EXIT_OBSERVED_NOT_RUNTIME_READY" :
+-        "ORIGINAL_GENESIS_BOOTSTRAP_REFUSED_OR_UNRESOLVED";
+-    state_->error = exit_code == 0 ? ERROR_SUCCESS : ERROR_INVALID_DATA;
+-    return exit_code == 0; // Diagnostic process completion only.
++    if (!state_->is_coordinator || state_->attempted || !state_->active() || !state_->origin ||
++        !state_->origin->recheck() || !state_->coordinator_payload.recheck())
++        return state_->fail("GENESIS_ORIGINAL_COORDINATOR_REQUIRED", ERROR_ACCESS_DENIED);
++    state_->attempted = true;
++    const auto now = GetTickCount64();
++    if (now > (std::numeric_limits<ULONGLONG>::max)() - 60'000)
++        return state_->fail("GENESIS_ORIGINAL_CLOCK_UNAVAILABLE", ERROR_INVALID_DATA);
++    state_->genesis_deadline = now + 60'000;
++    std::wstring executable;
++    std::string failure;
++    state_->genesis_package = GuardianActivePolicyGenesis::qualifyOriginalCoordinator(
++        state_->origin->retainedProcess(), state_->origin->retainedToken(), state_->cancelled.value,
++        state_->genesis_deadline, &executable, &failure);
++    if (!state_->genesis_package) return state_->fail(
++        failure.empty() ? "GENESIS_EXISTING_SIGNED_INSTALLER_PACKAGE_REQUIRED" : failure.c_str(), ERROR_ACCESS_DENIED);
++    if (!state_->genesis_package->recheck() || !state_->origin->recheck() || !state_->coordinator_payload.recheck())
++        return state_->fail("GENESIS_ORIGINAL_VERIFIED_PACKAGE_DRIFT", ERROR_ACCESS_DENIED);
++    const auto& selected = state_->genesis_package->capsule().selection;
++    std::uint64_t wall = 0, monotonic = 0;
++    const auto tick = GetTickCount64();
++    if (!state_->active() || tick >= state_->genesis_deadline ||
++        !active_policy_native::clock(&wall, &monotonic) || wall >= selected.policy.not_after_100ns ||
++        state_->genesis_deadline - tick > (selected.policy.not_after_100ns - wall) / 10'000 ||
++        !state_->genesis_window.observe(selected.policy, {selected.policy.generation, selected.policy_sha256},
++            selected.policy_sha256, wall, monotonic))
++        return state_->fail("GENESIS_ORIGINAL_SIGNED_WINDOW_EXPIRED", ERROR_TIMEOUT);
++    // Existing W77 retained files establish package custody, but this
++    // producer has no qualified binding to the system's later path open.
++    // Retained opens have sharing/subtree protections; they are not a
++    // qualified pre-execution path/image-open and early-load boundary. A
++    // returned process/image check cannot undo a child's earlier effects.
++    // Keep this attempt consumed and stop BEFORE the elevation boundary.
++    return state_->fail("GENESIS_ORIGINAL_PRELAUNCH_BINDING_UNPROVEN", ERROR_ACCESS_DENIED);
+ }
+ 
+ std::unique_ptr<GuardianActivePolicyGenesis> GuardianInstallOriginLink::captureOriginalGenesis(std::string* failure) {
+diff --git a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis.cpp b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis.cpp
+index 0f343e3..c35b696 100644
+--- a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis.cpp
++++ b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis.cpp
+@@ -66,20 +66,6 @@ std::unique_ptr<GuardianActivePolicyPackage> GuardianActivePolicyGenesis::qualif
+     } catch (...) { return reject("GENESIS_COORDINATOR_QUALIFICATION_UNAVAILABLE"); }
+ }
+ 
+-bool GuardianActivePolicyGenesis::originalCoordinatorBootstrapExact(
+-    GuardianActivePolicyPackage& package, HANDLE original_created_bootstrap) noexcept {
+-    try {
+-        if (!original_created_bootstrap || original_created_bootstrap == INVALID_HANDLE_VALUE ||
+-            WaitForSingleObject(original_created_bootstrap, 0) != WAIT_TIMEOUT || !package.recheck() ||
+-            package.capsule().selection.policy.generation != 1) return false;
+-        // Match the ORIGINAL runas process to the same retained W77 package,
+-        // not merely to an image path first observed after process creation.
+-        return package.originalImageExact(original_created_bootstrap,
+-            active_policy_genesis_detail::relative(package.capsule().selection, true)) &&
+-            package.recheck() && WaitForSingleObject(original_created_bootstrap, 0) == WAIT_TIMEOUT;
+-    } catch (...) { return false; }
+-}
+-
+ std::unique_ptr<GuardianActivePolicyGenesis> GuardianActivePolicyGenesis::captureOriginalBootstrap(
+     HANDLE coordinator, HANDLE primary, HANDLE bootstrap, HANDLE cancel,
+     std::uint64_t deadline, std::string* failure) {
+diff --git a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis.hpp b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis.hpp
+index 29a9fa3..5575e9f 100644
+--- a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis.hpp
++++ b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis.hpp
+@@ -43,8 +43,6 @@ private:
+     static std::unique_ptr<GuardianActivePolicyPackage> qualifyOriginalCoordinator(
+         HANDLE original_coordinator, HANDLE original_primary, HANDLE original_cancel,
+         std::uint64_t original_deadline, std::wstring* fixed_bootstrap_path, std::string* failure);
+-    static bool originalCoordinatorBootstrapExact(
+-        GuardianActivePolicyPackage&, HANDLE original_created_bootstrap) noexcept;
+     HANDLE originalInstallProcess() const noexcept;
+     HANDLE originalInstallPrimary() const noexcept;
+     struct State;
+diff --git a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-install-origin-coordinator.cpp b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-install-origin-coordinator.cpp
+index ba8ebc8..ce7bdad 100644
+--- a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-install-origin-coordinator.cpp
++++ b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-install-origin-coordinator.cpp
+@@ -5,14 +5,14 @@ int wmain(int argc, wchar_t** argv) {
+     if (argc == 2 && std::wstring_view(argv[1]) == L"--contract-json") {
+         std::cout << "{\"schema\":\"metaengine.browser-guardian.install-origin-coordinator.v1\",\"execution_level\":\"asInvoker\","
+             "\"original_unelevated_user_required\":true,\"caller_identity_allowed\":false,\"release_qualification_required_before_uac\":true,"
+-            "\"uac_implemented\":true,\"source_only\":true,\"authority_effect\":false}\n";
++            "\"uac_implemented\":false,\"prelaunch_file_binding_qualified\":false,\"source_only\":true,\"authority_effect\":false}\n";
+         return 0;
+     }
+     if (argc != 1) return 2;
+     // The zero-argument executable is a real producer: retain its own original
+     // process/primary token BEFORE considering UAC. No parent/caller identity.
+     auto scope = metaengine::guardian::GuardianInstallOriginLink::captureCoordinatorBeforeElevation();
+-    scope->requestElevation(); // Requires actual existing-authority signed fixed package before UAC.
++    scope->requestElevation(); // Existing signed-package preflight; HOLD before UAC.
+     std::cout << scope->snapshotJson() << '\n';
+     return 2;
+ }
+diff --git a/apps/metaengine-browser/test/native/verify-guardian-genesis-launch-binding-model.py b/apps/metaengine-browser/test/native/verify-guardian-genesis-launch-binding-model.py
+index 73f37e6..8d7e923 100644
+--- a/apps/metaengine-browser/test/native/verify-guardian-genesis-launch-binding-model.py
++++ b/apps/metaengine-browser/test/native/verify-guardian-genesis-launch-binding-model.py
+@@ -1,12 +1,15 @@
+ #!/usr/bin/env python3
+-"""Compile the actual Genesis process/package predicate against synthetic data.
++"""Compile the actual Genesis elevation request against adversarial synthetic APIs.
+ 
+-This is a source-extracted synthetic model plus production ordering guards.
+-It does not run Windows APIs, UAC, an installer, signatures or machine effects.
+-The positive model case is NOT Windows qualification or release authority.
++The production method is extracted unchanged. Its package, original-user,
++clock and OS boundaries below are explicitly simulated, never authority.
++Historical-shape controls demonstrate that rejecting a returned process cannot
++undo an early child effect inside the launch call. This is NOT Windows, UAC,
++NTFS namespace, release-signature or installer qualification.
+ """
+ from pathlib import Path
+ import argparse
++import hashlib
+ import json
+ import os
+ import shutil
+@@ -25,52 +28,40 @@ def main():
+     args = parser.parse_args()
+     native = Path(__file__).resolve().parents[2] / 'native/browser-guardian-scm'
+     source = (native / 'browser-guardian-active-policy-genesis.cpp').read_text()
+-    header = (native / 'browser-guardian-active-policy-genesis.hpp').read_text()
++    header = (native / 'browser-guardian-install-origin-link.hpp').read_text()
+     package_header = (native / 'browser-guardian-active-policy-activation-package.hpp').read_text()
++    coordinator = (native / 'browser-guardian-install-origin-coordinator.cpp').read_text()
+     origin = (native / 'browser-guardian-active-policy-genesis-origin.inc.hpp').read_text()
+-    relative = segment(source, 'std::wstring relative(', 'bool signedWindow(')
+-    predicate = segment(source, 'bool GuardianActivePolicyGenesis::originalCoordinatorBootstrapExact(',
+-                        'std::unique_ptr<GuardianActivePolicyGenesis> GuardianActivePolicyGenesis::captureOriginalBootstrap(')
+     request = segment(origin, 'bool GuardianInstallOriginLink::requestVerifiedGenesisElevation()',
+                       'std::unique_ptr<GuardianActivePolicyGenesis> GuardianInstallOriginLink::captureOriginalGenesis(')
+-    call = 'GuardianActivePolicyGenesis::originalCoordinatorBootstrapExact(*state_->genesis_package, original_bootstrap.value)'
+-    created = request.index('ShellExecuteExW(&effect)')
+-    retained = request.index('original_bootstrap.reset(effect.hProcess);')
+-    first = request.index(call)
+-    connect = request.index('connectOriginalBootstrap(original_bootstrap.value)')
+-    second = request.index(call, first + len(call))
+-    frame = request.index('auto frame = active_policy::genesisOriginWindow(')
+-    packet = request.index('state_->packet(state_->client_pipe.value, &frame, true)')
+-    declaration = header.index('static bool originalCoordinatorBootstrapExact(')
++    hold = 'GENESIS_ORIGINAL_PRELAUNCH_BINDING_UNPROVEN'
+     checks = {
+-        'predicate_is_private_no_package_friend_added':
+-            header.index('private:') < declaration < header.index('struct State;')
+-            and 'friend class GuardianInstallOriginLink;' in header
+-            and 'friend class GuardianInstallOriginLink;' not in package_header,
+-        'predicate_is_noexcept_and_refuses_exceptions':
+-            ') noexcept {' in predicate and 'catch (...) { return false; }' in predicate,
+-        'predicate_has_no_process_reselection_or_launch':
+-            all(token not in predicate for token in ('OpenProcess(', 'GetProcessId(', 'CreateProcess', 'ShellExecute')),
+-        'predicate_binds_fixed_bootstrap_purpose':
+-            'active_policy_genesis_detail::relative(package.capsule().selection, true)' in predicate,
+-        'generation_and_live_fences_surround_original_image_check':
+-            predicate.index('WaitForSingleObject(') < predicate.index('!package.recheck()')
+-            < predicate.index('policy.generation != 1') < predicate.index('package.originalImageExact(')
+-            < predicate.rindex('package.recheck()') < predicate.rindex('WaitForSingleObject('),
+-        'actual_created_handle_bound_before_connect_and_window_packet':
+-            created < retained < first < connect < second < frame < packet
+-            and request.count(call) == 2 and request.count('ShellExecuteExW(&effect)') == 1,
+-        'first_binding_is_inside_original_creation_lock':
+-            request.index('std::lock_guard<std::mutex> lock(state_->mutex);') < first
+-            < request.index('\n    }\n    // The original creator'),
+-        'second_binding_is_inside_postconnect_lock':
+-            connect < request.index('std::lock_guard<std::mutex> lock(state_->mutex);', connect) < second,
+-        'scope_package_and_original_handle_remain_retained':
+-            'Handle original_bootstrap;' in request
+-            and '!state_->origin->recheck() || !state_->coordinator_payload.recheck()' in request[retained:first]
+-            and '!state_->genesis_package->recheck()' in request[retained:first]
+-            and '!state_->genesis_package->recheck()' in request[connect:second],
+-        'elevated_consumer_keeps_its_independent_signed_image_check':
++        'coordinator_contract_does_not_claim_uac_or_prelaunch_binding':
++            r'\"uac_implemented\":false' in coordinator
++            and r'\"prelaunch_file_binding_qualified\":false' in coordinator,
++        'actual_private_request_method_is_extracted':
++            header.index('private:') < header.index('bool requestVerifiedGenesisElevation();'),
++        'original_eligibility_precedes_consumed_attempt':
++            request.index('!state_->is_coordinator') < request.index('state_->attempted = true;'),
++        'attempt_is_consumed_before_existing_package_qualification':
++            request.index('state_->attempted = true;') <
++            request.index('GuardianActivePolicyGenesis::qualifyOriginalCoordinator('),
++        'existing_package_original_user_and_custody_are_rechecked':
++            '!state_->genesis_package->recheck() || !state_->origin->recheck() || !state_->coordinator_payload.recheck()' in request,
++        'original_signed_window_is_checked_before_prelaunch_hold':
++            request.index('state_->genesis_window.observe(') < request.index(hold),
++        'request_refuses_before_all_dispatch_and_window_handoff_boundaries':
++            all(token not in request for token in (
++                'ShellExecute', 'CreateProcess', 'connectOriginalBootstrap(',
++                'genesisOriginWindow(', 'state_->packet(', 'genesis_elevation_attempted = true',
++                'WaitForMultipleObjects(', 'GetExitCodeProcess(')),
++        'prelaunch_hold_is_terminal_return':
++            request.rstrip().endswith('return state_->fail("' + hold + '", ERROR_ACCESS_DENIED);\n}'),
++        'obsolete_postlaunch_predicate_is_not_treated_as_prelaunch_authority':
++            'originalCoordinatorBootstrapExact' not in source,
++        'no_new_public_package_friend_added':
++            'friend class GuardianInstallOriginLink;' not in package_header,
++        'elevated_consumer_keeps_independent_signed_image_check':
+             's.package->originalImageExact(bootstrap, active_policy_genesis_detail::relative(s.package->capsule().selection, true))' in source,
+     }
+     if not all(checks.values()):
+@@ -80,138 +71,270 @@ def main():
+ #include <cstdint>
+ #include <functional>
+ #include <iostream>
++#include <limits>
++#include <memory>
++#include <mutex>
+ #include <stdexcept>
+ #include <string>
+-#include <utility>
+ #include <vector>
+ 
+ using DWORD = std::uint32_t;
+-constexpr DWORD WAIT_TIMEOUT = 258, WAIT_OBJECT_0 = 0, WAIT_FAILED = 0xffffffff;
+-struct ModelProcess {
+-    std::vector<DWORD> waits{WAIT_TIMEOUT, WAIT_TIMEOUT};
+-    std::size_t calls = 0, throw_on = 0;
++using ULONGLONG = std::uint64_t;
++constexpr DWORD ERROR_SUCCESS = 0, ERROR_ACCESS_DENIED = 5, ERROR_INVALID_DATA = 13, ERROR_TIMEOUT = 1460;
++constexpr DWORD WAIT_TIMEOUT = 258, WAIT_OBJECT_0 = 0;
++struct NativeObject {};
++using HANDLE = NativeObject*;
++enum class Attack { Route, Oplock, Bytes, Cancel, Deadline };
++struct Counters {
++    unsigned qualification = 0, package_rechecks = 0, signed_window_observations = 0;
++    unsigned shell = 0, connect = 0, window_frames = 0, packet_writes = 0;
++    unsigned early_effects = 0, postchecks = 0;
+ };
+-using HANDLE = ModelProcess*;
+-ModelProcess invalid_process;
+-const HANDLE INVALID_HANDLE_VALUE = &invalid_process;
+-DWORD WaitForSingleObject(HANDLE process, DWORD timeout) {
+-    if (!process || process == INVALID_HANDLE_VALUE || timeout != 0) throw std::runtime_error("invalid wait");
+-    ++process->calls;
+-    if (process->throw_on == process->calls) throw std::runtime_error("wait failure");
+-    return process->waits.at(process->calls - 1);
++struct SyntheticWorld {
++    NativeObject coordinator, primary, cancel, child;
++    Counters calls;
++    Attack attack = Attack::Route;
++    bool package_available = true, package_live = true, origin_live = true, custody_live = true;
++    bool route_intact = true, oplock_intact = true, bytes_intact = true;
++    bool cancel_signalled = false, fence_cancelled = false, clock_available = true, window_valid = true;
++    std::uint64_t tick = 1000, wall = 1'000'000'000, monotonic = 1000;
++    std::uint64_t policy_not_after = 2'000'000'000, tick_after_qualification = 0;
++    std::uint64_t launch_deadline = 61'000;
++} world;
++ULONGLONG GetTickCount64() { return world.tick; }
++DWORD GetLastError() { return ERROR_INVALID_DATA; }
++DWORD WaitForSingleObject(HANDLE handle, DWORD timeout) {
++    if (handle != &world.cancel || timeout != 0) throw std::runtime_error("unexpected synthetic wait");
++    return world.cancel_signalled ? WAIT_OBJECT_0 : WAIT_TIMEOUT;
++}
++
++// Abstract injected races, not a claim that Windows allows namespace substitution
++// around retained descendants. The fake records an early child effect INSIDE
++// dispatch, before returning its handle; it does not run any OS operation.
++struct SHELLEXECUTEINFOW { HANDLE hProcess = nullptr; };
++bool ShellExecuteExW(SHELLEXECUTEINFOW* effect) {
++    if (!effect) throw std::runtime_error("missing synthetic effect");
++    ++world.calls.shell;
++    ++world.calls.early_effects;
++    switch (world.attack) {
++        case Attack::Route: world.route_intact = false; break;
++        case Attack::Oplock: world.oplock_intact = false; break;
++        case Attack::Bytes: world.bytes_intact = false; break;
++        case Attack::Cancel: world.cancel_signalled = true; break;
++        case Attack::Deadline: world.tick = world.launch_deadline; break;
++    }
++    effect->hProcess = &world.child;
++    return true;
++}
++bool historicalPostlaunchCheck(HANDLE process) {
++    ++world.calls.postchecks;
++    return process == &world.child && world.route_intact && world.oplock_intact && world.bytes_intact &&
++        !world.cancel_signalled && world.tick < world.launch_deadline;
+ }
+ 
+ namespace metaengine::guardian {
+ namespace active_policy {
+-struct Policy { unsigned generation = 1; std::string target_package_version = "0.7.0-dev.123.1"; };
+-struct PolicySelection { Policy policy; };
++struct Policy { unsigned generation = 1; std::uint64_t not_after_100ns = 0; };
++struct PolicySelection { Policy policy; std::string policy_sha256 = std::string(64, 'a'); };
++struct Frame {};
++Frame genesisOriginWindow(std::uint64_t, unsigned) { ++world.calls.window_frames; return {}; }
++}
++namespace active_policy_native {
++bool clock(std::uint64_t* wall, std::uint64_t* monotonic) {
++    if (!world.clock_available) return false;
++    *wall = world.wall; *monotonic = world.monotonic; return true;
++}
+ }
+-struct ModelCapsule { active_policy::PolicySelection selection; };
++struct GuardianLoadedReleaseAnchor { unsigned generation; std::string sha; };
++struct GuardianLoadedReleaseWindow {
++    bool observe(const active_policy::Policy&, GuardianLoadedReleaseAnchor, const std::string&,
++                 std::uint64_t, std::uint64_t) {
++        ++world.calls.signed_window_observations;
++        return world.window_valid;
++    }
++};
++struct SyntheticCapsule { active_policy::PolicySelection selection; };
+ class GuardianActivePolicyPackage {
++    SyntheticCapsule data_;
++public:
++    GuardianActivePolicyPackage() { data_.selection.policy.not_after_100ns = world.policy_not_after; }
++    bool recheck() { ++world.calls.package_rechecks; return world.package_live; }
++    const SyntheticCapsule& capsule() const { return data_; }
++};
++class GuardianActivePolicyGenesis {
+ public:
+-    ModelCapsule data;
+-    HANDLE expected_process = nullptr;
+-    std::wstring expected_relative = L"resources\\guardian-bootstrap\\METAENGINE-Guardian-Bootstrap-0.7.0-dev.123.1-x64.exe";
+-    std::wstring observed_relative;
+-    unsigned rechecks = 0, fail_recheck = 0, throw_recheck = 0, capsule_reads = 0, throw_capsule = 0, image_checks = 0;
+-    bool image_exact = true, throw_image = false;
+-    bool recheck() {
+-        ++rechecks;
+-        if (throw_recheck == rechecks) throw std::runtime_error("recheck failure");
+-        return fail_recheck != rechecks;
++    static std::unique_ptr<GuardianActivePolicyPackage> qualifyOriginalCoordinator(
++        HANDLE coordinator, HANDLE primary, HANDLE cancel, std::uint64_t deadline,
++        std::wstring* executable, std::string* failure) {
++        ++world.calls.qualification;
++        if (coordinator != &world.coordinator || primary != &world.primary || cancel != &world.cancel ||
++            deadline != world.tick + 60'000 || !executable || !failure)
++            throw std::runtime_error("actual method changed synthetic qualification arguments");
++        if (!world.package_available) {
++            *failure = "SYNTHETIC_EXISTING_PACKAGE_UNAVAILABLE"; return {};
++        }
++        *executable = L"SYNTHETIC_FIXED_PACKAGE_BOOTSTRAP_NOT_AN_OS_PATH";
++        failure->clear();
++        if (world.tick_after_qualification) world.tick = world.tick_after_qualification;
++        return std::make_unique<GuardianActivePolicyPackage>();
+     }
+-    const ModelCapsule& capsule() {
+-        if (++capsule_reads == throw_capsule) throw std::runtime_error("capsule failure");
+-        return data;
++};
++struct Handle {
++    HANDLE value;
++    bool valid() const { return value != nullptr; }
++};
++struct SyntheticOriginalUser {
++    bool recheck() const { return world.origin_live; }
++    HANDLE retainedProcess() const { return &world.coordinator; }
++    HANDLE retainedToken() const { return &world.primary; }
++};
++struct SyntheticImageCustody { bool recheck() const { return world.custody_live; } };
++struct SyntheticFence { bool cancelled() const { return world.fence_cancelled; } };
++struct SyntheticState {
++    std::mutex mutex;
++    Handle cancelled{&world.cancel};
++    std::unique_ptr<SyntheticOriginalUser> origin = std::make_unique<SyntheticOriginalUser>();
++    SyntheticImageCustody coordinator_payload;
++    SyntheticFence fence;
++    bool is_coordinator = true, attempted = false, closed = false, kernel_bound = true;
++    bool genesis_elevation_attempted = false;
++    ULONGLONG genesis_deadline = 0;
++    std::unique_ptr<GuardianActivePolicyPackage> genesis_package;
++    GuardianLoadedReleaseWindow genesis_window;
++    std::string reason = "SYNTHETIC_NOT_CAPTURED";
++    DWORD error = ERROR_SUCCESS;
++    // Match production: fail does NOT cancel, close, revoke or reset attempted.
++    bool fail(const char* why, DWORD code = ERROR_SUCCESS) {
++        const DWORD observed_error = code != ERROR_SUCCESS ? code : GetLastError();
++        kernel_bound = false; reason = why; error = observed_error;
++        if (error == ERROR_SUCCESS) error = ERROR_INVALID_DATA;
++        return false;
+     }
+-    bool originalImageExact(HANDLE process, const std::wstring& relative) {
+-        ++image_checks;
+-        observed_relative = relative;
+-        if (throw_image) throw std::runtime_error("image failure");
+-        return image_exact && process == expected_process && relative == expected_relative;
++    bool active() const {
++        return !closed && cancelled.valid() && !fence.cancelled() &&
++            WaitForSingleObject(cancelled.value, 0) == WAIT_TIMEOUT;
+     }
++    bool packet(HANDLE, active_policy::Frame*, bool) { ++world.calls.packet_writes; return true; }
+ };
+-struct GenesisModelProbe;
+-class GuardianActivePolicyGenesis {
+-    static bool originalCoordinatorBootstrapExact(GuardianActivePolicyPackage&, HANDLE) noexcept;
+-    friend struct GenesisModelProbe;
++struct GenesisRequestModelProbe;
++class GuardianInstallOriginLink {
++    std::unique_ptr<SyntheticState> state_ = std::make_unique<SyntheticState>();
++    bool requestVerifiedGenesisElevation();
++    bool connectOriginalBootstrap(HANDLE) { ++world.calls.connect; return true; }
++    friend struct GenesisRequestModelProbe;
+ };
+-namespace active_policy_genesis_detail {
+-// The exact production path constructor follows, without test replacement.
+-__RELATIVE__
+-}
+-// The exact production predicate follows, without test replacement.
+-__PREDICATE__
+-struct GenesisModelProbe {
+-    static bool run(GuardianActivePolicyPackage& package, HANDLE process) {
+-        return GuardianActivePolicyGenesis::originalCoordinatorBootstrapExact(package, process);
+-    }
++// The ENTIRE exact production request follows. None of its branches are replaced.
++__REQUEST__
++struct GenesisRequestModelProbe {
++    static bool run(GuardianInstallOriginLink& link) { return link.requestVerifiedGenesisElevation(); }
++    static SyntheticState& state(GuardianInstallOriginLink& link) { return *link.state_; }
+ };
+ }
+ 
+ int main() {
+     using namespace metaengine::guardian;
+     std::vector<std::string> passed;
+-    auto require = [](bool condition, const std::string& name) {
+-        if (!condition) throw std::runtime_error(name);
++    const auto require = [](bool condition, const std::string& reason) {
++        if (!condition) throw std::runtime_error(reason);
+     };
+-    auto test = [&](const std::string& name, bool expected,
+-                    const std::function<void(GuardianActivePolicyPackage&, ModelProcess&)>& prepare) {
+-        GuardianActivePolicyPackage package;
+-        ModelProcess process;
+-        package.expected_process = &process;
+-        prepare(package, process);
+-        require(GenesisModelProbe::run(package, &process) == expected, name);
+-        passed.push_back(name);
++    const auto noEffects = [&] {
++        require(world.calls.shell == 0 && world.calls.connect == 0 && world.calls.window_frames == 0 &&
++            world.calls.packet_writes == 0 && world.calls.early_effects == 0, "production reached effect boundary");
+     };
+-    {
+-        GuardianActivePolicyPackage package;
+-        ModelProcess process;
+-        package.expected_process = &process;
+-        require(GenesisModelProbe::run(package, &process), "same_original_generation1_bootstrap_model");
+-        require(package.rechecks == 2 && process.calls == 2 && package.image_checks == 1 &&
+-            package.observed_relative == package.expected_relative, "positive_model_required_fences");
+-        passed.push_back("same_original_generation1_bootstrap_model_NOT_WINDOWS_PROOF");
++    const auto hold = [&](GuardianInstallOriginLink& link, const std::string& reason) {
++        require(!GenesisRequestModelProbe::run(link), "synthetic authority became production launch permission");
++        const auto& state = GenesisRequestModelProbe::state(link);
++        require(state.reason == reason && !state.kernel_bound && !state.genesis_elevation_attempted,
++            "wrong refusal or elevation claim");
++        noEffects();
++    };
++    const auto restoreSyntheticCustody = [&] {
++        world.package_available = world.package_live = world.origin_live = world.custody_live = true;
++        world.route_intact = world.oplock_intact = world.bytes_intact = true;
++        world.cancel_signalled = world.fence_cancelled = false;
++        world.clock_available = world.window_valid = true;
++        world.tick = 1000; world.tick_after_qualification = 0;
++    };
++    const std::vector<std::pair<Attack, std::string>> attacks{
++        {Attack::Route, "route_substitution"}, {Attack::Oplock, "oplock_break"},
++        {Attack::Bytes, "byte_drift"}, {Attack::Cancel, "cancellation"},
++        {Attack::Deadline, "deadline_consumed_inside_dispatch"},
++    };
++    // Controls demonstrate the adversary actually runs, without resetting
++    // counters or pretending a failed post-check removes an existing effect.
++    for (const auto& [attack, name] : attacks) {
++        world = SyntheticWorld{}; world.attack = attack;
++        SHELLEXECUTEINFOW effect;
++        const bool launched = ShellExecuteExW(&effect);
++        const bool accepted = launched && historicalPostlaunchCheck(effect.hProcess);
++        require(!accepted && effect.hProcess == &world.child && world.calls.shell == 1 &&
++            world.calls.postchecks == 1 && world.calls.early_effects == 1,
++            "historical post-check control failed to retain early effect");
++        passed.push_back("historical_false_postcheck_cannot_undo_early_effect_" + name);
+     }
+-    for (HANDLE bad : {static_cast<HANDLE>(nullptr), INVALID_HANDLE_VALUE}) {
+-        GuardianActivePolicyPackage package;
+-        require(!GenesisModelProbe::run(package, bad) && package.rechecks == 0, "invalid_original_handle");
++    for (const auto& [attack, name] : attacks) {
++        world = SyntheticWorld{}; world.attack = attack;
++        GuardianInstallOriginLink link;
++        hold(link, "GENESIS_ORIGINAL_PRELAUNCH_BINDING_UNPROVEN");
++        auto& state = GenesisRequestModelProbe::state(link);
++        require(state.attempted && !state.closed && !world.cancel_signalled &&
++            world.calls.qualification == 1 && world.calls.package_rechecks == 1 &&
++            world.calls.signed_window_observations == 1 && world.route_intact && world.oplock_intact && world.bytes_intact,
++            "valid synthetic signed fixture did not reach consumed prelaunch HOLD");
++        const auto qualified = world.calls.qualification;
++        const auto observed_window = world.calls.signed_window_observations;
++        restoreSyntheticCustody();
++        hold(link, "GENESIS_ORIGINAL_COORDINATOR_REQUIRED");
++        require(world.calls.qualification == qualified && world.calls.signed_window_observations == observed_window,
++            "consumed request retried after synthetic custody restored");
++        passed.push_back("actual_request_stops_before_" + name + "_and_refuses_retry_NOT_WINDOWS_PROOF");
+     }
+-    passed.push_back("null_and_invalid_original_handle_refuse");
+     {
+-        GuardianActivePolicyPackage package;
+-        ModelProcess original, wrong;
+-        package.expected_process = &original;
+-        require(!GenesisModelProbe::run(package, &wrong), "wrong_live_original_handle");
+-        passed.push_back("wrong_live_original_handle_refuses");
++        world = SyntheticWorld{}; world.package_available = false;
++        GuardianInstallOriginLink link;
++        hold(link, "SYNTHETIC_EXISTING_PACKAGE_UNAVAILABLE");
++        require(GenesisRequestModelProbe::state(link).attempted && world.calls.qualification == 1,
++            "missing package did not consume original attempt");
++        restoreSyntheticCustody();
++        hold(link, "GENESIS_ORIGINAL_COORDINATOR_REQUIRED");
++        require(world.calls.qualification == 1, "late package qualification rearmed failed request");
++        passed.push_back("missing_package_then_late_qualification_cannot_rearm_actual_request");
+     }
+-    test("wrong_image_refuses", false, [](auto& package, auto&) { package.image_exact = false; });
+-    test("install_origin_purpose_cannot_substitute_bootstrap", false, [](auto& package, auto&) {
+-        package.expected_relative = L"resources\\guardian-bootstrap\\METAENGINE-Guardian-Install-Origin-0.7.0-dev.123.1-x64.exe";
+-    });
+-    test("different_package_version_cannot_substitute_image", false, [](auto& package, auto&) {
+-        package.data.selection.policy.target_package_version = "0.7.0-dev.124.1";
+-    });
+-    test("generation_zero_refuses", false, [](auto& package, auto&) { package.data.selection.policy.generation = 0; });
+-    test("generation_two_refuses", false, [](auto& package, auto&) { package.data.selection.policy.generation = 2; });
+-    test("first_package_recheck_failure_refuses", false, [](auto& package, auto&) { package.fail_recheck = 1; });
+-    test("post_image_package_recheck_failure_refuses", false, [](auto& package, auto&) { package.fail_recheck = 2; });
+-    test("exit_before_image_check_refuses", false, [](auto&, auto& process) { process.waits = {WAIT_OBJECT_0}; });
+-    test("exit_after_image_check_refuses", false, [](auto&, auto& process) { process.waits = {WAIT_TIMEOUT, WAIT_OBJECT_0}; });
+-    test("unknown_lifetime_before_image_check_refuses", false, [](auto&, auto& process) { process.waits = {WAIT_FAILED}; });
+-    test("unknown_lifetime_after_image_check_refuses", false, [](auto&, auto& process) { process.waits = {WAIT_TIMEOUT, WAIT_FAILED}; });
+-    test("first_package_recheck_throw_refuses", false, [](auto& package, auto&) { package.throw_recheck = 1; });
+-    test("post_image_package_recheck_throw_refuses", false, [](auto& package, auto&) { package.throw_recheck = 2; });
+-    test("first_capsule_throw_refuses", false, [](auto& package, auto&) { package.throw_capsule = 1; });
+-    test("path_capsule_throw_refuses", false, [](auto& package, auto&) { package.throw_capsule = 2; });
+-    test("image_check_throw_refuses", false, [](auto& package, auto&) { package.throw_image = true; });
+-    test("first_lifetime_throw_refuses", false, [](auto&, auto& process) { process.throw_on = 1; });
+-    test("post_image_lifetime_throw_refuses", false, [](auto&, auto& process) { process.throw_on = 2; });
++    const auto refused = [&](const std::string& name, const std::string& reason, unsigned qualified,
++                             const std::function<void(GuardianInstallOriginLink&)>& prepare) {
++        world = SyntheticWorld{};
++        GuardianInstallOriginLink link;
++        prepare(link);
++        hold(link, reason);
++        require(world.calls.qualification == qualified, "unexpected qualification count: " + name);
++        passed.push_back(name);
++    };
++    refused("noncoordinator_refuses_before_qualification", "GENESIS_ORIGINAL_COORDINATOR_REQUIRED", 0,
++        [](auto& link) { GenesisRequestModelProbe::state(link).is_coordinator = false; });
++    refused("missing_original_user_refuses_before_qualification", "GENESIS_ORIGINAL_COORDINATOR_REQUIRED", 0,
++        [](auto& link) { GenesisRequestModelProbe::state(link).origin.reset(); });
++    refused("lost_original_image_custody_refuses_before_qualification", "GENESIS_ORIGINAL_COORDINATOR_REQUIRED", 0,
++        [](auto&) { world.custody_live = false; });
++    refused("cancelled_original_scope_refuses_before_qualification", "GENESIS_ORIGINAL_COORDINATOR_REQUIRED", 0,
++        [](auto&) { world.cancel_signalled = true; });
++    refused("clock_overflow_refuses_before_qualification", "GENESIS_ORIGINAL_CLOCK_UNAVAILABLE", 0,
++        [](auto&) { world.tick = (std::numeric_limits<ULONGLONG>::max)() - 59'999; });
++    refused("qualified_package_drift_refuses_before_dispatch", "GENESIS_ORIGINAL_VERIFIED_PACKAGE_DRIFT", 1,
++        [](auto&) { world.package_live = false; });
++    refused("clock_unavailable_refuses_before_dispatch", "GENESIS_ORIGINAL_SIGNED_WINDOW_EXPIRED", 1,
++        [](auto&) { world.clock_available = false; });
++    refused("signed_policy_expired_refuses_before_dispatch", "GENESIS_ORIGINAL_SIGNED_WINDOW_EXPIRED", 1,
++        [](auto&) { world.policy_not_after = world.wall; });
++    refused("signed_window_rejection_refuses_before_dispatch", "GENESIS_ORIGINAL_SIGNED_WINDOW_EXPIRED", 1,
++        [](auto&) { world.window_valid = false; });
++    refused("deadline_consumed_during_qualification_refuses_before_dispatch", "GENESIS_ORIGINAL_SIGNED_WINDOW_EXPIRED", 1,
++        [](auto&) { world.tick_after_qualification = 61'000; });
+     std::cout << "{\"model_cases\":" << passed.size() << ",\"passed\":[";
+     for (std::size_t i = 0; i < passed.size(); ++i) std::cout << (i ? "," : "") << '"' << passed[i] << '"';
+-    std::cout << "]}\n";
++    std::cout << "],\"production_dispatch_calls\":0,\"production_early_effects\":0,"
++        "\"historical_control_early_effects\":" << attacks.size() << "}\n";
+ }
+-'''.replace('__RELATIVE__', relative).replace('__PREDICATE__', predicate)
++'''.replace('__REQUEST__', request)
+     compiler = shutil.which('c++') or shutil.which('g++')
+     if not compiler:
+         raise RuntimeError('C++ compiler unavailable; model NOT RUN')
+@@ -228,7 +351,6 @@ int main() {
+             raise RuntimeError('model compile failed:\n' + built.stdout + built.stderr)
+         environment = os.environ.copy()
+         if args.sanitize:
+-            # LeakSanitizer /proc inspection is outside this model's scope.
+             environment['ASAN_OPTIONS'] = 'detect_leaks=0:halt_on_error=1'
+             environment['UBSAN_OPTIONS'] = 'halt_on_error=1:print_stacktrace=1'
+         run = subprocess.run([str(model_binary)], text=True, capture_output=True, env=environment, timeout=30)
+@@ -238,10 +360,15 @@ int main() {
+     print(json.dumps({
+         'schema': 'metaengine.guardian.genesis-launch-binding-model.v1',
+         'classification': 'SOURCE_EXTRACTED_SYNTHETIC_MODEL_ONLY',
++        'adversary_scope': 'ABSTRACT_INJECTED_BOUNDARY_RACES_NOT_NTFS_BYPASS_PROOF',
++        'source_method': 'GuardianInstallOriginLink::requestVerifiedGenesisElevation',
++        'source_method_sha256': hashlib.sha256(request.encode()).hexdigest(),
+         'state': 'PASS', 'source_guards': checks, **model,
+         'address_undefined_sanitizers': 'PASS' if args.sanitize else 'NOT_RUN',
+         'leak_sanitizer': 'NOT_RUN', 'windows_qualification': 'NOT_RUN',
++        'ntfs_namespace_qualification': 'NOT_RUN', 'uac_execution': 'NOT_RUN',
+         'release_signature_verification': 'NOT_RUN', 'installer_effects': 'NOT_RUN',
++        'full_package_verified': False, 'loaded_runtime_code_attested': False,
+         'authority_effect': False,
+     }, indent=2))
+ 

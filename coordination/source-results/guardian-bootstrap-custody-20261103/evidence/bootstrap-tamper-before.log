@@ -1,0 +1,19 @@
+{"launch_callbacks":1,"state":"HOLD","reason":"GUARDIAN_BOOTSTRAP_UAC_LAUNCH_REJECTED","installer_processes_started":0,"scope":"SYNTHETIC_JS_ONLY_NOT_WINDOWS_CUSTODY"}
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: changed file reached launch callback
+
+1 !== 0
+
+    at file:///workspace/metaengine-bootstrap-c265/evidence/bootstrap-tamper-reproduction.mjs:34:10 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: 1,
+  expected: 0,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+
+Node.js v24.19.0

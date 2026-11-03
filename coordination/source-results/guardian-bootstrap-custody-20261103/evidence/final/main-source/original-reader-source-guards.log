@@ -1,0 +1,25 @@
+{"case": "service_child_creation_remains_noninheriting", "state": "PASS", "kind": "STATIC_SOURCE_GUARD"}
+{"case": "service_retains_original_child", "state": "PASS", "kind": "STATIC_SOURCE_GUARD"}
+{"case": "service_binds_exact_creation_owned_connection", "state": "PASS", "kind": "STATIC_SOURCE_GUARD"}
+{"case": "service_one_shot_before_hello", "state": "PASS", "kind": "STATIC_SOURCE_GUARD"}
+{"case": "service_monotonic_hello_deadline", "state": "PASS", "kind": "STATIC_SOURCE_GUARD"}
+{"case": "service_duplicates_its_current_process_not_foreign_pid", "state": "PASS", "kind": "STATIC_SOURCE_GUARD"}
+{"case": "service_checks_child_table_object_before_publication", "state": "PASS", "kind": "STATIC_SOURCE_GUARD"}
+{"case": "service_checks_token_id_same_as_original", "state": "PASS", "kind": "STATIC_SOURCE_GUARD"}
+{"case": "service_checks_post_grant_authority", "state": "PASS", "kind": "STATIC_SOURCE_GUARD"}
+{"case": "service_fail_close_source", "state": "PASS", "kind": "STATIC_SOURCE_GUARD"}
+{"case": "service_writes_once_over_original_pipe", "state": "PASS", "kind": "STATIC_SOURCE_GUARD"}
+{"case": "process_reader_rights_exact", "state": "PASS", "kind": "STATIC_SOURCE_GUARD"}
+{"case": "token_reader_rights_exact", "state": "PASS", "kind": "STATIC_SOURCE_GUARD"}
+{"case": "client_uses_existing_creation_owner_pipe", "state": "PASS", "kind": "STATIC_SOURCE_GUARD"}
+{"case": "client_acquires_before_first_observation", "state": "PASS", "kind": "STATIC_SOURCE_GUARD"}
+{"case": "client_never_reopens_read_handle_by_pid", "state": "PASS", "kind": "STATIC_SOURCE_GUARD"}
+{"case": "client_checks_actual_service_birth", "state": "PASS", "kind": "STATIC_SOURCE_GUARD"}
+{"case": "client_checks_system_token_on_real_object", "state": "PASS", "kind": "STATIC_SOURCE_GUARD"}
+{"case": "client_policy_digest_matches_original_grant", "state": "PASS", "kind": "STATIC_SOURCE_GUARD"}
+{"case": "original_image_reader_rechecks_two_original_kernel_objects", "state": "PASS", "kind": "STATIC_SOURCE_GUARD"}
+{"case": "no_service_dacl_expansion_in_changed_modules", "state": "PASS", "kind": "STATIC_SOURCE_GUARD"}
+{"case": "no_debug_privilege_enabled", "state": "PASS", "kind": "STATIC_SOURCE_GUARD"}
+{"case": "no_protocol_authority_claim", "state": "PASS", "kind": "STATIC_SOURCE_GUARD"}
+{"case": "transfer_carries_two_bounded_objects", "state": "PASS", "kind": "STATIC_SOURCE_GUARD"}
+{"schema": "metaengine.guardian.original-reader-static-source.v1", "passed": 24, "failed": 0, "windows": "NOT RUN"}

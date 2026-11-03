@@ -1,0 +1,10 @@
+[
+  {
+    "name": "before",
+    "exit": 1
+  },
+  {
+    "name": "after",
+    "exit": 0
+  }
+]
