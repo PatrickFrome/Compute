@@ -1,0 +1,160 @@
+(node:23425) ExperimentalWarning: Module mocking is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:23425) DeprecationWarning: mock.module(): options.namedExports is deprecated. Use options.exports instead.
+✔ the module exports no native issuer, token allocator or fictitious cleanup lifecycle (2.073104ms)
+✔ unmodified public factories and copied registry-like descriptors cannot invoke hostile callbacks (3.624406ms)
+✔ valid fixed registry identities pass only the non-authorizing guard and still hit the real native HOLD (1.209904ms)
+✔ mechanical handle/JSON claims and copied jobs cannot create original native admission (0.986763ms)
+✔ input accessors, proxies, symbols and hidden fields deny without caller traps (0.384921ms)
+▶ each original server binding field must match the same frozen request
+  ✔ instance_id (0.354225ms)
+  ✔ host_pid (0.49217ms)
+  ✔ request_id (0.263751ms)
+  ✔ action (0.387245ms)
+  ✔ request_sha256 (0.254367ms)
+  ✔ body_sha256 (0.373354ms)
+✔ each original server binding field must match the same frozen request (3.56025ms)
+▶ the original signal, retained deadline and exact phase token cannot be substituted
+  ✔ signal (0.362648ms)
+  ✔ deadline (0.192235ms)
+  ✔ phase token (0.164965ms)
+✔ the original signal, retained deadline and exact phase token cannot be substituted (1.163095ms)
+▶ same-looking registry replacements during native vetoes cannot preserve original identities
+  ✔ job (0.460923ms)
+  ✔ server (0.198114ms)
+  ✔ phase (0.124495ms)
+✔ same-looking registry replacements during native vetoes cannot preserve original identities (1.291827ms)
+▶ revocation and expiry deny without refunding or replacing the original bound
+  ✔ cancelled (0.252835ms)
+  ✔ revoked (0.1953ms)
+  ✔ expired (0.113388ms)
+✔ revocation and expiry deny without refunding or replacing the original bound (0.891152ms)
+✔ foreign private errors are sanitized while existing original physical uncertainty remains negative (0.379393ms)
+▶ async, boolean or thenable vetoes cannot become native authority or invoke caller then getters
+  ✔ boolean (12.971334ms)
+  ✔ promise (0.922027ms)
+  ✔ thenable (0.510497ms)
+✔ async, boolean or thenable vetoes cannot become native authority or invoke caller then getters (15.355981ms)
+▶ malformed private facet and binding values refuse before accessor/coercion traps
+  ✔ job accessor (0.373233ms)
+  ✔ server proxy (0.250762ms)
+  ✔ binding coercion (0.104154ms)
+✔ malformed private facet and binding values refuse before accessor/coercion traps (1.066713ms)
+(node:23432) ExperimentalWarning: Module mocking is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:23432) DeprecationWarning: mock.module(): options.namedExports is deprecated. Use options.exports instead.
+✔ the real custody gate has no positive branch for copied handle claims or caller callbacks (1.842112ms)
+▶ actual root observation and producer stay on HOLD after the final path observation, with zero effects
+  ✔ none (34.035791ms)
+  ✔ root (18.823138ms)
+  ✔ state (25.286024ms)
+  ✔ pgdata (16.797184ms)
+  ✔ root-to-pgdata-alias (14.924065ms)
+✔ actual root observation and producer stay on HOLD after the final path observation, with zero effects (112.115578ms)
+▶ close and drain join the original pending phase without starting a pool or native work
+  ✔ phase 1 (10.654552ms)
+  ✔ phase 2 (12.288796ms)
+✔ close and drain join the original pending phase without starting a pool or native work (23.790646ms)
+✔ actual native adapter cannot turn handle-shaped job claims or callbacks into directory custody (10.976681ms)
+(node:23443) ExperimentalWarning: Module mocking is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:23443) DeprecationWarning: mock.module(): options.defaultExport is deprecated. Use options.exports.default instead.
+(node:23443) DeprecationWarning: mock.module(): options.namedExports is deprecated. Use options.exports instead.
+▶ absent registration always holds before seal issuance, mkdir or any other write
+  ✔ absent root remains absent (23.364839ms)
+  ✔ orphan root preserved (9.973388ms)
+✔ absent registration always holds before seal issuance, mkdir or any other write (35.604679ms)
+✔ real composition preserves the exact missing namespace-custody HOLD without writing (9.816574ms)
+▶ post-observation ancestor replacement cannot cross the missing original namespace-custody fence
+  ✔ replacement-directory (8.886581ms)
+  ✔ ancestor-alias-to-original-pgdata (7.353917ms)
+✔ post-observation ancestor replacement cannot cross the missing original namespace-custody fence (16.80829ms)
+✔ a synthetic READY pin can only be requalified readonly and never becomes effect authority (23.351901ms)
+✔ synthetic READY evidence retains its physical root through fresh readonly Host and identity composition (15.837725ms)
+▶ REGISTERING and missing READY roots remain holds without repair, recreation or rotation
+  ✔ REGISTERING (9.774517ms)
+  ✔ READY (14.20268ms)
+✔ REGISTERING and missing READY roots remain holds without repair, recreation or rotation (24.712629ms)
+✔ fake/copy/proxy identities, summaries, argument records and provider tokens cannot invoke caller code (3.422356ms)
+▶ malformed and Proxy current-directory records fail before ACL reads or writes
+  ✔ extra-field (2.654086ms)
+  ✔ accessor (1.390412ms)
+  ✔ proxy (2.190399ms)
+  ✔ revoked-proxy (2.021552ms)
+  ✔ relative-source (2.426535ms)
+  ✔ overlap (3.876961ms)
+✔ malformed and Proxy current-directory records fail before ACL reads or writes (15.617314ms)
+▶ replacement or alias of a READY root, source or state cannot be adopted from its old pathname
+  ✔ root (22.340625ms)
+  ✔ source (20.722716ms)
+  ✔ state (14.540837ms)
+  ✔ root-alias (15.286442ms)
+✔ replacement or alias of a READY root, source or state cannot be adopted from its old pathname (73.909443ms)
+▶ canonical device, client or key changes cannot reuse another synthetic READY pin
+  ✔ device_id (8.284057ms)
+  ✔ client_id (9.639451ms)
+  ✔ key_fingerprint_sha256 (7.314595ms)
+✔ canonical device, client or key changes cannot reuse another synthetic READY pin (25.853947ms)
+✔ close during ACL verification refuses late results and drain joins the original readonly work (8.916165ms)
+▶ Host restart or identity drift during ACL verification permanently refuses that provider
+  ✔ Host (5.746563ms)
+  ✔ device_id (8.234849ms)
+  ✔ client_id (7.632681ms)
+  ✔ key_fingerprint_sha256 (7.979155ms)
+✔ Host restart or identity drift during ACL verification permanently refuses that provider (30.272144ms)
+▶ ACL or sealed-read failure is sanitized and terminal without any repair attempt
+  ✔ unverified (18.113476ms)
+  ✔ wrong-operation (7.134082ms)
+  ✔ native-error (6.520521ms)
+  ✔ sealed-read-error (9.175869ms)
+✔ ACL or sealed-read failure is sanitized and terminal without any repair attempt (41.991552ms)
+✔ real Main provider requires an exact readonly selector token, including for a synthetic READY pin (26.615336ms)
+✔ READY root replaced before Main admission refuses before Owner binding or handoff work (12.251512ms)
+▶ physical or sealed READY root-pin change before Main read refuses further native observations
+  ✔ physical root (18.283839ms)
+  ✔ sealed pin (13.718217ms)
+✔ physical or sealed READY root-pin change before Main read refuses further native observations (32.514555ms)
+✔ actual recovery directory mechanics retain original objects against a simulated Win32 boundary (4110.925491ms)
+ℹ {"name":"exact_original_duplicates_and_identity","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ {"name":"missing_ancestry_refuses_capture","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ {"name":"symmetric_share_conflicts_reject_preexisting_writer","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ {"name":"direct_child_anchor_is_required","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ {"name":"swap_after_last_check_is_denied_without_another_check","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ {"name":"retained_anchor_prevents_empty_directory_junction_conversion","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ {"name":"preexisting_attribute_only_handle_cannot_convert_retained_nonempty_directory","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ {"name":"same_file_ids_do_not_replace_original_open_comparison","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ {"name":"reparse_and_case_sensitive_objects_are_refused","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ {"name":"fixed_child_create_uses_retained_parent_and_same_returned_object","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ {"name":"exclusive_collision_preserves_existing_child_and_contents","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ {"name":"empty_child_collision_is_preserved_without_adoption","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ {"name":"junction_child_collision_is_preserved_without_following","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ {"name":"unanchored_created_child_cannot_issue_operation_or_worker","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ {"name":"created_child_metadata_failure_retains_original_returned_handle","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ {"name":"created_child_duplicate_failure_retains_original_returned_handle","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ {"name":"post_create_allocation_exception_quarantines_original_child","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ {"name":"unsupported_native_create_api_has_no_path_fallback","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ {"name":"cancellation_before_create_prevents_all_namespace_effects","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ {"name":"revocation_during_final_metadata_cannot_issue_operation","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ {"name":"pending_native_create_cancellation_joins_late_completion","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ {"name":"revocation_at_native_create_boundary_cannot_publish_late_success","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ {"name":"original_operation_ticket_joins_after_revoke","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ {"name":"abandoned_operation_quarantines_original_handles","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ {"name":"worker_transfer_failure_denies_later_effects","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ {"name":"partial_worker_transfer_quarantines_originals_and_preserves_remote_copy","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ {"name":"worker_transfer_check_allocation_exception_preserves_originals_without_deadlock","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ {"name":"namespace_cannot_expand_after_original_worker_transfer","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ {"name":"worker_duplicates_survive_holder_crash_until_original_process_exit","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ {"name":"process_exit_and_original_job_descendant_join_are_distinct","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ {"name":"termination_request_failed_wait_and_job_query_never_establish_join","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ {"name":"late_callback_retains_handles_after_worker_join","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ {"name":"cross_scope_tickets_cannot_complete_another_original_operation","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ {"name":"reused_observed_handle_with_equal_pid_and_birth_is_not_original_worker","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ {"runtime":"SYNTHETIC_NATIVE_MECHANICS","tests_passed":34,"tests_failed":0,"windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false}
+ℹ tests 90
+ℹ suites 0
+ℹ pass 90
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5064.871737

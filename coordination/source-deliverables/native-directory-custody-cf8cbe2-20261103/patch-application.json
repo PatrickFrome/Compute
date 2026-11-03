@@ -1,0 +1,12 @@
+{
+  "incremental_base_tree": "cf8cbe232fef42c5ebf6c76316544e9e1cbe743b",
+  "expected_result_tree": "23e4cd10df4817505f8dc3e276cc7688753992e3",
+  "fresh_applied_result_tree": "23e4cd10df4817505f8dc3e276cc7688753992e3",
+  "git_apply_check": "PASS",
+  "git_apply_index": "PASS",
+  "git_diff_cached_check": "PASS",
+  "fresh_test_pass": 90,
+  "fresh_test_fail": 0,
+  "working_copy": "/workspace/metaengine-native-custody-verification",
+  "base_commit_is_local_synthetic": true
+}

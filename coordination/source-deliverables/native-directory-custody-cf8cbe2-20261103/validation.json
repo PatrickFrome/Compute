@@ -1,0 +1,49 @@
+{
+  "compatible_suite": {
+    "tests": 620,
+    "pass": 620,
+    "fail": 0,
+    "skip": 0,
+    "log": "compatible-tests.log"
+  },
+  "native_mechanics": {
+    "node_runner_tests": 1,
+    "scenarios": 34,
+    "pass": 34,
+    "fail": 0,
+    "classification": "SYNTHETIC_NATIVE_MECHANICS",
+    "compiler": "g++ -std=c++20 -Wall -Wextra -Werror -pthread",
+    "windows_native_execution": "NOT_RUN",
+    "physical_authority": false,
+    "authority_effect": false,
+    "log": "native-mechanics-tests.log"
+  },
+  "fresh_patch_suite": {
+    "tests": 90,
+    "pass": 90,
+    "fail": 0,
+    "skip": 0,
+    "log": "fresh-patch-tests.log"
+  },
+  "source_checks": {
+    "pass": 300,
+    "log": "source-check.log"
+  },
+  "static_build_graph": "PASS_SOURCE_MEMBERSHIP_ONLY",
+  "windows_build": "NOT_RUN",
+  "additional_unchanged_baseline_guard": {
+    "script": "apps/metaengine-browser/test/native/verify-guardian-original-main-launch-source.py",
+    "baseline_pass": 81,
+    "baseline_fail": 1,
+    "result_pass": 81,
+    "result_fail": 1,
+    "failing_case": "wire_route_authenticates_then_launches",
+    "baseline_result_output_identical": true
+  },
+  "package_integration": {
+    "state": "BLOCKED",
+    "reason": "infra/client-state-runtime/node_modules/postgres/ absent; pinned postgres@3.4.7 not installed",
+    "installation_attempted": false
+  },
+  "real_database_accessed": false
+}
