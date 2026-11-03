@@ -1,0 +1,21 @@
+✔ build cleanup retries transient Windows locks and physically removes only the captured directory (612.794106ms)
+✔ build cleanup stops after six busy attempts, fails closed and releases the owned preparation lock (1511.978045ms)
+✔ build cleanup rechecks directory identity after a busy attempt and preserves a replacement directory (107.382451ms)
+✔ build cleanup preserves the primary compiler failure and both independent cleanup failures (6.640398ms)
+✔ successful build cleanup retains the exact primary failure without wrapping or replacing it (4.411291ms)
+✔ build cleanup accepts an already removed build directory and still releases its owned lock (4.982448ms)
+✔ precompilation preserves exact C# and all protocol text outside the single Add-Type block, with LF or CRLF (3.979688ms)
+✔ build extraction rejects missing, ambiguous, malformed and invalid UTF-8 templates with LF and CRLF (2.579399ms)
+✔ the output loader refuses non-PE, unmanaged or truncated assembly bytes (2.040684ms)
+✔ instrumented fixture C# is prepared through the same exact-byte transformation (1.229075ms)
+✔ source preparation refuses a non-Windows host without creating an output or pretending compilation succeeded (0.825399ms)
+✔ runtime staging prepares once and packaging reuses its validated bytes for ASAR and the external helper (1.582788ms)
+﹣ Windows preparation compiles the real class once, publishes pinned self-contained bytes and retains old outputs on a rejected build (0.19586ms) # SKIP
+ℹ tests 13
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 1
+ℹ todo 0
+ℹ duration_ms 2334.377756

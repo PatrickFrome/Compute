@@ -1,0 +1,252 @@
+✔ composition mounts only a genuine branded materializer from a full-facet executor factory (1.564362ms)
+✔ composition refuses exactly on the missing native source reader and never mounts the real factory executor today (0.709028ms)
+✔ composition refuses without installed private tools; no fallback executor is selected (1.030153ms)
+✔ runtime-host wires the materializer runJob into the setup service and fences unmounted construction (source contract) (4.278795ms)
+✖ runtime-host mounts a supplied genuine recovery service and exposes its fixed operations (31.513318ms)
+✖ runtime-host refuses an invalid recovery composition shape instead of mounting it (18.141575ms)
+(node:29964) ExperimentalWarning: Module mocking is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ no-operator Host installs fixed configuration forwarders without creating a candidate (41.641117ms)
+✔ production Host callback router refuses before mount and routes only its actual retained authority (23.467311ms)
+✔ Host stop closes the original callback composition and cannot revive it (21.935898ms)
+✔ late private constructor returns actual baseline authority with real seed, heartbeat and custody operations (23.422155ms)
+✔ existing-operator startup preserves direct baseline authority and adds no late-mount service (15.783694ms)
+✔ Host and PostgreSQL identity drift fences the private constructor before an operator read (15.150699ms)
+✔ stop aborts and joins late construction before disposing the original owner pool (13.730133ms)
+✔ unsettled configuration cleanup preserves the owner pool and Host lock after bounded HOLD (6521.90497ms)
+✔ same lock bytes at a new inode revoke the original late-mount generation permanently (18.769463ms)
+✔ ownership replacement during the original constructor await cannot publish a late candidate (14.944529ms)
+▶ an observed Host or PostgreSQL restart cannot revive the old private callback after fields are restored
+  ✔ Host instance (12.392899ms)
+  ✔ PostgreSQL incarnation (16.203473ms)
+✔ an observed Host or PostgreSQL restart cannot revive the old private callback after fields are restored (29.29017ms)
+✔ bundled fixture accepts the concrete production provider, not an arbitrary first IPC message (14.414002ms)
+✔ bundled fixture enforces exact public descriptor fields and contextual endpoint/status bindings (12.982923ms)
+✔ bundled fixture refuses ended, failed, disconnected and silent Host channels without private output (1.023737ms)
+▶ generated Host fixture canonicalizes an aliased temporary root before deriving PG continuity inputs
+  ✔ canonical generated paths pass while alias-spelled postmaster data is still refused (7.908806ms)
+✔ generated Host fixture canonicalizes an aliased temporary root before deriving PG continuity inputs (10.353562ms)
+✔ host rejects private-state overlap, extra config fields and unqualified providers (0.943448ms)
+✔ attached host mode permits an independent PGDATA and rejects ambiguous ownership (1.143193ms)
+✔ physical directory identity fences short-name aliases and private PGDATA overlap (0.672957ms)
+✖ host owns one lock, publishes public status and idempotently stops its runtime (22.970293ms)
+✔ failed startup retains the finite health witness instead of overwriting it with an empty FAILED status (16.183093ms)
+✖ host persists a finite health failure before terminal cleanup and retains it after STOPPED (15.554864ms)
+✖ host clears a recovered health failure and refuses unvalidated private payloads (12.918096ms)
+✖ host serializes overlapping health and terminal status writes (16.42421ms)
+✖ attached host passes through mode and shutdown never claims the external PostgreSQL (23.296536ms)
+✖ real attached-host startup adopts only a physically absent predecessor and writes a fresh owner lock (152.004856ms)
+✔ a leftover recovery gate blocks an otherwise unclaimed host without touching attached data (8.488365ms)
+✔ resource path mismatch refuses launch and an already cancelled startup releases ownership (10.275838ms)
+✔ startup cancellation relays into launcher and cleans every acquired resource (18.489711ms)
+✖ child failure stops provider readiness; unconfirmed cleanup retains exclusive ownership (13.53368ms)
+✖ replaced owner lock is never erased by shutdown (10.698369ms)
+✔ host copies verified dependency bytes into a private writable cache without changing the bundle (7.786275ms)
+✔ cache staging rejects changed source bytes and private-cache directory aliases before launch (4.434469ms)
+✔ Deno compatibility hardlinks remain private across successive executable staging (16.942499ms)
+✔ private Deno executable tampering and bundled executable aliases fail before launch (7.859874ms)
+✔ private Deno staging rejects directory aliases and changed bundled executable bytes (4.258789ms)
+﹣ private Deno executable inherits the protected state DACL instead of broader bundle grants (0.183332ms) # SKIP
+✔ source closure includes side-effect, re-export and dynamic literal imports (11.597741ms)
+✔ runtime source closure explicitly includes PostgreSQL stderr classifier and refuses silent omission (3.390743ms)
+✖ startup manifest hashes dependencies, binds instance and omits credential material (6.94322ms)
+✔ literal migration resources belong to source closure and cannot escape the repository (6.546047ms)
+✔ startup bytes drift cannot become readiness and dependency aliases are rejected (2.305666ms)
+✔ only the two reviewed fresh-schema JSON resources are discovered as data (6.077874ms)
+✔ conditional Electron native import is limited to the exact reviewed first-owner adapter (3.594905ms)
+ℹ tests 52
+ℹ suites 0
+ℹ pass 40
+ℹ fail 11
+ℹ cancelled 0
+ℹ skipped 1
+ℹ todo 0
+ℹ duration_ms 7770.24367
+
+✖ failing tests:
+
+test at ../../infra/client-state-runtime/runtime-host-native-compositions.test.mjs:127:1
+✖ runtime-host mounts a supplied genuine recovery service and exposes its fixed operations (31.513318ms)
+  Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'postgres' imported from /workspace/metaengine-installed-recovery-verification/infra/client-state-runtime/runtime-host.mjs
+      at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)
+      at packageResolve (node:internal/modules/esm/resolve:768:81)
+      at moduleResolve (node:internal/modules/esm/resolve:859:18)
+      at defaultResolve (node:internal/modules/esm/resolve:992:11)
+      at #cachedDefaultResolve (node:internal/modules/esm/loader:701:20)
+      at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:721:38)
+      at ModuleLoader.resolveSync (node:internal/modules/esm/loader:759:56)
+      at #resolve (node:internal/modules/esm/loader:683:17)
+      at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:603:35)
+      at node:internal/modules/esm/loader:632:32 {
+    code: 'ERR_MODULE_NOT_FOUND'
+  }
+
+test at ../../infra/client-state-runtime/runtime-host-native-compositions.test.mjs:161:1
+✖ runtime-host refuses an invalid recovery composition shape instead of mounting it (18.141575ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /runtime_host_recovery_composition_invalid/. Input:
+  
+  "Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'postgres' imported from /workspace/metaengine-installed-recovery-verification/infra/client-state-runtime/runtime-host.mjs"
+  
+      at async TestContext.<anonymous> (file:///workspace/metaengine-installed-recovery-verification/infra/client-state-runtime/runtime-host-native-compositions.test.mjs:165:3)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'postgres' imported from /workspace/metaengine-installed-recovery-verification/infra/client-state-runtime/runtime-host.mjs
+        at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)
+        at packageResolve (node:internal/modules/esm/resolve:768:81)
+        at moduleResolve (node:internal/modules/esm/resolve:859:18)
+        at defaultResolve (node:internal/modules/esm/resolve:992:11)
+        at #cachedDefaultResolve (node:internal/modules/esm/loader:701:20)
+        at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:721:38)
+        at ModuleLoader.resolveSync (node:internal/modules/esm/loader:759:56)
+        at #resolve (node:internal/modules/esm/loader:683:17)
+        at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:603:35)
+        at node:internal/modules/esm/loader:632:32,
+    expected: /runtime_host_recovery_composition_invalid/,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at ../../infra/client-state-runtime/runtime-host.test.mjs:263:1
+✖ host owns one lock, publishes public status and idempotently stops its runtime (22.970293ms)
+  Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'postgres' imported from /workspace/metaengine-installed-recovery-verification/infra/client-state-runtime/runtime-host.mjs
+      at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)
+      at packageResolve (node:internal/modules/esm/resolve:768:81)
+      at moduleResolve (node:internal/modules/esm/resolve:859:18)
+      at defaultResolve (node:internal/modules/esm/resolve:992:11)
+      at #cachedDefaultResolve (node:internal/modules/esm/loader:701:20)
+      at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:721:38)
+      at ModuleLoader.resolveSync (node:internal/modules/esm/loader:759:56)
+      at #resolve (node:internal/modules/esm/loader:683:17)
+      at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:603:35)
+      at node:internal/modules/esm/loader:632:32 {
+    code: 'ERR_MODULE_NOT_FOUND'
+  }
+
+test at ../../infra/client-state-runtime/runtime-host.test.mjs:298:1
+✖ host persists a finite health failure before terminal cleanup and retains it after STOPPED (15.554864ms)
+  Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'postgres' imported from /workspace/metaengine-installed-recovery-verification/infra/client-state-runtime/runtime-host.mjs
+      at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)
+      at packageResolve (node:internal/modules/esm/resolve:768:81)
+      at moduleResolve (node:internal/modules/esm/resolve:859:18)
+      at defaultResolve (node:internal/modules/esm/resolve:992:11)
+      at #cachedDefaultResolve (node:internal/modules/esm/loader:701:20)
+      at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:721:38)
+      at ModuleLoader.resolveSync (node:internal/modules/esm/loader:759:56)
+      at #resolve (node:internal/modules/esm/loader:683:17)
+      at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:603:35)
+      at node:internal/modules/esm/loader:632:32 {
+    code: 'ERR_MODULE_NOT_FOUND'
+  }
+
+test at ../../infra/client-state-runtime/runtime-host.test.mjs:320:1
+✖ host clears a recovered health failure and refuses unvalidated private payloads (12.918096ms)
+  Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'postgres' imported from /workspace/metaengine-installed-recovery-verification/infra/client-state-runtime/runtime-host.mjs
+      at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)
+      at packageResolve (node:internal/modules/esm/resolve:768:81)
+      at moduleResolve (node:internal/modules/esm/resolve:859:18)
+      at defaultResolve (node:internal/modules/esm/resolve:992:11)
+      at #cachedDefaultResolve (node:internal/modules/esm/loader:701:20)
+      at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:721:38)
+      at ModuleLoader.resolveSync (node:internal/modules/esm/loader:759:56)
+      at #resolve (node:internal/modules/esm/loader:683:17)
+      at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:603:35)
+      at node:internal/modules/esm/loader:632:32 {
+    code: 'ERR_MODULE_NOT_FOUND'
+  }
+
+test at ../../infra/client-state-runtime/runtime-host.test.mjs:340:1
+✖ host serializes overlapping health and terminal status writes (16.42421ms)
+  Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'postgres' imported from /workspace/metaengine-installed-recovery-verification/infra/client-state-runtime/runtime-host.mjs
+      at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)
+      at packageResolve (node:internal/modules/esm/resolve:768:81)
+      at moduleResolve (node:internal/modules/esm/resolve:859:18)
+      at defaultResolve (node:internal/modules/esm/resolve:992:11)
+      at #cachedDefaultResolve (node:internal/modules/esm/loader:701:20)
+      at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:721:38)
+      at ModuleLoader.resolveSync (node:internal/modules/esm/loader:759:56)
+      at #resolve (node:internal/modules/esm/loader:683:17)
+      at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:603:35)
+      at node:internal/modules/esm/loader:632:32 {
+    code: 'ERR_MODULE_NOT_FOUND'
+  }
+
+test at ../../infra/client-state-runtime/runtime-host.test.mjs:356:1
+✖ attached host passes through mode and shutdown never claims the external PostgreSQL (23.296536ms)
+  Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'postgres' imported from /workspace/metaengine-installed-recovery-verification/infra/client-state-runtime/runtime-host.mjs
+      at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)
+      at packageResolve (node:internal/modules/esm/resolve:768:81)
+      at moduleResolve (node:internal/modules/esm/resolve:859:18)
+      at defaultResolve (node:internal/modules/esm/resolve:992:11)
+      at #cachedDefaultResolve (node:internal/modules/esm/loader:701:20)
+      at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:721:38)
+      at ModuleLoader.resolveSync (node:internal/modules/esm/loader:759:56)
+      at #resolve (node:internal/modules/esm/loader:683:17)
+      at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:603:35)
+      at node:internal/modules/esm/loader:632:32 {
+    code: 'ERR_MODULE_NOT_FOUND'
+  }
+
+test at ../../infra/client-state-runtime/runtime-host.test.mjs:379:1
+✖ real attached-host startup adopts only a physically absent predecessor and writes a fresh owner lock (152.004856ms)
+  Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'postgres' imported from /workspace/metaengine-installed-recovery-verification/infra/client-state-runtime/runtime-host.mjs
+      at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)
+      at packageResolve (node:internal/modules/esm/resolve:768:81)
+      at moduleResolve (node:internal/modules/esm/resolve:859:18)
+      at defaultResolve (node:internal/modules/esm/resolve:992:11)
+      at #cachedDefaultResolve (node:internal/modules/esm/loader:701:20)
+      at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:721:38)
+      at ModuleLoader.resolveSync (node:internal/modules/esm/loader:759:56)
+      at #resolve (node:internal/modules/esm/loader:683:17)
+      at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:603:35)
+      at node:internal/modules/esm/loader:632:32 {
+    code: 'ERR_MODULE_NOT_FOUND'
+  }
+
+test at ../../infra/client-state-runtime/runtime-host.test.mjs:463:1
+✖ child failure stops provider readiness; unconfirmed cleanup retains exclusive ownership (13.53368ms)
+  Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'postgres' imported from /workspace/metaengine-installed-recovery-verification/infra/client-state-runtime/runtime-host.mjs
+      at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)
+      at packageResolve (node:internal/modules/esm/resolve:768:81)
+      at moduleResolve (node:internal/modules/esm/resolve:859:18)
+      at defaultResolve (node:internal/modules/esm/resolve:992:11)
+      at #cachedDefaultResolve (node:internal/modules/esm/loader:701:20)
+      at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:721:38)
+      at ModuleLoader.resolveSync (node:internal/modules/esm/loader:759:56)
+      at #resolve (node:internal/modules/esm/loader:683:17)
+      at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:603:35)
+      at node:internal/modules/esm/loader:632:32 {
+    code: 'ERR_MODULE_NOT_FOUND'
+  }
+
+test at ../../infra/client-state-runtime/runtime-host.test.mjs:477:1
+✖ replaced owner lock is never erased by shutdown (10.698369ms)
+  Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'postgres' imported from /workspace/metaengine-installed-recovery-verification/infra/client-state-runtime/runtime-host.mjs
+      at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)
+      at packageResolve (node:internal/modules/esm/resolve:768:81)
+      at moduleResolve (node:internal/modules/esm/resolve:859:18)
+      at defaultResolve (node:internal/modules/esm/resolve:992:11)
+      at #cachedDefaultResolve (node:internal/modules/esm/loader:701:20)
+      at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:721:38)
+      at ModuleLoader.resolveSync (node:internal/modules/esm/loader:759:56)
+      at #resolve (node:internal/modules/esm/loader:683:17)
+      at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:603:35)
+      at node:internal/modules/esm/loader:632:32 {
+    code: 'ERR_MODULE_NOT_FOUND'
+  }
+
+test at ../../infra/client-state-runtime/startup-source-manifest.test.mjs:35:1
+✖ startup manifest hashes dependencies, binds instance and omits credential material (6.94322ms)
+  Error: ENOENT: no such file or directory, open '/workspace/metaengine-installed-recovery-verification/infra/client-state-runtime/node_modules/postgres/package.json'
+      at async open (node:internal/fs/promises:697:25)
+      at async readFile (node:internal/fs/promises:1348:14)
+      at async captureStartupSource (file:///workspace/metaengine-installed-recovery-verification/infra/client-state-runtime/startup-source-manifest.mjs:140:35)
+      at async TestContext.<anonymous> (file:///workspace/metaengine-installed-recovery-verification/infra/client-state-runtime/startup-source-manifest.test.mjs:38:18)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    errno: -2,
+    code: 'ENOENT',
+    syscall: 'open',
+    path: '/workspace/metaengine-installed-recovery-verification/infra/client-state-runtime/node_modules/postgres/package.json'
+  }

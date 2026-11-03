@@ -1,0 +1,33 @@
+(node:30148) ExperimentalWarning: Module mocking is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:30148) DeprecationWarning: mock.module(): options.namedExports is deprecated. Use options.exports instead.
+✔ actual fixed service composes without a W76 facade or starting recovery effects (5.21551ms)
+✔ startup overrides and old bundles remain unmounted without touching caller selectors (0.403699ms)
+✔ copied package results remain unmounted and foreign Host readers refuse before effects (1.503512ms)
+✔ package/config and PG tool mismatches cannot select a fallback runtime (1.90718ms)
+✔ valid attached configurations outside the recovery profile keep ordinary PG/API available (0.502766ms)
+✔ Host loss during composition refuses the mounted result and starts no effects (0.676023ms)
+(node:30149) ExperimentalWarning: Module mocking is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ no-operator Host installs fixed configuration forwarders without creating a candidate (69.107904ms)
+✔ production Host callback router refuses before mount and routes only its actual retained authority (45.903297ms)
+✔ Host stop closes the original callback composition and cannot revive it (42.3106ms)
+✔ late private constructor returns actual baseline authority with real seed, heartbeat and custody operations (26.521008ms)
+✔ existing-operator startup preserves direct baseline authority and adds no late-mount service (29.431719ms)
+✔ Host and PostgreSQL identity drift fences the private constructor before an operator read (31.580901ms)
+✔ stop aborts and joins late construction before disposing the original owner pool (38.60685ms)
+✔ unsettled configuration cleanup preserves the owner pool and Host lock after bounded HOLD (6517.243933ms)
+✔ same lock bytes at a new inode revoke the original late-mount generation permanently (21.234801ms)
+✔ ownership replacement during the original constructor await cannot publish a late candidate (17.069212ms)
+▶ an observed Host or PostgreSQL restart cannot revive the old private callback after fields are restored
+  ✔ Host instance (11.657866ms)
+  ✔ PostgreSQL incarnation (20.889976ms)
+✔ an observed Host or PostgreSQL restart cannot revive the old private callback after fields are restored (33.279277ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 7101.517443

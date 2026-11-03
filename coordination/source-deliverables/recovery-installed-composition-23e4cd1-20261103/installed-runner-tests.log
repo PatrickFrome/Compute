@@ -1,0 +1,35 @@
+✔ actual installed registry selects an immutable prepared pair despite mutable public manifest fields (222.193954ms)
+✔ cloned, forged and separately registered results cannot select the installed original (141.737549ms)
+✔ actual module and Node image locations bind the verified bundle without caller overrides (244.84468ms)
+✔ a symlinked Node origin cannot borrow the expected executable pathname (119.086457ms)
+✔ a synthetic ASAR layout retains its legacy resolver and cannot enter the installed Node reader (150.228734ms)
+✔ a byte-verified pair with another protocol cannot select the installed controller (121.454727ms)
+✔ legacy preparation cannot replace a missing installed prepared pair (96.392147ms)
+✔ installed controller refuses every explicit helper pin before process creation (115.292462ms)
+▶ installed pair drift, removal, symlinks and hardlinks refuse without a source fallback
+  ✔ helper bytes (112.560358ms)
+  ✔ manifest bytes (105.349057ms)
+  ✔ missing helper (99.668899ms)
+  ✔ missing manifest (101.641585ms)
+  ✔ symlink helper (103.335826ms)
+  ✔ hardlink helper (110.434454ms)
+✔ installed pair drift, removal, symlinks and hardlinks refuse without a source fallback (634.253964ms)
+▶ same-byte replacement during either selected file read is detected before spawning
+  ✔ helperPath (101.234278ms)
+  ✔ manifestPath (99.509635ms)
+✔ same-byte replacement during either selected file read is detected before spawning (201.415651ms)
+✔ installed controller rechecks the same pair after a synthetic ready observation and never resumes (129.48067ms)
+▶ pair drift during the post-ready observer joins the blocked helper close and cannot resume
+  ✔ changed bytes (128.56268ms)
+  ✔ same-byte replacement (109.120951ms)
+✔ pair drift during the post-ready observer joins the blocked helper close and cannot resume (238.232508ms)
+✔ production directory custody remains an independent HOLD after byte selection (115.467896ms)
+ℹ {"context":"SYNTHETIC_CONTEXT","resources":"SYNTHETIC_NONEXECUTABLE_RESOURCE","windows_native_execution":"NOT_RUN","actual_processes_spawned":0,"directory_custody_issued":false,"physical_authority":false,"release_authority":false}
+ℹ tests 23
+ℹ suites 0
+ℹ pass 23
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2615.908454

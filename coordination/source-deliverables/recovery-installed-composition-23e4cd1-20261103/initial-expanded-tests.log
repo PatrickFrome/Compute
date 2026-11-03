@@ -1,0 +1,1385 @@
+✔ cap requires both finite original bounds no more than 120 seconds away (2.257231ms)
+✔ a copied or JSON optional cap cannot retain a private request (1.887097ms)
+✔ an omitted additional cap uses the bound fixed at original Host row creation (1.365709ms)
+✔ 30-minute job policy is restricted by the original 120-second cap (0.616474ms)
+✔ elapsed acquisition time is not refunded at retention or repeated cap checks (252.662976ms)
+✔ already expired cap denies before retained admission and cannot revive after clock rollback (0.69534ms)
+✔ rollback before begin cannot extend the original monotonic handoff lifetime (230.886856ms)
+✔ explicit cancel remains sticky across cap expiry and late finish is only a join (112.158273ms)
+✔ legacy entry needs the exact original private facet and both transport bounds within the cap (1.084677ms)
+✔ legacy cap binds the original controller and cannot be replaced by a fresh cap (110.846614ms)
+✔ restart cannot transfer the old cap-bound request or original live job (0.902868ms)
+✔ retention preserves the original signal and job and requires a physical finish before settlement (4.488413ms)
+✔ the exact private request and branded token cannot be copied, forged or adopted (0.700478ms)
+✔ binding fields, signal and transport deadline must match the original Host context (0.693608ms)
+✔ invalid operation IDs and unbounded job deadlines cannot retain a request (1.28914ms)
+✔ retention after a transport deadline or external abort is refused before any ACK (25.40233ms)
+✔ the Host current veto runs at retention and again before further work (0.735861ms)
+✔ asynchronous or affirmative Host vetoes cannot be treated as current authority (0.63457ms)
+✔ early ACK is one-use observation only and never confirms physical settlement (1.115964ms)
+✔ ACK values cannot introduce completion, authorization, selectors or another operation (1.366506ms)
+✔ a lost ACK cannot re-run admission, abort the retained job or release original joins (0.355287ms)
+✔ explicit cancellation is sticky and never masquerades as original joins (0.432541ms)
+✔ external original Host abort preserves cancellation after ACK and requires a join (0.340464ms)
+✔ Host close aborts retained work but cannot turn unfinished resources into SETTLED (0.463477ms)
+✔ operation timeout aborts exactly once, and late finish only confirms joins (60.116232ms)
+✔ a backwards wall clock does not extend the monotonic operation timeout (61.494794ms)
+✔ a restarted Host cannot adopt the old private request, token or original job (0.690654ms)
+✔ real elapsed >30s keeps the same retained job alive past early ACK and transport expiry (30501.892601ms)
+✔ only the bound original request reads one stable opaque cap; copies and traps do not run (4.655088ms)
+✔ only the actual take mints a job registry facet and finish permanently closes it (1.631421ms)
+✔ job lookup is inert before the provider validates the actual server request (0.816752ms)
+✔ inert job lookup neither reads a controller getter nor traps on copied job aliases (0.297912ms)
+✔ elapsed time before request binding or take cannot renew the original wall cap (0.401396ms)
+✔ a late initial binding cannot obtain a new cap after original row expiry (0.521183ms)
+✔ longer optional caps cannot extend the original Host bound (0.525831ms)
+✔ blocked event loop plus wall rollback cannot pass an expired monotonic restriction (60.696184ms)
+✔ restart and cancellation invalidate prior facets; a late callback cannot revive a job (0.941848ms)
+✔ retained service keeps original handler, signal, evidence and drains alive after an observation-only ACK (58.400546ms)
+✔ retained service remains live after its original short transport deadline without status polling (248.157376ms)
+✔ real elapsed service operation survives the ordinary 30-second transport and authenticated-context lifetime (31009.995041ms)
+ℹ {"fixture_classification":"SYNTHETIC_RETAINED_SERVICE_ONLY","elapsed_ms":31001,"transport_timeout_ms":30000,"original_job_retained":true,"original_signal_retained":true,"executions":1,"consumptions":1,"original_drains":1,"real_pg_restore_run":false,"physical_restore_proven":false,"upgrade_authorized":false}
+✔ lost ACK and duplicate signed begin permit readback only and cannot create a second producer (9.517681ms)
+✔ fresh signed cancel fences the exact original job before a late successful execute and all joins (8.497857ms)
+✔ foreign actor, invalid signature and revoked ADMIN cannot cancel or adopt a retained job (10.994633ms)
+✔ all signed recovery routes reject paths, evidence, SQL and timeout selectors before producer or auth reads (21.463782ms)
+✔ cancel during original consumer teardown prevents late COMPLETE after a joined producer drain (16.945864ms)
+✔ current Owner and Keeper vetoes remain effective after ACK and before original evidence consumption (20.423738ms)
+✔ bounded operation timeout aborts the original signal but waits for late execute and resource drain (169.59448ms)
+✔ a swallowed original physical failure remains sticky HOLD despite later normal returns (6.917101ms)
+✔ unconfirmed original producer drain cannot be retried into a successful Host release (6.933765ms)
+✔ Host close while current-device authentication is pending prevents late ACK and producer admission (5.566835ms)
+✔ existing Host drain timeout retains original execute and cleanup promises until their actual joins (67.098163ms)
+✔ restart cannot adopt old Host reports and the existing same-root durable barrier forbids a second effect (30.463143ms)
+✔ unknown operation read and cancel remain HOLD without starting or adopting a backup job (6.182729ms)
+✔ missing original directory custody is explicit effect-free HOLD after original producer drain (6.980194ms)
+✔ a long job policy does not extend signed request freshness or allow an unbranded original context (5.632763ms)
+✔ retained service constructor rejects unbounded policy and leaves the shared action registry unchanged (18.336825ms)
+✔ optional service cap must be genuine when supplied; JSON data is no deadline or authority (22.493953ms)
+✔ original cap expiry during authentication cannot receive a fresh lifetime or ACK (228.484387ms)
+✔ 30-minute policy cannot outlive the original cap; late success and duplicate begin cannot repeat an effect (290.724226ms)
+✔ a valid cap does not replace existing current ADMIN, Owner or Keeper authority (15.608524ms)
+✔ service startup needs no cap; genuine take follows the authenticated root phase (64.446092ms)
+✔ missing original phase and a caller JSON phase cannot enter producer or ACK (4.875339ms)
+✔ original row expiry during root acquisition vetoes a late response before take (2.852015ms)
+✔ cancel or restart while acquiring root cannot become an admitted late job (6.159375ms)
+✔ concurrent acquisition cannot bypass the existing one-shot retained decision (3.683859ms)
+✔ legacy execute fails before producer and cannot mint an unregistered job or result (5.216485ms)
+✔ unknown physical completion remains HOLD and cannot reach the installed gate (3.574718ms)
+✔ optional supplied restriction can expire during phase and never be replaced by own cap (2.427224ms)
+✔ earlier Main-derived phase restriction also limits the retained job without replacing optional cap (3.009408ms)
+✔ fixed authenticated BEGIN publishes only the same frozen original service-job facet; lookup is inert (17.791105ms)
+✔ pre-authentication server, phase and factory job cannot register authenticated service provenance or invoke callbacks (2.778555ms)
+✔ failed signature authentication never publishes or reaches phase acquisition (4.234887ms)
+✔ failed ADMIN authentication never publishes or reaches phase acquisition (3.179531ms)
+✔ failed original phase acquisition cannot publish an authenticated service job (3.550351ms)
+✔ authenticated standalone lifetime without original server dispatch never gains the new facet (4.020649ms)
+✔ signed cancel retires ordinary lookup immediately while original producer work remains retained (10.225461ms)
+✔ service close removes lookup before original callback and resource drain join (5.965257ms)
+✔ finishing retires ordinary provenance while the original successful resource join is still pending (4.868058ms)
+✔ changed original server retires the facet permanently after explicit current check (4.908498ms)
+✔ changed original phase retires the facet permanently after explicit current check (3.445916ms)
+✔ changed original owner retires the facet permanently after explicit current check (4.976764ms)
+✔ changed original keeper retires the facet permanently after explicit current check (4.672617ms)
+✔ expiry removes ordinary lookup without invoking factory or original veto callbacks (4.466742ms)
+✔ thenable Owner veto cannot turn authenticated provenance into admission or invoke a then getter (3.629589ms)
+✔ authenticated facet adds no registration export, native capability or positive custody branch (3.352086ms)
+✔ legacy execution is permanently refused even with a real private request facet (74.568076ms)
+✔ retained operation expiration aborts the exact original controller and rejects late producer success (122.547078ms)
+✔ retained evidence cannot publish a late return after its operation deadline expires (143.955028ms)
+✔ central registry either denies unmounted action or enforces the exact reviewed contract (5.930304ms)
+✔ proposed interface uses real enrolled-device signature, current ADMIN and nonce verification (7.396531ms)
+✔ service refuses bad signature, revoked ADMIN, wrong Host or signed route before producer effects (27.668339ms)
+✔ signed body/input extras and non-UUID operations cannot introduce selectors or authority (24.889248ms)
+✔ original request, exact IPC digest, Host and cancellation are checked before authentication effects (34.844084ms)
+✔ one signed UUID dispatch retains its original Job and consumes evidence internally exactly once (7.438975ms)
+✔ copied original request cannot acquire the retained root phase or execute effects (5.13244ms)
+✔ abort during existing signature lookup prevents producer entry (6.931451ms)
+✔ abort after producer entry cannot publish or consume evidence (5.19286ms)
+✔ close fences admission and drain joins an original in-flight operation (5.963034ms)
+✔ unconfirmed physical cleanup is retained and cannot become a successful drain (4.860127ms)
+✔ production registry remains unchanged after all scoped interface tests (0.167218ms)
+✔ registry fixture preserves the retained interface and rejects incomplete or mixed declarations (0.991212ms)
+✔ real-PG private loader can import the actual signed service registry without starting physical work (17.701311ms)
+(node:28874) ExperimentalWarning: Module mocking is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:28874) DeprecationWarning: mock.module(): options.namedExports is deprecated. Use options.exports instead.
+✔ the module exports no native issuer, token allocator or fictitious cleanup lifecycle (1.433328ms)
+✔ unmodified public factories and copied registry-like descriptors cannot invoke hostile callbacks (3.612093ms)
+✔ valid fixed registry identities pass only the non-authorizing guard and still hit the real native HOLD (1.526256ms)
+✔ mechanical handle/JSON claims and copied jobs cannot create original native admission (1.270226ms)
+✔ input accessors, proxies, symbols and hidden fields deny without caller traps (0.614743ms)
+▶ each original server binding field must match the same frozen request
+  ✔ instance_id (0.755281ms)
+  ✔ host_pid (0.408657ms)
+  ✔ request_id (0.458741ms)
+  ✔ action (0.543317ms)
+  ✔ request_sha256 (0.43764ms)
+  ✔ body_sha256 (0.285023ms)
+✔ each original server binding field must match the same frozen request (3.977785ms)
+▶ the original signal, retained deadline and exact phase token cannot be substituted
+  ✔ signal (0.675263ms)
+  ✔ deadline (0.154789ms)
+  ✔ phase token (0.216762ms)
+✔ the original signal, retained deadline and exact phase token cannot be substituted (1.475931ms)
+▶ same-looking registry replacements during native vetoes cannot preserve original identities
+  ✔ job (0.326885ms)
+  ✔ server (0.157454ms)
+  ✔ phase (0.270962ms)
+✔ same-looking registry replacements during native vetoes cannot preserve original identities (1.211729ms)
+▶ revocation and expiry deny without refunding or replacing the original bound
+  ✔ cancelled (0.284402ms)
+  ✔ revoked (0.126258ms)
+  ✔ expired (0.166487ms)
+✔ revocation and expiry deny without refunding or replacing the original bound (0.924703ms)
+✔ foreign private errors are sanitized while existing original physical uncertainty remains negative (0.317631ms)
+▶ async, boolean or thenable vetoes cannot become native authority or invoke caller then getters
+  ✔ boolean (15.411636ms)
+  ✔ promise (0.888128ms)
+  ✔ thenable (0.621143ms)
+✔ async, boolean or thenable vetoes cannot become native authority or invoke caller then getters (17.497543ms)
+▶ malformed private facet and binding values refuse before accessor/coercion traps
+  ✔ job accessor (0.18133ms)
+  ✔ server proxy (0.083744ms)
+  ✔ binding coercion (0.090554ms)
+✔ malformed private facet and binding values refuse before accessor/coercion traps (0.641272ms)
+(node:28881) ExperimentalWarning: Module mocking is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:28881) DeprecationWarning: mock.module(): options.namedExports is deprecated. Use options.exports instead.
+✔ real public factory jobs and caller registry-like records cannot start SQL or owner callbacks (4.37171ms)
+✔ observer identity is opaque and cannot be copied or choose another pool/source (10.048364ms)
+✔ authenticated service identity is mandatory before root observations or SQL (3.514398ms)
+▶ only exact authenticated actor, service pool and configured source enter readonly observation
+  ✔ copied actor (2.374977ms)
+  ✔ other pool (2.094219ms)
+  ✔ other source (2.41804ms)
+✔ only exact authenticated actor, service pool and configured source enter readonly observation (7.512424ms)
+▶ service request and phase must be the exact original job registry objects before its veto runs
+  ✔ request (2.206456ms)
+  ✔ phase (2.10106ms)
+✔ service request and phase must be the exact original job registry objects before its veto runs (4.716543ms)
+✔ real root reader and W61 snapshots produce only a frozen Owner/birth/root observation (22.083908ms)
+✔ an authenticated row cannot supply an unregistered snapshot callback as real Host SQL custody (6.129431ms)
+✔ service retirement during an original pending query joins it and refuses late success (9.989472ms)
+▶ Owner or physical root change between own-PG snapshots cannot revive that original observation
+  ✔ Owner (13.405213ms)
+  ✔ root (13.835997ms)
+✔ Owner or physical root change between own-PG snapshots cannot revive that original observation (28.391708ms)
+✔ different postmaster births across real readonly snapshots are refused (17.048313ms)
+▶ original SQL uncertainty stays negative even though W61 normally returns null on read failure
+  ✔ service still registered (6.307334ms)
+  ✔ service also retired (5.914431ms)
+✔ original SQL uncertainty stays negative even though W61 normally returns null on read failure (12.794676ms)
+✔ accessors, proxies and caller proof readers cannot enter the observation surface (2.167428ms)
+(node:28892) ExperimentalWarning: Module mocking is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:28892) DeprecationWarning: mock.module(): options.namedExports is deprecated. Use options.exports instead.
+✔ actual fixed service composes without a W76 facade or starting recovery effects (3.832911ms)
+✔ startup overrides and old bundles remain unmounted without touching caller selectors (0.304943ms)
+✔ copied package results, foreign pool and replaced original Host readers refuse before effects (1.718451ms)
+✔ package/config and PG tool mismatches cannot select a fallback runtime (1.601067ms)
+✔ valid attached configurations outside the recovery profile keep ordinary PG/API available (0.483398ms)
+✔ Host loss during composition refuses the mounted result and starts no effects (0.631457ms)
+✔ unmodified provider refuses a factory-created job/phase before any caller callback without genuine server dispatch (3.181183ms)
+✔ synthetic registry plumbing pins real directory identities and never asserts physical authority (19.731931ms)
+✔ unmodified scope checks refuse synthetic frames and the installed gate consumes no evidence (4.307335ms)
+✔ JSON, copied jobs and caller callbacks cannot create an original provider binding (3.294511ms)
+✔ proxy/accessor/coercion input is rejected without executing caller code (3.068836ms)
+✔ installed gate cannot mint a producer root pin from an original job alone (4.164929ms)
+✔ unmodified provider refuses missing original server custody before lifetime or phase callbacks (3.422312ms)
+✔ a changed original server facet is refused before invoking its callback and remains terminal (3.301963ms)
+✔ revoked original server custody cannot be revived by a later restored fixture entry (3.301282ms)
+✔ wrong physical root digest permanently closes that original job (3.013845ms)
+✔ different physical root at the same pathname is rejected after pinning (5.28037ms)
+✔ source alias, nesting, identical identities and mismatched configured source are refused (14.452041ms)
+✔ symlink alias cannot substitute a physical directory (3.77214ms)
+✔ all four original actor fields are pinned and cannot be changed during consumption (16.367195ms)
+✔ Owner generation or fingerprint changes cannot reuse a current actor/root pin (7.474539ms)
+✔ original signal and exact deadline cannot be substituted or widened (10.406321ms)
+✔ late root callback after custody revocation is refused and never revives (4.073608ms)
+✔ a replaced phase with identical JSON cannot revive the original binding (4.208428ms)
+✔ original-job monotonic veto is checked synchronously after wall rollback and event-loop stall (275.370637ms)
+✔ Host restart refuses old jobs and cannot adopt saved root/frame JSON (5.062496ms)
+✔ unknown completion wins over a late successful root callback (4.906985ms)
+✔ installed gate veto before consume preserves the original evidence untouched (3.452797ms)
+✔ installed gate rechecks original custody after awaited consume and refuses a late observation (5.793562ms)
+✔ synthetic gate plumbing returns the exact original object with its JSON downgrade intact (5.073182ms)
+✔ producer-observed source-write veto cannot be promoted by a current root binding (5.423653ms)
+✔ legacy offline bundles retain read-only compatibility without a prepared pair (129.71899ms)
+✔ exact optional pair and PG pins are immutable original package-data snapshots (91.877933ms)
+▶ one missing prepared filename is refused and neighbors are never inventoried
+  ✔ manifest.json (9.917825ms)
+  ✔ codex-cli-job-runner.ps1 (9.881723ms)
+✔ one missing prepared filename is refused and neighbors are never inventoried (127.311606ms)
+▶ manifest helper digest and build contract are checked before stage writes
+  ✔ helper digest (15.570166ms)
+  ✔ runtime compilation (14.320467ms)
+  ✔ build mode (14.587008ms)
+  ✔ hash field (12.881354ms)
+  ✔ malformed JSON shape null (15.219587ms)
+  ✔ malformed JSON shape [] (12.60076ms)
+  ✔ malformed JSON shape {} (15.064156ms)
+✔ manifest helper digest and build contract are checked before stage writes (102.142397ms)
+✔ prepared input drift and installed helper drift cannot reuse a reviewed inventory (110.784318ms)
+✔ the exact builtin-only verifier also validates the optional pair as a data URL (106.389653ms)
+✔ packaging reuses byte-identical staged output and checks actual source pins without compilation (121.359776ms)
+✔ packaging cannot prepare or manufacture a missing pair from a legacy bundle (83.321649ms)
+✔ pre-aborted verification performs no filesystem work and yields no package proof (116.871987ms)
+✔ abort joins original readFile before rejecting and stops subsequent traversal (76.357013ms)
+✔ abort joins original readdir before rejecting and stops subsequent traversal (67.88864ms)
+✔ abort during real file hashing waits for in-flight read and descriptor close (73.012528ms)
+✔ a live signal preserves full verification and changed-byte refusal (99.808938ms)
+✔ abort cannot hide a lost file-close acknowledgement behind a closed stream (72.563185ms)
+✔ read error live joins successful original close without inventing cleanup uncertainty (60.138348ms)
+✔ read error abort-before-close joins successful original close without inventing cleanup uncertainty (67.501976ms)
+✔ read error abort-after-close joins successful original close without inventing cleanup uncertainty (62.157781ms)
+✔ plain original close failure remains cleanup HOLD after read error with live signal (66.066461ms)
+✔ plain original close failure remains cleanup HOLD after read error with aborted signal (55.704546ms)
+✔ mixed original close failure remains cleanup HOLD after read error with live signal (60.849028ms)
+✔ mixed original close failure remains cleanup HOLD after read error with aborted signal (54.586285ms)
+✔ nested original close failure remains cleanup HOLD after read error with live signal (54.94671ms)
+✔ nested original close failure remains cleanup HOLD after read error with aborted signal (60.56382ms)
+✔ failed original open has no descriptor to settle and remains an ordinary read failure (59.705366ms)
+✔ combined read/close failure retains cleanup HOLD with live signal (41.52677ms)
+✔ combined read/close failure retains cleanup HOLD with aborted signal (59.898282ms)
+✔ nested combined read/close failure retains cleanup HOLD with live signal (57.356864ms)
+✔ nested combined read/close failure retains cleanup HOLD with aborted signal (51.934638ms)
+✔ verifier remains builtin-only and usable from a data URL (75.758751ms)
+✔ offline resource bundle binds source, binaries, cache and licenses with no private state (141.222659ms)
+✔ offline bundle retains one exact reviewed ACL source filename while private paths remain forbidden (147.336283ms)
+✔ offline staging rejects changed source inventory and execution rejects changed binary bytes (88.47551ms)
+✔ offline verifier rejects missing pins, extra/private files and resource aliases (71.246401ms)
+✔ a fresh frozen exact-version Deno cache does not require registry metadata (92.898493ms)
+▶ offline inventory rejects each missing production PostgreSQL lifecycle and recovery tool
+  ✔ pg_isready (33.532266ms)
+  ✔ pg_controldata (34.58607ms)
+  ✔ pg_dump (31.956977ms)
+  ✔ pg_restore (30.370661ms)
+  ✔ pg_dumpall (32.12755ms)
+✔ offline inventory rejects each missing production PostgreSQL lifecycle and recovery tool (163.89016ms)
+✔ birth is a private fixed catalog SELECT, two distinct read-only transactions, Host triple fence (2.641552ms)
+✔ Host callback reconstructs distinct Date objects with identical kernel birth (1.101195ms)
+✔ no Host producer and invalid selector cannot generate proof (0.164204ms)
+✔ stale, fixture, wrong epoch, absent SHA, forged source shape fail closed (0.427014ms)
+✔ Owner process/generation/epoch/source changes before or after SQL => null (1.597061ms)
+✔ PG17 missing schema, invalid clock, wrong DB, broken catalog, PG15, restart drift fail closed (1.560386ms)
+✔ birth SQL is fixed catalog plus exact parameterized existing ledger Owner epoch, no network/secret effect (0.593331ms)
+✔ journal starts with no intent and never grants retry (7.072861ms)
+✔ one-shot publication -> durable barrier -> restart readback fences replay (9.123776ms)
+✔ concurrent starts permit at most one barrier and one effect permission (6.734559ms)
+✔ journal rejects archive reuse even for a newly generated intent (1.555309ms)
+✔ cross refuses a changed existing archive and an altered intent payload (3.004681ms)
+✔ bad source identity fails closed (1.242815ms)
+✔ physical journal alias fails closed without being relabelled as verified when unavailable (1.285899ms)
+✔ different UUIDs cannot reserve same new archive destination (4.248708ms)
+✔ archive outside the exact private journal is refused before intent write (2.161839ms)
+✔ corrupted archive reservation cannot be promoted to an effect crossing (2.935398ms)
+✔ native adapter rejects caller-supplied proof, controllers, SQL and connection expansion (3.605562ms)
+✔ default production adapter requires original directory custody on every platform without fallback (0.483338ms)
+✔ SYNTHETIC contract: bytes changed before resume deny child execution and join cancellation (22.243588ms)
+✔ SYNTHETIC contract: asynchronous Owner veto cannot authorize launch (6.634998ms)
+✔ SYNTHETIC contract: controller failure remains uncertain and redacts private output (7.184243ms)
+✔ SYNTHETIC contract: existing restore target is never initialized (5.956532ms)
+✔ SYNTHETIC contract: roles replay cannot introduce PASSWORD or omit bootstrap removal (51.63744ms)
+✔ SYNTHETIC contract: PASSWORD identifiers and comments pass the production dump path unchanged (42.245227ms)
+✔ SYNTHETIC contract: clauses and extra SQL fail before replay artifact, preserving the one-shot effect (151.326704ms)
+✔ SYNTHETIC contract: replaced target postmaster cannot receive a restore (35.925191ms)
+✔ SYNTHETIC contract: witness follows original jobs, cannot serialize or replay (92.414866ms)
+✔ SYNTHETIC contract: wrong original job consumes and rejects witness (97.482319ms)
+✔ SYNTHETIC contract: changed replay bytes invalidate completed evidence (104.597121ms)
+✔ query-scoped synthetic veto bypass leaves the production adapter on directory-custody HOLD (4.101549ms)
+(node:28979) ExperimentalWarning: Module mocking is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:28979) DeprecationWarning: mock.module(): options.namedExports is deprecated. Use options.exports instead.
+✔ the real custody gate has no positive branch for copied handle claims or caller callbacks (1.251408ms)
+▶ actual root observation and producer stay on HOLD after the final path observation, with zero effects
+  ✔ none (35.467347ms)
+  ✔ root (14.613733ms)
+  ✔ state (15.810589ms)
+  ✔ pgdata (16.605287ms)
+  ✔ root-to-pgdata-alias (14.205817ms)
+✔ actual root observation and producer stay on HOLD after the final path observation, with zero effects (98.00793ms)
+▶ close and drain join the original pending phase without starting a pool or native work
+  ✔ phase 1 (10.381711ms)
+  ✔ phase 2 (16.576395ms)
+✔ close and drain join the original pending phase without starting a pool or native work (28.121583ms)
+✔ actual native adapter cannot turn handle-shaped job claims or callbacks into directory custody (7.170934ms)
+✔ synthetic lifecycle: abort while owned source-pool teardown is pending cannot return earlier gate observation (6.004673ms)
+✔ synthetic lifecycle: close and drain join the exact consumer while its independent read is pending (1.233241ms)
+✔ synthetic lifecycle: marked transaction uncertainty during consumption preserves the marker and permanent HOLD (1.241694ms)
+✔ synthetic lifecycle: forged and copied references cannot enter the consumer; successful synthetic observation stays nonphysical (0.864473ms)
+✔ constructor rejects malformed private keeper identity with bounded errors before any external operation (0.849652ms)
+✔ W76 canonical reader, handoff, selected producer and diagnostic root field use the same single hash (20.534511ms)
+✔ canonical root identity remains equal across readers when root contents change (12.514817ms)
+✔ source directory alias is rejected by canonical reader, producer directory helper and handoff (7.724902ms)
+✔ same-path root replacement changes the canonical identity and invalidates the existing handoff (8.65771ms)
+✔ fixed measurement produces all v2 components and HMAC without returning plaintext or key (12.965285ms)
+✔ measurement rejects caller SQL/options before querying and quotes only server-discovered names (1.699082ms)
+✔ measurement rejects autocommit without catalogue readback (0.401836ms)
+✔ measurement rejects read-write transaction without catalogue readback (0.389198ms)
+✔ measurement rejects read-committed transaction without catalogue readback (0.321357ms)
+✔ measurement rejects wrong PostgreSQL major without catalogue readback (0.161991ms)
+✔ measurement rejects changed reserved backend_pid (1.12514ms)
+✔ measurement rejects changed reserved snapshot (0.908238ms)
+✔ measurement rejects changed reserved transaction_started_at (2.153847ms)
+✔ measurement rejects changed reserved login (4.253945ms)
+✔ protected-data failure is redacted while its SQLSTATE remains diagnosable (1.092662ms)
+✔ protected role boundary rejects directKeyReadable (0.461105ms)
+✔ protected role boundary rejects anonReadable (0.470568ms)
+✔ missing ledger relation or interrupted component measurement cannot return partial v2 evidence (0.80856ms)
+✔ unconfirmed transaction cleanup stays an explicit failure without leaking driver errors (0.540623ms)
+✔ metadata replay validates a bounded companion and changes only the fresh target transaction (1.088456ms)
+✔ metadata replay refuses populated target or changed roles before any metadata effect (0.349699ms)
+✔ unsupported metadata and injection payloads are refused before SQL execution (0.859586ms)
+✔ original synthetic root plumbing is current but grants no physical, backup or upgrade authority (24.970891ms)
+✔ unknown tuples, JSON claims and matching callbacks cannot create a root prerequisite (0.400194ms)
+✔ capability tuples reject accessors and symbols without executing caller accessors (0.149362ms)
+✔ Proxy tuples are rejected without invoking any caller traps, including revoked proxies (5.080651ms)
+✔ copied handoff, custody, host and original job objects are not original capabilities (5.261209ms)
+✔ wrong-root capability tuple is denied before legacy receipt reads (10.989863ms)
+✔ a different physical directory at the same root pathname invalidates the handoff (5.896663ms)
+✔ source PGDATA alias is refused before a handoff exists (5.092819ms)
+✔ revoked original custody prevents the root prerequisite (3.83344ms)
+✔ revocation during an awaited root read cannot publish a late current result (4.713247ms)
+✔ synthetic producer-observed source change after restore is a one-way veto, never source proof (5.016797ms)
+✔ Host restart cannot adopt the old handoff even if its descriptors are copied (4.35234ms)
+✔ unknown completion remains a hold after a late successful root read (7.005824ms)
+✔ an invalid explicit root input cannot fall back to the legacy gate (0.244173ms)
+✔ a current synthetic root cannot promote a consistent caller restore report (9.075161ms)
+✔ composition mounts only a genuine branded materializer from a full-facet executor factory (1.627015ms)
+✔ composition refuses exactly on the missing native source reader and never mounts the real factory executor today (0.679659ms)
+✔ composition refuses without installed private tools; no fallback executor is selected (0.741961ms)
+✔ runtime-host wires the materializer runJob into the setup service and fences unmounted construction (source contract) (4.429135ms)
+✖ runtime-host mounts a supplied genuine recovery service and exposes its fixed operations (24.68369ms)
+✖ runtime-host refuses an invalid recovery composition shape instead of mounting it (17.190172ms)
+(node:29037) ExperimentalWarning: Module mocking is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✖ no-operator Host installs fixed configuration forwarders without creating a candidate (35.627715ms)
+✖ production Host callback router refuses before mount and routes only its actual retained authority (13.226433ms)
+✖ Host stop closes the original callback composition and cannot revive it (20.930649ms)
+✖ late private constructor returns actual baseline authority with real seed, heartbeat and custody operations (12.219048ms)
+✖ existing-operator startup preserves direct baseline authority and adds no late-mount service (15.400146ms)
+✖ Host and PostgreSQL identity drift fences the private constructor before an operator read (16.386574ms)
+✖ stop aborts and joins late construction before disposing the original owner pool (17.657615ms)
+✖ unsettled configuration cleanup preserves the owner pool and Host lock after bounded HOLD (14.284659ms)
+✖ same lock bytes at a new inode revoke the original late-mount generation permanently (16.46511ms)
+✖ ownership replacement during the original constructor await cannot publish a late candidate (11.288166ms)
+▶ an observed Host or PostgreSQL restart cannot revive the old private callback after fields are restored
+  ✖ Host instance (11.148719ms)
+  ✖ PostgreSQL incarnation (12.066061ms)
+✖ an observed Host or PostgreSQL restart cannot revive the old private callback after fields are restored (23.964692ms)
+✔ bundled fixture accepts the concrete production provider, not an arbitrary first IPC message (14.604809ms)
+✔ bundled fixture enforces exact public descriptor fields and contextual endpoint/status bindings (9.880567ms)
+✔ bundled fixture refuses ended, failed, disconnected and silent Host channels without private output (2.009548ms)
+▶ generated Host fixture canonicalizes an aliased temporary root before deriving PG continuity inputs
+  ✔ canonical generated paths pass while alias-spelled postmaster data is still refused (9.213387ms)
+✔ generated Host fixture canonicalizes an aliased temporary root before deriving PG continuity inputs (11.114989ms)
+✔ host rejects private-state overlap, extra config fields and unqualified providers (0.978873ms)
+✔ attached host mode permits an independent PGDATA and rejects ambiguous ownership (1.164999ms)
+✔ physical directory identity fences short-name aliases and private PGDATA overlap (0.574483ms)
+✖ host owns one lock, publishes public status and idempotently stops its runtime (32.859561ms)
+✔ failed startup retains the finite health witness instead of overwriting it with an empty FAILED status (18.52892ms)
+✖ host persists a finite health failure before terminal cleanup and retains it after STOPPED (19.344309ms)
+✖ host clears a recovered health failure and refuses unvalidated private payloads (9.286044ms)
+✖ host serializes overlapping health and terminal status writes (9.944421ms)
+✖ attached host passes through mode and shutdown never claims the external PostgreSQL (16.123924ms)
+✖ real attached-host startup adopts only a physically absent predecessor and writes a fresh owner lock (152.336917ms)
+✔ a leftover recovery gate blocks an otherwise unclaimed host without touching attached data (4.566088ms)
+✔ resource path mismatch refuses launch and an already cancelled startup releases ownership (8.117159ms)
+✔ startup cancellation relays into launcher and cleans every acquired resource (8.325608ms)
+✖ child failure stops provider readiness; unconfirmed cleanup retains exclusive ownership (11.858222ms)
+✖ replaced owner lock is never erased by shutdown (9.854658ms)
+✔ host copies verified dependency bytes into a private writable cache without changing the bundle (6.614248ms)
+✔ cache staging rejects changed source bytes and private-cache directory aliases before launch (2.831022ms)
+✔ Deno compatibility hardlinks remain private across successive executable staging (16.113739ms)
+✔ private Deno executable tampering and bundled executable aliases fail before launch (5.812858ms)
+✔ private Deno staging rejects directory aliases and changed bundled executable bytes (3.742746ms)
+﹣ private Deno executable inherits the protected state DACL instead of broader bundle grants (0.159888ms) # SKIP
+✔ source closure includes side-effect, re-export and dynamic literal imports (11.803171ms)
+✔ runtime source closure explicitly includes PostgreSQL stderr classifier and refuses silent omission (3.636127ms)
+✖ startup manifest hashes dependencies, binds instance and omits credential material (5.434846ms)
+✔ literal migration resources belong to source closure and cannot escape the repository (4.827095ms)
+✔ startup bytes drift cannot become readiness and dependency aliases are rejected (2.085876ms)
+✔ only the two reviewed fresh-schema JSON resources are discovered as data (4.053106ms)
+✔ conditional Electron native import is limited to the exact reviewed first-owner adapter (2.701771ms)
+✔ pinned archive and TOC cannot substitute for native NTFS DACL and installed Owner (9.583986ms)
+✔ failed one-shot pg_dump has no acceptable receipt (1.509261ms)
+✔ zero-byte or truncated archive is rejected (1.796387ms)
+✔ stale or different Owner PID/digest is rejected (1.256986ms)
+✔ TOC substitution is rejected (1.317455ms)
+✔ matching receipt cannot conceal modified archive bytes (2.987535ms)
+✔ receipt cannot authorize unsafe effects or automatic retry (1.099973ms)
+✔ untrusted symlink is refused (1.527407ms)
+✔ unapproved archive directory is rejected even when digest is valid (1.054445ms)
+✔ unsafe TOC omission is rejected (1.101455ms)
+✔ TOC-qualified archive without full disposable restore is NOT restore-qualified (12.309502ms)
+✔ self-asserted synthetic receipt is consistent but NEVER physical restore proof (4.159444ms)
+✔ restore proof rejects different archive digest (2.219815ms)
+✔ restore proof rejects different postmaster (1.982512ms)
+✔ restore proof rejects different executable pin (2.206115ms)
+✔ restore proof rejects same source PostgreSQL port (1.688166ms)
+✔ restore proof rejects same source process pid (2.167808ms)
+✔ restore proof rejects same postmaster hash (2.406863ms)
+✔ restore proof rejects source connection (2.615582ms)
+✔ restore proof rejects external target not isolated (1.996263ms)
+✔ restore proof rejects SQL restore failed (2.994775ms)
+✔ restore proof rejects no exit-on-error (1.932509ms)
+✔ restore proof rejects cleanup unconfirmed (1.44797ms)
+✔ restore proof rejects insufficient table data (1.86562ms)
+✔ restore proof rejects no row readback (1.914492ms)
+✔ restore proof rejects source profile changed (4.416456ms)
+✔ restore proof rejects auto retry grant (1.541118ms)
+✔ bad archive always blocks even a claimed perfect restore receipt (1.466077ms)
+✔ standalone restore receipt is inert without expected trusted executable digest (0.978142ms)
+✔ standalone receipt rejects keeperPid omitted from both bindings (0.98366ms)
+✔ standalone receipt rejects ownerPid omitted from both bindings (0.895709ms)
+✔ standalone receipt rejects postmasterSha256 omitted from both bindings (1.916294ms)
+✔ standalone receipt rejects zero Owner PID even when matching fields agree (1.061385ms)
+✔ standalone receipt rejects string Keeper PID even when matching fields agree (0.968758ms)
+✔ standalone receipt rejects unsafe Keeper PID even when matching fields agree (1.041035ms)
+✔ standalone receipt rejects same Owner and Keeper PID even when matching fields agree (0.953606ms)
+✔ standalone receipt rejects malformed source hash even when matching fields agree (0.875659ms)
+✔ standalone receipt rejects non-string postmasterSha256 without coercion (1.028487ms)
+✔ standalone receipt rejects non-string qualifiedExecutorSha256 without coercion (0.830853ms)
+✔ standalone receipt rejects substituted TOC with unchanged table-data count (0.997421ms)
+✔ standalone receipt rejects oversized ASCII TOC even with matching hashes (34.32364ms)
+✔ standalone receipt rejects oversized UTF-8 TOC even with matching hashes (53.732229ms)
+✔ build cleanup retries transient Windows locks and physically removes only the captured directory (613.069437ms)
+✔ build cleanup stops after six busy attempts, fails closed and releases the owned preparation lock (1509.437321ms)
+✔ build cleanup rechecks directory identity after a busy attempt and preserves a replacement directory (106.261624ms)
+✔ build cleanup preserves the primary compiler failure and both independent cleanup failures (3.322001ms)
+✔ successful build cleanup retains the exact primary failure without wrapping or replacing it (4.033708ms)
+✔ build cleanup accepts an already removed build directory and still releases its owned lock (2.786376ms)
+✔ precompilation preserves exact C# and all protocol text outside the single Add-Type block, with LF or CRLF (2.610105ms)
+✔ build extraction rejects missing, ambiguous, malformed and invalid UTF-8 templates with LF and CRLF (2.511569ms)
+✔ the output loader refuses non-PE, unmanaged or truncated assembly bytes (1.861723ms)
+✔ instrumented fixture C# is prepared through the same exact-byte transformation (1.17895ms)
+✔ source preparation refuses a non-Windows host without creating an output or pretending compilation succeeded (0.898624ms)
+✖ normal packaging prepares once before copying only the manifest into ASAR and the compiled helper outside (2.10903ms)
+﹣ Windows preparation compiles the real class once, publishes pinned self-contained bytes and retains old outputs on a rejected build (0.732497ms) # SKIP
+✔ source runtime resolves prepared output separately from the reviewed build template (3.534717ms)
+✔ source preparation refuses a changed template, changed helper and absent manifest without fallback (3.045266ms)
+✔ runtime manifest requires its fixed build mode and every build-chain digest (1.881323ms)
+✔ packaged binding comes from the app archive and cannot be replaced by a physical resource manifest (1.085141ms)
+✔ explicit disposable helpers require their own exact hash and reject directories or oversized files (4.603614ms)
+✔ helper tampering after controller construction is rejected before any child or input effect (3.326177ms)
+✔ owned physical fixture cleans up after proof assertion before RESUME without hiding its failure (17.297015ms)
+✔ owned physical fixture cleans up after expired original deadline before RESUME without hiding its failure (4.979071ms)
+✔ owned physical fixture awaits completion even after terminate rejects and reports both errors (0.526251ms)
+✔ startup timeout retains its exact reason and waits for helper close at the unchanged default deadline (2.471198ms)
+✔ pre-ready invalid protocol retains its fixed reason without settling before close (2.477127ms)
+✔ pre-ready native error frame retains its fixed reason without settling before close (1.644801ms)
+✔ pre-ready spawn error retains its fixed reason without settling before close (1.061155ms)
+✔ pre-ready input failure retains its fixed reason without settling before close (1.616129ms)
+✔ close without a proven startup cause retains the unproven-exit fallback (1.806562ms)
+✔ a valid ready and exit protocol still waits for helper close before confirmed completion (3.605072ms)
+✔ requested suspended cancellation is identity-bound, fences resume immediately and waits for helper close0 (1.79196ms)
+✔ deadline refusal followed by concurrent cancel/resume cannot send RESUME or change the cancellation binding (1.754474ms)
+✔ post-RESUME cancellation retains the ordinary protocol and cannot confirm a suspended receipt (2.491749ms)
+✔ a suspended cancellation receipt before valid ready is a protocol failure, not native cleanup proof (1.456882ms)
+✔ unsolicited receipt cannot establish suspended cleanup (1.05765ms)
+✔ unsolicited resumed cannot establish suspended cleanup (1.329633ms)
+✔ receipt after RESUME cannot establish suspended cleanup (1.0844ms)
+✔ suspended cancellation rejects different cancellation ID (1.139351ms)
+✔ suspended cancellation rejects missing cancellation ID (0.938132ms)
+✔ suspended cancellation rejects different run ID (1.811069ms)
+✔ suspended cancellation rejects different job ID (1.402692ms)
+✔ suspended cancellation rejects different PID (1.068396ms)
+✔ suspended cancellation rejects different kernel incarnation (0.954377ms)
+✔ suspended cancellation rejects different reason (1.136887ms)
+✔ suspended cancellation rejects STILL_ACTIVE exit (0.95631ms)
+✔ suspended cancellation rejects different exit (1.433358ms)
+✔ suspended cancellation rejects missing exit observation (1.012804ms)
+✔ suspended cancellation rejects resumed child (1.215544ms)
+✔ suspended cancellation rejects unclosed handles (1.459927ms)
+✔ suspended cancellation rejects unconfirmed cleanup (1.06457ms)
+✔ suspended cancellation rejects different tree controller (1.194313ms)
+✔ suspended cancellation rejects missing accounting (1.88631ms)
+✔ suspended cancellation rejects active job (1.101755ms)
+✔ suspended cancellation rejects empty lifetime job (1.403062ms)
+✔ suspended cancellation rejects additional job process (0.952373ms)
+✔ suspended cancellation rejects negative terminated count (1.188604ms)
+✔ suspended cancellation rejects fractional terminated count (1.377826ms)
+✔ suspended cancellation rejects impossible terminated count (1.602289ms)
+✔ suspended cancellation rejects string accounting (1.382222ms)
+✔ valid cancellation followed by duplicate receipt cannot confirm cleanup (1.282313ms)
+✔ valid cancellation followed by resumed cannot confirm cleanup (1.12483ms)
+✔ valid cancellation followed by output cannot confirm cleanup (1.350935ms)
+✔ valid cancellation followed by exit cannot confirm cleanup (1.146031ms)
+✔ valid cancellation followed by error cannot confirm cleanup (1.793302ms)
+✔ valid cancellation followed by blank line cannot confirm cleanup (0.933535ms)
+✔ valid cancellation followed by partial bytes cannot confirm cleanup (1.021186ms)
+✔ valid cancellation followed by partial whitespace cannot confirm cleanup (1.302644ms)
+✔ valid cancellation receipt plus helper exit1 remains unconfirmed (1.245128ms)
+✔ valid cancellation receipt plus helper killed remains unconfirmed (1.188524ms)
+✔ valid cancellation receipt plus helper error remains unconfirmed (1.07081ms)
+✔ valid cancellation receipt plus input failure remains unconfirmed (1.190267ms)
+✔ valid cancellation receipt plus stderr overflow remains unconfirmed (1.103548ms)
+✔ valid cancellation receipt plus forced helper kill remains unconfirmed (1.576981ms)
+✔ cancellation without any native receipt remains unconfirmed even after helper close0 (1.277286ms)
+✔ resumed during suspended cancellation cannot replace its cleanup receipt (1.564653ms)
+✔ output during suspended cancellation cannot replace its cleanup receipt (1.90632ms)
+✔ exit during suspended cancellation cannot replace its cleanup receipt (1.543892ms)
+✔ error during suspended cancellation cannot replace its cleanup receipt (1.09804ms)
+✔ a helper signal cannot confirm a cancellation receipt even alongside exit0 (1.353519ms)
+▶ separate controller runs issue distinct cancellation IDs
+  ✔ run 0 (1.180362ms)
+  ✔ run 1 (1.414089ms)
+✔ separate controller runs issue distinct cancellation IDs (3.117708ms)
+✔ normal terminal refuses request UUID (1.207743ms)
+✔ normal terminal refuses request digest (1.00329ms)
+✔ normal terminal refuses helper birth within same millisecond (1.007455ms)
+✔ normal terminal refuses child birth within same millisecond (1.179701ms)
+✔ normal terminal refuses active descendant (0.985523ms)
+✔ normal terminal refuses unclosed handle (0.915119ms)
+✔ normal terminal refuses undrained stdout/stdin (2.057514ms)
+✔ normal terminal refuses exit-only boolean (1.290786ms)
+✔ normal terminal refuses foreign control field (1.042898ms)
+✔ normal join refuses or holds no terminal (0.897833ms)
+✔ normal join refuses or holds no resumed ACK (0.917061ms)
+✔ normal join refuses or holds helper exit only (1.114034ms)
+✔ normal join refuses or holds stderr bytes (1.079583ms)
+✔ normal join refuses or holds extra terminal (1.030619ms)
+✔ helper native observation rejects changed process_incarnation_id and joins original close (16.19526ms)
+✔ helper native observation rejects changed user_sid and joins original close (1.73167ms)
+✔ helper native observation rejects changed exe_path and joins original close (1.12553ms)
+✔ held helper birth observation cannot be upgraded by close or late observer reply (1.373639ms)
+✔ resume refuses changed prompt without sending its bytes or weakening cancellation (1.402952ms)
+✔ throwing helper kill is issued once and cannot release pending original close (1.116868ms)
+✔ returned ready proof cannot mutate the original privately observed request or helper incarnation (1.082928ms)
+✔ custom distribution with a bound receipt passes the byte gate (22.013566ms)
+✔ a stock runtime image has no static Guardian binding and fails closed (16.747631ms)
+✔ a stock node_modules distribution path is refused before anything else (6.153684ms)
+✔ a drifted distribution path is refused (7.11432ms)
+✔ a configuration that does not select the custom dist is refused (7.386995ms)
+✔ a missing receipt fails closed (5.159949ms)
+✔ a receipt that does not bind the current native source tree is refused (8.836347ms)
+✔ a receipt bound to foreign upstream pins is refused (10.003819ms)
+✔ mutated inventory bytes are refused (14.129914ms)
+✔ an unlisted extra file in the distribution is refused (12.361959ms)
+✔ a symlink inside the distribution is refused (10.710358ms)
+✔ afterPack detects a packaged executable whose code bytes differ (18.221838ms)
+✔ the hook refuses non-win32 builder contexts (0.405101ms)
+✔ PE parser rejects foreign architectures and malformed images (0.616756ms)
+✔ the gate refuses a receipt claiming runtime authority (8.466749ms)
+✔ W74 uses fixed own-PG project/epoch+advisory CAS and sealed STAGING genesis (never installed) (5.199247ms)
+✔ W74 refuses missing signer, wrong source shape, missing SQL scope and corrupt protected custody (1.23949ms)
+✔ W74 denies Guardian PID/100ns birth drift, wrong device, lost epoch and unverified old process (1.531263ms)
+✔ W74 never relabels protected STAGING or forged cached source into Owner (1.018092ms)
+✔ W74 second native observation cannot lose binding or acquire an untrusted marker (0.438031ms)
+✔ W74 never returns an old Owner after post-commit device/client/key rebinding at the same epoch (1.244647ms)
+✔ W74 rejects client-side self attestation and never uses constructor project text (0.199996ms)
+✔ W74 only transfers generation on independently verified old PID death (STAGING) (0.903321ms)
+✔ W74 pre-seal close invalidation cannot start a sealed write (STAGING) (0.513402ms)
+✔ W74 pre-seal source invalidation cannot start a sealed write (STAGING) (0.411621ms)
+✔ W74 pre-seal epoch invalidation cannot start a sealed write (STAGING) (0.217914ms)
+✔ W74 pre-seal host invalidation cannot start a sealed write (STAGING) (0.241759ms)
+✔ W74 rechecks SQL after native pre-seal evidence, not before it (STAGING) (0.288228ms)
+✔ W74 close joins already-started native work and fences queued creation (STAGING) (5.951524ms)
+✔ W74 late close after an irreversible seal joins but cannot return a confirmed Owner (STAGING) (0.711957ms)
+✔ W74 current Admin and device must still agree after native evidence awaits (STAGING) (0.474154ms)
+✔ W74 invalid asynchronous lifetime gate is refused and joined without an unhandled rejection (0.70103ms)
+✔ W74 already-settled async lifetime resolve never authorizes a seal (0.231504ms)
+✔ W74 already-settled async lifetime reject never authorizes a seal (0.100038ms)
+✔ typed pending custody seals exact source/Guardian evidence and never adopts missing legacy pins (STAGING) (3.478744ms)
+✔ W74 protected device identity record survives restart without promoting STAGING (26.32057ms)
+✔ W74 queued safeStorage CAS revalidates close after the preceding identity write (STAGING) (5.072885ms)
+✔ W74 queued safeStorage CAS revalidates grant after the preceding identity write (STAGING) (4.913654ms)
+✔ W74 queued safeStorage CAS revalidates host after the preceding identity write (STAGING) (3.902192ms)
+✔ W74 successful seal with lost persistence ACK remains unconfirmed and never auto-retries (STAGING) (4.322116ms)
+✔ W74 close during actual Owner temp-file sync prevents final replacement (STAGING) (5.682706ms)
+✔ W74 grant during actual Owner temp-file sync prevents final replacement (STAGING) (3.753702ms)
+✔ W74 host during actual Owner temp-file sync prevents final replacement (STAGING) (3.606353ms)
+✔ W74 close during started Owner rename joins an unconfirmed replacement (STAGING) (3.986688ms)
+✔ W74 synchronous final lifetime fence closes the async guard continuation gap (STAGING) (4.226399ms)
+✔ W76 absent W74 genesis never calls the W67 Host reader or creates Owner (1.306459ms)
+✔ W76 generated or forged Owner evidence is always STAGING/UNKNOWN (1.575829ms)
+✔ W76 exact 100ns incarnation mismatch rejects equality at ISO millisecond precision (0.270121ms)
+✔ W76 revoke and before/after identity drift fail closed (0.2025ms)
+✔ W76 close during native Owner read 1 refuses its late result (0.837553ms)
+✔ W76 close during native Owner read 2 refuses its late result (0.371482ms)
+✔ W76 production default source integration is an independent W74 reader, never a W67 recursion (4.872743ms)
+✔ explicit managed host descriptor accepts only public pinned canonical resource/config locations (1.946819ms)
+✔ host environment carries a private config path and no loader, service or Browser identity secrets (0.616675ms)
+✔ protected packaged binding pins version, verifier, manifest and each reviewed resource identity (0.810964ms)
+✔ one verified external host starts from a private file, binds ready IPC and stops through real child IPC (53.094233ms)
+✔ shutdown delays Electron quit until the owned host has acknowledged exit (35.657375ms)
+✔ mismatched endpoint, instance, status path or private IPC fields stop the new host fail closed (219.66233ms)
+✔ verification rejects changed bundles before any host spawn or private config read (5.969391ms)
+✔ server failure and bounded readiness timeout do not expose private stderr and confirm cleanup (147.568339ms)
+✔ a nonexistent executable fails promptly without retaining an owned PID or leaking its path (5.503344ms)
+✔ bounded owner cleanup reports unconfirmed before parent disconnect finishes the inert child (241.962823ms)
+✔ an unsolicited fixture terminal followed by stop retains one reason until physical exit (71.454938ms)
+{"schema":"metaengine.browser.runtime-host.v1","state":"OWNED_RUNTIME_HOST_EXITED","automatic_cloud_fallback":false,"authority_effect":false}
+✔ unexpected clean Host termination blocks readiness without automatically replacing the writer (147.43481ms)
+✔ only an exact trusted failure envelope exposes the fixed interrupted-start recovery category (10.158008ms)
+✔ a ready IPC followed by exit before the startup continuation cannot publish a dead owned host (2.184102ms)
+✔ host shutdown during bootstrap health cannot overwrite BLOCKED with stale READY (43.794599ms)
+✔ stale packaged Owner pin leaves the old profile intact and exits without a second uncaught dialog (source contract) (1.370434ms)
+✔ owned native scope cleanup joins exact verified Host shutdown, never stops live Host on its own (43.230401ms)
+✔ concurrent owned shutdown requests share one exact-child stop send and wait for exit (44.589207ms)
+✔ synchronous stopping-generation observer reentry shares already-owned shutdown work (45.874657ms)
+✔ owned real child confirms terminal cleanup before replacement; concurrent starts share each generation (172.644002ms)
+{"schema":"metaengine.browser.runtime-host.v1","state":"OWNED_RUNTIME_HOST_EXITED","automatic_cloud_fallback":false,"authority_effect":false}
+✔ unsolicited health failure confirms terminal cleanup and permits one fresh generation (121.731588ms)
+{"schema":"metaengine.browser.runtime-host.v1","state":"OWNED_RUNTIME_HOST_EXITED","automatic_cloud_fallback":false,"authority_effect":false}
+✔ crash without terminal acknowledgment retains cleanup uncertainty and forbids replacement (73.689873ms)
+{"schema":"metaengine.browser.runtime-host.v1","state":"OWNED_RUNTIME_HOST_EXITED","automatic_cloud_fallback":false,"authority_effect":false}
+✔ zero exit without terminal acknowledgment retains cleanup uncertainty and forbids replacement (70.487818ms)
+{"schema":"metaengine.browser.runtime-host.v1","state":"OWNED_RUNTIME_HOST_EXITED","automatic_cloud_fallback":false,"authority_effect":false}
+✔ wrong launch nonce retains cleanup uncertainty and forbids replacement (74.351341ms)
+{"schema":"metaengine.browser.runtime-host.v1","state":"OWNED_RUNTIME_HOST_EXITED","automatic_cloud_fallback":false,"authority_effect":false}
+✔ wrong host PID retains cleanup uncertainty and forbids replacement (84.88403ms)
+{"schema":"metaengine.browser.runtime-host.v1","state":"OWNED_RUNTIME_HOST_EXITED","automatic_cloud_fallback":false,"authority_effect":false}
+✔ wrong runtime instance retains cleanup uncertainty and forbids replacement (73.153974ms)
+{"schema":"metaengine.browser.runtime-host.v1","state":"OWNED_RUNTIME_HOST_EXITED","automatic_cloud_fallback":false,"authority_effect":false}
+✔ unreleased ownership retains cleanup uncertainty and forbids replacement (45.856133ms)
+{"schema":"metaengine.browser.runtime-host.v1","state":"OWNED_RUNTIME_HOST_EXITED","automatic_cloud_fallback":false,"authority_effect":false}
+✔ children not confirmed stopped retains cleanup uncertainty and forbids replacement (67.285579ms)
+{"schema":"metaengine.browser.runtime-host.v1","state":"OWNED_RUNTIME_HOST_EXITED","automatic_cloud_fallback":false,"authority_effect":false}
+✔ extra terminal fields retains cleanup uncertainty and forbids replacement (46.563203ms)
+{"schema":"metaengine.browser.runtime-host.v1","state":"OWNED_RUNTIME_HOST_EXITED","automatic_cloud_fallback":false,"authority_effect":false}
+✔ two valid conflicting terminal records retain cleanup uncertainty after physical exit (53.901392ms)
+✔ shutdown during queued verification cancels startup before the child can spawn (5.137135ms)
+✔ shutdown after spawn but before READY stops that exact generation without admitting it (53.677317ms)
+✔ a valid terminal acknowledgment alone cannot confirm cleanup before physical exit (55.972195ms)
+✔ a malformed terminal before READY cannot be followed by an admitted descriptor (54.023532ms)
+✔ a malformed terminal after READY revokes readiness and cannot mint a fresh native capability (58.970566ms)
+{"schema":"metaengine.browser.runtime-host.v1","state":"OWNED_RUNTIME_HOST_EXITED","automatic_cloud_fallback":false,"authority_effect":false}
+✔ an outstanding native read cannot be rebound to a replacement child (124.662332ms)
+✔ reads the CURRENT host PG directory only through the existing provider owner file (11.815409ms)
+✔ composed configuration keeps the CURRENT host source directory and reuses the fixed W76 selector rules (5.212438ms)
+✔ binding requires original owned Host and identity without callback/path fallback (1.283545ms)
+✔ UUID sanity for generated summaries used above (0.149532ms)
+✔ actual Main mount supplies the direct transaction callback to the default runtime without a factory override (76.278686ms)
+✔ actual Main refuses preinstalled/old-profile cli_executable before Host capability or preparation (48.659801ms)
+✔ actual Main refuses preinstalled/old-profile git_executable before Host capability or preparation (47.223357ms)
+✔ actual Main refuses preinstalled/old-profile codex_home before Host capability or preparation (51.905498ms)
+✔ actual Main callback fences mount-barrier between original Owner phases (43.149ms)
+✔ actual Main callback fences host-summary between original Owner phases (40.740013ms)
+✔ actual Main callback fences generation-lost between original Owner phases (40.00952ms)
+✔ actual Main callback fences shutdown between original Owner phases (43.395245ms)
+✔ actual Main callback fences installer-stop between original Owner phases (37.116034ms)
+✔ actual Main callback fences host-closed between original Owner phases (35.944627ms)
+✔ actual Main callback fences host-instance between original Owner phases (35.539664ms)
+✔ actual Main callback fences device-key between original Owner phases (40.836647ms)
+✔ actual Main retains a pending native Owner read across mount-barrier (42.182073ms)
+✔ actual Main retains a pending native Owner read across scope-abort (42.118627ms)
+✔ actual Main default runtime remains CLOSED before prepared custody, reserve, broker, worker or W30 effects (32.893907ms)
+✔ direct missing Owner observation cannot open the actual Main runtime (44.215089ms)
+✔ direct SOURCE_ONLY Owner observation cannot open the actual Main runtime (43.351907ms)
+✔ exact bound request is stable; cloned request/token, guessed Main token, and copied client are not original (2.572187ms)
+✔ restart never adopts a previous exact request or resurrects an old facet (0.490858ms)
+✔ monotonic cap is synchronous when wall clock moves back and timer has not run (0.784244ms)
+✔ wall cap independently fences, and restoring either clock cannot renew (0.373845ms)
+✔ delayed root response restricts from original send anchor, never from arrival time (0.381997ms)
+✔ wire restriction cannot renew after rollback or a later recheck (0.750273ms)
+✔ wire restriction rejects serialized performance values and malformed duration (0.324611ms)
+✔ revoked original signal closes exact lookup and rejects a late frame (1.078961ms)
+✔ an asynchronous callback cannot substitute for the synchronous lifetime veto (0.477588ms)
+✔ pure transport syntax rejects SYNTHETIC scope without granting authority (0.661431ms)
+✔ pure transport syntax rejects synthetic Owner marker without granting authority (0.291432ms)
+✔ pure transport syntax rejects source identity alias without granting authority (0.473593ms)
+✔ pure transport syntax rejects source path alias without granting authority (0.350701ms)
+✔ pure transport syntax rejects nested source path without granting authority (0.199987ms)
+✔ pure transport syntax rejects noncanonical root path without granting authority (0.202931ms)
+✔ pure transport syntax rejects device change without granting authority (0.152606ms)
+✔ pure transport syntax rejects client change without granting authority (0.174889ms)
+✔ pure transport syntax rejects fingerprint change without granting authority (0.221128ms)
+✔ pure transport syntax rejects grant change without granting authority (0.170653ms)
+✔ pure transport syntax rejects project change without granting authority (0.187188ms)
+✔ pure transport syntax rejects stale Owner without granting authority (0.160488ms)
+✔ proxy/getter inputs cannot call a proof callback or getter (0.43858ms)
+✔ foreign phase field fences same-request transport: instance_id (0.33719ms)
+✔ foreign phase field fences same-request transport: host_pid (0.393374ms)
+✔ foreign phase field fences same-request transport: request_sha256 (0.181039ms)
+✔ foreign phase field fences same-request transport: body_sha256 (0.144885ms)
+✔ foreign phase field fences same-request transport: action (0.14841ms)
+✔ foreign phase field fences same-request transport: sequence (0.14161ms)
+✔ close/drain retains the original cleanup send until its actual callback joins; late callback cannot reopen (11.69107ms)
+✔ an unknown original send completion rejects drain; a refusal never manufactures a root (0.509496ms)
+✔ caller provider methods never run and cannot replace the statically imported original authority (0.594232ms)
+✔ standalone phase factory never registers a genuine Host server dispatch (0.206427ms)
+✔ fake physical custody and copied tickets cannot execute callbacks through original lookup (0.11468ms)
+✔ fixed OS reader pairing is identity-only; wrong reader or SQL is refused without native IO (0.672118ms)
+✔ a physical-custody factory with positive callback shapes still has no original native pair or ticket (0.209741ms)
+✔ simulated setup custody uses existing native predicates, no project/task/Owner record or identity initialization (8.204847ms)
+✔ setup retains W74 refusal for simulated source release_root_signature_verified=false (1.573185ms)
+✔ setup retains W74 refusal for simulated source slsa_evidence_digest_bound=false (1.197447ms)
+✔ setup retains W74 refusal for simulated source package_code_verified=false (1.09851ms)
+✔ setup retains W74 refusal for simulated source native_signature_verified=false (1.390103ms)
+✔ setup retains W74 refusal for simulated source exact_bytes_verified=false (1.034666ms)
+✔ setup retains W74 refusal for simulated source loaded_runtime_code_attested=true (1.557382ms)
+✔ setup retains W74 refusal for simulated source fixture_classification=STAGING (0.921808ms)
+✔ setup retains W74 refusal for simulated source source=CALLER_JSON (0.880927ms)
+✔ simulated setup revalidation rejects key rotation without adopting another binding (1.630199ms)
+✔ simulated setup revalidation rejects epoch rotation without adopting another binding (1.147513ms)
+✔ simulated setup revalidation rejects host rotation without adopting another binding (1.306719ms)
+✔ simulated setup revalidation rejects source rotation without adopting another binding (1.918567ms)
+✔ simulated setup revalidation rejects guardian rotation without adopting another binding (1.279278ms)
+✔ simulated setup revalidation rejects kernel rotation without adopting another binding (0.939715ms)
+✔ cancel during a simulated native read joins late completion and never enters the effect (6.10488ms)
+✔ cancel after simulated grant is synchronous while original effect callback remains joined (2.241316ms)
+✔ ignored async recheck still joins its simulated native read and cannot hide failure behind callback success (1.721534ms)
+✔ async veto is refused and its late rejection is joined before simulated setup drain (0.866305ms)
+✔ preexisting native unknown marker remains HOLD in setup drain even when an invalid async veto is refused (0.708782ms)
+✔ a native supplier returning valid simulated evidence after marking cleanup unknown cannot enter the retained effect (0.974716ms)
+✔ boolean assertLifetime cannot stand in for a synchronous veto (0.643785ms)
+✔ boolean assertOpen cannot stand in for a synchronous veto (0.381787ms)
+✔ same signed setup deadline is enforced while custody is retained (1.259018ms)
+✔ real disposable loaded identity synchronously revokes retained simulated state custody (13.385535ms)
+✔ real disposable loaded identity synchronously revokes retained simulated guardian custody (10.777519ms)
+✔ loaded identity restart cannot adopt old simulated setup custody without its original Guardian binding (4.959069ms)
+✔ loaded identity cancel joins first simulated Guardian challenge without dispatching a second late challenge (4.529201ms)
+✔ loaded setup preserves a marked unknown Guardian resource instead of normalizing it to an ordinary denial (3.247729ms)
+✔ loaded setup veto fires before a disposable identity replacement starts, while its original callback stays joined (5.077845ms)
+✔ Main factory forwards existing native suppliers and retains only the captured Host/identity lifetime (simulated private callback) (0.848359ms)
+✔ loaded BEGIN signer reuses real enrolled ES256 signature without ensure, Owner genesis or arbitrary routes (4.310937ms)
+✔ Main BEGIN helper dispatches the actual signed request and retained callback while preserving early ACK (3.290193ms)
+✔ Main BEGIN helper refuses identity replacement during the original signature await (3.439886ms)
+✔ Main BEGIN helper refuses host replacement during the original signature await (2.936308ms)
+✔ integration: stale Guardian unbind cannot revoke replacement retained setup custody (3.972105ms)
+✔ fixture surfaces an initialization failure before its selected pause (10.533232ms)
+✔ actual close waits for a deferred managed constructor and prevents its late publication (4.000427ms)
+✔ actual window teardown retains a published RPC and blocks replacement startup until its authenticated command drains (39.663464ms)
+✔ failed published RPC cleanup retains the exact owner and fences subsequent startup (3.309656ms)
+✔ a deferred autonomous constructor is closed before the existing managed host is released (2.823249ms)
+✔ a deferred RPC listen cannot survive actual teardown as an unpublished server (2.521482ms)
+✔ the actual relay startup helper stops a relay returned after its initialization lifetime closed (2.820306ms)
+✔ an initialization waiting on the old barrier never waits on the close which captures it (2.286874ms)
+✔ a new initialization waits on the new close barrier without joining its captured old snapshot (4.115508ms)
+✔ a stale candidate whose cleanup fails remains in custody and prevents a false successful empty drain (2.111113ms)
+✔ actual teardown waits for pending recovery initialization and denies later activation (1.881723ms)
+✔ actual teardown waits for pending start initialization and denies later activation (1.757859ms)
+✔ actual teardown waits for pending storage initialization and denies later activation (1.903935ms)
+✔ an RPC candidate still starting cannot execute a command after its captured lifetime closes (2.298741ms)
+✔ relay control callbacks cannot submit commands or goals while their unpublished relay finishes stale startup (2.442224ms)
+✔ a late Supervisor start is stopped on the captured old instance rather than a successor (1.830817ms)
+✔ a stale recovery failure never applies its fence to a successor Supervisor (1.983504ms)
+✔ the actual recovery helper cannot clear its fence or publish recovery after teardown during init (10.185807ms)
+✔ a failed local RPC start never stops or clears a successor published RPC (2.249559ms)
+✔ concurrent startup in one lifetime shares construction and the actual successful initialization path (2.214526ms)
+✔ an old rejected close barrier cannot be converted into successful initialization or drain (2.031886ms)
+✔ same-barrier Supervisor substitution cannot redirect a provisional relay goal callback to its successor (2.26409ms)
+✔ actual recovery callbacks reject teardown while init is pending before reading or applying fleet and Supervisor state (2.280474ms)
+✔ a new recovery lifetime reloads the same protected journal with fresh callbacks and rejects the cached old callbacks (3.048144ms)
+✔ same-barrier Fleet replacement refreshes cached recovery against the same journal without redirecting old callbacks (5.898154ms)
+✔ recovery storage failure fences the actual current Supervisor until a verified reload (2.915297ms)
+✔ recovery journal failure fences the actual current Supervisor until a verified reload (3.469529ms)
+✔ failed old recovery initialization cannot change a replacement Supervisor fence (1.958727ms)
+✔ actual Supervisor startup nested mount cannot hide Host dependency from quit upgrade=false (63.807019ms)
+✔ actual Supervisor startup nested mount cannot hide Host dependency from quit upgrade=true (55.969269ms)
+✔ the default Main adapter does not classify ordinary Node as development (4.965078ms)
+✔ original Main mount admits and shares one capability within generation and cleanup custody (1.832379ms)
+✔ installed Node context follows actual bundle and execution-resource checks, not hooks or Electron absence (4.745062ms)
+✔ default producer carries one tools binding through offline hashing and ASAR agreement (1.484373ms)
+(node:29493) ExperimentalWarning: Module mocking is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:29493) DeprecationWarning: mock.module(): options.namedExports is deprecated. Use options.exports instead.
+✔ private reader accepts only the exact current Host and retained launch config (118.190428ms)
+{"schema":"metaengine.browser.runtime-host.v1","state":"OWNED_RUNTIME_HOST_EXITED","automatic_cloud_fallback":false,"authority_effect":false}
+✔ launch config with another state root is refused even with claimed protected storage (63.469558ms)
+{"schema":"metaengine.browser.runtime-host.v1","state":"OWNED_RUNTIME_HOST_EXITED","automatic_cloud_fallback":false,"authority_effect":false}
+✔ native ACL failure joins the other pending observation before rejection (55.241142ms)
+✔ Host loss during ACL read refuses a late success and joins both observations (51.571396ms)
+(node:29532) ExperimentalWarning: Module mocking is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:29532) DeprecationWarning: mock.module(): options.defaultExport is deprecated. Use options.exports.default instead.
+(node:29532) DeprecationWarning: mock.module(): options.namedExports is deprecated. Use options.exports instead.
+▶ absent registration always holds before seal issuance, mkdir or any other write
+  ✔ absent root remains absent (21.204038ms)
+  ✔ orphan root preserved (6.977986ms)
+✔ absent registration always holds before seal issuance, mkdir or any other write (29.356728ms)
+✔ real composition preserves the exact missing namespace-custody HOLD without writing (10.643946ms)
+▶ post-observation ancestor replacement cannot cross the missing original namespace-custody fence
+  ✔ replacement-directory (8.643808ms)
+  ✔ ancestor-alias-to-original-pgdata (7.596778ms)
+✔ post-observation ancestor replacement cannot cross the missing original namespace-custody fence (16.854829ms)
+✔ a synthetic READY pin can only be requalified readonly and never becomes effect authority (15.404211ms)
+✔ synthetic READY evidence retains its physical root through fresh readonly Host and identity composition (12.422506ms)
+▶ REGISTERING and missing READY roots remain holds without repair, recreation or rotation
+  ✔ REGISTERING (8.800721ms)
+  ✔ READY (11.667966ms)
+✔ REGISTERING and missing READY roots remain holds without repair, recreation or rotation (21.118451ms)
+✔ fake/copy/proxy identities, summaries, argument records and provider tokens cannot invoke caller code (2.398029ms)
+▶ malformed and Proxy current-directory records fail before ACL reads or writes
+  ✔ extra-field (2.038966ms)
+  ✔ accessor (1.724299ms)
+  ✔ proxy (1.69089ms)
+  ✔ revoked-proxy (1.838538ms)
+  ✔ relative-source (1.870035ms)
+  ✔ overlap (2.676201ms)
+✔ malformed and Proxy current-directory records fail before ACL reads or writes (12.619548ms)
+▶ replacement or alias of a READY root, source or state cannot be adopted from its old pathname
+  ✔ root (15.216071ms)
+  ✔ source (15.000221ms)
+  ✔ state (13.518422ms)
+  ✔ root-alias (13.265447ms)
+✔ replacement or alias of a READY root, source or state cannot be adopted from its old pathname (57.745258ms)
+▶ canonical device, client or key changes cannot reuse another synthetic READY pin
+  ✔ device_id (6.426727ms)
+  ✔ client_id (7.188148ms)
+  ✔ key_fingerprint_sha256 (6.836106ms)
+✔ canonical device, client or key changes cannot reuse another synthetic READY pin (20.991162ms)
+✔ close during ACL verification refuses late results and drain joins the original readonly work (7.89731ms)
+▶ Host restart or identity drift during ACL verification permanently refuses that provider
+  ✔ Host (5.556487ms)
+  ✔ device_id (11.444936ms)
+  ✔ client_id (7.541112ms)
+  ✔ key_fingerprint_sha256 (6.657274ms)
+✔ Host restart or identity drift during ACL verification permanently refuses that provider (31.879657ms)
+▶ ACL or sealed-read failure is sanitized and terminal without any repair attempt
+  ✔ unverified (12.622012ms)
+  ✔ wrong-operation (5.68058ms)
+  ✔ native-error (5.557568ms)
+  ✔ sealed-read-error (6.943445ms)
+✔ ACL or sealed-read failure is sanitized and terminal without any repair attempt (31.480099ms)
+✔ real Main provider requires an exact readonly selector token, including for a synthetic READY pin (22.824623ms)
+✔ READY root replaced before Main admission refuses before Owner binding or handoff work (11.888113ms)
+▶ physical or sealed READY root-pin change before Main read refuses further native observations
+  ✔ physical root (16.649589ms)
+  ✔ sealed pin (14.147606ms)
+✔ physical or sealed READY root-pin change before Main read refuses further native observations (31.284188ms)
+✔ original synthetic root handoff uses actual separate directories and never grants native authority (22.847487ms)
+✔ creating a synthetic archive changes root contents without invalidating stable directory identity (15.01327ms)
+✔ replacement directory at the same root pathname invalidates the original handoff (9.032245ms)
+✔ root/source independence refuses same_directory before consumer dispatch (3.098368ms)
+✔ root/source independence refuses root_is_source_parent before consumer dispatch (2.822139ms)
+✔ root/source independence refuses root_is_source_child before consumer dispatch (3.32898ms)
+✔ root/source independence refuses symlink_to_source before consumer dispatch (1.68476ms)
+✔ copied handoff and matching fake custody or Host callbacks cannot create authority (6.237828ms)
+✔ accessor, Proxy and unexpected tuple fields are rejected without invoking caller code (4.245761ms)
+✔ custody revoked during awaited root read prevents a late use callback (5.284873ms)
+✔ explicit source-changed-after-restore producer veto revokes root use without claiming DB measurement (9.373911ms)
+✔ a foreign job cannot revoke another original handoff (5.574793ms)
+✔ an exact original job cannot bind concurrently, repeatedly or after unknown completion (6.400529ms)
+✔ Host restart permanently rejects the old original capability, including matching descriptive copies (4.010652ms)
+✔ unknown original completion retains drain and refuses a late successful consumer result (5.194419ms)
+✔ close during initial bind fences publication but joins the original paused read (2.684745ms)
+✔ close during a started consumer joins final rejection and holds unknown completion (7.347193ms)
+✔ explicit close revokes root capability and cannot be undone by a new use callback (4.118472ms)
+✔ the original cancellation signal remains authoritative after a successful bind (5.788801ms)
+✔ the initial deadline is not renewed after binding (311.659701ms)
+✔ synchronous expiry survives wall rollback and a blocked timer without renewing on revalidate (343.035204ms)
+✔ a forward wall jump still applies its original cap before monotonic expiry (7.491062ms)
+✔ original cancellation during wall rollback retains the pending consumer and refuses its late result (4.869677ms)
+✔ late original consumer microtask cannot dispatch after real expiry while the wall clock remains rolled back (342.461894ms)
+✔ actual read-only opaque scope cannot reach sealing or persistence through caller records or flags (24.259993ms)
+✔ sealed registration uses loaded original identity only and rejects copied authority without reads (6.56983ms)
+✔ REGISTERING then READY preserves key and Owner bytes and hides encrypted selector from snapshots (8.72932ms)
+✔ READY survives restart and remains immutable under a fresh scope (8.647834ms)
+✔ interrupted REGISTERING cannot finish after restart even with copied registration ID (5.402138ms)
+✔ READY requires the original scope and unchanged registration, device, state and source binding (8.920889ms)
+✔ registration input rejects accessors, proxies and noncanonical data without invoking caller code (4.293787ms)
+✔ malformed sealed data is a denial rather than absence or registration permission (4.636922ms)
+✔ active W74 custody refuses registration before encryption or persistence (7.696152ms)
+✔ pending per-request W74 setup custody is preserved instead of invalidated by registration (7.716872ms)
+✔ scope revocation while temporary data flushes denies final replacement and cleans temporary bytes (4.720395ms)
+✔ queued competing registrations use CAS and cannot replace the first sealed intent (4.372509ms)
+✔ W74 custody bound during temporary flush is rechecked before selector replacement (4.265471ms)
+✔ lost persistence acknowledgement poisons the cache and leaves restart REGISTERING on HOLD (7.335636ms)
+✔ ordinary state writes and re-enrollment preserve sealed selector and cannot adopt it for another device (7.027399ms)
+✔ captured original registration wrappers resist replacement of public static methods (4.818931ms)
+{
+  "classification": "SYNTHETIC_BOUNDARY_REGRESSION",
+  "mainStartMono": 1000,
+  "mainExpiresMono": 121000,
+  "hostStartMono": 11000,
+  "transferredHostExpiresMono": 121000,
+  "checkedMono": 126000,
+  "originalMainExpired": true,
+  "hostPhaseStillCurrent": false,
+  "hostRetainedEffectCapStillCurrent": false
+}
+(node:29600) ExperimentalWarning: Module mocking is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:29600) DeprecationWarning: mock.module(): options.namedExports is deprecated. Use options.exports instead.
+✔ private Main request facet retains its original monotonic expiry (4.034177ms)
+✔ delayed acquisition and wall rollback never refund original Main lifetime (18.053162ms)
+✔ original W74 reader rejects duck types, copied prototypes and proxies without invoking them (1.232259ms)
+✔ original W74 uninitialized identity remains absent and never calls ensure or secure storage (4.339891ms)
+✔ captured original W74 exports ignore later replaceable static properties (0.192145ms)
+✔ W76 original root ignores arbitrary legacy providers and rejects copied custody (0.791655ms)
+✔ W76 private configuration rejects wrong-root selectors, overlap and accessor/coercion aliases (0.68739ms)
+✔ W74 existing-only facet shares guards without ensure or legacy readers (legacy synthetic) (2.780998ms)
+✔ W74 existing-only facet shares guards without ensure or legacy readers (typed synthetic) (0.735141ms)
+✔ W74 missing existing-only readers never fall back to ensure (0.166117ms)
+✔ W74 existing-only facet rejects revoked custody without key or SQL activity (0.418411ms)
+✔ W74 existing-only facet rejects revoked epoch without key or SQL activity (0.363819ms)
+✔ W74 unknown read completion keeps close pending and closed custody cannot be reused (2.983898ms)
+✔ owned Host reader rejects fake/copy/snapshot capabilities without invoking their methods (0.486102ms)
+✔ a generic original IPC client is not the controller-owned Host capability (1.016238ms)
+✔ Main recovery reader rejects duck identities, prototype copies and proxies without caller reads (1.417744ms)
+✔ unloaded original identity is refused without ensure, storage, key or filesystem writes (5.029203ms)
+✔ captured original W74 exports cannot be replaced by static JSON authority (0.273826ms)
+✔ matching Host snapshot and caller proof callback cannot register an original Main provider (0.164975ms)
+✔ caller JSON, copied request and fake callbacks cannot open or revive a Main session (0.920686ms)
+✔ READ-only recovery facade never exposes create/write and never initializes an identity (1.662788ms)
+✔ READ-only recovery facade joins an already-started read after close and never reopens (0.509486ms)
+✔ actual recovery directory mechanics retain original objects against a simulated Win32 boundary (3572.009847ms)
+ℹ {"name":"exact_original_duplicates_and_identity","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"name":"missing_ancestry_refuses_capture","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"name":"symmetric_share_conflicts_reject_preexisting_writer","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"name":"direct_child_anchor_is_required","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"name":"swap_after_last_check_is_denied_without_another_check","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"name":"retained_anchor_prevents_empty_directory_junction_conversion","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"name":"preexisting_attribute_only_handle_cannot_convert_retained_nonempty_directory","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"name":"same_file_ids_do_not_replace_original_open_comparison","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"name":"reparse_and_case_sensitive_objects_are_refused","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"name":"fixed_child_create_uses_retained_parent_and_same_returned_object","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"name":"exclusive_collision_preserves_existing_child_and_contents","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"name":"empty_child_collision_is_preserved_without_adoption","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"name":"junction_child_collision_is_preserved_without_following","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"name":"unanchored_created_child_cannot_issue_operation_or_worker","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"name":"created_child_metadata_failure_retains_original_returned_handle","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"name":"created_child_duplicate_failure_retains_original_returned_handle","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"name":"post_create_allocation_exception_quarantines_original_child","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"name":"unsupported_native_create_api_has_no_path_fallback","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"name":"cancellation_before_create_prevents_all_namespace_effects","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"name":"revocation_during_final_metadata_cannot_issue_operation","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"name":"pending_native_create_cancellation_joins_late_completion","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"name":"revocation_at_native_create_boundary_cannot_publish_late_success","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"name":"original_operation_ticket_joins_after_revoke","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"name":"abandoned_operation_quarantines_original_handles","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"name":"worker_transfer_failure_denies_later_effects","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"name":"partial_worker_transfer_quarantines_originals_and_preserves_remote_copy","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"name":"worker_transfer_check_allocation_exception_preserves_originals_without_deadlock","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"name":"namespace_cannot_expand_after_original_worker_transfer","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"name":"worker_duplicates_survive_holder_crash_until_original_process_exit","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"name":"original_job_owner_crash_requests_termination_while_worker_descriptors_remain","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"name":"external_surviving_job_duplicate_suppresses_kill_on_close_counterexample","state":"COUNTEREXAMPLE_CONFIRMED","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":true,"counterexample_kind":"EXTERNAL_JOB_HANDLE_SUPPRESSES_OWNER_CRASH_TERMINATION"}
+ℹ {"name":"job_member_without_worker_descriptors_leaves_crash_gap_counterexample","state":"COUNTEREXAMPLE_CONFIRMED","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":true,"counterexample_kind":"JOB_MEMBERSHIP_WITHOUT_DESCRIPTOR_COPIES_LEAVES_LIVE_DESCENDANT_GAP"}
+ℹ {"name":"process_exit_and_original_job_descendant_join_are_distinct","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"name":"termination_request_failed_wait_and_job_query_never_establish_join","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"name":"late_callback_retains_handles_after_worker_join","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"name":"cross_scope_tickets_cannot_complete_another_original_operation","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"name":"reused_observed_handle_with_equal_pid_and_birth_is_not_original_worker","state":"PASS","runtime":"SYNTHETIC_NATIVE_MECHANICS","windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false,"counterexample":false}
+ℹ {"runtime":"SYNTHETIC_NATIVE_MECHANICS","tests_passed":37,"mechanics_cases_passed":35,"counterexamples_confirmed":2,"tests_failed":0,"windows_native_execution":"NOT_RUN","original_creation_proof":false,"physical_authority":false,"authority_effect":false,"production_issuer_available":false,"architecture_accepted":false}
+✔ diagnosis: permanently pending Fleet blocks all later runtime scheduling (3.412335ms)
+✔ diagnosis: Fleet rejection degrades and permits later scheduling (0.95693ms)
+✔ owner safety initialization is a real ordering prerequisite (0.888379ms)
+✔ diagnosis: pending shell snapshot also prevents native scheduling after Fleet settles (0.858454ms)
+✔ native startup has captured Fleet recovery and protected mount dependencies, not unconditional independence (0.701301ms)
+✔ native startup dependency diagnostic rejects missing Fleet prerequisite (1.6573ms)
+✔ native startup dependency diagnostic rejects mutable Fleet callback (0.617477ms)
+✔ native startup dependency diagnostic rejects missing recovery call (1.35406ms)
+✔ native startup dependency diagnostic rejects missing captured start (0.473223ms)
+✔ native startup dependency diagnostic rejects missing recovery fence (1.231438ms)
+✔ native startup dependency diagnostic rejects missing protected permit refusal (0.608904ms)
+✔ parallel fresh startup persists one identity and every enrollment signature verifies (24.449542ms)
+✔ parallel cold loads decrypt the existing identity once without rotating its key (7.04319ms)
+✔ failed shared initialization can recover after secure storage becomes available (6.898645ms)
+✔ constructor and cancelled setup do not create identity bytes or encrypt a key (2.273209ms)
+✔ malformed existing identity is never replaced or rekeyed (3.88666ms)
+✔ existing unreadable identity fails without creating a key (1.344426ms)
+✔ mismatched stored private and public keys never load or rotate (4.0152ms)
+✔ two distinct first creators cannot overwrite the winning identity (3.399315ms)
+✔ symlink or hard-link identities are refused without modifying their target (4.140937ms)
+✔ identity disappearing after initial observation never triggers a replacement key (5.545792ms)
+✔ queued enrollment mutations preserve the preceding device binding and use owned temp files (4.504622ms)
+✔ failed writeFile preserves identity and enrollment without publishing new state (4.24416ms)
+✔ failed sync preserves identity and enrollment without publishing new state (7.355428ms)
+✔ failed close preserves identity and enrollment without publishing new state (4.540034ms)
+✔ write flush and close finish before atomic replacement; ambiguous replacement fences future writes (5.068553ms)
+✔ exclusive temp collision never overwrites or cleans up a file not owned by this operation (3.511753ms)
+✔ uncertain clear-binding fences W67 capabilities at before boundary (7.831209ms)
+✔ uncertain clear-binding fences W67 capabilities at guardian boundary (5.55843ms)
+✔ uncertain clear-binding fences W67 capabilities at host boundary (3.416742ms)
+✔ uncertain clear-binding fences W67 capabilities at gateway boundary (4.742865ms)
+✔ uncertain clear-binding fences W67 capabilities at postgres boundary (8.87277ms)
+ℹ tests 874
+ℹ suites 0
+ℹ pass 847
+ℹ fail 25
+ℹ cancelled 0
+ℹ skipped 2
+ℹ todo 0
+ℹ duration_ms 88261.35157
+
+✖ failing tests:
+
+test at ../../infra/client-state-runtime/runtime-host-native-compositions.test.mjs:127:1
+✖ runtime-host mounts a supplied genuine recovery service and exposes its fixed operations (24.68369ms)
+  Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'postgres' imported from /workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs
+      at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)
+      at packageResolve (node:internal/modules/esm/resolve:768:81)
+      at moduleResolve (node:internal/modules/esm/resolve:859:18)
+      at defaultResolve (node:internal/modules/esm/resolve:992:11)
+      at #cachedDefaultResolve (node:internal/modules/esm/loader:701:20)
+      at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:721:38)
+      at ModuleLoader.resolveSync (node:internal/modules/esm/loader:759:56)
+      at #resolve (node:internal/modules/esm/loader:683:17)
+      at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:603:35)
+      at node:internal/modules/esm/loader:632:32 {
+    code: 'ERR_MODULE_NOT_FOUND'
+  }
+
+test at ../../infra/client-state-runtime/runtime-host-native-compositions.test.mjs:161:1
+✖ runtime-host refuses an invalid recovery composition shape instead of mounting it (17.190172ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /runtime_host_recovery_composition_invalid/. Input:
+  
+  "Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'postgres' imported from /workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs"
+  
+      at async TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host-native-compositions.test.mjs:165:3)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'postgres' imported from /workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs
+        at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)
+        at packageResolve (node:internal/modules/esm/resolve:768:81)
+        at moduleResolve (node:internal/modules/esm/resolve:859:18)
+        at defaultResolve (node:internal/modules/esm/resolve:992:11)
+        at #cachedDefaultResolve (node:internal/modules/esm/loader:701:20)
+        at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:721:38)
+        at ModuleLoader.resolveSync (node:internal/modules/esm/loader:759:56)
+        at #resolve (node:internal/modules/esm/loader:683:17)
+        at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:603:35)
+        at node:internal/modules/esm/loader:632:32,
+    expected: /runtime_host_recovery_composition_invalid/,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at ../../infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:93:1
+✖ no-operator Host installs fixed configuration forwarders without creating a candidate (35.627715ms)
+  Error: offline_bundle_verified_result_required
+      at fail (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/offline-runtime-bundle.mjs:30:38)
+      at readVerifiedOfflineRuntimePackage (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/offline-runtime-bundle.mjs:89:36)
+      at composeInstalledNativeCodingRecoveryService (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/native-coding-recovery-installed-composition.mjs:32:19)
+      at file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs:791:31
+      at async startManagedRuntimeHost (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs:885:5)
+      at async fixture (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:86:9)
+      at async TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:94:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    code: 'offline_bundle_verified_result_required'
+  }
+
+test at ../../infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:113:1
+✖ production Host callback router refuses before mount and routes only its actual retained authority (13.226433ms)
+  Error: offline_bundle_verified_result_required
+      at fail (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/offline-runtime-bundle.mjs:30:38)
+      at readVerifiedOfflineRuntimePackage (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/offline-runtime-bundle.mjs:89:36)
+      at composeInstalledNativeCodingRecoveryService (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/native-coding-recovery-installed-composition.mjs:32:19)
+      at file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs:791:31
+      at async startManagedRuntimeHost (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs:885:5)
+      at async fixture (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:86:9)
+      at async TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:114:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    code: 'offline_bundle_verified_result_required'
+  }
+
+test at ../../infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:126:1
+✖ Host stop closes the original callback composition and cannot revive it (20.930649ms)
+  Error: offline_bundle_verified_result_required
+      at fail (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/offline-runtime-bundle.mjs:30:38)
+      at readVerifiedOfflineRuntimePackage (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/offline-runtime-bundle.mjs:89:36)
+      at composeInstalledNativeCodingRecoveryService (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/native-coding-recovery-installed-composition.mjs:32:19)
+      at file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs:791:31
+      at async startManagedRuntimeHost (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs:885:5)
+      at async fixture (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:86:9)
+      at async TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:127:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    code: 'offline_bundle_verified_result_required'
+  }
+
+test at ../../infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:133:1
+✖ late private constructor returns actual baseline authority with real seed, heartbeat and custody operations (12.219048ms)
+  Error: offline_bundle_verified_result_required
+      at fail (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/offline-runtime-bundle.mjs:30:38)
+      at readVerifiedOfflineRuntimePackage (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/offline-runtime-bundle.mjs:89:36)
+      at composeInstalledNativeCodingRecoveryService (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/native-coding-recovery-installed-composition.mjs:32:19)
+      at file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs:791:31
+      at async startManagedRuntimeHost (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs:885:5)
+      at async fixture (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:86:9)
+      at async TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:134:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    code: 'offline_bundle_verified_result_required'
+  }
+
+test at ../../infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:143:1
+✖ existing-operator startup preserves direct baseline authority and adds no late-mount service (15.400146ms)
+  Error: offline_bundle_verified_result_required
+      at fail (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/offline-runtime-bundle.mjs:30:38)
+      at readVerifiedOfflineRuntimePackage (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/offline-runtime-bundle.mjs:89:36)
+      at composeInstalledNativeCodingRecoveryService (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/native-coding-recovery-installed-composition.mjs:32:19)
+      at file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs:791:31
+      at async startManagedRuntimeHost (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs:885:5)
+      at async fixture (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:86:9)
+      at async TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:144:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    code: 'offline_bundle_verified_result_required'
+  }
+
+test at ../../infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:151:1
+✖ Host and PostgreSQL identity drift fences the private constructor before an operator read (16.386574ms)
+  Error: offline_bundle_verified_result_required
+      at fail (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/offline-runtime-bundle.mjs:30:38)
+      at readVerifiedOfflineRuntimePackage (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/offline-runtime-bundle.mjs:89:36)
+      at composeInstalledNativeCodingRecoveryService (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/native-coding-recovery-installed-composition.mjs:32:19)
+      at file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs:791:31
+      at async startManagedRuntimeHost (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs:885:5)
+      at async fixture (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:86:9)
+      at async TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:152:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    code: 'offline_bundle_verified_result_required'
+  }
+
+test at ../../infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:158:1
+✖ stop aborts and joins late construction before disposing the original owner pool (17.657615ms)
+  Error: offline_bundle_verified_result_required
+      at fail (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/offline-runtime-bundle.mjs:30:38)
+      at readVerifiedOfflineRuntimePackage (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/offline-runtime-bundle.mjs:89:36)
+      at composeInstalledNativeCodingRecoveryService (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/native-coding-recovery-installed-composition.mjs:32:19)
+      at file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs:791:31
+      at async startManagedRuntimeHost (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs:885:5)
+      at async fixture (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:86:9)
+      at async TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:159:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    code: 'offline_bundle_verified_result_required'
+  }
+
+test at ../../infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:170:1
+✖ unsettled configuration cleanup preserves the owner pool and Host lock after bounded HOLD (14.284659ms)
+  Error: offline_bundle_verified_result_required
+      at fail (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/offline-runtime-bundle.mjs:30:38)
+      at readVerifiedOfflineRuntimePackage (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/offline-runtime-bundle.mjs:89:36)
+      at composeInstalledNativeCodingRecoveryService (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/native-coding-recovery-installed-composition.mjs:32:19)
+      at file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs:791:31
+      at async startManagedRuntimeHost (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs:885:5)
+      at async fixture (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:86:9)
+      at async TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:171:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    code: 'offline_bundle_verified_result_required'
+  }
+
+test at ../../infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:186:1
+✖ same lock bytes at a new inode revoke the original late-mount generation permanently (16.46511ms)
+  Error: offline_bundle_verified_result_required
+      at fail (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/offline-runtime-bundle.mjs:30:38)
+      at readVerifiedOfflineRuntimePackage (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/offline-runtime-bundle.mjs:89:36)
+      at composeInstalledNativeCodingRecoveryService (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/native-coding-recovery-installed-composition.mjs:32:19)
+      at file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs:791:31
+      at async startManagedRuntimeHost (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs:885:5)
+      at async fixture (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:86:9)
+      at async TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:187:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    code: 'offline_bundle_verified_result_required'
+  }
+
+test at ../../infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:198:1
+✖ ownership replacement during the original constructor await cannot publish a late candidate (11.288166ms)
+  Error: offline_bundle_verified_result_required
+      at fail (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/offline-runtime-bundle.mjs:30:38)
+      at readVerifiedOfflineRuntimePackage (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/offline-runtime-bundle.mjs:89:36)
+      at composeInstalledNativeCodingRecoveryService (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/native-coding-recovery-installed-composition.mjs:32:19)
+      at file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs:791:31
+      at async startManagedRuntimeHost (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs:885:5)
+      at async fixture (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:86:9)
+      at async TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:199:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    code: 'offline_bundle_verified_result_required'
+  }
+
+test at ../../infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:212:71
+✖ Host instance (11.148719ms)
+  Error: offline_bundle_verified_result_required
+      at fail (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/offline-runtime-bundle.mjs:30:38)
+      at readVerifiedOfflineRuntimePackage (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/offline-runtime-bundle.mjs:89:36)
+      at composeInstalledNativeCodingRecoveryService (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/native-coding-recovery-installed-composition.mjs:32:19)
+      at file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs:791:31
+      at async startManagedRuntimeHost (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs:885:5)
+      at async fixture (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:86:9)
+      at async TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:213:11)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:212:63)
+      at async Test.run (node:internal/test_runner/test:1389:7) {
+    code: 'offline_bundle_verified_result_required'
+  }
+
+test at ../../infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:212:71
+✖ PostgreSQL incarnation (12.066061ms)
+  Error: offline_bundle_verified_result_required
+      at fail (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/offline-runtime-bundle.mjs:30:38)
+      at readVerifiedOfflineRuntimePackage (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/offline-runtime-bundle.mjs:89:36)
+      at composeInstalledNativeCodingRecoveryService (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/native-coding-recovery-installed-composition.mjs:32:19)
+      at file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs:791:31
+      at async startManagedRuntimeHost (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs:885:5)
+      at async fixture (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:86:9)
+      at async TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:213:11)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host-native-config-interface.test.mjs:212:63)
+      at async Test.run (node:internal/test_runner/test:1389:7) {
+    code: 'offline_bundle_verified_result_required'
+  }
+
+test at ../../infra/client-state-runtime/runtime-host.test.mjs:263:1
+✖ host owns one lock, publishes public status and idempotently stops its runtime (32.859561ms)
+  Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'postgres' imported from /workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs
+      at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)
+      at packageResolve (node:internal/modules/esm/resolve:768:81)
+      at moduleResolve (node:internal/modules/esm/resolve:859:18)
+      at defaultResolve (node:internal/modules/esm/resolve:992:11)
+      at #cachedDefaultResolve (node:internal/modules/esm/loader:701:20)
+      at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:721:38)
+      at ModuleLoader.resolveSync (node:internal/modules/esm/loader:759:56)
+      at #resolve (node:internal/modules/esm/loader:683:17)
+      at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:603:35)
+      at node:internal/modules/esm/loader:632:32 {
+    code: 'ERR_MODULE_NOT_FOUND'
+  }
+
+test at ../../infra/client-state-runtime/runtime-host.test.mjs:298:1
+✖ host persists a finite health failure before terminal cleanup and retains it after STOPPED (19.344309ms)
+  Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'postgres' imported from /workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs
+      at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)
+      at packageResolve (node:internal/modules/esm/resolve:768:81)
+      at moduleResolve (node:internal/modules/esm/resolve:859:18)
+      at defaultResolve (node:internal/modules/esm/resolve:992:11)
+      at #cachedDefaultResolve (node:internal/modules/esm/loader:701:20)
+      at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:721:38)
+      at ModuleLoader.resolveSync (node:internal/modules/esm/loader:759:56)
+      at #resolve (node:internal/modules/esm/loader:683:17)
+      at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:603:35)
+      at node:internal/modules/esm/loader:632:32 {
+    code: 'ERR_MODULE_NOT_FOUND'
+  }
+
+test at ../../infra/client-state-runtime/runtime-host.test.mjs:320:1
+✖ host clears a recovered health failure and refuses unvalidated private payloads (9.286044ms)
+  Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'postgres' imported from /workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs
+      at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)
+      at packageResolve (node:internal/modules/esm/resolve:768:81)
+      at moduleResolve (node:internal/modules/esm/resolve:859:18)
+      at defaultResolve (node:internal/modules/esm/resolve:992:11)
+      at #cachedDefaultResolve (node:internal/modules/esm/loader:701:20)
+      at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:721:38)
+      at ModuleLoader.resolveSync (node:internal/modules/esm/loader:759:56)
+      at #resolve (node:internal/modules/esm/loader:683:17)
+      at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:603:35)
+      at node:internal/modules/esm/loader:632:32 {
+    code: 'ERR_MODULE_NOT_FOUND'
+  }
+
+test at ../../infra/client-state-runtime/runtime-host.test.mjs:340:1
+✖ host serializes overlapping health and terminal status writes (9.944421ms)
+  Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'postgres' imported from /workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs
+      at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)
+      at packageResolve (node:internal/modules/esm/resolve:768:81)
+      at moduleResolve (node:internal/modules/esm/resolve:859:18)
+      at defaultResolve (node:internal/modules/esm/resolve:992:11)
+      at #cachedDefaultResolve (node:internal/modules/esm/loader:701:20)
+      at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:721:38)
+      at ModuleLoader.resolveSync (node:internal/modules/esm/loader:759:56)
+      at #resolve (node:internal/modules/esm/loader:683:17)
+      at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:603:35)
+      at node:internal/modules/esm/loader:632:32 {
+    code: 'ERR_MODULE_NOT_FOUND'
+  }
+
+test at ../../infra/client-state-runtime/runtime-host.test.mjs:356:1
+✖ attached host passes through mode and shutdown never claims the external PostgreSQL (16.123924ms)
+  Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'postgres' imported from /workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs
+      at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)
+      at packageResolve (node:internal/modules/esm/resolve:768:81)
+      at moduleResolve (node:internal/modules/esm/resolve:859:18)
+      at defaultResolve (node:internal/modules/esm/resolve:992:11)
+      at #cachedDefaultResolve (node:internal/modules/esm/loader:701:20)
+      at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:721:38)
+      at ModuleLoader.resolveSync (node:internal/modules/esm/loader:759:56)
+      at #resolve (node:internal/modules/esm/loader:683:17)
+      at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:603:35)
+      at node:internal/modules/esm/loader:632:32 {
+    code: 'ERR_MODULE_NOT_FOUND'
+  }
+
+test at ../../infra/client-state-runtime/runtime-host.test.mjs:379:1
+✖ real attached-host startup adopts only a physically absent predecessor and writes a fresh owner lock (152.336917ms)
+  Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'postgres' imported from /workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs
+      at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)
+      at packageResolve (node:internal/modules/esm/resolve:768:81)
+      at moduleResolve (node:internal/modules/esm/resolve:859:18)
+      at defaultResolve (node:internal/modules/esm/resolve:992:11)
+      at #cachedDefaultResolve (node:internal/modules/esm/loader:701:20)
+      at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:721:38)
+      at ModuleLoader.resolveSync (node:internal/modules/esm/loader:759:56)
+      at #resolve (node:internal/modules/esm/loader:683:17)
+      at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:603:35)
+      at node:internal/modules/esm/loader:632:32 {
+    code: 'ERR_MODULE_NOT_FOUND'
+  }
+
+test at ../../infra/client-state-runtime/runtime-host.test.mjs:463:1
+✖ child failure stops provider readiness; unconfirmed cleanup retains exclusive ownership (11.858222ms)
+  Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'postgres' imported from /workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs
+      at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)
+      at packageResolve (node:internal/modules/esm/resolve:768:81)
+      at moduleResolve (node:internal/modules/esm/resolve:859:18)
+      at defaultResolve (node:internal/modules/esm/resolve:992:11)
+      at #cachedDefaultResolve (node:internal/modules/esm/loader:701:20)
+      at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:721:38)
+      at ModuleLoader.resolveSync (node:internal/modules/esm/loader:759:56)
+      at #resolve (node:internal/modules/esm/loader:683:17)
+      at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:603:35)
+      at node:internal/modules/esm/loader:632:32 {
+    code: 'ERR_MODULE_NOT_FOUND'
+  }
+
+test at ../../infra/client-state-runtime/runtime-host.test.mjs:477:1
+✖ replaced owner lock is never erased by shutdown (9.854658ms)
+  Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'postgres' imported from /workspace/metaengine-c26565e/Compute/infra/client-state-runtime/runtime-host.mjs
+      at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)
+      at packageResolve (node:internal/modules/esm/resolve:768:81)
+      at moduleResolve (node:internal/modules/esm/resolve:859:18)
+      at defaultResolve (node:internal/modules/esm/resolve:992:11)
+      at #cachedDefaultResolve (node:internal/modules/esm/loader:701:20)
+      at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:721:38)
+      at ModuleLoader.resolveSync (node:internal/modules/esm/loader:759:56)
+      at #resolve (node:internal/modules/esm/loader:683:17)
+      at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:603:35)
+      at node:internal/modules/esm/loader:632:32 {
+    code: 'ERR_MODULE_NOT_FOUND'
+  }
+
+test at ../../infra/client-state-runtime/startup-source-manifest.test.mjs:35:1
+✖ startup manifest hashes dependencies, binds instance and omits credential material (5.434846ms)
+  Error: ENOENT: no such file or directory, open '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/package.json'
+      at async open (node:internal/fs/promises:697:25)
+      at async readFile (node:internal/fs/promises:1348:14)
+      at async captureStartupSource (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/startup-source-manifest.mjs:140:35)
+      at async TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/startup-source-manifest.test.mjs:38:18)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    errno: -2,
+    code: 'ENOENT',
+    syscall: 'open',
+    path: '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/package.json'
+  }
+
+test at test/codex-cli-job-runtime-build.test.mjs:206:1
+✖ normal packaging prepares once before copying only the manifest into ASAR and the compiled helper outside (2.10903ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  0 !== 1
+  
+      at TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/apps/metaengine-browser/test/codex-cli-job-runtime-build.test.mjs:215:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+Isolated test profile retained: /tmp/metaengine-node-tests-eTBdc7
