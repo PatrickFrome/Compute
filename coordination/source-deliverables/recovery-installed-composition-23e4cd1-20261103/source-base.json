@@ -1,0 +1,29 @@
+{
+  "source_only": true,
+  "incremental_base_tree": "23e4cd10df4817505f8dc3e276cc7688753992e3",
+  "result_tree": "7aa8184e89a4ca3754275e81bf3f83a61276837b",
+  "patch_sha256": "83fc15b9c9100f2dca110b07497ca3df3754b725d69e8e4da630ca764572e4bf",
+  "patch_bytes": 201178,
+  "synthetic_local_base_commit": "93e1c25c3bd8ed19e351f29eec07f9e95e1c479f",
+  "local_commit_metadata_is_not_upstream_identity": true,
+  "base_deliverable_pr": "https://github.com/PatrickFrome/Compute/pull/1443",
+  "base_deliverable_commit": "f58fa33bec83a8a73b57532b274ef11c391b6975",
+  "base_incremental_patch_sha256": "5567ec3d20da83cb260426f6b9ed32599e60a6b0184d535f8bac591859631bdd",
+  "source_transfer_commit": "accb28e72c87c059e780efb8e6681886b33e9b4f",
+  "original_source_revision": "c26565e58ab92dcbcda9663c4d231bdf4a9a7ee6",
+  "original_source_tree": "2dbe253e97379532f6f4b52ef7edf26109a9266d",
+  "archive_sha256": "4200e492828dbb857aaa737a7ce56d0aeda3c97c84f7743b1501ef2f229d3636",
+  "parent_integration_head": "49386b65adfc00b607434fd84399f5dd53bd7816",
+  "parent_head_tree_verified": false,
+  "parent_fetch": {
+    "action": "git fetch --no-tags origin 49386b65adfc00b607434fd84399f5dd53bd7816",
+    "repository": "https://github.com/PatrickFrome/Compute.git",
+    "exit_code": 128,
+    "outcome": "FAILED_NOT_DENIED",
+    "error": "fatal: remote error: upload-pack: not our ref 49386b65adfc00b607434fd84399f5dd53bd7816",
+    "retried": false
+  },
+  "native_issuer": "UNAVAILABLE_HOLD",
+  "windows_build_and_execution": "NOT_RUN",
+  "real_database_accessed": false
+}

@@ -1,0 +1,13 @@
+{
+  "base_tree": "23e4cd10df4817505f8dc3e276cc7688753992e3",
+  "expected_result_tree": "7aa8184e89a4ca3754275e81bf3f83a61276837b",
+  "fresh_applied_result_tree": "7aa8184e89a4ca3754275e81bf3f83a61276837b",
+  "git_apply_check": "PASS",
+  "git_apply_index": "PASS",
+  "git_diff_cached_check": "PASS",
+  "fresh_test_pass": 88,
+  "fresh_test_fail": 0,
+  "fresh_test_skip": 0,
+  "patch_sha256": "83fc15b9c9100f2dca110b07497ca3df3754b725d69e8e4da630ca764572e4bf",
+  "source_base_portable_identity": "TREE_NOT_SYNTHETIC_COMMIT"
+}

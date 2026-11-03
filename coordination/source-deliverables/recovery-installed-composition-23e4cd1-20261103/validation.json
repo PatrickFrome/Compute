@@ -1,0 +1,89 @@
+{
+  "compatible_suite": {
+    "tests": 862,
+    "pass": 861,
+    "fail": 0,
+    "skip": 1,
+    "skipped": "Windows real preparation test",
+    "log": "compatible-tests.log",
+    "command": "compatible-command.json"
+  },
+  "fresh_applied_patch": {
+    "tests": 88,
+    "pass": 88,
+    "fail": 0,
+    "skip": 0,
+    "log": "fresh-patch-tests.log"
+  },
+  "native_model": {
+    "assertions": 37,
+    "mechanical_cases_pass": 35,
+    "counterexamples_confirmed": 2,
+    "counterexamples": [
+      "external Job holder suppresses kill-on-last-close after original owner death",
+      "Job descendant without its own directory copies loses namespace custody after holder and parent death"
+    ],
+    "classification": "SYNTHETIC_NATIVE_MECHANICS",
+    "production_issuer_available": false,
+    "architecture_accepted": false,
+    "physical_authority": false,
+    "windows_native_execution": "NOT_RUN"
+  },
+  "source_checks": {
+    "pass": 302,
+    "log": "source-check.log"
+  },
+  "reviewed_static_catalog": {
+    "base_files": 88,
+    "installed_host_files": 283,
+    "all_paths_reviewed": true,
+    "installed_host_includes_service_observer_veto": true,
+    "test_loaders_included": false,
+    "npm": [
+      "npm:postgres@3.4.7"
+    ],
+    "scope": "STATIC_SOURCE_CATALOG_ONLY"
+  },
+  "dependency_profiles": {
+    "state": "BLOCKED_PREREQUISITE",
+    "reason": "Pinned infra/client-state-runtime/node_modules/postgres@3.4.7 absent",
+    "baseline": {
+      "tests": 52,
+      "pass": 40,
+      "fail": 11,
+      "skip": 1,
+      "log": "baseline-dependency-tests.log"
+    },
+    "remaining_blocked_files": [
+      "infra/client-state-runtime/runtime-host.test.mjs",
+      "infra/client-state-runtime/runtime-host-native-compositions.test.mjs",
+      "infra/client-state-runtime/startup-source-manifest.test.mjs"
+    ],
+    "installation_attempted": false
+  },
+  "initial_expanded_run": {
+    "tests": 874,
+    "pass": 847,
+    "fail": 25,
+    "skip": 2,
+    "log": "initial-expanded-tests.log",
+    "failure_resolution": {
+      "baseline_dependency_failures": 11,
+      "new_mocked_verifier_composition_regressions_fixed": 13,
+      "obsolete_beforePack_compile_assertion_updated_and_passed": 1
+    },
+    "fixed_host_compatibility_rerun": {
+      "tests": 19,
+      "pass": 19,
+      "fail": 0,
+      "skip": 0
+    }
+  },
+  "native_cpp_core_changed": false,
+  "native_csharp_runner_changed": false,
+  "selector_registration_gate_changed": false,
+  "native_effect_veto_changed": false,
+  "windows_build": "NOT_RUN",
+  "windows_execution": "NOT_RUN",
+  "real_database_accessed": false
+}

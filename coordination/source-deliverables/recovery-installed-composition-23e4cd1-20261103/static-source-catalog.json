@@ -1,0 +1,31 @@
+{
+  "scope": "STATIC_SOURCE_CATALOG_ONLY",
+  "modes": {
+    "base": {
+      "files": 88,
+      "npm": [
+        "npm:postgres@3.4.7"
+      ],
+      "all_paths_reviewed": true,
+      "service": false,
+      "host_observation": false,
+      "effect_veto": false,
+      "test_loader_included": false
+    },
+    "installed_host": {
+      "files": 283,
+      "npm": [
+        "npm:postgres@3.4.7"
+      ],
+      "all_paths_reviewed": true,
+      "service": true,
+      "host_observation": true,
+      "effect_veto": true,
+      "test_loader_included": false
+    }
+  },
+  "source_checkout_read_only": true,
+  "build_inventory_not_captured": true,
+  "runtime_assembly_not_qualified": true,
+  "windows_native_execution": "NOT_RUN"
+}
