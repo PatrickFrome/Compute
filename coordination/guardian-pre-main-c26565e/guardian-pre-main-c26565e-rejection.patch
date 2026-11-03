@@ -1,0 +1,409 @@
+diff --git a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-original-main-challenge.hpp b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-original-main-challenge.hpp
+index f12b935..3c3882e 100644
+--- a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-original-main-challenge.hpp
++++ b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-original-main-challenge.hpp
+@@ -45,6 +45,14 @@ public:
+     GuardianOriginalMainChallenge& operator=(const GuardianOriginalMainChallenge&) = delete;
+     GuardianOriginalMainChallenge(GuardianOriginalMainChallenge&&) = delete;
+     GuardianOriginalMainChallenge& operator=(GuardianOriginalMainChallenge&&) = delete;
++    // Refusal/cancellation is terminal even when a malformed frame cannot
++    // supply a nonce to consume(). This never arms or extends a challenge.
++    void revoke() noexcept {
++        used_ = true;
++        matched_ = false;
++        nonce_.clear();
++        connection_ = nullptr;
++    }
+     bool consume(std::string_view nonce, std::uint64_t now, const void* connection) noexcept {
+         if (used_ || nonce_.empty()) return false;
+         used_ = true; // Any attempt consumes it, including malformed or expired proof.
+diff --git a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-original-main-launch-session.inc.hpp b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-original-main-launch-session.inc.hpp
+index e1fa956..fedd0da 100644
+--- a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-original-main-launch-session.inc.hpp
++++ b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-original-main-launch-session.inc.hpp
+@@ -10,7 +10,10 @@ GuardianNativeRootSession::authorizeOriginalMainLaunch(
+     const std::string& wire, OwnerEnrollmentPipe& pipe,
+     GuardianOriginalMainChallenge& originalChallenge, std::string* failure) {
+     expireReplacementPreparation();
+-    const auto reject = [failure](const char* reason) {
++    const auto reject = [failure, &originalChallenge](const char* reason) {
++        // Malformed input and failed identity/signature checks end this
++        // challenge as well. A later valid frame cannot revive the attempt.
++        originalChallenge.revoke();
+         if (failure) *failure = reason;
+         return std::unique_ptr<GuardianOriginalMainLaunchGrant>{};
+     };
+diff --git a/apps/metaengine-browser/test/native/verify-guardian-original-main-authorization-model.py b/apps/metaengine-browser/test/native/verify-guardian-original-main-authorization-model.py
+new file mode 100644
+index 0000000..40d66c6
+--- /dev/null
++++ b/apps/metaengine-browser/test/native/verify-guardian-original-main-authorization-model.py
+@@ -0,0 +1,368 @@
++#!/usr/bin/env python3
++"""Exercise the actual Main grant authorizer with synthetic external objects.
++
++The real wire parser, connection challenge and private grant constructor run in
++this harness. Windows identity, device-signature verification, clock, RNG and
++retained-root objects are stand-ins, not production evidence. The calibration
++case does not authorize a process or prove that a pre-Main issuer exists.
++"""
++from pathlib import Path
++import argparse
++import os
++import subprocess
++import tempfile
++
++
++parser = argparse.ArgumentParser(description=__doc__)
++parser.add_argument('--sanitize', action='store_true')
++parser.add_argument('--mutation-check', action='store_true',
++                    help='require a temporary pre-revocation authorizer to fail the malformed-frame regression')
++args = parser.parse_args()
++root = Path(__file__).resolve().parents[2] / 'native/browser-guardian-scm'
++source = (root / 'browser-guardian-original-main-launch-session.inc.hpp').read_text()
++begin = source.index('std::unique_ptr<GuardianOriginalMainLaunchGrant>\n'
++                     'GuardianNativeRootSession::authorizeOriginalMainLaunch(')
++end = source.index('\nbool GuardianNativeRootSession::duplicateOriginalMainLaunchObjects(', begin)
++method = source[begin:end]
++
++pre = r'''
++#define METAENGINE_GUARDIAN_MAIN_CHALLENGE_TEST 1
++#include "browser-guardian-original-main-challenge.hpp"
++#include "browser-guardian-original-main-launch-grant.hpp"
++#include "browser-guardian-original-main-launch-wire.hpp"
++#include <cassert>
++#include <cstdint>
++#include <cstring>
++#include <iostream>
++#include <limits>
++#include <memory>
++#include <string>
++#include <utility>
++
++using ULONGLONG = std::uint64_t;
++using PUCHAR = unsigned char*;
++constexpr unsigned BCRYPT_USE_SYSTEM_PREFERRED_RNG = 2;
++
++namespace metaengine::guardian {
++namespace {
++constexpr std::uint64_t issued = 100, deadline = 300;
++const std::string nonce(43, 'A'), key_x(43, 'B'), key_y(43, 'C');
++const std::string signature(86, 'D');
++struct Inputs {
++    std::uint64_t now = 150;
++    bool stopped = false, identity_exact = true, tuple_exact = true;
++    bool root_held = true, release_bound = true, token_valid = true;
++    bool token_logon_valid = true, random_available = true, correlation_nonzero = true;
++    bool expire_during_signature = false, expire_during_final_root_check = false;
++    bool cancel_during_signature = false;
++    int observations = 0, signatures = 0, root_checks = 0, random_calls = 0;
++} input;
++}
++ULONGLONG GetTickCount64() { return input.now; }
++int BCryptGenRandom(void*, PUCHAR out, std::size_t length, unsigned flags) {
++    ++input.random_calls;
++    assert(flags == BCRYPT_USE_SYSTEM_PREFERRED_RNG);
++    if (!input.random_available) return -1;
++    std::memset(out, input.correlation_nonzero ? 7 : 0, length);
++    return 0;
++}
++bool BCRYPT_SUCCESS(int result) { return result >= 0; }
++
++struct GuardianOriginalMainChallengeTest {
++    static bool arm(GuardianOriginalMainChallenge& challenge, const void* pipe) {
++        return challenge.arm(nonce, issued, deadline - issued, pipe);
++    }
++};
++struct Identity {
++    std::uint32_t session_id = 1, client_pid = 2;
++    std::uint64_t client_creation_time_100ns = 3;
++    std::wstring user_sid = L"S-1-5-21-1";
++};
++struct DurableOwner {};
++struct OwnerEnrollmentPipe {
++    Identity observeClientIdentity(bool retain) {
++        ++input.observations;
++        assert(retain);
++        return {};
++    }
++};
++std::wstring browserGuardianOwnerEnrollmentStoreDefaultRoot() { return L"TEST_ONLY"; }
++struct OwnerEnrollmentStore {
++    explicit OwnerEnrollmentStore(const std::wstring&) {}
++    DurableOwner read() const { return {}; }
++};
++bool ownerAndClientExact(const Identity&, const DurableOwner&) {
++    return input.identity_exact;
++}
++// Deliberate signature-verifier stand-in. Crypto is NOT tested by this model;
++// it verifies that the authorizer passes the real parser's fixed-purpose bytes
++// to the existing verifier and refuses its negative result irreversibly.
++bool deviceProofExact(const std::string& x, const std::string& y,
++                      const std::string& proof, const std::string& material,
++                      const DurableOwner&) {
++    ++input.signatures;
++    assert(material == "metaengine.browser-guardian.original-main-launch-device-proof.v1\n"
++                       "purpose=ORIGINAL_MAIN_LAUNCH\nrequest_nonce=" + nonce + "\n");
++    if (input.expire_during_signature) input.now = deadline;
++    if (input.cancel_during_signature) input.stopped = true;
++    return x == key_x && y == key_y && proof == signature;
++}
++// Only a syntactically valid digest is needed by the real grant constructor.
++// No cryptographic digest assertion is made by this synthetic harness.
++std::string sha256Text(const std::string&) { return std::string(64, 'a'); }
++
++class GuardianNativeRootSession {
++public:
++    struct State {
++        struct Token {
++            bool valid() const { return input.token_valid; }
++            const Token& get() const { return *this; }
++        } user_token;
++        struct Installed {
++            bool releaseSignatureBound() const { return input.release_bound; }
++        };
++        std::unique_ptr<Installed> installed = std::make_unique<Installed>();
++        std::uint64_t logon_id = 0;
++        bool sameTuple(const Identity&, const DurableOwner&) const { return input.tuple_exact; }
++        bool recheck() {
++            ++input.root_checks;
++            if (input.expire_during_final_root_check && input.root_checks == 2)
++                input.now = deadline;
++            return !input.stopped && input.root_held && bool(installed);
++        }
++        static bool tokenLogonId(const Token&, std::uint64_t* out) {
++            if (!input.token_logon_valid) return false;
++            *out = 4;
++            return true;
++        }
++    };
++    struct Admission { bool stopped() const { return input.stopped; } } admission_;
++    std::unique_ptr<State> state_ = std::make_unique<State>();
++    static constexpr std::size_t kMaxWireBytes = 4096;
++    void expireReplacementPreparation() {}
++    std::unique_ptr<GuardianOriginalMainLaunchGrant> authorizeOriginalMainLaunch(
++        const std::string&, OwnerEnrollmentPipe&, GuardianOriginalMainChallenge&, std::string*);
++};
++'''
++
++post = r'''
++namespace {
++std::string frame(const std::string& proof = signature) {
++    return "schema=metaengine.browser-guardian.original-main-launch-device-proof.v1\n"
++           "purpose=ORIGINAL_MAIN_LAUNCH\nrequest_nonce=" + nonce +
++           "\npublic_jwk_x=" + key_x + "\npublic_jwk_y=" + key_y +
++           "\nsignature=" + proof + "\n";
++}
++struct Attempt {
++    OwnerEnrollmentPipe pipe;
++    GuardianOriginalMainChallenge challenge;
++    GuardianNativeRootSession session;
++    std::string failure;
++    Attempt() { assert(GuardianOriginalMainChallengeTest::arm(challenge, &pipe)); }
++    std::unique_ptr<GuardianOriginalMainLaunchGrant> authorize(const std::string& wire = frame()) {
++        return session.authorizeOriginalMainLaunch(wire, pipe, challenge, &failure);
++    }
++    void expect(const char* reason, const std::string& wire = frame()) {
++        assert(!authorize(wire));
++        assert(failure == reason);
++    }
++    void expectSpent() {
++        // Restoring every synthetic dependency cannot revive the challenge.
++        input = Inputs{};
++        expect("ORIGINAL_MAIN_LAUNCH_CHALLENGE_INVALID_OR_EXPIRED");
++        assert(input.observations == 0 && input.signatures == 0);
++    }
++};
++bool malformedFrameIsTerminal() {
++    input = Inputs{}; Attempt a;
++    a.expect("ORIGINAL_MAIN_LAUNCH_FRAME_INVALID", frame() + "extra=x\n");
++    assert(input.observations == 0 && input.signatures == 0);
++    if (GuardianOriginalMainChallengeTest::arm(a.challenge, &a.pipe)) return false;
++    // A pre-fix authorizer leaves the challenge live after the malformed
++    // frame. A valid frame then mints a grant in this synthetic calibration.
++    if (a.authorize()) return false;
++    return a.failure == "ORIGINAL_MAIN_LAUNCH_CHALLENGE_INVALID_OR_EXPIRED" &&
++        !GuardianOriginalMainChallengeTest::arm(a.challenge, &a.pipe);
++}
++unsigned passed = 0;
++void pass(const char* name) { ++passed; std::cout << "PASS synthetic " << name << '\n'; }
++}
++} // namespace metaengine::guardian
++
++int main(int argc, char** argv) {
++    using namespace metaengine::guardian;
++    if (argc == 2 && std::string(argv[1]) == "--malformed-only") {
++        if (!malformedFrameIsTerminal()) {
++            std::cerr << "REGRESSION malformed_frame_retry_minted_synthetic_grant\n";
++            return 7;
++        }
++        return 0;
++    }
++    assert(argc == 1);
++    {
++        input = Inputs{}; Attempt a;
++        const auto grant = a.authorize();
++        assert(grant && a.failure.empty());
++        assert(grant->bound().purpose == GuardianOriginalMainLaunchGrant::kPurposeOriginalMainLaunch);
++        assert(grant->bound().session_id == 1 && grant->bound().client_pid == 2);
++        assert(grant->bound().client_birth_100ns == 3 && grant->bound().user_sid == L"S-1-5-21-1");
++        assert(grant->bound().monotonic_deadline_ms == 150 + GuardianOriginalMainLaunchGrant::kAdmissionWindowMs);
++        assert(input.observations == 1 && input.signatures == 1 && input.root_checks == 2);
++        a.expectSpent();
++        pass("calibration_and_replay");
++    }
++    {
++        input = Inputs{}; Attempt a; OwnerEnrollmentPipe other;
++        assert(!a.session.authorizeOriginalMainLaunch(frame(), other, a.challenge, &a.failure));
++        assert(a.failure == "ORIGINAL_MAIN_LAUNCH_CHALLENGE_INVALID_OR_EXPIRED");
++        assert(input.observations == 0 && input.signatures == 0);
++        a.expectSpent(); pass("different_original_pipe");
++    }
++    {
++        input = Inputs{}; Attempt a; input.now = deadline;
++        a.expect("ORIGINAL_MAIN_LAUNCH_CHALLENGE_INVALID_OR_EXPIRED");
++        assert(input.observations == 0 && input.signatures == 0);
++        a.expectSpent(); pass("expired_before_authorization");
++    }
++    {
++        input = Inputs{}; Attempt a; input.expire_during_signature = true;
++        a.expect("ORIGINAL_MAIN_LAUNCH_CHALLENGE_EXPIRED_AFTER_VERIFICATION");
++        assert(input.signatures == 1 && input.random_calls == 0);
++        a.expectSpent(); pass("expiry_during_device_verification");
++    }
++    {
++        input = Inputs{}; Attempt a; input.expire_during_final_root_check = true;
++        a.expect("ORIGINAL_MAIN_LAUNCH_ORIGINAL_ROOT_OR_CHALLENGE_POSTCHECK_FAILED");
++        assert(input.root_checks == 2 && input.random_calls == 1);
++        a.expectSpent(); pass("expiry_during_final_retained_root_check");
++    }
++    {
++        input = Inputs{}; Attempt a; input.stopped = true;
++        a.expect("ORIGINAL_MAIN_LAUNCH_EXISTING_OWNER_DEVICE_SCOPE_REQUIRED");
++        assert(input.signatures == 0);
++        a.expectSpent(); pass("admission_cancelled_before_proof");
++    }
++    {
++        input = Inputs{}; Attempt a; input.cancel_during_signature = true;
++        a.expect("ORIGINAL_MAIN_LAUNCH_ORIGINAL_ROOT_CUSTODY_UNPROVEN");
++        assert(input.signatures == 1 && input.root_checks == 1);
++        a.expectSpent(); pass("cancellation_during_verification");
++    }
++    {
++        input = Inputs{}; Attempt a; input.identity_exact = false;
++        a.expect("ORIGINAL_MAIN_LAUNCH_EXISTING_OWNER_DEVICE_SCOPE_REQUIRED");
++        assert(input.signatures == 0);
++        a.expectSpent(); pass("owner_client_identity_mismatch");
++    }
++    {
++        input = Inputs{}; Attempt a; input.tuple_exact = false;
++        a.expect("ORIGINAL_MAIN_LAUNCH_EXISTING_OWNER_DEVICE_SCOPE_REQUIRED");
++        assert(input.signatures == 0);
++        a.expectSpent(); pass("original_session_tuple_mismatch");
++    }
++    {
++        input = Inputs{}; Attempt a;
++        a.expect("ORIGINAL_MAIN_LAUNCH_EXISTING_OWNER_DEVICE_SCOPE_REQUIRED", frame(std::string(86, 'E')));
++        assert(input.signatures == 1 && input.root_checks == 0);
++        assert(!a.challenge.currentAfterVerification(input.now, &a.pipe));
++        a.expectSpent(); pass("device_verifier_refuses_signature");
++    }
++    {
++        input = Inputs{}; Attempt a; a.session.state_.reset();
++        a.expect("ORIGINAL_MAIN_LAUNCH_EXISTING_OWNER_DEVICE_SCOPE_REQUIRED");
++        assert(input.signatures == 0);
++        a.expectSpent(); pass("missing_original_root_session");
++    }
++    {
++        input = Inputs{}; Attempt a; input.root_held = false;
++        a.expect("ORIGINAL_MAIN_LAUNCH_ORIGINAL_ROOT_CUSTODY_UNPROVEN");
++        a.expectSpent(); pass("retained_root_custody_lost");
++    }
++    {
++        input = Inputs{}; Attempt a; input.release_bound = false;
++        a.expect("ORIGINAL_MAIN_LAUNCH_ORIGINAL_ROOT_CUSTODY_UNPROVEN");
++        a.expectSpent(); pass("signed_release_binding_missing");
++    }
++    {
++        input = Inputs{}; Attempt a; input.token_valid = false;
++        a.expect("ORIGINAL_MAIN_LAUNCH_ORIGINAL_WTS_TOKEN_UNAVAILABLE");
++        a.expectSpent(); pass("original_token_missing");
++    }
++    {
++        input = Inputs{}; Attempt a; input.token_logon_valid = false;
++        a.expect("ORIGINAL_MAIN_LAUNCH_ORIGINAL_WTS_TOKEN_UNAVAILABLE");
++        a.expectSpent(); pass("original_logon_identity_missing");
++    }
++    {
++        input = Inputs{}; Attempt a; input.random_available = false;
++        a.expect("ORIGINAL_MAIN_LAUNCH_CORRELATION_UNAVAILABLE");
++        a.expectSpent(); pass("system_rng_unavailable");
++    }
++    {
++        input = Inputs{}; Attempt a; input.correlation_nonzero = false;
++        a.expect("ORIGINAL_MAIN_LAUNCH_CORRELATION_UNAVAILABLE");
++        a.expectSpent(); pass("zero_correlation");
++    }
++    {
++        assert(malformedFrameIsTerminal());
++        pass("malformed_frame_cannot_retry_or_rearm");
++    }
++    {
++        input = Inputs{}; Attempt a;
++        a.expect("ORIGINAL_MAIN_LAUNCH_FRAME_INVALID", std::string(4097, 'A'));
++        assert(input.observations == 0 && input.signatures == 0);
++        a.expectSpent(); pass("oversized_frame_consumes_challenge");
++    }
++    {
++        input = Inputs{}; OwnerEnrollmentPipe pipe; GuardianOriginalMainChallenge challenge;
++        challenge.revoke();
++        assert(!GuardianOriginalMainChallengeTest::arm(challenge, &pipe));
++        assert(!challenge.consume(nonce, 150, &pipe));
++        assert(!challenge.currentAfterVerification(150, &pipe));
++        pass("revoke_before_issue_is_terminal");
++    }
++    {
++        input = Inputs{}; Attempt a;
++        a.challenge.revoke();
++        assert(!GuardianOriginalMainChallengeTest::arm(a.challenge, &a.pipe));
++        a.expectSpent(); pass("revoke_after_issue_is_terminal");
++    }
++    {
++        input = Inputs{}; Attempt a;
++        assert(a.challenge.consume(nonce, 150, &a.pipe));
++        assert(a.challenge.currentAfterVerification(151, &a.pipe));
++        a.challenge.revoke();
++        assert(!a.challenge.currentAfterVerification(152, &a.pipe));
++        assert(!GuardianOriginalMainChallengeTest::arm(a.challenge, &a.pipe));
++        a.expectSpent(); pass("revoke_after_consumption_is_terminal");
++    }
++    std::cout << "original_main_authorization_synthetic: " << passed
++              << " PASS; WINDOWS: NOT RUN; CRYPTO: STAND-IN; PRE-MAIN ISSUER: UNPROVEN\n";
++}
++'''
++
++with tempfile.TemporaryDirectory(prefix='guardian-main-authorization-model-') as temp:
++    cpp = Path(temp) / 'model.cpp'
++    binary = Path(temp) / 'model'
++    cpp.write_text(pre + method + post)
++    flags = ['-fsanitize=address,undefined', '-fno-omit-frame-pointer'] if args.sanitize else []
++    subprocess.run(['g++', '-std=c++20', '-Wall', '-Wextra', '-Werror', '-pedantic',
++                    *flags, '-I', str(root), str(cpp), '-o', str(binary)], check=True)
++    environment = {**os.environ, 'ASAN_OPTIONS': 'detect_leaks=0'} if args.sanitize else None
++    subprocess.run([str(binary)], check=True, env=environment)
++    if args.mutation_check:
++        if method.count('originalChallenge.revoke();') != 1:
++            raise RuntimeError('expected exactly one original challenge rejection revocation')
++        mutated = method.replace('originalChallenge.revoke();', '', 1)
++        cpp.write_text(pre + mutated + post)
++        mutant = Path(temp) / 'pre-revocation-model'
++        subprocess.run(['g++', '-std=c++20', '-Wall', '-Wextra', '-Werror', '-pedantic',
++                        *flags, '-I', str(root), str(cpp), '-o', str(mutant)], check=True)
++        result = subprocess.run([str(mutant), '--malformed-only'], env=environment,
++                                capture_output=True, text=True)
++        expected = 'REGRESSION malformed_frame_retry_minted_synthetic_grant'
++        if result.returncode != 7 or expected not in result.stderr:
++            raise RuntimeError(f'mutation escaped regression: exit={result.returncode}\n'
++                               f'{result.stdout}{result.stderr}')
++        print('PASS mutation: removing rejection revocation reproduces malformed-frame retry\n'
++              'MUTANT: EXPECTED FAIL (exit 7); production source was not modified')
