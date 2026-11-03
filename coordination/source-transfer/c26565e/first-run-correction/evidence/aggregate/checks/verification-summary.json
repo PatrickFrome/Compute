@@ -1,0 +1,402 @@
+{
+  "schema": "metaengine.guardian.original-main-source-verification.v1",
+  "started_utc": "2026-11-03T08:17:35.049374+00:00",
+  "finished_utc": "2026-11-03T08:18:02.493315+00:00",
+  "source_head": "59ccb6cb33a94583bc515ff508dc3bdc30b1b2ab",
+  "source_tree": "c5c432b8973bbf4d0e618b19ac433a2bea6479d4",
+  "worktree_before": [],
+  "worktree_after": [],
+  "checks_passed": 23,
+  "checks_failed": 0,
+  "checks_not_run": 5,
+  "windows_execution": "NOT RUN",
+  "full_custom_electron_build": "NOT RUN",
+  "production_main_launch_grant": "NOT RUN",
+  "production_release_positive": "NOT RUN",
+  "loaded_runtime_code_attested": false,
+  "continuous_code_custody_proven": false,
+  "leak_sanitizer": "NOT RUN; disabled on ptrace host",
+  "checks": [
+    {
+      "name": "entry-compile",
+      "kind": "command",
+      "command": "c++ -std=c++20 -Wall -Wextra -Werror -pedantic -pthread -I /workspace/metaengine-enrollment-c26565e/source/Compute/apps/metaengine-browser/native/browser-guardian-scm /workspace/metaengine-enrollment-c26565e/source/Compute/apps/metaengine-browser/test/native/browser-guardian-original-main-entry-tests.cpp -o /tmp/guardian-original-main-source-9tdtkveh/entry",
+      "exit_code": 0,
+      "status": "PASS",
+      "seconds": 1.227,
+      "log": "entry-compile.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "profile-compile",
+      "kind": "command",
+      "command": "c++ -std=c++20 -Wall -Wextra -Werror -pedantic -pthread -I /workspace/metaengine-enrollment-c26565e/source/Compute/apps/metaengine-browser/native/browser-guardian-scm /workspace/metaengine-enrollment-c26565e/source/Compute/apps/metaengine-browser/test/native/browser-guardian-original-main-profile-tests.cpp -o /tmp/guardian-original-main-source-9tdtkveh/profile",
+      "exit_code": 0,
+      "status": "PASS",
+      "seconds": 2.656,
+      "log": "profile-compile.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "debug-image-compile",
+      "kind": "command",
+      "command": "c++ -std=c++20 -Wall -Wextra -Werror -pedantic -pthread -I /workspace/metaengine-enrollment-c26565e/source/Compute/apps/metaengine-browser/native/browser-guardian-scm /workspace/metaengine-enrollment-c26565e/source/Compute/apps/metaengine-browser/test/native/browser-guardian-original-main-debug-tests.cpp -o /tmp/guardian-original-main-source-9tdtkveh/debug-image",
+      "exit_code": 0,
+      "status": "PASS",
+      "seconds": 1.541,
+      "log": "debug-image-compile.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "reader-transfer-compile",
+      "kind": "command",
+      "command": "c++ -std=c++20 -Wall -Wextra -Werror -pedantic -pthread -I /workspace/metaengine-enrollment-c26565e/source/Compute/apps/metaengine-browser/native/browser-guardian-scm /workspace/metaengine-enrollment-c26565e/source/Compute/apps/metaengine-browser/test/native/browser-guardian-original-reader-transfer-tests.cpp -o /tmp/guardian-original-main-source-9tdtkveh/reader-transfer",
+      "exit_code": 0,
+      "status": "PASS",
+      "seconds": 0.772,
+      "log": "reader-transfer-compile.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "entry",
+      "kind": "json",
+      "command": "/tmp/guardian-original-main-source-9tdtkveh/entry",
+      "exit_code": 0,
+      "status": "PASS",
+      "seconds": 0.008,
+      "log": "entry.log",
+      "log_sha256": "491ec06615a78a3a4434e5854c71e73f8eb7a5f9253d2462758539bb5177d18b",
+      "cases_passed": 74,
+      "summary": {
+        "schema": "metaengine.guardian.original-main-entry.portable-tests.v1",
+        "passed": 74,
+        "failed": 0,
+        "runtime": "GENERATED_PORTABLE_DATA_ONLY",
+        "windows": "NOT RUN",
+        "original_load_proven": false,
+        "loaded_runtime_code_attested": false
+      }
+    },
+    {
+      "name": "profile",
+      "kind": "json",
+      "command": "/tmp/guardian-original-main-source-9tdtkveh/profile",
+      "exit_code": 0,
+      "status": "PASS",
+      "seconds": 0.021,
+      "log": "profile.log",
+      "log_sha256": "f5fb3eb2885cf9d28ea46a80413834840f0ae9a53bf867e79ae68b993fbb8e8a",
+      "cases_passed": 32,
+      "summary": {
+        "schema": "metaengine.browser-guardian.original-main-profile-tests.v1",
+        "passed": 32,
+        "failed": 0,
+        "scope": "PORTABLE_MAIN_PROFILE_DATA_ONLY",
+        "signature_verified": false,
+        "original_startup_proven": false,
+        "loaded_runtime_code_attested": false,
+        "authority_effect": false,
+        "windows_execution": "NOT_RUN"
+      }
+    },
+    {
+      "name": "debug-image",
+      "kind": "json",
+      "command": "/tmp/guardian-original-main-source-9tdtkveh/debug-image",
+      "exit_code": 0,
+      "status": "PASS",
+      "seconds": 0.006,
+      "log": "debug-image.log",
+      "log_sha256": "6992b7e60ae35bb576bcbbbb7536bd6eafc92c5fa06daea55e0c7b95e3b2c1ab",
+      "cases_passed": 62,
+      "summary": {
+        "summary": true,
+        "passed": 62,
+        "failed": 0,
+        "native_Windows": "NOT_RUN",
+        "W77_authority": "NOT_RUN",
+        "loaded_runtime_code_attested": false,
+        "continuous_code_custody_proven": false
+      }
+    },
+    {
+      "name": "reader-transfer",
+      "kind": "json",
+      "command": "/tmp/guardian-original-main-source-9tdtkveh/reader-transfer",
+      "exit_code": 0,
+      "status": "PASS",
+      "seconds": 0.003,
+      "log": "reader-transfer.log",
+      "log_sha256": "754e561cbeafcd6966d5ecbd5c4cc50181cacdee32313545e8c7c51fec882589",
+      "cases_passed": 54,
+      "summary": {
+        "schema": "metaengine.guardian.original-reader-transfer.portable-tests.v1",
+        "passed": 54,
+        "failed": 0,
+        "windows": "NOT RUN",
+        "kernel_readback_proven": false
+      }
+    },
+    {
+      "name": "entry-asan-ubsan-compile",
+      "kind": "command",
+      "command": "c++ -std=c++20 -Wall -Wextra -Werror -pedantic -pthread -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -I /workspace/metaengine-enrollment-c26565e/source/Compute/apps/metaengine-browser/native/browser-guardian-scm /workspace/metaengine-enrollment-c26565e/source/Compute/apps/metaengine-browser/test/native/browser-guardian-original-main-entry-tests.cpp -o /tmp/guardian-original-main-source-9tdtkveh/entry-asan-ubsan",
+      "exit_code": 0,
+      "status": "PASS",
+      "seconds": 2.591,
+      "log": "entry-asan-ubsan-compile.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "profile-asan-ubsan-compile",
+      "kind": "command",
+      "command": "c++ -std=c++20 -Wall -Wextra -Werror -pedantic -pthread -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -I /workspace/metaengine-enrollment-c26565e/source/Compute/apps/metaengine-browser/native/browser-guardian-scm /workspace/metaengine-enrollment-c26565e/source/Compute/apps/metaengine-browser/test/native/browser-guardian-original-main-profile-tests.cpp -o /tmp/guardian-original-main-source-9tdtkveh/profile-asan-ubsan",
+      "exit_code": 0,
+      "status": "PASS",
+      "seconds": 9.167,
+      "log": "profile-asan-ubsan-compile.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "debug-image-asan-ubsan-compile",
+      "kind": "command",
+      "command": "c++ -std=c++20 -Wall -Wextra -Werror -pedantic -pthread -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -I /workspace/metaengine-enrollment-c26565e/source/Compute/apps/metaengine-browser/native/browser-guardian-scm /workspace/metaengine-enrollment-c26565e/source/Compute/apps/metaengine-browser/test/native/browser-guardian-original-main-debug-tests.cpp -o /tmp/guardian-original-main-source-9tdtkveh/debug-image-asan-ubsan",
+      "exit_code": 0,
+      "status": "PASS",
+      "seconds": 4.1,
+      "log": "debug-image-asan-ubsan-compile.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "reader-transfer-asan-ubsan-compile",
+      "kind": "command",
+      "command": "c++ -std=c++20 -Wall -Wextra -Werror -pedantic -pthread -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -I /workspace/metaengine-enrollment-c26565e/source/Compute/apps/metaengine-browser/native/browser-guardian-scm /workspace/metaengine-enrollment-c26565e/source/Compute/apps/metaengine-browser/test/native/browser-guardian-original-reader-transfer-tests.cpp -o /tmp/guardian-original-main-source-9tdtkveh/reader-transfer-asan-ubsan",
+      "exit_code": 0,
+      "status": "PASS",
+      "seconds": 1.949,
+      "log": "reader-transfer-asan-ubsan-compile.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "entry-asan-ubsan",
+      "kind": "json",
+      "command": "/tmp/guardian-original-main-source-9tdtkveh/entry-asan-ubsan",
+      "exit_code": 0,
+      "status": "PASS",
+      "seconds": 0.023,
+      "log": "entry-asan-ubsan.log",
+      "log_sha256": "491ec06615a78a3a4434e5854c71e73f8eb7a5f9253d2462758539bb5177d18b",
+      "cases_passed": 74,
+      "summary": {
+        "schema": "metaengine.guardian.original-main-entry.portable-tests.v1",
+        "passed": 74,
+        "failed": 0,
+        "runtime": "GENERATED_PORTABLE_DATA_ONLY",
+        "windows": "NOT RUN",
+        "original_load_proven": false,
+        "loaded_runtime_code_attested": false
+      }
+    },
+    {
+      "name": "profile-asan-ubsan",
+      "kind": "json",
+      "command": "/tmp/guardian-original-main-source-9tdtkveh/profile-asan-ubsan",
+      "exit_code": 0,
+      "status": "PASS",
+      "seconds": 0.053,
+      "log": "profile-asan-ubsan.log",
+      "log_sha256": "f5fb3eb2885cf9d28ea46a80413834840f0ae9a53bf867e79ae68b993fbb8e8a",
+      "cases_passed": 32,
+      "summary": {
+        "schema": "metaengine.browser-guardian.original-main-profile-tests.v1",
+        "passed": 32,
+        "failed": 0,
+        "scope": "PORTABLE_MAIN_PROFILE_DATA_ONLY",
+        "signature_verified": false,
+        "original_startup_proven": false,
+        "loaded_runtime_code_attested": false,
+        "authority_effect": false,
+        "windows_execution": "NOT_RUN"
+      }
+    },
+    {
+      "name": "debug-image-asan-ubsan",
+      "kind": "json",
+      "command": "/tmp/guardian-original-main-source-9tdtkveh/debug-image-asan-ubsan",
+      "exit_code": 0,
+      "status": "PASS",
+      "seconds": 0.01,
+      "log": "debug-image-asan-ubsan.log",
+      "log_sha256": "6992b7e60ae35bb576bcbbbb7536bd6eafc92c5fa06daea55e0c7b95e3b2c1ab",
+      "cases_passed": 62,
+      "summary": {
+        "summary": true,
+        "passed": 62,
+        "failed": 0,
+        "native_Windows": "NOT_RUN",
+        "W77_authority": "NOT_RUN",
+        "loaded_runtime_code_attested": false,
+        "continuous_code_custody_proven": false
+      }
+    },
+    {
+      "name": "reader-transfer-asan-ubsan",
+      "kind": "json",
+      "command": "/tmp/guardian-original-main-source-9tdtkveh/reader-transfer-asan-ubsan",
+      "exit_code": 0,
+      "status": "PASS",
+      "seconds": 0.011,
+      "log": "reader-transfer-asan-ubsan.log",
+      "log_sha256": "754e561cbeafcd6966d5ecbd5c4cc50181cacdee32313545e8c7c51fec882589",
+      "cases_passed": 54,
+      "summary": {
+        "schema": "metaengine.guardian.original-reader-transfer.portable-tests.v1",
+        "passed": 54,
+        "failed": 0,
+        "windows": "NOT RUN",
+        "kernel_readback_proven": false
+      }
+    },
+    {
+      "name": "original-reader-source-guards",
+      "kind": "json",
+      "command": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3 /workspace/metaengine-enrollment-c26565e/source/Compute/apps/metaengine-browser/test/native/verify-guardian-original-reader-source.py",
+      "exit_code": 0,
+      "status": "PASS",
+      "seconds": 0.026,
+      "log": "original-reader-source-guards.log",
+      "log_sha256": "11921b7f6867362909f6063611524bab064d484a8eb49b3d3c7a3533fe809c4e",
+      "cases_passed": 24,
+      "summary": {
+        "schema": "metaengine.guardian.original-reader-static-source.v1",
+        "passed": 24,
+        "failed": 0,
+        "windows": "NOT RUN"
+      }
+    },
+    {
+      "name": "native-mount-adapter",
+      "kind": "json",
+      "command": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3 /workspace/metaengine-enrollment-c26565e/source/Compute/apps/metaengine-browser/test/native/verify-guardian-electron-mount.py",
+      "exit_code": 0,
+      "status": "PASS",
+      "seconds": 1.414,
+      "log": "native-mount-adapter.log",
+      "log_sha256": "a205e8fbd91d620cc67b27ba749615d871baad5c5c08125a0965ee5945f4e4bf",
+      "cases_passed": 18,
+      "summary": {
+        "passed": 18,
+        "failed": 0,
+        "scope": "ACTUAL_ADAPTER_WITH_ISOLATED_NODE_AND_HOST_FIXTURES",
+        "windows_runtime": "NOT RUN",
+        "full_electron_build": "NOT RUN",
+        "original_creation_proof": false
+      }
+    },
+    {
+      "name": "native-host-model",
+      "kind": "json",
+      "command": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3 /workspace/metaengine-enrollment-c26565e/source/Compute/apps/metaengine-browser/test/native/verify-guardian-original-main-host.py",
+      "exit_code": 0,
+      "status": "PASS",
+      "seconds": 1.191,
+      "log": "native-host-model.log",
+      "log_sha256": "27245b03c6d10c9e865ea0eb7490a74189fd438bfe6ecde7dd32f00300e9e570",
+      "cases_passed": 28,
+      "summary": {
+        "passed": 28,
+        "failed": 0,
+        "scope": "REAL_NATIVE_HOST_WITH_SYNTHETIC_WIN32_AND_PEER",
+        "sanitizers": "none",
+        "windows_runtime": "NOT RUN",
+        "original_creation_proof": false
+      }
+    },
+    {
+      "name": "native-host-model-asan-ubsan",
+      "kind": "json",
+      "command": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3 /workspace/metaengine-enrollment-c26565e/source/Compute/apps/metaengine-browser/test/native/verify-guardian-original-main-host.py --sanitize",
+      "exit_code": 0,
+      "status": "PASS",
+      "seconds": 1.946,
+      "log": "native-host-model-asan-ubsan.log",
+      "log_sha256": "6315ccfcec858bc6e4ce009acb89b3fe055775c4c62efc8c5122893ff4e60d54",
+      "cases_passed": 28,
+      "summary": {
+        "passed": 28,
+        "failed": 0,
+        "scope": "REAL_NATIVE_HOST_WITH_SYNTHETIC_WIN32_AND_PEER",
+        "sanitizers": "ASAN+UBSAN",
+        "windows_runtime": "NOT RUN",
+        "original_creation_proof": false
+      }
+    },
+    {
+      "name": "w77-openssl-compile",
+      "kind": "command",
+      "command": "c++ -std=c++20 -Wall -Wextra -Werror /workspace/metaengine-enrollment-c26565e/source/Compute/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-release-signature-test.cpp -lcrypto -o /tmp/guardian-original-main-source-9tdtkveh/w77-openssl-tests",
+      "exit_code": 0,
+      "status": "PASS",
+      "seconds": 0.733,
+      "log": "w77-openssl-compile.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "w77-openssl-regression",
+      "kind": "node",
+      "command": "node --test --test-reporter=tap /workspace/metaengine-enrollment-c26565e/source/Compute/apps/metaengine-browser/test/browser-guardian-release-signature.test.mjs",
+      "exit_code": 0,
+      "status": "PASS",
+      "seconds": 0.251,
+      "log": "w77-openssl-regression.log",
+      "log_sha256": "e2f2aaa4054f5f1ec021d5933f20854afc6eb69e8aef07aa22cd0941d689c8a3",
+      "test_environment": {
+        "METAENGINE_GUARDIAN_RELEASE_SIGNATURE_TEST_BINARY": "/tmp/guardian-original-main-source-9tdtkveh/w77-openssl-tests"
+      },
+      "tests": 26,
+      "pass": 26,
+      "fail": 0,
+      "skipped": 0
+    },
+    {
+      "name": "w77-pinned-openssl-regression",
+      "status": "NOT RUN",
+      "reason": "Provide the acquired+extracted pinned OpenSSL 3.5.9 source with a completed static build"
+    },
+    {
+      "name": "w77-boringssl-regression",
+      "status": "NOT RUN",
+      "reason": "Provide the exact pinned public source and its isolated static crypto build"
+    },
+    {
+      "name": "node-source-regressions",
+      "kind": "node",
+      "command": "node --test --test-reporter=tap /workspace/metaengine-enrollment-c26565e/source/Compute/apps/metaengine-browser/test/browser-guardian-original-main-static-napi.test.mjs /workspace/metaengine-enrollment-c26565e/source/Compute/apps/metaengine-browser/test/browser-guardian-connected-peer-napi.test.mjs /workspace/metaengine-enrollment-c26565e/source/Compute/apps/metaengine-browser/test/browser-guardian-connected-peer-native.test.mjs /workspace/metaengine-enrollment-c26565e/source/Compute/apps/metaengine-browser/test/browser-guardian-trusted-main-peer-consumer.test.mjs /workspace/metaengine-enrollment-c26565e/source/Compute/apps/metaengine-browser/test/browser-guardian-startup-integration.test.mjs",
+      "exit_code": 0,
+      "status": "PASS",
+      "seconds": 9.122,
+      "log": "node-source-regressions.log",
+      "log_sha256": "b5940cf577dea356790e3aba9d0de4fe0adc9d0fabc53b729927b9dd0da27039",
+      "tests": 16,
+      "pass": 15,
+      "fail": 0,
+      "skipped": 1,
+      "skip_meaning": "NOT RUN; not qualified by this host"
+    },
+    {
+      "name": "electron-source-interface",
+      "status": "NOT RUN",
+      "reason": "Provide exact Electron and Node-after-Electron-patches source files"
+    },
+    {
+      "name": "official-electron-header-syntax",
+      "status": "NOT RUN",
+      "reason": "Provide verified official Electron header archive and patched Node internal headers"
+    },
+    {
+      "name": "win64-cross-builds",
+      "status": "NOT RUN",
+      "reason": "No existing cross compiler supplied; this runner never installs one"
+    }
+  ]
+}
