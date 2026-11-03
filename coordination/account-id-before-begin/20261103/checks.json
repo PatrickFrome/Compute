@@ -1,0 +1,154 @@
+[
+  {
+    "name": "initial_setup",
+    "command": [
+      "node",
+      "--test",
+      "apps/metaengine-browser/test/native-coding-initial-loaded-signers.test.mjs",
+      "apps/metaengine-browser/test/native-coding-initial-provider-composition.test.mjs",
+      "apps/metaengine-browser/test/native-coding-initial-publication-contract.test.mjs",
+      "apps/metaengine-browser/test/native-coding-initial-selection-store.test.mjs",
+      "apps/metaengine-browser/test/native-coding-initial-selection.test.mjs",
+      "apps/metaengine-browser/test/native-coding-initial-setup-composition.test.mjs",
+      "apps/metaengine-browser/test/native-coding-initial-setup-main.test.mjs",
+      "apps/metaengine-browser/test/native-coding-initial-setup-panel.test.mjs",
+      "apps/metaengine-browser/test/native-coding-initial-setup-ui-adapter.test.mjs"
+    ],
+    "cwd": "/workspace/metaengine-account-source/Compute",
+    "exit_code": 0,
+    "seconds": 0.835,
+    "log": "initial_setup.log"
+  },
+  {
+    "name": "original_main_launch_source",
+    "command": [
+      "python3",
+      "apps/metaengine-browser/test/native/verify-guardian-original-main-launch-source.py"
+    ],
+    "cwd": "/workspace/metaengine-account-source/Compute",
+    "exit_code": 1,
+    "seconds": 0.033,
+    "log": "original_main_launch_source.log"
+  },
+  {
+    "name": "begin_model",
+    "command": [
+      "python3",
+      "apps/metaengine-browser/test/native/verify-guardian-main-begin-model.py"
+    ],
+    "cwd": "/workspace/metaengine-account-source/Compute",
+    "exit_code": 0,
+    "seconds": 1.161,
+    "log": "begin_model.log"
+  },
+  {
+    "name": "begin_model_sanitize",
+    "command": [
+      "python3",
+      "apps/metaengine-browser/test/native/verify-guardian-main-begin-model.py",
+      "--sanitize"
+    ],
+    "cwd": "/workspace/metaengine-account-source/Compute",
+    "exit_code": 0,
+    "seconds": 1.417,
+    "log": "begin_model_sanitize.log"
+  },
+  {
+    "name": "owner_wait_model",
+    "command": [
+      "python3",
+      "apps/metaengine-browser/test/native/verify-guardian-main-owner-wait-model.py"
+    ],
+    "cwd": "/workspace/metaengine-account-source/Compute",
+    "exit_code": 0,
+    "seconds": 1.348,
+    "log": "owner_wait_model.log"
+  },
+  {
+    "name": "owner_wait_model_sanitize",
+    "command": [
+      "python3",
+      "apps/metaengine-browser/test/native/verify-guardian-main-owner-wait-model.py",
+      "--sanitize"
+    ],
+    "cwd": "/workspace/metaengine-account-source/Compute",
+    "exit_code": 0,
+    "seconds": 1.303,
+    "log": "owner_wait_model_sanitize.log"
+  },
+  {
+    "name": "requester_session_model",
+    "command": [
+      "python3",
+      "apps/metaengine-browser/test/native/verify-guardian-requester-session-model.py"
+    ],
+    "cwd": "/workspace/metaengine-account-source/Compute",
+    "exit_code": 0,
+    "seconds": 0.47,
+    "log": "requester_session_model.log"
+  },
+  {
+    "name": "requester_session_model_sanitize",
+    "command": [
+      "python3",
+      "apps/metaengine-browser/test/native/verify-guardian-requester-session-model.py",
+      "--sanitize"
+    ],
+    "cwd": "/workspace/metaengine-account-source/Compute",
+    "exit_code": 0,
+    "seconds": 0.671,
+    "log": "requester_session_model_sanitize.log"
+  },
+  {
+    "name": "protocol_owner_ticket",
+    "command": [
+      "node",
+      "--test",
+      "apps/metaengine-browser/test/browser-guardian-original-main-launch-protocol.test.mjs",
+      "apps/metaengine-browser/test/guardian-owner-loaded-read.test.mjs",
+      "apps/metaengine-browser/test/browser-guardian-native-ticket-enrollment-contract.test.mjs"
+    ],
+    "cwd": "/workspace/metaengine-account-source/Compute",
+    "exit_code": 0,
+    "seconds": 0.847,
+    "log": "protocol_owner_ticket.log"
+  },
+  {
+    "name": "check_source",
+    "command": [
+      "node",
+      "scripts/check-source.mjs"
+    ],
+    "cwd": "/workspace/metaengine-account-source/Compute/apps/metaengine-browser",
+    "exit_code": 0,
+    "seconds": 9.12,
+    "log": "check_source.log"
+  },
+  {
+    "name": "original_main_source",
+    "command": [
+      "python3",
+      "apps/metaengine-browser/test/native/verify-guardian-original-main-source.py",
+      "--repo",
+      "/workspace/metaengine-account-source/Compute",
+      "--out",
+      "/workspace/metaengine-results/account-id/source-evidence"
+    ],
+    "cwd": "/workspace/metaengine-account-source/Compute",
+    "exit_code": 0,
+    "seconds": 27.252,
+    "log": "original_main_source.log"
+  },
+  {
+    "name": "diff_check",
+    "command": [
+      "git",
+      "diff",
+      "--check"
+    ],
+    "cwd": "/workspace/metaengine-account-source/Compute",
+    "exit_code": 0,
+    "seconds": 0.01,
+    "log": "diff_check.log"
+  }
+]
