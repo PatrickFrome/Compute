@@ -1,0 +1,844 @@
+diff --git a/apps/metaengine-browser/scripts/check-source.mjs b/apps/metaengine-browser/scripts/check-source.mjs
+index 720470fe1bd16cdda03438dbe67d2758811a6533..1a25907be5c86f263edfa6081745f9325e1bcd17 100644
+--- a/apps/metaengine-browser/scripts/check-source.mjs
++++ b/apps/metaengine-browser/scripts/check-source.mjs
+@@ -207,6 +207,8 @@ export const SOURCE_CHECK_FILES = Object.freeze([
+   "scripts/stage-client-state-runtime.mjs",
+   "scripts/offline-runtime-package-binding.cjs",
+   "src/local-state-provider-bootstrap.mjs",
++  "src/fresh-provider-restart-fence.mjs",
++  "src/browser-guardian-status-observer.mjs",
+   "src/local-provider-upgrade-admission.mjs",
+   "src/codex-cli-result-schema.mjs",
+   "src/codex-cli-runner.mjs",
+diff --git a/apps/metaengine-browser/src/browser-guardian-status-observer.mjs b/apps/metaengine-browser/src/browser-guardian-status-observer.mjs
+index ae6f94b6b7720f784c03c7af163163702065259f..320e8ae7d4dbfedb8e5c0a475bf24affc144425c 100644
+--- a/apps/metaengine-browser/src/browser-guardian-status-observer.mjs
++++ b/apps/metaengine-browser/src/browser-guardian-status-observer.mjs
+@@ -165,6 +165,7 @@ export function createBrowserGuardianStatusObserver({
+   let lastError = null;
+   let invalidatedReason = 'GUARDIAN_OBSERVATION_NOT_YET_AVAILABLE';
+   let inFlight = null;
++  let sourceRead = null;
+ 
+   function isFresh(at = now()) {
+     return Boolean(cached && observedAtMs > 0 && at - observedAtMs <= ttl);
+@@ -177,7 +178,7 @@ export function createBrowserGuardianStatusObserver({
+         observed_at: null,
+         expires_at: null,
+         stale: true,
+-        refresh_in_flight: inFlight != null,
++        refresh_in_flight: inFlight != null || sourceRead != null,
+         observation_generation: generation,
+         observation_revision: revision,
+         observation_error: lastError,
+@@ -191,7 +192,7 @@ export function createBrowserGuardianStatusObserver({
+       return staleProjection(cached, {
+         observedAt,
+         expiresAt,
+-        inFlight: inFlight != null,
++        inFlight: inFlight != null || sourceRead != null,
+         generation,
+         revision,
+         lastError,
+@@ -204,7 +205,7 @@ export function createBrowserGuardianStatusObserver({
+       observed_at: observedAt,
+       expires_at: expiresAt,
+       stale: false,
+-      refresh_in_flight: inFlight != null,
++      refresh_in_flight: inFlight != null || sourceRead != null,
+       observation_generation: generation,
+       observation_revision: revision,
+       observation_error: lastError,
+@@ -214,11 +215,11 @@ export function createBrowserGuardianStatusObserver({
+     });
+   }
+ 
+-  async function boundedRead(capturedGeneration) {
++  async function boundedRead(capturedGeneration, originalRead) {
+     let timer = null;
+     try {
+       const result = await Promise.race([
+-        Promise.resolve().then(() => readStatus()),
++        originalRead,
+         new Promise((_, reject) => {
+           timer = setTimeoutImpl(
+             () => reject(Object.assign(new Error('guardian_status_observation_deadline'), { code: 'GUARDIAN_STATUS_OBSERVATION_DEADLINE' })),
+@@ -247,8 +248,17 @@ export function createBrowserGuardianStatusObserver({
+   async function observe({ force = false } = {}) {
+     if (!force && isFresh()) return projected();
+     if (inFlight) return inFlight;
++    // A diagnostic timeout does not close the original loaded-only pipe.
++    // Keep its original generation; another observer must not attach that old
++    // read to a newer generation or open another pipe before actual settlement.
++    if (sourceRead) return projected();
+     const capturedGeneration = generation;
+-    const promise = boundedRead(capturedGeneration).finally(() => {
++    const originalRead = Promise.resolve().then(() => readStatus());
++    const held = originalRead.finally(() => {
++      if (sourceRead === held) sourceRead = null;
++    });
++    sourceRead = held;
++    const promise = boundedRead(capturedGeneration, held).finally(() => {
+       if (inFlight === promise) inFlight = null;
+     });
+     inFlight = promise;
+@@ -256,7 +266,7 @@ export function createBrowserGuardianStatusObserver({
+   }
+ 
+   function refreshIfDue() {
+-    if (inFlight || isFresh()) return false;
++    if (inFlight || sourceRead || isFresh()) return false;
+     void observe().catch(() => {});
+     return true;
+   }
+@@ -272,8 +282,15 @@ export function createBrowserGuardianStatusObserver({
+   }
+ 
+   async function quiesce() {
+-    if (!inFlight) return projected();
+-    try { await inFlight; } catch {}
++    // Activation must join the source even if its diagnostic budget expired.
++    const originalRead = sourceRead;
++    const observation = inFlight;
++    if (originalRead) {
++      try { await originalRead; } catch {}
++    }
++    if (observation) {
++      try { await observation; } catch {}
++    }
+     return projected();
+   }
+ 
+diff --git a/apps/metaengine-browser/src/fresh-provider-restart-fence.mjs b/apps/metaengine-browser/src/fresh-provider-restart-fence.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..7be408a065c8e8819270ac8dff1c92c50b898984
+--- /dev/null
++++ b/apps/metaengine-browser/src/fresh-provider-restart-fence.mjs
+@@ -0,0 +1,114 @@
++import fs from 'node:fs/promises';
++import path from 'node:path';
++import { createHash } from 'node:crypto';
++
++const ROOT_NAME = 'client-first-run-v1';
++const JOURNAL_LIMIT = 16384;
++const SHA256 = /^[a-f0-9]{64}$/;
++const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
++const fail = () => { throw new Error('local_state_provider_fresh_install_incomplete'); };
++const samePath = (a, b) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
++const exactKeys = (value, keys) => value && typeof value === 'object' && !Array.isArray(value)
++  && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
++
++function freshJournalFile(config, env) {
++  const files = [config?.runtime_identity_file, config?.runtime_host?.config_file];
++  // Either path claiming METAENGINE's reserved fresh tree activates the fence;
++  // an unrelated user/parent named client-first-run-v1 does not. Inspect raw
++  // components so '..' cannot normalize an interrupted fresh claim away.
++  if (!files.some(file => {
++    if (typeof file !== 'string') return false;
++    const parts = file.split(/[\\/]/).filter(Boolean).map(part => part.toLowerCase());
++    return parts.some((part, index) => part === 'metaengine' && parts[index + 1] === ROOT_NAME);
++  })) return null;
++  if (typeof env.LOCALAPPDATA !== 'string' || !path.isAbsolute(env.LOCALAPPDATA)
++    || /^(?:\\\\|\/\/)/.test(env.LOCALAPPDATA) || /[\x00-\x1f]/.test(env.LOCALAPPDATA)) fail();
++  const root = path.join(env.LOCALAPPDATA, 'METAENGINE', ROOT_NAME);
++  if (!files.every(file => typeof file === 'string' && path.isAbsolute(file))
++    || !samePath(files[0], path.join(root, 'runtime', 'runtime-instance.json'))
++    || !samePath(files[1], path.join(root, 'runtime', 'host-config.json'))
++    || !SHA256.test(config.runtime_host.expected_bundle_sha256 || '')) fail();
++  return path.join(root, 'install-journal.json');
++}
++
++const sameObject = (a, b) => a.dev === b.dev && a.ino === b.ino;
++const regularJournal = stat => stat.isFile() && !stat.isSymbolicLink()
++  && stat.nlink === 1 && stat.size > 0 && stat.size <= JOURNAL_LIMIT;
++
++async function readJournal(file) {
++  const parents = [];
++  let current = path.parse(file).root;
++  for (const part of path.relative(current, path.dirname(file)).split(path.sep).filter(Boolean)) {
++    current = path.join(current, part);
++    const stat = await fs.lstat(current);
++    if (!stat.isDirectory() || stat.isSymbolicLink()) fail();
++    parents.push({ file: current, stat });
++  }
++  const before = await fs.lstat(file);
++  if (!regularJournal(before)) fail();
++  const handle = await fs.open(file, 'r');
++  try {
++    const opened = await handle.stat();
++    if (!regularJournal(opened) || !sameObject(before, opened)) fail();
++    const bytes = Buffer.alloc(JOURNAL_LIMIT + 1);
++    const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0);
++    const after = await handle.stat(), named = await fs.lstat(file);
++    if (bytesRead !== opened.size || !regularJournal(after) || !regularJournal(named)
++      || !sameObject(opened, after) || !sameObject(after, named)
++      || opened.size !== after.size || opened.mtimeMs !== after.mtimeMs || opened.ctimeMs !== after.ctimeMs) fail();
++    for (const parent of parents) {
++      const stat = await fs.lstat(parent.file);
++      if (!stat.isDirectory() || stat.isSymbolicLink() || !sameObject(parent.stat, stat)) fail();
++    }
++    const content = bytes.subarray(0, bytesRead), record = JSON.parse(content.toString('utf8'));
++    // The sole writer uses exactly JSON.stringify(record) plus one newline.
++    // Refuse duplicate keys, invalid UTF-8 and partial/noncanonical rewrites.
++    if (!content.equals(Buffer.from(JSON.stringify(record) + '\n'))) fail();
++    return record;
++  } finally { await handle.close(); }
++}
++
++function terminalJournal(record, config) {
++  if (!exactKeys(record, ['schema', 'stage', 'bundle_sha256', 'automatic_retry_allowed',
++    'device_enrolled', 'guardian_ready', 'device_enrollment'])
++    || record.schema !== 'compute.fresh-client-install-journal.v1'
++    || record.stage !== 'PROVIDER_CONFIGURED_DEVICE_ADMIN_VERIFIED'
++    || record.bundle_sha256 !== config.runtime_host.expected_bundle_sha256
++    || record.automatic_retry_allowed !== false || record.device_enrolled !== true
++    || record.guardian_ready !== false) fail();
++  const binding = record.device_enrollment;
++  if (!exactKeys(binding, ['cluster_system_identifier', 'runtime_instance_id', 'client_id', 'profile',
++    'public_jwk', 'key_fingerprint_sha256', 'request_id', 'requested_at', 'expires_at',
++    'requested_at_db', 'expires_at_db', 'device_id'])
++    || typeof binding.cluster_system_identifier !== 'string'
++    || !/^[1-9][0-9]{0,19}$/.test(binding.cluster_system_identifier)
++    || !['runtime_instance_id', 'client_id', 'request_id', 'device_id'].every(key => UUID.test(binding[key] || ''))
++    || binding.profile !== 'A2_DEVICE_HTTP_SIGNATURE_V1' || !SHA256.test(binding.key_fingerprint_sha256 || '')) fail();
++  const key = binding.public_jwk;
++  if (!exactKeys(key, ['crv', 'ext', 'key_ops', 'kty', 'x', 'y']) || key.crv !== 'P-256'
++    || key.ext !== true || key.kty !== 'EC' || JSON.stringify(key.key_ops) !== '["verify"]'
++    || !/^[A-Za-z0-9_-]{43}$/.test(key.x || '') || !/^[A-Za-z0-9_-]{43}$/.test(key.y || '')) fail();
++  const canonical = { crv: key.crv, ext: true, key_ops: ['verify'], kty: key.kty, x: key.x, y: key.y };
++  if (createHash('sha256').update(JSON.stringify(canonical)).digest('hex') !== binding.key_fingerprint_sha256) fail();
++  // These are historical enrollment observations. Normal restart changes the
++  // runtime UUID, and expiration of the old request does not undo its commit.
++  for (const key of ['requested_at', 'expires_at', 'requested_at_db', 'expires_at_db']) {
++    if (typeof binding[key] !== 'string' || binding[key].length > 128
++      || !Number.isFinite(Date.parse(binding[key]))) fail();
++  }
++  if (Date.parse(binding.requested_at) !== Date.parse(binding.requested_at_db)
++    || Date.parse(binding.expires_at) !== Date.parse(binding.expires_at_db)
++    || Date.parse(binding.expires_at) <= Date.parse(binding.requested_at)) fail();
++}
++
++// A denial-only restart fence for the existing fresh operator's fixed layout.
++// An Owner profile can be published before its terminal journal append fails.
++// Reading a terminal record merely removes that interruption veto; this helper
++// issues no READY, provenance, native Owner, Guardian, device or task authority.
++// The original runtime/PG/health admission checks must still run afterwards.
++export async function assertFreshProviderRestartFence(config, { env = process.env } = {}) {
++  try {
++    const file = freshJournalFile(config, env);
++    if (file) terminalJournal(await readJournal(file), config);
++  } catch { fail(); }
++}
+diff --git a/apps/metaengine-browser/src/local-state-provider-bootstrap.mjs b/apps/metaengine-browser/src/local-state-provider-bootstrap.mjs
+index 407251d6f90ed5d0198ada37d8051809ceb2d725..d0b293f63c42cdf8b90c7c8530d1386a537d6913 100644
+--- a/apps/metaengine-browser/src/local-state-provider-bootstrap.mjs
++++ b/apps/metaengine-browser/src/local-state-provider-bootstrap.mjs
+@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
+ import { canonicalLocalStateSupervisorBase, LOCAL_STATE_INSTANCE_UUID, localStateProviderHealthAttested, localStateProviderOwnerFile, validateLocalStateProviderConfig, validateLocalStateRuntimeIdentity } from './local-state-provider-policy.mjs';
+ import { ownedLocalRuntimeHostReady, startConfiguredLocalRuntimeHost, stopOwnedLocalRuntimeHost } from './local-runtime-host-controller.mjs';
+ import { qaUpgradeAdmissionFile, assertQaUpgradeAdmission } from './local-provider-upgrade-admission.mjs';
++import { assertFreshProviderRestartFence } from './fresh-provider-restart-fence.mjs';
+ 
+ const CONFIG_MAX_BYTES = 16384;
+ const RUNTIME_MAX_BYTES = 65536;
+@@ -97,6 +98,19 @@ export async function bootstrapPersistentLocalProvider({
+       delete env.METAENGINE_FALLBACK_SUPERVISOR_BASE_URL;
+       throw new Error('local_state_provider_upgrade_admission_unverified');
+     }
++    try {
++      // Owner publication precedes the fresh operator's terminal append. A
++      // published descriptor must not restart an interrupted fresh transaction.
++      // Validation above succeeded, but inspect its original path spellings:
++      // normalization must not erase a raw reserved fresh claim containing '..'.
++      // This veto does not replace the independent runtime/PG/health checks.
++      await assertFreshProviderRestartFence(ownerRead.value, { env });
++    } catch {
++      delete env.METAENGINE_SUPERVISOR_BASE_URL;
++      delete env.METAENGINE_LOCAL_STATE_INSTANCE_ID;
++      delete env.METAENGINE_FALLBACK_SUPERVISOR_BASE_URL;
++      throw new Error('local_state_provider_fresh_install_incomplete');
++    }
+     if ((inherited.provider && inherited.provider !== 'LOCAL_POSTGRES') || (inherited.base && canonicalLocalStateSupervisorBase(inherited.base) !== config.base_url) || (inherited.instance && !LOCAL_STATE_INSTANCE_UUID.test(inherited.instance))) {
+       throw new Error('local_state_provider_environment_conflict');
+     }
+diff --git a/apps/metaengine-browser/src/main.mjs b/apps/metaengine-browser/src/main.mjs
+index 83f579671658dd76a0772a219c5c3df604565162..69fbd711a9b722fbd24d2ae837f13fa1c92e98c0 100644
+--- a/apps/metaengine-browser/src/main.mjs
++++ b/apps/metaengine-browser/src/main.mjs
+@@ -2719,7 +2719,7 @@ function ensureGuardianBootstrapLauncher() {
+ function ensureGuardianStatusObserver() {
+   if (!guardianStatusObserver) {
+     guardianStatusObserver = createBrowserGuardianStatusObserver({
+-      readStatus: () => ensureGuardianBootstrapLauncher().status(),
++      readStatus: () => ensureGuardianBootstrapLauncher().statusLoaded(),
+     });
+   }
+   return guardianStatusObserver;
+diff --git a/apps/metaengine-browser/test/browser-guardian-loaded-status-reader.test.mjs b/apps/metaengine-browser/test/browser-guardian-loaded-status-reader.test.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..925188462d74cb59ac25829dc1d83e02303b2d82
+--- /dev/null
++++ b/apps/metaengine-browser/test/browser-guardian-loaded-status-reader.test.mjs
+@@ -0,0 +1,196 @@
++import assert from 'node:assert/strict';
++import fs from 'node:fs';
++import test from 'node:test';
++import vm from 'node:vm';
++
++import { createBrowserGuardianStatusObserver } from '../src/browser-guardian-status-observer.mjs';
++
++// Source-only control-flow fixtures. No Electron, credentials, OS pipe, native
++// admission or database is acquired. Positive diagnostics below are test data.
++const tick = () => new Promise(resolve => setImmediate(resolve));
++function deferred() {
++  let resolve, reject;
++  const promise = new Promise((done, fail) => { resolve = done; reject = fail; });
++  return { promise, resolve, reject };
++}
++function hold(reason) {
++  return Object.freeze({
++    schema: 'metaengine.browser-guardian.machine-bootstrap-launcher.v1',
++    state: 'HOLD', reason, ready: false, guardian_service_ready: false,
++    owner_binding_proven: false, device_binding_proven: false,
++    explicit_user_action_required: true, uac_consent_required: false,
++    fixed_packaged_bootstrap: true, caller_supplied_path_used: false,
++    caller_supplied_arguments_used: false, arbitrary_shell_used: false,
++    automatic_retry_allowed: false, authority_effect: false,
++  });
++}
++function ready(reason) {
++  return Object.freeze({ ...hold(reason), state: 'READY', ready: true,
++    guardian_service_ready: true, owner_binding_proven: true,
++    device_binding_proven: true, explicit_user_action_required: false });
++}
++function deadlines() {
++  const timers = new Set();
++  return {
++    setTimeoutImpl(callback) { timers.add(callback); return callback; },
++    clearTimeoutImpl(callback) { timers.delete(callback); },
++    expire() {
++      assert.equal(timers.size, 1);
++      const [callback] = timers;
++      timers.delete(callback);
++      callback();
++    },
++  };
++}
++
++test('Main Guardian status uses its cached loaded-only reader without credential initialization or legacy fallback', async () => {
++  const main = fs.readFileSync(new URL('../src/main.mjs', import.meta.url), 'utf8');
++  const start = main.indexOf('function ensureGuardianStatusObserver() {');
++  const end = main.indexOf('\nasync function initGithubChatRelay(', start);
++  assert.ok(start >= 0 && end > start);
++  const source = main.slice(start, end);
++  assert.match(source, /readStatus:\s*\(\) => ensureGuardianBootstrapLauncher\(\)\.statusLoaded\(\)/);
++  assert.doesNotMatch(source, /\.status\(|\.ensure\(|\.activate\(/);
++  let loaded = 0, legacy = 0, initializations = 0;
++  const launcher = {
++    statusLoaded() { loaded++; return Promise.resolve(hold('DEVICE_NOT_LOADED')); },
++    status() { legacy++; throw Error('legacy owner status forbidden'); },
++    ensure() { initializations++; throw Error('credential initialization forbidden'); },
++  };
++  // Execute the exact Main observer factory, without evaluating Main's imports
++  // or starting Electron. The real status observer is used unchanged.
++  const ensureObserver = vm.runInNewContext(`let guardianStatusObserver = null;\n${source}\nensureGuardianStatusObserver`, {
++    createBrowserGuardianStatusObserver,
++    ensureGuardianBootstrapLauncher: () => launcher,
++  });
++  const observer = ensureObserver();
++  assert.strictEqual(ensureObserver(), observer);
++  const value = await observer.observe({ force: true });
++  assert.equal(value.state, 'HOLD');
++  assert.equal(value.reason, 'DEVICE_NOT_LOADED');
++  assert.equal(value.authority_effect, false);
++  assert.equal(loaded, 1);
++  assert.equal(legacy, 0);
++  assert.equal(initializations, 0);
++});
++
++test('diagnostic timeout and forced refresh retain one original loaded read until it actually settles', async () => {
++  const original = deferred(), timer = deadlines();
++  let calls = 0;
++  const readStatus = () => {
++    calls++;
++    return calls === 1 ? original.promise : Promise.resolve(hold('CURRENT_READ'));
++  };
++  const observer = createBrowserGuardianStatusObserver({ readStatus, ...timer });
++  const first = observer.observe({ force: true });
++  await tick();
++  timer.expire();
++  assert.equal((await first).state, 'HOLD');
++  assert.match(observer.snapshot().observation_error, /observation_deadline/);
++  assert.equal(observer.snapshot().refresh_in_flight, true);
++  for (let refresh = 0; refresh < 3; refresh++) {
++    assert.equal((await observer.observe({ force: true })).state, 'HOLD');
++    assert.equal(observer.refreshIfDue(), false);
++  }
++  assert.equal(calls, 1);
++  original.resolve(ready('LATE_ORIGINAL_READ'));
++  await tick();
++  assert.equal(observer.snapshot().state, 'HOLD');
++  assert.equal(observer.snapshot().observation_revision, 0);
++  assert.equal(observer.snapshot().refresh_in_flight, false);
++  assert.equal((await observer.observe({ force: true })).reason, 'CURRENT_READ');
++  assert.equal(calls, 2);
++});
++
++test('success, rejection and synchronous source failure release only their settled read without automatic retry', async () => {
++  const original = deferred();
++  let calls = 0;
++  const observer = createBrowserGuardianStatusObserver({ readStatus: () => {
++    calls++;
++    if (calls === 1) return original.promise;
++    if (calls === 2) throw Error('source unavailable');
++    return hold('LATER_READ');
++  } });
++  const first = observer.observe({ force: true });
++  await tick();
++  original.reject(Error('original close failed'));
++  assert.match((await first).observation_error, /original close failed/);
++  await tick();
++  assert.equal(calls, 1);
++  assert.match((await observer.observe({ force: true })).observation_error, /source unavailable/);
++  assert.equal(calls, 2);
++  assert.equal((await observer.observe({ force: true })).reason, 'LATER_READ');
++  assert.equal((await observer.observe({ force: true })).reason, 'LATER_READ');
++  assert.equal(calls, 4);
++});
++
++for (const timeoutFirst of [false, true]) {
++  test(`invalidation and forced refresh cannot rebind an old read to the new generation; timeout first=${timeoutFirst}`, async () => {
++    const original = deferred(), timer = deadlines();
++    let calls = 0;
++    const observer = createBrowserGuardianStatusObserver({ readStatus: () => {
++      calls++;
++      return calls === 1 ? original.promise : hold('CURRENT_GENERATION_READ');
++    }, ...timer });
++    const oldRead = observer.observe({ force: true });
++    await tick();
++    if (timeoutFirst) { timer.expire(); await oldRead; }
++    observer.invalidate('GUARDIAN_ACTIVATION_STARTED');
++    const refresh = observer.observe({ force: true });
++    if (!timeoutFirst) { timer.expire(); await oldRead; }
++    assert.equal((await refresh).state, 'HOLD');
++    assert.equal(calls, 1);
++    original.resolve(ready('STALE_PRE_INVALIDATION_READ'));
++    await tick();
++    const after = observer.snapshot();
++    assert.equal(after.state, 'HOLD');
++    assert.equal(after.reason, 'GUARDIAN_ACTIVATION_STARTED');
++    assert.equal(after.observation_revision, 0);
++    assert.equal(after.owner_binding_proven, false);
++    assert.equal((await observer.observe({ force: true })).reason, 'CURRENT_GENERATION_READ');
++    assert.equal(calls, 2);
++  });
++}
++
++for (const quiesceFirst of [false, true]) {
++  test(`quiesce retains the actual loaded read through its diagnostic deadline; quiesce first=${quiesceFirst}`, async () => {
++    const original = deferred(), timer = deadlines();
++    let calls = 0, settled = false;
++    const observer = createBrowserGuardianStatusObserver({ readStatus: () => { calls++; return original.promise; }, ...timer });
++    const reading = observer.observe({ force: true });
++    await tick();
++    let quiescing;
++    if (quiesceFirst) quiescing = observer.quiesce().then(value => { settled = true; return value; });
++    timer.expire();
++    await reading;
++    if (!quiesceFirst) quiescing = observer.quiesce().then(value => { settled = true; return value; });
++    await tick();
++    assert.equal(settled, false, 'diagnostic timeout is not physical source cleanup');
++    assert.equal((await observer.observe({ force: true })).state, 'HOLD');
++    assert.equal(calls, 1);
++    if (quiesceFirst) original.resolve(hold('ORIGINAL_READ_CLOSED'));
++    else original.reject(Error('original read closed after error'));
++    await quiescing;
++    assert.equal(settled, true);
++    assert.equal(observer.snapshot().refresh_in_flight, false);
++    assert.equal(calls, 1);
++  });
++}
++
++test('late old loaded-read completion cannot replace a newer recorded Guardian diagnostic', async () => {
++  const original = deferred(), timer = deadlines();
++  let calls = 0;
++  const readStatus = () => { calls++; return original.promise; };
++  const observer = createBrowserGuardianStatusObserver({ readStatus, ...timer });
++  const reading = observer.observe({ force: true });
++  await tick();
++  observer.invalidate('GUARDIAN_ACTIVATION_STARTED');
++  observer.record(hold('NEWER_RECORDED_DIAGNOSTIC'));
++  const refresh = observer.observe({ force: true });
++  original.resolve(ready('STALE_OLD_DIAGNOSTIC'));
++  await Promise.all([reading, refresh]);
++  assert.equal(observer.snapshot().reason, 'NEWER_RECORDED_DIAGNOSTIC');
++  assert.equal(observer.snapshot().observation_revision, 1);
++  assert.equal(observer.snapshot().authority_effect, false);
++  assert.equal(calls, 1);
++});
+diff --git a/apps/metaengine-browser/test/fresh-provider-restart-fence.test.mjs b/apps/metaengine-browser/test/fresh-provider-restart-fence.test.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..90c1543d1133cd0d58e1d661f12d0da96c66fd2b
+--- /dev/null
++++ b/apps/metaengine-browser/test/fresh-provider-restart-fence.test.mjs
+@@ -0,0 +1,261 @@
++import assert from 'node:assert/strict';
++import fs from 'node:fs/promises';
++import os from 'node:os';
++import path from 'node:path';
++import { createHash } from 'node:crypto';
++import { registerHooks } from 'node:module';
++import { after, test } from 'node:test';
++import { assertFreshProviderRestartFence } from '../src/fresh-provider-restart-fence.mjs';
++import { provisionPersistentClientProvider } from '../../../infra/client-state-runtime/persistent-client-provider.mjs';
++import { localStateProviderOwnerFile, validateLocalStateProviderConfig } from '../src/local-state-provider-policy.mjs';
++
++const digest = 'a'.repeat(64);
++const currentInstance = '11111111-1111-4111-8111-111111111111';
++const historicalInstance = '22222222-2222-4222-8222-222222222222';
++const failure = /^Error: local_state_provider_fresh_install_incomplete$/;
++
++// Only the runtime effects are inert. Production Owner publication, bootstrap,
++// fresh-layout selection, physical journal reads and health admission run below.
++const effects = { starts: 0, stops: 0, health: 0 };
++globalThis.__freshProviderRestartFenceTestEffects = effects;
++const bootstrapUrl = new URL('../src/local-state-provider-bootstrap.mjs', import.meta.url).href;
++const hostModule = `
++  export async function startConfiguredLocalRuntimeHost() {
++    globalThis.__freshProviderRestartFenceTestEffects.starts++; return null;
++  }
++  export async function stopOwnedLocalRuntimeHost() {
++    globalThis.__freshProviderRestartFenceTestEffects.stops++; return {cleanup_confirmed:true};
++  }
++  export function ownedLocalRuntimeHostReady() { return true; }
++`;
++const hook = registerHooks({ resolve(specifier, context, next) {
++  if (context.parentURL === bootstrapUrl && specifier === './local-runtime-host-controller.mjs')
++    return { url: `data:text/javascript,${encodeURIComponent(hostModule)}`, shortCircuit: true };
++  return next(specifier, context);
++} });
++const originalArgv = process.argv;
++process.argv = [...originalArgv, '--metaengine-profile-probe'];
++const { bootstrapPersistentLocalProvider } = await import(bootstrapUrl);
++process.argv = originalArgv;
++after(() => { hook.deregister(); delete globalThis.__freshProviderRestartFenceTestEffects; });
++
++function terminalRecord() {
++  const public_jwk = { crv: 'P-256', ext: true, key_ops: ['verify'], kty: 'EC', x: 'A'.repeat(43), y: 'B'.repeat(43) };
++  return { schema: 'compute.fresh-client-install-journal.v1', stage: 'PROVIDER_CONFIGURED_DEVICE_ADMIN_VERIFIED',
++    bundle_sha256: digest, automatic_retry_allowed: false, device_enrolled: true, guardian_ready: false,
++    device_enrollment: { cluster_system_identifier: '765432109876543210', runtime_instance_id: historicalInstance,
++      client_id: '33333333-3333-4333-8333-333333333333', profile: 'A2_DEVICE_HTTP_SIGNATURE_V1', public_jwk,
++      key_fingerprint_sha256: createHash('sha256').update(JSON.stringify(public_jwk)).digest('hex'),
++      request_id: '44444444-4444-4444-8444-444444444444', requested_at: '2026-01-01T00:00:00.123Z',
++      expires_at: '2026-01-01T00:30:00.123Z', requested_at_db: '2026-01-01 00:00:00.123456+00',
++      expires_at_db: '2026-01-01 00:30:00.123456+00', device_id: '55555555-5555-4555-8555-555555555555' } };
++}
++
++async function fixture(t) {
++  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'fresh-provider-restart-fence-'));
++  t.after(() => fs.rm(directory, { recursive: true, force: true }));
++  const local = path.join(directory, 'local'), appData = path.join(directory, 'roaming');
++  const root = path.join(local, 'METAENGINE', 'client-first-run-v1'), runtime = path.join(root, 'runtime');
++  await fs.mkdir(runtime, { recursive: true });
++  const ownerFile = localStateProviderOwnerFile({ env: { APPDATA: appData }, platform: 'win32' });
++  const owner = { schema: 'metaengine.browser.local-state-provider-config.v1', version: 1, profile: 'CLIENT_LOCAL_POSTGRES_V1',
++    provider: 'LOCAL_POSTGRES', base_url: 'http://127.0.0.1:15433/a2-browser-native-supervisor-v1',
++    runtime_identity_file: path.join(runtime, 'runtime-instance.json'),
++    runtime_host: { bundle_directory: path.join(directory, 'verified-bundle-fixture'), expected_bundle_sha256: digest,
++      config_file: path.join(runtime, 'host-config.json') }, authority_effect: false };
++  const publication = await provisionPersistentClientProvider({ ownerChoice: 'LOCAL_POSTGRES', ownerFile,
++    appDataDirectory: appData, baseUrl: owner.base_url, runtimeIdentityFile: owner.runtime_identity_file,
++    runtimeHost: owner.runtime_host });
++  assert.equal(publication.state, 'CONFIGURED');
++  const identity = { schema: 'metaengine.client-state.runtime-status.v1', state: 'READY', instance_id: currentInstance,
++    endpoint: owner.base_url, runtime_ready: true, state_provider: 'LOCAL_POSTGRES', hosted_supabase_required: false,
++    automatic_cloud_fallback: false, capability_health: { state: 'ATTESTED', authority_effect: false }, authority_effect: false };
++  await fs.writeFile(owner.runtime_identity_file, JSON.stringify(identity));
++  const journal = path.join(root, 'install-journal.json');
++  const writeJournal = record => fs.writeFile(journal, JSON.stringify(record) + '\n');
++  return { directory, root, runtime, local, appData, ownerFile, owner, identity, journal, writeJournal };
++}
++
++async function restart(f, { healthy = true } = {}) {
++  Object.assign(effects, { starts: 0, stops: 0, health: 0 });
++  const env = { LOCALAPPDATA: f.local, APPDATA: f.appData, METAENGINE_STATE_PROVIDER: 'LOCAL_POSTGRES',
++    METAENGINE_LOCAL_PROVIDER_BOOT_STATE: 'READY', METAENGINE_SUPERVISOR_BASE_URL: f.owner.base_url,
++    METAENGINE_LOCAL_STATE_INSTANCE_ID: currentInstance, METAENGINE_FALLBACK_SUPERVISOR_BASE_URL: 'https://example.invalid/' };
++  const observed = bootstrapPersistentLocalProvider({ ownerFile: f.ownerFile, platform: 'win32', env,
++    fetchImpl: async () => { effects.health++; return { ok: true, json: async () => ({ ok: true,
++      instance_id: currentInstance, state_provider: 'LOCAL_POSTGRES', runtime_ready: healthy, hosted_supabase_required: false,
++      capability_health: { state: healthy ? 'ATTESTED' : 'UNATTESTED', authority_effect: false } }) }; } });
++  return { observed, env };
++}
++
++test('published Owner with an interrupted terminal append cannot restart host or reach health, and preserves exact bytes', async t => {
++  const f = await fixture(t);
++  for (const stage of ['OWNER_PUBLICATION_PENDING', 'OUTCOME_REQUIRES_REVIEW', 'DEVICE_APPROVAL_OUTCOME_PENDING',
++    'PROVIDER_CONFIGURED_DEVICE_ENROLLMENT_REQUIRED']) {
++    await f.writeJournal({ ...terminalRecord(), stage });
++    const before = await fs.readFile(f.journal), ownerBefore = await fs.readFile(f.ownerFile);
++    const { observed, env } = await restart(f);
++    await assert.rejects(observed, failure);
++    assert.equal(effects.starts, 0); assert.equal(effects.health, 0);
++    assert.equal(env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE, 'BLOCKED');
++    for (const key of ['METAENGINE_SUPERVISOR_BASE_URL', 'METAENGINE_LOCAL_STATE_INSTANCE_ID', 'METAENGINE_FALLBACK_SUPERVISOR_BASE_URL'])
++      assert.equal(env[key], undefined);
++    assert.deepEqual(await fs.readFile(f.journal), before);
++    assert.deepEqual(await fs.readFile(f.ownerFile), ownerBefore);
++  }
++});
++
++test('failed post-publication terminal write leaves the original pending journal as a restart veto', async t => {
++  const f = await fixture(t);
++  await f.writeJournal({ ...terminalRecord(), stage: 'OWNER_PUBLICATION_PENDING' });
++  const ownerBefore = await fs.readFile(f.ownerFile), journalBefore = await fs.readFile(f.journal);
++  // The real Owner publisher already completed in fixture(). Fail the original
++  // writer's next operation, truncate(0), before any terminal bytes are written.
++  // This models its commit window without initializing PG or creating a device.
++  const writer = await fs.open(f.journal, 'r+');
++  await writer.close();
++  await assert.rejects(writer.truncate(0), { code: 'EBADF' });
++  for (let attempt = 0; attempt < 2; attempt++) {
++    const { observed } = await restart(f);
++    await assert.rejects(observed, failure);
++    assert.equal(effects.starts, 0); assert.equal(effects.health, 0);
++    assert.deepEqual(await fs.readFile(f.ownerFile), ownerBefore);
++    assert.deepEqual(await fs.readFile(f.journal), journalBefore);
++  }
++});
++
++test('missing, malformed, duplicate-key, excessive or nonterminal fresh journal never launches and is not repaired', async t => {
++  const f = await fixture(t), original = terminalRecord();
++  for (const contents of [null, '', '{truncated', 'x'.repeat(16385),
++    JSON.stringify(original).replace('"stage":', '"stage":"OWNER_PUBLICATION_PENDING","stage":') + '\n',
++    JSON.stringify({ ...original, stage: 'UNKNOWN' }) + '\n']) {
++    if (contents === null) await fs.rm(f.journal, { force: true }); else await fs.writeFile(f.journal, contents);
++    const { observed } = await restart(f);
++    await assert.rejects(observed, failure);
++    assert.equal(effects.starts, 0); assert.equal(effects.health, 0);
++    if (contents === null) await assert.rejects(fs.stat(f.journal), { code: 'ENOENT' });
++    else assert.equal(await fs.readFile(f.journal, 'utf8'), contents);
++  }
++});
++
++test('terminal journal only removes interruption veto; current runtime and health still decide provider readiness', async t => {
++  const f = await fixture(t);
++  await f.writeJournal(terminalRecord());
++  assert.equal(await assertFreshProviderRestartFence(f.owner, { env: { LOCALAPPDATA: f.local } }), undefined);
++  assert.notEqual(historicalInstance, currentInstance); // historical requests may expire and runtimes reincarnate
++  const good = await restart(f);
++  assert.equal((await good.observed).state, 'READY');
++  assert.equal(effects.starts, 1); assert.equal(effects.health, 1);
++  const unattested = await restart(f, { healthy: false });
++  await assert.rejects(unattested.observed, /local_state_provider_health_unattested/);
++  assert.equal(unattested.env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE, 'BLOCKED');
++  await fs.writeFile(f.owner.runtime_identity_file, JSON.stringify({ ...f.identity, state: 'STOPPED' }));
++  const stopped = await restart(f);
++  await assert.rejects(stopped.observed, /local_state_provider_runtime_identity_invalid/);
++  assert.equal(effects.health, 0);
++});
++
++test('journal schema, bundle, device binding and claimed Guardian/readiness upgrades cannot clear the veto', async t => {
++  const f = await fixture(t);
++  const original = terminalRecord();
++  for (const change of [{ schema: 'unknown' }, { bundle_sha256: 'b'.repeat(64) }, { device_enrolled: false },
++    { automatic_retry_allowed: true }, { guardian_ready: true }, { runtime_ready: true }, { device_enrollment: null },
++    { device_enrollment: { ...original.device_enrollment, device_id: null } },
++    { device_enrollment: { ...original.device_enrollment, cluster_system_identifier: '' } },
++    { device_enrollment: { ...original.device_enrollment, key_fingerprint_sha256: 'c'.repeat(64) } },
++    { device_enrollment: { ...original.device_enrollment, requested_at_db: '2026-01-01 00:00:01+00' } }]) {
++    await f.writeJournal({ ...original, ...change });
++    const { observed } = await restart(f);
++    await assert.rejects(observed, failure);
++    assert.equal(effects.starts, 0); assert.equal(effects.health, 0);
++  }
++});
++
++test('either reserved path claim requires the exact fixed fresh layout and original local root', async t => {
++  const f = await fixture(t);
++  await f.writeJournal(terminalRecord());
++  for (const owner of [
++    { ...f.owner, runtime_identity_file: path.join(f.directory, 'attached', 'runtime-instance.json') },
++    { ...f.owner, runtime_host: { ...f.owner.runtime_host, config_file: path.join(f.directory, 'attached', 'host-config.json') } },
++    { ...f.owner, runtime_host: undefined },
++    { ...f.owner, runtime_identity_file: path.join(f.runtime, 'other-instance.json') },
++    { ...f.owner, runtime_host: { ...f.owner.runtime_host, config_file: path.join(f.runtime, 'other-config.json') } },
++    { ...f.owner, runtime_identity_file: f.root + path.sep + '..' + path.sep + 'attached-instance.json',
++      runtime_host: { ...f.owner.runtime_host, config_file: path.join(f.directory, 'attached', 'host-config.json') } },
++    { ...f.owner, runtime_identity_file: 'C:\\Other\\MeTaEnGiNe/cLiEnT-FiRsT-RuN-V1\\..\\attached-instance.json',
++      runtime_host: { ...f.owner.runtime_host, config_file: path.join(f.directory, 'attached', 'host-config.json') } },
++  ]) await assert.rejects(assertFreshProviderRestartFence(owner, { env: { LOCALAPPDATA: f.local } }), failure);
++  for (const env of [{}, { LOCALAPPDATA: 'relative' }, { LOCALAPPDATA: path.join(f.directory, 'another-user') }])
++    await assert.rejects(assertFreshProviderRestartFence(f.owner, { env }), failure);
++});
++
++test('bootstrap retains both raw reserved claims when normalization would route them into an attached layout', async t => {
++  const f = await fixture(t);
++  const rawState = f.root + path.sep + '..' + path.sep + 'attached';
++  const raw = { ...f.owner, runtime_identity_file: rawState + path.sep + 'runtime-instance.json',
++    runtime_host: { ...f.owner.runtime_host, config_file: rawState + path.sep + 'host-config.json' } };
++  const normalized = validateLocalStateProviderConfig(raw);
++  for (const file of [normalized.runtime_identity_file, normalized.runtime_host.config_file])
++    assert.equal(file.split(path.sep).includes('client-first-run-v1'), false);
++  // Without the raw-path veto, the inert host and this healthy attached identity
++  // would let bootstrap finish. Neither descriptor path retains the fresh name.
++  await fs.mkdir(path.dirname(normalized.runtime_identity_file), { recursive: true });
++  await fs.writeFile(normalized.runtime_identity_file, JSON.stringify(f.identity));
++  await fs.writeFile(f.ownerFile, JSON.stringify(raw) + '\n');
++  const before = await fs.readFile(f.ownerFile);
++  const { observed, env } = await restart(f);
++  await assert.rejects(observed, failure);
++  assert.equal(effects.starts, 0); assert.equal(effects.health, 0);
++  assert.equal(env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE, 'BLOCKED');
++  assert.deepEqual(await fs.readFile(f.ownerFile), before);
++  await assert.rejects(fs.stat(f.journal), { code: 'ENOENT' });
++});
++
++test('journal links and nonregular entries are refused without changing their targets', async t => {
++  const f = await fixture(t), content = JSON.stringify(terminalRecord()) + '\n';
++  const target = path.join(f.directory, 'original-journal');
++  await fs.writeFile(target, content);
++  await fs.link(target, f.journal);
++  await assert.rejects(assertFreshProviderRestartFence(f.owner, { env: { LOCALAPPDATA: f.local } }), failure);
++  await fs.unlink(f.journal);
++  if (process.platform !== 'win32') {
++    await fs.symlink(target, f.journal);
++    await assert.rejects(assertFreshProviderRestartFence(f.owner, { env: { LOCALAPPDATA: f.local } }), failure);
++    await fs.unlink(f.journal);
++  }
++  await fs.mkdir(f.journal);
++  await assert.rejects(assertFreshProviderRestartFence(f.owner, { env: { LOCALAPPDATA: f.local } }), failure);
++  assert.equal(await fs.readFile(target, 'utf8'), content);
++});
++
++test('a fresh root reached through an alias stays blocked without touching the original journal', { skip: process.platform === 'win32' }, async t => {
++  const f = await fixture(t);
++  await f.writeJournal(terminalRecord());
++  const original = path.join(f.local, 'METAENGINE', 'original-fresh-root');
++  await fs.rename(f.root, original);
++  await fs.symlink(original, f.root);
++  await assert.rejects(assertFreshProviderRestartFence(f.owner, { env: { LOCALAPPDATA: f.local } }), failure);
++  assert.equal(await fs.readFile(path.join(original, 'install-journal.json'), 'utf8'), JSON.stringify(terminalRecord()) + '\n');
++});
++
++test('ordinary attached and upgrade descriptors do not acquire a fresh-journal dependency', async t => {
++  const f = await fixture(t);
++  for (const name of ['attached', 'client-state-qa-upgrade-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa']) {
++    const state = path.join(f.directory, name);
++    const owner = { ...f.owner, runtime_identity_file: path.join(state, 'runtime-instance.json'),
++      runtime_host: { ...f.owner.runtime_host, config_file: path.join(state, 'runtime-config.json') } };
++    assert.equal(await assertFreshProviderRestartFence(owner, { env: {} }), undefined);
++  }
++});
++
++test('attached and upgrade profiles beneath an unrelated client-first-run-v1 parent do not claim METAENGINE fresh state', async t => {
++  const f = await fixture(t);
++  for (const parent of [path.join(f.directory, 'client-first-run-v1'), 'C:\\Users\\client-first-run-v1\\Local']) {
++    for (const name of ['attached', 'client-state-qa-upgrade-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa']) {
++      const state = path.join(parent, name);
++      const owner = { ...f.owner, runtime_identity_file: path.join(state, 'runtime-instance.json'),
++        runtime_host: { ...f.owner.runtime_host, config_file: path.join(state, 'runtime-config.json') } };
++      assert.equal(await assertFreshProviderRestartFence(owner, { env: {} }), undefined);
++    }
++  }
++});
+diff --git a/docs/guardian-first-run-enrollment-source-review.md b/docs/guardian-first-run-enrollment-source-review.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..aa148a8034c98af74d427f128870d0683cdab9ed
+--- /dev/null
++++ b/docs/guardian-first-run-enrollment-source-review.md
+@@ -0,0 +1,92 @@
++# Guardian first run and enrollment source review
++
++The source baseline is `c26565e58ab92dcbcda9663c4d231bdf4a9a7ee6`, tree
++`2dbe253e97379532f6f4b52ef7edf26109a9266d`. Its source transfer at public commit
++`accb28e72c87c059e780efb8e6681886b33e9b4f` contains three ordered archive parts;
++the joined archive SHA256 is
++`4200e492828dbb857aaa737a7ce56d0aeda3c97c84f7743b1501ef2f229d3636`.
++The archive and tree were verified before edits. Earlier incremental patches
++must not be applied to this snapshot again.
++
++## Remaining first owner boundary
++
++First owner enrollment and an ORIGINAL Main launch remain HOLD. The original
++install coordinator is a real zero argument native producer, but its existing
++W77 package and `GuardianActivePolicyGenesis` authorize first policy publication,
++not first Owner enrollment or a Main launch. A successful SCM start, bootstrap
++process exit, `CONFIGURED` provider receipt or `DB_TICKET_CONSUMED` result cannot
++extend that purpose.
++
++| Existing owner | Actual source contract | Missing join |
++| --- | --- | --- |
++| Original install coordinator | `browser-guardian-install-origin-coordinator.cpp` captures its original unelevated process and primary token before one fixed package qualified elevation. `browser-guardian-active-policy-genesis-origin.inc.hpp` retains the original channel, package, cancellation and absolute deadline. | No existing signed first Owner setup purpose or native setup continuation is produced. Genesis is not an enrollment grant. |
++| Fresh machine policy owner | `browser-guardian-active-policy-genesis-ownership.cpp` creates original roots/intent only under sealed Genesis and refuses existing roots. `browser-guardian-machine-bootstrap.cpp` ends fresh publication with `COMPLETE_NOT_READY` and `owner_enrolled:false`. | No Owner/device/PostgreSQL admission follows that policy publication. Existing roots require the separate upgrade/replacement protocol. |
++| Fresh local PostgreSQL and device owner | `fresh-client-provider.mjs` owns native consent, fresh PG17, private credentials, first ADMIN/device approval and cleanup. `fresh-provider-native-device-identity.mjs` requires packaged ready Electron and its actual singleton. | This producer is reached from Browser `main-entry.mjs`; no install-origin authorized pre-Main setup process or continuous singleton handoff exists. Moving it into an ordinary Node client would change its authority. |
++| Own runtime Host | `guardian-owner-consume.mjs` consumes an existing ticket with the exact current ADMIN/device and own reserved PostgreSQL backend. It returns `guardian_ready:false` and `native_bridge_authenticated:false`. | There is no independently authenticated installed native Guardian to Host bridge. Same SID, a challenge digest, device signature or an IPC JSON receipt cannot supply code authentication. |
++| Native Guardian Owner | `browser-guardian-enrollment-ticket-client.cpp` returns `LOCAL_OWNER_BRIDGE_REQUIRED`; `ensureOwnerBound` holds before ticket issuance or a second enrollment probe. | No accepting native receipt capability is produced. Existing Owner challenge/readback stays a separate read only path. |
++| ORIGINAL Main | `GuardianNativeRootSession` requires the existing durable Owner and enrolled device on the original pipe. Its launch authorization consumes the original service challenge and holds original requester/token/package objects. | This post-enrollment authority cannot create its own first Owner. The wire launch route is deliberately HOLD. |
++
++The dependency cycle is therefore still real: ORIGINAL Main requires enrolled
++Owner; first local ADMIN/device setup requires packaged Electron and singleton;
++the only current setup entry is inside the Browser launch. A source-only status
++projection must not turn that cycle into a successful enrollment claim.
++
++## Changes in this patch
++
++The patch repairs two independently actionable first run problems while keeping
++the authority gap closed:
++
++* Guardian status uses the existing loaded-only signer and fixed read transport.
++  Status discovery cannot call `ensure()` to create a device key. The original
++  pending read remains held across observer deadlines until its actual joined
++  transport promise settles; a refresh cannot open a second read in that interval.
++* Restart admission checks the first run journal before starting the normal Host
++  for the fixed fresh-provider layout. Owner publication alone cannot hide a
++  pending or unknown install result. The check is a veto only: terminal journal
++  bytes do not replace the existing package, Host, PostgreSQL or health checks,
++  and never prove Guardian readiness. Missing or damaged evidence is preserved
++  for review rather than repaired or replayed.
++
++Neither change supplies the missing first owner producer, registers a new trust
++root, consumes a real ticket, creates production credentials, launches Main or
++changes a database.
++
++## Minimum interface still needed
++
++The existing trust owners must jointly produce an original, non-reconstructible
++native first owner setup scope. The current code has no such producer. Before
++adding an accepting route, that scope must bind all of the following:
++
++1. The original unelevated install process/primary token, original native channel,
++   fixed existing-authority signed package and an explicit first owner setup
++   purpose. A path, PID, JSON flag or policy Genesis object is insufficient.
++2. The exact native setup process, its continuous singleton ownership or a
++   physically joined singleton handoff, original lifetime/cancellation and a
++   bounded non-renewed deadline. Failure/unknown completion retains the fence.
++3. The existing protected Electron device identity and native consent producer,
++   actual owned PG17 cluster/backend and current approved device/client/key/ADMIN
++   epoch. The key remains inside its existing owner; no exported key or injected
++   signer/transport/verifier is a substitute.
++4. Original installed-code authentication between Guardian and the runtime Host,
++   one challenge and one ticket consumption with current grant readback, then
++   native durable Owner CAS/readback on the original worker. A DB-only receipt
++   cannot mint this native capability. Unknown commit or response never retries.
++5. A separate post-enrollment ORIGINAL Main authorization retaining the original
++   requester/token/namespace and native worker/Job/I/O/barrier lifetime. Setup
++   completion cannot directly resume Main.
++
++An upgrade must preserve old Owner/device/PGDATA and use its existing original
++upgrade authority. Fresh root absence is not an upgrade authorization; the
++fresh Genesis path intentionally refuses already existing roots.
++
++## Qualification limits
++
++All changes and tests are source-only in an isolated Linux workspace. No
++installer, service, Electron application or real PostgreSQL instance was started.
++No production credentials or alternate trust root were created. Native models
++use synthetic objects and do not prove Windows WTS/SCM/pipe/Job/ACL behavior,
++DPAPI, singleton handoff, loaded-code custody, filesystem durability or a live
++signed release. Windows compilation/linking and an authorized isolated Windows
++qualification remain necessary. The launch source guard's
++`wire_route_authenticates_then_launches` failure must remain visible until the
++genuine route is implemented; removing the failure is not enrollment closure.

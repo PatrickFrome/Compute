@@ -1,0 +1,104 @@
+{
+  "schema": "metaengine.guardian.verified-final-aggregate-report.v1",
+  "source_head": "f0bbb447b6dfd9d4cae05dac2b6572c302f54e0d",
+  "source_tree": "2e00ee9976fcc939ee3021bf2cde31eccbb50f08",
+  "source_before": {
+    "head": "f0bbb447b6dfd9d4cae05dac2b6572c302f54e0d",
+    "tree": "2e00ee9976fcc939ee3021bf2cde31eccbb50f08",
+    "worktree": [],
+    "observed_utc": "2026-11-03T08:04:27.310129+00:00"
+  },
+  "source_after": {
+    "head": "f0bbb447b6dfd9d4cae05dac2b6572c302f54e0d",
+    "tree": "2e00ee9976fcc939ee3021bf2cde31eccbb50f08",
+    "worktree": [],
+    "observed_utc": "2026-11-03T08:04:52.462587+00:00"
+  },
+  "source_metadata_matches_expected": true,
+  "frozen_source_preserved": true,
+  "command": "python3 apps/metaengine-browser/test/native/verify-guardian-original-main-source.py --repo /workspace/metaengine-enrollment-c26565e/source/Compute --out /workspace/metaengine-enrollment-c26565e/evidence/verified-original-source",
+  "exit_code": 0,
+  "started_utc": "2026-11-03T08:04:27.310485+00:00",
+  "finished_utc": "2026-11-03T08:04:52.449933+00:00",
+  "checks_passed": 23,
+  "checks_failed": 0,
+  "checks_not_run": 5,
+  "failed_checks": [],
+  "not_run_checks": [
+    {
+      "name": "w77-pinned-openssl-regression",
+      "status": "NOT RUN",
+      "reason": "Provide the acquired+extracted pinned OpenSSL 3.5.9 source with a completed static build"
+    },
+    {
+      "name": "w77-boringssl-regression",
+      "status": "NOT RUN",
+      "reason": "Provide the exact pinned public source and its isolated static crypto build"
+    },
+    {
+      "name": "electron-source-interface",
+      "status": "NOT RUN",
+      "reason": "Provide exact Electron and Node-after-Electron-patches source files"
+    },
+    {
+      "name": "official-electron-header-syntax",
+      "status": "NOT RUN",
+      "reason": "Provide verified official Electron header archive and patched Node internal headers"
+    },
+    {
+      "name": "win64-cross-builds",
+      "status": "NOT RUN",
+      "reason": "No existing cross compiler supplied; this runner never installs one"
+    }
+  ],
+  "aggregate_check_details": "/workspace/metaengine-enrollment-c26565e/evidence/verified-original-source/verification-summary.json",
+  "command_metadata": "/workspace/metaengine-enrollment-c26565e/evidence/verified-native-aggregate/original-main-source.result.json",
+  "stdout_log": "/workspace/metaengine-enrollment-c26565e/evidence/verified-native-aggregate/original-main-source.stdout.log",
+  "stderr_log": "/workspace/metaengine-enrollment-c26565e/evidence/verified-native-aggregate/original-main-source.stderr.log",
+  "stdout_sha256": "5403a718eda5d666ff253c756fcf92ab3103235a535136e5817f4867f00edc7a",
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "tap_results": [
+    {
+      "name": "w77-openssl-regression",
+      "exit_code": 0,
+      "tests": 26,
+      "pass": 26,
+      "fail": 0,
+      "skipped": 0,
+      "log": "w77-openssl-regression.log"
+    },
+    {
+      "name": "node-source-regressions",
+      "exit_code": 0,
+      "tests": 16,
+      "pass": 15,
+      "fail": 0,
+      "skipped": 1,
+      "log": "node-source-regressions.log"
+    }
+  ],
+  "nested_windows_test_not_run": {
+    "test": "actual Windows original pipe and process references survive caller close and refuse stale/replaced peers",
+    "reason": "requires actual Windows named pipes, process handles and SCM readback",
+    "log": "/workspace/metaengine-enrollment-c26565e/evidence/verified-original-source/node-source-regressions.log"
+  },
+  "explicit_qualification_not_run": {
+    "windows_execution": "NOT RUN",
+    "full_custom_electron_build": "NOT RUN",
+    "production_main_launch_grant": "NOT RUN",
+    "production_release_positive": "NOT RUN",
+    "leak_sanitizer": "NOT RUN; disabled on ptrace host"
+  },
+  "additional_fixture_not_run": {
+    "debug_image_W77_authority": "NOT_RUN",
+    "native_runtime_Windows": "NOT_RUN"
+  },
+  "loaded_runtime_code_attested": false,
+  "continuous_code_custody_proven": false,
+  "repo_source_writes_performed_by_this_task": false,
+  "log_integrity": {
+    "verified_log_count": 25,
+    "all_hashes_match": true,
+    "details": "/workspace/metaengine-enrollment-c26565e/evidence/verified-native-aggregate/evidence-integrity.json"
+  }
+}
