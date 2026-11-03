@@ -1,0 +1,304 @@
+✖ reviewed source bundle is deterministic, complete and omits runtime/private material (30.032234ms)
+✖ reviewed migration source and upgrade URLs retain their exact repository paths and bytes (19.246293ms)
+✖ migration SQL cannot move paths, expand the catalog or bypass digest verification (23.104082ms)
+✖ build-resource inventory stages and verifies the full real runtime-host closure without launch (125.328156ms)
+✖ reviewed runtime host source is included only by explicit host selection (16.325613ms)
+✖ staged launcher and API import without checkout resolution, process startup or network (17.9222ms)
+✖ review identity and frozen non-private startup policy must be explicit (18.861062ms)
+✖ manifest paths, exact closure, duplicate records and unexpected resources fail closed (17.611809ms)
+✖ stage must be empty, canonical, absolute and outside the checkout (17.145328ms)
+✖ unreviewed dependency bytes and files are rejected before stage writes (21.198778ms)
+✖ dependency contract does not accept another version even with reviewed byte hashes (17.285747ms)
+▶ alias source paths, dependency junctions and hardlinks are not copied
+  ✖ source hardlink (18.154463ms)
+  ✖ dependency junction (16.824052ms)
+✖ alias source paths, dependency junctions and hardlinks are not copied (35.931809ms)
+✖ known private literals never enter a reviewed source bundle (17.918173ms)
+✖ verification rejects drift, injected files, edited manifests and absent pinned digest (17.723395ms)
+✔ selected runtime bundle includes the full real first-run source closure (59.253674ms)
+✖ predescriptor Host setup service, strict contract and lifecycle SQL are in the verified installed source closure (105.845938ms)
+✖ native Host reviewed source catalog admits the exact ACL implementation and all bridge dependencies, not private data (105.844906ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 1
+ℹ fail 18
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 742.979667
+
+✖ failing tests:
+
+test at package-runtime-resources.test.mjs:91:1
+✖ reviewed source bundle is deterministic, complete and omits runtime/private material (30.032234ms)
+  Error: ENOENT: no such file or directory, scandir '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/'
+      at async readdir (node:internal/fs/promises:1013:18)
+      at async walk (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:25:24)
+      at async files (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:31:3)
+      at async fixture (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:78:11)
+      at async TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:92:3)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    errno: -2,
+    code: 'ENOENT',
+    syscall: 'scandir',
+    path: '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/'
+  }
+
+test at package-runtime-resources.test.mjs:121:1
+✖ reviewed migration source and upgrade URLs retain their exact repository paths and bytes (19.246293ms)
+  Error: ENOENT: no such file or directory, scandir '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/'
+      at async readdir (node:internal/fs/promises:1013:18)
+      at async walk (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:25:24)
+      at async files (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:31:3)
+      at async fixture (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:78:11)
+      at async TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:122:3)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    errno: -2,
+    code: 'ENOENT',
+    syscall: 'scandir',
+    path: '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/'
+  }
+
+test at package-runtime-resources.test.mjs:140:1
+✖ migration SQL cannot move paths, expand the catalog or bypass digest verification (23.104082ms)
+  Error: ENOENT: no such file or directory, scandir '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/'
+      at async readdir (node:internal/fs/promises:1013:18)
+      at async walk (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:25:24)
+      at async files (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:31:3)
+      at async fixture (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:78:11)
+      at async TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:141:3)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    errno: -2,
+    code: 'ENOENT',
+    syscall: 'scandir',
+    path: '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/'
+  }
+
+test at package-runtime-resources.test.mjs:169:1
+✖ build-resource inventory stages and verifies the full real runtime-host closure without launch (125.328156ms)
+  Error: ENOENT: no such file or directory, scandir '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/'
+      at async readdir (node:internal/fs/promises:1013:18)
+      at async walk (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:25:24)
+      at async files (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:31:3)
+      at async receipt (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:52:22)
+      at async TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:172:23)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    errno: -2,
+    code: 'ENOENT',
+    syscall: 'scandir',
+    path: '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/'
+  }
+
+test at package-runtime-resources.test.mjs:205:1
+✖ reviewed runtime host source is included only by explicit host selection (16.325613ms)
+  Error: ENOENT: no such file or directory, scandir '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/'
+      at async readdir (node:internal/fs/promises:1013:18)
+      at async walk (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:25:24)
+      at async files (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:31:3)
+      at async fixture (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:78:11)
+      at async TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:206:3)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    errno: -2,
+    code: 'ENOENT',
+    syscall: 'scandir',
+    path: '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/'
+  }
+
+test at package-runtime-resources.test.mjs:242:1
+✖ staged launcher and API import without checkout resolution, process startup or network (17.9222ms)
+  Error: ENOENT: no such file or directory, scandir '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/'
+      at async readdir (node:internal/fs/promises:1013:18)
+      at async walk (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:25:24)
+      at async files (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:31:3)
+      at async fixture (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:78:11)
+      at async TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:243:3)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    errno: -2,
+    code: 'ENOENT',
+    syscall: 'scandir',
+    path: '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/'
+  }
+
+test at package-runtime-resources.test.mjs:264:1
+✖ review identity and frozen non-private startup policy must be explicit (18.861062ms)
+  Error: ENOENT: no such file or directory, scandir '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/'
+      at async readdir (node:internal/fs/promises:1013:18)
+      at async walk (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:25:24)
+      at async files (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:31:3)
+      at async fixture (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:78:11)
+      at async TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:265:3)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    errno: -2,
+    code: 'ENOENT',
+    syscall: 'scandir',
+    path: '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/'
+  }
+
+test at package-runtime-resources.test.mjs:281:1
+✖ manifest paths, exact closure, duplicate records and unexpected resources fail closed (17.611809ms)
+  Error: ENOENT: no such file or directory, scandir '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/'
+      at async readdir (node:internal/fs/promises:1013:18)
+      at async walk (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:25:24)
+      at async files (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:31:3)
+      at async fixture (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:78:11)
+      at async TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:282:3)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    errno: -2,
+    code: 'ENOENT',
+    syscall: 'scandir',
+    path: '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/'
+  }
+
+test at package-runtime-resources.test.mjs:305:1
+✖ stage must be empty, canonical, absolute and outside the checkout (17.145328ms)
+  Error: ENOENT: no such file or directory, scandir '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/'
+      at async readdir (node:internal/fs/promises:1013:18)
+      at async walk (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:25:24)
+      at async files (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:31:3)
+      at async fixture (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:78:11)
+      at async TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:306:3)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    errno: -2,
+    code: 'ENOENT',
+    syscall: 'scandir',
+    path: '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/'
+  }
+
+test at package-runtime-resources.test.mjs:319:1
+✖ unreviewed dependency bytes and files are rejected before stage writes (21.198778ms)
+  Error: ENOENT: no such file or directory, scandir '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/'
+      at async readdir (node:internal/fs/promises:1013:18)
+      at async walk (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:25:24)
+      at async files (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:31:3)
+      at async fixture (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:78:11)
+      at async TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:320:3)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    errno: -2,
+    code: 'ENOENT',
+    syscall: 'scandir',
+    path: '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/'
+  }
+
+test at package-runtime-resources.test.mjs:332:1
+✖ dependency contract does not accept another version even with reviewed byte hashes (17.285747ms)
+  Error: ENOENT: no such file or directory, scandir '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/'
+      at async readdir (node:internal/fs/promises:1013:18)
+      at async walk (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:25:24)
+      at async files (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:31:3)
+      at async fixture (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:78:11)
+      at async TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:333:3)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    errno: -2,
+    code: 'ENOENT',
+    syscall: 'scandir',
+    path: '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/'
+  }
+
+test at package-runtime-resources.test.mjs:345:11
+✖ source hardlink (18.154463ms)
+  Error: ENOENT: no such file or directory, scandir '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/'
+      at async readdir (node:internal/fs/promises:1013:18)
+      at async walk (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:25:24)
+      at async files (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:31:3)
+      at async fixture (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:78:11)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:345:3)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    errno: -2,
+    code: 'ENOENT',
+    syscall: 'scandir',
+    path: '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/'
+  }
+
+test at package-runtime-resources.test.mjs:349:11
+✖ dependency junction (16.824052ms)
+  Error: ENOENT: no such file or directory, scandir '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/'
+      at async readdir (node:internal/fs/promises:1013:18)
+      at async walk (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:25:24)
+      at async files (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:31:3)
+      at async fixture (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:78:11)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:349:3)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    errno: -2,
+    code: 'ENOENT',
+    syscall: 'scandir',
+    path: '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/'
+  }
+
+test at package-runtime-resources.test.mjs:356:1
+✖ known private literals never enter a reviewed source bundle (17.918173ms)
+  Error: ENOENT: no such file or directory, scandir '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/'
+      at async readdir (node:internal/fs/promises:1013:18)
+      at async walk (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:25:24)
+      at async files (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:31:3)
+      at async fixture (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:78:11)
+      at async TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:357:3)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    errno: -2,
+    code: 'ENOENT',
+    syscall: 'scandir',
+    path: '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/'
+  }
+
+test at package-runtime-resources.test.mjs:366:1
+✖ verification rejects drift, injected files, edited manifests and absent pinned digest (17.723395ms)
+  Error: ENOENT: no such file or directory, scandir '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/'
+      at async readdir (node:internal/fs/promises:1013:18)
+      at async walk (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:25:24)
+      at async files (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:31:3)
+      at async fixture (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:78:11)
+      at async TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:367:3)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    errno: -2,
+    code: 'ENOENT',
+    syscall: 'scandir',
+    path: '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/'
+  }
+
+test at package-runtime-resources.test.mjs:394:1
+✖ predescriptor Host setup service, strict contract and lifecycle SQL are in the verified installed source closure (105.845938ms)
+  Error: ENOENT: no such file or directory, scandir '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/'
+      at async readdir (node:internal/fs/promises:1013:18)
+      at async walk (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:25:24)
+      at async files (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:31:3)
+      at async receipt (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:52:22)
+      at async TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:395:17)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    errno: -2,
+    code: 'ENOENT',
+    syscall: 'scandir',
+    path: '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/'
+  }
+
+test at package-runtime-resources.test.mjs:402:1
+✖ native Host reviewed source catalog admits the exact ACL implementation and all bridge dependencies, not private data (105.844906ms)
+  Error: ENOENT: no such file or directory, scandir '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/'
+      at async readdir (node:internal/fs/promises:1013:18)
+      at async walk (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:25:24)
+      at async files (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:31:3)
+      at async receipt (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:52:22)
+      at async TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/infra/client-state-runtime/package-runtime-resources.test.mjs:403:18)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    errno: -2,
+    code: 'ENOENT',
+    syscall: 'scandir',
+    path: '/workspace/metaengine-c26565e/Compute/infra/client-state-runtime/node_modules/postgres/'
+  }

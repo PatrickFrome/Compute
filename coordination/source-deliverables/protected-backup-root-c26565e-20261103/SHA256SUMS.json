@@ -1,0 +1,12 @@
+{
+  "REPORT.md": "739d68d018cc3e877f5b44116c0fbc06a708e7b5001d4d19d03877f4cfcd7a4b",
+  "focused-tests.log": "b271bfa0af6b4dede9c32f5cf77994c23a1f7e216592c9eef5543ce67655b899",
+  "package-tests-blocked.log": "6a72ac5074c5b8a61be206a8ca5ce2b4bfb98af1f003fc8fc8485a84217a9b60",
+  "patch-application.json": "35a3c0854521648e78a0198c311d63c4d0a4762da3ae8b2100e6021a2c8bfa7a",
+  "protected-backup-root-provider.patch": "62c23c0fe581766bb319ddafc46effe2db503b10476445a655965726807e6640",
+  "source-base.json": "3e07572c8099398392f94109a3d5259b3a32aae3c6d4ee9910b48a9a4b2f77e8",
+  "source-check.log": "dc21a26fff0302ecfff6c109733effce9b01dcaebdda64cc726b7762fc353c31",
+  "static-source-closure.json": "b22c952d00238f3ed77c7d2f2be5f3fe72e6bf83762792e6bb085d33dbb905e5",
+  "validation.json": "39e966c1e1bed2093851b55c691e59eb5aeda6c1ff91140f2cde067ed5d88e1d",
+  "w76-tests.log": "1462591ea3010bc39539b0e611eba7154f48df7bbdb492b86489855948b29968"
+}

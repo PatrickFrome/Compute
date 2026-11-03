@@ -1,0 +1,17 @@
+{
+  "transfer_repository": "PatrickFrome/Compute",
+  "transfer_branch": "work/source-transfer-c26565e-20261103",
+  "transfer_commit": "accb28e72c87c059e780efb8e6681886b33e9b4f",
+  "archive_parts": [
+    "coordination/source-transfer/c26565e/archive.part00",
+    "coordination/source-transfer/c26565e/archive.part01",
+    "coordination/source-transfer/c26565e/archive.part02"
+  ],
+  "archive_sha256": "4200e492828dbb857aaa737a7ce56d0aeda3c97c84f7743b1501ef2f229d3636",
+  "source_commit": "c26565e58ab92dcbcda9663c4d231bdf4a9a7ee6",
+  "source_tree": "2dbe253e97379532f6f4b52ef7edf26109a9266d",
+  "result_tree": "b6c5977b519c9332158af1d5b7de295fa452c1e6",
+  "patch_sha256": "62c23c0fe581766bb319ddafc46effe2db503b10476445a655965726807e6640",
+  "prior_patches_applied": false,
+  "repository_skills": "No AGENTS.md or .agents/skills in verified source snapshot"
+}

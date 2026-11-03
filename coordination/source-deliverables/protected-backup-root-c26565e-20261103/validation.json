@@ -1,0 +1,101 @@
+{
+  "runtime": {
+    "node": "v24.19.0",
+    "platform": "linux",
+    "arch": "x64"
+  },
+  "focused_tests": {
+    "pass": 404,
+    "fail": 0,
+    "skip": 0
+  },
+  "source_checks": 295,
+  "commands": [
+    {
+      "cwd": "apps/metaengine-browser",
+      "argv": [
+        "node",
+        "scripts/run-isolated-tests.mjs",
+        "--test-concurrency=1",
+        "test/owned-protected-backup-root.test.mjs",
+        "test/protected-backup-root-sealed-registration.test.mjs",
+        "test/owned-host-recovery-configuration.test.mjs",
+        "test/local-runtime-recovery-composition.test.mjs",
+        "test/protected-root-recovery-provider.test.mjs",
+        "test/protected-root-original-interface.test.mjs",
+        "test/protected-backup-root-handoff.test.mjs",
+        "test/native-coding-recovery-root-phase.test.mjs",
+        "test/protected-root-main-deadline-transfer.test.mjs",
+        "test/local-runtime-host-terminal.test.mjs",
+        "test/local-runtime-host-controller.test.mjs",
+        "test/supervisor-device-identity-concurrency.test.mjs",
+        "test/host-owner-protected-identity-w74.test.mjs",
+        "test/host-owner-genesis-custody-w74.test.mjs",
+        "test/native-coding-setup-owner-main.test.mjs",
+        "test/native-coding-main-prepared-composition.test.mjs",
+        "test/startup-independence-diagnostic.test.mjs",
+        "test/native-supervisor-initialization-lifetime.test.mjs",
+        "test/native-tools-main-host-composition.test.mjs",
+        "../../infra/client-state-runtime/protected-root-gate-interface.test.mjs",
+        "../../infra/client-state-runtime/upgrade-backup-gate.test.mjs",
+        "../../infra/client-state-runtime/upgrade-backup-restore-gate.test.mjs",
+        "../../infra/client-state-runtime/native-coding-recovery-root-provider.production-negative.test.mjs"
+      ],
+      "exit_code": 0,
+      "tests": 397,
+      "pass": 397,
+      "fail": 0,
+      "skip": 0,
+      "log": "focused-tests.log"
+    },
+    {
+      "cwd": "apps/metaengine-browser",
+      "argv": [
+        "node",
+        "scripts/run-isolated-tests.mjs",
+        "--test-concurrency=1",
+        "test/host-private-custody-w76.test.mjs"
+      ],
+      "exit_code": 0,
+      "tests": 7,
+      "pass": 7,
+      "fail": 0,
+      "skip": 0,
+      "log": "w76-tests.log"
+    },
+    {
+      "cwd": "apps/metaengine-browser",
+      "argv": [
+        "node",
+        "scripts/check-source.mjs"
+      ],
+      "exit_code": 0,
+      "source_checks": 295,
+      "log": "source-check.log"
+    },
+    {
+      "cwd": "infra/client-state-runtime",
+      "argv": [
+        "node",
+        "--test",
+        "--test-concurrency=1",
+        "package-runtime-resources.test.mjs"
+      ],
+      "exit_code": 1,
+      "tests": 19,
+      "pass": 1,
+      "fail": 18,
+      "skip": 0,
+      "status": "BLOCKED_FIXTURE_DEPENDENCY_ABSENT",
+      "reason": "ENOENT: infra/client-state-runtime/node_modules/postgres/ (postgres@3.4.7)",
+      "log": "package-tests-blocked.log"
+    }
+  ],
+  "patch_application": "patch-application.json",
+  "static_closure": "static-source-closure.json",
+  "native_windows": "NOT_RUN",
+  "postgresql_integration": "NOT_RUN",
+  "installation": "NOT_PERFORMED",
+  "database_access": "NONE",
+  "trust_root_change": "NONE"
+}

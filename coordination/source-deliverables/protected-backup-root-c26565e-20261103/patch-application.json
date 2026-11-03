@@ -1,0 +1,7 @@
+{
+  "base_tree": "2dbe253e97379532f6f4b52ef7edf26109a9266d",
+  "patch_check": "PASS",
+  "patch_apply": "PASS",
+  "result_tree": "b6c5977b519c9332158af1d5b7de295fa452c1e6",
+  "fresh_archive_extraction": true
+}
