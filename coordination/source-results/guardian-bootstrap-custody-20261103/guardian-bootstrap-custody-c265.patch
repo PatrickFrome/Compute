@@ -1,0 +1,702 @@
+diff --git a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis-origin.inc.hpp b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis-origin.inc.hpp
+index 380413a..3d3f7b3 100644
+--- a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis-origin.inc.hpp
++++ b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis-origin.inc.hpp
+@@ -2,7 +2,7 @@
+ // metaengine::guardian. Existing identity observation alone never reaches a
+ // machine write: the original fixed W77 package is required independently.
+ bool GuardianInstallOriginLink::requestVerifiedGenesisElevation() {
+-    HANDLE created = nullptr;
++    Handle original_bootstrap;
+     {
+         std::lock_guard<std::mutex> lock(state_->mutex);
+         if (!state_->is_coordinator || state_->attempted || !state_->active() || !state_->origin ||
+@@ -43,14 +43,20 @@ bool GuardianInstallOriginLink::requestVerifiedGenesisElevation() {
+         state_->genesis_elevation_attempted = true;
+         if (!ShellExecuteExW(&effect) || !effect.hProcess)
+             return state_->fail("GENESIS_ORIGINAL_ELEVATION_NOT_CONFIRMED");
+-        created = effect.hProcess;
++        original_bootstrap.reset(effect.hProcess);
++        if (!state_->active() || !state_->origin->recheck() || !state_->coordinator_payload.recheck() ||
++            !state_->genesis_package->recheck() ||
++            !GuardianActivePolicyGenesis::originalCoordinatorBootstrapExact(*state_->genesis_package, original_bootstrap.value) ||
++            GetTickCount64() >= state_->genesis_deadline)
++            return state_->fail("GENESIS_ORIGINAL_CREATED_BOOTSTRAP_PACKAGE_UNPROVEN", ERROR_ACCESS_DENIED);
+     }
+-    Handle original_bootstrap(created);
+     // The original creator passes its actual hProcess, not the command's PID.
+     if (!connectOriginalBootstrap(original_bootstrap.value)) return false;
+     std::lock_guard<std::mutex> lock(state_->mutex);
+     if (!state_->active() || !state_->kernel_bound || !state_->genesis_package ||
+-        !state_->genesis_package->recheck() || !state_->bootstrapExact(state_->client_pipe.value) ||
++        !state_->genesis_package->recheck() ||
++        !GuardianActivePolicyGenesis::originalCoordinatorBootstrapExact(*state_->genesis_package, original_bootstrap.value) ||
++        !state_->bootstrapExact(state_->client_pipe.value) ||
+         GetTickCount64() >= state_->genesis_deadline)
+         return state_->fail("GENESIS_ORIGINAL_POST_ELEVATION_SCOPE_LOST", ERROR_TIMEOUT);
+     auto frame = active_policy::genesisOriginWindow(state_->genesis_deadline, state_->challenge);
+diff --git a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis.cpp b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis.cpp
+index c35b696..0f343e3 100644
+--- a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis.cpp
++++ b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis.cpp
+@@ -66,6 +66,20 @@ std::unique_ptr<GuardianActivePolicyPackage> GuardianActivePolicyGenesis::qualif
+     } catch (...) { return reject("GENESIS_COORDINATOR_QUALIFICATION_UNAVAILABLE"); }
+ }
+ 
++bool GuardianActivePolicyGenesis::originalCoordinatorBootstrapExact(
++    GuardianActivePolicyPackage& package, HANDLE original_created_bootstrap) noexcept {
++    try {
++        if (!original_created_bootstrap || original_created_bootstrap == INVALID_HANDLE_VALUE ||
++            WaitForSingleObject(original_created_bootstrap, 0) != WAIT_TIMEOUT || !package.recheck() ||
++            package.capsule().selection.policy.generation != 1) return false;
++        // Match the ORIGINAL runas process to the same retained W77 package,
++        // not merely to an image path first observed after process creation.
++        return package.originalImageExact(original_created_bootstrap,
++            active_policy_genesis_detail::relative(package.capsule().selection, true)) &&
++            package.recheck() && WaitForSingleObject(original_created_bootstrap, 0) == WAIT_TIMEOUT;
++    } catch (...) { return false; }
++}
++
+ std::unique_ptr<GuardianActivePolicyGenesis> GuardianActivePolicyGenesis::captureOriginalBootstrap(
+     HANDLE coordinator, HANDLE primary, HANDLE bootstrap, HANDLE cancel,
+     std::uint64_t deadline, std::string* failure) {
+diff --git a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis.hpp b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis.hpp
+index 5575e9f..29a9fa3 100644
+--- a/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis.hpp
++++ b/apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-active-policy-genesis.hpp
+@@ -43,6 +43,8 @@ private:
+     static std::unique_ptr<GuardianActivePolicyPackage> qualifyOriginalCoordinator(
+         HANDLE original_coordinator, HANDLE original_primary, HANDLE original_cancel,
+         std::uint64_t original_deadline, std::wstring* fixed_bootstrap_path, std::string* failure);
++    static bool originalCoordinatorBootstrapExact(
++        GuardianActivePolicyPackage&, HANDLE original_created_bootstrap) noexcept;
+     HANDLE originalInstallProcess() const noexcept;
+     HANDLE originalInstallPrimary() const noexcept;
+     struct State;
+diff --git a/apps/metaengine-browser/src/browser-guardian-machine-bootstrap-launcher.mjs b/apps/metaengine-browser/src/browser-guardian-machine-bootstrap-launcher.mjs
+index 93444c4..9977355 100644
+--- a/apps/metaengine-browser/src/browser-guardian-machine-bootstrap-launcher.mjs
++++ b/apps/metaengine-browser/src/browser-guardian-machine-bootstrap-launcher.mjs
+@@ -230,15 +230,9 @@ export function createBrowserGuardianMachineBootstrapLauncher({
+   resourcesPath = '',
+   version = '',
+   identity,
+-  openPath,
+   bindingLoader = loadPackagedGuardianMachineBootstrapBinding,
+   trustRootLoader = loadPackagedEmergencyMaintenanceTrustRoot,
+   actuatorFactory = null,
+-  launchTimeoutMs = 60_000,
+-  readbackTimeoutMs = 30_000,
+-  pollIntervalMs = 300,
+-  now = () => Date.now(),
+-  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+ } = {}) {
+   if (!identity
+       || typeof identity.randomNonce !== 'function'
+@@ -246,14 +240,8 @@ export function createBrowserGuardianMachineBootstrapLauncher({
+       || typeof identity.guardianUpdateActuatorProof !== 'function') {
+     throw new Error('guardian_machine_bootstrap_identity_required');
+   }
+-  if (typeof openPath !== 'function') throw new Error('guardian_machine_bootstrap_open_path_required');
+   if (bindingLoader != null && typeof bindingLoader !== 'function') throw new Error('guardian_machine_bootstrap_binding_loader_invalid');
+   if (trustRootLoader != null && typeof trustRootLoader !== 'function') throw new Error('guardian_machine_bootstrap_trust_root_loader_invalid');
+-  if (!Number.isSafeInteger(launchTimeoutMs) || launchTimeoutMs < 1 || launchTimeoutMs > 120_000) {
+-    throw new Error('guardian_machine_bootstrap_launch_timeout_invalid');
+-  }
+-  const timeout = Math.max(2_000, Math.min(60_000, Number(readbackTimeoutMs) || 30_000));
+-  const poll = Math.max(100, Math.min(2_000, Number(pollIntervalMs) || 300));
+   let inFlight = null;
+ 
+   function prepared() {
+@@ -372,55 +360,20 @@ export function createBrowserGuardianMachineBootstrapLauncher({
+         return state('HOLD', 'GUARDIAN_ACTIVATION_PRECONDITION_INVALID');
+       }
+ 
+-      let openError;
+-      let launchTimer;
+-      try {
+-        // A stalled/lost OS acknowledgement cannot hold IPC forever or prove
+-        // that elevation never happened. A late completion is not a retry.
+-        openError = await Promise.race([
+-          Promise.resolve().then(() => openPath(p.executable.executable)),
+-          new Promise((_, reject) => {
+-            launchTimer = setTimeout(() => reject(new Error('guardian_bootstrap_uac_launch_deadline')), launchTimeoutMs);
+-          }),
+-        ]);
+-      } catch (error) {
+-        return state('AMBIGUOUS', 'GUARDIAN_BOOTSTRAP_UAC_LAUNCH_OUTCOME_UNKNOWN', {
+-          source_head: p.binding.source_head,
+-          package_version: p.binding.package_version,
+-          error: String(error?.message || error).slice(0, 240),
+-          uac_launch_requested: true,
+-          physical_effect_outcome: 'UNPROVEN',
+-        });
+-      } finally {
+-        clearTimeout(launchTimer);
+-      }
+-      if (String(openError || '')) {
+-        return state('HOLD', 'GUARDIAN_BOOTSTRAP_UAC_LAUNCH_REJECTED', {
+-          source_head: p.binding.source_head,
+-          package_version: p.binding.package_version,
+-          error: String(openError).slice(0, 240),
+-          uac_launch_requested: true,
+-          physical_effect_outcome: 'UNPROVEN',
+-        });
+-      }
+-
+-      const deadline = now() + timeout;
+-      while (now() < deadline) {
+-        await sleep(poll);
+-        const observed = await observePrepared(p);
+-        if (observed.state === 'ACTIVATION_REQUIRED') continue;
+-        if (observed.state === 'OWNER_ENROLLMENT_REQUIRED') {
+-          const bound = await ensureOwner(p);
+-          return freeze({ ...bound, uac_launch_requested: true });
+-        }
+-        return freeze({ ...observed, uac_launch_requested: true });
+-      }
+-      return state('HOLD', 'GUARDIAN_BOOTSTRAP_READBACK_TIMEOUT', {
++      // A package digest carries neither existing native W77 authority nor
++      // a retained file handle. The file can change while service observation
++      // is pending; openPath would resolve that mutable path later.
++      // Only the original native install-origin scope may compose retained
++      // signed package custody with its fixed elevation operation. No such
++      // private handoff is available to this launcher; fail before any effect.
++      return state('HOLD', 'GUARDIAN_BOOTSTRAP_NATIVE_CUSTODY_REQUIRED', {
+         source_head: p.binding.source_head,
+         package_version: p.binding.package_version,
+         guardian_service_ready: false,
+-        uac_launch_requested: true,
+-        physical_effect_outcome: 'UNPROVEN',
++        uac_consent_required: false,
++        uac_launch_requested: false,
++        original_file_launch_binding_proven: false,
++        physical_effect_outcome: 'NOT_ATTEMPTED',
+       });
+     })().finally(() => { inFlight = null; });
+     return inFlight;
+@@ -441,7 +394,9 @@ export function browserGuardianMachineBootstrapLauncherContract() {
+     exact_sha256_and_size_required: true,
+     symlink_rejected: true,
+     windows_uac_manifest_required: true,
+-    open_path_only: true,
++    open_path_only: false,
++    authenticated_native_bootstrap_dispatch_required: true,
++    digest_observation_authorizes_launch: false,
+     read_only_service_polling_allowed: true,
+     pipe_activation_requires_preconnect_os_enoent: true,
+     pipe_timeout_or_disconnect_proves_absence: false,
+@@ -449,7 +404,7 @@ export function browserGuardianMachineBootstrapLauncherContract() {
+     authenticated_local_owner_bridge_required: true,
+     automatic_effect_retry_allowed: false,
+     ambiguous_owner_enrollment_retry_allowed: false,
+-    bounded_uac_acknowledgement_required: true,
++    bounded_uac_acknowledgement_required: false,
+     lost_uac_acknowledgement_proves_no_effect: false,
+     authority_effect: false,
+   });
+diff --git a/apps/metaengine-browser/src/main.mjs b/apps/metaengine-browser/src/main.mjs
+index 83f5796..339d938 100644
+--- a/apps/metaengine-browser/src/main.mjs
++++ b/apps/metaengine-browser/src/main.mjs
+@@ -2708,7 +2708,6 @@ function ensureGuardianBootstrapLauncher() {
+       resourcesPath: process.resourcesPath,
+       version: app.getVersion(),
+       identity: ensureSupervisorIdentity(),
+-      openPath: (fixedExecutable) => shell.openPath(fixedExecutable),
+     });
+     // Private in-process hook; no field exposed on identity snapshot/status.
+     ensureSupervisorIdentity().bindGuardianOwnerEvidenceW67(guardianBootstrapLauncher);
+diff --git a/apps/metaengine-browser/test/browser-guardian-machine-bootstrap-launcher.test.mjs b/apps/metaengine-browser/test/browser-guardian-machine-bootstrap-launcher.test.mjs
+index aee30d4..005f11c 100644
+--- a/apps/metaengine-browser/test/browser-guardian-machine-bootstrap-launcher.test.mjs
++++ b/apps/metaengine-browser/test/browser-guardian-machine-bootstrap-launcher.test.mjs
+@@ -56,6 +56,22 @@ async function fixture(t) {
+   return { root, dir, bytes, binding: b, exe };
+ }
+ 
++function missingGuardian() {
++  return Object.assign(new Error('guardian_update_actuator_pipe_error:ENOENT'), {
++    code: 'GUARDIAN_PIPE_NOT_FOUND',
++  });
++}
++
++function assertNativeCustodyHold(result) {
++  assert.equal(result.state, 'HOLD');
++  assert.equal(result.reason, 'GUARDIAN_BOOTSTRAP_NATIVE_CUSTODY_REQUIRED');
++  assert.equal(result.ready, false);
++  assert.equal(result.uac_launch_requested, false);
++  assert.equal(result.original_file_launch_binding_proven, false);
++  assert.equal(result.physical_effect_outcome, 'NOT_ATTEMPTED');
++  assert.equal(result.automatic_retry_allowed, false);
++}
++
+ test('protected binding accepts only exact build/version/name/bytes contract', () => {
+   const bytes = Buffer.alloc(80 * 1024, 1);
+   const exact = validateGuardianMachineBootstrapBinding(binding(bytes), {
+@@ -74,7 +90,7 @@ test('protected binding accepts only exact build/version/name/bytes contract', (
+   }), /contract_invalid/);
+ });
+ 
+-test('packaged executable must match protected digest/size and reject symlink substitution', async (t) => {
++test('packaged executable must match protected digest and size', async (t) => {
+   const fx = await fixture(t);
+   const verified = verifyPackagedGuardianBootstrapExecutable({
+     binding: fx.binding, resourcesPath: fx.root, expectedBuildSha: HEAD, expectedVersion: VERSION,
+@@ -136,43 +152,104 @@ test('pre-existing Guardian with missing owner binds approved device without lau
+   assert.equal(ensureCount, 1);
+ });
+ 
+-test('UAC launch is fixed-path and READY requires independent Guardian readback plus owner binding', async (t) => {
++test('unchanged packaged bootstrap requires native custody before any OS launch or polling', async (t) => {
+   const fx = await fixture(t);
+-  let openPathSeen = null;
++  let opens = 0;
+   let observes = 0;
+   let ensures = 0;
+-  let clock = 1_000;
+   const launcher = createBrowserGuardianMachineBootstrapLauncher({
+     platform: 'win32', isPackaged: true, resourcesPath: fx.root, version: VERSION,
+     identity: identity(),
+-    openPath: async (value) => { openPathSeen = value; return ''; },
++    openPath: async () => { opens += 1; return ''; },
+     trustRootLoader: () => ({ build_sha: HEAD }),
+     bindingLoader: () => fx.binding,
+-    now: () => clock,
+-    sleep: async (ms) => { clock += ms; },
+-    pollIntervalMs: 100,
+     actuatorFactory: () => ({
+       observeOwner: async () => {
+         observes += 1;
+-        if (observes < 3) throw Object.assign(new Error('guardian_update_actuator_pipe_error:ENOENT'), { code: 'GUARDIAN_PIPE_NOT_FOUND' });
+-        return { state: 'NO_EFFECT_PROVEN', reason: 'OWNER_ENROLLMENT_TICKET_REQUIRED', effect_absent_proven: true };
++        throw missingGuardian();
+       },
+       ensureOwnerBound: async () => {
+         ensures += 1;
+-        return {
+-          state: 'OWNER_BOUND', reason: 'DURABLE_OWNER_AND_DEVICE_CHALLENGE_EXACT',
+-          owner_binding_proven: true, device_binding_proven: true, effect_absent_proven: true,
+-          device_key_fingerprint_sha256: FP,
+-        };
++        throw new Error('must_not_enroll');
+       },
+     }),
+   });
+   const result = await launcher.activate();
+-  assert.equal(openPathSeen, fx.exe);
+-  assert.equal(result.state, 'READY');
+-  assert.equal(result.uac_launch_requested, true);
+-  assert.equal(ensures, 1);
+-  assert.ok(observes >= 3);
++  assertNativeCustodyHold(result);
++  assert.equal(opens, 0);
++  assert.equal(observes, 1);
++  assert.equal(ensures, 0);
++});
++
++for (const scenario of [
++  {
++    name: 'same-size byte tampering',
++    replace: (fx) => fs.writeFile(fx.exe, Buffer.alloc(fx.bytes.length, 9)),
++  },
++  {
++    name: 'pathname replacement',
++    replace: async (fx) => {
++      await fs.rename(fx.exe, `${fx.exe}.verified-original`);
++      await fs.writeFile(fx.exe, Buffer.alloc(fx.bytes.length, 9));
++    },
++  },
++]) {
++  test(`${scenario.name} during Guardian observation cannot reach an OS launch callback`, async (t) => {
++    const fx = await fixture(t);
++    let opens = 0;
++    let observes = 0;
++    const launcher = createBrowserGuardianMachineBootstrapLauncher({
++      platform: 'win32', isPackaged: true, resourcesPath: fx.root, version: VERSION,
++      identity: identity(),
++      openPath: async () => { opens += 1; return ''; },
++      trustRootLoader: () => ({ build_sha: HEAD }), bindingLoader: () => fx.binding,
++      actuatorFactory: () => ({
++        observeOwner: async () => {
++          observes += 1;
++          await scenario.replace(fx);
++          throw missingGuardian();
++        },
++      }),
++    });
++    const result = await launcher.activate();
++    assertNativeCustodyHold(result);
++    assert.equal(opens, 0);
++    assert.equal(observes, 1);
++    assert.notEqual(crypto.createHash('sha256').update(await fs.readFile(fx.exe)).digest('hex'), fx.binding.bootstrap_sha256);
++  });
++}
++
++test('verified digest and fabricated launch or subsequent readback JSON do not provide native custody', async (t) => {
++  const fx = await fixture(t);
++  let opens = 0;
++  let observes = 0;
++  let ensures = 0;
++  const fabricated = {
++    state: 'OWNER_BOUND', owner_binding_proven: true, device_binding_proven: true,
++    original_file_launch_binding_proven: true, native_custody_verified: true,
++    installer_sha256: fx.binding.bootstrap_sha256,
++    device_key_fingerprint_sha256: FP,
++  };
++  const launcher = createBrowserGuardianMachineBootstrapLauncher({
++    platform: 'win32', isPackaged: true, resourcesPath: fx.root, version: VERSION,
++    identity: identity(),
++    openPath: async () => { opens += 1; return JSON.stringify(fabricated); },
++    trustRootLoader: () => ({ build_sha: HEAD }),
++    bindingLoader: () => ({ ...fx.binding, ...fabricated }),
++    actuatorFactory: () => ({
++      observeOwner: async () => {
++        observes += 1;
++        if (observes === 1) throw missingGuardian();
++        return fabricated;
++      },
++      ensureOwnerBound: async () => { ensures += 1; return fabricated; },
++    }),
++  });
++  const result = await launcher.activate();
++  assertNativeCustodyHold(result);
++  assert.equal(opens, 0);
++  assert.equal(observes, 1);
++  assert.equal(ensures, 0);
+ });
+ 
+ test('ambiguous owner enrollment is terminal for this activation and is never auto-retried', async (t) => {
+@@ -217,37 +294,30 @@ test('tampered packaged bootstrap holds before UAC', async (t) => {
+   assert.equal(openCount, 0);
+ });
+ 
+-for (const scenario of [
+-  { name: 'lost OS launch response', open: () => { throw new Error('response lost after dispatch'); }, state: 'AMBIGUOUS' },
+-  { name: 'stalled OS launch response', open: () => new Promise(() => {}), state: 'AMBIGUOUS' },
+-  { name: 'opaque OS failure message', open: () => 'The operation failed', state: 'HOLD' },
+-]) {
+-  test(`${scenario.name} is bounded and cannot prove physical effect absence or cause retries`, async (t) => {
+-    const fx = await fixture(t);
+-    let launches = 0;
+-    let enrollments = 0;
+-    const launcher = createBrowserGuardianMachineBootstrapLauncher({
+-      platform: 'win32', isPackaged: true, resourcesPath: fx.root, version: VERSION,
+-      identity: identity(),
+-      launchTimeoutMs: 20,
+-      openPath: () => { launches += 1; return scenario.open(); },
+-      trustRootLoader: () => ({ build_sha: HEAD }), bindingLoader: () => fx.binding,
+-      actuatorFactory: () => ({
+-        observeOwner: async () => { throw Object.assign(new Error('guardian_update_actuator_pipe_error:ENOENT'), { code: 'GUARDIAN_PIPE_NOT_FOUND' }); },
+-        ensureOwnerBound: async () => { enrollments += 1; throw new Error('must_not_enroll'); },
+-      }),
+-    });
+-    const results = await Promise.all([launcher.activate(), launcher.activate()]);
+-    for (const result of results) {
+-      assert.equal(result.state, scenario.state);
+-      assert.equal(result.physical_effect_outcome, 'UNPROVEN');
+-      assert.equal(result.ready, false);
+-      assert.equal(result.automatic_retry_allowed, false);
+-    }
+-    assert.equal(launches, 1);
+-    assert.equal(enrollments, 0);
++test('repeated and concurrent activation remain HOLD without OS callbacks or enrollment', async (t) => {
++  const fx = await fixture(t);
++  let launches = 0;
++  let observations = 0;
++  let enrollments = 0;
++  const launcher = createBrowserGuardianMachineBootstrapLauncher({
++    platform: 'win32', isPackaged: true, resourcesPath: fx.root, version: VERSION,
++    identity: identity(),
++    openPath: () => { launches += 1; throw new Error('must_not_launch'); },
++    trustRootLoader: () => ({ build_sha: HEAD }), bindingLoader: () => fx.binding,
++    actuatorFactory: () => ({
++      observeOwner: async () => { observations += 1; throw missingGuardian(); },
++      ensureOwnerBound: async () => { enrollments += 1; throw new Error('must_not_enroll'); },
++    }),
+   });
+-}
++  const concurrent = await Promise.all([launcher.activate(), launcher.activate(), launcher.activate()]);
++  for (const result of concurrent) assertNativeCustodyHold(result);
++  assert.equal(observations, 1);
++  assertNativeCustodyHold(await launcher.activate());
++  for (const result of await Promise.all([launcher.activate(), launcher.activate()])) assertNativeCustodyHold(result);
++  assert.equal(observations, 3);
++  assert.equal(launches, 0);
++  assert.equal(enrollments, 0);
++});
+ 
+ test('launcher contract exposes no renderer path/args and no startup elevation or retry', () => {
+   const contract = browserGuardianMachineBootstrapLauncherContract();
+@@ -257,11 +327,14 @@ test('launcher contract exposes no renderer path/args and no startup elevation o
+   assert.equal(contract.renderer_supplied_arguments_allowed, false);
+   assert.equal(contract.packaged_asar_binding_required, true);
+   assert.equal(contract.exact_sha256_and_size_required, true);
++  assert.equal(contract.open_path_only, false);
++  assert.equal(contract.authenticated_native_bootstrap_dispatch_required, true);
++  assert.equal(contract.digest_observation_authorizes_launch, false);
+   assert.equal(contract.single_owner_enrollment_attempt_after_service_readback, false);
+   assert.equal(contract.authenticated_local_owner_bridge_required, true);
+   assert.equal(contract.automatic_effect_retry_allowed, false);
+   assert.equal(contract.ambiguous_owner_enrollment_retry_allowed, false);
+-  assert.equal(contract.bounded_uac_acknowledgement_required, true);
++  assert.equal(contract.bounded_uac_acknowledgement_required, false);
+   assert.equal(contract.lost_uac_acknowledgement_proves_no_effect, false);
+ });
+ 
+diff --git a/apps/metaengine-browser/test/native/verify-guardian-genesis-launch-binding-model.py b/apps/metaengine-browser/test/native/verify-guardian-genesis-launch-binding-model.py
+new file mode 100644
+index 0000000..73f37e6
+--- /dev/null
++++ b/apps/metaengine-browser/test/native/verify-guardian-genesis-launch-binding-model.py
+@@ -0,0 +1,250 @@
++#!/usr/bin/env python3
++"""Compile the actual Genesis process/package predicate against synthetic data.
++
++This is a source-extracted synthetic model plus production ordering guards.
++It does not run Windows APIs, UAC, an installer, signatures or machine effects.
++The positive model case is NOT Windows qualification or release authority.
++"""
++from pathlib import Path
++import argparse
++import json
++import os
++import shutil
++import subprocess
++import tempfile
++
++
++def segment(text, start, end):
++    begin = text.index(start)
++    return text[begin:text.index(end, begin)]
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--sanitize', action='store_true')
++    args = parser.parse_args()
++    native = Path(__file__).resolve().parents[2] / 'native/browser-guardian-scm'
++    source = (native / 'browser-guardian-active-policy-genesis.cpp').read_text()
++    header = (native / 'browser-guardian-active-policy-genesis.hpp').read_text()
++    package_header = (native / 'browser-guardian-active-policy-activation-package.hpp').read_text()
++    origin = (native / 'browser-guardian-active-policy-genesis-origin.inc.hpp').read_text()
++    relative = segment(source, 'std::wstring relative(', 'bool signedWindow(')
++    predicate = segment(source, 'bool GuardianActivePolicyGenesis::originalCoordinatorBootstrapExact(',
++                        'std::unique_ptr<GuardianActivePolicyGenesis> GuardianActivePolicyGenesis::captureOriginalBootstrap(')
++    request = segment(origin, 'bool GuardianInstallOriginLink::requestVerifiedGenesisElevation()',
++                      'std::unique_ptr<GuardianActivePolicyGenesis> GuardianInstallOriginLink::captureOriginalGenesis(')
++    call = 'GuardianActivePolicyGenesis::originalCoordinatorBootstrapExact(*state_->genesis_package, original_bootstrap.value)'
++    created = request.index('ShellExecuteExW(&effect)')
++    retained = request.index('original_bootstrap.reset(effect.hProcess);')
++    first = request.index(call)
++    connect = request.index('connectOriginalBootstrap(original_bootstrap.value)')
++    second = request.index(call, first + len(call))
++    frame = request.index('auto frame = active_policy::genesisOriginWindow(')
++    packet = request.index('state_->packet(state_->client_pipe.value, &frame, true)')
++    declaration = header.index('static bool originalCoordinatorBootstrapExact(')
++    checks = {
++        'predicate_is_private_no_package_friend_added':
++            header.index('private:') < declaration < header.index('struct State;')
++            and 'friend class GuardianInstallOriginLink;' in header
++            and 'friend class GuardianInstallOriginLink;' not in package_header,
++        'predicate_is_noexcept_and_refuses_exceptions':
++            ') noexcept {' in predicate and 'catch (...) { return false; }' in predicate,
++        'predicate_has_no_process_reselection_or_launch':
++            all(token not in predicate for token in ('OpenProcess(', 'GetProcessId(', 'CreateProcess', 'ShellExecute')),
++        'predicate_binds_fixed_bootstrap_purpose':
++            'active_policy_genesis_detail::relative(package.capsule().selection, true)' in predicate,
++        'generation_and_live_fences_surround_original_image_check':
++            predicate.index('WaitForSingleObject(') < predicate.index('!package.recheck()')
++            < predicate.index('policy.generation != 1') < predicate.index('package.originalImageExact(')
++            < predicate.rindex('package.recheck()') < predicate.rindex('WaitForSingleObject('),
++        'actual_created_handle_bound_before_connect_and_window_packet':
++            created < retained < first < connect < second < frame < packet
++            and request.count(call) == 2 and request.count('ShellExecuteExW(&effect)') == 1,
++        'first_binding_is_inside_original_creation_lock':
++            request.index('std::lock_guard<std::mutex> lock(state_->mutex);') < first
++            < request.index('\n    }\n    // The original creator'),
++        'second_binding_is_inside_postconnect_lock':
++            connect < request.index('std::lock_guard<std::mutex> lock(state_->mutex);', connect) < second,
++        'scope_package_and_original_handle_remain_retained':
++            'Handle original_bootstrap;' in request
++            and '!state_->origin->recheck() || !state_->coordinator_payload.recheck()' in request[retained:first]
++            and '!state_->genesis_package->recheck()' in request[retained:first]
++            and '!state_->genesis_package->recheck()' in request[connect:second],
++        'elevated_consumer_keeps_its_independent_signed_image_check':
++            's.package->originalImageExact(bootstrap, active_policy_genesis_detail::relative(s.package->capsule().selection, true))' in source,
++    }
++    if not all(checks.values()):
++        raise RuntimeError('source guards failed: ' + ', '.join(name for name, okay in checks.items() if not okay))
++
++    harness = r'''
++#include <cstdint>
++#include <functional>
++#include <iostream>
++#include <stdexcept>
++#include <string>
++#include <utility>
++#include <vector>
++
++using DWORD = std::uint32_t;
++constexpr DWORD WAIT_TIMEOUT = 258, WAIT_OBJECT_0 = 0, WAIT_FAILED = 0xffffffff;
++struct ModelProcess {
++    std::vector<DWORD> waits{WAIT_TIMEOUT, WAIT_TIMEOUT};
++    std::size_t calls = 0, throw_on = 0;
++};
++using HANDLE = ModelProcess*;
++ModelProcess invalid_process;
++const HANDLE INVALID_HANDLE_VALUE = &invalid_process;
++DWORD WaitForSingleObject(HANDLE process, DWORD timeout) {
++    if (!process || process == INVALID_HANDLE_VALUE || timeout != 0) throw std::runtime_error("invalid wait");
++    ++process->calls;
++    if (process->throw_on == process->calls) throw std::runtime_error("wait failure");
++    return process->waits.at(process->calls - 1);
++}
++
++namespace metaengine::guardian {
++namespace active_policy {
++struct Policy { unsigned generation = 1; std::string target_package_version = "0.7.0-dev.123.1"; };
++struct PolicySelection { Policy policy; };
++}
++struct ModelCapsule { active_policy::PolicySelection selection; };
++class GuardianActivePolicyPackage {
++public:
++    ModelCapsule data;
++    HANDLE expected_process = nullptr;
++    std::wstring expected_relative = L"resources\\guardian-bootstrap\\METAENGINE-Guardian-Bootstrap-0.7.0-dev.123.1-x64.exe";
++    std::wstring observed_relative;
++    unsigned rechecks = 0, fail_recheck = 0, throw_recheck = 0, capsule_reads = 0, throw_capsule = 0, image_checks = 0;
++    bool image_exact = true, throw_image = false;
++    bool recheck() {
++        ++rechecks;
++        if (throw_recheck == rechecks) throw std::runtime_error("recheck failure");
++        return fail_recheck != rechecks;
++    }
++    const ModelCapsule& capsule() {
++        if (++capsule_reads == throw_capsule) throw std::runtime_error("capsule failure");
++        return data;
++    }
++    bool originalImageExact(HANDLE process, const std::wstring& relative) {
++        ++image_checks;
++        observed_relative = relative;
++        if (throw_image) throw std::runtime_error("image failure");
++        return image_exact && process == expected_process && relative == expected_relative;
++    }
++};
++struct GenesisModelProbe;
++class GuardianActivePolicyGenesis {
++    static bool originalCoordinatorBootstrapExact(GuardianActivePolicyPackage&, HANDLE) noexcept;
++    friend struct GenesisModelProbe;
++};
++namespace active_policy_genesis_detail {
++// The exact production path constructor follows, without test replacement.
++__RELATIVE__
++}
++// The exact production predicate follows, without test replacement.
++__PREDICATE__
++struct GenesisModelProbe {
++    static bool run(GuardianActivePolicyPackage& package, HANDLE process) {
++        return GuardianActivePolicyGenesis::originalCoordinatorBootstrapExact(package, process);
++    }
++};
++}
++
++int main() {
++    using namespace metaengine::guardian;
++    std::vector<std::string> passed;
++    auto require = [](bool condition, const std::string& name) {
++        if (!condition) throw std::runtime_error(name);
++    };
++    auto test = [&](const std::string& name, bool expected,
++                    const std::function<void(GuardianActivePolicyPackage&, ModelProcess&)>& prepare) {
++        GuardianActivePolicyPackage package;
++        ModelProcess process;
++        package.expected_process = &process;
++        prepare(package, process);
++        require(GenesisModelProbe::run(package, &process) == expected, name);
++        passed.push_back(name);
++    };
++    {
++        GuardianActivePolicyPackage package;
++        ModelProcess process;
++        package.expected_process = &process;
++        require(GenesisModelProbe::run(package, &process), "same_original_generation1_bootstrap_model");
++        require(package.rechecks == 2 && process.calls == 2 && package.image_checks == 1 &&
++            package.observed_relative == package.expected_relative, "positive_model_required_fences");
++        passed.push_back("same_original_generation1_bootstrap_model_NOT_WINDOWS_PROOF");
++    }
++    for (HANDLE bad : {static_cast<HANDLE>(nullptr), INVALID_HANDLE_VALUE}) {
++        GuardianActivePolicyPackage package;
++        require(!GenesisModelProbe::run(package, bad) && package.rechecks == 0, "invalid_original_handle");
++    }
++    passed.push_back("null_and_invalid_original_handle_refuse");
++    {
++        GuardianActivePolicyPackage package;
++        ModelProcess original, wrong;
++        package.expected_process = &original;
++        require(!GenesisModelProbe::run(package, &wrong), "wrong_live_original_handle");
++        passed.push_back("wrong_live_original_handle_refuses");
++    }
++    test("wrong_image_refuses", false, [](auto& package, auto&) { package.image_exact = false; });
++    test("install_origin_purpose_cannot_substitute_bootstrap", false, [](auto& package, auto&) {
++        package.expected_relative = L"resources\\guardian-bootstrap\\METAENGINE-Guardian-Install-Origin-0.7.0-dev.123.1-x64.exe";
++    });
++    test("different_package_version_cannot_substitute_image", false, [](auto& package, auto&) {
++        package.data.selection.policy.target_package_version = "0.7.0-dev.124.1";
++    });
++    test("generation_zero_refuses", false, [](auto& package, auto&) { package.data.selection.policy.generation = 0; });
++    test("generation_two_refuses", false, [](auto& package, auto&) { package.data.selection.policy.generation = 2; });
++    test("first_package_recheck_failure_refuses", false, [](auto& package, auto&) { package.fail_recheck = 1; });
++    test("post_image_package_recheck_failure_refuses", false, [](auto& package, auto&) { package.fail_recheck = 2; });
++    test("exit_before_image_check_refuses", false, [](auto&, auto& process) { process.waits = {WAIT_OBJECT_0}; });
++    test("exit_after_image_check_refuses", false, [](auto&, auto& process) { process.waits = {WAIT_TIMEOUT, WAIT_OBJECT_0}; });
++    test("unknown_lifetime_before_image_check_refuses", false, [](auto&, auto& process) { process.waits = {WAIT_FAILED}; });
++    test("unknown_lifetime_after_image_check_refuses", false, [](auto&, auto& process) { process.waits = {WAIT_TIMEOUT, WAIT_FAILED}; });
++    test("first_package_recheck_throw_refuses", false, [](auto& package, auto&) { package.throw_recheck = 1; });
++    test("post_image_package_recheck_throw_refuses", false, [](auto& package, auto&) { package.throw_recheck = 2; });
++    test("first_capsule_throw_refuses", false, [](auto& package, auto&) { package.throw_capsule = 1; });
++    test("path_capsule_throw_refuses", false, [](auto& package, auto&) { package.throw_capsule = 2; });
++    test("image_check_throw_refuses", false, [](auto& package, auto&) { package.throw_image = true; });
++    test("first_lifetime_throw_refuses", false, [](auto&, auto& process) { process.throw_on = 1; });
++    test("post_image_lifetime_throw_refuses", false, [](auto&, auto& process) { process.throw_on = 2; });
++    std::cout << "{\"model_cases\":" << passed.size() << ",\"passed\":[";
++    for (std::size_t i = 0; i < passed.size(); ++i) std::cout << (i ? "," : "") << '"' << passed[i] << '"';
++    std::cout << "]}\n";
++}
++'''.replace('__RELATIVE__', relative).replace('__PREDICATE__', predicate)
++    compiler = shutil.which('c++') or shutil.which('g++')
++    if not compiler:
++        raise RuntimeError('C++ compiler unavailable; model NOT RUN')
++    with tempfile.TemporaryDirectory(prefix='guardian-genesis-launch-binding-') as directory:
++        directory = Path(directory)
++        model_source, model_binary = directory / 'model.cpp', directory / 'model'
++        model_source.write_text(harness)
++        command = [compiler, '-std=c++20', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g']
++        if args.sanitize:
++            command += ['-fsanitize=address,undefined', '-fno-omit-frame-pointer']
++        command += [str(model_source), '-o', str(model_binary)]
++        built = subprocess.run(command, text=True, capture_output=True, timeout=60)
++        if built.returncode:
++            raise RuntimeError('model compile failed:\n' + built.stdout + built.stderr)
++        environment = os.environ.copy()
++        if args.sanitize:
++            # LeakSanitizer /proc inspection is outside this model's scope.
++            environment['ASAN_OPTIONS'] = 'detect_leaks=0:halt_on_error=1'
++            environment['UBSAN_OPTIONS'] = 'halt_on_error=1:print_stacktrace=1'
++        run = subprocess.run([str(model_binary)], text=True, capture_output=True, env=environment, timeout=30)
++        if run.returncode:
++            raise RuntimeError('model execution failed:\n' + run.stdout + run.stderr)
++        model = json.loads(run.stdout)
++    print(json.dumps({
++        'schema': 'metaengine.guardian.genesis-launch-binding-model.v1',
++        'classification': 'SOURCE_EXTRACTED_SYNTHETIC_MODEL_ONLY',
++        'state': 'PASS', 'source_guards': checks, **model,
++        'address_undefined_sanitizers': 'PASS' if args.sanitize else 'NOT_RUN',
++        'leak_sanitizer': 'NOT_RUN', 'windows_qualification': 'NOT_RUN',
++        'release_signature_verification': 'NOT_RUN', 'installer_effects': 'NOT_RUN',
++        'authority_effect': False,
++    }, indent=2))
++
++
++if __name__ == '__main__':
++    main()

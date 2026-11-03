@@ -1,0 +1,149 @@
+[
+  {
+    "name": "bootstrap-regressions",
+    "command": [
+      "node",
+      "--test",
+      "apps/metaengine-browser/test/browser-guardian-machine-bootstrap-launcher.test.mjs",
+      "apps/metaengine-browser/test/browser-guardian-bootstrap-plan.test.mjs",
+      "apps/metaengine-browser/test/browser-guardian-machine-bootstrap-contract.test.mjs",
+      "apps/metaengine-browser/test/browser-guardian-original-install-user-native.test.mjs",
+      "apps/metaengine-browser/test/browser-guardian-install-origin-link-native.test.mjs",
+      "apps/metaengine-browser/test/browser-guardian-install-origin-wire.test.mjs"
+    ],
+    "cwd": "/workspace/metaengine-bootstrap-c265/extracted/Compute",
+    "exit": 0,
+    "log": "bootstrap-regressions.log"
+  },
+  {
+    "name": "genesis-launch-binding-model",
+    "command": [
+      "python3",
+      "apps/metaengine-browser/test/native/verify-guardian-genesis-launch-binding-model.py"
+    ],
+    "cwd": "/workspace/metaengine-bootstrap-c265/extracted/Compute",
+    "exit": 0,
+    "log": "genesis-launch-binding-model.log"
+  },
+  {
+    "name": "genesis-launch-binding-model-sanitize",
+    "command": [
+      "python3",
+      "apps/metaengine-browser/test/native/verify-guardian-genesis-launch-binding-model.py",
+      "--sanitize"
+    ],
+    "cwd": "/workspace/metaengine-bootstrap-c265/extracted/Compute",
+    "exit": 0,
+    "log": "genesis-launch-binding-model-sanitize.log"
+  },
+  {
+    "name": "original-main-launch-source",
+    "command": [
+      "python3",
+      "apps/metaengine-browser/test/native/verify-guardian-original-main-launch-source.py"
+    ],
+    "cwd": "/workspace/metaengine-bootstrap-c265/extracted/Compute",
+    "exit": 1,
+    "log": "original-main-launch-source.log"
+  },
+  {
+    "name": "main-begin-model",
+    "command": [
+      "python3",
+      "apps/metaengine-browser/test/native/verify-guardian-main-begin-model.py"
+    ],
+    "cwd": "/workspace/metaengine-bootstrap-c265/extracted/Compute",
+    "exit": 0,
+    "log": "main-begin-model.log"
+  },
+  {
+    "name": "main-begin-model-sanitize",
+    "command": [
+      "python3",
+      "apps/metaengine-browser/test/native/verify-guardian-main-begin-model.py",
+      "--sanitize"
+    ],
+    "cwd": "/workspace/metaengine-bootstrap-c265/extracted/Compute",
+    "exit": 0,
+    "log": "main-begin-model-sanitize.log"
+  },
+  {
+    "name": "main-owner-wait-model",
+    "command": [
+      "python3",
+      "apps/metaengine-browser/test/native/verify-guardian-main-owner-wait-model.py"
+    ],
+    "cwd": "/workspace/metaengine-bootstrap-c265/extracted/Compute",
+    "exit": 0,
+    "log": "main-owner-wait-model.log"
+  },
+  {
+    "name": "main-owner-wait-model-sanitize",
+    "command": [
+      "python3",
+      "apps/metaengine-browser/test/native/verify-guardian-main-owner-wait-model.py",
+      "--sanitize"
+    ],
+    "cwd": "/workspace/metaengine-bootstrap-c265/extracted/Compute",
+    "exit": 0,
+    "log": "main-owner-wait-model-sanitize.log"
+  },
+  {
+    "name": "requester-session-model",
+    "command": [
+      "python3",
+      "apps/metaengine-browser/test/native/verify-guardian-requester-session-model.py"
+    ],
+    "cwd": "/workspace/metaengine-bootstrap-c265/extracted/Compute",
+    "exit": 0,
+    "log": "requester-session-model.log"
+  },
+  {
+    "name": "requester-session-model-sanitize",
+    "command": [
+      "python3",
+      "apps/metaengine-browser/test/native/verify-guardian-requester-session-model.py",
+      "--sanitize"
+    ],
+    "cwd": "/workspace/metaengine-bootstrap-c265/extracted/Compute",
+    "exit": 0,
+    "log": "requester-session-model-sanitize.log"
+  },
+  {
+    "name": "main-protocol-enrollment",
+    "command": [
+      "node",
+      "--test",
+      "apps/metaengine-browser/test/browser-guardian-original-main-launch-protocol.test.mjs",
+      "apps/metaengine-browser/test/guardian-owner-loaded-read.test.mjs",
+      "apps/metaengine-browser/test/browser-guardian-native-ticket-enrollment-contract.test.mjs"
+    ],
+    "cwd": "/workspace/metaengine-bootstrap-c265/extracted/Compute",
+    "exit": 0,
+    "log": "main-protocol-enrollment.log"
+  },
+  {
+    "name": "client-check-source",
+    "command": [
+      "node",
+      "scripts/check-source.mjs"
+    ],
+    "cwd": "/workspace/metaengine-bootstrap-c265/extracted/Compute/apps/metaengine-browser",
+    "exit": 0,
+    "log": "client-check-source.log"
+  },
+  {
+    "name": "original-main-source",
+    "command": [
+      "python3",
+      "apps/metaengine-browser/test/native/verify-guardian-original-main-source.py",
+      "--repo",
+      "/workspace/metaengine-bootstrap-c265/extracted/Compute",
+      "--out",
+      "/workspace/metaengine-bootstrap-c265/evidence/final/main-source"
+    ],
+    "cwd": "/workspace/metaengine-bootstrap-c265/extracted/Compute",
+    "exit": 0,
+    "log": "original-main-source.log"
+  }
+]
