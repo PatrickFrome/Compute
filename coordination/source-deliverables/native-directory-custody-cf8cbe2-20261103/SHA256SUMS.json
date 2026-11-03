@@ -1,0 +1,16 @@
+{
+  "HOST_SERVICE_MOUNT.md": "3295a071fc39de8f9a5dfd042b2c7edbd601af51ef015e7981048b27f35559c9",
+  "REPORT.md": "2d459b6c81100682db01f8016ac95011adf0d5e6a901a43a6faaf082beb47aed",
+  "additional-launch-source-baseline.jsonl": "75d2ddb074700ba9a4a6d9b22ee95289cd85a74ee89d3c4276d447467ade9691",
+  "additional-launch-source-current.jsonl": "75d2ddb074700ba9a4a6d9b22ee95289cd85a74ee89d3c4276d447467ade9691",
+  "compatible-test-command.json": "f1dd4abaa4b840da4c530f52368814d61390209f0b7689b53fead36f78583f44",
+  "compatible-tests.log": "5cc6a13cf76b4e86b0b041458fd51700b4723d734d5db6197ece739333a69c17",
+  "fresh-patch-tests.log": "c7cb6719761f1241149ad2f3112d6cf735598e314220a323c19d4c20d2bc3821",
+  "native-mechanics-tests.log": "4a5ea08a5d5ec23a7cedd1b6159fe3bea56b3f182b38ba0566d4d28444c1b219",
+  "original-directory-custody.patch": "5567ec3d20da83cb260426f6b9ed32599e60a6b0184d535f8bac591859631bdd",
+  "patch-application.json": "8a571aea29cc6f95d6333edf6f43102741c6772ec4920aeb20fe4a791dbca863",
+  "source-base.json": "0f46f1bcc82a0f620479a33409d846a23c1218e0288e511905842f152dd2468a",
+  "source-check.log": "df5062e909d2cbd678de6fba62fff8adab350440ea7efabf118b4287de14f26b",
+  "static-source-closure.json": "a547cd8e3a7174c523ae37bc387c8dabdf02d03c7c94642c49b469e67d044833",
+  "validation.json": "48f03b1ddb61c7f30a04264c7d66412b9b22e8ddeddadf8e95bd96932209e898"
+}

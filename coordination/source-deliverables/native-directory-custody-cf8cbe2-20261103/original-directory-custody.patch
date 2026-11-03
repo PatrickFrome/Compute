@@ -1,0 +1,2492 @@
+diff --git a/apps/metaengine-browser/native/browser-guardian-scm/recovery-directory-handles.cpp b/apps/metaengine-browser/native/browser-guardian-scm/recovery-directory-handles.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..90dcd5b67a773e2a4f8dda93811bf6ebf4f68b79
+--- /dev/null
++++ b/apps/metaengine-browser/native/browser-guardian-scm/recovery-directory-handles.cpp
+@@ -0,0 +1,621 @@
++#include "recovery-directory-handles.hpp"
++
++#include <winternl.h>
++#include <algorithm>
++#include <atomic>
++#include <cstring>
++#include <limits>
++#include <map>
++#include <mutex>
++#include <utility>
++#include <vector>
++
++namespace metaengine::guardian {
++namespace recovery_directory_detail {
++
++constexpr std::size_t maximum_directories = 128;
++constexpr std::size_t maximum_workers = 256;
++constexpr std::size_t maximum_operations = 4096;
++constexpr DWORD volume_name_guid = 1U;
++constexpr NTSTATUS status_pending = static_cast<NTSTATUS>(0x103);
++
++bool deny(std::string* failure,const char* reason) noexcept {
++    if (failure) {
++        try {*failure = std::string("recovery_directory_handles_") + reason;}
++        catch (...) {failure->clear();}
++    }
++    return false;
++}
++bool valid(HANDLE value) { return value && value != INVALID_HANDLE_VALUE; }
++
++struct Handle final {
++    HANDLE value = nullptr;
++    Handle() = default;
++    explicit Handle(HANDLE handle) noexcept : value(handle) {}
++    ~Handle() { if (valid(value)) CloseHandle(value); }
++    Handle(const Handle&) = delete;
++    Handle& operator=(const Handle&) = delete;
++    Handle(Handle&& other) noexcept : value(std::exchange(other.value,nullptr)) {}
++    Handle& operator=(Handle&& other) noexcept {
++        if (this != &other) {
++            if (valid(value)) CloseHandle(value);
++            value = std::exchange(other.value,nullptr);
++        }
++        return *this;
++    }
++    void quarantine() noexcept { value = nullptr; } // OS ownership intentionally survives until process exit.
++    bool close() noexcept {
++        if (!valid(value)) return true;
++        if (!CloseHandle(value)) return false;
++        value = nullptr;
++        return true;
++    }
++};
++
++template<class Function> Function native(const wchar_t* module,const char* name) {
++    Function function = nullptr;
++    const auto library = GetModuleHandleW(module);
++    const auto address = library ? GetProcAddress(library,name) : nullptr;
++    static_assert(sizeof(function) == sizeof(address));
++    std::memcpy(&function,&address,sizeof(function));
++    return function;
++}
++bool sameObject(HANDLE left,HANDLE right) {
++    using Compare = BOOL(WINAPI*)(HANDLE,HANDLE);
++    const auto compare = native<Compare>(L"kernelbase.dll","CompareObjectHandles");
++    return valid(left) && valid(right) && compare && compare(left,right);
++}
++Handle duplicate(HANDLE original) {
++    HANDLE raw = nullptr;
++    if (!valid(original) || !DuplicateHandle(GetCurrentProcess(),original,GetCurrentProcess(),
++        &raw,0,FALSE,DUPLICATE_SAME_ACCESS)) return {};
++    Handle result(raw);
++    return sameObject(original,result.value) ? std::move(result) : Handle{};
++}
++std::uint64_t ticks(FILETIME value) {
++    return (std::uint64_t{value.dwHighDateTime} << 32U) | value.dwLowDateTime;
++}
++
++std::size_t volumeRootLength(const std::wstring& path) {
++    const std::wstring prefix = L"\\\\?\\Volume{";
++    if (!path.starts_with(prefix)) return 0;
++    const auto end = path.find(L"}\\",prefix.size());
++    if (end == std::wstring::npos || end - prefix.size() != 36) return 0;
++    const auto length = end + 2;
++    if (path.size() > length && path.back() == L'\\') return 0;
++    std::size_t begin = length;
++    while (begin < path.size()) {
++        const auto next = path.find(L'\\',begin);
++        const auto part = path.substr(begin,next == std::wstring::npos ? next : next-begin);
++        if (part.empty() || part == L"." || part == L".." || part.find_first_of(L"/:") != std::wstring::npos)
++            return 0;
++        if (next == std::wstring::npos) break;
++        begin = next + 1;
++    }
++    return length;
++}
++std::optional<std::wstring> parentPath(const std::wstring& path) {
++    const auto root = volumeRootLength(path);
++    if (!root || path.size() <= root) return {};
++    const auto split = path.find_last_of(L'\\');
++    if (split == std::wstring::npos) return {};
++    return path.substr(0,split < root ? root : split);
++}
++
++struct Metadata final {
++    RecoveryDirectoryIdentity identity;
++    bool directory = false;
++};
++bool equalIdentity(const RecoveryDirectoryIdentity& left,const RecoveryDirectoryIdentity& right) {
++    return left.volume_id == right.volume_id && left.file_id == right.file_id
++        && left.birth_time_100ns == right.birth_time_100ns && left.native_volume_id == right.native_volume_id
++        && left.native_file_id == right.native_file_id && left.canonical_volume_path == right.canonical_volume_path;
++}
++bool metadata(HANDLE original,int required_kind,Metadata* output) {
++    if (!output || !valid(original) || GetFileType(original) != FILE_TYPE_DISK) return false;
++    FILE_ATTRIBUTE_TAG_INFO tag{},after_tag{};
++    FILE_ID_INFO id{};
++    FILE_STANDARD_INFO standard{};
++    BY_HANDLE_FILE_INFORMATION basic{};
++    if (!GetFileInformationByHandleEx(original,FileAttributeTagInfo,&tag,sizeof(tag))
++        || (tag.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
++        || !GetFileInformationByHandleEx(original,FileIdInfo,&id,sizeof(id))
++        || !GetFileInformationByHandleEx(original,FileStandardInfo,&standard,sizeof(standard))
++        || standard.DeletePending || !GetFileInformationByHandle(original,&basic)) return false;
++    const bool directory = (tag.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
++    if ((required_kind >= 0 && directory != (required_kind == 1))
++        || directory != (standard.Directory != FALSE)
++        || (!directory && (standard.NumberOfLinks != 1 || basic.nNumberOfLinks != 1))) return false;
++    if (directory) {
++        FILE_CASE_SENSITIVE_INFO sensitive{};
++        // Unsupported information classes refuse; no path/case fallback.
++        if (!GetFileInformationByHandleEx(original,FileCaseSensitiveInfo,&sensitive,sizeof(sensitive))
++            || (sensitive.Flags & FILE_CS_FLAG_CASE_SENSITIVE_DIR)) return false;
++    }
++    std::wstring path(32768,L'\0');
++    const auto count = GetFinalPathNameByHandleW(original,path.data(),static_cast<DWORD>(path.size()),
++        FILE_NAME_NORMALIZED | volume_name_guid);
++    if (!count || count >= path.size()) return false;
++    path.resize(count);
++    if (!volumeRootLength(path) || !GetFileInformationByHandleEx(original,FileAttributeTagInfo,&after_tag,sizeof(after_tag))
++        || after_tag.FileAttributes != tag.FileAttributes || after_tag.ReparseTag != tag.ReparseTag) return false;
++    Metadata result;
++    result.directory = directory;
++    result.identity.volume_id = basic.dwVolumeSerialNumber;
++    result.identity.file_id = (std::uint64_t{basic.nFileIndexHigh} << 32U) | basic.nFileIndexLow;
++    result.identity.birth_time_100ns = ticks(basic.ftCreationTime);
++    result.identity.native_volume_id = id.VolumeSerialNumber;
++    std::copy(std::begin(id.FileId.Identifier),std::end(id.FileId.Identifier),result.identity.native_file_id.begin());
++    result.identity.canonical_volume_path = std::move(path);
++    if (!result.identity.file_id || !result.identity.birth_time_100ns
++        || std::all_of(result.identity.native_file_id.begin(),result.identity.native_file_id.end(),
++            [](unsigned char value){return value == 0;})) return false;
++    *output = std::move(result);
++    return true;
++}
++
++struct OriginalObject final {
++    HANDLE observed = nullptr; // Original issuer's handle; never reopened by numeric lookup/path.
++    Handle original;
++    Handle held;
++    Handle comparison;
++    Metadata captured;
++    void quarantine() noexcept { original.quarantine();held.quarantine();comparison.quarantine(); }
++    bool close() noexcept { return comparison.close() && held.close() && original.close(); }
++};
++bool exact(const OriginalObject& object) {
++    Metadata source,current;
++    return sameObject(object.observed,object.original.value) && sameObject(object.held.value,object.comparison.value)
++        && metadata(object.original.value,object.captured.directory ? 1 : 0,&source)
++        && metadata(object.held.value,object.captured.directory ? 1 : 0,&current)
++        && equalIdentity(source.identity,object.captured.identity)
++        && equalIdentity(current.identity,object.captured.identity);
++}
++bool capture(HANDLE original,int kind,OriginalObject* output) {
++    if (!output) return false;
++    OriginalObject result;
++    result.observed = original;
++    result.original = duplicate(original);
++    if (!valid(result.original.value) || !metadata(result.original.value,kind,&result.captured)) return false;
++    // Object-relative strengthening, not a by-name reacquisition. ReOpenFile
++    // creates a distinct open description: compare its PHYSICAL tuple to the
++    // still-retained original, then CompareObjectHandles only its duplicates.
++    result.held = Handle(ReOpenFile(result.original.value,FILE_READ_ATTRIBUTES | READ_CONTROL | SYNCHRONIZE,
++        FILE_SHARE_READ,FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS));
++    result.comparison = duplicate(result.held.value);
++    if (!exact(result)) return false;
++    *output = std::move(result);
++    return true;
++}
++bool captureCreated(Handle* original,OriginalObject* output) {
++    if (!output || !original || !valid(original->value)) return false;
++    OriginalObject result;
++    result.observed = original->value;
++    // Leave the successful native-create handle owned by the caller until
++    // every post-effect observation succeeds. Metadata/duplicate failure must
++    // not close the only retained original before UNKNOWN is quarantined.
++    result.original = duplicate(original->value);
++    result.held = duplicate(result.original.value);
++    result.comparison = duplicate(result.held.value);
++    if (!metadata(result.original.value,1,&result.captured) || !exact(result)) return false;
++    result.original = std::move(*original);
++    *output = std::move(result);
++    return true;
++}
++struct Directory final {
++    OriginalObject object;
++    std::optional<OriginalObject> anchor;
++    void quarantine() noexcept { object.quarantine();if(anchor)anchor->quarantine(); }
++    bool close() noexcept { return (!anchor || anchor->close()) && object.close(); }
++};
++bool directAnchor(const Directory& directory,const OriginalObject& anchor) {
++    const auto parent = parentPath(anchor.captured.identity.canonical_volume_path);
++    return parent && *parent == directory.object.captured.identity.canonical_volume_path
++        && !equalIdentity(directory.object.captured.identity,anchor.captured.identity);
++}
++bool correlation(const RecoveryDirectoryBinding& value) {
++    const auto text = [](const std::string& item){
++        return !item.empty() && item.size() <= 128 && std::all_of(item.begin(),item.end(),
++            [](unsigned char c){return c >= 0x21 && c <= 0x7e;});
++    };
++    return text(value.original_job_id) && text(value.owner_id) && text(value.host_instance_id)
++        && value.owner_epoch && value.owner_generation && value.host_generation && value.host_pid;
++}
++
++} // namespace recovery_directory_detail
++
++struct RecoveryDirectoryHandles::State final {
++    using Handle = recovery_directory_detail::Handle;
++    using Directory = recovery_directory_detail::Directory;
++    struct Operation final { const OperationTicket* ticket = nullptr;bool joined = false; };
++    struct Remote final { HANDLE source = nullptr;HANDLE remote = nullptr; };
++    struct Worker final {
++        const WorkerTicket* ticket = nullptr;
++        HANDLE observed_process = nullptr,observed_job = nullptr;
++        Handle process,process_comparison,job,job_comparison;
++        DWORD pid = 0;
++        std::uint64_t birth = 0;
++        std::vector<Remote> transferred;
++        bool joined = false;
++        void quarantine() noexcept { process.quarantine();process_comparison.quarantine();job.quarantine();job_comparison.quarantine(); }
++        bool close() noexcept { return job_comparison.close() && job.close() && process_comparison.close() && process.close(); }
++    };
++    RecoveryDirectoryBinding correlation;
++    std::vector<Directory> directories;
++    std::vector<Handle> uncertain_creates;
++    std::map<std::uint64_t,Operation> operations;
++    std::map<std::uint64_t,Worker> workers;
++    mutable std::mutex mutex;
++    std::atomic<bool> revoked{false},released{false};
++    bool unknown = false,quarantined = false;
++    std::uint64_t sequence = 0;
++
++    bool pending() const {
++        return std::any_of(operations.begin(),operations.end(),[](const auto& item){return !item.second.joined;})
++            || std::any_of(workers.begin(),workers.end(),[](const auto& item){return !item.second.joined;});
++    }
++    void abandon() noexcept { unknown = true;revoked.store(true); }
++    bool workerObjects(const Worker& row) const {
++        return recovery_directory_detail::sameObject(row.observed_process,row.process.value)
++            && recovery_directory_detail::sameObject(row.process.value,row.process_comparison.value)
++            && recovery_directory_detail::sameObject(row.observed_job,row.job.value)
++            && recovery_directory_detail::sameObject(row.job.value,row.job_comparison.value)
++            && GetProcessId(row.process.value) == row.pid;
++    }
++    bool workerBirth(const Worker& row) const {
++        FILETIME created{},exit{},kernel{},user{};
++        return workerObjects(row) && GetProcessTimes(row.process.value,&created,&exit,&kernel,&user)
++            && recovery_directory_detail::ticks(created) == row.birth;
++    }
++    bool remoteObjects(const Worker& row) const {
++        if (!workerBirth(row) || WaitForSingleObject(row.process.value,0) != WAIT_TIMEOUT) return false;
++        BOOL in_job = FALSE;
++        if (!IsProcessInJob(row.process.value,row.job.value,&in_job) || !in_job) return false;
++        for (const auto& transferred : row.transferred) {
++            HANDLE raw = nullptr;
++            if (!DuplicateHandle(row.process.value,transferred.remote,GetCurrentProcess(),&raw,0,FALSE,DUPLICATE_SAME_ACCESS))
++                return false;
++            Handle copied(raw);
++            if (!recovery_directory_detail::sameObject(transferred.source,copied.value)) return false;
++        }
++        return true;
++    }
++    bool check(bool allow_unanchored,std::string* failure) const {
++        using namespace recovery_directory_detail;
++        if (released.load()) return deny(failure,"released");
++        for (const auto& directory : directories) {
++            if (!exact(directory.object)) return deny(failure,"original_directory_changed");
++            if (!directory.anchor) {
++                if (!allow_unanchored) return deny(failure,"original_direct_child_anchor_required");
++            } else if (!exact(*directory.anchor) || !directAnchor(directory,*directory.anchor)) {
++                return deny(failure,"original_direct_child_anchor_changed");
++            }
++            auto parent = parentPath(directory.object.captured.identity.canonical_volume_path);
++            while (parent) {
++                if (std::none_of(directories.begin(),directories.end(),[&](const Directory& held){
++                    return held.object.captured.identity.canonical_volume_path == *parent;
++                })) return deny(failure,"original_ancestor_required");
++                parent = parentPath(*parent);
++            }
++        }
++        return true;
++    }
++    bool current(std::string* failure) {
++        using namespace recovery_directory_detail;
++        if (revoked.load() || unknown || quarantined) return deny(failure,"revoked");
++        try {
++            if (!check(false,failure)) { revoked.store(true);return false; }
++            for (const auto& item : workers) {
++                if (!item.second.joined && !remoteObjects(item.second)) {
++                    revoked.store(true);return deny(failure,"original_worker_custody_changed");
++                }
++            }
++        } catch (...) {
++            abandon();return deny(failure,"original_observation_unknown");
++        }
++        // A native observation may have raced synchronous cancellation. This
++        // is the final liveness fence, not an admission flag.
++        if (revoked.load() || unknown || quarantined) return deny(failure,"revoked");
++        return true;
++    }
++    bool closeAll() noexcept {
++        for (auto& item : workers) if (!item.second.close()) return false;
++        for (auto& item : directories) if (!item.close()) return false;
++        for (auto& item : uncertain_creates) if (!item.close()) return false;
++        released.store(true);
++        return true;
++    }
++    ~State() {
++        // A destructor is not an original physical join. Keep actual native
++        // opens alive until process exit when their remaining work is unknown.
++        if (unknown || quarantined || pending()) {
++            for (auto& item : workers) item.second.quarantine();
++            for (auto& item : directories) item.quarantine();
++            for (auto& item : uncertain_creates) item.quarantine();
++        }
++    }
++};
++
++RecoveryDirectoryHandles::OperationTicket::OperationTicket(std::shared_ptr<State> state,std::uint64_t id)
++    : state_(std::move(state)),id_(id) {}
++RecoveryDirectoryHandles::OperationTicket::~OperationTicket() {
++    if (!state_) return;
++    std::lock_guard lock(state_->mutex);
++    const auto found = state_->operations.find(id_);
++    if (found != state_->operations.end() && found->second.ticket == this && !found->second.joined) state_->abandon();
++}
++RecoveryDirectoryHandles::WorkerTicket::WorkerTicket(std::shared_ptr<State> state,std::uint64_t id)
++    : state_(std::move(state)),id_(id) {}
++RecoveryDirectoryHandles::WorkerTicket::~WorkerTicket() {
++    if (!state_) return;
++    std::lock_guard lock(state_->mutex);
++    const auto found = state_->workers.find(id_);
++    if (found != state_->workers.end() && found->second.ticket == this && !found->second.joined) state_->abandon();
++}
++RecoveryDirectoryHandles::RecoveryDirectoryHandles(std::shared_ptr<State> state) : state_(std::move(state)) {}
++
++std::unique_ptr<RecoveryDirectoryHandles> RecoveryDirectoryHandles::retainOriginal(
++    const RecoveryDirectoryBinding& binding,std::span<const OriginalRecoveryDirectory> originals,std::string* failure) {
++    using namespace recovery_directory_detail;
++    if (!correlation(binding) || originals.empty() || originals.size() > maximum_directories) {
++        deny(failure,"original_inputs_required");return {};
++    }
++    auto state = std::make_shared<State>();state->correlation = binding;
++    // Reserve before any creation/remote-transfer effect so allocation failure
++    // cannot discard a newly created original or an unrecorded remote copy.
++    state->directories.reserve(maximum_directories);
++    state->uncertain_creates.reserve(maximum_directories);
++    for (const auto& original : originals) {
++        Directory entry;
++        OriginalObject anchor;
++        if (!capture(original.directory,1,&entry.object) || !capture(original.direct_child_anchor,-1,&anchor)) {
++            deny(failure,"original_capture_unavailable");return {};
++        }
++        if (!directAnchor(entry,anchor)) {deny(failure,"original_direct_child_anchor_required");return {};}
++        entry.anchor.emplace(std::move(anchor));
++        if (std::any_of(state->directories.begin(),state->directories.end(),[&](const Directory& prior){
++            return equalIdentity(prior.object.captured.identity,entry.object.captured.identity)
++                || prior.object.captured.identity.canonical_volume_path == entry.object.captured.identity.canonical_volume_path;
++        })) {deny(failure,"duplicate_original_directory");return {};}
++        state->directories.push_back(std::move(entry));
++    }
++    if (!state->check(false,failure)) return {};
++    return std::unique_ptr<RecoveryDirectoryHandles>(new RecoveryDirectoryHandles(std::move(state)));
++}
++
++RecoveryDirectoryHandles::~RecoveryDirectoryHandles() {
++    revoke();
++    std::lock_guard lock(state_->mutex);
++    if (state_->unknown || state_->pending()) state_->quarantined = true;
++    else if (!state_->closeAll()) state_->abandon();
++}
++bool RecoveryDirectoryHandles::checkOriginals(std::string* failure) const {
++    std::lock_guard lock(state_->mutex);return state_->current(failure);
++}
++std::size_t RecoveryDirectoryHandles::directoryCount() const {
++    std::lock_guard lock(state_->mutex);return state_->directories.size();
++}
++std::optional<RecoveryDirectoryIdentity> RecoveryDirectoryHandles::identity(std::size_t index) const {
++    std::lock_guard lock(state_->mutex);
++    if (state_->released.load() || index >= state_->directories.size()) return {};
++    return state_->directories[index].object.captured.identity;
++}
++RecoveryDirectoryBinding RecoveryDirectoryHandles::binding() const {
++    std::lock_guard lock(state_->mutex);return state_->correlation;
++}
++
++std::optional<std::size_t> RecoveryDirectoryHandles::createProtectedBackupRoot(std::size_t parent_index,std::string* failure) {
++    using namespace recovery_directory_detail;
++    using Create = NTSTATUS(NTAPI*)(PHANDLE,ACCESS_MASK,POBJECT_ATTRIBUTES,PIO_STATUS_BLOCK,
++        PLARGE_INTEGER,ULONG,ULONG,ULONG,ULONG,PVOID,ULONG);
++    std::lock_guard lock(state_->mutex);
++    if (!state_->current(failure)) return {};
++    if (parent_index >= state_->directories.size() || state_->directories.size() >= maximum_directories) {
++        deny(failure,"original_parent_required");return {};
++    }
++    if (!state_->workers.empty() || !state_->operations.empty()) {
++        state_->revoked.store(true);deny(failure,"namespace_expansion_after_ticket_forbidden");return {};
++    }
++    const auto create = native<Create>(L"ntdll.dll","NtCreateFile");
++    if (!create) {state_->revoked.store(true);deny(failure,"relative_create_unavailable");return {};}
++    const std::wstring leaf = L"protected-backup-root-v1";
++    UNICODE_STRING name{};name.Buffer = const_cast<PWSTR>(leaf.c_str());
++    name.Length = static_cast<USHORT>(leaf.size()*sizeof(wchar_t));
++    name.MaximumLength = static_cast<USHORT>(name.Length+sizeof(wchar_t));
++    OBJECT_ATTRIBUTES attributes{};attributes.Length = sizeof(attributes);
++    attributes.RootDirectory = state_->directories[parent_index].object.held.value;
++    attributes.ObjectName = &name;attributes.Attributes = 0x40U | 0x1000U; // CASE_INSENSITIVE | DONT_REPARSE.
++    IO_STATUS_BLOCK operation{};operation.Status = status_pending;
++    HANDLE raw = nullptr;
++    if (state_->revoked.load()) {deny(failure,"revoked");return {};}
++    const auto result = create(&raw,FILE_READ_ATTRIBUTES | READ_CONTROL | SYNCHRONIZE,&attributes,&operation,
++        nullptr,FILE_ATTRIBUTE_DIRECTORY,FILE_SHARE_READ,2U,1U | 0x20U | 0x00200000U,nullptr,0);
++    Handle created(raw);
++    Directory child;
++    try {
++    if (result == status_pending) {
++        // Keep the original kernel-owned IO_STATUS_BLOCK and every parent
++        // object in this frame until terminal. Cancellation is not completion.
++        if (valid(created.value)) CancelIoEx(created.value,nullptr);
++        const auto* status = reinterpret_cast<volatile const NTSTATUS*>(&operation.Status);
++        while (*status == status_pending) {
++            const auto wait = valid(created.value) ? WaitForSingleObject(created.value,25) : WAIT_FAILED;
++            if (wait != WAIT_TIMEOUT) Sleep(25);
++        }
++        state_->abandon();
++        if (valid(created.value)) state_->uncertain_creates.push_back(std::move(created));
++        deny(failure,"relative_create_unknown");return {};
++    }
++    if (result != 0 || operation.Status != 0 || operation.Information != 2U || !valid(created.value)) {
++        state_->revoked.store(true);
++        if (valid(created.value)) {state_->abandon();state_->uncertain_creates.push_back(std::move(created));}
++        deny(failure,"exclusive_create_failed");return {};
++    }
++    if (state_->revoked.load()) {
++        state_->abandon();state_->uncertain_creates.push_back(std::move(created));
++        deny(failure,"relative_create_revoked");return {};
++    }
++    if (!captureCreated(&created,&child.object)) {
++        state_->abandon();
++        if (valid(created.value)) state_->uncertain_creates.push_back(std::move(created));
++        deny(failure,"original_created_child_unconfirmed");return {};
++    }
++    const auto parent = parentPath(child.object.captured.identity.canonical_volume_path);
++    if (!parent || *parent != state_->directories[parent_index].object.captured.identity.canonical_volume_path
++        || child.object.captured.identity.canonical_volume_path != *parent + (parent->back()==L'\\' ? L"" : L"\\") + leaf) {
++        state_->abandon();child.quarantine();deny(failure,"original_created_child_changed");return {};
++    }
++    const auto index = state_->directories.size();state_->directories.push_back(std::move(child));
++    // This child is intentionally unanchored. No current operation ticket or
++    // worker can be issued until attachOriginalDirectChildAnchor succeeds.
++    return index;
++    } catch (...) {
++        // Even allocation failure after FILE_CREATE is an irreversible effect
++        // boundary. Preserve whichever original object owns the new child.
++        state_->abandon();
++        // The terminal exception handler itself must not allocate. Dropping
++        // C++ ownership intentionally leaves each raw kernel open alive until
++        // process exit, even if every allocation is now failing.
++        created.quarantine();
++        child.quarantine();
++        deny(failure,"original_created_child_unknown");return {};
++    }
++}
++
++bool RecoveryDirectoryHandles::duplicateOriginalDirectory(std::size_t index,HANDLE* output,std::string* failure) const {
++    using namespace recovery_directory_detail;
++    std::lock_guard lock(state_->mutex);
++    if (!output || index >= state_->directories.size() || state_->revoked.load() || !state_->check(true,failure))
++        return deny(failure,"original_directory_required");
++    auto copy = duplicate(state_->directories[index].object.held.value);
++    if (!valid(copy.value)) return deny(failure,"original_directory_duplicate_failed");
++    if (state_->revoked.load()) return deny(failure,"revoked");
++    *output = std::exchange(copy.value,nullptr);return true;
++}
++bool RecoveryDirectoryHandles::attachOriginalDirectChildAnchor(std::size_t index,HANDLE original_child,std::string* failure) {
++    using namespace recovery_directory_detail;
++    std::lock_guard lock(state_->mutex);
++    if (index >= state_->directories.size() || state_->revoked.load() || !state_->check(true,failure))
++        return deny(failure,"original_directory_required");
++    auto& directory = state_->directories[index];
++    if (directory.anchor) return deny(failure,"original_anchor_immutable");
++    OriginalObject anchor;
++    if (!capture(original_child,-1,&anchor) || !directAnchor(directory,anchor)) {
++        state_->revoked.store(true);return deny(failure,"original_direct_child_anchor_required");
++    }
++    directory.anchor.emplace(std::move(anchor));
++    if (!state_->check(false,failure)) {state_->revoked.store(true);return false;}
++    if (state_->revoked.load()) return deny(failure,"revoked");
++    return true;
++}
++
++std::unique_ptr<RecoveryDirectoryHandles::OperationTicket> RecoveryDirectoryHandles::beginOperation(std::string* failure) {
++    using namespace recovery_directory_detail;
++    std::unique_lock lock(state_->mutex);
++    if (!state_->current(failure)) return {};
++    if (state_->operations.size() >= maximum_operations) {state_->revoked.store(true);deny(failure,"operation_budget");return {};}
++    const auto id = ++state_->sequence;
++    const auto row = state_->operations.emplace(id,State::Operation{}).first;
++    try {
++        auto ticket = std::unique_ptr<OperationTicket>(new OperationTicket(state_,id));
++        row->second.ticket = ticket.get();
++        if (state_->revoked.load()) {
++            row->second.joined = true;deny(failure,"revoked");lock.unlock();return {};
++        }
++        return ticket;
++    } catch (...) {state_->operations.erase(row);throw;}
++}
++bool RecoveryDirectoryHandles::completeOperation(OperationTicket& ticket,std::string* failure) {
++    std::lock_guard lock(state_->mutex);
++    const auto found = state_->operations.find(ticket.id_);
++    if (ticket.state_ != state_ || found == state_->operations.end() || found->second.ticket != &ticket || found->second.joined)
++        return recovery_directory_detail::deny(failure,"original_operation_required");
++    found->second.joined = true;return true;
++}
++void RecoveryDirectoryHandles::abandonOperation(OperationTicket& ticket) noexcept {
++    std::lock_guard lock(state_->mutex);
++    const auto found = state_->operations.find(ticket.id_);
++    if (ticket.state_ == state_ && found != state_->operations.end() && found->second.ticket == &ticket && !found->second.joined)
++        state_->abandon();
++}
++
++std::unique_ptr<RecoveryDirectoryHandles::WorkerTicket> RecoveryDirectoryHandles::retainOriginalWorker(
++    HANDLE original_process,HANDLE original_job,std::string* failure) {
++    using namespace recovery_directory_detail;
++    std::unique_lock lock(state_->mutex);
++    if (!state_->current(failure)) return {};
++    if (state_->workers.size() >= maximum_workers) {state_->revoked.store(true);deny(failure,"worker_budget");return {};}
++    State::Worker worker;
++    worker.observed_process = original_process;worker.observed_job = original_job;
++    worker.process = duplicate(original_process);worker.process_comparison = duplicate(worker.process.value);
++    worker.job = duplicate(original_job);worker.job_comparison = duplicate(worker.job.value);
++    FILETIME created{},exit{},kernel{},user{};BOOL in_job = FALSE;
++    worker.pid = valid(worker.process.value) ? GetProcessId(worker.process.value) : 0;
++    if (!worker.pid || !state_->workerObjects(worker) || !GetProcessTimes(worker.process.value,&created,&exit,&kernel,&user)
++        || WaitForSingleObject(worker.process.value,0) != WAIT_TIMEOUT
++        || !IsProcessInJob(worker.process.value,worker.job.value,&in_job) || !in_job) {
++        state_->revoked.store(true);deny(failure,"original_worker_required");return {};
++    }
++    worker.birth = ticks(created);
++    worker.transferred.reserve(state_->directories.size()*2);
++    const auto id = ++state_->sequence;
++    auto& row = state_->workers.emplace(id,std::move(worker)).first->second;
++    std::unique_ptr<WorkerTicket> ticket;
++    try {ticket.reset(new WorkerTicket(state_,id));}
++    catch (...) {row.joined = true;throw;}
++    row.ticket = ticket.get();
++    try {
++    bool transferred = true;
++    for (const auto& directory : state_->directories) {
++        for (const auto source : {directory.object.held.value,directory.anchor->held.value}) {
++            HANDLE remote = nullptr;
++            if (state_->revoked.load() || !DuplicateHandle(GetCurrentProcess(),source,row.process.value,
++                &remote,0,FALSE,DUPLICATE_SAME_ACCESS)) {transferred = false;break;}
++            row.transferred.push_back(State::Remote{source,remote});
++        }
++        if (!transferred) break;
++    }
++    if (!transferred || !state_->remoteObjects(row) || !state_->check(false,failure) || state_->revoked.load()) {
++        state_->revoked.store(true);
++        if (row.transferred.empty()) row.joined = true;
++        else state_->abandon(); // Keep partial remote copies until exact process/Job joins; no eager remote close.
++        deny(failure,"original_worker_transfer_unconfirmed");
++        lock.unlock();return {};
++    }
++    return ticket;
++    } catch (...) {
++        // Remote effects already recorded in this original row must outlive
++        // observation/allocation failure and every corresponding worker join.
++        state_->abandon();deny(failure,"original_worker_transfer_unknown");
++        lock.unlock();return {};
++    }
++}
++bool RecoveryDirectoryHandles::joinOriginalWorker(WorkerTicket& ticket,std::string* failure) {
++    std::lock_guard lock(state_->mutex);
++    const auto found = state_->workers.find(ticket.id_);
++    if (ticket.state_ != state_ || found == state_->workers.end() || found->second.ticket != &ticket || found->second.joined)
++        return recovery_directory_detail::deny(failure,"original_worker_required");
++    auto& row = found->second;
++    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting{};
++    DWORD exit = STILL_ACTIVE;
++    if (!state_->workerBirth(row) || WaitForSingleObject(row.process.value,0) != WAIT_OBJECT_0
++        || !GetExitCodeProcess(row.process.value,&exit) || exit == STILL_ACTIVE
++        || !QueryInformationJobObject(row.job.value,JobObjectBasicAccountingInformation,&accounting,sizeof(accounting),nullptr)
++        || accounting.ActiveProcesses != 0)
++        return recovery_directory_detail::deny(failure,"original_worker_join_pending");
++    row.joined = true;return true;
++}
++
++void RecoveryDirectoryHandles::revoke() noexcept { state_->revoked.store(true); }
++bool RecoveryDirectoryHandles::drain(std::string* failure) {
++    std::lock_guard lock(state_->mutex);
++    if (!state_->revoked.load()) return recovery_directory_detail::deny(failure,"revoke_before_drain");
++    if (state_->unknown || state_->quarantined) return recovery_directory_detail::deny(failure,"original_finish_unknown");
++    if (state_->pending()) return recovery_directory_detail::deny(failure,"original_join_pending");
++    if (!state_->closeAll()) {state_->abandon();return recovery_directory_detail::deny(failure,"original_close_unconfirmed");}
++    return true;
++}
++bool RecoveryDirectoryHandles::revoked() const noexcept { return state_->revoked.load(); }
++bool RecoveryDirectoryHandles::released() const noexcept { return state_->released.load(); }
++
++} // namespace metaengine::guardian
+diff --git a/apps/metaengine-browser/native/browser-guardian-scm/recovery-directory-handles.hpp b/apps/metaengine-browser/native/browser-guardian-scm/recovery-directory-handles.hpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..09ab1f7206362165a394a10a09ece93978daed5e
+--- /dev/null
++++ b/apps/metaengine-browser/native/browser-guardian-scm/recovery-directory-handles.hpp
+@@ -0,0 +1,142 @@
++#pragma once
++
++// INTERNAL kernel mechanics only. There is no authenticated issuer, effect
++// admission, NAPI entry, arbitrary path argument, signing key or wire format.
++// The missing existing native issuer must supply the ORIGINAL objects and
++// bind its actual Owner/Host/request/job authority independently.
++#include <windows.h>
++#include <array>
++#include <cstddef>
++#include <cstdint>
++#include <memory>
++#include <optional>
++#include <span>
++#include <string>
++
++namespace metaengine::guardian {
++
++struct RecoveryDirectoryBinding final {
++    std::string original_job_id;
++    std::string owner_id;
++    std::string host_instance_id;
++    std::uint64_t owner_epoch = 0;
++    std::uint64_t owner_generation = 0;
++    std::uint64_t host_generation = 0;
++    DWORD host_pid = 0;
++    // Correlation ONLY. None of these fields supplies admission or proves an
++    // authenticated original job, Owner, Host or process provenance.
++};
++
++struct RecoveryDirectoryIdentity final {
++    // Raw native observations only, NOT the JS stat identity digest. NT birth
++    // uses the 1601 epoch; JS nanoseconds require separately qualified mapping
++    // and conversion (ticks - 116444736000000000) * 100. No mapping is asserted.
++    // These values are not a path hash, database digest or portable capability.
++    std::uint64_t volume_id = 0;
++    std::uint64_t file_id = 0;
++    std::uint64_t birth_time_100ns = 0;
++    std::uint64_t native_volume_id = 0;
++    std::array<unsigned char,16> native_file_id{};
++    std::wstring canonical_volume_path;
++};
++
++struct OriginalRecoveryDirectory final {
++    HANDLE directory = nullptr;
++    HANDLE direct_child_anchor = nullptr;
++    // Both handles are borrowed ORIGINAL issuer objects, retained by that
++    // issuer until drain. Core duplicates and compares exact opens, then uses
++    // ReOpenFile on each OBJECT with fixed restrictive sharing. It never
++    // reacquires a supplied path. A retained direct child keeps the directory
++    // nonempty, excluding empty-directory reparse conversion.
++};
++
++class RecoveryDirectoryHandles final {
++    struct State;
++public:
++    class OperationTicket final {
++    public:
++        ~OperationTicket();
++        OperationTicket(const OperationTicket&) = delete;
++        OperationTicket& operator=(const OperationTicket&) = delete;
++        OperationTicket(OperationTicket&&) = delete;
++        OperationTicket& operator=(OperationTicket&&) = delete;
++    private:
++        friend class RecoveryDirectoryHandles;
++        OperationTicket(std::shared_ptr<State>,std::uint64_t);
++        std::shared_ptr<State> state_;
++        std::uint64_t id_ = 0;
++    };
++
++    class WorkerTicket final {
++    public:
++        ~WorkerTicket();
++        WorkerTicket(const WorkerTicket&) = delete;
++        WorkerTicket& operator=(const WorkerTicket&) = delete;
++        WorkerTicket(WorkerTicket&&) = delete;
++        WorkerTicket& operator=(WorkerTicket&&) = delete;
++    private:
++        friend class RecoveryDirectoryHandles;
++        WorkerTicket(std::shared_ptr<State>,std::uint64_t);
++        std::shared_ptr<State> state_;
++        std::uint64_t id_ = 0;
++    };
++
++    // Supply every volume-root/ancestor directory needed to resolve the
++    // selected namespaces, each with an original direct child anchor. Missing
++    // ancestry, empty/unanchored objects and unsupported native APIs refuse.
++    static std::unique_ptr<RecoveryDirectoryHandles> retainOriginal(
++        const RecoveryDirectoryBinding&,std::span<const OriginalRecoveryDirectory>,std::string* failure);
++    ~RecoveryDirectoryHandles();
++    RecoveryDirectoryHandles(const RecoveryDirectoryHandles&) = delete;
++    RecoveryDirectoryHandles& operator=(const RecoveryDirectoryHandles&) = delete;
++    RecoveryDirectoryHandles(RecoveryDirectoryHandles&&) = delete;
++    RecoveryDirectoryHandles& operator=(RecoveryDirectoryHandles&&) = delete;
++
++    bool checkOriginals(std::string* failure) const;
++    std::size_t directoryCount() const;
++    std::optional<RecoveryDirectoryIdentity> identity(std::size_t) const;
++    RecoveryDirectoryBinding binding() const;
++
++    // Sole creation operation: NtCreateFile(FILE_CREATE) relative to the
++    // retained original parent; basename is literally protected-backup-root-v1.
++    // There is no open-existing/adopt/repair/delete fallback. The SAME returned
++    // native object is retained, initially UNANCHORED. It does not qualify any
++    // namespace until the original issuer supplies its retained direct child.
++    std::optional<std::size_t> createProtectedBackupRoot(std::size_t parent_index,std::string* failure);
++    bool duplicateOriginalDirectory(std::size_t,HANDLE* output,std::string* failure) const;
++    bool attachOriginalDirectChildAnchor(std::size_t,HANDLE original_child,std::string* failure);
++
++    // Local original callback tickets are not external-worker admission. An
++    // abandoned ticket is terminal unknown. No completion boolean is accepted.
++    std::unique_ptr<OperationTicket> beginOperation(std::string* failure);
++    bool completeOperation(OperationTicket&,std::string* failure);
++    void abandonOperation(OperationTicket&) noexcept;
++
++    // Caller must already own the exact process AND its existing original Job.
++    // Directory+anchor opens are duplicated into that exact process and checked
++    // by duplicate-back + CompareObjectHandles before this ticket is returned.
++    // This does not create/resume a child or prove every descendant received
++    // custody: the absent authenticated issuer/runner must bind ALL effectful
++    // workers before resume. Partial transfer irreversibly revokes this core.
++    // MANDATORY future integration invariant: this core belongs in the native
++    // process that ALREADY OWNS the original Job lifetime. Borrowing an external
++    // prepared helper's Job would keep KILL_ON_JOB_CLOSE alive after that helper
++    // crashes. These mechanical arguments cannot prove that owner placement;
++    // until the actual issuer enforces it, no effect admission may be exposed.
++    std::unique_ptr<WorkerTicket> retainOriginalWorker(HANDLE original_process,HANDLE original_job,std::string* failure);
++    bool joinOriginalWorker(WorkerTicket&,std::string* failure);
++
++    // Revoke is atomic and synchronous even while original native creation is
++    // pending. Drain never treats cancel/timeout as completion: it releases only
++    // after revoke and all exact original tickets have joined, without UNKNOWN.
++    void revoke() noexcept;
++    bool drain(std::string* failure);
++    bool revoked() const noexcept;
++    bool released() const noexcept;
++
++private:
++    explicit RecoveryDirectoryHandles(std::shared_ptr<State>);
++    std::shared_ptr<State> state_;
++};
++
++} // namespace metaengine::guardian
+diff --git a/apps/metaengine-browser/native/electron-original-main/BUILD.gn b/apps/metaengine-browser/native/electron-original-main/BUILD.gn
+index e6a921ce77af11c3b94b09236b6fc1aa1fee211d..11a7769fce77a7d2ba2dd8dfeca02b4e66e9f6dd 100644
+--- a/apps/metaengine-browser/native/electron-original-main/BUILD.gn
++++ b/apps/metaengine-browser/native/electron-original-main/BUILD.gn
+@@ -16,6 +16,8 @@ source_set("guardian_original_main") {
+     "../browser-guardian-scm/browser-guardian-installed-namespace.cpp",
+     "../browser-guardian-scm/browser-guardian-original-main-native-host.cpp",
+     "../browser-guardian-scm/browser-guardian-release-signature.cpp",
++    "../browser-guardian-scm/recovery-directory-handles.cpp",
++    "../browser-guardian-scm/recovery-directory-handles.hpp",
+   ]
+   include_dirs = [
+     ".",
+diff --git a/apps/metaengine-browser/scripts/check-source.mjs b/apps/metaengine-browser/scripts/check-source.mjs
+index c2fd576951ceeaebbe724575b49addb6361ed3f9..8ea96dae957a5481c3738bbd950093f620539231 100644
+--- a/apps/metaengine-browser/scripts/check-source.mjs
++++ b/apps/metaengine-browser/scripts/check-source.mjs
+@@ -127,6 +127,7 @@ export const SOURCE_CHECK_FILES = Object.freeze([
+   "src/local-runtime-recovery-composition.mjs",
+   "src/protected-root-recovery-provider.mjs",
+   "../../infra/client-state-runtime/native-coding-recovery-directory-custody.mjs",
++  "../../infra/client-state-runtime/native-coding-recovery-directory-lifetime.mjs",
+   "../../infra/client-state-runtime/pg17-recovery-producer.mjs",
+   "../../infra/client-state-runtime/pg17-native-recovery-process.mjs",
+   "../../infra/client-state-runtime/native-coding-host-recovery-service.mjs",
+diff --git a/apps/metaengine-browser/scripts/custom-electron-source-build.py b/apps/metaengine-browser/scripts/custom-electron-source-build.py
+index ec2fe173f99e186c92d6466358dc5a9488e59f99..8ba6d89e61b4a8f8c65c2699c308a3cc644c234c 100644
+--- a/apps/metaengine-browser/scripts/custom-electron-source-build.py
++++ b/apps/metaengine-browser/scripts/custom-electron-source-build.py
+@@ -72,6 +72,7 @@ GN_SOURCE_SET = {
+     'browser-guardian-installed-namespace.cpp',
+     'browser-guardian-original-main-native-host.cpp',
+     'browser-guardian-release-signature.cpp',
++    'recovery-directory-handles.cpp', 'recovery-directory-handles.hpp',
+ }
+ # Files that must exist in the staged native/ tree for the source-set and its
+ # transitive includes to compile; verified before GN ever runs.
+@@ -82,6 +83,7 @@ GN_REQUIRED_HEADERS = {
+     'browser-guardian-installed-namespace.hpp', 'browser-guardian-release-signature.hpp',
+     'browser-guardian-original-material-channel.hpp', 'browser-guardian-original-material-wire.hpp',
+     'browser-guardian-original-material-napi.inc',
++    'recovery-directory-handles.hpp',
+ }
+ 
+ 
+diff --git a/apps/metaengine-browser/test/native/recovery-directory-handles-synthetic/README.md b/apps/metaengine-browser/test/native/recovery-directory-handles-synthetic/README.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..031154b88eb1f600ae699fab3869307647995fa1
+--- /dev/null
++++ b/apps/metaengine-browser/test/native/recovery-directory-handles-synthetic/README.md
+@@ -0,0 +1,42 @@
++# Recovery directory mechanics: isolated source model
++
++The runner compiles the actual `recovery-directory-handles.cpp` against the
++small Win32 declarations and object model in this directory. The model is a
++test boundary, not a production scope issuer. It never loads the native
++module into an application, connects to PostgreSQL, changes an installed
++directory, or supplies authentication or backup/restore evidence.
++
++Unlike a flag-recording stub, its file opens enforce share conflicts in both
++directions. Paths name model objects; separate handles retain the same original
++object. Independent rename and reparse attempts consult live opens, rather than
++calling the implementation's recheck. Relative exclusive creation is resolved
++through the supplied original parent handle and returns the new child handle
++in the same operation. Collisions preserve the original contents.
++
++Every result says `SYNTHETIC_NATIVE_MECHANICS`, Windows execution `NOT_RUN`, and
++physical authority `false`. A successful mechanical test cannot replace either
++existing JavaScript HOLD fence or qualify Windows sharing, process lifetime,
++ACLs, kernel calls, physical recovery or production authority.
++
++The 34 cases run in fresh executable processes. They cover complete ancestry,
++sharing in both directions, post-check namespace swaps, retained anchors and
++attribute-only reparse attempts, same-object comparisons despite equal IDs,
++exclusive relative creation and collision preservation, unanchored-child
++refusal, cancellation and late completion, exact callback tickets, original
++worker/Job joins, partial transfer and handle reuse. Allocation failures after
++creation and during transfer verification are injected by the modeled native
++boundary; the actual C++ exception paths must retain originals and avoid
++deadlock. Independent mutation controls succeed after a confirmed release.
++
++The crash case checks directory and anchor copies in the one registered
++process's separate handle table after the modeled holder dies. It does not
++prove that unregistered descendants received copies, that an authenticated
++runner bound every worker before resume, or that a helper owns the original
++Job across a real crash. Those integrations remain absent and cannot be
++replaced with this model, a diagnostic binding record, or a successful ticket.
++
++Run from `apps/metaengine-browser`:
++
++```sh
++node --test test/recovery-directory-handles.test.mjs
++```
+diff --git a/apps/metaengine-browser/test/native/recovery-directory-handles-synthetic/core.cpp b/apps/metaengine-browser/test/native/recovery-directory-handles-synthetic/core.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..87b73fdb58d907cc4dce90b6b35041bf59af3958
+--- /dev/null
++++ b/apps/metaengine-browser/test/native/recovery-directory-handles-synthetic/core.cpp
+@@ -0,0 +1,855 @@
++// Actual native mechanical source, simulated OS only. No admission issuer.
++#include "windows.h"
++#include "winternl.h"
++#include "recovery-directory-handles.hpp"
++
++#include <algorithm>
++#include <array>
++#include <cstring>
++#include <cwctype>
++#include <functional>
++#include <iostream>
++#include <map>
++#include <memory>
++#include <set>
++#include <stdexcept>
++#include <string>
++#include <string_view>
++#include <utility>
++#include <vector>
++
++namespace model {
++constexpr DWORD main_pid=1001;
++constexpr NTSTATUS pending_status=0x103;
++constexpr NTSTATUS collision_status=static_cast<NTSTATUS>(0xc0000035U);
++constexpr NTSTATUS invalid_status=static_cast<NTSTATUS>(0xc000000dU);
++constexpr NTSTATUS denied_status=static_cast<NTSTATUS>(0xc0000022U);
++const HANDLE current_process=reinterpret_cast<HANDLE>(static_cast<std::intptr_t>(-2));
++enum class Kind{File,Process,Job,Event};
++struct Node{
++    std::wstring path;
++    std::string bytes;
++    FILE_ID_INFO identity{};
++    std::uint64_t birth=134000000000000001ULL;
++    DWORD attributes=FILE_ATTRIBUTE_DIRECTORY;
++    bool case_sensitive=false,metadata_denied=false;
++};
++struct Open{
++    std::shared_ptr<Node> node;
++    DWORD access=0,share=0;
++};
++struct Process;
++struct Job{std::set<std::shared_ptr<Process>,std::owner_less<std::shared_ptr<Process>>> members;};
++struct Event{bool signaled=false;};
++struct Object{
++    Kind kind=Kind::File;
++    std::shared_ptr<Open> open;
++    std::shared_ptr<Process> process;
++    std::shared_ptr<Job> job;
++    std::shared_ptr<Event> event;
++};
++struct Process{
++    DWORD pid=0;
++    std::uint64_t birth=134000000000000123ULL;
++    bool live=true;
++    std::map<HANDLE,std::shared_ptr<Object>> handles;
++    std::uintptr_t next_handle=0x100;
++};
++struct Pending{
++    IO_STATUS_BLOCK* status=nullptr;
++    HANDLE original=nullptr;
++    bool cancelled=false;
++};
++struct World{
++    DWORD error=ERROR_SUCCESS,current_pid=main_pid;
++    std::uint64_t next_id=1,ticks=0;
++    std::map<std::wstring,std::shared_ptr<Node>> paths;
++    std::map<DWORD,std::shared_ptr<Process>> processes;
++    std::vector<Pending> pending;
++    std::function<void()> on_wait,on_sleep,on_nt_create,on_metadata;
++    bool missing_nt_create=false,pending_create=false,duplicate_denied=false,wrong_file_duplicate=false,
++        compare_denied=false,query_job_denied=false,created_metadata_denied=false,
++        throw_created_metadata=false,throw_worker_copyback=false,process_wait_failed=false;
++    DWORD fail_duplicate_target_pid=0;
++    unsigned target_duplicate_count=0,fail_target_duplicate_at=0;
++    unsigned creates=0,cancel_requests=0,close_before_completion=0,
++        relative_creates=0,duplicate_calls=0,compare_calls=0,waits=0,sleeps=0;
++};
++World world;
++void require(bool value,std::string_view reason){if(!value)throw std::runtime_error(std::string(reason));}
++std::wstring key(std::wstring value){
++    if(value.starts_with(L"\\\\?\\"))value.erase(0,4);
++    while(value.size()>3&&value.back()==L'\\')value.pop_back();
++    std::transform(value.begin(),value.end(),value.begin(),[](wchar_t ch){return std::towlower(ch);});
++    return value;
++}
++std::shared_ptr<Process> process(DWORD pid){
++    const auto found=world.processes.find(pid);return found==world.processes.end()?nullptr:found->second;
++}
++std::shared_ptr<Object> lookup(DWORD pid,HANDLE handle){
++    const auto p=process(pid);if(!p)return {};
++    const auto found=p->handles.find(handle);return found==p->handles.end()?nullptr:found->second;
++}
++std::shared_ptr<Object> lookup(HANDLE handle){return lookup(world.current_pid,handle);}
++std::shared_ptr<Process> processFrom(HANDLE handle){
++    if(handle==current_process)return process(world.current_pid);
++    const auto object=lookup(handle);return object&&object->kind==Kind::Process?object->process:nullptr;
++}
++HANDLE put(const std::shared_ptr<Process>& p,std::shared_ptr<Object> object){
++    if(!p||!p->live){world.error=ERROR_INVALID_HANDLE;return nullptr;}
++    HANDLE value=nullptr;
++    do{value=reinterpret_cast<HANDLE>(p->next_handle++);}while(p->handles.contains(value));
++    p->handles.emplace(value,std::move(object));return value;
++}
++HANDLE put(std::shared_ptr<Object> object){return put(process(world.current_pid),std::move(object));}
++std::shared_ptr<Node> nodeAt(const std::wstring& path,bool directory=true,std::string bytes={}){
++    auto node=std::make_shared<Node>();node->path=path;node->bytes=std::move(bytes);
++    node->attributes=directory?FILE_ATTRIBUTE_DIRECTORY:FILE_ATTRIBUTE_NORMAL;
++    node->identity.VolumeSerialNumber=17;
++    const auto id=world.next_id++;
++    std::memcpy(node->identity.FileId.Identifier,&id,sizeof(id));
++    node->birth+=id;
++    world.paths[key(path)]=node;return node;
++}
++std::shared_ptr<Node> named(const std::wstring& path){
++    const auto found=world.paths.find(key(path));return found==world.paths.end()?nullptr:found->second;
++}
++DWORD expanded(DWORD access){
++    DWORD result=access;
++    if(access&(GENERIC_READ|GENERIC_ALL))result|=FILE_READ_DATA|FILE_READ_EA|FILE_READ_ATTRIBUTES|READ_CONTROL;
++    if(access&(GENERIC_WRITE|GENERIC_ALL))result|=FILE_WRITE_DATA|FILE_APPEND_DATA|FILE_WRITE_EA|FILE_WRITE_ATTRIBUTES;
++    if(access&(GENERIC_EXECUTE|GENERIC_ALL))result|=FILE_EXECUTE;
++    if(access&GENERIC_ALL)result|=DELETE|WRITE_DAC|WRITE_OWNER;
++    return result;
++}
++bool compatible(DWORD desired,DWORD share){
++    const auto access=expanded(desired);
++    return (!(access&(FILE_READ_DATA|FILE_EXECUTE))||(share&FILE_SHARE_READ))&&
++        (!(access&(FILE_WRITE_DATA|FILE_APPEND_DATA))||(share&FILE_SHARE_WRITE))&&
++        (!(access&DELETE)||(share&FILE_SHARE_DELETE));
++}
++bool canOpen(const std::shared_ptr<Node>& node,DWORD access,DWORD share){
++    for(const auto& [pid,p]:world.processes){
++        (void)pid;
++        for(const auto& [raw,object]:p->handles){
++            (void)raw;
++            if(object->kind!=Kind::File||object->open->node!=node)continue;
++            if(!compatible(access,object->open->share)||!compatible(object->open->access,share)){
++                world.error=ERROR_SHARING_VIOLATION;return false;
++            }
++        }
++    }
++    return true;
++}
++HANDLE open(const std::shared_ptr<Node>& node,DWORD access,DWORD share){
++    if(!node){world.error=ERROR_FILE_NOT_FOUND;return INVALID_HANDLE_VALUE;}
++    if(!canOpen(node,access,share))return INVALID_HANDLE_VALUE;
++    auto object=std::make_shared<Object>();object->kind=Kind::File;
++    object->open=std::make_shared<Open>(Open{node,access,share});return put(std::move(object));
++}
++bool live(HANDLE value){return value&&value!=INVALID_HANDLE_VALUE&&lookup(value)!=nullptr;}
++bool directChild(const std::wstring& parent,const std::wstring& child){
++    auto prefix=key(parent);if(prefix.back()!=L'\\')prefix+=L"\\";
++    const auto full=key(child);
++    return full.starts_with(prefix)&&full.size()>prefix.size()&&full.find(L'\\',prefix.size())==std::wstring::npos;
++}
++bool hasChildren(const std::shared_ptr<Node>& parent){
++    for(const auto& [path,node]:world.paths){(void)path;if(directChild(parent->path,node->path))return true;}return false;
++}
++bool rename(const std::wstring& from,const std::wstring& to){
++    const auto original=named(from);
++    if(!original){world.error=ERROR_FILE_NOT_FOUND;return false;}
++    const auto deleting=open(original,DELETE,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE);
++    if(!live(deleting))return false;
++    if(named(to)){CloseHandle(deleting);world.error=ERROR_ALREADY_EXISTS;return false;}
++    const auto old=key(from),prefix=old+L"\\";
++    std::vector<std::shared_ptr<Node>> moving;
++    for(const auto& [path,node]:world.paths)if(path==old||path.starts_with(prefix))moving.push_back(node);
++    for(const auto& node:moving)world.paths.erase(key(node->path));
++    for(const auto& node:moving){node->path=to+node->path.substr(from.size());world.paths[key(node->path)]=node;}
++    CloseHandle(deleting);return true;
++}
++bool junction(const std::wstring& path){
++    const auto node=named(path);
++    if(!node){world.error=ERROR_FILE_NOT_FOUND;return false;}
++    if(hasChildren(node)){world.error=ERROR_DIR_NOT_EMPTY;return false;}
++    const auto writer=open(node,GENERIC_WRITE,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE);
++    if(!live(writer))return false;
++    node->attributes|=FILE_ATTRIBUTE_REPARSE_POINT;CloseHandle(writer);return true;
++}
++bool attributeOnlyJunction(HANDLE original){
++    const auto object=lookup(original);
++    if(!object||object->kind!=Kind::File||!(expanded(object->open->access)&FILE_WRITE_ATTRIBUTES)){
++        world.error=ERROR_ACCESS_DENIED;return false;
++    }
++    if(hasChildren(object->open->node)){world.error=ERROR_DIR_NOT_EMPTY;return false;}
++    object->open->node->attributes|=FILE_ATTRIBUTE_REPARSE_POINT;return true;
++}
++void exitProcess(const std::shared_ptr<Process>& p){
++    require(p!=nullptr,"missing_process");p->live=false;p->handles.clear();
++}
++std::size_t fileHandleCount(){
++    std::size_t total=0;for(const auto& [pid,p]:world.processes){(void)pid;
++        for(const auto& [raw,object]:p->handles){(void)raw;if(object->kind==Kind::File)++total;}}
++    return total;
++}
++void initialize(){
++    world=World{};auto p=std::make_shared<Process>();p->pid=main_pid;world.processes.emplace(main_pid,p);
++}
++FILETIME time(std::uint64_t ticks){return {static_cast<DWORD>(ticks),static_cast<DWORD>(ticks>>32)};}
++}
++
++DWORD GetLastError(){return model::world.error;}
++void SetLastError(DWORD error){model::world.error=error;}
++HANDLE GetCurrentProcess(){return model::current_process;}
++DWORD GetCurrentProcessId(){return model::world.current_pid;}
++DWORD GetProcessId(HANDLE handle){const auto p=model::processFrom(handle);return p?p->pid:0;}
++BOOL GetProcessTimes(HANDLE handle,FILETIME* created,FILETIME* ended,FILETIME* kernel,FILETIME* user){
++    const auto p=model::processFrom(handle);if(!p||!created||!ended||!kernel||!user)return FALSE;
++    *created=model::time(p->birth);*ended={};*kernel={};*user={};return TRUE;
++}
++BOOL GetExitCodeProcess(HANDLE handle,DWORD* code){
++    const auto p=model::processFrom(handle);if(!p||!code)return FALSE;*code=p->live?STILL_ACTIVE:0;return TRUE;
++}
++BOOL IsProcessInJob(HANDLE processHandle,HANDLE jobHandle,BOOL* member){
++    const auto p=model::processFrom(processHandle);
++    const auto job=model::lookup(jobHandle);
++    if(!p||!job||job->kind!=model::Kind::Job||!member)return FALSE;
++    *member=job->job->members.contains(p)?TRUE:FALSE;return TRUE;
++}
++BOOL QueryInformationJobObject(HANDLE handle,JOBOBJECTINFOCLASS kind,LPVOID output,DWORD bytes,DWORD* returned){
++    const auto object=model::lookup(handle);
++    if(!object||object->kind!=model::Kind::Job||!output||model::world.query_job_denied)return FALSE;
++    if(kind==JobObjectBasicAccountingInformation&&bytes==sizeof(JOBOBJECT_BASIC_ACCOUNTING_INFORMATION)){
++        JOBOBJECT_BASIC_ACCOUNTING_INFORMATION info{};
++        info.TotalProcesses=static_cast<DWORD>(object->job->members.size());
++        info.ActiveProcesses=static_cast<DWORD>(object->job->members.size());
++        *static_cast<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION*>(output)=info;
++        if(returned)*returned=sizeof(info);
++        return TRUE;
++    }
++    return FALSE;
++}
++HANDLE CreateFileW(LPCWSTR path,DWORD access,DWORD share,SECURITY_ATTRIBUTES*,DWORD disposition,DWORD,HANDLE){
++    if(!path||disposition!=OPEN_EXISTING){SetLastError(ERROR_INVALID_PARAMETER);return INVALID_HANDLE_VALUE;}
++    return model::open(model::named(path),access,share);
++}
++HANDLE ReOpenFile(HANDLE original,DWORD access,DWORD share,DWORD){
++    const auto object=model::lookup(original);
++    if(!object||object->kind!=model::Kind::File)return INVALID_HANDLE_VALUE;
++    return model::open(object->open->node,access,share);
++}
++BOOL CloseHandle(HANDLE value){
++    const auto p=model::process(model::world.current_pid);
++    if(!p||!p->handles.contains(value)){SetLastError(ERROR_INVALID_HANDLE);return FALSE;}
++    for(const auto& operation:model::world.pending)
++        if(operation.original==value&&operation.status&&operation.status->Status==model::pending_status)
++            ++model::world.close_before_completion;
++    p->handles.erase(value);return TRUE;
++}
++BOOL DuplicateHandle(HANDLE sourceProcess,HANDLE original,HANDLE destinationProcess,PHANDLE duplicate,DWORD access,BOOL inherit,DWORD options){
++    ++model::world.duplicate_calls;
++    const auto source=model::processFrom(sourceProcess),destination=model::processFrom(destinationProcess);
++    if(!source||!destination||!duplicate||inherit||model::world.duplicate_denied||
++        !(options&DUPLICATE_SAME_ACCESS)||access){SetLastError(ERROR_INVALID_PARAMETER);return FALSE;}
++    const auto found=source->handles.find(original);
++    if(found==source->handles.end()){SetLastError(ERROR_INVALID_HANDLE);return FALSE;}
++    const auto object=found->second;
++    if(model::world.throw_worker_copyback&&source->pid!=model::world.current_pid&&
++        destination->pid==model::world.current_pid&&object->kind==model::Kind::File){
++        model::world.throw_worker_copyback=false;throw std::bad_alloc{};
++    }
++    if(destination->pid==model::world.fail_duplicate_target_pid&&
++        ++model::world.target_duplicate_count==model::world.fail_target_duplicate_at){
++        SetLastError(ERROR_ACCESS_DENIED);return FALSE;
++    }
++    if(model::world.wrong_file_duplicate&&object->kind==model::Kind::File){
++        model::world.wrong_file_duplicate=false;
++        auto substituted=std::make_shared<model::Object>(*object);
++        substituted->open=std::make_shared<model::Open>(*object->open);
++        *duplicate=model::put(destination,substituted);
++    }else *duplicate=model::put(destination,object);
++    if(options&DUPLICATE_CLOSE_SOURCE)source->handles.erase(original);
++    return *duplicate?TRUE:FALSE;
++}
++BOOL CompareObjectHandles(HANDLE left,HANDLE right){
++    ++model::world.compare_calls;
++    const auto a=model::lookup(left),b=model::lookup(right);
++    return !model::world.compare_denied&&a&&a==b?TRUE:FALSE;
++}
++BOOL GetFileInformationByHandleEx(HANDLE handle,FILE_INFO_BY_HANDLE_CLASS kind,LPVOID output,DWORD bytes){
++    const auto object=model::lookup(handle);
++    if(!object||object->kind!=model::Kind::File||!output||object->open->node->metadata_denied)return FALSE;
++    const auto& node=*object->open->node;
++    if(model::world.on_metadata)model::world.on_metadata();
++    if(model::world.throw_created_metadata&&node.path.ends_with(L"\\protected-backup-root-v1")){
++        model::world.throw_created_metadata=false;throw std::bad_alloc{};
++    }
++    if(kind==FileIdInfo&&bytes==sizeof(FILE_ID_INFO)){*static_cast<FILE_ID_INFO*>(output)=node.identity;return TRUE;}
++    if(kind==FileAttributeTagInfo&&bytes==sizeof(FILE_ATTRIBUTE_TAG_INFO)){
++        *static_cast<FILE_ATTRIBUTE_TAG_INFO*>(output)={node.attributes,(node.attributes&FILE_ATTRIBUTE_REPARSE_POINT)?0xa0000003U:0};return TRUE;
++    }
++    if(kind==FileCaseSensitiveInfo&&bytes==sizeof(FILE_CASE_SENSITIVE_INFO)){
++        *static_cast<FILE_CASE_SENSITIVE_INFO*>(output)={node.case_sensitive?FILE_CS_FLAG_CASE_SENSITIVE_DIR:0};return TRUE;
++    }
++    if(kind==FileBasicInfo&&bytes==sizeof(FILE_BASIC_INFO)){
++        FILE_BASIC_INFO value{};value.CreationTime.QuadPart=static_cast<LONGLONG>(node.birth);value.FileAttributes=node.attributes;
++        *static_cast<FILE_BASIC_INFO*>(output)=value;return TRUE;
++    }
++    if(kind==FileStandardInfo&&bytes==sizeof(FILE_STANDARD_INFO)){
++        FILE_STANDARD_INFO value{};value.EndOfFile.QuadPart=static_cast<LONGLONG>(node.bytes.size());
++        value.NumberOfLinks=1;value.Directory=(node.attributes&FILE_ATTRIBUTE_DIRECTORY)?TRUE:FALSE;
++        *static_cast<FILE_STANDARD_INFO*>(output)=value;return TRUE;
++    }
++    return FALSE;
++}
++BOOL GetFileInformationByHandle(HANDLE handle,BY_HANDLE_FILE_INFORMATION* output){
++    const auto object=model::lookup(handle);
++    if(!object||object->kind!=model::Kind::File||!output)return FALSE;
++    const auto& node=*object->open->node;BY_HANDLE_FILE_INFORMATION value{};
++    value.dwFileAttributes=node.attributes;value.ftCreationTime=model::time(node.birth);value.nNumberOfLinks=1;
++    value.dwVolumeSerialNumber=static_cast<DWORD>(node.identity.VolumeSerialNumber);
++    std::uint64_t id=0;std::memcpy(&id,node.identity.FileId.Identifier,sizeof(id));
++    value.nFileIndexLow=static_cast<DWORD>(id);value.nFileIndexHigh=static_cast<DWORD>(id>>32);
++    *output=value;return TRUE;
++}
++DWORD GetFileType(HANDLE handle){const auto object=model::lookup(handle);return object&&object->kind==model::Kind::File?FILE_TYPE_DISK:0;}
++DWORD GetFinalPathNameByHandleW(HANDLE handle,PWSTR output,DWORD capacity,DWORD flags){
++    const auto object=model::lookup(handle);if(!object||object->kind!=model::Kind::File)return 0;
++    const auto path=(flags&VOLUME_NAME_NT)?L"\\Device\\HarddiskVolume17"+object->open->node->path.substr(2):
++        (flags&VOLUME_NAME_GUID)?L"\\\\?\\Volume{00000000-0000-4000-8000-000000000017}"+object->open->node->path.substr(2):
++        L"\\\\?\\"+object->open->node->path;
++    if(!output||capacity<=path.size())return static_cast<DWORD>(path.size()+1);
++    std::copy(path.begin(),path.end(),output);output[path.size()]=L'\0';return static_cast<DWORD>(path.size());
++}
++BOOL IsValidSecurityDescriptor(PSECURITY_DESCRIPTOR value){return value?TRUE:FALSE;}
++HANDLE CreateEventW(SECURITY_ATTRIBUTES*,BOOL,BOOL signaled,LPCWSTR){
++    auto object=std::make_shared<model::Object>();object->kind=model::Kind::Event;
++    object->event=std::make_shared<model::Event>();object->event->signaled=signaled;return model::put(object);
++}
++BOOL SetEvent(HANDLE handle){const auto object=model::lookup(handle);if(!object||object->kind!=model::Kind::Event)return FALSE;object->event->signaled=true;return TRUE;}
++BOOL ResetEvent(HANDLE handle){const auto object=model::lookup(handle);if(!object||object->kind!=model::Kind::Event)return FALSE;object->event->signaled=false;return TRUE;}
++DWORD WaitForSingleObject(HANDLE handle,DWORD timeout){
++    ++model::world.waits;if(timeout&&model::world.on_wait)model::world.on_wait();
++    const auto object=model::lookup(handle);if(!object)return WAIT_FAILED;
++    if(object->kind==model::Kind::Process){
++        if(model::world.process_wait_failed)return WAIT_FAILED;
++        return object->process->live?WAIT_TIMEOUT:WAIT_OBJECT_0;
++    }
++    if(object->kind==model::Kind::Event)return object->event->signaled?WAIT_OBJECT_0:WAIT_TIMEOUT;
++    if(object->kind==model::Kind::File){
++        for(const auto& op:model::world.pending)if(op.original==handle&&op.status->Status==model::pending_status)return WAIT_TIMEOUT;
++        return WAIT_OBJECT_0;
++    }
++    return WAIT_TIMEOUT;
++}
++DWORD WaitForMultipleObjects(DWORD count,const HANDLE* handles,BOOL all,DWORD timeout){
++    if(!handles||all)return WAIT_FAILED;
++    for(DWORD i=0;i<count;++i)if(WaitForSingleObject(handles[i],0)==WAIT_OBJECT_0)return WAIT_OBJECT_0+i;
++    if(timeout&&model::world.on_wait)model::world.on_wait();
++    return WAIT_TIMEOUT;
++}
++BOOL CancelIoEx(HANDLE handle,OVERLAPPED*){
++    ++model::world.cancel_requests;
++    for(auto& pending:model::world.pending)if(pending.original==handle)pending.cancelled=true;
++    return TRUE;
++}
++BOOL GetOverlappedResult(HANDLE,OVERLAPPED* operation,DWORD* transferred,BOOL){
++    if(!operation||operation->Internal==static_cast<ULONG_PTR>(model::pending_status)){
++        SetLastError(ERROR_IO_INCOMPLETE);return FALSE;
++    }
++    if(transferred)*transferred=0;
++    return TRUE;
++}
++void Sleep(DWORD amount){++model::world.sleeps;model::world.ticks+=amount;if(model::world.on_sleep)model::world.on_sleep();}
++ULONGLONG GetTickCount64(){return model::world.ticks;}
++
++NTSTATUS NTAPI modeledNtCreateFile(PHANDLE returned,ACCESS_MASK access,POBJECT_ATTRIBUTES attributes,
++    PIO_STATUS_BLOCK status,PLARGE_INTEGER,ULONG fileAttributes,ULONG share,ULONG disposition,
++    ULONG options,PVOID,ULONG){
++    using namespace model;
++    ++world.creates;
++    if(!returned||!attributes||!attributes->ObjectName||!status||disposition!=2||
++        !(options&1)||!(options&0x20)||!(attributes->Attributes&0x1000U))return invalid_status;
++    const auto parent=lookup(attributes->RootDirectory);
++    if(!parent||parent->kind!=Kind::File||!(parent->open->node->attributes&FILE_ATTRIBUTE_DIRECTORY)||
++        (parent->open->node->attributes&FILE_ATTRIBUTE_REPARSE_POINT))return denied_status;
++    if(world.on_nt_create)world.on_nt_create();
++    const auto name=attributes->ObjectName;
++    const std::wstring leaf(name->Buffer,name->Length/sizeof(wchar_t));
++    if(leaf.empty()||leaf.find_first_of(L"\\/:")!=std::wstring::npos||leaf==L"."||leaf==L".."||leaf.find(L'\0')!=std::wstring::npos)return invalid_status;
++    ++world.relative_creates;
++    const auto path=parent->open->node->path+L"\\"+leaf;
++    if(named(path)){status->Status=collision_status;status->Information=0;return collision_status;}
++    const auto child=nodeAt(path,true);child->attributes=fileAttributes;
++    child->metadata_denied=world.created_metadata_denied;
++    *returned=open(child,access,share);
++    if(!live(*returned))return denied_status;
++    status->Information=2;
++    if(world.pending_create){status->Status=pending_status;world.pending.push_back({status,*returned,false});return pending_status;}
++    status->Status=0;return 0;
++}
++HMODULE GetModuleHandleW(LPCWSTR name){
++    if(!name)return nullptr;
++    if(std::wstring_view(name)==L"ntdll.dll")return reinterpret_cast<HMODULE>(0x180000000ULL);
++    if(std::wstring_view(name)==L"kernelbase.dll")return reinterpret_cast<HMODULE>(0x180100000ULL);
++    return nullptr;
++}
++FARPROC GetProcAddress(HMODULE module,LPCSTR name){
++    if(!module||!name)return nullptr;
++    FARPROC result=nullptr;
++    if(std::string_view(name)=="NtCreateFile"&&!model::world.missing_nt_create){
++        auto function=&modeledNtCreateFile;static_assert(sizeof(result)==sizeof(function));
++        std::memcpy(&result,&function,sizeof(result));
++    }else if(std::string_view(name)=="CompareObjectHandles"){
++        auto function=&CompareObjectHandles;static_assert(sizeof(result)==sizeof(function));
++        std::memcpy(&result,&function,sizeof(result));
++    }
++    return result;
++}
++
++// The mechanical class's exact cases follow below. Every invocation is a fresh
++// process, so intentionally quarantined uncertain owners are never reset into
++// a later synthetic attempt.
++namespace tests {
++using namespace metaengine::guardian;
++using model::require;
++constexpr DWORD all_sharing=FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE;
++constexpr DWORD metadata_access=FILE_READ_ATTRIBUTES|READ_CONTROL|SYNCHRONIZE;
++const std::wstring base=L"C:\\fixture",state=base+L"\\state",source=state+L"\\pgdata",
++    identity_store=base+L"\\identity",fixed_root=state+L"\\protected-backup-root-v1";
++std::wstring child(const std::wstring& parent,const std::wstring& leaf){
++    return parent+(parent.back()==L'\\'?L"":L"\\")+leaf;
++}
++struct Fixture{
++    std::vector<std::wstring> names{L"C:\\",base,state,source,identity_store};
++    std::vector<OriginalRecoveryDirectory> originals;
++    std::vector<HANDLE> raw;
++    RecoveryDirectoryBinding correlation;
++    std::string failure;
++    Fixture(){
++        model::initialize();
++        correlation.original_job_id="10000000-0000-4000-8000-000000000001";
++        correlation.owner_id="20000000-0000-4000-8000-000000000002";
++        correlation.host_instance_id="30000000-0000-4000-8000-000000000003";
++        correlation.owner_epoch=7;correlation.owner_generation=2;correlation.host_generation=3;
++        correlation.host_pid=model::main_pid;
++        for(const auto& name:names)model::nodeAt(name);
++        for(const auto& name:names){
++            const auto anchor=child(name,L"namespace-anchor.bin");
++            model::nodeAt(anchor,false,"SYNTHETIC_ORIGINAL_ANCHOR_BYTES");
++            const auto directory=CreateFileW(name.c_str(),metadata_access,all_sharing,nullptr,OPEN_EXISTING,
++                FILE_FLAG_BACKUP_SEMANTICS|FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
++            const auto file=CreateFileW(anchor.c_str(),metadata_access,all_sharing,nullptr,OPEN_EXISTING,
++                FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
++            require(model::live(directory)&&model::live(file),"model_fixture_open_failed");
++            originals.push_back({directory,file});raw.push_back(directory);raw.push_back(file);
++        }
++    }
++    ~Fixture(){model::world.current_pid=model::main_pid;for(const auto handle:raw)CloseHandle(handle);}
++    std::unique_ptr<RecoveryDirectoryHandles> retain(){
++        auto held=RecoveryDirectoryHandles::retainOriginal(correlation,originals,&failure);
++        require(held!=nullptr,"retain_original_failed:"+failure);
++        require(held->checkOriginals(&failure),"original_check_failed:"+failure);return held;
++    }
++    void drain(RecoveryDirectoryHandles& held){
++        held.revoke();require(held.drain(&failure),"drain_failed:"+failure);
++        require(held.released(),"drain_did_not_release");
++    }
++    HANDLE addAnchor(const std::wstring& parent){
++        // Explicit synthetic issuer boundary: this generated file is no
++        // authenticated registration, ACL claim or production scope.
++        const auto path=child(parent,L"namespace-anchor.bin");
++        model::nodeAt(path,false,"SYNTHETIC_CREATED_CHILD_ANCHOR");
++        const auto handle=CreateFileW(path.c_str(),metadata_access,all_sharing,nullptr,OPEN_EXISTING,
++            FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
++        require(model::live(handle),"generated_anchor_open_failed");raw.push_back(handle);return handle;
++    }
++};
++struct Worker{
++    std::shared_ptr<model::Process> process;
++    std::shared_ptr<model::Job> job;
++    HANDLE process_handle=nullptr,job_handle=nullptr;
++    Worker(){
++        process=std::make_shared<model::Process>();process->pid=2001;
++        model::world.processes.emplace(process->pid,process);
++        job=std::make_shared<model::Job>();job->members.insert(process);
++        auto process_object=std::make_shared<model::Object>();process_object->kind=model::Kind::Process;
++        process_object->process=process;process_handle=model::put(process_object);
++        auto job_object=std::make_shared<model::Object>();job_object->kind=model::Kind::Job;
++        job_object->job=job;job_handle=model::put(job_object);
++    }
++    ~Worker(){model::world.current_pid=model::main_pid;CloseHandle(process_handle);CloseHandle(job_handle);}
++    void physicalExit(){model::exitProcess(process);}
++    void jobJoin(){job->members.erase(process);}
++};
++using Case=std::pair<const char*,std::function<void()>>;
++std::vector<Case> cases(){return {
++    {"exact_original_duplicates_and_identity",[]{
++        Fixture f;auto held=f.retain();
++        require(held->directoryCount()==f.names.size(),"directory_count_changed");
++        const auto id=held->identity(2);require(id.has_value(),"identity_missing");
++        require(id->native_volume_id==17&&id->birth_time_100ns>0,"raw_native_identity_missing");
++        require(id->canonical_volume_path.find(L"Volume{")!=std::wstring::npos,"canonical_volume_identity_missing");
++        require(held->binding().original_job_id==f.correlation.original_job_id,"correlation_changed");
++        HANDLE a=nullptr,b=nullptr;
++        require(held->duplicateOriginalDirectory(2,&a,&f.failure)&&held->duplicateOriginalDirectory(2,&b,&f.failure),"original_duplicate_failed");
++        require(CompareObjectHandles(a,b),"duplicates_do_not_retain_same_original_open");
++        CloseHandle(a);CloseHandle(b);f.drain(*held);
++        require(model::rename(state,state+L"-after-release"),"model_does_not_observe_release");
++    }},
++    {"missing_ancestry_refuses_capture",[]{
++        Fixture f;auto incomplete=f.originals;incomplete.erase(incomplete.begin()+1);
++        auto held=RecoveryDirectoryHandles::retainOriginal(f.correlation,incomplete,&f.failure);
++        require(!held,"missing_ancestor_admitted");
++        require(model::rename(state,state+L"-control"),"failed_capture_leaked_restrictive_opens");
++    }},
++    {"symmetric_share_conflicts_reject_preexisting_writer",[]{
++        Fixture f;
++        const auto writer=CreateFileW(state.c_str(),GENERIC_WRITE,all_sharing,nullptr,OPEN_EXISTING,
++            FILE_FLAG_BACKUP_SEMANTICS|FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
++        require(model::live(writer),"permissive_fixture_writer_failed");
++        auto held=RecoveryDirectoryHandles::retainOriginal(f.correlation,f.originals,&f.failure);
++        require(!held,"preexisting_writer_survived_restrictive_original_reopen");CloseHandle(writer);
++        held=f.retain();
++        const auto late=CreateFileW(state.c_str(),GENERIC_WRITE,all_sharing,nullptr,OPEN_EXISTING,
++            FILE_FLAG_BACKUP_SEMANTICS|FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
++        require(!model::live(late)&&GetLastError()==ERROR_SHARING_VIOLATION,"future_writer_not_denied");f.drain(*held);
++    }},
++    {"direct_child_anchor_is_required",[]{
++        Fixture f;auto missing=f.originals;missing[2].direct_child_anchor=nullptr;
++        require(!RecoveryDirectoryHandles::retainOriginal(f.correlation,missing,&f.failure),"unanchored_namespace_admitted");
++        auto wrong=f.originals;wrong[2].direct_child_anchor=f.originals[4].direct_child_anchor;
++        require(!RecoveryDirectoryHandles::retainOriginal(f.correlation,wrong,&f.failure),"unrelated_child_anchor_admitted");
++    }},
++    {"swap_after_last_check_is_denied_without_another_check",[]{
++        Fixture f;auto held=f.retain();
++        require(held->checkOriginals(&f.failure),"last_observation_failed");
++        for(std::size_t i=1;i<f.names.size();++i){
++            require(!model::rename(f.names[i],f.names[i]+L"-replacement"),"post_check_namespace_rename_succeeded");
++            require(GetLastError()==ERROR_SHARING_VIOLATION,"rename_was_not_blocked_by_live_opens");
++            require(model::named(child(f.names[i],L"namespace-anchor.bin"))->bytes=="SYNTHETIC_ORIGINAL_ANCHOR_BYTES","original_bytes_changed");
++        }
++        f.drain(*held);require(model::rename(state,state+L"-control"),"release_control_rename_failed");
++    }},
++    {"retained_anchor_prevents_empty_directory_junction_conversion",[]{
++        Fixture f;model::nodeAt(base+L"\\empty-control");
++        require(model::junction(base+L"\\empty-control"),"unheld_empty_reparse_control_failed");
++        auto held=f.retain();
++        const auto anchor=child(state,L"namespace-anchor.bin");
++        require(!model::rename(anchor,anchor+L"-removed"),"retained_child_anchor_was_removed");
++        require(GetLastError()==ERROR_SHARING_VIOLATION,"anchor_denial_did_not_use_handle_sharing");
++        require(!model::junction(state)&&GetLastError()==ERROR_DIR_NOT_EMPTY,"anchored_directory_became_junction");
++        f.drain(*held);
++    }},
++    {"preexisting_attribute_only_handle_cannot_convert_retained_nonempty_directory",[]{
++        Fixture f;
++        const auto attributes=CreateFileW(state.c_str(),FILE_WRITE_ATTRIBUTES,all_sharing,nullptr,OPEN_EXISTING,
++            FILE_FLAG_BACKUP_SEMANTICS|FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
++        require(model::live(attributes),"attribute_only_model_open_failed");
++        auto held=f.retain();
++        require(!model::attributeOnlyJunction(attributes)&&GetLastError()==ERROR_DIR_NOT_EMPTY,
++            "attribute_only_handle_converted_anchored_directory");
++        const auto anchor=child(state,L"namespace-anchor.bin");
++        require(!model::rename(anchor,anchor+L"-removed"),"attribute_only_attack_removed_retained_anchor");
++        // PGDATA is another direct child of state. Use an otherwise empty
++        // leaf namespace for the independent successful conversion control.
++        const auto empty=base+L"\\attribute-control";model::nodeAt(empty);
++        const auto control=CreateFileW(empty.c_str(),FILE_WRITE_ATTRIBUTES,all_sharing,nullptr,OPEN_EXISTING,
++            FILE_FLAG_BACKUP_SEMANTICS|FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
++        require(model::attributeOnlyJunction(control),"attribute_only_empty_directory_control_failed");
++        CloseHandle(control);CloseHandle(attributes);f.drain(*held);
++    }},
++    {"same_file_ids_do_not_replace_original_open_comparison",[]{
++        Fixture f;model::world.wrong_file_duplicate=true;
++        require(!RecoveryDirectoryHandles::retainOriginal(f.correlation,f.originals,&f.failure),"equal_metadata_substituted_for_same_original_object");
++        require(model::world.compare_calls>0,"original_object_comparison_not_executed");
++    }},
++    {"reparse_and_case_sensitive_objects_are_refused",[]{
++        Fixture f;const auto node=model::named(state);node->attributes|=FILE_ATTRIBUTE_REPARSE_POINT;
++        require(!RecoveryDirectoryHandles::retainOriginal(f.correlation,f.originals,&f.failure),"reparse_directory_admitted");
++        node->attributes=FILE_ATTRIBUTE_DIRECTORY;node->case_sensitive=true;
++        require(!RecoveryDirectoryHandles::retainOriginal(f.correlation,f.originals,&f.failure),"case_sensitive_directory_admitted");
++    }},
++    {"fixed_child_create_uses_retained_parent_and_same_returned_object",[]{
++        Fixture f;auto held=f.retain();const auto original_parent=model::named(state);
++        model::world.on_nt_create=[&]{require(!model::rename(state,state+L"-swapped"),"parent_swapped_at_create_boundary");};
++        const auto index=held->createProtectedBackupRoot(2,&f.failure);
++        require(index.has_value(),"fixed_child_creation_failed:"+f.failure);
++        require(model::world.creates==1&&model::world.relative_creates==1,"creation_did_not_use_exclusive_relative_syscall");
++        require(model::named(state)==original_parent,"creation_parent_changed");
++        require(model::named(fixed_root)!=nullptr,"fixed_child_absent");
++        require(held->attachOriginalDirectChildAnchor(*index,f.addAnchor(fixed_root),&f.failure),"created_child_anchor_failed:"+f.failure);
++        require(held->checkOriginals(&f.failure),"anchored_child_not_retained:"+f.failure);
++        require(!model::rename(fixed_root,fixed_root+L"-swapped"),"returned_original_child_was_not_retained");
++        f.drain(*held);require(model::rename(fixed_root,fixed_root+L"-control"),"child_release_control_failed");
++    }},
++    {"exclusive_collision_preserves_existing_child_and_contents",[]{
++        Fixture f;const auto existing=model::nodeAt(fixed_root);
++        const auto sentinel=model::nodeAt(child(fixed_root,L"retained-evidence"),false,"SYNTHETIC_ORPHAN_MUST_BE_PRESERVED");
++        auto held=f.retain();require(!held->createProtectedBackupRoot(2,&f.failure),"existing_child_was_adopted");
++        require(model::named(fixed_root)==existing&&model::named(sentinel->path)==sentinel&&
++            sentinel->bytes=="SYNTHETIC_ORPHAN_MUST_BE_PRESERVED","collision_changed_original_namespace");
++        require(model::world.creates==1,"collision_created_or_retried_more_than_once");held->revoke();held->drain(&f.failure);
++    }},
++    {"empty_child_collision_is_preserved_without_adoption",[]{
++        Fixture f;const auto existing=model::nodeAt(fixed_root);auto held=f.retain();
++        require(!held->createProtectedBackupRoot(2,&f.failure),"empty_existing_child_was_adopted");
++        require(model::named(fixed_root)==existing&&!model::hasChildren(existing),"empty_collision_was_changed");
++        require(model::world.creates==1,"empty_collision_was_retried");held->revoke();held->drain(&f.failure);
++    }},
++    {"junction_child_collision_is_preserved_without_following",[]{
++        Fixture f;const auto existing=model::nodeAt(fixed_root);existing->attributes|=FILE_ATTRIBUTE_REPARSE_POINT;
++        auto held=f.retain();require(!held->createProtectedBackupRoot(2,&f.failure),"junction_collision_was_adopted");
++        require(model::named(fixed_root)==existing&&(existing->attributes&FILE_ATTRIBUTE_REPARSE_POINT),"junction_collision_was_replaced");
++        require(model::world.creates==1,"junction_collision_was_retried");held->revoke();held->drain(&f.failure);
++    }},
++    {"unanchored_created_child_cannot_issue_operation_or_worker",[]{
++        Fixture f;auto held=f.retain();const auto index=held->createProtectedBackupRoot(2,&f.failure);
++        require(index.has_value(),"fixed_child_creation_failed");
++        require(!held->beginOperation(&f.failure),"unanchored_child_issued_operation_ticket");
++        Worker worker;
++        require(!held->retainOriginalWorker(worker.process_handle,worker.job_handle,&f.failure),"unanchored_child_issued_worker_ticket");
++        require(worker.process->handles.empty(),"unanchored_child_transferred_effectful_handles");
++        held->revoke();held->drain(&f.failure);
++    }},
++    {"created_child_metadata_failure_retains_original_returned_handle",[]{
++        Fixture f;auto held=f.retain();model::world.created_metadata_denied=true;
++        require(!held->createProtectedBackupRoot(2,&f.failure),"unconfirmed_created_metadata_returned_positive_index");
++        require(model::named(fixed_root)!=nullptr,"created_child_was_deleted_after_metadata_failure");
++        held->revoke();require(!held->drain(&f.failure),"post_create_metadata_failure_was_claimed_drained");held.reset();
++        require(!model::rename(fixed_root,fixed_root+L"-metadata-failed"),"original_created_handle_closed_after_metadata_failure");
++    }},
++    {"created_child_duplicate_failure_retains_original_returned_handle",[]{
++        Fixture f;auto held=f.retain();model::world.on_nt_create=[]{model::world.duplicate_denied=true;};
++        require(!held->createProtectedBackupRoot(2,&f.failure),"unconfirmed_created_duplicate_returned_positive_index");
++        model::world.duplicate_denied=false;model::world.on_nt_create={};
++        held->revoke();require(!held->drain(&f.failure),"post_create_duplicate_failure_was_claimed_drained");held.reset();
++        require(!model::rename(fixed_root,fixed_root+L"-duplicate-failed"),"original_created_handle_closed_after_duplicate_failure");
++    }},
++    {"post_create_allocation_exception_quarantines_original_child",[]{
++        Fixture f;auto held=f.retain();model::world.throw_created_metadata=true;
++        bool positive=false;
++        try{positive=held->createProtectedBackupRoot(2,&f.failure).has_value();}catch(const std::bad_alloc&){}
++        require(!positive&&model::named(fixed_root),"post_effect_allocation_exception_returned_positive_or_deleted_child");
++        require(held->revoked(),"post_effect_allocation_exception_left_scope_open");
++        require(!held->drain(&f.failure),"post_effect_allocation_exception_was_claimed_drained");held.reset();
++        require(!model::rename(fixed_root,fixed_root+L"-allocation-failed"),"post_effect_allocation_exception_closed_original_child");
++    }},
++    {"unsupported_native_create_api_has_no_path_fallback",[]{
++        Fixture f;auto held=f.retain();model::world.missing_nt_create=true;
++        require(!held->createProtectedBackupRoot(2,&f.failure),"missing_native_api_admitted_create");
++        require(model::world.creates==0&&!model::named(fixed_root),"missing_native_api_had_effect");held->revoke();held->drain(&f.failure);
++    }},
++    {"cancellation_before_create_prevents_all_namespace_effects",[]{
++        Fixture f;auto held=f.retain();held->revoke();
++        require(!held->beginOperation(&f.failure),"cancelled_scope_started_operation");
++        require(!held->createProtectedBackupRoot(2,&f.failure),"cancelled_scope_created_child");
++        require(model::world.creates==0&&!model::named(fixed_root),"cancelled_create_changed_namespace");
++        require(held->drain(&f.failure),"effect_free_cancel_did_not_drain");
++    }},
++    {"revocation_during_final_metadata_cannot_issue_operation",[]{
++        Fixture f;auto held=f.retain();bool revoked=false;
++        model::world.on_metadata=[&]{if(!revoked){revoked=true;held->revoke();}};
++        require(!held->beginOperation(&f.failure),"metadata_reentrant_cancel_published_operation_ticket");
++        require(revoked&&held->revoked(),"metadata_cancel_not_observed");
++        model::world.on_metadata={};
++        require(!held->createProtectedBackupRoot(2,&f.failure)&&model::world.creates==0,"metadata_cancel_started_later_namespace_effect");
++        require(held->drain(&f.failure),"effect_free_metadata_cancel_failed_drain");
++    }},
++    {"pending_native_create_cancellation_joins_late_completion",[]{
++        Fixture f;auto held=f.retain();model::world.pending_create=true;
++        unsigned observations=0;
++        const auto observe=[&]{
++            if(model::world.pending.empty())return;
++            ++observations;held->revoke();
++            require(!model::rename(state,state+L"-during-pending"),"parent_released_before_pending_create_join");
++            require(!model::rename(fixed_root,fixed_root+L"-during-pending"),"child_released_before_pending_create_join");
++            if(observations>=3)model::world.pending.front().status->Status=0;
++        };
++        model::world.on_wait=observe;model::world.on_sleep=observe;
++        const auto index=held->createProtectedBackupRoot(2,&f.failure);
++        require(!index,"cancelled_late_create_returned_positive_child");
++        require(observations>=3&&model::world.cancel_requests==1,"cancel_was_treated_as_terminal_completion");
++        require(model::world.close_before_completion==0,"native_create_storage_or_handle_released_early");
++        model::world.pending.clear();model::world.on_wait={};model::world.on_sleep={};
++        require(model::named(fixed_root)!=nullptr,"late_created_child_was_automatically_deleted");
++        held->drain(&f.failure);
++    }},
++    {"revocation_at_native_create_boundary_cannot_publish_late_success",[]{
++        Fixture f;auto held=f.retain();model::world.on_nt_create=[&]{held->revoke();};
++        require(!held->createProtectedBackupRoot(2,&f.failure),"revoked_native_create_published_positive_child");
++        require(model::named(fixed_root)!=nullptr,"revoked_terminal_create_was_automatically_deleted");
++        require(!held->drain(&f.failure),"post_effect_revocation_was_claimed_drained");held.reset();
++        require(!model::rename(fixed_root,fixed_root+L"-revoked"),"late_created_original_handle_was_released");
++    }},
++    {"original_operation_ticket_joins_after_revoke",[]{
++        Fixture f;auto held=f.retain();auto ticket=held->beginOperation(&f.failure);
++        require(ticket!=nullptr,"original_operation_ticket_missing");held->revoke();
++        require(!held->drain(&f.failure),"pending_callback_was_mistaken_for_join");
++        require(!model::rename(state,state+L"-pending"),"pending_original_callback_lost_handles");
++        require(held->completeOperation(*ticket,&f.failure),"exact_original_callback_could_not_join");
++        require(!held->completeOperation(*ticket,&f.failure),"completed_callback_ticket_replayed");
++        require(held->drain(&f.failure),"joined_callback_did_not_drain");
++        require(model::rename(state,state+L"-joined"),"joined_callback_did_not_release");
++    }},
++    {"abandoned_operation_quarantines_original_handles",[]{
++        Fixture f;auto held=f.retain();auto ticket=held->beginOperation(&f.failure);
++        require(ticket!=nullptr,"original_operation_ticket_missing");held->abandonOperation(*ticket);ticket.reset();
++        held->revoke();require(!held->drain(&f.failure),"unknown_callback_was_claimed_joined");held.reset();
++        require(!model::rename(state,state+L"-after-owner-destruction"),"unknown_callback_owner_released_early");
++    }},
++    {"worker_transfer_failure_denies_later_effects",[]{
++        Fixture f;auto held=f.retain();Worker worker;model::world.duplicate_denied=true;
++        auto ticket=held->retainOriginalWorker(worker.process_handle,worker.job_handle,&f.failure);
++        require(!ticket,"missing_worker_handle_transfer_was_admitted");model::world.duplicate_denied=false;
++        require(held->revoked(),"worker_transfer_failure_did_not_revoke");
++        require(!held->beginOperation(&f.failure),"failed_transfer_started_later_operation");
++        require(!held->createProtectedBackupRoot(2,&f.failure)&&model::world.creates==0,"failed_transfer_permitted_namespace_effect");
++        held->drain(&f.failure);
++    }},
++    {"partial_worker_transfer_quarantines_originals_and_preserves_remote_copy",[]{
++        Fixture f;auto held=f.retain();Worker worker;
++        model::world.fail_duplicate_target_pid=worker.process->pid;model::world.fail_target_duplicate_at=2;
++        const auto ticket=held->retainOriginalWorker(worker.process_handle,worker.job_handle,&f.failure);
++        require(!ticket&&worker.process->handles.size()==1,"partial_transfer_did_not_preserve_exact_partial_remote_open");
++        require(held->revoked(),"partial_transfer_did_not_revoke");
++        require(!held->beginOperation(&f.failure)&&!held->createProtectedBackupRoot(2,&f.failure),"partial_transfer_admitted_later_effects");
++        require(model::world.creates==0,"partial_transfer_started_namespace_creation");
++        require(!held->drain(&f.failure),"partial_transfer_was_mistaken_for_original_join");held.reset();
++        require(worker.process->handles.size()==1,"partial_remote_copy_was_eagerly_closed");
++        require(!model::rename(state,state+L"-partial-transfer"),"partial_transfer_unknown_released_originals");
++        // No worker effect is invoked: the absent production issuer must keep
++        // every worker unresumed when transfer did not complete.
++    }},
++    {"worker_transfer_check_allocation_exception_preserves_originals_without_deadlock",[]{
++        Fixture f;auto held=f.retain();Worker worker;model::world.throw_worker_copyback=true;
++        std::unique_ptr<RecoveryDirectoryHandles::WorkerTicket> ticket;
++        try{ticket=held->retainOriginalWorker(worker.process_handle,worker.job_handle,&f.failure);}catch(const std::bad_alloc&){}
++        require(!ticket,"worker_transfer_exception_returned_positive_ticket");
++        require(worker.process->handles.size()>=f.names.size()*2,"worker_transfer_exception_closed_remote_copies");
++        require(held->revoked(),"worker_transfer_exception_left_scope_open");
++        require(!held->beginOperation(&f.failure)&&!held->drain(&f.failure),"worker_transfer_exception_admitted_effect_or_false_join");
++        held.reset();require(!model::rename(state,state+L"-worker-allocation-failed"),"worker_transfer_exception_released_originals");
++    }},
++    {"namespace_cannot_expand_after_original_worker_transfer",[]{
++        Fixture f;auto held=f.retain();Worker worker;
++        auto ticket=held->retainOriginalWorker(worker.process_handle,worker.job_handle,&f.failure);
++        require(ticket!=nullptr,"worker_original_transfer_failed");
++        require(!held->createProtectedBackupRoot(2,&f.failure),"new_directory_was_created_without_existing_worker_copies");
++        require(model::world.creates==0&&!model::named(fixed_root),"post_transfer_namespace_expansion_had_effect");
++        held->revoke();worker.physicalExit();worker.jobJoin();
++        require(held->joinOriginalWorker(*ticket,&f.failure),"original_worker_join_failed");
++        require(held->drain(&f.failure),"original_worker_join_did_not_drain");
++    }},
++    {"worker_duplicates_survive_holder_crash_until_original_process_exit",[]{
++        Fixture f;auto held=f.retain();Worker worker;
++        auto ticket=held->retainOriginalWorker(worker.process_handle,worker.job_handle,&f.failure);
++        require(ticket!=nullptr,"worker_original_transfer_failed:"+f.failure);
++        require(worker.process->handles.size()>=f.names.size()*2,"worker_did_not_receive_all_directory_and_anchor_opens");
++        model::exitProcess(model::process(model::main_pid));
++        auto attacker=std::make_shared<model::Process>();attacker->pid=3001;model::world.processes.emplace(attacker->pid,attacker);
++        model::world.current_pid=attacker->pid;
++        require(!model::rename(state,state+L"-holder-dead"),"holder_crash_dropped_worker_namespace_coverage");
++        require(!model::rename(source,source+L"-holder-dead"),"holder_crash_dropped_source_coverage");
++        model::exitProcess(worker.process);worker.jobJoin();
++        require(model::rename(state,state+L"-worker-exited"),"physical_worker_exit_did_not_release_remote_opens");
++        // The simulated parent is dead. Never run parent cleanup or claim it
++        // recovered a production scope after death.
++        (void)ticket.release();(void)held.release();
++    }},
++    {"process_exit_and_original_job_descendant_join_are_distinct",[]{
++        Fixture f;auto held=f.retain();Worker worker;
++        auto ticket=held->retainOriginalWorker(worker.process_handle,worker.job_handle,&f.failure);
++        require(ticket!=nullptr,"worker_transfer_failed:"+f.failure);
++        auto descendant=std::make_shared<model::Process>();descendant->pid=2002;
++        model::world.processes.emplace(descendant->pid,descendant);worker.job->members.insert(descendant);
++        held->revoke();worker.physicalExit();worker.jobJoin();
++        require(!held->joinOriginalWorker(*ticket,&f.failure),"live_original_job_descendant_was_claimed_joined");
++        require(!held->drain(&f.failure),"live_job_descendant_dropped_custody");
++        require(!model::rename(state,state+L"-descendant-live"),"descendant_lifetime_released_parent");
++        model::exitProcess(descendant);worker.job->members.erase(descendant);
++        require(held->joinOriginalWorker(*ticket,&f.failure),"empty_original_job_failed_join:"+f.failure);
++        require(held->drain(&f.failure),"joined_job_failed_drain:"+f.failure);
++        require(model::rename(state,state+L"-job-joined"),"job_join_release_control_failed");
++    }},
++    {"termination_request_failed_wait_and_job_query_never_establish_join",[]{
++        Fixture f;auto held=f.retain();Worker worker;
++        auto ticket=held->retainOriginalWorker(worker.process_handle,worker.job_handle,&f.failure);
++        require(ticket!=nullptr,"worker_original_transfer_failed");held->revoke();
++        // A termination request is modeled without signaling physical exit.
++        // The actual core receives no caller completion flag or replacement.
++        require(!held->joinOriginalWorker(*ticket,&f.failure),"termination_request_was_claimed_physical_join");
++        model::world.process_wait_failed=true;
++        require(!held->joinOriginalWorker(*ticket,&f.failure),"failed_wait_was_claimed_physical_join");
++        model::world.process_wait_failed=false;worker.physicalExit();worker.jobJoin();
++        model::world.query_job_denied=true;
++        require(!held->joinOriginalWorker(*ticket,&f.failure),"failed_job_query_was_claimed_empty_job");
++        require(!held->drain(&f.failure)&&!model::rename(state,state+L"-unknown-join"),"failed_join_released_original_handles");
++        model::world.query_job_denied=false;
++        require(held->joinOriginalWorker(*ticket,&f.failure)&&held->drain(&f.failure),"original_terminal_observations_did_not_join");
++    }},
++    {"late_callback_retains_handles_after_worker_join",[]{
++        Fixture f;auto held=f.retain();Worker worker;
++        auto operation=held->beginOperation(&f.failure);
++        auto ticket=held->retainOriginalWorker(worker.process_handle,worker.job_handle,&f.failure);
++        require(operation&&ticket,"original_work_registration_failed");held->revoke();worker.physicalExit();worker.jobJoin();
++        require(held->joinOriginalWorker(*ticket,&f.failure),"original_worker_join_failed");
++        require(!held->drain(&f.failure),"worker_join_released_pending_native_callback");
++        require(!model::rename(state,state+L"-late-callback"),"late_callback_lost_original_handles");
++        require(held->completeOperation(*operation,&f.failure),"late_original_callback_could_not_join");
++        require(held->drain(&f.failure),"physical_worker_and_callback_join_failed");
++        require(model::rename(state,state+L"-all-joined"),"all_joins_release_control_failed");
++    }},
++    {"cross_scope_tickets_cannot_complete_another_original_operation",[]{
++        Fixture f;auto first=f.retain(),second=f.retain();
++        auto a=first->beginOperation(&f.failure),b=second->beginOperation(&f.failure);
++        require(a&&b,"operation_registration_failed");
++        require(!second->completeOperation(*a,&f.failure)&&!first->completeOperation(*b,&f.failure),"cross_scope_ticket_joined_other_operation");
++        first->revoke();second->revoke();
++        require(!first->drain(&f.failure)&&!second->drain(&f.failure),"cross_scope_denial_completed_pending_work");
++        require(first->completeOperation(*a,&f.failure)&&second->completeOperation(*b,&f.failure),"exact_scope_ticket_could_not_join");
++        require(first->drain(&f.failure)&&second->drain(&f.failure),"exact_scope_joins_did_not_drain");
++    }},
++    {"reused_observed_handle_with_equal_pid_and_birth_is_not_original_worker",[]{
++        Fixture f;auto held=f.retain();Worker worker;
++        auto ticket=held->retainOriginalWorker(worker.process_handle,worker.job_handle,&f.failure);
++        require(ticket!=nullptr,"worker_registration_failed");
++        const auto raw=worker.process_handle;require(CloseHandle(raw),"observed_handle_close_failed");
++        auto impostor=std::make_shared<model::Process>();impostor->pid=worker.process->pid;impostor->birth=worker.process->birth;
++        auto object=std::make_shared<model::Object>();object->kind=model::Kind::Process;object->process=impostor;
++        model::process(model::main_pid)->next_handle=reinterpret_cast<std::uintptr_t>(raw);
++        require(model::put(object)==raw,"numeric_handle_reuse_control_failed");
++        require(!held->checkOriginals(&f.failure)&&held->revoked(),"numeric_handle_pid_birth_clone_replaced_original_worker");
++        require(!held->joinOriginalWorker(*ticket,&f.failure),"cloned_handle_was_claimed_original_join");
++        require(!held->drain(&f.failure),"unresolved_original_worker_released_namespace");
++    }},
++};}
++void emit(const char* name,bool passed,const std::string& reason={}){
++    // Error messages are fixed model assertions and native reason identifiers.
++    // No filesystem path, runtime credential or genuine authority is reported.
++    std::cout<<"{\"name\":\""<<name<<"\",\"state\":\""<<(passed?"PASS":"FAIL")
++        <<"\",\"runtime\":\"SYNTHETIC_NATIVE_MECHANICS\",\"windows_native_execution\":\"NOT_RUN\","
++        <<"\"original_creation_proof\":false,\"physical_authority\":false,\"authority_effect\":false";
++    if(!reason.empty()){
++        std::cout<<",\"reason\":\"";
++        for(const char ch:reason){if(ch=='\\'||ch=='\"')std::cout<<'\\';if(ch>=' ')std::cout<<ch;}
++        std::cout<<'\"';
++    }
++    std::cout<<"}\n";
++}
++}
++
++int main(int argc,char** argv){
++    const auto cases=tests::cases();
++    if(argc==2&&std::string_view(argv[1])=="--list"){
++        std::cout<<'[';
++        for(std::size_t i=0;i<cases.size();++i){if(i)std::cout<<',';std::cout<<'\"'<<cases[i].first<<'\"';}
++        std::cout<<"]\n";return 0;
++    }
++    if(argc!=2)return 2;
++    const auto selected=std::find_if(cases.begin(),cases.end(),[&](const auto& entry){return entry.first==std::string_view(argv[1]);});
++    if(selected==cases.end())return 2;
++    try{selected->second();tests::emit(selected->first,true);return 0;}
++    catch(const std::exception& error){tests::emit(selected->first,false,error.what());return 1;}
++}
+diff --git a/apps/metaengine-browser/test/native/recovery-directory-handles-synthetic/windows.h b/apps/metaengine-browser/test/native/recovery-directory-handles-synthetic/windows.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..d763ec42c5970dab65def1ccbb7d465d34fb5045
+--- /dev/null
++++ b/apps/metaengine-browser/test/native/recovery-directory-handles-synthetic/windows.h
+@@ -0,0 +1,132 @@
++#pragma once
++// Isolated declarations for the source model. Never a production include path.
++#include <cstddef>
++#include <cstdint>
++
++#define WINAPI
++#define NTAPI
++#define TRUE 1
++#define FALSE 0
++#define INVALID_HANDLE_VALUE reinterpret_cast<HANDLE>(static_cast<std::intptr_t>(-1))
++
++using BYTE=unsigned char;
++using WORD=std::uint16_t;
++using USHORT=std::uint16_t;
++using DWORD=std::uint32_t;
++using ULONG=std::uint32_t;
++using LONG=std::int32_t;
++using BOOL=int;
++using UINT=unsigned int;
++using ULONGLONG=std::uint64_t;
++using LONGLONG=std::int64_t;
++using ULONG_PTR=std::uintptr_t;
++using SIZE_T=std::size_t;
++using ACCESS_MASK=DWORD;
++using HANDLE=void*;
++using PHANDLE=HANDLE*;
++using HMODULE=void*;
++using PVOID=void*;
++using LPVOID=void*;
++using PWSTR=wchar_t*;
++using LPCWSTR=const wchar_t*;
++using LPCSTR=const char*;
++using FARPROC=void(*)();
++using PSECURITY_DESCRIPTOR=void*;
++
++struct FILETIME{DWORD dwLowDateTime=0,dwHighDateTime=0;};
++struct LARGE_INTEGER{LONGLONG QuadPart=0;};
++using PLARGE_INTEGER=LARGE_INTEGER*;
++struct FILE_ID_128{BYTE Identifier[16]{};};
++struct FILE_ID_INFO{ULONGLONG VolumeSerialNumber=0;FILE_ID_128 FileId{};};
++struct FILE_ATTRIBUTE_TAG_INFO{DWORD FileAttributes=0,ReparseTag=0;};
++struct FILE_CASE_SENSITIVE_INFO{DWORD Flags=0;};
++struct FILE_BASIC_INFO{
++    LARGE_INTEGER CreationTime{},LastAccessTime{},LastWriteTime{},ChangeTime{};
++    DWORD FileAttributes=0;
++};
++struct FILE_STANDARD_INFO{
++    LARGE_INTEGER AllocationSize{},EndOfFile{};
++    DWORD NumberOfLinks=0;BOOL DeletePending=FALSE,Directory=FALSE;
++};
++struct BY_HANDLE_FILE_INFORMATION{
++    DWORD dwFileAttributes=0;
++    FILETIME ftCreationTime{},ftLastAccessTime{},ftLastWriteTime{};
++    DWORD dwVolumeSerialNumber=0,nFileSizeHigh=0,nFileSizeLow=0,nNumberOfLinks=0;
++    DWORD nFileIndexHigh=0,nFileIndexLow=0;
++};
++struct SECURITY_ATTRIBUTES{DWORD nLength=0;PVOID lpSecurityDescriptor=nullptr;BOOL bInheritHandle=FALSE;};
++struct OVERLAPPED{
++    ULONG_PTR Internal=0,InternalHigh=0;
++    DWORD Offset=0,OffsetHigh=0;HANDLE hEvent=nullptr;
++};
++enum FILE_INFO_BY_HANDLE_CLASS{
++    FileBasicInfo=0,FileStandardInfo=1,FileNameInfo=2,FileRenameInfo=3,
++    FileDispositionInfo=4,FileAttributeTagInfo=9,FileIdInfo=18,FileCaseSensitiveInfo=23,
++};
++
++constexpr DWORD ERROR_SUCCESS=0,ERROR_INVALID_FUNCTION=1,ERROR_FILE_NOT_FOUND=2,
++    ERROR_PATH_NOT_FOUND=3,ERROR_ACCESS_DENIED=5,ERROR_INVALID_HANDLE=6,
++    ERROR_INVALID_DATA=13,ERROR_NOT_SAME_DEVICE=17,ERROR_SHARING_VIOLATION=32,
++    ERROR_NOT_SUPPORTED=50,ERROR_FILE_EXISTS=80,ERROR_INVALID_PARAMETER=87,
++    ERROR_INSUFFICIENT_BUFFER=122,ERROR_DIR_NOT_EMPTY=145,ERROR_ALREADY_EXISTS=183,
++    ERROR_OPERATION_ABORTED=995,ERROR_IO_INCOMPLETE=996,ERROR_IO_PENDING=997;
++constexpr DWORD WAIT_OBJECT_0=0,WAIT_TIMEOUT=258,WAIT_FAILED=0xffffffffU,INFINITE=0xffffffffU;
++constexpr DWORD FILE_READ_DATA=1,FILE_LIST_DIRECTORY=1,FILE_WRITE_DATA=2,
++    FILE_ADD_FILE=2,FILE_APPEND_DATA=4,FILE_ADD_SUBDIRECTORY=4,FILE_READ_EA=8,
++    FILE_WRITE_EA=16,FILE_EXECUTE=32,FILE_TRAVERSE=32,FILE_DELETE_CHILD=64,
++    FILE_READ_ATTRIBUTES=128,FILE_WRITE_ATTRIBUTES=256;
++constexpr DWORD DELETE=0x10000,READ_CONTROL=0x20000,WRITE_DAC=0x40000,
++    WRITE_OWNER=0x80000,SYNCHRONIZE=0x100000;
++constexpr DWORD GENERIC_READ=0x80000000U,GENERIC_WRITE=0x40000000U,
++    GENERIC_EXECUTE=0x20000000U,GENERIC_ALL=0x10000000U;
++constexpr DWORD FILE_SHARE_READ=1,FILE_SHARE_WRITE=2,FILE_SHARE_DELETE=4;
++constexpr DWORD FILE_ATTRIBUTE_DIRECTORY=0x10,FILE_ATTRIBUTE_NORMAL=0x80,
++    FILE_ATTRIBUTE_REPARSE_POINT=0x400;
++constexpr DWORD FILE_FLAG_WRITE_THROUGH=0x80000000U,FILE_FLAG_OVERLAPPED=0x40000000U,
++    FILE_FLAG_BACKUP_SEMANTICS=0x02000000,FILE_FLAG_OPEN_REPARSE_POINT=0x00200000;
++constexpr DWORD CREATE_NEW=1,CREATE_ALWAYS=2,OPEN_EXISTING=3,OPEN_ALWAYS=4,
++    TRUNCATE_EXISTING=5;
++constexpr DWORD FILE_NAME_NORMALIZED=0,VOLUME_NAME_DOS=0,VOLUME_NAME_GUID=1,VOLUME_NAME_NT=2;
++constexpr DWORD FILE_CS_FLAG_CASE_SENSITIVE_DIR=1,FILE_TYPE_DISK=1;
++constexpr DWORD DUPLICATE_SAME_ACCESS=2,DUPLICATE_CLOSE_SOURCE=1;
++constexpr DWORD PROCESS_DUP_HANDLE=0x40,PROCESS_QUERY_LIMITED_INFORMATION=0x1000;
++constexpr DWORD STILL_ACTIVE=259,MAXDWORD=0xffffffffU;
++enum JOBOBJECTINFOCLASS{JobObjectBasicAccountingInformation=1,JobObjectBasicProcessIdList=3};
++struct JOBOBJECT_BASIC_ACCOUNTING_INFORMATION{
++    LARGE_INTEGER TotalUserTime{},TotalKernelTime{},ThisPeriodTotalUserTime{},ThisPeriodTotalKernelTime{};
++    DWORD TotalPageFaultCount=0,TotalProcesses=0,ActiveProcesses=0,TotalTerminatedProcesses=0;
++};
++struct JOBOBJECT_BASIC_PROCESS_ID_LIST{
++    DWORD NumberOfAssignedProcesses=0,NumberOfProcessIdsInList=0;ULONG_PTR ProcessIdList[1]{};
++};
++
++DWORD GetLastError();
++void SetLastError(DWORD);
++HANDLE GetCurrentProcess();
++DWORD GetCurrentProcessId();
++DWORD GetProcessId(HANDLE);
++BOOL GetProcessTimes(HANDLE,FILETIME*,FILETIME*,FILETIME*,FILETIME*);
++BOOL GetExitCodeProcess(HANDLE,DWORD*);
++BOOL IsProcessInJob(HANDLE,HANDLE,BOOL*);
++BOOL QueryInformationJobObject(HANDLE,JOBOBJECTINFOCLASS,LPVOID,DWORD,DWORD*);
++HANDLE CreateFileW(LPCWSTR,DWORD,DWORD,SECURITY_ATTRIBUTES*,DWORD,DWORD,HANDLE);
++HANDLE ReOpenFile(HANDLE,DWORD,DWORD,DWORD);
++BOOL CloseHandle(HANDLE);
++BOOL DuplicateHandle(HANDLE,HANDLE,HANDLE,PHANDLE,DWORD,BOOL,DWORD);
++BOOL CompareObjectHandles(HANDLE,HANDLE);
++BOOL GetFileInformationByHandleEx(HANDLE,FILE_INFO_BY_HANDLE_CLASS,LPVOID,DWORD);
++BOOL GetFileInformationByHandle(HANDLE,BY_HANDLE_FILE_INFORMATION*);
++DWORD GetFileType(HANDLE);
++DWORD GetFinalPathNameByHandleW(HANDLE,PWSTR,DWORD,DWORD);
++HMODULE GetModuleHandleW(LPCWSTR);
++FARPROC GetProcAddress(HMODULE,LPCSTR);
++BOOL IsValidSecurityDescriptor(PSECURITY_DESCRIPTOR);
++HANDLE CreateEventW(SECURITY_ATTRIBUTES*,BOOL,BOOL,LPCWSTR);
++BOOL SetEvent(HANDLE);
++BOOL ResetEvent(HANDLE);
++DWORD WaitForSingleObject(HANDLE,DWORD);
++DWORD WaitForMultipleObjects(DWORD,const HANDLE*,BOOL,DWORD);
++BOOL CancelIoEx(HANDLE,OVERLAPPED*);
++BOOL GetOverlappedResult(HANDLE,OVERLAPPED*,DWORD*,BOOL);
++void Sleep(DWORD);
++ULONGLONG GetTickCount64();
+diff --git a/apps/metaengine-browser/test/native/recovery-directory-handles-synthetic/winternl.h b/apps/metaengine-browser/test/native/recovery-directory-handles-synthetic/winternl.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..d67e7fa947550e686933d3ab50bbca9b5054f517
+--- /dev/null
++++ b/apps/metaengine-browser/test/native/recovery-directory-handles-synthetic/winternl.h
+@@ -0,0 +1,15 @@
++#pragma once
++#include "windows.h"
++using NTSTATUS=LONG;
++struct UNICODE_STRING{USHORT Length=0,MaximumLength=0;PWSTR Buffer=nullptr;};
++using PUNICODE_STRING=UNICODE_STRING*;
++struct OBJECT_ATTRIBUTES{
++    ULONG Length=0;HANDLE RootDirectory=nullptr;PUNICODE_STRING ObjectName=nullptr;
++    ULONG Attributes=0;PVOID SecurityDescriptor=nullptr,SecurityQualityOfService=nullptr;
++};
++using POBJECT_ATTRIBUTES=OBJECT_ATTRIBUTES*;
++struct IO_STATUS_BLOCK{
++    union{NTSTATUS Status;PVOID Pointer;};ULONG_PTR Information=0;
++    IO_STATUS_BLOCK():Status(0){}
++};
++using PIO_STATUS_BLOCK=IO_STATUS_BLOCK*;
+diff --git a/apps/metaengine-browser/test/recovery-directory-handles.test.mjs b/apps/metaengine-browser/test/recovery-directory-handles.test.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..7852eff81e7078cf76de8492bc0bfb9eb5969d3f
+--- /dev/null
++++ b/apps/metaengine-browser/test/recovery-directory-handles.test.mjs
+@@ -0,0 +1,62 @@
++// Source-only native mechanics against an isolated, deliberately modeled OS.
++// No authenticated issuer, Windows kernel, real recovery or database is used.
++import assert from 'node:assert/strict';
++import {execFileSync, spawnSync} from 'node:child_process';
++import fs from 'node:fs';
++import os from 'node:os';
++import path from 'node:path';
++import test from 'node:test';
++import {fileURLToPath} from 'node:url';
++
++const fixture=fileURLToPath(new URL('./native/recovery-directory-handles-synthetic/',import.meta.url));
++const native=fileURLToPath(new URL('../native/browser-guardian-scm/',import.meta.url));
++
++test('actual recovery directory mechanics retain original objects against a simulated Win32 boundary',{
++  skip:process.platform==='linux'?false:'Linux source model; Windows qualification is separate',
++  timeout:90_000,
++},t=>{
++  const temporary=fs.mkdtempSync(path.join(os.tmpdir(),'recovery-directory-handles-model-'));
++  try{
++    const executable=path.join(temporary,'recovery-directory-handles-model');
++    execFileSync('g++',['-std=c++20','-Wall','-Wextra','-Werror','-pthread',
++      '-I',fixture,'-I',native,path.join(fixture,'core.cpp'),
++      path.join(native,'recovery-directory-handles.cpp'),'-o',executable],
++    {cwd:temporary,encoding:'utf8',timeout:60_000});
++    const names=JSON.parse(execFileSync(executable,['--list'],{encoding:'utf8',timeout:5_000}));
++    assert.ok(names.length>=15,'the model must exercise independent adversarial scenarios');
++    assert.equal(new Set(names).size,names.length,'duplicate native scenarios');
++    for(const required of ['swap_after_last_check_is_denied_without_another_check',
++      'preexisting_attribute_only_handle_cannot_convert_retained_nonempty_directory',
++      'fixed_child_create_uses_retained_parent_and_same_returned_object',
++      'pending_native_create_cancellation_joins_late_completion',
++      'post_create_allocation_exception_quarantines_original_child',
++      'worker_transfer_check_allocation_exception_preserves_originals_without_deadlock',
++      'partial_worker_transfer_quarantines_originals_and_preserves_remote_copy',
++      'worker_duplicates_survive_holder_crash_until_original_process_exit',
++      'namespace_cannot_expand_after_original_worker_transfer',
++      'late_callback_retains_handles_after_worker_join'])assert.ok(names.includes(required),required);
++    const rows=[];
++    for(const name of names){
++      // Each case starts a fresh model process. Unknown native work remains
++      // quarantined; a later case cannot reset and adopt the old scope.
++      const result=spawnSync(executable,[name],{cwd:temporary,encoding:'utf8',timeout:5_000});
++      assert.ifError(result.error);
++      assert.equal(result.status,0,`${name}: ${result.stdout}${result.stderr}`);
++      const output=result.stdout.trim().split(/\r?\n/).filter(Boolean).map(line=>JSON.parse(line));
++      assert.equal(output.length,1,'each fresh process must report exactly its selected case');
++      assert.equal(output[0].name,name);rows.push(output[0]);
++    }
++    for(const row of rows){
++      assert.equal(row.state,'PASS',JSON.stringify(row));
++      assert.equal(row.runtime,'SYNTHETIC_NATIVE_MECHANICS');
++      assert.equal(row.windows_native_execution,'NOT_RUN');
++      assert.equal(row.original_creation_proof,false);
++      assert.equal(row.physical_authority,false);
++      assert.equal(row.authority_effect,false);
++      t.diagnostic(JSON.stringify(row));
++    }
++    t.diagnostic(JSON.stringify({runtime:'SYNTHETIC_NATIVE_MECHANICS',tests_passed:rows.length,
++      tests_failed:0,windows_native_execution:'NOT_RUN',original_creation_proof:false,
++      physical_authority:false,authority_effect:false}));
++  }finally{fs.rmSync(temporary,{recursive:true,force:true});}
++});
+diff --git a/infra/client-state-runtime/README-recovery-directory-custody.md b/infra/client-state-runtime/README-recovery-directory-custody.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..a7583a67cb7b78a9fcad0b89825c12e9e9c4626c
+--- /dev/null
++++ b/infra/client-state-runtime/README-recovery-directory-custody.md
+@@ -0,0 +1,118 @@
++# Recovery directory custody: source interface and mount requirements
++
++Status: **HOLD**. The default Host does not mount recovery. This change adds
++internal Win32 mechanics and an original-request prerequisite; it does not add
++an authenticated native issuer or make backup, restore or selector registration
++reachable. Windows build and execution are **NOT RUN**.
++
++## Existing authority and the new prerequisite
++
++`native-coding-recovery-directory-lifetime.mjs` resolves the exact original job,
++server dispatch and recovery phase from their existing private registries. It
++compares the six original server binding fields, signal, retained deadline and
++phase token before invoking their original synchronous vetoes. Public lifetime
++factories, copied records, native-looking JSON and caller callbacks do not supply
++custody. `beginOriginalRecoveryDirectoryCustody` then calls the existing fixed
++`native_recovery_original_directory_custody_required` refusal. The producer waits
++for it before connecting a source pool or performing filesystem/native effects.
++
++`owned-protected-backup-root.mjs` remains read-only. Without an original sealed
++registration it refuses before REGISTERING, encryption, identity-store writes or
++`mkdir`. Even a sealed READY selector remains an observation; it cannot bypass
++the producer's native custody refusal. Existing recovery vetoes remain required.
++
++## Internal native mechanics
++
++`native/browser-guardian-scm/recovery-directory-handles.hpp/.cpp` is compiled in
++the existing static original-Main source-set. It has no NAPI entry, arbitrary
++path acquisition, separate helper executable, signing key, wire permit or
++positive authorization export. Its binding strings are correlation only.
++
++The interface consumes borrowed original handles, duplicates and compares the
++exact native opens, and strengthens their sharing with `ReOpenFile` on the
++original object. It records volume/file/birth identity and checks reparse and
++case-sensitive state. A retained direct child is required to keep each
++directory nonempty: restrictive sharing alone does not exclude an
++attribute-only empty-directory junction conversion. Raw native identity is
++diagnostic; it is not an admitted replacement for the existing JavaScript
++filesystem-identity digest.
++
++The sole creation primitive uses a literal `protected-backup-root-v1` leaf and
++exclusive `NtCreateFile(FILE_CREATE)` relative to an original retained parent.
++It retains that same returned child; it does not mkdir then reopen, adopt a
++collision, repair an orphan or select another parent. The new child remains
++unanchored and unusable until the original issuer supplies an original direct
++child anchor. This primitive itself performs creation, so only an authenticated
++native issuer may call it after acquiring all required parent custody. The
++current JavaScript selector does not call it.
++
++Operation tickets and exact process/Job worker tickets track original joins.
++Revocation prevents new work; cancellation, timeout and a callback-shaped claim
++do not prove completion. Worker transfer duplicates the held opens into the
++original process and compares the duplicate back. Unknown or abandoned work
++retains/quarantines handles rather than reporting a drained operation. These
++mechanics do not prove that a production worker or every descendant received
++custody before it could act.
++
++## Required production mount
++
++The following work is still required before either fixed HOLD may be removed:
++
++1. Extend the existing authenticated original-Main/native Host path with a
++   private issuer that resolves the original request/job, current W74 Owner,
++   original Host process and W76 own-PG birth. Do not accept caller paths,
++   numeric handles, helper path/hash pairs, proof callbacks or JSON as admission.
++   The issuer must own the original namespace handles and their acquisition
++   provenance, rather than opening names after a final JavaScript check.
++2. Retain the backup root, PGDATA and complete necessary parent chains before
++   the first effect. For registration, also retain identity-store mutation
++   ancestry and original state parent before REGISTERING or temporary identity
++   files. Pin ACL/security state through the effect interval. The native
++   mechanics do not issue ACL/Owner authority or prove ancestry completeness.
++3. For creation, obtain missing fixed parents relative to retained originals,
++   return and retain the same new objects, and publish the existing encrypted
++   registration only under that custody. A crash, pending REGISTERING or
++   orphan/collision remains HOLD; no automatic adoption or trust-root repair.
++4. Pass custody to every effectful worker before resume, through the original
++   runner/controller registry and original Job. Retain copies across helper or
++   Host death and descendant lifetime. The present prepared runner inherits
++   only its three stdio handles; this change does not implement that handoff.
++   Do not duplicate a helper-owned Job into a surviving Host: an extra Job
++   handle can defeat `KILL_ON_JOB_CLOSE` when the helper dies. The eventual
++   issuer must preserve the original Job owner's crash behavior, for example
++   by co-locating these mechanics with that owner and qualifying the handoff.
++5. Bind cancellation, expiry and Owner/Host replacement to immediate revoke.
++   Release only after the original processes/Jobs, pipes, SQL operations,
++   filesystem completions and phase/send callbacks physically join. Request
++   finish or cancellation must not destroy the cleanup owner. Unknown settlement
++   stays quarantined and blocks retry; a late callback cannot reopen admission.
++6. Supply a fixed `runtime-host.mjs` recovery composition with actual W76
++   Owner/own-PG providers, protected connection data, tool pins and keeper
++   vetoes. Its current optional `createRecoveryService` hook is unmounted in
++   production. Import the composition through the reviewed Host source closure.
++7. Resolve prepared native artifacts through the existing authenticated package
++   registry in a Host-accessible layout. The current installed Node resolver
++   expects a source/native-dist layout, while Electron packages the helper in
++   resources and its manifest in ASAR. Do not invent a third native-tool trust
++   component or treat explicit helper paths and hashes as authenticated origin.
++8. Qualify the static Windows build and real kernel/filesystem behavior,
++   including directory sharing, attribute/reparse changes, live PostgreSQL
++   compatibility, process inheritance and all crash/join paths. Linux modeled
++   tests cannot qualify these properties.
++
++## Evidence boundaries
++
++The Linux C++ model compiles the actual native mechanics with a deliberately
++simulated Win32 object boundary. It independently models opens, share conflicts,
++path replacement and relative creation. Its result is
++`SYNTHETIC_NATIVE_MECHANICS`, `windows_native_execution: NOT_RUN`,
++`physical_authority: false`, `authority_effect: false`. Request and producer
++tests separately check original-registry refusal and zero effects after final
++path observations. No real database, installed directory or service is used.
++
++Primary API references:
++
++- [ReOpenFile: reopen the same filesystem object with different sharing](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-reopenfile)
++- [CompareObjectHandles: compare underlying kernel objects](https://learn.microsoft.com/en-us/windows/win32/api/handleapi/nf-handleapi-compareobjecthandles)
++- [FSCTL_SET_REPARSE_POINT access and nonempty-directory restrictions](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fsa/4aeefef8-92c3-4abc-af7a-a610caf8a165)
++- [NtCreateFile: names relative to a directory handle](https://learn.microsoft.com/en-us/windows/win32/api/winternl/nf-winternl-ntcreatefile)
+diff --git a/infra/client-state-runtime/native-coding-recovery-directory-lifetime.mjs b/infra/client-state-runtime/native-coding-recovery-directory-lifetime.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..f310de792758bcb53355072a8f50d2f92dc9d27d
+--- /dev/null
++++ b/infra/client-state-runtime/native-coding-recovery-directory-lifetime.mjs
+@@ -0,0 +1,109 @@
++// Original-request prerequisite only. This module does not issue directory
++// custody, allocate a token, open a helper or own cleanup resources. Genuine
++// native acquisition remains unavailable behind the fixed custody refusal.
++import {types} from 'node:util';
++import {readOriginalNativeCodingRecoveryJob} from './native-coding-host-recovery-lifetime.mjs';
++import {readOriginalNativeCodingRecoveryServerRequest} from './native-coding-host-ipc.mjs';
++import {readOriginalRecoveryRootPhase} from '../../apps/metaengine-browser/src/native-coding-recovery-root-phase.mjs';
++import {NATIVE_RECOVERY_ACTION} from '../../apps/metaengine-browser/src/native-coding-recovery-contract.mjs';
++import {nativePhysicalSettlementUnconfirmed,markNativePhysicalSettlementUnconfirmed}
++  from '../../apps/metaengine-browser/src/native-coding-host-settlement.mjs';
++import {requireOriginalRecoveryDirectoryCustody} from './native-coding-recovery-directory-custody.mjs';
++
++const INPUT=['originalJob','signal','deadlineAt'];
++const JOB=['request','signal','deadlineAt','assertCurrent'];
++const SERVER=['binding','assertCurrent'];
++const BINDING=['instance_id','host_pid','request_id','action','request_sha256','body_sha256'];
++const REQUEST=['signal','deadlineAt','instanceId','hostPid','requestId','action','requestDigest','bodyDigest','recoveryRootPhase'];
++const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
++const HASH=/^[a-f0-9]{64}$/;
++const ownErrors=new WeakSet();
++const failure=reason=>{const error=Error('native_recovery_directory_lifetime_'+reason);ownErrors.add(error);return error;};
++const must=(condition,reason)=>{if(!condition)throw failure(reason);};
++function data(value,keys,exact=true){
++  must(value&&typeof value==='object'&&!types.isProxy(value)
++    &&[Object.prototype,null].includes(Object.getPrototypeOf(value)),'input_invalid');
++  const descriptors=Object.getOwnPropertyDescriptors(value),actual=Reflect.ownKeys(value);
++  must(actual.every(key=>typeof key==='string'&&Object.hasOwn(descriptors[key],'value')&&descriptors[key].enumerable)
++    &&keys.every(key=>Object.hasOwn(descriptors,key))
++    &&(!exact||actual.length===keys.length&&actual.every(key=>keys.includes(key))),'input_invalid');
++  return Object.fromEntries(keys.map(key=>[key,descriptors[key].value]));
++}
++function synchronous(check){
++  must(typeof check==='function','original_binding_invalid');
++  const result=check();
++  // Join only a genuine Promise rejection. Inspecting an arbitrary thenable
++  // would invoke caller code while refusing its invalid positive/async result.
++  if(types.isPromise(result))Promise.prototype.then.call(result,undefined,()=>{});
++  must(result===undefined,'synchronous_veto_required');
++}
++function sameBinding(first,second){return BINDING.every(key=>first[key]===second[key]);}
++function serverBinding(value,request){
++  const binding=data(value,BINDING);
++  must(typeof binding.instance_id==='string'&&typeof binding.request_id==='string'
++    &&typeof binding.request_sha256==='string'&&typeof binding.body_sha256==='string'
++    &&UUID.test(binding.instance_id)&&UUID.test(binding.request_id)
++    &&Number.isSafeInteger(binding.host_pid)&&binding.host_pid>0&&binding.action===NATIVE_RECOVERY_ACTION
++    &&HASH.test(binding.request_sha256)&&HASH.test(binding.body_sha256),'original_binding_invalid');
++  must(binding.instance_id===request.instanceId&&binding.host_pid===request.hostPid
++    &&binding.request_id===request.requestId&&binding.action===request.action
++    &&binding.request_sha256===request.requestDigest&&binding.body_sha256===request.bodyDigest,'original_binding_invalid');
++  return binding;
++}
++
++// Returns undefined after validating only existing original registries. This
++// proves neither native handles nor permission to perform a recovery effect.
++export function assertOriginalRecoveryDirectoryRequest(input){
++  try{
++    const value=data(input,INPUT);
++    must(value.originalJob&&typeof value.originalJob==='object'&&!types.isProxy(value.originalJob)
++      &&value.signal&&typeof value.signal==='object'&&!types.isProxy(value.signal)
++      &&Number.isSafeInteger(value.deadlineAt),'original_job_required');
++    const job=readOriginalNativeCodingRecoveryJob(value.originalJob);
++    must(job,'original_job_required');
++    const admitted=data(job,JOB);
++    must(Object.isFrozen(job),'original_job_required');
++    // A public lifetime factory can mint a job facet with supplied vetoes.
++    // Resolve the actual server-dispatch registry BEFORE invoking any of them
++    // or inspecting fields of a factory-supplied request object.
++    const server=readOriginalNativeCodingRecoveryServerRequest(admitted.request);
++    must(server,'original_server_request_required');
++    const original=data(server,SERVER);
++    must(Object.isFrozen(server),'original_server_request_required');
++    const request=data(admitted.request,REQUEST,false);
++    must(Object.isFrozen(admitted.request)&&admitted.signal===value.signal&&admitted.deadlineAt===value.deadlineAt
++      &&request.signal===value.signal&&Number.isSafeInteger(request.deadlineAt)
++      &&value.deadlineAt>Date.now(),'original_binding_invalid');
++    const binding=serverBinding(original.binding,request);
++    const phase=readOriginalRecoveryRootPhase(admitted.request);
++    must(phase,'original_phase_required');
++    const selected=data(phase,['token','assertCurrent'],false);
++    must(Object.isFrozen(phase)&&selected.token&&typeof selected.token==='object'&&!types.isProxy(selected.token)
++      &&selected.token===request.recoveryRootPhase,'original_phase_required');
++    synchronous(original.assertCurrent);
++    synchronous(admitted.assertCurrent);
++    synchronous(selected.assertCurrent);
++    must(value.deadlineAt>Date.now(),'original_binding_invalid');
++    // Fixed native vetoes may revoke or replace a registry row. Matching
++    // descriptors after that change cannot preserve the original identities.
++    must(readOriginalNativeCodingRecoveryJob(value.originalJob)===job
++      &&readOriginalNativeCodingRecoveryServerRequest(admitted.request)===server
++      &&readOriginalRecoveryRootPhase(admitted.request)===phase,'original_binding_changed');
++    const currentServer=data(server,SERVER),currentRequest=data(admitted.request,REQUEST,false);
++    must(currentServer.assertCurrent===original.assertCurrent
++      &&sameBinding(binding,serverBinding(currentServer.binding,currentRequest))
++      &&currentRequest.signal===value.signal&&currentRequest.recoveryRootPhase===selected.token,'original_binding_changed');
++  }catch(error){
++    if(ownErrors.has(error))throw error;
++    const refused=failure('original_binding_unavailable');
++    throw nativePhysicalSettlementUnconfirmed(error)?markNativePhysicalSettlementUnconfirmed(refused):refused;
++  }
++}
++
++// No native issuer exists. Original request admission is necessary, never
++// sufficient: preserve the real custody refusal instead of issuing a token or
++// accepting a caller backend, handle, proof callback or positive JSON report.
++export async function beginOriginalRecoveryDirectoryCustody(input){
++  assertOriginalRecoveryDirectoryRequest(input);
++  requireOriginalRecoveryDirectoryCustody();
++}
+diff --git a/infra/client-state-runtime/native-coding-recovery-directory-lifetime.test.mjs b/infra/client-state-runtime/native-coding-recovery-directory-lifetime.test.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..a493e6a0ac838e4e4146ca9c577fe350ec4577e6
+--- /dev/null
++++ b/infra/client-state-runtime/native-coding-recovery-directory-lifetime.test.mjs
+@@ -0,0 +1,205 @@
++// Original-request guard only. Production-negative cases use unmodified real
++// public lifetime/phase factories. Separate query-scoped cases substitute ONLY
++// the fixed registry boundaries. The real directory-custody veto is never
++// mocked; no case issues native custody or allocates a helper, key or database.
++import nodeTest, {mock} from 'node:test';
++import assert from 'node:assert/strict';
++import {randomUUID} from 'node:crypto';
++import * as production from './native-coding-recovery-directory-lifetime.mjs';
++import {createNativeCodingRecoveryRequestLifetime,takeNativeCodingRecoveryRequestLifetime}
++  from './native-coding-host-recovery-lifetime.mjs';
++import {createRecoveryRootHostPhases} from '../../apps/metaengine-browser/src/native-coding-recovery-root-phase.mjs';
++import {originalRecoveryDirectoryCustodyUnavailable} from './native-coding-recovery-directory-custody.mjs';
++import {nativePhysicalSettlementUnconfirmed,markNativePhysicalSettlementUnconfirmed}
++  from '../../apps/metaengine-browser/src/native-coding-host-settlement.mjs';
++
++const test=(name,body)=>nodeTest(name,{timeout:10000},body);
++const prefix=/^native_recovery_directory_lifetime_/;
++const action='VERIFY_PRE_UPGRADE_RECOVERY_V1';
++const jobs=new WeakMap(),servers=new WeakMap(),phases=new WeakMap();
++const localUrl=name=>new URL('./'+name,import.meta.url).href;
++const browserUrl=name=>new URL('../../apps/metaengine-browser/src/'+name,import.meta.url).href;
++mock.module(localUrl('native-coding-host-recovery-lifetime.mjs'),{namedExports:{
++  readOriginalNativeCodingRecoveryJob:job=>jobs.get(job)??null,
++}});
++mock.module(localUrl('native-coding-host-ipc.mjs'),{namedExports:{
++  readOriginalNativeCodingRecoveryServerRequest:request=>servers.get(request)??null,
++}});
++mock.module(browserUrl('native-coding-recovery-root-phase.mjs'),{namedExports:{
++  readOriginalRecoveryRootPhase:request=>phases.get(request)??null,
++}});
++const boundary=await import(localUrl('native-coding-recovery-directory-lifetime.mjs?synthetic-fixed-registry-boundaries'));
++
++function syntheticOriginal(){
++  const controller=new AbortController(),originalJob=Object.freeze({}),phaseToken=Object.freeze({});
++  const deadlineAt=Date.now()+60000;
++  const request=Object.freeze({instanceId:randomUUID(),hostPid:process.pid,requestId:randomUUID(),action,
++    requestDigest:'a'.repeat(64),bodyDigest:'b'.repeat(64),signal:controller.signal,
++    // The retained job legitimately outlives its original transport deadline;
++    // the real lifetime owns that intersection, not a new guard-local clock.
++    deadlineAt:Date.now()+30000,recoveryLifetime:Object.freeze({}),recoveryRootPhase:phaseToken});
++  const f={controller,originalJob,request,deadlineAt,closed:false,
++    checks:{job:0,server:0,phase:0,recheck:0},onCheck:{}};
++  const current=kind=>{
++    f.checks[kind]++;
++    if(f.closed||controller.signal.aborted||Date.now()>=deadlineAt)throw Error('SYNTHETIC_PRIVATE_ORIGINAL_CUSTODY_CLOSED');
++    return f.onCheck[kind]?.();
++  };
++  f.job=Object.freeze({request,signal:controller.signal,deadlineAt,assertCurrent:()=>current('job')});
++  f.server=Object.freeze({binding:Object.freeze({instance_id:request.instanceId,host_pid:request.hostPid,
++    request_id:request.requestId,action,request_sha256:request.requestDigest,body_sha256:request.bodyDigest}),
++    assertCurrent:()=>current('server')});
++  f.phase=Object.freeze({token:phaseToken,assertCurrent:()=>current('phase'),
++    recheck(){f.checks.recheck++;throw Error('SYNTHETIC_GUARD_MUST_NOT_START_PHASE_IO');}});
++  jobs.set(originalJob,f.job);servers.set(request,f.server);phases.set(request,f.phase);
++  f.input={originalJob,signal:controller.signal,deadlineAt};return f;
++}
++const denied=(fn,expected=prefix)=>assert.throws(fn,error=>{assert.match(error.message,expected);return true;});
++const deniedAsync=(promise,expected=prefix)=>assert.rejects(promise,error=>{assert.match(error.message,expected);return true;});
++
++test('the module exports no native issuer, token allocator or fictitious cleanup lifecycle',()=>{
++  assert.deepEqual(Object.keys(production).sort(),['assertOriginalRecoveryDirectoryRequest','beginOriginalRecoveryDirectoryCustody']);
++});
++
++test('unmodified public factories and copied registry-like descriptors cannot invoke hostile callbacks',async()=>{
++  let armed=false,calls=0;
++  const forbidden=()=>{if(armed){calls++;throw Error('SYNTHETIC_FACTORY_CALLBACK_MUST_NOT_RUN');}};
++  const controller=new AbortController(),binding={instanceId:randomUUID(),hostPid:process.pid,
++    requestId:randomUUID(),requestDigest:'c'.repeat(64),action},deadlineAt=Date.now()+30000;
++  const holder=createNativeCodingRecoveryRequestLifetime({binding,controller,transportDeadlineAt:deadlineAt,
++    transportExpiresMono:performance.now()+30000,assertHostCurrent:forbidden,acknowledge:forbidden});
++  const phase=createRecoveryRootHostPhases({binding:{instance_id:binding.instanceId,host_pid:binding.hostPid,
++    request_id:binding.requestId,action,request_sha256:binding.requestDigest,body_sha256:'d'.repeat(64)},
++    signal:controller.signal,assertLifetime:forbidden,send(){forbidden();return Promise.resolve();}});
++  const request=Object.freeze({...binding,signal:controller.signal,deadlineAt,recoveryLifetime:holder.token,
++    recoveryRootPhase:phase.token,bodyDigest:'d'.repeat(64)});
++  let retained;
++  try{
++    holder.bindRequest(request);phase.bindRequest(request);
++    retained=takeNativeCodingRecoveryRequestLifetime(request,{operationId:randomUUID(),timeoutMs:10000});
++    const input={originalJob:retained.originalJob,signal:retained.signal,deadlineAt:retained.deadlineAt};
++    armed=true;
++    denied(()=>production.assertOriginalRecoveryDirectoryRequest(input),/original_server_request_required$/);
++    await deniedAsync(production.beginOriginalRecoveryDirectoryCustody(input),/original_server_request_required$/);
++    const descriptor={request,signal:retained.signal,deadlineAt:retained.deadlineAt,assertCurrent:forbidden,
++      native_directory_custody:{handles_held:true,assertCurrent:forbidden}};
++    for(const originalJob of [{...retained.originalJob},descriptor,Object.freeze({...descriptor})]){
++      denied(()=>production.assertOriginalRecoveryDirectoryRequest({...input,originalJob}),/original_job_required$/);
++      await deniedAsync(production.beginOriginalRecoveryDirectoryCustody({...input,originalJob}),/original_job_required$/);
++    }
++    assert.equal(calls,0);
++  }finally{
++    armed=false;retained?.finish();holder.close();phase.close();await phase.drain();
++  }
++});
++
++test('valid fixed registry identities pass only the non-authorizing guard and still hit the real native HOLD',async()=>{
++  const f=syntheticOriginal();assert.equal(boundary.assertOriginalRecoveryDirectoryRequest(f.input),undefined);
++  let refusal;
++  await assert.rejects(boundary.beginOriginalRecoveryDirectoryCustody(f.input),error=>{
++    refusal=error;assert.equal(error.message,'native_recovery_original_directory_custody_required');
++    assert.equal(originalRecoveryDirectoryCustodyUnavailable(error),true);return true;
++  });
++  assert.equal(originalRecoveryDirectoryCustodyUnavailable(Error(refusal.message)),false);
++  for(const kind of ['job','server','phase'])assert.ok(f.checks[kind]>0);
++  assert.equal(f.checks.recheck,0,'no path observation, native acquisition or effect is started by the guard');
++});
++
++test('mechanical handle/JSON claims and copied jobs cannot create original native admission',async()=>{
++  const f=syntheticOriginal();let calls=0;const forbidden=()=>{calls++;throw Error('SYNTHETIC_HANDLE_CALLBACK');};
++  const claim=Object.defineProperties({},Object.fromEntries(['handle','handles_held','assertCurrent','request']
++    .map(key=>[key,{enumerable:true,get:forbidden}])));
++  const proxy=new Proxy(claim,{get:forbidden,getPrototypeOf:forbidden,ownKeys:forbidden,getOwnPropertyDescriptor:forbidden});
++  const revoked=Proxy.revocable({},{});revoked.revoke();
++  const json={schema:'metaengine.recovery-directory-handles.v1',handles_held:true,native_verified:true,
++    request:{...f.request},signal:f.input.signal,deadlineAt:f.deadlineAt,assertCurrent:forbidden};
++  for(const originalJob of [{...f.originalJob},Object.create(f.originalJob),claim,proxy,revoked.proxy,json])
++    await deniedAsync(boundary.beginOriginalRecoveryDirectoryCustody({...f.input,originalJob}));
++  for(const extra of [{nativeCustody:json},{handles:claim},{backend:forbidden},{readOriginal:forbidden}])
++    await deniedAsync(boundary.beginOriginalRecoveryDirectoryCustody({...f.input,...extra}),/input_invalid$/);
++  assert.equal(calls,0);assert.deepEqual(f.checks,{job:0,server:0,phase:0,recheck:0});
++});
++
++test('input accessors, proxies, symbols and hidden fields deny without caller traps',()=>{
++  const f=syntheticOriginal();let calls=0;const forbidden=()=>{calls++;throw Error('SYNTHETIC_INPUT_TRAP');};
++  const accessor=Object.defineProperty({...f.input},'originalJob',{enumerable:true,get:forbidden});
++  const hidden=Object.defineProperty({...f.input},'signal',{value:f.input.signal,enumerable:false});
++  const proxy=new Proxy(f.input,{get:forbidden,getPrototypeOf:forbidden,ownKeys:forbidden,getOwnPropertyDescriptor:forbidden});
++  const revoked=Proxy.revocable({},{});revoked.revoke();
++  for(const input of [accessor,hidden,proxy,revoked.proxy,{...f.input,[Symbol('permit')]:true},Object.create(f.input)])
++    denied(()=>boundary.assertOriginalRecoveryDirectoryRequest(input),/input_invalid$/);
++  assert.equal(calls,0);assert.deepEqual(f.checks,{job:0,server:0,phase:0,recheck:0});
++});
++
++test('each original server binding field must match the same frozen request',async t=>{
++  const changed={instance_id:randomUUID(),host_pid:process.pid+1,request_id:randomUUID(),action:'READ_PRE_UPGRADE_RECOVERY_V1',
++    request_sha256:'e'.repeat(64),body_sha256:'f'.repeat(64)};
++  for(const [key,value] of Object.entries(changed))await t.test(key,()=>{
++    const f=syntheticOriginal();servers.set(f.request,Object.freeze({...f.server,binding:Object.freeze({...f.server.binding,[key]:value})}));
++    denied(()=>boundary.assertOriginalRecoveryDirectoryRequest(f.input),/original_binding_invalid$/);
++    assert.equal(f.checks.job,0);assert.equal(f.checks.phase,0);assert.equal(f.checks.recheck,0);
++  });
++});
++
++test('the original signal, retained deadline and exact phase token cannot be substituted',async t=>{
++  for(const changed of ['signal','deadline','phase token'])await t.test(changed,()=>{
++    const f=syntheticOriginal(),input={...f.input};
++    if(changed==='signal')input.signal=new AbortController().signal;
++    if(changed==='deadline')input.deadlineAt++;
++    if(changed==='phase token')phases.set(f.request,Object.freeze({...f.phase,token:{...f.phase.token}}));
++    denied(()=>boundary.assertOriginalRecoveryDirectoryRequest(input));assert.equal(f.checks.job,0);assert.equal(f.checks.recheck,0);
++  });
++});
++
++test('same-looking registry replacements during native vetoes cannot preserve original identities',async t=>{
++  for(const changed of ['job','server','phase'])await t.test(changed,()=>{
++    const f=syntheticOriginal();
++    f.onCheck.job=()=>{
++      if(changed==='job')jobs.set(f.originalJob,Object.freeze({...f.job}));
++      if(changed==='server')servers.set(f.request,Object.freeze({...f.server}));
++      if(changed==='phase')phases.set(f.request,Object.freeze({...f.phase}));
++    };
++    denied(()=>boundary.assertOriginalRecoveryDirectoryRequest(f.input),/original_binding_changed$/);assert.equal(f.checks.recheck,0);
++  });
++});
++
++test('revocation and expiry deny without refunding or replacing the original bound',async t=>{
++  for(const changed of ['cancelled','revoked','expired'])await t.test(changed,()=>{
++    const f=syntheticOriginal(),realNow=Date.now;
++    try{
++      if(changed==='cancelled')f.controller.abort();if(changed==='revoked')f.closed=true;
++      if(changed==='expired')Date.now=()=>f.deadlineAt+1;
++      denied(()=>boundary.assertOriginalRecoveryDirectoryRequest(f.input));assert.equal(f.checks.recheck,0);
++    }finally{Date.now=realNow;}
++  });
++});
++
++test('foreign private errors are sanitized while existing original physical uncertainty remains negative',()=>{
++  const f=syntheticOriginal(),marker='SYNTHETIC_PRIVATE_NATIVE_DETAIL';
++  f.onCheck.job=()=>{throw markNativePhysicalSettlementUnconfirmed(Error(marker));};
++  assert.throws(()=>boundary.assertOriginalRecoveryDirectoryRequest(f.input),error=>{
++    assert.equal(error.message,'native_recovery_directory_lifetime_original_binding_unavailable');
++    assert.equal(error.message.includes(marker),false);assert.equal(nativePhysicalSettlementUnconfirmed(error),true);return true;
++  });
++});
++
++test('async, boolean or thenable vetoes cannot become native authority or invoke caller then getters',async t=>{
++  for(const mode of ['boolean','promise','thenable'])await t.test(mode,async()=>{
++    const f=syntheticOriginal();let calls=0;
++    f.onCheck.job=()=>mode==='boolean'?true:mode==='promise'?Promise.reject(Error('SYNTHETIC_ASYNC_VETO')):
++      Object.defineProperty({},'then',{get(){calls++;throw Error('SYNTHETIC_THENABLE_TRAP');}});
++    denied(()=>boundary.assertOriginalRecoveryDirectoryRequest(f.input),/synchronous_veto_required$/);
++    await new Promise(resolve=>setImmediate(resolve));assert.equal(calls,0);assert.equal(f.checks.recheck,0);
++  });
++});
++
++test('malformed private facet and binding values refuse before accessor/coercion traps',async t=>{
++  for(const mode of ['job accessor','server proxy','binding coercion'])await t.test(mode,()=>{
++    const f=syntheticOriginal();let calls=0;const forbidden=()=>{calls++;throw Error('SYNTHETIC_FACET_TRAP');};
++    if(mode==='job accessor')jobs.set(f.originalJob,Object.freeze(Object.defineProperty({...f.job},'request',{get:forbidden,enumerable:true})));
++    if(mode==='server proxy')servers.set(f.request,new Proxy(f.server,{get:forbidden,getPrototypeOf:forbidden,ownKeys:forbidden}));
++    if(mode==='binding coercion')servers.set(f.request,Object.freeze({...f.server,binding:{...f.server.binding,
++      instance_id:{toString:forbidden}}}));
++    denied(()=>boundary.assertOriginalRecoveryDirectoryRequest(f.input));assert.equal(calls,0);assert.equal(f.checks.recheck,0);
++  });
++});
+diff --git a/infra/client-state-runtime/pg17-recovery-directory-custody.test.mjs b/infra/client-state-runtime/pg17-recovery-directory-custody.test.mjs
+index 6ac65c9654aa47599a44838e07fc3d75b73b55d3..22df433a775c3df9218809faeef1ad1d787f3668 100644
+--- a/infra/client-state-runtime/pg17-recovery-directory-custody.test.mjs
++++ b/infra/client-state-runtime/pg17-recovery-directory-custody.test.mjs
+@@ -14,6 +14,7 @@ import {nativePhysicalSettlementUnconfirmed}
+   from '../../apps/metaengine-browser/src/native-coding-host-settlement.mjs';
+ import {requireOriginalRecoveryDirectoryCustody,originalRecoveryDirectoryCustodyUnavailable}
+   from './native-coding-recovery-directory-custody.mjs';
++import {NATIVE_RECOVERY_ACTION} from '../../apps/metaengine-browser/src/native-coding-recovery-contract.mjs';
+ 
+ const test=(name,body)=>nodeTest(name,{timeout:15000},body);
+ const localUrl=name=>new URL('./'+name,import.meta.url).href;
+@@ -91,10 +92,15 @@ async function fixture(t,{swap='none',pauseRead=0}={}){
+   const current=()=>{
+     if(!f.registryOpen||controller.signal.aborted||Date.now()>=deadlineAt)throw Error('SYNTHETIC_ORIGINAL_REQUEST_CLOSED');
+   };
+-  const request=Object.freeze({}),originalJob=Object.freeze({});
++  const phaseToken=Object.freeze({}),originalJob=Object.freeze({});
++  const binding=Object.freeze({instance_id:randomUUID(),host_pid:process.pid,request_id:randomUUID(),
++    action:NATIVE_RECOVERY_ACTION,request_sha256:'d'.repeat(64),body_sha256:'e'.repeat(64)});
++  const request=Object.freeze({signal:controller.signal,deadlineAt,instanceId:binding.instance_id,
++    hostPid:binding.host_pid,requestId:binding.request_id,action:binding.action,
++    requestDigest:binding.request_sha256,bodyDigest:binding.body_sha256,recoveryRootPhase:phaseToken});
+   jobs.set(originalJob,Object.freeze({request,signal:controller.signal,deadlineAt,assertCurrent:current}));
+-  servers.set(request,Object.freeze({assertCurrent:current}));
+-  phases.set(request,Object.freeze({assertCurrent:current,async recheck(){
++  servers.set(request,Object.freeze({binding,assertCurrent:current}));
++  phases.set(request,Object.freeze({token:phaseToken,assertCurrent:current,async recheck(){
+     current();f.phaseReads++;
+     // These are real final path observations. The test swaps only after both
+     // original identities were measured and the immutable frame was captured.
+diff --git a/infra/client-state-runtime/pg17-recovery-producer.mjs b/infra/client-state-runtime/pg17-recovery-producer.mjs
+index 3c638dc222010265e81bc141b37004be9fc1a7e8..d06714aea909a8057bb5741adf9e67eb02ca209a 100644
+--- a/infra/client-state-runtime/pg17-recovery-producer.mjs
++++ b/infra/client-state-runtime/pg17-recovery-producer.mjs
+@@ -17,8 +17,9 @@ import {readDirectoryIdentity} from '../../apps/metaengine-browser/src/native-co
+ import {createNativePreparationTransactions,bindNativeCodingTransactionPool} from './native-coding-preparation-transaction.mjs';
+ import {runNativePhysicalSettlementScope,nativePhysicalSettlementUnconfirmed,markNativePhysicalSettlementUnconfirmed} from '../../apps/metaengine-browser/src/native-coding-host-settlement.mjs';
+ import {readOriginalRecoveryProtectedRoot} from './native-coding-recovery-root-provider.mjs';
+-import {requireOriginalRecoveryDirectoryCustody,originalRecoveryDirectoryCustodyUnavailable}
++import {originalRecoveryDirectoryCustodyUnavailable}
+  from './native-coding-recovery-directory-custody.mjs';
++import {beginOriginalRecoveryDirectoryCustody} from './native-coding-recovery-directory-lifetime.mjs';
+ 
+ export const PG17_RECOVERY_PRODUCER_SCHEMA='metaengine.pg17.original-recovery-diagnostic.v1';
+ const fields=['owner_id','device_id','project_id','pid','created_at','process_incarnation_id','epoch','generation','source_sha'];
+@@ -274,7 +275,7 @@ export function createPg17RecoveryProducer({custody,sql,connect,sourceConnection
+     // not reach a source pool, probe directory, file, journal or native child.
+     // No native directory-handle issuer is available: fixed HOLD, no fallback.
+     await readOriginalRecoveryProtectedRoot({originalJob,actor:currentActor,signal,deadlineAt,sourceDataDirectory});
+-    open();requireOriginalRecoveryDirectoryCustody();
++    open();await beginOriginalRecoveryDirectoryCustody({originalJob,signal,deadlineAt});
+     const sourceTransactions=createNativePreparationTransactions();
+     row.sourcePool=bindNativeCodingTransactionPool(connect({host:sourceConfig.host,port:sourceConfig.port,user:sourceConfig.username,
+      password:sourceConfig.password,database:'postgres',max:2,prepare:false,connect_timeout:5,onnotice:()=>{},
+diff --git a/infra/client-state-runtime/test/pg17-recovery-private-loader.mjs b/infra/client-state-runtime/test/pg17-recovery-private-loader.mjs
+index 0c4bf5749c2d4243389bf30d738661a896603396..39563f8f5fec72cb756502e36f07bb08e131fe76 100644
+--- a/infra/client-state-runtime/test/pg17-recovery-private-loader.mjs
++++ b/infra/client-state-runtime/test/pg17-recovery-private-loader.mjs
+@@ -1,7 +1,7 @@
+ // TEST ONLY: reuse the accepted synthetic seed without registering its tests.
+ // The producer body is unchanged in an exact query-scoped test copy. Its
+ // direct OS/process boundaries are substituted, and the missing-directory-
+-// custody veto is explicitly bypassed ONLY to exercise downstream PG/lifecycle
++// custody admission/refusal is explicitly bypassed ONLY to exercise downstream PG/lifecycle
+ // algorithms. These tests cannot establish production reachability, kernel
+ // directory custody or native qualification. The replacement owns local test
+ // children and reports SYNTHETIC_LOCAL_CHILD_CUSTODY, never Windows evidence.
+@@ -23,6 +23,7 @@ const registryUrl = registryFile.href + '?signed-pg17-recovery-qualification';
+ const syntheticDirectoryCustodyBypassUrl='data:text/javascript,'+encodeURIComponent(`
+   // TEST ONLY: exercise PG algorithms, without supplying directory custody.
+   export function requireOriginalRecoveryDirectoryCustody() {}
++  export async function beginOriginalRecoveryDirectoryCustody() {}
+   export function originalRecoveryDirectoryCustodyUnavailable() { return false; }
+ `);
+ 
+@@ -45,7 +46,8 @@ export async function loadPg17RecoveryFixture() {
+ export async function loadSyntheticPg17RecoveryProducer() {
+   if (process.platform !== 'linux') throw Error('recovery_fixture_linux_only');
+   const hooks = registerHooks({resolve(specifier, context, next) {
+-    if(context.parentURL===producerUrl&&specifier==='./native-coding-recovery-directory-custody.mjs')
++    if(context.parentURL===producerUrl&&['./native-coding-recovery-directory-custody.mjs',
++      './native-coding-recovery-directory-lifetime.mjs'].includes(specifier))
+       return {url:syntheticDirectoryCustodyBypassUrl,shortCircuit:true};
+     if(context.parentURL===producerUrl&&specifier==='./native-coding-recovery-root-provider.mjs')return {url:rootProviderUrl,shortCircuit:true};
+     if(context.parentURL===rootProviderUrl&&['./native-coding-host-recovery-lifetime.mjs','./native-coding-host-ipc.mjs','../../apps/metaengine-browser/src/native-coding-recovery-root-phase.mjs'].includes(specifier))return {url:rootRegistryUrl,shortCircuit:true};

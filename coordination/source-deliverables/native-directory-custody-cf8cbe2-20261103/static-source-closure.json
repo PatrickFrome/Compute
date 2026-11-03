@@ -1,0 +1,21 @@
+{
+  "scope": "STATIC_SOURCE_ONLY",
+  "modes": {
+    "recovery_consumers": {
+      "file_count": 153,
+      "npm": [],
+      "directory_lifetime_included": true,
+      "veto_included": true,
+      "synthetic_tests_included": false
+    },
+    "host_entry": {
+      "file_count": 136,
+      "npm": [],
+      "directory_lifetime_included": false,
+      "veto_included": false,
+      "synthetic_tests_included": false
+    }
+  },
+  "production_recovery_service": "UNMOUNTED",
+  "package_verification": "BLOCKED_MISSING_POSTGRES_3_4_7"
+}
