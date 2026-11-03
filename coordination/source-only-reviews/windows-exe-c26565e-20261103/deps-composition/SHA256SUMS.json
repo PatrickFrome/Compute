@@ -1,0 +1,20 @@
+{
+  "DEPS_COMPOSITION.md": "500c7c97fec417b785179bc20642c39e16e4c8889024fa3e3bdfa2820f87e6af",
+  "DEPS_REVIEW.txt": "f88f66a37a2cc5c5de9593956045cc94236b79aeb88de1daf3cce26790990821",
+  "DEPS_REVIEW_SNAPSHOT.json": "7011fa8580dcac415c440281e87e04fee26f24ff66f16c6e99b48d3172e149db",
+  "HOOK_REVIEW.txt": "94b1b155ba085b4b3fc1920d029e1fdb26b98c59986157249237778b7d2a6673",
+  "HOOK_REVIEW_NEGATIVES.json": "573537a33440a3d611b37f42dc76234e9f0043be3cdbdada16cfa8a747974a2c",
+  "REPORT.md": "0e2729f2ab29b2f08e942fe58c4e3964a7537b1af1ea5f3e19af4cedda5ce37d",
+  "changed-files.txt": "2b0e591943cd4f65cabd2690bbec95469698415969da9d94262234ea9f058170",
+  "chromium-tree-objects.tar.gz": "493bb2dc26a7d2cfafff31b8665fd1db424ee9a3fe4fabd91aa3399437552822",
+  "chromium-tree-packet.json": "d9ee9faf6b7b7dfcf0eaa1c2b80727bf691fcd3932228d309b1bdda9202f1408",
+  "clean-apply-proof.json": "35e8de571aedf714e40938ff25118060beb3d98f489a7e2f9db8e3f0fc03583f",
+  "deps-composition-incremental.patch": "715c3d0b41a0ac279d078e5e822338c33cb81c6c2c2e5ddf6b54d729e52a719d",
+  "metaengine-c26565e-deps-combined.patch": "c21b5df22f575d573d53f0e93be277e83326c278eda5adda1284df27b7176824",
+  "root-final-deps-inventory.json": "d7c6e51ecb2d61c48997c94b28783ecec9723687a286a9c09db65cd99c4cf664",
+  "root-final-hook-inventory.json": "ac90883a9001f33362b02d5f80e9f44365755952b31d94235fc685b7a3a87e20",
+  "root-independent-gitlinks.json": "8938f5c2179325f624b4b693a04acd4f316b6ea0c203435efbf84a58e982549a",
+  "source-configuration-evidence.json": "e4de63c97ba48bd1828763a22cb8520130ea4425dd45589cb477f7ac1e2812fa",
+  "test-evidence.tar.gz": "d829ea6392c5f77b8a731da05fcc880670d81ad5d3ccc6de2436732dab64df7b",
+  "verification.json": "1e31265aecb28c15b01b170b07f55dd5ec52c947b025cd6b9680eab5875acebb"
+}

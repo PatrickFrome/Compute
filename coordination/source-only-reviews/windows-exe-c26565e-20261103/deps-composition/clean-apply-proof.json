@@ -1,0 +1,16 @@
+[
+  {
+    "patch": "deps-composition-incremental.patch",
+    "baseline": "000067a7f03f1541aa7a0b715842d73042d82e30",
+    "apply_check": true,
+    "applied_tree": "2d268fbb87d7974a53095cde68f98c1d1fe0c3f5",
+    "physical_vs_index_clean": true
+  },
+  {
+    "patch": "metaengine-c26565e-deps-combined.patch",
+    "baseline": "2dbe253e97379532f6f4b52ef7edf26109a9266d",
+    "apply_check": true,
+    "applied_tree": "2d268fbb87d7974a53095cde68f98c1d1fe0c3f5",
+    "physical_vs_index_clean": true
+  }
+]

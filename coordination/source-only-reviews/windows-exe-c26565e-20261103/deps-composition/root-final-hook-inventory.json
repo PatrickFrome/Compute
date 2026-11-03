@@ -1,0 +1,2777 @@
+{
+  "schema": "metaengine.hook-tool-input-inventory.v1",
+  "scope": "PINNED_TOP_LEVEL_BASE_DECLARATIONS_ONLY",
+  "disposition": "HOLD",
+  "profile": {
+    "name": "DECLARED_NATIVE_WIN_X64_INITIAL_SYNC",
+    "variables": {
+      "checkout_android": false,
+      "checkout_ios": false,
+      "checkout_fuchsia": false,
+      "checkout_chromeos": false,
+      "checkout_linux": false,
+      "checkout_mac": false,
+      "checkout_arm": false,
+      "checkout_arm64": false,
+      "checkout_mips": false,
+      "checkout_mips64": false,
+      "checkout_ppc": false,
+      "checkout_riscv64": false,
+      "checkout_s390": false,
+      "checkout_x86": false,
+      "checkout_loong64": false,
+      "host_os": "win",
+      "host_cpu": "x64",
+      "checkout_win": true,
+      "checkout_x64": true
+    },
+    "observed_sync_spec": false
+  },
+  "sources": [
+    {
+      "path": "chromium/.vpython3",
+      "blob_sha1": "7cfdf7b56865f455fa46ac282c5c979720446136",
+      "sha256": "bd1533f72ac26ecd58c9dc5ea09dfcb35bab48ddac249776d4a863edf48bff50",
+      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE",
+      "content": "MATCHES_BASE_BLOB_BYTES"
+    },
+    {
+      "path": "chromium/build/config/siso/configure_siso.py",
+      "blob_sha1": "aec885109dbab181bf63be744da195c6e5225847",
+      "sha256": "630a6cf285474fa34e5ad23d7995425c6d1b983b8a07608b12185ab5945a3b32",
+      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE",
+      "content": "MATCHES_BASE_BLOB_BYTES"
+    },
+    {
+      "path": "chromium/build/config/win/BUILD.gn",
+      "blob_sha1": "069432bbae2fff5c76785bcbc97ec663e7f04b35",
+      "sha256": "575ad32181c67aa8062906e2208d8d30a6bb8a90c007fdbbb30be05c510e48bd",
+      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE",
+      "content": "MATCHES_BASE_BLOB_BYTES"
+    },
+    {
+      "path": "chromium/build/find_depot_tools.py",
+      "blob_sha1": "f891a414837a507759bb3591b0cecf2b79300d1a",
+      "sha256": "f42b1d5f2c8e2f26d50a679a5e5dc7595dd4c1b64af23f6684c22207f5c98b73",
+      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE",
+      "content": "MATCHES_BASE_BLOB_BYTES"
+    },
+    {
+      "path": "chromium/build/get_landmines.py",
+      "blob_sha1": "956024631775c07e246cecdd40e2ef29b9a178b5",
+      "sha256": "c266e23758992d6d1b6b26d4dfe3587b3ffc1b84e0b23a99469e44b4bd0b47e1",
+      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE",
+      "content": "MATCHES_BASE_BLOB_BYTES"
+    },
+    {
+      "path": "chromium/build/gn_helpers.py",
+      "blob_sha1": "1474375b63cdb0ce320d55cf915755afd90cbd90",
+      "sha256": "4c99d6d159f0faef3b83ac594ea0cf4d30973c029179721f3525cf87d765f082",
+      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE",
+      "content": "MATCHES_BASE_BLOB_BYTES"
+    },
+    {
+      "path": "chromium/build/landmines.py",
+      "blob_sha1": "844ee3808c60424305d02b34b504f40d10c9378b",
+      "sha256": "60f6f053ae87ded43d612b74f77b170851cb86649def53477301c1c2eed86d84",
+      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE",
+      "content": "MATCHES_BASE_BLOB_BYTES"
+    },
+    {
+      "path": "chromium/build/toolchain/win/rc/win/rc.exe.sha1",
+      "blob_sha1": "7c8aa9aee057ccfc54ef3765bd5adbc258c7448a",
+      "sha256": "ad6cd3835f44229227d120a4d13d070a1af4c3cd2461105d63951e179364100c",
+      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE",
+      "content": "MATCHES_BASE_BLOB_BYTES"
+    },
+    {
+      "path": "chromium/build/toolchain/win/setup_toolchain.py",
+      "blob_sha1": "e0b7c03a522040d58afdf82cbe20acc38f96b43e",
+      "sha256": "f6ae24c99ae0bfc72b093da415615119652f25415155dffb4db22f49b78ca8cf",
+      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE",
+      "content": "MATCHES_BASE_BLOB_BYTES"
+    },
+    {
+      "path": "chromium/build/util/lastchange.py",
+      "blob_sha1": "78232084df8b30a75f866379c003c1614fa439c3",
+      "sha256": "e8124f001dbdb317fcf054e5e0d8d77dc364ba278992adb1bb9c018e0a6407f8",
+      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE",
+      "content": "MATCHES_BASE_BLOB_BYTES"
+    },
+    {
+      "path": "chromium/build/util/tast_control.py",
+      "blob_sha1": "cb04a13c113085f650c7b65c49488b4b0acdaa25",
+      "sha256": "e216d3d5ddaa86cdfe7e9d3d80718e24cde91fdc625fc41e3c50ac418b734498",
+      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE",
+      "content": "MATCHES_BASE_BLOB_BYTES"
+    },
+    {
+      "path": "chromium/build/vs_toolchain.py",
+      "blob_sha1": "7c62254219ca578f25f89823f7cca494a5781230",
+      "sha256": "5b258c09a6037b0d0ef3bb95d431fba562758592ee4424dbc261f80bf590b8f2",
+      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE",
+      "content": "MATCHES_BASE_BLOB_BYTES"
+    },
+    {
+      "path": "chromium/buildtools/reclient_cfgs/configure_reclient_cfgs.py",
+      "blob_sha1": "8779d4609c9eed155c414a1c97d3598906857b22",
+      "sha256": "6ab0bfb84822b4e1815aacc99bf5db95b4e3be2080f845a366bf18ece077d5fc",
+      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE",
+      "content": "MATCHES_BASE_BLOB_BYTES"
+    },
+    {
+      "path": "chromium/tools/clang/scripts/update.py",
+      "blob_sha1": "9cf9371c34f55f06c62eeff23fa33346202e0825",
+      "sha256": "0679888392d7a700fb3a3c3de93f56bfb4e4064a5a46ece798c306b63e98b7cd",
+      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE",
+      "content": "MATCHES_BASE_BLOB_BYTES"
+    },
+    {
+      "path": "chromium/tools/remove_stale_files.py",
+      "blob_sha1": "5973fd57bc99e7e702346eb048985c599268c2b2",
+      "sha256": "6a3225ffac5f681f530fec5a3f2ed29c085d937daef8ace3672b07cb564d3cd3",
+      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE",
+      "content": "MATCHES_BASE_BLOB_BYTES"
+    },
+    {
+      "path": "chromium/tools/remove_stale_pyc_files.py",
+      "blob_sha1": "f1c65f1936ffe9ec84b6d82731ae370e419bc0fb",
+      "sha256": "a41098a3ce4f625c9d62133208aa917d2f5899a6a455cf3c788a21d54f75a585",
+      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE",
+      "content": "MATCHES_BASE_BLOB_BYTES"
+    },
+    {
+      "path": "chromium/tools/rust/update_rust.py",
+      "blob_sha1": "f00dc67e48679b4c001e2d8d8077717b51a85cc7",
+      "sha256": "ad5332728305a079dc4fcaf16aeb57de3fa2788831ff56b89c92cc7075bb936a",
+      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE",
+      "content": "MATCHES_BASE_BLOB_BYTES"
+    },
+    {
+      "path": "electron/.github/workflows/pipeline-segment-build-siso.yml",
+      "blob_sha1": "ee6a614c183abf2a3782824c80570e268bf86292",
+      "sha256": "f00b5eccd440ba76c0b6e377f3a66848401d54d548b0d77e0b54af2c285859a4",
+      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE",
+      "content": "MATCHES_BASE_BLOB_BYTES"
+    },
+    {
+      "path": "electron/.yarn/releases/yarn-4.18.0.cjs",
+      "blob_sha1": "57ec26f4e2d6731486039d80c41af9f8c8757cfc",
+      "sha256": "fb8b1d20be72a0b544a35bcec4c7ed0ff55a9b173c01f191b02ba164b2051db5",
+      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE",
+      "content": "MATCHES_BASE_BLOB_BYTES"
+    },
+    {
+      "path": "electron/.yarnrc.yml",
+      "blob_sha1": "f6af5c87747b2102dc8caf704af0091055006fb6",
+      "sha256": "5ff351333ed430b13a26492feea6c1adfd7f680aaf6bfb339afb6c3c0c897cc0",
+      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE",
+      "content": "MATCHES_BASE_BLOB_BYTES"
+    },
+    {
+      "path": "electron/build/args/release.gn",
+      "blob_sha1": "59326deae7980cbbe82e6305eb939e0a668ec20d",
+      "sha256": "b4490cee911e0ed136a6d095c69a7914cb3f4aa2d5517e3f987a2b5f45d3cd56",
+      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE",
+      "content": "MATCHES_BASE_BLOB_BYTES"
+    },
+    {
+      "path": "electron/build/pgo_profiles/v8-builtins.pgo.txt",
+      "blob_sha1": "0830ea7163eb811b8893e3ec692b8f28c50783da",
+      "sha256": "0574263718b2902f8c47d2e7d5223d4d1a71837ebe97e5d279bc7dd0de2f9624",
+      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE",
+      "content": "MATCHES_BASE_BLOB_BYTES"
+    },
+    {
+      "path": "electron/build/pgo_profiles/win-arm64.pgo.txt",
+      "blob_sha1": "96dcb20afc849a3f96c236c6a2ad3b26c5529c45",
+      "sha256": "65fe83e9756555d248b8cdad7cb32db7a629a97d6e027c1ee011d280f4d203c5",
+      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE",
+      "content": "MATCHES_BASE_BLOB_BYTES"
+    },
+    {
+      "path": "electron/build/pgo_profiles/win-x64.pgo.txt",
+      "blob_sha1": "db6d17c96c192693695083b062dc38deff67cd54",
+      "sha256": "ad7db47570e85f684cf1d1bd5980cbfef723972ba3ede79cc3a45fc2d5680a1c",
+      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE",
+      "content": "MATCHES_BASE_BLOB_BYTES"
+    },
+    {
+      "path": "electron/build/siso_revision",
+      "blob_sha1": "3dba72a89493a8d910138e69ed1fa2e0cb3102d8",
+      "sha256": "4d6d291eece72f22cd4bff5ad43e056cdd2a52c2d340bbcf050672dc14b07e3a",
+      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE",
+      "content": "MATCHES_BASE_BLOB_BYTES"
+    },
+    {
+      "path": "electron/package.json",
+      "blob_sha1": "0c91d8bad78b63f36652c4850ec3e16c3477613a",
+      "sha256": "0e4a2fe8ef3ea595a615a2091b4164fc96ee3d37cff89e6984b9345e6210a4f6",
+      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE",
+      "content": "MATCHES_BASE_BLOB_BYTES"
+    },
+    {
+      "path": "electron/script/apply_all_patches.py",
+      "blob_sha1": "37f60fa4d1252ee8c62e516ca85ab75e459d7523",
+      "sha256": "c8c5afd7706f28dd7000b9e649123943446035a5a05858b0fd8e7cbc48e4822f",
+      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE",
+      "content": "MATCHES_BASE_BLOB_BYTES"
+    },
+    {
+      "path": "electron/script/gen-siso-revision.js",
+      "blob_sha1": "5f718dc3f026787c1f781c86bc634d6ef54a12bb",
+      "sha256": "e1e0dbee6786d441acb9e1869b9870bd64902390d1e57f11653006421c765838",
+      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE",
+      "content": "MATCHES_BASE_BLOB_BYTES"
+    },
+    {
+      "path": "electron/script/lib/git.py",
+      "blob_sha1": "9a76d6076a58432516966642639d92e9e22be0ef",
+      "sha256": "80ff751b85381c32d3fab305489b47a4674c21de69897312202c4d2283949269",
+      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE",
+      "content": "MATCHES_BASE_BLOB_BYTES"
+    },
+    {
+      "path": "electron/script/lib/patches.py",
+      "blob_sha1": "785de42e0ec02d1fa809d7ddc12f4ded039d6805",
+      "sha256": "dbc83703912c42fea72d6b64e2b845cd07ef5e0e9f4f743134fdf74448be4a62",
+      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE",
+      "content": "MATCHES_BASE_BLOB_BYTES"
+    },
+    {
+      "path": "electron/script/patches-mtime-cache.py",
+      "blob_sha1": "2576705b904e7469d80701d71889abe67a8443ab",
+      "sha256": "8d4f54d3abed9f8463620f19387ba4b9f9643811c6d4bcebd13011b4b3207137",
+      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE",
+      "content": "MATCHES_BASE_BLOB_BYTES"
+    },
+    {
+      "path": "electron/script/pgo/download-profiles.py",
+      "blob_sha1": "f72275b1c1644bd3d86a350dbc77d4781a693ee6",
+      "sha256": "cf16f90bcc2cfa845a0b4a85ab13d73f6971352b5ae3beb9cb51c72c900aeab5",
+      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE",
+      "content": "MATCHES_BASE_BLOB_BYTES"
+    },
+    {
+      "path": "electron/script/sysroots.json",
+      "blob_sha1": "aaad2a796350291280e28f7cad0485bfb6d94f3d",
+      "sha256": "2fcdb40d559e8e5334618afca7da27f7e3b40321780372f3fed4e40585805e6c",
+      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE",
+      "content": "MATCHES_BASE_BLOB_BYTES"
+    },
+    {
+      "path": "electron/yarn.lock",
+      "blob_sha1": "552af176bec53be86ada93bfc5286027a06e7bd2",
+      "sha256": "92ffc6eb5852ece404d7649f55c96c6e72443c1dcb66bc4175ecec035745c5a1",
+      "phase": "LOCKED_UPSTREAM_BASE_NOT_PATCHED_HOOK_TREE",
+      "content": "MATCHES_BASE_BLOB_BYTES"
+    }
+  ],
+  "hooks": [
+    {
+      "owner": "electron",
+      "phase": "pre_deps_hooks",
+      "index": 0,
+      "name": "generate_mtime_cache",
+      "condition": "(checkout_chromium and apply_patches and use_mtime_cache) and process_deps",
+      "pattern": "src/electron",
+      "action": [
+        "python3",
+        "src/electron/script/patches-mtime-cache.py",
+        "generate",
+        "--cache-file",
+        "src/electron/patches/mtime-cache.json",
+        "--patches-config",
+        "src/electron/patches/config.json"
+      ],
+      "selection": "SELECTED",
+      "condition_result": true,
+      "executed": false,
+      "disposition": "HOLD",
+      "source_paths": [
+        "electron/script/patches-mtime-cache.py"
+      ],
+      "declared_host_command": "python3",
+      "blockers": [
+        "FILESYSTEM_MTIME_INPUTS_NOT_CANONICAL_SOURCE_BYTES",
+        "GCLIENT_PHASE_AND_CUSTOM_VARS_NOT_OPERATIONALLY_BOUND",
+        "GENERATED_OUTPUT_NAMESPACE_AND_CONTENT_PRODUCER_UNAVAILABLE",
+        "HOST_INTERPRETER_STDLIB_BOOTSTRAP_AND_SUBPROCESS_BYTES_UNBOUND",
+        "PATCHED_DEPS_AND_HOOK_SOURCE_RECONCILIATION_UNAVAILABLE",
+        "RECURSIVE_HOOK_GRAPH_AND_GLOBAL_EXECUTION_ORDER_UNAVAILABLE"
+      ]
+    },
+    {
+      "owner": "electron",
+      "phase": "hooks",
+      "index": 0,
+      "name": "patch_chromium",
+      "condition": "(checkout_chromium and apply_patches) and process_deps",
+      "pattern": "src/electron",
+      "action": [
+        "python3",
+        "src/electron/script/apply_all_patches.py",
+        "src/electron/patches/config.json"
+      ],
+      "selection": "SELECTED",
+      "condition_result": true,
+      "executed": false,
+      "disposition": "HOLD",
+      "source_paths": [
+        "electron/script/apply_all_patches.py"
+      ],
+      "declared_host_command": "python3",
+      "blockers": [
+        "ALL_PATCH_CONFIG_TARGET_REPOSITORIES_MUST_BE_PRESENT_NO_EXIT_STATUS_SUBSTITUTE",
+        "GCLIENT_PHASE_AND_CUSTOM_VARS_NOT_OPERATIONALLY_BOUND",
+        "GENERATED_OUTPUT_NAMESPACE_AND_CONTENT_PRODUCER_UNAVAILABLE",
+        "HOST_INTERPRETER_STDLIB_BOOTSTRAP_AND_SUBPROCESS_BYTES_UNBOUND",
+        "PATCHED_DEPS_AND_HOOK_SOURCE_RECONCILIATION_UNAVAILABLE",
+        "RECURSIVE_HOOK_GRAPH_AND_GLOBAL_EXECUTION_ORDER_UNAVAILABLE"
+      ]
+    },
+    {
+      "owner": "electron",
+      "phase": "hooks",
+      "index": 1,
+      "name": "apply_mtime_cache",
+      "condition": "(checkout_chromium and apply_patches and use_mtime_cache) and process_deps",
+      "pattern": "src/electron",
+      "action": [
+        "python3",
+        "src/electron/script/patches-mtime-cache.py",
+        "apply",
+        "--cache-file",
+        "src/electron/patches/mtime-cache.json"
+      ],
+      "selection": "SELECTED",
+      "condition_result": true,
+      "executed": false,
+      "disposition": "HOLD",
+      "source_paths": [
+        "electron/script/patches-mtime-cache.py"
+      ],
+      "declared_host_command": "python3",
+      "blockers": [
+        "FILESYSTEM_MTIME_INPUTS_NOT_CANONICAL_SOURCE_BYTES",
+        "GCLIENT_PHASE_AND_CUSTOM_VARS_NOT_OPERATIONALLY_BOUND",
+        "GENERATED_OUTPUT_NAMESPACE_AND_CONTENT_PRODUCER_UNAVAILABLE",
+        "HOST_INTERPRETER_STDLIB_BOOTSTRAP_AND_SUBPROCESS_BYTES_UNBOUND",
+        "PATCHED_DEPS_AND_HOOK_SOURCE_RECONCILIATION_UNAVAILABLE",
+        "RECURSIVE_HOOK_GRAPH_AND_GLOBAL_EXECUTION_ORDER_UNAVAILABLE"
+      ]
+    },
+    {
+      "owner": "electron",
+      "phase": "hooks",
+      "index": 2,
+      "name": "electron_npm_deps",
+      "pattern": "src/electron/package.json",
+      "action": [
+        "python3",
+        "-c",
+        "import os, subprocess; os.chdir(os.path.join(\"src\", \"electron\")); subprocess.check_call([\"node\", \".yarn/releases/yarn-4.18.0.cjs\", \"install\", \"--immutable\"]);"
+      ],
+      "selection": "SELECTED",
+      "condition_result": true,
+      "executed": false,
+      "disposition": "HOLD",
+      "source_paths": [
+        "electron/package.json",
+        "electron/yarn.lock",
+        "electron/.yarnrc.yml",
+        "electron/.yarn/releases/yarn-4.18.0.cjs"
+      ],
+      "declared_host_command": "python3",
+      "blockers": [
+        "BARE_PATH_NODE_NOT_PINNED_NODE_SOURCE",
+        "GCLIENT_PHASE_AND_CUSTOM_VARS_NOT_OPERATIONALLY_BOUND",
+        "GENERATED_OUTPUT_NAMESPACE_AND_CONTENT_PRODUCER_UNAVAILABLE",
+        "HOST_INTERPRETER_STDLIB_BOOTSTRAP_AND_SUBPROCESS_BYTES_UNBOUND",
+        "PATCHED_DEPS_AND_HOOK_SOURCE_RECONCILIATION_UNAVAILABLE",
+        "RECURSIVE_HOOK_GRAPH_AND_GLOBAL_EXECUTION_ORDER_UNAVAILABLE",
+        "YARN_LOCK_PAYLOAD_AND_INSTALL_OUTPUT_CLOSURE_UNBOUND"
+      ]
+    },
+    {
+      "owner": "electron",
+      "phase": "hooks",
+      "index": 3,
+      "name": "gen_siso_revision",
+      "condition": "checkout_chromium and process_deps",
+      "pattern": "src/electron",
+      "action": [
+        "node",
+        "src/electron/script/gen-siso-revision.js"
+      ],
+      "selection": "SELECTED",
+      "condition_result": true,
+      "executed": false,
+      "disposition": "HOLD",
+      "source_paths": [
+        "electron/script/gen-siso-revision.js"
+      ],
+      "declared_host_command": "node",
+      "blockers": [
+        "ADJACENT_PATCHED_DEPS_AND_GENERATED_SISO_OUTPUT_UNBOUND",
+        "BARE_PATH_NODE_NOT_PINNED_NODE_SOURCE",
+        "GCLIENT_PHASE_AND_CUSTOM_VARS_NOT_OPERATIONALLY_BOUND",
+        "GENERATED_OUTPUT_NAMESPACE_AND_CONTENT_PRODUCER_UNAVAILABLE",
+        "HOST_INTERPRETER_STDLIB_BOOTSTRAP_AND_SUBPROCESS_BYTES_UNBOUND",
+        "PATCHED_DEPS_AND_HOOK_SOURCE_RECONCILIATION_UNAVAILABLE",
+        "RECURSIVE_HOOK_GRAPH_AND_GLOBAL_EXECUTION_ORDER_UNAVAILABLE"
+      ]
+    },
+    {
+      "owner": "electron",
+      "phase": "hooks",
+      "index": 11,
+      "name": "electron_pgo_profiles_win",
+      "pattern": "src/electron/build/pgo_profiles",
+      "condition": "checkout_win and process_deps",
+      "action": [
+        "python3",
+        "src/electron/script/pgo/download-profiles.py",
+        "--targets",
+        "win-x64,win-arm64"
+      ],
+      "selection": "SELECTED",
+      "condition_result": true,
+      "executed": false,
+      "disposition": "HOLD",
+      "source_paths": [
+        "electron/script/pgo/download-profiles.py",
+        "electron/build/pgo_profiles/win-x64.pgo.txt",
+        "electron/build/pgo_profiles/win-arm64.pgo.txt"
+      ],
+      "declared_host_command": "python3",
+      "blockers": [
+        "ALL_REQUESTED_WIN_X64_AND_ARM64_PROFILE_PAYLOADS_UNAVAILABLE",
+        "GCLIENT_PHASE_AND_CUSTOM_VARS_NOT_OPERATIONALLY_BOUND",
+        "GENERATED_OUTPUT_NAMESPACE_AND_CONTENT_PRODUCER_UNAVAILABLE",
+        "HOST_INTERPRETER_STDLIB_BOOTSTRAP_AND_SUBPROCESS_BYTES_UNBOUND",
+        "PATCHED_DEPS_AND_HOOK_SOURCE_RECONCILIATION_UNAVAILABLE",
+        "RECURSIVE_HOOK_GRAPH_AND_GLOBAL_EXECUTION_ORDER_UNAVAILABLE"
+      ]
+    },
+    {
+      "owner": "electron",
+      "phase": "hooks",
+      "index": 13,
+      "name": "electron_pgo_profiles_v8_builtins",
+      "pattern": "src/electron/build/pgo_profiles",
+      "condition": "process_deps",
+      "action": [
+        "python3",
+        "src/electron/script/pgo/download-profiles.py",
+        "--targets",
+        "v8-builtins"
+      ],
+      "selection": "SELECTED",
+      "condition_result": true,
+      "executed": false,
+      "disposition": "HOLD",
+      "source_paths": [
+        "electron/script/pgo/download-profiles.py",
+        "electron/build/pgo_profiles/v8-builtins.pgo.txt"
+      ],
+      "declared_host_command": "python3",
+      "blockers": [
+        "GCLIENT_PHASE_AND_CUSTOM_VARS_NOT_OPERATIONALLY_BOUND",
+        "GENERATED_OUTPUT_NAMESPACE_AND_CONTENT_PRODUCER_UNAVAILABLE",
+        "HOST_INTERPRETER_STDLIB_BOOTSTRAP_AND_SUBPROCESS_BYTES_UNBOUND",
+        "PATCHED_DEPS_AND_HOOK_SOURCE_RECONCILIATION_UNAVAILABLE",
+        "RECURSIVE_HOOK_GRAPH_AND_GLOBAL_EXECUTION_ORDER_UNAVAILABLE",
+        "V8_BUILTINS_PROFILE_PAYLOAD_UNAVAILABLE"
+      ]
+    },
+    {
+      "owner": "chromium",
+      "phase": "hooks",
+      "index": 0,
+      "name": "vpython3_common",
+      "pattern": ".",
+      "action": [
+        "vpython3",
+        "-vpython-spec",
+        "src/.vpython3",
+        "-vpython-tool",
+        "install"
+      ],
+      "selection": "SELECTED",
+      "condition_result": true,
+      "executed": false,
+      "disposition": "HOLD",
+      "source_paths": [
+        "chromium/.vpython3"
+      ],
+      "declared_host_command": "vpython3",
+      "blockers": [
+        "GCLIENT_PHASE_AND_CUSTOM_VARS_NOT_OPERATIONALLY_BOUND",
+        "GENERATED_OUTPUT_NAMESPACE_AND_CONTENT_PRODUCER_UNAVAILABLE",
+        "HOST_INTERPRETER_STDLIB_BOOTSTRAP_AND_SUBPROCESS_BYTES_UNBOUND",
+        "PATCHED_DEPS_AND_HOOK_SOURCE_RECONCILIATION_UNAVAILABLE",
+        "RECURSIVE_HOOK_GRAPH_AND_GLOBAL_EXECUTION_ORDER_UNAVAILABLE",
+        "VPYTHON_PLATFORM_FILTER_AND_RESOLVED_WHEEL_INSTANCES_UNBOUND"
+      ]
+    },
+    {
+      "owner": "chromium",
+      "phase": "hooks",
+      "index": 1,
+      "name": "landmines",
+      "pattern": ".",
+      "action": [
+        "python3",
+        "src/build/landmines.py"
+      ],
+      "selection": "SELECTED",
+      "condition_result": true,
+      "executed": false,
+      "disposition": "HOLD",
+      "source_paths": [
+        "chromium/build/landmines.py"
+      ],
+      "declared_host_command": "python3",
+      "blockers": [
+        "GCLIENT_PHASE_AND_CUSTOM_VARS_NOT_OPERATIONALLY_BOUND",
+        "GENERATED_OUTPUT_NAMESPACE_AND_CONTENT_PRODUCER_UNAVAILABLE",
+        "HOST_INTERPRETER_STDLIB_BOOTSTRAP_AND_SUBPROCESS_BYTES_UNBOUND",
+        "LANDMINE_SCRIPT_IMPORTS_AND_CLOBBER_NAMESPACE_UNBOUND",
+        "PATCHED_DEPS_AND_HOOK_SOURCE_RECONCILIATION_UNAVAILABLE",
+        "RECURSIVE_HOOK_GRAPH_AND_GLOBAL_EXECUTION_ORDER_UNAVAILABLE"
+      ]
+    },
+    {
+      "owner": "chromium",
+      "phase": "hooks",
+      "index": 3,
+      "name": "disable_depot_tools_selfupdate",
+      "pattern": ".",
+      "action": [
+        "python3",
+        "src/third_party/depot_tools/update_depot_tools_toggle.py",
+        "--disable"
+      ],
+      "selection": "SELECTED",
+      "condition_result": true,
+      "executed": false,
+      "disposition": "HOLD",
+      "source_paths": [
+        "depot_tools/update_depot_tools_toggle.py"
+      ],
+      "declared_host_command": "python3",
+      "blockers": [
+        "BASE_SOURCE_BYTES_UNAVAILABLE:depot_tools/update_depot_tools_toggle.py",
+        "DEPOT_TOOLS_BOOTSTRAP_CLIENT_AND_HOOK_SCRIPT_BYTES_UNBOUND",
+        "GCLIENT_PHASE_AND_CUSTOM_VARS_NOT_OPERATIONALLY_BOUND",
+        "GENERATED_OUTPUT_NAMESPACE_AND_CONTENT_PRODUCER_UNAVAILABLE",
+        "HOST_INTERPRETER_STDLIB_BOOTSTRAP_AND_SUBPROCESS_BYTES_UNBOUND",
+        "PATCHED_DEPS_AND_HOOK_SOURCE_RECONCILIATION_UNAVAILABLE",
+        "RECURSIVE_HOOK_GRAPH_AND_GLOBAL_EXECUTION_ORDER_UNAVAILABLE"
+      ]
+    },
+    {
+      "owner": "chromium",
+      "phase": "hooks",
+      "index": 4,
+      "name": "remove_stale_files",
+      "pattern": ".",
+      "action": [
+        "python3",
+        "src/tools/remove_stale_files.py",
+        "src/third_party/test_fonts/test_fonts.tar.gz",
+        "src/third_party/node/node_modules.tar.gz",
+        "src/third_party/tfhub_models",
+        "src/tools/clang/crashreports"
+      ],
+      "selection": "SELECTED",
+      "condition_result": true,
+      "executed": false,
+      "disposition": "HOLD",
+      "source_paths": [
+        "chromium/tools/remove_stale_files.py"
+      ],
+      "declared_host_command": "python3",
+      "blockers": [
+        "DECLARED_REMOVAL_NAMESPACE_UNBOUND",
+        "GCLIENT_PHASE_AND_CUSTOM_VARS_NOT_OPERATIONALLY_BOUND",
+        "GENERATED_OUTPUT_NAMESPACE_AND_CONTENT_PRODUCER_UNAVAILABLE",
+        "HOST_INTERPRETER_STDLIB_BOOTSTRAP_AND_SUBPROCESS_BYTES_UNBOUND",
+        "PATCHED_DEPS_AND_HOOK_SOURCE_RECONCILIATION_UNAVAILABLE",
+        "RECURSIVE_HOOK_GRAPH_AND_GLOBAL_EXECUTION_ORDER_UNAVAILABLE"
+      ]
+    },
+    {
+      "owner": "chromium",
+      "phase": "hooks",
+      "index": 5,
+      "name": "remove_stale_pyc_files",
+      "pattern": ".",
+      "action": [
+        "python3",
+        "src/tools/remove_stale_pyc_files.py",
+        "src/android_webview/tools",
+        "src/build/android",
+        "src/gpu/gles2_conform_support",
+        "src/infra",
+        "src/ppapi",
+        "src/printing",
+        "src/third_party/blink/renderer/build/scripts",
+        "src/third_party/blink/tools",
+        "src/third_party/catapult",
+        "src/third_party/mako",
+        "src/tools"
+      ],
+      "selection": "SELECTED",
+      "condition_result": true,
+      "executed": false,
+      "disposition": "HOLD",
+      "source_paths": [
+        "chromium/tools/remove_stale_pyc_files.py"
+      ],
+      "declared_host_command": "python3",
+      "blockers": [
+        "DECLARED_REMOVAL_NAMESPACE_UNBOUND",
+        "GCLIENT_PHASE_AND_CUSTOM_VARS_NOT_OPERATIONALLY_BOUND",
+        "GENERATED_OUTPUT_NAMESPACE_AND_CONTENT_PRODUCER_UNAVAILABLE",
+        "HOST_INTERPRETER_STDLIB_BOOTSTRAP_AND_SUBPROCESS_BYTES_UNBOUND",
+        "PATCHED_DEPS_AND_HOOK_SOURCE_RECONCILIATION_UNAVAILABLE",
+        "RECURSIVE_HOOK_GRAPH_AND_GLOBAL_EXECUTION_ORDER_UNAVAILABLE"
+      ]
+    },
+    {
+      "owner": "chromium",
+      "phase": "hooks",
+      "index": 8,
+      "name": "win_toolchain",
+      "pattern": ".",
+      "condition": "checkout_win",
+      "action": [
+        "python3",
+        "src/build/vs_toolchain.py",
+        "update",
+        "--force"
+      ],
+      "selection": "SELECTED",
+      "condition_result": true,
+      "executed": false,
+      "disposition": "HOLD",
+      "source_paths": [
+        "chromium/build/vs_toolchain.py"
+      ],
+      "declared_host_command": "python3",
+      "blockers": [
+        "DEPOT_TOOLS_SDK_DOWNLOADER_AND_EXTRACTED_MEMBERS_UNBOUND",
+        "GCLIENT_PHASE_AND_CUSTOM_VARS_NOT_OPERATIONALLY_BOUND",
+        "GENERATED_OUTPUT_NAMESPACE_AND_CONTENT_PRODUCER_UNAVAILABLE",
+        "HOST_INTERPRETER_STDLIB_BOOTSTRAP_AND_SUBPROCESS_BYTES_UNBOUND",
+        "PATCHED_DEPS_AND_HOOK_SOURCE_RECONCILIATION_UNAVAILABLE",
+        "RECURSIVE_HOOK_GRAPH_AND_GLOBAL_EXECUTION_ORDER_UNAVAILABLE",
+        "SDK_ARTIFACT_LABEL_NOT_STRONG_PAYLOAD_DIGEST"
+      ]
+    },
+    {
+      "owner": "chromium",
+      "phase": "hooks",
+      "index": 12,
+      "name": "lastchange",
+      "pattern": ".",
+      "action": [
+        "python3",
+        "src/build/util/lastchange.py",
+        "-o",
+        "src/build/util/LASTCHANGE"
+      ],
+      "selection": "SELECTED",
+      "condition_result": true,
+      "executed": false,
+      "disposition": "HOLD",
+      "source_paths": [
+        "chromium/build/util/lastchange.py"
+      ],
+      "declared_host_command": "python3",
+      "blockers": [
+        "GCLIENT_PHASE_AND_CUSTOM_VARS_NOT_OPERATIONALLY_BOUND",
+        "GENERATED_OUTPUT_NAMESPACE_AND_CONTENT_PRODUCER_UNAVAILABLE",
+        "GIT_HISTORY_AND_ENVIRONMENT_DERIVED_OUTPUTS_UNBOUND",
+        "HOST_INTERPRETER_STDLIB_BOOTSTRAP_AND_SUBPROCESS_BYTES_UNBOUND",
+        "PATCHED_DEPS_AND_HOOK_SOURCE_RECONCILIATION_UNAVAILABLE",
+        "RECURSIVE_HOOK_GRAPH_AND_GLOBAL_EXECUTION_ORDER_UNAVAILABLE"
+      ]
+    },
+    {
+      "owner": "chromium",
+      "phase": "hooks",
+      "index": 14,
+      "name": "gpu_lists_version",
+      "pattern": ".",
+      "action": [
+        "python3",
+        "src/build/util/lastchange.py",
+        "-m",
+        "GPU_LISTS_VERSION",
+        "--revision-id-only",
+        "--header",
+        "src/gpu/config/gpu_lists_version.h"
+      ],
+      "selection": "SELECTED",
+      "condition_result": true,
+      "executed": false,
+      "disposition": "HOLD",
+      "source_paths": [
+        "chromium/build/util/lastchange.py"
+      ],
+      "declared_host_command": "python3",
+      "blockers": [
+        "GCLIENT_PHASE_AND_CUSTOM_VARS_NOT_OPERATIONALLY_BOUND",
+        "GENERATED_OUTPUT_NAMESPACE_AND_CONTENT_PRODUCER_UNAVAILABLE",
+        "GIT_HISTORY_AND_ENVIRONMENT_DERIVED_OUTPUTS_UNBOUND",
+        "HOST_INTERPRETER_STDLIB_BOOTSTRAP_AND_SUBPROCESS_BYTES_UNBOUND",
+        "PATCHED_DEPS_AND_HOOK_SOURCE_RECONCILIATION_UNAVAILABLE",
+        "RECURSIVE_HOOK_GRAPH_AND_GLOBAL_EXECUTION_ORDER_UNAVAILABLE"
+      ]
+    },
+    {
+      "owner": "chromium",
+      "phase": "hooks",
+      "index": 15,
+      "name": "lastchange_skia",
+      "pattern": ".",
+      "action": [
+        "python3",
+        "src/build/util/lastchange.py",
+        "-m",
+        "SKIA_COMMIT_HASH",
+        "-s",
+        "src/third_party/skia",
+        "--header",
+        "src/skia/ext/skia_commit_hash.h"
+      ],
+      "selection": "SELECTED",
+      "condition_result": true,
+      "executed": false,
+      "disposition": "HOLD",
+      "source_paths": [
+        "chromium/build/util/lastchange.py"
+      ],
+      "declared_host_command": "python3",
+      "blockers": [
+        "GCLIENT_PHASE_AND_CUSTOM_VARS_NOT_OPERATIONALLY_BOUND",
+        "GENERATED_OUTPUT_NAMESPACE_AND_CONTENT_PRODUCER_UNAVAILABLE",
+        "GIT_HISTORY_AND_ENVIRONMENT_DERIVED_OUTPUTS_UNBOUND",
+        "HOST_INTERPRETER_STDLIB_BOOTSTRAP_AND_SUBPROCESS_BYTES_UNBOUND",
+        "PATCHED_DEPS_AND_HOOK_SOURCE_RECONCILIATION_UNAVAILABLE",
+        "RECURSIVE_HOOK_GRAPH_AND_GLOBAL_EXECUTION_ORDER_UNAVAILABLE"
+      ]
+    },
+    {
+      "owner": "chromium",
+      "phase": "hooks",
+      "index": 16,
+      "name": "lastchange_dawn",
+      "pattern": ".",
+      "action": [
+        "python3",
+        "src/build/util/lastchange.py",
+        "-m",
+        "DAWN_COMMIT_HASH",
+        "-s",
+        "src/third_party/dawn",
+        "--revision",
+        "src/gpu/webgpu/DAWN_VERSION",
+        "--header",
+        "src/gpu/webgpu/dawn_commit_hash.h"
+      ],
+      "selection": "SELECTED",
+      "condition_result": true,
+      "executed": false,
+      "disposition": "HOLD",
+      "source_paths": [
+        "chromium/build/util/lastchange.py"
+      ],
+      "declared_host_command": "python3",
+      "blockers": [
+        "GCLIENT_PHASE_AND_CUSTOM_VARS_NOT_OPERATIONALLY_BOUND",
+        "GENERATED_OUTPUT_NAMESPACE_AND_CONTENT_PRODUCER_UNAVAILABLE",
+        "GIT_HISTORY_AND_ENVIRONMENT_DERIVED_OUTPUTS_UNBOUND",
+        "HOST_INTERPRETER_STDLIB_BOOTSTRAP_AND_SUBPROCESS_BYTES_UNBOUND",
+        "PATCHED_DEPS_AND_HOOK_SOURCE_RECONCILIATION_UNAVAILABLE",
+        "RECURSIVE_HOOK_GRAPH_AND_GLOBAL_EXECUTION_ORDER_UNAVAILABLE"
+      ]
+    },
+    {
+      "owner": "chromium",
+      "phase": "hooks",
+      "index": 19,
+      "name": "rc_win",
+      "pattern": ".",
+      "condition": "checkout_win and host_os == \"win\"",
+      "action": [
+        "python3",
+        "src/third_party/depot_tools/download_from_google_storage.py",
+        "--no_resume",
+        "--bucket",
+        "chromium-browser-clang/rc",
+        "-s",
+        "src/build/toolchain/win/rc/win/rc.exe.sha1"
+      ],
+      "selection": "SELECTED",
+      "condition_result": true,
+      "executed": false,
+      "disposition": "HOLD",
+      "source_paths": [
+        "depot_tools/download_from_google_storage.py",
+        "chromium/build/toolchain/win/rc/win/rc.exe.sha1"
+      ],
+      "declared_host_command": "python3",
+      "blockers": [
+        "BASE_SOURCE_BYTES_UNAVAILABLE:depot_tools/download_from_google_storage.py",
+        "DEPOT_TOOLS_GCS_DOWNLOADER_UNBOUND",
+        "GCLIENT_PHASE_AND_CUSTOM_VARS_NOT_OPERATIONALLY_BOUND",
+        "GENERATED_OUTPUT_NAMESPACE_AND_CONTENT_PRODUCER_UNAVAILABLE",
+        "HOST_INTERPRETER_STDLIB_BOOTSTRAP_AND_SUBPROCESS_BYTES_UNBOUND",
+        "LEGACY_SHA1_DESCRIPTOR_NOT_STRONG_PAYLOAD_PROOF",
+        "PATCHED_DEPS_AND_HOOK_SOURCE_RECONCILIATION_UNAVAILABLE",
+        "RECURSIVE_HOOK_GRAPH_AND_GLOBAL_EXECUTION_ORDER_UNAVAILABLE"
+      ]
+    },
+    {
+      "owner": "chromium",
+      "phase": "hooks",
+      "index": 22,
+      "name": "apache_win32",
+      "pattern": "\\.sha1",
+      "condition": "checkout_win",
+      "action": [
+        "python3",
+        "src/third_party/depot_tools/download_from_google_storage.py",
+        "--no_resume",
+        "--directory",
+        "--recursive",
+        "--num_threads=16",
+        "--bucket",
+        "chromium-apache-win32",
+        "src/third_party/apache-win32"
+      ],
+      "selection": "SELECTED",
+      "condition_result": true,
+      "executed": false,
+      "disposition": "HOLD",
+      "source_paths": [
+        "depot_tools/download_from_google_storage.py"
+      ],
+      "declared_host_command": "python3",
+      "blockers": [
+        "BASE_SOURCE_BYTES_UNAVAILABLE:depot_tools/download_from_google_storage.py",
+        "GCLIENT_PHASE_AND_CUSTOM_VARS_NOT_OPERATIONALLY_BOUND",
+        "GENERATED_OUTPUT_NAMESPACE_AND_CONTENT_PRODUCER_UNAVAILABLE",
+        "HOST_INTERPRETER_STDLIB_BOOTSTRAP_AND_SUBPROCESS_BYTES_UNBOUND",
+        "PATCHED_DEPS_AND_HOOK_SOURCE_RECONCILIATION_UNAVAILABLE",
+        "RECURSIVE_HOOK_GRAPH_AND_GLOBAL_EXECUTION_ORDER_UNAVAILABLE",
+        "RECURSIVE_SHA1_DESCRIPTOR_AND_DOWNLOADER_CLOSURE_UNBOUND"
+      ]
+    },
+    {
+      "owner": "chromium",
+      "phase": "hooks",
+      "index": 53,
+      "name": "Generate location tags for tests",
+      "pattern": ".",
+      "action": [
+        "python3",
+        "src/testing/generate_location_tags.py",
+        "--out",
+        "src/testing/location_tags.json"
+      ],
+      "condition": "generate_location_tags",
+      "selection": "UNRESOLVED",
+      "condition_result": {
+        "unresolved": [
+          "PARENT_VARIABLE_PRECEDENCE:generate_location_tags"
+        ]
+      },
+      "executed": false,
+      "disposition": "HOLD",
+      "source_paths": [
+        "chromium/testing/generate_location_tags.py"
+      ],
+      "declared_host_command": "python3",
+      "blockers": [
+        "BASE_SOURCE_BYTES_UNAVAILABLE:chromium/testing/generate_location_tags.py",
+        "GCLIENT_PHASE_AND_CUSTOM_VARS_NOT_OPERATIONALLY_BOUND",
+        "GENERATED_INPUT_HANDLER_UNAVAILABLE",
+        "GENERATED_OUTPUT_NAMESPACE_AND_CONTENT_PRODUCER_UNAVAILABLE",
+        "HOOK_SELECTION_UNRESOLVED",
+        "HOST_INTERPRETER_STDLIB_BOOTSTRAP_AND_SUBPROCESS_BYTES_UNBOUND",
+        "PATCHED_DEPS_AND_HOOK_SOURCE_RECONCILIATION_UNAVAILABLE",
+        "RECURSIVE_HOOK_GRAPH_AND_GLOBAL_EXECUTION_ORDER_UNAVAILABLE"
+      ]
+    },
+    {
+      "owner": "chromium",
+      "phase": "hooks",
+      "index": 56,
+      "name": "configure_reclient_cfgs",
+      "pattern": ".",
+      "condition": "not download_remoteexec_cfg",
+      "action": [
+        "python3",
+        "src/buildtools/reclient_cfgs/configure_reclient_cfgs.py",
+        "--rbe_instance",
+        "projects/rbe-chrome-untrusted/instances/default_instance",
+        "--reproxy_cfg_template",
+        "reproxy.cfg.template",
+        "--rewrapper_cfg_project",
+        "",
+        "--skip_remoteexec_cfg_fetch",
+        "--quiet"
+      ],
+      "selection": "SELECTED",
+      "condition_result": true,
+      "executed": false,
+      "disposition": "HOLD",
+      "source_paths": [
+        "chromium/buildtools/reclient_cfgs/configure_reclient_cfgs.py"
+      ],
+      "declared_host_command": "python3",
+      "blockers": [
+        "GCLIENT_PHASE_AND_CUSTOM_VARS_NOT_OPERATIONALLY_BOUND",
+        "GENERATED_OUTPUT_NAMESPACE_AND_CONTENT_PRODUCER_UNAVAILABLE",
+        "GENERATED_RECLIENT_TEMPLATES_AND_CONFIG_NAMESPACE_UNBOUND",
+        "HOST_INTERPRETER_STDLIB_BOOTSTRAP_AND_SUBPROCESS_BYTES_UNBOUND",
+        "PATCHED_DEPS_AND_HOOK_SOURCE_RECONCILIATION_UNAVAILABLE",
+        "RECURSIVE_HOOK_GRAPH_AND_GLOBAL_EXECUTION_ORDER_UNAVAILABLE"
+      ]
+    },
+    {
+      "owner": "chromium",
+      "phase": "hooks",
+      "index": 57,
+      "name": "configure_siso",
+      "pattern": ".",
+      "action": [
+        "python3",
+        "src/build/config/siso/configure_siso.py",
+        "--rbe_instance",
+        "projects/rbe-chrome-untrusted/instances/default_instance",
+        "--reapi_instance",
+        "",
+        "--reapi_address",
+        "",
+        "--reapi_backend_config_path",
+        "",
+        "--credential-helper",
+        ""
+      ],
+      "selection": "SELECTED",
+      "condition_result": true,
+      "executed": false,
+      "disposition": "HOLD",
+      "source_paths": [
+        "chromium/build/config/siso/configure_siso.py"
+      ],
+      "declared_host_command": "python3",
+      "blockers": [
+        "GCLIENT_PHASE_AND_CUSTOM_VARS_NOT_OPERATIONALLY_BOUND",
+        "GENERATED_OUTPUT_NAMESPACE_AND_CONTENT_PRODUCER_UNAVAILABLE",
+        "GENERATED_SISO_ENV_AND_BACKEND_CONFIG_NAMESPACE_UNBOUND",
+        "HOST_INTERPRETER_STDLIB_BOOTSTRAP_AND_SUBPROCESS_BYTES_UNBOUND",
+        "PATCHED_DEPS_AND_HOOK_SOURCE_RECONCILIATION_UNAVAILABLE",
+        "RECURSIVE_HOOK_GRAPH_AND_GLOBAL_EXECUTION_ORDER_UNAVAILABLE"
+      ]
+    },
+    {
+      "owner": "chromium",
+      "phase": "hooks",
+      "index": 60,
+      "name": "tast_control",
+      "pattern": ".",
+      "action": [
+        "python3",
+        "src/build/util/tast_control.py",
+        "-o",
+        "src/chromeos/tast_control.gni",
+        "-t",
+        "src/chromeos/tast_control.gni.template",
+        "-i",
+        "src/chromeos/tast_control_disabled_tests.txt",
+        "--input-public",
+        "src/chromeos/tast_control_disabled_tests_public_builders.txt",
+        "-f",
+        "src/chromeos/tast_control_flaky_tests.txt"
+      ],
+      "selection": "SELECTED",
+      "condition_result": true,
+      "executed": false,
+      "disposition": "HOLD",
+      "source_paths": [
+        "chromium/build/util/tast_control.py"
+      ],
+      "declared_host_command": "python3",
+      "blockers": [
+        "GCLIENT_PHASE_AND_CUSTOM_VARS_NOT_OPERATIONALLY_BOUND",
+        "GENERATED_OUTPUT_NAMESPACE_AND_CONTENT_PRODUCER_UNAVAILABLE",
+        "HOST_INTERPRETER_STDLIB_BOOTSTRAP_AND_SUBPROCESS_BYTES_UNBOUND",
+        "PATCHED_DEPS_AND_HOOK_SOURCE_RECONCILIATION_UNAVAILABLE",
+        "RECURSIVE_HOOK_GRAPH_AND_GLOBAL_EXECUTION_ORDER_UNAVAILABLE",
+        "TAST_TEMPLATE_FILTER_AND_GENERATED_OUTPUT_BYTES_UNBOUND"
+      ]
+    }
+  ],
+  "gcs_declarations": [
+    {
+      "owner": "chromium",
+      "path": "src/third_party/js_code_coverage/node_modules",
+      "kind": "gcs",
+      "condition": "non_git_source",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "bucket": "chromium-nodejs",
+      "objects": [
+        {
+          "object_name": "js_code_coverage/e932c86d2d4f250416970dc270002a9cb6acecbec034998cdadf9a394d0f1abc",
+          "sha256sum": "e932c86d2d4f250416970dc270002a9cb6acecbec034998cdadf9a394d0f1abc",
+          "size_bytes": 1557200,
+          "generation": 1742338539536352,
+          "selection": "SELECTED",
+          "condition_result": true
+        }
+      ],
+      "missing": [
+        "GCS_PAYLOAD_CONTENT_UNVERIFIED"
+      ],
+      "payloads": "NOT_DOWNLOADED_OR_EXTRACTED"
+    },
+    {
+      "owner": "chromium",
+      "path": "src/buildtools/win-format",
+      "kind": "gcs",
+      "condition": "host_os == \"win\" and non_git_source",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "bucket": "chromium-clang-format",
+      "objects": [
+        {
+          "object_name": "fb0bcaf406ad6f0bd6b4a6347d2abe78a94fb13e",
+          "sha256sum": "ee7a1f89733de23daf8ee035f8aebafa52410c9f4dd1f05ee12a95ce517a0953",
+          "size_bytes": 3799552,
+          "generation": 1779297371701340,
+          "output_file": "clang-format.exe",
+          "selection": "SELECTED",
+          "condition_result": true
+        }
+      ],
+      "missing": [
+        "GCS_PAYLOAD_CONTENT_UNVERIFIED"
+      ],
+      "payloads": "NOT_DOWNLOADED_OR_EXTRACTED"
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/node/linux",
+      "kind": "gcs",
+      "condition": "non_git_source",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "bucket": "chromium-nodejs",
+      "objects": [
+        {
+          "object_name": "744e6926ffdd4a4fb2080ae2b9ce4575490261e7",
+          "sha256sum": "bdea62a6857735d62165ec97242d79a693564c72d551890c4d009d2355abf14c",
+          "size_bytes": 53566970,
+          "generation": 1767604834866657,
+          "output_file": "node-linux-x64.tar.gz",
+          "selection": "SELECTED",
+          "condition_result": true
+        }
+      ],
+      "missing": [
+        "GCS_PAYLOAD_CONTENT_UNVERIFIED"
+      ],
+      "payloads": "NOT_DOWNLOADED_OR_EXTRACTED"
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/node/win",
+      "kind": "gcs",
+      "condition": "host_os == \"win\" and non_git_source",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "bucket": "chromium-nodejs",
+      "objects": [
+        {
+          "object_name": "2f710ced2db2beb7c3debf6097196c35ee5adb74",
+          "sha256sum": "2ffe3acc0458fdde999f50d11809bbe7c9b7ef204dcf17094e325d26ace101d8",
+          "size_bytes": 89935872,
+          "generation": 1767604839180114,
+          "output_file": "node.exe",
+          "selection": "SELECTED",
+          "condition_result": true
+        }
+      ],
+      "missing": [
+        "GCS_PAYLOAD_CONTENT_UNVERIFIED"
+      ],
+      "payloads": "NOT_DOWNLOADED_OR_EXTRACTED"
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/node/node_modules",
+      "kind": "gcs",
+      "condition": "non_git_source",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "bucket": "chromium-nodejs",
+      "objects": [
+        {
+          "object_name": "faaf73cc8ff7b0b2f0d984d6cedcf758e006f57a",
+          "sha256sum": "a298af5fafd358179d6aec9a42f667902dbcdb03a42ee4a87a1bff83515e96b9",
+          "size_bytes": 11320770,
+          "generation": 1781805676756361,
+          "output_file": "node_modules.tar.gz",
+          "selection": "SELECTED",
+          "condition_result": true
+        }
+      ],
+      "missing": [
+        "GCS_PAYLOAD_CONTENT_UNVERIFIED"
+      ],
+      "payloads": "NOT_DOWNLOADED_OR_EXTRACTED"
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/llvm-build/Release+Asserts",
+      "kind": "gcs",
+      "condition": "not llvm_force_head_revision",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "bucket": "chromium-browser-clang",
+      "objects": [
+        {
+          "object_name": "Linux_x64/clang-llvmorg-23-init-19482-g53d18800-1.tar.xz",
+          "sha256sum": "e22e06c05fe1657f48f988b15804b8226e691addb00abba5b984a5c99ac98c42",
+          "size_bytes": 59093892,
+          "generation": 1781627382446731,
+          "condition": "(host_os == \"linux\" or checkout_android) and non_git_source",
+          "selection": "EXCLUDED",
+          "condition_result": false
+        },
+        {
+          "object_name": "Linux_x64/clang-tidy-llvmorg-23-init-19482-g53d18800-1.tar.xz",
+          "sha256sum": "96da04c2fff4e580ac81b840405edfa292108d0b593927a10750c0a1d8599c0a",
+          "size_bytes": 14808648,
+          "generation": 1781627382496605,
+          "condition": "host_os == \"linux\" and checkout_clang_tidy and non_git_source",
+          "selection": "EXCLUDED",
+          "condition_result": false
+        },
+        {
+          "object_name": "Linux_x64/clangd-llvmorg-23-init-19482-g53d18800-1.tar.xz",
+          "sha256sum": "1e6b6918bb270659ef517a3e8f80af8f371bc79a9d942241978db8faea22f152",
+          "size_bytes": 15001372,
+          "generation": 1781627382490030,
+          "condition": "host_os == \"linux\" and checkout_clangd and non_git_source",
+          "selection": "EXCLUDED",
+          "condition_result": false
+        },
+        {
+          "object_name": "Linux_x64/llvm-code-coverage-llvmorg-23-init-19482-g53d18800-1.tar.xz",
+          "sha256sum": "bb63e33c20329c344a9dfa958f3742b316c0b9dd602647190fb0037d8d53a7e6",
+          "size_bytes": 2332356,
+          "generation": 1781627382888550,
+          "condition": "host_os == \"linux\" and checkout_clang_coverage_tools and non_git_source",
+          "selection": "EXCLUDED",
+          "condition_result": false
+        },
+        {
+          "object_name": "Linux_x64/llvmobjdump-llvmorg-23-init-19482-g53d18800-1.tar.xz",
+          "sha256sum": "e43b98bce71d58bbe1b456f7b62997c4d017cf8362a0367592428ac5a7512f41",
+          "size_bytes": 5875704,
+          "generation": 1781627382574869,
+          "condition": "((checkout_linux or checkout_mac or checkout_android) and host_os == \"linux\") and non_git_source",
+          "selection": "EXCLUDED",
+          "condition_result": false
+        },
+        {
+          "object_name": "Mac/clang-llvmorg-23-init-19482-g53d18800-1.tar.xz",
+          "sha256sum": "84b3934db2fb3c2e657d4a783a83ca6d2facaf598991490ae8ab712fcb03224b",
+          "size_bytes": 56083264,
+          "generation": 1781627385112611,
+          "condition": "host_os == \"mac\" and host_cpu == \"x64\"",
+          "selection": "EXCLUDED",
+          "condition_result": false
+        },
+        {
+          "object_name": "Mac/clang-mac-runtime-library-llvmorg-23-init-19482-g53d18800-1.tar.xz",
+          "sha256sum": "5079e2ac3f0fa76e8b0218bf99a65a5439e8dcf6a750f886a355a66df34c69c1",
+          "size_bytes": 1010816,
+          "generation": 1781627394919334,
+          "condition": "checkout_mac and not host_os == \"mac\"",
+          "selection": "EXCLUDED",
+          "condition_result": false
+        },
+        {
+          "object_name": "Mac/clang-tidy-llvmorg-23-init-19482-g53d18800-1.tar.xz",
+          "sha256sum": "1ca3dc160992d8c27765adaffcc8115aed34cdf7645a5354820e8c8b16b75dcd",
+          "size_bytes": 14790996,
+          "generation": 1781627384977799,
+          "condition": "host_os == \"mac\" and host_cpu == \"x64\" and checkout_clang_tidy",
+          "selection": "EXCLUDED",
+          "condition_result": false
+        },
+        {
+          "object_name": "Mac/clangd-llvmorg-23-init-19482-g53d18800-1.tar.xz",
+          "sha256sum": "4920275e6050dffbb81ba0210a627a61a20faa896aa50f5ecc2d765522790526",
+          "size_bytes": 16720488,
+          "generation": 1781627385229783,
+          "condition": "host_os == \"mac\" and host_cpu == \"x64\" and checkout_clangd",
+          "selection": "EXCLUDED",
+          "condition_result": false
+        },
+        {
+          "object_name": "Mac/llvm-code-coverage-llvmorg-23-init-19482-g53d18800-1.tar.xz",
+          "sha256sum": "07e8bf3354e0c086e420ab8f1f376e48c8b6207788cf30b56d1b0ad1fd4b0f12",
+          "size_bytes": 2372720,
+          "generation": 1781627385661382,
+          "condition": "host_os == \"mac\" and host_cpu == \"x64\" and checkout_clang_coverage_tools",
+          "selection": "EXCLUDED",
+          "condition_result": false
+        },
+        {
+          "object_name": "Mac/llvmobjdump-llvmorg-23-init-19482-g53d18800-1.tar.xz",
+          "sha256sum": "9b286eecf04996dfa82cd1434bceb19612fa0754e4390649ba8dcd846dca9c1e",
+          "size_bytes": 5797028,
+          "generation": 1781627385345493,
+          "condition": "host_os == \"mac\" and host_cpu == \"x64\"",
+          "selection": "EXCLUDED",
+          "condition_result": false
+        },
+        {
+          "object_name": "Mac_arm64/clang-llvmorg-23-init-19482-g53d18800-1.tar.xz",
+          "sha256sum": "e96c5e31ddc2a6e841bcb0f7278ae82b3a581799904276e6f7673213c9748c27",
+          "size_bytes": 47058068,
+          "generation": 1781627397208650,
+          "condition": "host_os == \"mac\" and host_cpu == \"arm64\"",
+          "selection": "EXCLUDED",
+          "condition_result": false
+        },
+        {
+          "object_name": "Mac_arm64/clang-tidy-llvmorg-23-init-19482-g53d18800-1.tar.xz",
+          "sha256sum": "27eff49b49d393c903246d5e17ba620f62f493a8a39cb6dbdd2e3f5f06c592a2",
+          "size_bytes": 12835944,
+          "generation": 1781627397575694,
+          "condition": "host_os == \"mac\" and host_cpu == \"arm64\" and checkout_clang_tidy",
+          "selection": "EXCLUDED",
+          "condition_result": false
+        },
+        {
+          "object_name": "Mac_arm64/clangd-llvmorg-23-init-19482-g53d18800-1.tar.xz",
+          "sha256sum": "9519e51006f45a797a351b616d92bff319793ab976eeb59df60901d6181f3c18",
+          "size_bytes": 13205948,
+          "generation": 1781627397237653,
+          "condition": "host_os == \"mac\" and host_cpu == \"arm64\" and checkout_clangd",
+          "selection": "EXCLUDED",
+          "condition_result": false
+        },
+        {
+          "object_name": "Mac_arm64/llvm-code-coverage-llvmorg-23-init-19482-g53d18800-1.tar.xz",
+          "sha256sum": "62084a5523a1c3b140166c2ed5a21bc110ceb65503f2759272a9f1feb00b503e",
+          "size_bytes": 2000216,
+          "generation": 1781627397451117,
+          "condition": "host_os == \"mac\" and host_cpu == \"arm64\" and checkout_clang_coverage_tools",
+          "selection": "EXCLUDED",
+          "condition_result": false
+        },
+        {
+          "object_name": "Mac_arm64/llvmobjdump-llvmorg-23-init-19482-g53d18800-1.tar.xz",
+          "sha256sum": "b6c6c0b1b4147ba4d51603713d3ed21f88ee2f506ff07fb432b3444f1d323295",
+          "size_bytes": 5548680,
+          "generation": 1781627397409118,
+          "condition": "host_os == \"mac\" and host_cpu == \"arm64\"",
+          "selection": "EXCLUDED",
+          "condition_result": false
+        },
+        {
+          "object_name": "Win/clang-llvmorg-23-init-19482-g53d18800-1.tar.xz",
+          "sha256sum": "9e3894b94d0d5e3d5904a559f590f12bd53aa5d1d9b6a902de2acb957825de46",
+          "size_bytes": 51306328,
+          "generation": 1781627409675428,
+          "condition": "host_os == \"win\"",
+          "selection": "SELECTED",
+          "condition_result": true
+        },
+        {
+          "object_name": "Win/clang-tidy-llvmorg-23-init-19482-g53d18800-1.tar.xz",
+          "sha256sum": "8fa52c3d1707e73d0689aaa3c8d3789f13e85526bef029d942baf44ed980b442",
+          "size_bytes": 14867152,
+          "generation": 1781627409620988,
+          "condition": "host_os == \"win\" and checkout_clang_tidy",
+          "selection": "UNRESOLVED",
+          "condition_result": {
+            "unresolved": [
+              "PARENT_VARIABLE_PRECEDENCE:checkout_clang_tidy"
+            ]
+          }
+        },
+        {
+          "object_name": "Win/clang-win-runtime-library-llvmorg-23-init-19482-g53d18800-1.tar.xz",
+          "sha256sum": "f925c30e1f63291662b2ad91103592208ecc4354f669c98a07e35360d2561a13",
+          "size_bytes": 2623388,
+          "generation": 1781627419134531,
+          "condition": "checkout_win and not host_os == \"win\"",
+          "selection": "EXCLUDED",
+          "condition_result": false
+        },
+        {
+          "object_name": "Win/clangd-llvmorg-23-init-19482-g53d18800-1.tar.xz",
+          "sha256sum": "54042464918d992a19efed3a5f2a170e6fc2e4551884b4870650e3a3a6a03b41",
+          "size_bytes": 15262064,
+          "generation": 1781627409708803,
+          "condition": "host_os == \"win\" and checkout_clangd",
+          "selection": "EXCLUDED",
+          "condition_result": false
+        },
+        {
+          "object_name": "Win/llvm-code-coverage-llvmorg-23-init-19482-g53d18800-1.tar.xz",
+          "sha256sum": "7c4fbafcf2741a036d1f4058fc31b52cb5b0951e617561fc3d51b7fbe0a3044b",
+          "size_bytes": 2496336,
+          "generation": 1781627409916932,
+          "condition": "host_os == \"win\" and checkout_clang_coverage_tools",
+          "selection": "EXCLUDED",
+          "condition_result": false
+        },
+        {
+          "object_name": "Win/llvmobjdump-llvmorg-23-init-19482-g53d18800-1.tar.xz",
+          "sha256sum": "7ea19d03f21ef59d2e511af8d9cccff20ea72deb54923557173bb46a64244fa7",
+          "size_bytes": 5934284,
+          "generation": 1781627409787893,
+          "condition": "(checkout_linux or checkout_mac or checkout_android) and host_os == \"win\"",
+          "selection": "EXCLUDED",
+          "condition_result": false
+        }
+      ],
+      "missing": [
+        "GCS_PAYLOAD_CONTENT_UNVERIFIED"
+      ],
+      "payloads": "NOT_DOWNLOADED_OR_EXTRACTED"
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/rust-toolchain",
+      "kind": "gcs",
+      "condition": "not rust_force_head_revision",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "bucket": "chromium-browser-clang",
+      "objects": [
+        {
+          "object_name": "Linux_x64/rust-toolchain-b998449636a48e2c4a362809085b600a0174e1f2-5-llvmorg-23-init-19482-g53d18800.tar.xz",
+          "sha256sum": "1753392d6fe791a5ce743bfc70f45e151ee27bcccede516fb221b023f2c06a05",
+          "size_bytes": 274786408,
+          "generation": 1783367871911099,
+          "condition": "host_os == \"linux\" and non_git_source",
+          "selection": "EXCLUDED",
+          "condition_result": false
+        },
+        {
+          "object_name": "Mac/rust-toolchain-b998449636a48e2c4a362809085b600a0174e1f2-5-llvmorg-23-init-19482-g53d18800.tar.xz",
+          "sha256sum": "6925151e70efd917156f3d50925c5bd416b9adf4ff42ca4bf73b4a6610d785d2",
+          "size_bytes": 262413648,
+          "generation": 1783367875702343,
+          "condition": "host_os == \"mac\" and host_cpu == \"x64\"",
+          "selection": "EXCLUDED",
+          "condition_result": false
+        },
+        {
+          "object_name": "Mac_arm64/rust-toolchain-b998449636a48e2c4a362809085b600a0174e1f2-5-llvmorg-23-init-19482-g53d18800.tar.xz",
+          "sha256sum": "1765d9be3b30726f5f5ad60d8bc50ee66501220bc942019782cf423de3f7114e",
+          "size_bytes": 246837492,
+          "generation": 1783367879712419,
+          "condition": "host_os == \"mac\" and host_cpu == \"arm64\"",
+          "selection": "EXCLUDED",
+          "condition_result": false
+        },
+        {
+          "object_name": "Win/rust-toolchain-b998449636a48e2c4a362809085b600a0174e1f2-5-llvmorg-23-init-19482-g53d18800.tar.xz",
+          "sha256sum": "dfa5db1cef7e75fd4d3ea5827f0c5eff3543d55d9d9982f806154e8d6b05950a",
+          "size_bytes": 415992772,
+          "generation": 1783367883448269,
+          "condition": "host_os == \"win\"",
+          "selection": "SELECTED",
+          "condition_result": true
+        }
+      ],
+      "missing": [
+        "GCS_PAYLOAD_CONTENT_UNVERIFIED"
+      ],
+      "payloads": "NOT_DOWNLOADED_OR_EXTRACTED"
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/llvm-libclang",
+      "kind": "gcs",
+      "condition": "not rust_force_head_revision",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "bucket": "chromium-browser-clang",
+      "objects": [
+        {
+          "object_name": "Linux_x64/rust-libclang-b998449636a48e2c4a362809085b600a0174e1f2-5-llvmorg-23-init-19482-g53d18800.tar.xz",
+          "sha256sum": "0f1d0864cabaa77adc6374b02bffe1c8dae13c0859a93fe094e2f833568079ae",
+          "size_bytes": 22601620,
+          "generation": 1783367873770989,
+          "condition": "host_os == \"linux\" and non_git_source",
+          "selection": "EXCLUDED",
+          "condition_result": false
+        },
+        {
+          "object_name": "Mac/rust-libclang-b998449636a48e2c4a362809085b600a0174e1f2-5-llvmorg-23-init-19482-g53d18800.tar.xz",
+          "sha256sum": "2dd39e8e981b5375551e758fcb4a0992b14ac932d94e6d93394f5d40d0592baf",
+          "size_bytes": 22963424,
+          "generation": 1783367877737200,
+          "condition": "host_os == \"mac\" and host_cpu == \"x64\"",
+          "selection": "EXCLUDED",
+          "condition_result": false
+        },
+        {
+          "object_name": "Mac_arm64/rust-libclang-b998449636a48e2c4a362809085b600a0174e1f2-5-llvmorg-23-init-19482-g53d18800.tar.xz",
+          "sha256sum": "00a9cc25a866286a4643f156e854de01677fd1704a7834c554d0dd2510818178",
+          "size_bytes": 20391888,
+          "generation": 1783367881537158,
+          "condition": "host_os == \"mac\" and host_cpu == \"arm64\"",
+          "selection": "EXCLUDED",
+          "condition_result": false
+        },
+        {
+          "object_name": "Win/rust-libclang-b998449636a48e2c4a362809085b600a0174e1f2-5-llvmorg-23-init-19482-g53d18800.tar.xz",
+          "sha256sum": "866525020d31552627c68d8e77b2e499b62312ca99d290f69634ef2df9c53295",
+          "size_bytes": 21292240,
+          "generation": 1783367885344404,
+          "condition": "host_os == \"win\"",
+          "selection": "SELECTED",
+          "condition_result": true
+        }
+      ],
+      "missing": [
+        "GCS_PAYLOAD_CONTENT_UNVERIFIED"
+      ],
+      "payloads": "NOT_DOWNLOADED_OR_EXTRACTED"
+    },
+    {
+      "owner": "chromium",
+      "path": "src/content/test/data/gpu/meet_effects",
+      "kind": "gcs",
+      "condition": "non_git_source",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "bucket": "meet-bundles",
+      "objects": [
+        {
+          "object_name": "meet-gpu-tests/954443332.tar.gz",
+          "sha256sum": "38bb2842f486dee0822045ddb0579b1fbc7222c3a412488579c1fe6ff1d39137",
+          "size_bytes": 278457858,
+          "generation": 1785142180562353,
+          "selection": "SELECTED",
+          "condition_result": true
+        }
+      ],
+      "missing": [
+        "GCS_PAYLOAD_CONTENT_UNVERIFIED"
+      ],
+      "payloads": "NOT_DOWNLOADED_OR_EXTRACTED"
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/blink/renderer/core/css/perftest_data",
+      "kind": "gcs",
+      "condition": "non_git_source",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "bucket": "chromium-style-perftest",
+      "objects": [
+        {
+          "object_name": "e9ce994346c62f8c9fd6d0cecb2b2b0b93b4c2d8",
+          "sha256sum": "519019df16c628c6c0893df18928faeaa3150a9d8f26a787a16ce7c6b2cec2ad",
+          "size_bytes": 601672,
+          "generation": 1664794185950162,
+          "output_file": "ecommerce.json",
+          "selection": "SELECTED",
+          "condition_result": true
+        },
+        {
+          "object_name": "756068da5e551516b23b0ba133e55c144f623d38",
+          "sha256sum": "84ef87a8163335a95111d9709306596f96742539da0b34fbe7397f799946a168",
+          "size_bytes": 2156935,
+          "generation": 1664794188995509,
+          "output_file": "encyclopedia.json",
+          "selection": "SELECTED",
+          "condition_result": true
+        },
+        {
+          "object_name": "314e4e0d5e89ea9e9e9a234c617b4413adf48aa9",
+          "sha256sum": "a721ada40011a286631baae6d76878f2023ff000151792228c83b1958ea8a197",
+          "size_bytes": 608840,
+          "generation": 1664794191929032,
+          "output_file": "extension.json",
+          "selection": "SELECTED",
+          "condition_result": true
+        },
+        {
+          "object_name": "3a19b42a7c46257b716d55d6733f070c87180b1e",
+          "sha256sum": "f203ff9e8c8a6a3b714f0a26db38cc940544a907435c62c79b21f4bd3f8bee8e",
+          "size_bytes": 1750837,
+          "generation": 1664794194891567,
+          "output_file": "news.json",
+          "selection": "SELECTED",
+          "condition_result": true
+        },
+        {
+          "object_name": "fdc43ee18cbd65487249441849f58aa13484aaef",
+          "sha256sum": "0e92de92f49abc9a521f7175106c80744196f8cefc0263bc0f4a6b4f724a7d10",
+          "size_bytes": 1310798,
+          "generation": 1664794197855470,
+          "output_file": "search.json",
+          "selection": "SELECTED",
+          "condition_result": true
+        },
+        {
+          "object_name": "7fc9338af75b7d9d185c91ddf262a356def5623d",
+          "sha256sum": "34e92acae8aade2a186abe79ed1f379c266f04f72f1eb54bd3a912e889bc5cc0",
+          "size_bytes": 2280846,
+          "generation": 1664794200867034,
+          "output_file": "social1.json",
+          "selection": "SELECTED",
+          "condition_result": true
+        },
+        {
+          "object_name": "c2d7e9ce67522dad138c7feb0a6911b828bfb130",
+          "sha256sum": "95c6b148577b891310c024b2daa5d68faf644a37707ac0cb21501eefe8a399a3",
+          "size_bytes": 411708,
+          "generation": 1664794203829582,
+          "output_file": "social2.json",
+          "selection": "SELECTED",
+          "condition_result": true
+        },
+        {
+          "object_name": "031d5599c8a21118754e30dbea141be66104f556",
+          "sha256sum": "8e7b765d72bb8e7742f5bf955f4bf64d5469f61197dad8b632304095a52322d7",
+          "size_bytes": 3203922,
+          "generation": 1664794206824773,
+          "output_file": "sports.json",
+          "selection": "SELECTED",
+          "condition_result": true
+        },
+        {
+          "object_name": "8aac3db2a8c9e44babec81e539a3d60aeab4985c",
+          "sha256sum": "6aeb0036dfafaf5e905abdb0ffe515a3952ffe35a7c59afb0fc8b233b27c6ce4",
+          "size_bytes": 5902660,
+          "generation": 1664794209886788,
+          "output_file": "video.json",
+          "selection": "SELECTED",
+          "condition_result": true
+        }
+      ],
+      "missing": [
+        "GCS_PAYLOAD_CONTENT_UNVERIFIED"
+      ],
+      "payloads": "NOT_DOWNLOADED_OR_EXTRACTED"
+    },
+    {
+      "owner": "chromium",
+      "path": "src/tools/perf/page_sets/maps_perf_test/dataset",
+      "kind": "gcs",
+      "condition": "non_git_source",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "bucket": "chromium-telemetry",
+      "objects": [
+        {
+          "object_name": "e6bf26977c2fd80c18789d1f279d474096a7b0d1",
+          "sha256sum": "f5f7fe360ad2b9c3d9dda2612f17336c0541bac15b4e4992f2c167e059a190fa",
+          "size_bytes": 3285237,
+          "generation": 1513305740113238,
+          "output_file": "load_dataset",
+          "selection": "SELECTED",
+          "condition_result": true
+        }
+      ],
+      "missing": [
+        "GCS_PAYLOAD_CONTENT_UNVERIFIED"
+      ],
+      "payloads": "NOT_DOWNLOADED_OR_EXTRACTED"
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/opus/tests/resources",
+      "kind": "gcs",
+      "condition": "non_git_source",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "bucket": "chromium-webrtc-resources",
+      "objects": [
+        {
+          "object_name": "009a3ee778767c2402b1d2c920bc2449265f5a2c",
+          "sha256sum": "34de3161f242895a682d9cdcbbf4ad50246742b6db46873386104cfde8a24332",
+          "size_bytes": 26889600,
+          "generation": 1392811661954000,
+          "output_file": "speech_mono_32_48kHz.pcm",
+          "selection": "SELECTED",
+          "condition_result": true
+        }
+      ],
+      "missing": [
+        "GCS_PAYLOAD_CONTENT_UNVERIFIED"
+      ],
+      "payloads": "NOT_DOWNLOADED_OR_EXTRACTED"
+    },
+    {
+      "owner": "chromium",
+      "path": "src/base/tracing/test/data",
+      "kind": "gcs",
+      "condition": null,
+      "selection": "SELECTED",
+      "condition_result": true,
+      "bucket": "perfetto",
+      "objects": [
+        {
+          "object_name": "test_data/chrome_fcp_lcp_navigations.pftrace-ae01d849fbd75a98be1b7ddd5a8873217c377b393a1d5bbd788ed3364f7fefc3",
+          "sha256sum": "ae01d849fbd75a98be1b7ddd5a8873217c377b393a1d5bbd788ed3364f7fefc3",
+          "size_bytes": 2398645,
+          "generation": 1697714434866488,
+          "output_file": "chrome_fcp_lcp_navigations.pftrace",
+          "selection": "SELECTED",
+          "condition_result": true
+        },
+        {
+          "object_name": "test_data/chrome_input_with_frame_view.pftrace-a93548822e481508c728ccc5da3ad34afcd0aec02ca7a7a4dad84ff340ee5975",
+          "sha256sum": "a93548822e481508c728ccc5da3ad34afcd0aec02ca7a7a4dad84ff340ee5975",
+          "size_bytes": 6392331,
+          "generation": 1711402389089075,
+          "output_file": "chrome_input_with_frame_view.pftrace",
+          "selection": "SELECTED",
+          "condition_result": true
+        },
+        {
+          "object_name": "test_data/scroll_offsets_trace_2.pftrace-2ddd9f78d91d51e39c72c520bb54fdc9dbf1333ae722e87633fc345159296289",
+          "sha256sum": "2ddd9f78d91d51e39c72c520bb54fdc9dbf1333ae722e87633fc345159296289",
+          "size_bytes": 1496388,
+          "generation": 1712592637141461,
+          "output_file": "scroll_offsets_trace_2.pftrace",
+          "selection": "SELECTED",
+          "condition_result": true
+        },
+        {
+          "object_name": "test_data/top_level_java_choreographer_slices-8001e73b2458e94f65a606bb558a645ba5bca553b57fe416001f6c2175675a8a",
+          "sha256sum": "8001e73b2458e94f65a606bb558a645ba5bca553b57fe416001f6c2175675a8a",
+          "size_bytes": 5323017,
+          "generation": 1671708979893186,
+          "output_file": "top_level_java_choreographer_slices",
+          "selection": "SELECTED",
+          "condition_result": true
+        },
+        {
+          "object_name": "test_data/chrome_page_load_all_categories_not_extended.pftrace.gz-6586e9e2bbc0c996caddb321a0374328654983733e6ffd7f4635ac07db32a493",
+          "sha256sum": "6586e9e2bbc0c996caddb321a0374328654983733e6ffd7f4635ac07db32a493",
+          "size_bytes": 1277750,
+          "generation": 1652442088902445,
+          "output_file": "chrome_page_load_all_categories_not_extended.pftrace.gz",
+          "selection": "SELECTED",
+          "condition_result": true
+        },
+        {
+          "object_name": "test_data/jetstream_3.pftrace.gz-8b5915cdf7f4182a74345cc080c34ce190835e5b46c30e921ce81433119acfda",
+          "sha256sum": "8b5915cdf7f4182a74345cc080c34ce190835e5b46c30e921ce81433119acfda",
+          "size_bytes": 78162,
+          "generation": 1771505932279144,
+          "output_file": "jetstream_3.pftrace.gz",
+          "selection": "SELECTED",
+          "condition_result": true
+        },
+        {
+          "object_name": "test_data/speedometer_21.perfetto_trace.gz-8a159b354d74a3ca0d38ce9cd071ef47de322db4261ee266bfafe04d70310529",
+          "sha256sum": "8a159b354d74a3ca0d38ce9cd071ef47de322db4261ee266bfafe04d70310529",
+          "size_bytes": 891088,
+          "generation": 1716566741068306,
+          "output_file": "speedometer_21.perfetto_trace.gz",
+          "selection": "SELECTED",
+          "condition_result": true
+        },
+        {
+          "object_name": "test_data/speedometer_3.perfetto_trace.gz-b2c77fbe2c17363432a1ad0c05c1c1c20d3ebc62bda92c041d39918011af6f02",
+          "sha256sum": "b2c77fbe2c17363432a1ad0c05c1c1c20d3ebc62bda92c041d39918011af6f02",
+          "size_bytes": 1301036,
+          "generation": 1716566914245446,
+          "output_file": "speedometer_3.perfetto_trace.gz",
+          "selection": "SELECTED",
+          "condition_result": true
+        },
+        {
+          "object_name": "test_data/scroll_jank_with_pinch.pftrace-8587d2016fdb5d39b5f852704b6e3925e9e6527af01696396be767bed04d4a45",
+          "sha256sum": "8587d2016fdb5d39b5f852704b6e3925e9e6527af01696396be767bed04d4a45",
+          "size_bytes": 3914720,
+          "generation": 1717497788778335,
+          "output_file": "scroll_jank_with_pinch.pftrace",
+          "selection": "SELECTED",
+          "condition_result": true
+        },
+        {
+          "object_name": "test_data/cpu_powerups_1.pb-70f5511ba0cd6ce1359e3cadb4d1d9301fb6e26be85158e3384b06f41418d386",
+          "sha256sum": "70f5511ba0cd6ce1359e3cadb4d1d9301fb6e26be85158e3384b06f41418d386",
+          "size_bytes": 2033064,
+          "generation": 1669652389509708,
+          "output_file": "cpu_powerups_1.pb",
+          "selection": "SELECTED",
+          "condition_result": true
+        },
+        {
+          "object_name": "test_data/chrome_5672_histograms.pftrace.gz-a09bd44078ac71bcfbc901b0544750e8344d0d0f6f96e220f700a5a53fa932ee",
+          "sha256sum": "a09bd44078ac71bcfbc901b0544750e8344d0d0f6f96e220f700a5a53fa932ee",
+          "size_bytes": 1127472,
+          "generation": 1684946598804577,
+          "output_file": "chrome_5672_histograms.pftrace.gz",
+          "selection": "SELECTED",
+          "condition_result": true
+        },
+        {
+          "object_name": "test_data/chrome_custom_navigation_trace.gz-ff68279e3cec94076b69259d756eed181a63eaf834d8b956a7f4ba665fabf939",
+          "sha256sum": "ff68279e3cec94076b69259d756eed181a63eaf834d8b956a7f4ba665fabf939",
+          "size_bytes": 7572484,
+          "generation": 1666713705258900,
+          "output_file": "chrome_custom_navigation_trace.gz",
+          "selection": "SELECTED",
+          "condition_result": true
+        },
+        {
+          "object_name": "test_data/scroll_offsets.pftrace-62101edb5204fec8bea30124f65d4e49bda0808d7b036e95f89445aaad6d8d98",
+          "sha256sum": "62101edb5204fec8bea30124f65d4e49bda0808d7b036e95f89445aaad6d8d98",
+          "size_bytes": 769741,
+          "generation": 1693402148909129,
+          "output_file": "scroll_offsets.pftrace",
+          "selection": "SELECTED",
+          "condition_result": true
+        },
+        {
+          "object_name": "test_data/chrome_input_with_frame_view_new.pftrace-e901ad9577088e62c921dd8bfcb43d652ecf49fa69b5b57f81bb3d27dbe94e12",
+          "sha256sum": "e901ad9577088e62c921dd8bfcb43d652ecf49fa69b5b57f81bb3d27dbe94e12",
+          "size_bytes": 1967821,
+          "generation": 1719520814352733,
+          "output_file": "chrome_input_with_frame_view_new.pftrace",
+          "selection": "SELECTED",
+          "condition_result": true
+        },
+        {
+          "object_name": "test_data/scroll_m131.pftrace-14171c9e502a65a454f39fe14fce8b313c7012a2c14394bed496fc93b1644b0d",
+          "sha256sum": "14171c9e502a65a454f39fe14fce8b313c7012a2c14394bed496fc93b1644b0d",
+          "size_bytes": 1247290,
+          "generation": 1729619115836875,
+          "output_file": "scroll_m131.pftrace",
+          "selection": "SELECTED",
+          "condition_result": true
+        },
+        {
+          "object_name": "test_data/scroll_m132.pftrace-779e1fa6cab1abc0ab2dcafa4bbbf826ea8fc052878886ab168c783ca32f3bbe",
+          "sha256sum": "779e1fa6cab1abc0ab2dcafa4bbbf826ea8fc052878886ab168c783ca32f3bbe",
+          "size_bytes": 1854184,
+          "generation": 1732117381568969,
+          "output_file": "scroll_m132.pftrace",
+          "selection": "SELECTED",
+          "condition_result": true
+        },
+        {
+          "object_name": "test_data/scroll_m132_with_atrace.pftrace-b1fe189738a4a714cef7dd13b12318c89d6c4345fbe65096b4680ffa79f2872a",
+          "sha256sum": "b1fe189738a4a714cef7dd13b12318c89d6c4345fbe65096b4680ffa79f2872a",
+          "size_bytes": 18887098,
+          "generation": 1730148514067154,
+          "output_file": "scroll_m132_with_atrace.pftrace",
+          "selection": "SELECTED",
+          "condition_result": true
+        },
+        {
+          "object_name": "test_data/scroll_m133beta.pftrace-2acc70545be1caeb3fb43218ab52872c2c749b49577b973cb8400057c680fc19",
+          "sha256sum": "2acc70545be1caeb3fb43218ab52872c2c749b49577b973cb8400057c680fc19",
+          "size_bytes": 1448694,
+          "generation": 1738338471679054,
+          "output_file": "scroll_m133beta.pftrace",
+          "selection": "SELECTED",
+          "condition_result": true
+        },
+        {
+          "object_name": "test_data/scroll_with_input_not_forwarded_to_renderer.pftrace-ceb2ff3cb64c99ddb28a29867bc82f1491c4b413bfacd8638551b80936240faf",
+          "sha256sum": "ceb2ff3cb64c99ddb28a29867bc82f1491c4b413bfacd8638551b80936240faf",
+          "size_bytes": 729606,
+          "generation": 1732902685002882,
+          "output_file": "scroll_with_input_not_forwarded_to_renderer.pftrace",
+          "selection": "SELECTED",
+          "condition_result": true
+        },
+        {
+          "object_name": "test_data/scroll_m144.pftrace-6a3426ee6a441cf71ec8b634b662fe800700b8c3d2d1e9f247feaba890315843",
+          "sha256sum": "6a3426ee6a441cf71ec8b634b662fe800700b8c3d2d1e9f247feaba890315843",
+          "size_bytes": 4384532,
+          "generation": 1769534965677794,
+          "output_file": "scroll_m144.pftrace",
+          "selection": "SELECTED",
+          "condition_result": true
+        },
+        {
+          "object_name": "test_data/loadline2_phone_perfetto_trace.pb.gz-446e12518282e078360cb1ab55ebb3e3788c3863b269601d2392c9e5d058a92c",
+          "sha256sum": "446e12518282e078360cb1ab55ebb3e3788c3863b269601d2392c9e5d058a92c",
+          "size_bytes": 1214995,
+          "generation": 1763134487216405,
+          "output_file": "loadline2_phone_perfetto_trace.pb.gz",
+          "selection": "SELECTED",
+          "condition_result": true
+        }
+      ],
+      "missing": [
+        "GCS_PAYLOAD_CONTENT_UNVERIFIED"
+      ],
+      "payloads": "NOT_DOWNLOADED_OR_EXTRACTED"
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/subresource-filter-ruleset/data",
+      "kind": "gcs",
+      "condition": "non_git_source",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "bucket": "chromium-ads-detection",
+      "objects": [
+        {
+          "object_name": "c94b69e368b739a6326a77e04e5a49a4caa6294b0e784bf94173d6730f46570a",
+          "sha256sum": "c94b69e368b739a6326a77e04e5a49a4caa6294b0e784bf94173d6730f46570a",
+          "size_bytes": 155706,
+          "generation": 1778028359866227,
+          "output_file": "UnindexedRules",
+          "selection": "SELECTED",
+          "condition_result": true
+        }
+      ],
+      "missing": [
+        "GCS_PAYLOAD_CONTENT_UNVERIFIED"
+      ],
+      "payloads": "NOT_DOWNLOADED_OR_EXTRACTED"
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/test_fonts/test_fonts",
+      "kind": "gcs",
+      "condition": "non_git_source",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "bucket": "chromium-fonts",
+      "objects": [
+        {
+          "object_name": "9c07d19d9c5ee1ff94f717e6fb17e0c8c354e6f9",
+          "sha256sum": "f0e9628f9e43e3f3476cde06a1849058de460e0e037b7449ce0d42b9a73c37d5",
+          "size_bytes": 33413117,
+          "generation": 1775663926405386,
+          "selection": "SELECTED",
+          "condition_result": true
+        }
+      ],
+      "missing": [
+        "GCS_PAYLOAD_CONTENT_UNVERIFIED"
+      ],
+      "payloads": "NOT_DOWNLOADED_OR_EXTRACTED"
+    }
+  ],
+  "cipd_declarations": [
+    {
+      "owner": "chromium",
+      "path": "src/buildtools/win",
+      "kind": "cipd",
+      "condition": "host_os == \"win\"",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "packages": [
+        {
+          "package": "gn/gn/windows-amd64",
+          "version": "git_revision:641ace93dd9560e75e7add0d08f77b446fbb3b78"
+        }
+      ],
+      "missing": [
+        "CIPD_IMMUTABLE_INSTANCE_PIN_UNAVAILABLE",
+        "CIPD_PAYLOAD_MEMBERSHIP_UNVERIFIED"
+      ],
+      "reference_formats": [
+        {
+          "kind": "SYMBOLIC_REFERENCE_REQUIRES_RESOLUTION",
+          "disposition": "HOLD"
+        }
+      ]
+    },
+    {
+      "owner": "chromium",
+      "path": "src/content/test/data/gpu/meet_effects_videos",
+      "kind": "cipd",
+      "condition": null,
+      "selection": "SELECTED",
+      "condition_result": true,
+      "packages": [
+        {
+          "package": "chromium/testing/meet-effects-videos",
+          "version": "I5ME8r-BP_A2lRn-c5E-9POZkrJwGS8BNnRdREhYbs8C"
+        }
+      ],
+      "missing": [
+        "CIPD_PAYLOAD_MEMBERSHIP_UNVERIFIED"
+      ],
+      "reference_formats": [
+        {
+          "kind": "SHA256_INSTANCE",
+          "sha256": "239304f2bf813ff0369519fe73913ef4f39992b270192f0136745d4448586ecf",
+          "disposition": "HOLD"
+        }
+      ]
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/apache-windows-arm64",
+      "kind": "cipd",
+      "condition": "checkout_win",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "packages": [
+        {
+          "package": "infra/3pp/tools/httpd-php/windows-arm64",
+          "version": "version:3@httpd2.4.55-php8.2.5.chromium.6"
+        }
+      ],
+      "missing": [
+        "CIPD_IMMUTABLE_INSTANCE_PIN_UNAVAILABLE",
+        "CIPD_PAYLOAD_MEMBERSHIP_UNVERIFIED"
+      ],
+      "reference_formats": [
+        {
+          "kind": "SYMBOLIC_REFERENCE_REQUIRES_RESOLUTION",
+          "disposition": "HOLD"
+        }
+      ]
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/updater/chrome_win_arm64/cipd",
+      "kind": "cipd",
+      "condition": "checkout_win",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "packages": [
+        {
+          "package": "chromium/third_party/updater/chrome_win_arm64",
+          "version": "version:2@152.0.7933.0"
+        }
+      ],
+      "missing": [
+        "CIPD_IMMUTABLE_INSTANCE_PIN_UNAVAILABLE",
+        "CIPD_PAYLOAD_MEMBERSHIP_UNVERIFIED"
+      ],
+      "reference_formats": [
+        {
+          "kind": "SYMBOLIC_REFERENCE_REQUIRES_RESOLUTION",
+          "disposition": "HOLD"
+        }
+      ]
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/updater/chrome_win_x86/cipd",
+      "kind": "cipd",
+      "condition": "checkout_win",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "packages": [
+        {
+          "package": "chromium/third_party/updater/chrome_win_x86",
+          "version": "version:2@152.0.7933.0"
+        }
+      ],
+      "missing": [
+        "CIPD_IMMUTABLE_INSTANCE_PIN_UNAVAILABLE",
+        "CIPD_PAYLOAD_MEMBERSHIP_UNVERIFIED"
+      ],
+      "reference_formats": [
+        {
+          "kind": "SYMBOLIC_REFERENCE_REQUIRES_RESOLUTION",
+          "disposition": "HOLD"
+        }
+      ]
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/updater/chrome_win_x86_64/cipd",
+      "kind": "cipd",
+      "condition": "checkout_win",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "packages": [
+        {
+          "package": "chromium/third_party/updater/chrome_win_x86_64",
+          "version": "version:2@152.0.7933.0"
+        }
+      ],
+      "missing": [
+        "CIPD_IMMUTABLE_INSTANCE_PIN_UNAVAILABLE",
+        "CIPD_PAYLOAD_MEMBERSHIP_UNVERIFIED"
+      ],
+      "reference_formats": [
+        {
+          "kind": "SYMBOLIC_REFERENCE_REQUIRES_RESOLUTION",
+          "disposition": "HOLD"
+        }
+      ]
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/updater/chrome_win_arm64_sans_iid/cipd",
+      "kind": "cipd",
+      "condition": "checkout_win",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "packages": [
+        {
+          "package": "chromium/third_party/updater/chrome_win_arm64",
+          "version": "OoGMyCUHah7D_AOVm4RpVoPOdkGqjFHuSMcoKTZ0rlsC"
+        }
+      ],
+      "missing": [
+        "CIPD_PAYLOAD_MEMBERSHIP_UNVERIFIED"
+      ],
+      "reference_formats": [
+        {
+          "kind": "SHA256_INSTANCE",
+          "sha256": "3a818cc825076a1ec3fc03959b84695683ce7641aa8c51ee48c728293674ae5b",
+          "disposition": "HOLD"
+        }
+      ]
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/updater/chrome_win_x86_sans_iid/cipd",
+      "kind": "cipd",
+      "condition": "checkout_win",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "packages": [
+        {
+          "package": "chromium/third_party/updater/chrome_win_x86",
+          "version": "gqhcrVQFtXAKUu7yEISTlbrBpPaBUnQZ6FdOo5E4HLQC"
+        }
+      ],
+      "missing": [
+        "CIPD_PAYLOAD_MEMBERSHIP_UNVERIFIED"
+      ],
+      "reference_formats": [
+        {
+          "kind": "SHA256_INSTANCE",
+          "sha256": "82a85cad5405b5700a52eef210849395bac1a4f681527419e8574ea391381cb4",
+          "disposition": "HOLD"
+        }
+      ]
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/updater/chrome_win_x86_64_sans_iid/cipd",
+      "kind": "cipd",
+      "condition": "checkout_win",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "packages": [
+        {
+          "package": "chromium/third_party/updater/chrome_win_x86_64",
+          "version": "koo1i4cAVdOK2-re2VGbx-crCcbTz9h0qumUk1hyEt0C"
+        }
+      ],
+      "missing": [
+        "CIPD_PAYLOAD_MEMBERSHIP_UNVERIFIED"
+      ],
+      "reference_formats": [
+        {
+          "kind": "SHA256_INSTANCE",
+          "sha256": "928a358b870055d38adbeaded9519bc7e72b09c6d3cfd874aae99493587212dd",
+          "disposition": "HOLD"
+        }
+      ]
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/updater/chromium_win_arm64/cipd",
+      "kind": "cipd",
+      "condition": "checkout_win",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "packages": [
+        {
+          "package": "chromium/third_party/updater/chromium_win_arm64",
+          "version": "version:2@1662007"
+        }
+      ],
+      "missing": [
+        "CIPD_IMMUTABLE_INSTANCE_PIN_UNAVAILABLE",
+        "CIPD_PAYLOAD_MEMBERSHIP_UNVERIFIED"
+      ],
+      "reference_formats": [
+        {
+          "kind": "SYMBOLIC_REFERENCE_REQUIRES_RESOLUTION",
+          "disposition": "HOLD"
+        }
+      ]
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/updater/chromium_win_x86/cipd",
+      "kind": "cipd",
+      "condition": "checkout_win",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "packages": [
+        {
+          "package": "chromium/third_party/updater/chromium_win_x86",
+          "version": "version:2@1662035"
+        }
+      ],
+      "missing": [
+        "CIPD_IMMUTABLE_INSTANCE_PIN_UNAVAILABLE",
+        "CIPD_PAYLOAD_MEMBERSHIP_UNVERIFIED"
+      ],
+      "reference_formats": [
+        {
+          "kind": "SYMBOLIC_REFERENCE_REQUIRES_RESOLUTION",
+          "disposition": "HOLD"
+        }
+      ]
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/updater/chromium_win_x86_64/cipd",
+      "kind": "cipd",
+      "condition": "checkout_win",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "packages": [
+        {
+          "package": "chromium/third_party/updater/chromium_win_x86_64",
+          "version": "version:2@1662007"
+        }
+      ],
+      "missing": [
+        "CIPD_IMMUTABLE_INSTANCE_PIN_UNAVAILABLE",
+        "CIPD_PAYLOAD_MEMBERSHIP_UNVERIFIED"
+      ],
+      "reference_formats": [
+        {
+          "kind": "SYMBOLIC_REFERENCE_REQUIRES_RESOLUTION",
+          "disposition": "HOLD"
+        }
+      ]
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/updater/chromium_win_arm64_sans_iid/cipd",
+      "kind": "cipd",
+      "condition": "checkout_win",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "packages": [
+        {
+          "package": "chromium/third_party/updater/chromium_win_arm64",
+          "version": "ksRzLnqewvz7P-YMX2e8mxZuDI1hgPtLNCuAXIisXhoC"
+        }
+      ],
+      "missing": [
+        "CIPD_PAYLOAD_MEMBERSHIP_UNVERIFIED"
+      ],
+      "reference_formats": [
+        {
+          "kind": "SHA256_INSTANCE",
+          "sha256": "92c4732e7a9ec2fcfb3fe60c5f67bc9b166e0c8d6180fb4b342b805c88ac5e1a",
+          "disposition": "HOLD"
+        }
+      ]
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/updater/chromium_win_x86_sans_iid/cipd",
+      "kind": "cipd",
+      "condition": "checkout_win",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "packages": [
+        {
+          "package": "chromium/third_party/updater/chromium_win_x86",
+          "version": "tcFWGGE3wmwKDhT_s-9mzPiQVYxMOI1U9sRAhm1_5QcC"
+        }
+      ],
+      "missing": [
+        "CIPD_PAYLOAD_MEMBERSHIP_UNVERIFIED"
+      ],
+      "reference_formats": [
+        {
+          "kind": "SHA256_INSTANCE",
+          "sha256": "b5c156186137c26c0a0e14ffb3ef66ccf890558c4c388d54f6c440866d7fe507",
+          "disposition": "HOLD"
+        }
+      ]
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/updater/chromium_win_x86_64_sans_iid/cipd",
+      "kind": "cipd",
+      "condition": "checkout_win",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "packages": [
+        {
+          "package": "chromium/third_party/updater/chromium_win_x86_64",
+          "version": "iXamEEmbStVBV_c-vEG4Xtrda8tTqSRCZ-tmE7VRHb0C"
+        }
+      ],
+      "missing": [
+        "CIPD_PAYLOAD_MEMBERSHIP_UNVERIFIED"
+      ],
+      "reference_formats": [
+        {
+          "kind": "SHA256_INSTANCE",
+          "sha256": "8976a610499b4ad54157f73ebc41b85edadd6bcb53a9244267eb6613b5511dbd",
+          "disposition": "HOLD"
+        }
+      ]
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/webview2",
+      "kind": "cipd",
+      "condition": "checkout_win",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "packages": [
+        {
+          "package": "chromium/third_party/webview2",
+          "version": "version:2@1.0.3856.49.r1"
+        }
+      ],
+      "missing": [
+        "CIPD_IMMUTABLE_INSTANCE_PIN_UNAVAILABLE",
+        "CIPD_PAYLOAD_MEMBERSHIP_UNVERIFIED"
+      ],
+      "reference_formats": [
+        {
+          "kind": "SYMBOLIC_REFERENCE_REQUIRES_RESOLUTION",
+          "disposition": "HOLD"
+        }
+      ]
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/wtl",
+      "kind": "cipd",
+      "condition": "checkout_win",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "packages": [
+        {
+          "package": "chromium/third_party/wtl",
+          "version": "version:2@10.1.0"
+        }
+      ],
+      "missing": [
+        "CIPD_IMMUTABLE_INSTANCE_PIN_UNAVAILABLE",
+        "CIPD_PAYLOAD_MEMBERSHIP_UNVERIFIED"
+      ],
+      "reference_formats": [
+        {
+          "kind": "SYMBOLIC_REFERENCE_REQUIRES_RESOLUTION",
+          "disposition": "HOLD"
+        }
+      ]
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/enterprise_companion/chromium_win_x86/cipd",
+      "kind": "cipd",
+      "condition": "checkout_win",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "packages": [
+        {
+          "package": "chromium/third_party/enterprise_companion/chromium_win_x86",
+          "version": "AYslTlYIeTAeixIsCIfqdortf8dhyL7afIv34gZLi8sC"
+        }
+      ],
+      "missing": [
+        "CIPD_PAYLOAD_MEMBERSHIP_UNVERIFIED"
+      ],
+      "reference_formats": [
+        {
+          "kind": "SHA256_INSTANCE",
+          "sha256": "018b254e560879301e8b122c0887ea768aed7fc761c8beda7c8bf7e2064b8bcb",
+          "disposition": "HOLD"
+        }
+      ]
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/enterprise_companion/chromium_win_x86_64/cipd",
+      "kind": "cipd",
+      "condition": "checkout_win",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "packages": [
+        {
+          "package": "chromium/third_party/enterprise_companion/chromium_win_x86_64",
+          "version": "xzQaSZE4tRCdx_KPMEzpYFiVSmAAhuRFxtjTJMjcV-kC"
+        }
+      ],
+      "missing": [
+        "CIPD_PAYLOAD_MEMBERSHIP_UNVERIFIED"
+      ],
+      "reference_formats": [
+        {
+          "kind": "SHA256_INSTANCE",
+          "sha256": "c7341a499138b5109dc7f28f304ce96058954a600086e445c6d8d324c8dc57e9",
+          "disposition": "HOLD"
+        }
+      ]
+    },
+    {
+      "owner": "chromium",
+      "path": "src/components/variations/test_data/cipd",
+      "kind": "cipd",
+      "condition": "non_git_source",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "packages": [
+        {
+          "package": "chromium/chrome/test/data/variations/cipd",
+          "version": "mVEsPtSXI4F46cdHi9Gsnn89DOjyf6rCqZvL0QEqCQ8C"
+        }
+      ],
+      "missing": [
+        "CIPD_PAYLOAD_MEMBERSHIP_UNVERIFIED"
+      ],
+      "reference_formats": [
+        {
+          "kind": "SHA256_INSTANCE",
+          "sha256": "99512c3ed497238178e9c7478bd1ac9e7f3d0ce8f27faac2a99bcbd1012a090f",
+          "disposition": "HOLD"
+        }
+      ]
+    },
+    {
+      "owner": "chromium",
+      "path": "src/tools/luci-go",
+      "kind": "cipd",
+      "condition": "non_git_source",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "packages": [
+        {
+          "package": "infra/tools/luci/cas/${{platform}}",
+          "version": "git_revision:9429fac3f8d3e6389ffdafd9d9fa1eb791dd0fe9"
+        },
+        {
+          "package": "infra/tools/luci/isolate/${{platform}}",
+          "version": "git_revision:9429fac3f8d3e6389ffdafd9d9fa1eb791dd0fe9"
+        },
+        {
+          "package": "infra/tools/luci/swarming/${{platform}}",
+          "version": "git_revision:9429fac3f8d3e6389ffdafd9d9fa1eb791dd0fe9"
+        }
+      ],
+      "missing": [
+        "CIPD_IMMUTABLE_INSTANCE_PIN_UNAVAILABLE",
+        "CIPD_PAYLOAD_MEMBERSHIP_UNVERIFIED",
+        "CIPD_PLATFORM_EXPANSION_UNQUALIFIED"
+      ],
+      "reference_formats": [
+        {
+          "kind": "SYMBOLIC_REFERENCE_REQUIRES_RESOLUTION",
+          "disposition": "HOLD"
+        },
+        {
+          "kind": "SYMBOLIC_REFERENCE_REQUIRES_RESOLUTION",
+          "disposition": "HOLD"
+        },
+        {
+          "kind": "SYMBOLIC_REFERENCE_REQUIRES_RESOLUTION",
+          "disposition": "HOLD"
+        }
+      ]
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/lzma_sdk/bin/host_platform",
+      "kind": "cipd",
+      "condition": "checkout_win",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "packages": [
+        {
+          "package": "infra/3pp/tools/7z/${{platform}}",
+          "version": "version:3@26.03"
+        }
+      ],
+      "missing": [
+        "CIPD_IMMUTABLE_INSTANCE_PIN_UNAVAILABLE",
+        "CIPD_PAYLOAD_MEMBERSHIP_UNVERIFIED",
+        "CIPD_PLATFORM_EXPANSION_UNQUALIFIED"
+      ],
+      "reference_formats": [
+        {
+          "kind": "SYMBOLIC_REFERENCE_REQUIRES_RESOLUTION",
+          "disposition": "HOLD"
+        }
+      ]
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/lzma_sdk/bin/win64",
+      "kind": "cipd",
+      "condition": "checkout_win",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "packages": [
+        {
+          "package": "infra/3pp/tools/7z/windows-amd64",
+          "version": "version:3@26.03"
+        }
+      ],
+      "missing": [
+        "CIPD_IMMUTABLE_INSTANCE_PIN_UNAVAILABLE",
+        "CIPD_PAYLOAD_MEMBERSHIP_UNVERIFIED"
+      ],
+      "reference_formats": [
+        {
+          "kind": "SYMBOLIC_REFERENCE_REQUIRES_RESOLUTION",
+          "disposition": "HOLD"
+        }
+      ]
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/ninja",
+      "kind": "cipd",
+      "condition": "non_git_source",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "packages": [
+        {
+          "package": "infra/3pp/tools/ninja/${{platform}}",
+          "version": "version:3@1.12.1.chromium.4"
+        }
+      ],
+      "missing": [
+        "CIPD_IMMUTABLE_INSTANCE_PIN_UNAVAILABLE",
+        "CIPD_PAYLOAD_MEMBERSHIP_UNVERIFIED",
+        "CIPD_PLATFORM_EXPANSION_UNQUALIFIED"
+      ],
+      "reference_formats": [
+        {
+          "kind": "SYMBOLIC_REFERENCE_REQUIRES_RESOLUTION",
+          "disposition": "HOLD"
+        }
+      ]
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/siso/cipd",
+      "kind": "cipd",
+      "condition": "non_git_source",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "packages": [
+        {
+          "package": "build/siso/${{platform}}",
+          "version": "git_revision:7bc9a0bfe050ef97e1712ff61c6f11952799e951"
+        }
+      ],
+      "missing": [
+        "CIPD_IMMUTABLE_INSTANCE_PIN_UNAVAILABLE",
+        "CIPD_PAYLOAD_MEMBERSHIP_UNVERIFIED",
+        "CIPD_PLATFORM_EXPANSION_UNQUALIFIED"
+      ],
+      "reference_formats": [
+        {
+          "kind": "SYMBOLIC_REFERENCE_REQUIRES_RESOLUTION",
+          "disposition": "HOLD"
+        }
+      ]
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/swift-format",
+      "kind": "cipd",
+      "condition": "host_os == mac",
+      "selection": "UNRESOLVED",
+      "condition_result": {
+        "unresolved": [
+          "CONDITION_VAR:mac"
+        ]
+      },
+      "packages": [
+        {
+          "package": "infra/3pp/tools/swift-format/mac-${{arch}}",
+          "version": "version:2@505.chromium.1"
+        }
+      ],
+      "missing": [
+        "CIPD_IMMUTABLE_INSTANCE_PIN_UNAVAILABLE",
+        "CIPD_PAYLOAD_MEMBERSHIP_UNVERIFIED",
+        "CIPD_PLATFORM_EXPANSION_UNQUALIFIED",
+        "CONDITION_VAR:mac"
+      ],
+      "reference_formats": [
+        {
+          "kind": "SYMBOLIC_REFERENCE_REQUIRES_RESOLUTION",
+          "disposition": "HOLD"
+        }
+      ]
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/swift-toolchain",
+      "kind": "cipd",
+      "condition": "host_os == mac",
+      "selection": "UNRESOLVED",
+      "condition_result": {
+        "unresolved": [
+          "CONDITION_VAR:mac"
+        ]
+      },
+      "packages": [
+        {
+          "package": "chromium/tools/swift-toolchain/mac-amd64",
+          "version": "version:2@5.8-release"
+        }
+      ],
+      "missing": [
+        "CIPD_IMMUTABLE_INSTANCE_PIN_UNAVAILABLE",
+        "CIPD_PAYLOAD_MEMBERSHIP_UNVERIFIED",
+        "CONDITION_VAR:mac"
+      ],
+      "reference_formats": [
+        {
+          "kind": "SYMBOLIC_REFERENCE_REQUIRES_RESOLUTION",
+          "disposition": "HOLD"
+        }
+      ]
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/typescript/linux-amd64/src",
+      "kind": "cipd",
+      "condition": "non_git_source",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "packages": [
+        {
+          "package": "chromium/third_party/typescript/linux-amd64",
+          "version": "version:2@7.0.1-rc"
+        }
+      ],
+      "missing": [
+        "CIPD_IMMUTABLE_INSTANCE_PIN_UNAVAILABLE",
+        "CIPD_PAYLOAD_MEMBERSHIP_UNVERIFIED"
+      ],
+      "reference_formats": [
+        {
+          "kind": "SYMBOLIC_REFERENCE_REQUIRES_RESOLUTION",
+          "disposition": "HOLD"
+        }
+      ]
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/typescript/windows-amd64/src",
+      "kind": "cipd",
+      "condition": "checkout_win and non_git_source",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "packages": [
+        {
+          "package": "chromium/third_party/typescript/windows-amd64",
+          "version": "version:2@7.0.1-rc"
+        }
+      ],
+      "missing": [
+        "CIPD_IMMUTABLE_INSTANCE_PIN_UNAVAILABLE",
+        "CIPD_PAYLOAD_MEMBERSHIP_UNVERIFIED"
+      ],
+      "reference_formats": [
+        {
+          "kind": "SYMBOLIC_REFERENCE_REQUIRES_RESOLUTION",
+          "disposition": "HOLD"
+        }
+      ]
+    },
+    {
+      "owner": "chromium",
+      "path": "src/tools/skia_goldctl/win",
+      "kind": "cipd",
+      "condition": "checkout_win",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "packages": [
+        {
+          "package": "skia/tools/goldctl/windows-amd64",
+          "version": "-xDDUZodBeTybAnBSH4M_GKIYBtt7r4CdSUugKkjFpgC"
+        }
+      ],
+      "missing": [
+        "CIPD_PAYLOAD_MEMBERSHIP_UNVERIFIED"
+      ],
+      "reference_formats": [
+        {
+          "kind": "SHA256_INSTANCE",
+          "sha256": "fb10c3519a1d05e4f26c09c1487e0cfc6288601b6deebe0275252e80a9231698",
+          "disposition": "HOLD"
+        }
+      ]
+    },
+    {
+      "owner": "chromium",
+      "path": "src/tools/resultdb",
+      "kind": "cipd",
+      "condition": "non_git_source",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "packages": [
+        {
+          "package": "infra/tools/result_adapter/${{platform}}",
+          "version": "git_revision:5fb3ca203842fd691cab615453f8e5a14302a1d8"
+        }
+      ],
+      "missing": [
+        "CIPD_IMMUTABLE_INSTANCE_PIN_UNAVAILABLE",
+        "CIPD_PAYLOAD_MEMBERSHIP_UNVERIFIED",
+        "CIPD_PLATFORM_EXPANSION_UNQUALIFIED"
+      ],
+      "reference_formats": [
+        {
+          "kind": "SYMBOLIC_REFERENCE_REQUIRES_RESOLUTION",
+          "disposition": "HOLD"
+        }
+      ]
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/screen-ai/windows_amd64",
+      "kind": "cipd",
+      "condition": "checkout_win",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "packages": [
+        {
+          "package": "chromium/third_party/screen-ai/windows-amd64",
+          "version": "version:148.13"
+        }
+      ],
+      "missing": [
+        "CIPD_IMMUTABLE_INSTANCE_PIN_UNAVAILABLE",
+        "CIPD_PAYLOAD_MEMBERSHIP_UNVERIFIED"
+      ],
+      "reference_formats": [
+        {
+          "kind": "SYMBOLIC_REFERENCE_REQUIRES_RESOLUTION",
+          "disposition": "HOLD"
+        }
+      ]
+    },
+    {
+      "owner": "chromium",
+      "path": "src/third_party/screen-ai/windows_386",
+      "kind": "cipd",
+      "condition": "checkout_win",
+      "selection": "SELECTED",
+      "condition_result": true,
+      "packages": [
+        {
+          "package": "chromium/third_party/screen-ai/windows-386",
+          "version": "version:148.13"
+        }
+      ],
+      "missing": [
+        "CIPD_IMMUTABLE_INSTANCE_PIN_UNAVAILABLE",
+        "CIPD_PAYLOAD_MEMBERSHIP_UNVERIFIED"
+      ],
+      "reference_formats": [
+        {
+          "kind": "SYMBOLIC_REFERENCE_REQUIRES_RESOLUTION",
+          "disposition": "HOLD"
+        }
+      ]
+    }
+  ],
+  "electron_pgo": [
+    {
+      "target": "win-x64",
+      "state_source": "electron/build/pgo_profiles/win-x64.pgo.txt",
+      "file": "electron-win-x64-1792295497-fd148b9908.profdata",
+      "sha256": "6ee0afa168bcfc4267dc54a3c696a5ed25c691c1062443cf0a2ee0801ab9475b",
+      "size_bytes": null,
+      "payload": "UNAVAILABLE",
+      "disposition": "HOLD"
+    },
+    {
+      "target": "win-arm64",
+      "state_source": "electron/build/pgo_profiles/win-arm64.pgo.txt",
+      "file": "electron-win-arm64-1792295497-fd148b9908.profdata",
+      "sha256": "0d169602f530d5fff4c2c47c1259fba073fe7b3b078b561d97f3acec18c4854f",
+      "size_bytes": null,
+      "payload": "UNAVAILABLE",
+      "disposition": "HOLD"
+    },
+    {
+      "target": "v8-builtins",
+      "state_source": "electron/build/pgo_profiles/v8-builtins.pgo.txt",
+      "file": "electron-v8-x64-1792291780-fd148b9908.profile",
+      "sha256": "c9965f095de80e66ed02d5c58e134dd275c481d73364bbf2ba006fd878fe69b5",
+      "size_bytes": null,
+      "payload": "UNAVAILABLE",
+      "disposition": "HOLD"
+    }
+  ],
+  "windows_toolchain_defaults": {
+    "scope": "UPSTREAM_BASE_DECLARATIONS_ONLY",
+    "disposition": "HOLD",
+    "sdk_payload_sha256": null,
+    "sdk_payload_size_bytes": null,
+    "toolchain_hash": "e66617bc68",
+    "sdk_version": "10.0.26100.0",
+    "rc_legacy_sha1": "dea7da0d9bfcb8dad6cf53ca608dddac3459faaa"
+  },
+  "base_siso_output": {
+    "path": "src/electron/build/siso_revision",
+    "bytes": 41,
+    "sha256": "4d6d291eece72f22cd4bff5ad43e056cdd2a52c2d340bbcf050672dc14b07e3a",
+    "expected_base_text": "7bc9a0bfe050ef97e1712ff61c6f11952799e951\n",
+    "actual_hook_output": "UNQUALIFIED"
+  },
+  "known_environment_override_keys": [
+    "NODE_PATH"
+  ],
+  "blockers": [
+    "GCLIENT_PHASE_AND_CUSTOM_VARS_NOT_OPERATIONALLY_BOUND",
+    "PATCHED_DEPS_AND_HOOK_SOURCE_RECONCILIATION_UNAVAILABLE",
+    "RECURSIVE_HOOK_GRAPH_AND_GLOBAL_EXECUTION_ORDER_UNAVAILABLE",
+    "HOST_INTERPRETER_STDLIB_BOOTSTRAP_AND_SUBPROCESS_BYTES_UNBOUND",
+    "GENERATED_OUTPUT_NAMESPACE_AND_CONTENT_PRODUCER_UNAVAILABLE",
+    "CIPD_PACKAGE_MEMBERSHIP_AND_EXTRACTED_GCS_PAYLOADS_UNBOUND",
+    "DECLARED_PROFILE_NOT_ACTUAL_GCLIENT_EXECUTION_SPEC",
+    "KNOWN_ENVIRONMENT_KEY_CHECK_IS_NOT_COMPLETE_ENVIRONMENT_IDENTITY"
+  ],
+  "summary": {
+    "hook_selection": {
+      "SELECTED": 22,
+      "UNRESOLVED": 1
+    },
+    "source_content": {
+      "MATCHES_BASE_BLOB_BYTES": 34
+    },
+    "all_hook_count": 77
+  },
+  "hooks_executed": false,
+  "tool_payloads_downloaded": false,
+  "authority_effect": false
+}

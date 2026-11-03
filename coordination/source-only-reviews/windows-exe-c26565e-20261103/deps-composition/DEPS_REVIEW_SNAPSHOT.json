@@ -1,0 +1,24 @@
+{
+  "schema": "metaengine.deps-independent-review-snapshot.v1",
+  "source_head": "337608c86e464433f7f5693289c8ce697d4b074d",
+  "reviewed_policy_sha256": "aaef7aa1d1f0fc37927990f9047600203c434ba33a721e62e0c38036f50d6891",
+  "reviewed_tests_sha256": "269ab546c531869f0f3f1ab34d13d036e4a3b7cf51c128881d5597bd8972a587",
+  "reviewed_files_sha256": {
+    "apps/metaengine-browser/scripts/custom-electron-deps-policy.py": "aaef7aa1d1f0fc37927990f9047600203c434ba33a721e62e0c38036f50d6891",
+    "apps/metaengine-browser/test/test_custom_electron_deps_policy.py": "269ab546c531869f0f3f1ab34d13d036e4a3b7cf51c128881d5597bd8972a587",
+    "apps/metaengine-browser/scripts/custom-electron-source-build.py": "86f2e897dc62d002983343038c143d088a21a7c85f65073634952fa2317e3f87",
+    "apps/metaengine-browser/test/test_custom_electron_source_build.py": "c9fd388a83030d9a700dbaecd411e0a1330667721e66206addd46edb1f3b1cf3",
+    "apps/metaengine-browser/scripts/custom-electron-source-policy.py": "5671a093a10d7c39e7d4f15cbc9b4b9e5d964946e165d547e3d1df28cdfd5108"
+  },
+  "prior_pre_helper_review_policy_sha256": "5dbeb49a99c1b3afae79d06bd201fc18b9cf6d76a46c7e25bc92db68bb39c094",
+  "derived_manifest_sha256": "d7c6e51ecb2d61c48997c94b28783ecec9723687a286a9c09db65cd99c4cf664",
+  "derived_manifest_bytes": 255584,
+  "verified_recomputed_canonical": true,
+  "independent_tests_passed": 17,
+  "implementer_tests_independently_passed": 17,
+  "wrapper_tests_independently_passed": 25,
+  "independent_helper_guard_checks_passed": 6,
+  "all_upstream_source_execution": false,
+  "source_repository_mutated": false,
+  "operational_composition_qualified": false
+}
