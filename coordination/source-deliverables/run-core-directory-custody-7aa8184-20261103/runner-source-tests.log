@@ -1,0 +1,78 @@
+▶ actual private slot expression rejects replay, stale generations and a one-tick birth mismatch
+  ✔ revoked scope (1.083706ms)
+  ✔ joined slot (0.207638ms)
+  ✔ consumed slot replay (0.126828ms)
+  ✔ stale scope generation (0.147449ms)
+  ✔ changed active generation (0.16218ms)
+  ✔ stale slot generation (0.180658ms)
+  ✔ changed expected slot (0.111866ms)
+  ✔ missing original birth (0.127789ms)
+  ✔ birth drift within one millisecond (0.414714ms)
+✔ actual private slot expression rejects replay, stale generations and a one-tick birth mismatch (28.991688ms)
+▶ actual private release expression requires revocation, original event/IO joins and empty Job
+  ✔ not revoked (0.383178ms)
+  ✔ unknown physical work (0.113559ms)
+  ✔ pending debug event (0.078726ms)
+  ✔ unjoined IO (0.105447ms)
+  ✔ live Job member (0.110794ms)
+  ✔ no original worker (0.072788ms)
+  ✔ one original worker unjoined (0.061572ms)
+  ✔ invalid negative worker set (0.077455ms)
+✔ actual private release expression requires revocation, original event/IO joins and empty Job (17.123668ms)
+▶ generated slot counterfactuals demonstrate each source fence contributes to refusal
+  ✔ !revoked (5.002424ms)
+  ✔ !joined (4.43943ms)
+  ✔ !consumed (3.586796ms)
+  ✔ scopeGeneration==activeGeneration (5.668762ms)
+  ✔ slotGeneration==expectedSlotGeneration (4.025055ms)
+  ✔ capturedBirth>0 (4.46006ms)
+  ✔ capturedBirth==observedBirth (3.061908ms)
+✔ generated slot counterfactuals demonstrate each source fence contributes to refusal (39.092968ms)
+▶ generated release counterfactuals reject exit-only, IO-only and empty-worker shortcuts
+  ✔ revoked (4.865321ms)
+  ✔ !unknown (3.910095ms)
+  ✔ !eventPending (3.789096ms)
+  ✔ ioJoined (4.629842ms)
+  ✔ active==0 (3.707906ms)
+  ✔ workers>0 (3.832981ms)
+  ✔ workers==joined (3.694415ms)
+✔ generated release counterfactuals reject exit-only, IO-only and empty-worker shortcuts (42.404537ms)
+✔ public entry points cannot construct an original recovery producer or all-birth facet (36.316233ms)
+✔ RunCore acquires original namespace custody in its own Job owner before native birth (38.753505ms)
+✔ each observed birth retains and checks every original descriptor before continuation (18.871469ms)
+✔ release follows exact process, original Job and all original IO joins; UNKNOWN retains owners (21.156004ms)
+▶ generated actual-call-site counterfactuals cannot bypass origin, transfer, replay or physical joins
+  ✔ minted coverage facet (4.805582ms)
+  ✔ missing prebirth acquisition (15.279035ms)
+  ✔ debugger excludes descendants (13.777068ms)
+  ✔ metadata-only mask cannot provide a share veto (38.69204ms)
+  ✔ slot expectation becomes tautological (13.570272ms)
+  ✔ unchecked Job membership (7.60397ms)
+  ✔ numeric remote handle replaces same-object readback (7.719251ms)
+  ✔ continue before descriptor checks (10.261148ms)
+  ✔ partial worker not retained (9.86465ms)
+  ✔ exact pending process not stopped (11.171226ms)
+  ✔ EXIT receipt pretends physical signal (10.177013ms)
+  ✔ Job zero hides an unobserved descendant (11.899305ms)
+  ✔ IO claimed without join (17.033545ms)
+  ✔ late input bypasses original veto (15.987154ms)
+  ✔ replacement control is treated as a new lease (22.846551ms)
+✔ generated actual-call-site counterfactuals cannot bypass origin, transfer, replay or physical joins (215.751878ms)
+▶ actual CREATE event statements consume only after retained-worker checks; every failure stops continuation
+  ✔ source statement order (0.969296ms)
+  ✔ retain (0.278793ms)
+  ✔ originals (0.127299ms)
+  ✔ worker (0.124956ms)
+  ✔ stale slot (0.176372ms)
+  ✔ replay (0.137243ms)
+✔ actual CREATE event statements consume only after retained-worker checks; every failure stops continuation (15.9036ms)
+✔ reported source evidence cannot be upgraded into Windows, compiler or all-worker birth proof (25.569546ms)
+ℹ {"evidence":"ACTUAL_SOURCE_EXPRESSIONS_AND_STATEMENTS_WITH_CALL_TRACE_CONTRACTS","csharp_sha256":"8a951ac23ead3710e1ab78883008fd7341838dce05232cd0703730a628797851","csharp_compilation":"NOT_RUN","windows_native_execution":"NOT_RUN","production_issuer_available":false,"all_worker_birth_coverage_proven":false,"continuous_worker_descriptor_retention_proven":false,"physical_authority":false,"authority_effect":false}
+ℹ tests 63
+ℹ suites 0
+ℹ pass 63
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 607.794125

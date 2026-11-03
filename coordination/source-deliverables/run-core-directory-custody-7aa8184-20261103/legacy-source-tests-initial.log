@@ -1,0 +1,58 @@
+✔ build cleanup retries transient Windows locks and physically removes only the captured directory (616.392969ms)
+✔ build cleanup stops after six busy attempts, fails closed and releases the owned preparation lock (1509.332911ms)
+✔ build cleanup rechecks directory identity after a busy attempt and preserves a replacement directory (105.233351ms)
+✔ build cleanup preserves the primary compiler failure and both independent cleanup failures (3.36881ms)
+✔ successful build cleanup retains the exact primary failure without wrapping or replacing it (3.178027ms)
+✔ build cleanup accepts an already removed build directory and still releases its owned lock (1.701536ms)
+✔ precompilation preserves exact C# and all protocol text outside the single Add-Type block, with LF or CRLF (3.082665ms)
+✔ build extraction rejects missing, ambiguous, malformed and invalid UTF-8 templates with LF and CRLF (3.021955ms)
+✔ the output loader refuses non-PE, unmanaged or truncated assembly bytes (2.303478ms)
+✔ instrumented fixture C# is prepared through the same exact-byte transformation (2.152865ms)
+✔ source preparation refuses a non-Windows host without creating an output or pretending compilation succeeded (0.724336ms)
+✔ runtime staging prepares once and packaging reuses its validated bytes for ASAR and the external helper (1.862365ms)
+﹣ Windows preparation compiles the real class once, publishes pinned self-contained bytes and retains old outputs on a rejected build (0.221599ms) # SKIP
+✔ prepared helper has a separately bound bootstrap and one retained ACK/prompt input owner (7.57298ms)
+✔ handle-list counterfactual changes only the explicit inheritance restriction, retaining pre-birth Job containment (6.518545ms)
+﹣ actual Windows inheritance counterfactual (UNKNOWN unless executed on Windows) (0.270962ms) # SKIP
+✖ native child is created suspended with a checked Job-list attribute before any ready or resume (7.469206ms)
+✔ native birth contract rejects omitted HANDLE_LIST (2.50654ms)
+✔ native birth contract rejects control pipe substituted for child stdout (1.246479ms)
+✔ native birth contract rejects HANDLE_LIST value freed before attributes (1.155405ms)
+✔ native birth contract rejects unchecked capability refusal (1.744019ms)
+✔ native birth contract rejects creation before Job-list setup (1.99119ms)
+✔ native birth contract rejects unchecked native creation (0.883491ms)
+✔ native birth contract rejects ownership transfer before successful creation (1.364445ms)
+✔ native birth contract rejects sequential fallback (1.171198ms)
+✔ native birth contract rejects additional bare creation fallback (1.101574ms)
+✔ native birth contract rejects missing extended-startup flag (1.54302ms)
+✔ native birth contract rejects wrong native startup size (1.072912ms)
+✔ native birth contract rejects freed Job-list value before attribute deletion (2.680258ms)
+✔ native birth contract rejects early ready before membership readback (0.684987ms)
+ℹ tests 29
+ℹ suites 1
+ℹ pass 27
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 1
+ℹ todo 0
+ℹ duration_ms 2323.743233
+
+✖ failing tests:
+
+test at apps/metaengine-browser/test/codex-cli-windows-job-birth.test.mjs:56:1
+✖ native child is created suspended with a checked Job-list attribute before any ready or resume (7.469206ms)
+  AssertionError [ERR_ASSERTION]: create must occur exactly once
+  
+  1 !== 2
+  
+      at assertJobBirthContract (file:///workspace/metaengine-c26565e/Compute/apps/metaengine-browser/test/codex-cli-windows-job-birth.test.mjs:39:12)
+      at TestContext.<anonymous> (file:///workspace/metaengine-c26565e/Compute/apps/metaengine-browser/test/codex-cli-windows-job-birth.test.mjs:57:3)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 2,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

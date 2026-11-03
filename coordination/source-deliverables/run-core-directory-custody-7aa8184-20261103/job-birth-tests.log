@@ -1,0 +1,23 @@
+✔ native child is created suspended with a checked Job-list attribute before any ready or resume (7.420659ms)
+✔ native birth contract rejects omitted HANDLE_LIST (5.203881ms)
+✔ native birth contract rejects control pipe substituted for child stdout (1.209565ms)
+✔ native birth contract rejects HANDLE_LIST value freed before attributes (1.149496ms)
+✔ native birth contract rejects unchecked capability refusal (1.17961ms)
+✔ native birth contract rejects creation before Job-list setup (2.004714ms)
+✔ native birth contract rejects unchecked native creation (0.809642ms)
+✔ native birth contract rejects ownership transfer before successful creation (0.877192ms)
+✔ native birth contract rejects sequential fallback (1.394749ms)
+✔ native birth contract rejects additional bare creation fallback (1.474218ms)
+✔ native birth contract rejects missing extended-startup flag (1.152901ms)
+✔ native birth contract rejects private creation without original debug birth (1.477251ms)
+✔ native birth contract rejects wrong native startup size (0.953975ms)
+✔ native birth contract rejects freed Job-list value before attribute deletion (1.015332ms)
+✔ native birth contract rejects early ready before membership readback (0.879946ms)
+ℹ tests 15
+ℹ suites 0
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 94.717435

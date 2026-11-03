@@ -1,0 +1,38 @@
+{
+  "source_only": true,
+  "mode": "ISOLATED_INDEX_NO_WORKTREE_MUTATION",
+  "steps": [
+    {
+      "patch": "protected-backup-root-provider.patch",
+      "sha256": "9889999dfe35be42cd8d3b6d5d4fa3e3ce56a51bd321ec7bd0f9329d89c7b54e",
+      "base_tree": "2dbe253e97379532f6f4b52ef7edf26109a9266d",
+      "result_tree": "cf8cbe232fef42c5ebf6c76316544e9e1cbe743b",
+      "apply_cached_check": "PASS",
+      "apply_cached": "PASS"
+    },
+    {
+      "patch": "original-directory-custody.patch",
+      "sha256": "5567ec3d20da83cb260426f6b9ed32599e60a6b0184d535f8bac591859631bdd",
+      "base_tree": "cf8cbe232fef42c5ebf6c76316544e9e1cbe743b",
+      "result_tree": "23e4cd10df4817505f8dc3e276cc7688753992e3",
+      "apply_cached_check": "PASS",
+      "apply_cached": "PASS"
+    },
+    {
+      "patch": "installed-recovery-composition.patch",
+      "sha256": "83fc15b9c9100f2dca110b07497ca3df3754b725d69e8e4da630ca764572e4bf",
+      "base_tree": "23e4cd10df4817505f8dc3e276cc7688753992e3",
+      "result_tree": "7aa8184e89a4ca3754275e81bf3f83a61276837b",
+      "apply_cached_check": "PASS",
+      "apply_cached": "PASS"
+    },
+    {
+      "patch": "run-core-directory-custody.patch",
+      "sha256": "466d5acb63737d643322709b1a12bb13f5e1da36fabf92e785706215830dbcf3",
+      "base_tree": "7aa8184e89a4ca3754275e81bf3f83a61276837b",
+      "result_tree": "9163f18f17bbcb5ffdb0af6169028afe8e454998",
+      "apply_cached_check": "PASS",
+      "apply_cached": "PASS"
+    }
+  ]
+}

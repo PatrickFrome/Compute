@@ -1,0 +1,11 @@
+{
+  "scope": "DELIVERABLE_BYTES_PATTERN_CHECK_ONLY",
+  "patterns": [
+    "private_key",
+    "aws_access_key",
+    "github_token"
+  ],
+  "findings": [],
+  "runtime_credentials_read": false,
+  "claim": "NO_MATCHES_NOT_A_GENERAL_SECRET_PROOF"
+}

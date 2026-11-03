@@ -1,0 +1,42 @@
+{
+  "compatible_profile": {
+    "tests": 942,
+    "pass": 941,
+    "fail": 0,
+    "skip": 1
+  },
+  "fresh_applied_profile": {
+    "tests": 96,
+    "pass": 95,
+    "fail": 0,
+    "skip": 1
+  },
+  "source_checks": 302,
+  "actual_csharp_source_contracts": {
+    "tests": 63,
+    "pass": 63,
+    "compilation": "NOT_RUN",
+    "execution": "EXTRACTED_SCALAR_EXPRESSIONS_AND_ONE_CREATE_BRANCH_WITH_SYNTHETIC_BOUNDARIES"
+  },
+  "actual_cpp_synthetic_mechanics": {
+    "cases": 40,
+    "mechanics_pass": 36,
+    "counterexamples_confirmed": 4,
+    "windows_native_execution": "NOT_RUN",
+    "architecture_accepted": false,
+    "production_issuer_available": false
+  },
+  "independent_bounded_review": {
+    "tests": 94,
+    "pass": 93,
+    "skip": 1,
+    "fail": 0
+  },
+  "csharp_compilation": "NOT_RUN",
+  "windows_native_execution": "NOT_RUN",
+  "installation": "NOT_RUN",
+  "physical_recovery": "NOT_RUN",
+  "all_worker_birth_coverage_proven": false,
+  "continuous_worker_descriptor_retention_proven": false,
+  "authority_effect": false
+}

@@ -1,0 +1,86 @@
+{
+  "BASE.md": {
+    "sha256": "336f63567d805e53640db790766b414965b78e93cf61661464334e5dd2682974",
+    "bytes": 2460
+  },
+  "HOST_SERVICE_MOUNT.md": {
+    "sha256": "ed41ce1fab9cd59c0f10e93d1bb918aa09ffff5eeda4c456b058c6948e0c396c",
+    "bytes": 14355
+  },
+  "INDEPENDENT_REVIEW.md": {
+    "sha256": "3b59af965acbb3c6929bfbe56b76df37589c2eed689f4f54d4dc67ff8f2a5a38",
+    "bytes": 6698
+  },
+  "REPORT.md": {
+    "sha256": "6c68030c87c48c9d3614bdd463858a4f2c8a1de202c88410cbcc9c90b28fbdef",
+    "bytes": 9154
+  },
+  "base-chain-verification.json": {
+    "sha256": "1d68aeadfe4ec09b2cf42c6853b05c1518b51fe7d94a826c3923a63a1ae557c1",
+    "bytes": 1464
+  },
+  "compatible-command.json": {
+    "sha256": "4d1c8d51f32374d8f4853edd5e0bf72c0fa3fad714b0aaf8839712e1a4ee4192",
+    "bytes": 4587
+  },
+  "compatible-tests.log": {
+    "sha256": "5a66dab03541396e61323606754289f2cf4069b82a3ecc72cd0709ee4567bfaa",
+    "bytes": 107330
+  },
+  "directory-crash-counterexamples.log": {
+    "sha256": "0f198ab9ffde341b8737c8f1a89ae3404b5e2017271c661a4579a88f1fbb3837",
+    "bytes": 14537
+  },
+  "extraction-evidence.json": {
+    "sha256": "0e5a203c3ac3418ee76308546bf9bb89b0c72bae804df2c8c8034396a26566a6",
+    "bytes": 572
+  },
+  "fresh-apply-tests.log": {
+    "sha256": "032ad7907bb86e9048a5c02d594483de4da2473f154495e50f7600c5be7e02bb",
+    "bytes": 23693
+  },
+  "hold-preservation.json": {
+    "sha256": "29209a4dbadf493304ff814a0356350558551ea12924f20197aec481eb8b0dd5",
+    "bytes": 1747
+  },
+  "independent-bounded-tests.log": {
+    "sha256": "52dbf4912584e1b04de8e8ab0f1dc83547d43858a2f5853c909bce219a0c165f",
+    "bytes": 22009
+  },
+  "job-birth-tests.log": {
+    "sha256": "b1af197a5541e5e9da5e53ab25e6cc789973734bde1d945785ac4d44c3ddced0",
+    "bytes": 1363
+  },
+  "legacy-source-tests-initial.log": {
+    "sha256": "9bc632f5f2203d637e42fc41e2f230e81c46006855f7eacf8530a87f11f7a7a9",
+    "bytes": 4001
+  },
+  "patch-application.json": {
+    "sha256": "5d0a8d4338696643378769bb99273845e71107de3b1f179455e5a6ce26d24f92",
+    "bytes": 523
+  },
+  "redaction-check.json": {
+    "sha256": "6c12c20945b7ea95d2f51183b295164c80f7180c489aa0f38cfad9827aabcb52",
+    "bytes": 242
+  },
+  "run-core-directory-custody.patch": {
+    "sha256": "466d5acb63737d643322709b1a12bb13f5e1da36fabf92e785706215830dbcf3",
+    "bytes": 109192
+  },
+  "runner-source-tests.log": {
+    "sha256": "768d84b12626117e61ee78b5a7ba4def2f572e64c6152e0f2bb8a59a1bc2d59d",
+    "bytes": 4489
+  },
+  "source-base.json": {
+    "sha256": "557d95627d7c7699e90ac75d2612f7ac37e4c5c382161dcb888c6d3bd54cf770",
+    "bytes": 1668
+  },
+  "source-check.log": {
+    "sha256": "1a6fc5934a46e29994dc9f924029cc54c02aab3708ed5558bdfd6c5c098e49c9",
+    "bytes": 25
+  },
+  "validation.json": {
+    "sha256": "d58b9f5f64b966b9a83f213ba7fbe7f25874688c7bd645000ec1936286fca75e",
+    "bytes": 1034
+  }
+}

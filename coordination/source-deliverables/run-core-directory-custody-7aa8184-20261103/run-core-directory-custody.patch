@@ -1,0 +1,1450 @@
+diff --git a/apps/metaengine-browser/native/browser-guardian-scm/recovery-directory-handles.cpp b/apps/metaengine-browser/native/browser-guardian-scm/recovery-directory-handles.cpp
+index 90dcd5b67a773e2a4f8dda93811bf6ebf4f68b79..72f7e4fd0383088627225e1673111c38a5fbb986 100644
+--- a/apps/metaengine-browser/native/browser-guardian-scm/recovery-directory-handles.cpp
++++ b/apps/metaengine-browser/native/browser-guardian-scm/recovery-directory-handles.cpp
+@@ -180,7 +180,10 @@ bool capture(HANDLE original,int kind,OriginalObject* output) {
+     // Object-relative strengthening, not a by-name reacquisition. ReOpenFile
+     // creates a distinct open description: compare its PHYSICAL tuple to the
+     // still-retained original, then CompareObjectHandles only its duplicates.
+-    result.held = Handle(ReOpenFile(result.original.value,FILE_READ_ATTRIBUTES | READ_CONTROL | SYNCHRONIZE,
++    // READ_DATA aliases LIST_DIRECTORY for directories. Metadata-only access
++    // does not participate in the filesystem's sharing checks, so it cannot
++    // establish the requested write/delete veto. No attributes-only fallback.
++    result.held = Handle(ReOpenFile(result.original.value,FILE_READ_DATA | FILE_READ_ATTRIBUTES | READ_CONTROL | SYNCHRONIZE,
+         FILE_SHARE_READ,FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS));
+     result.comparison = duplicate(result.held.value);
+     if (!exact(result)) return false;
+@@ -428,7 +431,7 @@ std::optional<std::size_t> RecoveryDirectoryHandles::createProtectedBackupRoot(s
+     IO_STATUS_BLOCK operation{};operation.Status = status_pending;
+     HANDLE raw = nullptr;
+     if (state_->revoked.load()) {deny(failure,"revoked");return {};}
+-    const auto result = create(&raw,FILE_READ_ATTRIBUTES | READ_CONTROL | SYNCHRONIZE,&attributes,&operation,
++    const auto result = create(&raw,FILE_READ_DATA | FILE_READ_ATTRIBUTES | READ_CONTROL | SYNCHRONIZE,&attributes,&operation,
+         nullptr,FILE_ATTRIBUTE_DIRECTORY,FILE_SHARE_READ,2U,1U | 0x20U | 0x00200000U,nullptr,0);
+     Handle created(raw);
+     Directory child;
+diff --git a/apps/metaengine-browser/scripts/codex-cli-job-runner.ps1 b/apps/metaengine-browser/scripts/codex-cli-job-runner.ps1
+index 1d3e76d5fa1c3d9e179ac2c9d8e40cba2d9a7cb6..0c9ece35718bb9cce44a4d7a5c61d01a7ab08136 100644
+--- a/apps/metaengine-browser/scripts/codex-cli-job-runner.ps1
++++ b/apps/metaengine-browser/scripts/codex-cli-job-runner.ps1
+@@ -7,6 +7,7 @@ Add-Type -TypeDefinition @'
+ using System;
+ using System.IO;
+ using System.Text;
++using System.Collections.Generic;
+ using System.Collections.Concurrent;
+ using System.Threading.Tasks;
+ using System.Runtime.InteropServices;
+@@ -47,6 +48,396 @@ public static class MetaengineCodexJob {
+   [DllImport("kernel32.dll",SetLastError=true)] static extern bool CloseHandle(IntPtr h);
+   [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+   [DllImport("kernel32.dll")] static extern uint GetCurrentProcessId();
++  [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
++  [DllImport("kernel32.dll",SetLastError=true)] static extern uint GetProcessId(IntPtr p);
++  [DllImport("kernel32.dll",SetLastError=true)] static extern bool DuplicateHandle(IntPtr source,IntPtr handle,IntPtr target,out IntPtr copy,uint access,bool inherit,uint options);
++  [DllImport("kernelbase.dll",SetLastError=true)] static extern bool CompareObjectHandles(IntPtr first,IntPtr second);
++  [DllImport("kernel32.dll",SetLastError=true)] static extern IntPtr ReOpenFile(IntPtr original,uint access,uint share,uint flags);
++  [DllImport("kernel32.dll",SetLastError=true)] static extern uint GetFileType(IntPtr handle);
++  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern uint GetFinalPathNameByHandle(IntPtr handle,StringBuilder name,uint size,uint flags);
++  [DllImport("kernel32.dll",SetLastError=true)] static extern bool GetFileInformationByHandleEx(IntPtr handle,int kind,IntPtr info,uint size);
++  [DllImport("kernel32.dll",SetLastError=true)] static extern bool WaitForDebugEvent(IntPtr value,uint milliseconds);
++  [DllImport("kernel32.dll",SetLastError=true)] static extern bool ContinueDebugEvent(uint pid,uint tid,uint status);
++  [DllImport("kernel32.dll",SetLastError=true)] static extern bool DebugSetProcessKillOnExit(bool kill);
++
++  // PRIVATE, dormant recovery source stage. The existing public methods and
++  // PowerShell grammar never accept these types, raw handles, paths, tokens or
++  // a recovery flag. There are deliberately NO constructor call sites for the
++  // two original-source facets below. Their genuine authenticated native
++  // producer, all-worker birth coverage and cancellable control join are still
++  // absent; the production JS native-custody HOLD is unchanged.
++  // DEBUG_PROCESS alone is NOT complete birth coverage: a nested debugger or a
++  // brokered child can escape its chain/Job. Target processes can also close
++  // their own transferred handles between observations. Complete birth AND
++  // continuous worker retention remain missing original-producer obligations.
++  // Neither debug events, Job counts, signed bytes nor a policy boolean creates
++  // this facet or proves those obligations.
++  sealed class OriginalRecoveryBirthCoverage {
++    private OriginalRecoveryBirthCoverage() {}
++  }
++  sealed class OriginalRecoveryDirectory {
++    internal readonly IntPtr directory,anchor;
++    internal OriginalRecoveryDirectory(IntPtr directory,IntPtr anchor) { this.directory=directory;this.anchor=anchor; }
++  }
++  sealed class OriginalRecoveryBundle {
++    internal readonly object authenticatedJob,request,phase,owner,host;
++    internal readonly OriginalRecoveryBirthCoverage birthCoverage;
++    internal readonly OriginalRecoveryDirectory[] directories;
++    internal readonly int backupRoot,pgData,hostState,identityState;
++    int taken;
++    private OriginalRecoveryBundle(object authenticatedJob,object request,object phase,object owner,object host,
++      OriginalRecoveryBirthCoverage birthCoverage,OriginalRecoveryDirectory[] directories,int backupRoot,int pgData,int hostState,int identityState) {
++      this.authenticatedJob=authenticatedJob;this.request=request;this.phase=phase;this.owner=owner;this.host=host;
++      this.birthCoverage=birthCoverage;this.directories=directories;this.backupRoot=backupRoot;this.pgData=pgData;
++      this.hostState=hostState;this.identityState=identityState;
++    }
++    internal void Take() {
++      if(authenticatedJob==null || request==null || phase==null || owner==null || host==null || birthCoverage==null
++        || System.Threading.Interlocked.CompareExchange(ref taken,1,0)!=0)
++        throw new InvalidOperationException("codex_job_original_recovery_producer_required");
++    }
++  }
++  // These predicates are used by the actual private native methods. They are
++  // necessary local state checks, never a substitute for same-object native
++  // readback, original provenance, pre-execution coverage or physical joins.
++  static bool RecoverySlotCurrent(bool revoked,bool joined,bool consumed,long scopeGeneration,long activeGeneration,
++    long slotGeneration,long expectedSlotGeneration,long capturedBirth,long observedBirth) {
++    return !revoked && !joined && !consumed && scopeGeneration==activeGeneration && slotGeneration==expectedSlotGeneration
++      && capturedBirth>0 && capturedBirth==observedBirth;
++  }
++  static bool RecoveryMayRelease(bool revoked,bool unknown,bool eventPending,bool ioJoined,uint active,int workers,int joined) {
++    return revoked && !unknown && !eventPending && ioJoined && active==0 && workers>0 && workers==joined;
++  }
++  static long recoveryGeneration;
++  sealed class RecoveryFileIdentity {
++    internal ulong volume,idLow,idHigh;internal long birth;internal string path;internal bool directory;
++    internal bool SamePhysical(RecoveryFileIdentity other) {
++      return other!=null && volume==other.volume && idLow==other.idLow && idHigh==other.idHigh && birth==other.birth && directory==other.directory;
++    }
++    internal bool Same(RecoveryFileIdentity other) {
++      return SamePhysical(other) && String.Equals(path,other.path,StringComparison.Ordinal);
++    }
++  }
++  sealed class RecoveryObject {
++    internal IntPtr observed,original,held,comparison;internal RecoveryFileIdentity identity;
++    static bool Valid(IntPtr value) { return value!=IntPtr.Zero && value!=new IntPtr(-1); }
++    internal static IntPtr Duplicate(IntPtr process,IntPtr source,IntPtr target) {
++      IntPtr copy=IntPtr.Zero;Require(Valid(source) && DuplicateHandle(process,source,target,out copy,0,false,2),"recovery_duplicate_failed");
++      return copy;
++    }
++    internal static RecoveryFileIdentity Read(IntPtr handle,int requiredKind) {
++      Require(Valid(handle) && GetFileType(handle)==1,"recovery_disk_object_required");
++      IntPtr info=Marshal.AllocHGlobal(64);
++      try {
++        Require(GetFileInformationByHandleEx(handle,9,info,8),"recovery_tag_unavailable");
++        uint attributes=unchecked((uint)Marshal.ReadInt32(info)),tag=unchecked((uint)Marshal.ReadInt32(info,4));
++        bool directory=(attributes&0x10)!=0;
++        Require((attributes&0x400)==0 && tag==0 && (requiredKind<0 || directory==(requiredKind==1)),"recovery_reparse_or_type");
++        Require(GetFileInformationByHandleEx(handle,1,info,24),"recovery_standard_unavailable");
++        Require(Marshal.ReadByte(info,20)==0 && (Marshal.ReadByte(info,21)!=0)==directory
++          && (directory || Marshal.ReadInt32(info,16)==1),"recovery_pending_delete_or_links");
++        Require(GetFileInformationByHandleEx(handle,18,info,24),"recovery_file_id_unavailable");
++        ulong volume=unchecked((ulong)Marshal.ReadInt64(info)),low=unchecked((ulong)Marshal.ReadInt64(info,8)),high=unchecked((ulong)Marshal.ReadInt64(info,16));
++        Require(volume!=0 && (low!=0 || high!=0),"recovery_file_id_invalid");
++        Require(GetFileInformationByHandleEx(handle,0,info,40),"recovery_birth_unavailable");long birth=Marshal.ReadInt64(info);
++        Require(birth>0,"recovery_birth_invalid");
++        if(directory) { Require(GetFileInformationByHandleEx(handle,23,info,4) && Marshal.ReadInt32(info)==0,"recovery_case_sensitive_or_unsupported"); }
++        var path=new StringBuilder(32768);uint length=GetFinalPathNameByHandle(handle,path,32768,1);
++        Require(length>0 && length<32768,"recovery_final_path_unavailable");
++        string name=path.ToString();int root=RecoveryDirectoryScope.VolumeRootLength(name);
++        Require(root>0,"recovery_nonlocal_or_alias");
++        Require(GetFileInformationByHandleEx(handle,9,info,8) && unchecked((uint)Marshal.ReadInt32(info))==attributes
++          && unchecked((uint)Marshal.ReadInt32(info,4))==tag,"recovery_attributes_changed");
++        return new RecoveryFileIdentity {volume=volume,idLow=low,idHigh=high,birth=birth,path=name,directory=directory};
++      } finally { Marshal.FreeHGlobal(info); }
++    }
++    internal static RecoveryObject Capture(IntPtr source,int kind) {
++      var result=new RecoveryObject();result.observed=source;
++      try {
++        result.original=Duplicate(GetCurrentProcess(),source,GetCurrentProcess());
++        Require(CompareObjectHandles(source,result.original),"recovery_original_object_changed");
++        result.identity=Read(result.original,kind);
++        // Object-relative reopen supplies actual restrictive share semantics;
++        // FILE_READ_DATA / FILE_LIST_DIRECTORY bit 1 is mandatory: metadata-
++        // only opens do not participate in the required sharing checks. Refuse
++        // if this access is unavailable; there is no attributes-only fallback,
++        // path reopen or promise about an unobservable original share mask.
++        result.held=ReOpenFile(result.original,0x00120081,1,0x02200000);
++        Require(Valid(result.held),"recovery_reopen_failed");
++        result.comparison=Duplicate(GetCurrentProcess(),result.held,GetCurrentProcess());result.Check();return result;
++      } catch { result.Close();throw; }
++    }
++    internal void Check() {
++      Require(CompareObjectHandles(observed,original) && CompareObjectHandles(held,comparison)
++        && identity.Same(Read(original,identity.directory?1:0)) && identity.Same(Read(held,identity.directory?1:0)),"recovery_original_changed");
++    }
++    internal void Close() {
++      CloseChecked(ref comparison,"recovery_comparison_close_failed");CloseChecked(ref held,"recovery_hold_close_failed");
++      CloseChecked(ref original,"recovery_original_close_failed");
++    }
++  }
++  sealed class RecoveryWorker {
++    internal object owner;internal long scopeGeneration,slotGeneration,birth;internal uint pid;
++    internal IntPtr process,comparison;internal IntPtr[] remote;internal bool consumed,exitContinued,joined;
++    internal RecoverySlot ticket;
++  }
++  sealed class RecoverySlot {
++    internal readonly object owner;internal readonly RecoveryWorker worker;
++    internal readonly long generation,slotGeneration,birth;
++    internal RecoverySlot(object owner,RecoveryWorker worker,long generation,long slotGeneration,long birth) {
++      this.owner=owner;this.worker=worker;this.generation=generation;this.slotGeneration=slotGeneration;this.birth=birth;
++    }
++  }
++  sealed class RecoveryDirectoryScope {
++    readonly object invocation=new object();readonly long generation;
++    readonly uint creatorThread;readonly OriginalRecoveryBundle source;readonly IntPtr job;
++    readonly RecoveryObject[] objects;readonly List<RecoveryWorker> workers=new List<RecoveryWorker>();
++    long sequence;volatile bool revoked,unknown;bool ioJoined,resumed,released;Task[] originalIO;
++    IntPtr eventBuffer;bool eventPending;uint eventCode,eventPid,eventTid;IntPtr eventProcess,eventImage;
++    RecoverySlot initial;Accounting joinedAccounting;
++    internal bool Released { get { return released; } }
++    internal static int VolumeRootLength(string value) {
++      if(value==null || !value.StartsWith("\\\\?\\Volume{",StringComparison.Ordinal))return 0;
++      int end=value.IndexOf("}\\",11,StringComparison.Ordinal);Guid id;
++      if(end!=47 || !Guid.TryParseExact(value.Substring(11,36),"D",out id))return 0;
++      int root=end+2;if(value.Length>root && value.EndsWith("\\",StringComparison.Ordinal))return 0;
++      string rest=value.Substring(root);
++      if(rest.Length>0)foreach(string part in rest.Split('\\'))
++        if(part.Length==0 || part=="." || part==".." || part.IndexOfAny(new[]{'/','\0',':'})>=0)return 0;
++      return root;
++    }
++    static string Parent(string value) {
++      int root=VolumeRootLength(value);if(root==0 || value.Length<=root)return null;
++      int split=value.LastIndexOf('\\');return value.Substring(0,split<root?root:split);
++    }
++    static bool ContainsPath(string parent,string child) {
++      string prefix=parent.EndsWith("\\",StringComparison.Ordinal)?parent:parent+"\\";
++      return String.Equals(parent,child,StringComparison.Ordinal) || child.StartsWith(prefix,StringComparison.Ordinal);
++    }
++    internal RecoveryDirectoryScope(OriginalRecoveryBundle original,IntPtr ownedJob) {
++      // No constructor for original or its birth-coverage facet is called by
++      // this source. A mechanically valid directory cannot arm public Run.
++      original.Take();source=original;job=ownedJob;creatorThread=GetCurrentThreadId();
++      generation=System.Threading.Interlocked.Increment(ref recoveryGeneration);
++      Require(generation>0 && job!=IntPtr.Zero && original.directories!=null && original.directories.Length>0
++        && original.directories.Length<=128,"recovery_original_bundle_invalid");
++      int count=original.directories.Length;
++      foreach(int role in new[]{original.backupRoot,original.pgData,original.hostState,original.identityState})
++        Require(role>=0 && role<count,"recovery_required_namespace_missing");
++      Require(original.backupRoot!=original.pgData,"recovery_namespaces_overlap");
++      objects=new RecoveryObject[count*2];
++      try {
++        for(int i=0;i<count;i++) {
++          OriginalRecoveryDirectory directory=original.directories[i];Require(directory!=null,"recovery_original_directory_missing");
++          objects[i*2]=RecoveryObject.Capture(directory.directory,1);objects[i*2+1]=RecoveryObject.Capture(directory.anchor,-1);
++        }
++        CheckOriginals();eventBuffer=Marshal.AllocHGlobal(176);
++      } catch { foreach(RecoveryObject value in objects)if(value!=null)value.Close();throw; }
++    }
++    void SameThread() { Require(GetCurrentThreadId()==creatorThread,"recovery_debug_thread_changed"); }
++    void CheckOriginals() {
++      SameThread();Require(!released && source.birthCoverage!=null,"recovery_original_coverage_required");
++      foreach(RecoveryObject value in objects)value.Check();
++      for(int i=0;i<objects.Length;i+=2) {
++        string directory=objects[i].identity.path,anchor=objects[i+1].identity.path;
++        for(int j=i+2;j<objects.Length;j+=2)
++          Require(!objects[i].identity.SamePhysical(objects[j].identity)
++            && !String.Equals(directory,objects[j].identity.path,StringComparison.Ordinal),"recovery_directory_alias");
++        Require(String.Equals(Parent(anchor),directory,StringComparison.Ordinal) && !objects[i].identity.Same(objects[i+1].identity),"recovery_direct_child_anchor_required");
++        for(string parent=Parent(directory);parent!=null;parent=Parent(parent)) {
++          bool found=false;for(int j=0;j<objects.Length;j+=2)if(String.Equals(objects[j].identity.path,parent,StringComparison.Ordinal))found=true;
++          Require(found,"recovery_original_ancestor_missing");
++        }
++      }
++      string backup=objects[source.backupRoot*2].identity.path,data=objects[source.pgData*2].identity.path;
++      Require(!ContainsPath(backup,data) && !ContainsPath(data,backup),"recovery_namespaces_overlap");
++      string hostState=objects[source.hostState*2].identity.path;
++      Require(String.Equals(Parent(backup),hostState,StringComparison.Ordinal)
++        && String.Equals(backup,hostState+"\\protected-backup-root-v1",StringComparison.OrdinalIgnoreCase),"recovery_fixed_backup_role_required");
++      // PGDATA may belong to an attached source outside Host state. These
++      // necessary mechanical role checks do not prove original config/Owner,
++      // identity-store authority or protection; that producer is still absent.
++    }
++    void CheckWorker(RecoveryWorker worker,RecoverySlot ticket,bool beforeContinue) {
++      SameThread();long birth,exit,kernel,user;bool member;
++      Require(ticket!=null && Object.ReferenceEquals(ticket.owner,invocation) && Object.ReferenceEquals(ticket.worker,worker)
++        && Object.ReferenceEquals(worker.ticket,ticket) && Object.ReferenceEquals(worker.owner,invocation) && workers.Contains(worker)
++        && worker.scopeGeneration==ticket.generation && worker.birth==ticket.birth
++        && GetProcessTimes(worker.process,out birth,out exit,out kernel,out user)
++        && RecoverySlotCurrent(revoked,worker.joined,beforeContinue&&worker.consumed,ticket.generation,generation,
++          worker.slotGeneration,ticket.slotGeneration,ticket.birth,birth)
++        && GetProcessId(worker.process)==worker.pid && CompareObjectHandles(worker.process,worker.comparison)
++        && IsProcessInJob(worker.process,job,out member) && member,"recovery_worker_slot_changed");
++      foreach(IntPtr remote in worker.remote) {
++        Require(remote!=IntPtr.Zero,"recovery_worker_transfer_incomplete");
++      }
++      for(int i=0;i<objects.Length;i++) {
++        IntPtr copy=IntPtr.Zero;
++        try { copy=RecoveryObject.Duplicate(worker.process,worker.remote[i],GetCurrentProcess());
++          Require(CompareObjectHandles(copy,objects[i].held),"recovery_remote_object_changed"); }
++        finally { CloseChecked(ref copy,"recovery_transfer_readback_close_failed"); }
++      }
++    }
++    RecoverySlot RetainStoppedWorker(IntPtr original,uint pid) {
++      CheckOriginals();Require(!revoked,"recovery_revoked");
++      Require(workers.Count<256,"recovery_worker_budget_exhausted");
++      foreach(RecoveryWorker old in workers)Require(old.pid!=pid,"recovery_worker_pid_replayed");
++      var worker=new RecoveryWorker {owner=invocation,scopeGeneration=generation,slotGeneration=checked(++sequence),pid=pid,
++        remote=new IntPtr[objects.Length]};
++      // Row ownership precedes the first transfer; partial native effects are
++      // retained even if any later duplicate, allocation or readback fails.
++      workers.Add(worker);
++      try {
++        worker.process=RecoveryObject.Duplicate(GetCurrentProcess(),original,GetCurrentProcess());
++        worker.comparison=RecoveryObject.Duplicate(GetCurrentProcess(),worker.process,GetCurrentProcess());
++        long exit,kernel,user;bool member;
++        Require(CompareObjectHandles(original,worker.process) && GetProcessId(worker.process)==pid
++          && GetProcessTimes(worker.process,out worker.birth,out exit,out kernel,out user)
++          && IsProcessInJob(worker.process,job,out member) && member,"recovery_original_worker_required");
++        worker.ticket=new RecoverySlot(invocation,worker,generation,worker.slotGeneration,worker.birth);
++        for(int i=0;i<objects.Length;i++)worker.remote[i]=RecoveryObject.Duplicate(GetCurrentProcess(),objects[i].held,worker.process);
++        CheckWorker(worker,worker.ticket,true);return worker.ticket;
++      } catch { Abandon();throw; }
++    }
++    bool ReadEvent(uint milliseconds) {
++      SameThread();Require(!eventPending,"recovery_debug_event_pending");
++      if(!WaitForDebugEvent(eventBuffer,milliseconds)) {
++        Require(Marshal.GetLastWin32Error()==121,"recovery_debug_wait_failed");return false;
++      }
++      // Mark native ownership BEFORE interpreting, validating or allocating.
++      eventPending=true;eventCode=unchecked((uint)Marshal.ReadInt32(eventBuffer));
++      eventPid=unchecked((uint)Marshal.ReadInt32(eventBuffer,4));eventTid=unchecked((uint)Marshal.ReadInt32(eventBuffer,8));
++      int offset=IntPtr.Size==8?16:12;eventImage=IntPtr.Zero;eventProcess=IntPtr.Zero;
++      if(eventCode==3) { eventImage=Marshal.ReadIntPtr(eventBuffer,offset);eventProcess=Marshal.ReadIntPtr(eventBuffer,offset+IntPtr.Size); }
++      else if(eventCode==6)eventImage=Marshal.ReadIntPtr(eventBuffer,offset);
++      return true;
++    }
++    void ContinuePending(uint status) {
++      SameThread();Require(eventPending,"recovery_debug_event_missing");
++      CloseChecked(ref eventImage,"recovery_debug_image_close_failed");
++      Require(ContinueDebugEvent(eventPid,eventTid,status),"recovery_debug_continue_failed");eventPending=false;eventProcess=IntPtr.Zero;
++    }
++    RecoveryWorker Worker(uint pid) {
++      foreach(RecoveryWorker worker in workers)if(worker.pid==pid)return worker;
++      throw new InvalidOperationException("codex_job_recovery_unobserved_worker");
++    }
++    internal void CaptureInitial(ProcessInfo process) {
++      SameThread();Require(DebugSetProcessKillOnExit(true),"recovery_debug_exit_policy_failed");
++      Require(ReadEvent(5000) && eventCode==3 && eventPid==process.pid
++        && CompareObjectHandles(eventProcess,process.process),"recovery_original_create_event_required");
++      initial=RetainStoppedWorker(eventProcess,eventPid);
++      // Keep this CREATE event stopped until the original second authorization.
++    }
++    internal void ResumeInitial(ProcessInfo process) {
++      SameThread();CheckOriginals();CheckWorker(initial.worker,initial,true);
++      Require(eventPending && eventCode==3 && eventPid==process.pid && source.birthCoverage!=null,"recovery_original_birth_coverage_required");
++      initial.worker.consumed=true;
++      Require(ResumeThread(process.thread)==1,"recovery_original_suspend_count_invalid");
++      ContinuePending(0x00010002);resumed=true;
++    }
++    internal void PumpOne(uint milliseconds) {
++      try {
++        Require(!revoked,"recovery_revoked");
++        if(!ReadEvent(milliseconds))return;
++        if(eventCode==3) {
++          RecoverySlot ticket=RetainStoppedWorker(eventProcess,eventPid);CheckOriginals();CheckWorker(ticket.worker,ticket,true);
++          ticket.worker.consumed=true;ContinuePending(0x00010002);
++        } else if(eventCode==5) {
++          RecoveryWorker worker=Worker(eventPid);
++          // Debugger-owned event handles close on Continue. This independently
++          // duplicated ORIGINAL process object remains until its physical exit.
++          ContinuePending(0x00010002);worker.exitContinued=true;
++        } else {
++          RecoveryWorker worker=Worker(eventPid);CheckOriginals();CheckWorker(worker,worker.ticket,false);
++          Require(eventCode==1 || eventCode==2 || eventCode==4 || eventCode==6 || eventCode==7 || eventCode==8,"recovery_debug_event_unsupported");
++          // No original loader-breakpoint attestation exists here. Never
++          // swallow a breakpoint, single-step or application exception to keep
++          // an otherwise failing worker alive; preserve exception dispatch.
++          uint status=eventCode==1?0x80010001:0x00010002;
++          ContinuePending(status);
++        }
++      } catch { Abandon();throw; }
++    }
++    internal void RecordIO(Task output,Task error,Task input,Task control) {
++      SameThread();Require(resumed && originalIO==null && output!=null && error!=null && input!=null && control!=null,"recovery_original_io_required");
++      originalIO=new[]{output,error,input,control};
++    }
++    internal void AssertInputCurrent() {
++      Require(!revoked && !unknown && resumed && !released && source.birthCoverage!=null,"recovery_input_revoked");
++    }
++    internal Task WriteOriginalInput(IntPtr handle,byte[] bytes) {
++      return Task.Run(()=> {
++        try { using(var input=new FileStream(new SafeFileHandle(handle,false),FileAccess.Write)) {
++          AssertInputCurrent();input.Write(bytes,0,bytes.Length);
++        }} finally { CloseChecked(ref handle,"recovery_input_pipe_close_failed"); }
++      });
++    }
++    internal void Abandon() { revoked=true;unknown=true; }
++    internal Accounting TerminateAndJoin(uint terminationCode) {
++      SameThread();revoked=true;Require(TerminateJobObject(job,terminationCode),"recovery_termination_failed");
++      DateTime deadline=DateTime.UtcNow.AddSeconds(5);
++      for(;;) {
++        if(eventPending) {
++          // Never continue a live foreign/failed-admission create merely
++          // because terminating our Job succeeded: kill THAT exact event object.
++          if(eventCode!=5) {
++            IntPtr exact=eventCode==3?eventProcess:Worker(eventPid).process;
++            Require(TerminateProcess(exact,terminationCode),"recovery_pending_process_termination_failed");
++          }
++          uint exitingPid=eventPid;bool exiting=eventCode==5;ContinuePending(0x00010002);
++          if(exiting)Worker(exitingPid).exitContinued=true;
++        }
++        Accounting accounting;Require(QueryInformationJobObject(job,1,out accounting,(uint)Marshal.SizeOf(typeof(Accounting)),IntPtr.Zero),"recovery_accounting_failed");
++        int joined=0;
++        foreach(RecoveryWorker worker in workers) {
++          if(!worker.joined && worker.exitContinued && WaitForSingleObject(worker.process,0)==0) {
++            uint code;long birth,exit,kernel,user;
++            Require(GetExitCodeProcess(worker.process,out code) && code!=259
++              && CompareObjectHandles(worker.process,worker.comparison)
++              && GetProcessTimes(worker.process,out birth,out exit,out kernel,out user) && birth==worker.birth,"recovery_original_exit_unconfirmed");
++            worker.joined=true;
++          }
++          if(worker.joined)joined++;
++        }
++        if(accounting.active==0 && joined==workers.Count && workers.Count>0) {
++          Require(accounting.total==(uint)workers.Count && accounting.terminated<=accounting.total,"recovery_unobserved_descendant");
++          joinedAccounting=accounting;return accounting;
++        }
++        Require(DateTime.UtcNow<deadline,"recovery_physical_join_unconfirmed");
++        if(ReadEvent(20) && eventCode==3) {
++          // Revoked births remain stopped. There is no effect authorization;
++          // retain their original process for exit observation, then terminate.
++          Require(workers.Count<256,"recovery_worker_budget_exhausted");
++          var worker=new RecoveryWorker {owner=invocation,scopeGeneration=generation,slotGeneration=checked(++sequence),pid=eventPid,
++            remote=new IntPtr[objects.Length]};workers.Add(worker);
++          worker.process=RecoveryObject.Duplicate(GetCurrentProcess(),eventProcess,GetCurrentProcess());
++          worker.comparison=RecoveryObject.Duplicate(GetCurrentProcess(),worker.process,GetCurrentProcess());
++          long exit,kernel,user;Require(GetProcessTimes(worker.process,out worker.birth,out exit,out kernel,out user),"recovery_revoked_birth_failed");
++        }
++      }
++    }
++    internal void JoinIOAndRelease(bool beforeResume) {
++      SameThread();
++      if(beforeResume)Require(!resumed && originalIO==null,"recovery_suspended_io_changed");
++      else Require(originalIO!=null && Task.WaitAll(originalIO,5000),"recovery_original_io_join_unconfirmed");
++      ioJoined=true;int joined=0;foreach(RecoveryWorker worker in workers)if(worker.joined)joined++;
++      Require(RecoveryMayRelease(revoked,unknown,eventPending,ioJoined,joinedAccounting.active,workers.Count,joined),"recovery_release_unconfirmed");
++      foreach(RecoveryObject value in objects)value.Close();
++      foreach(RecoveryWorker worker in workers) { CloseChecked(ref worker.comparison,"recovery_worker_comparison_close_failed");CloseChecked(ref worker.process,"recovery_worker_close_failed"); }
++      if(eventBuffer!=IntPtr.Zero) { Marshal.FreeHGlobal(eventBuffer);eventBuffer=IntPtr.Zero; }released=true;
++    }
++    internal void Quarantine() {
++      Abandon();
++      // IntPtr owners have no finalizer. Deliberately do not close original
++      // directory/process/Job objects, remote copies or pending native event.
++      // The SAME helper remains the sole Job owner. Its actual process exit,
++      // never a cancellation receipt, closes its own table and requests kill.
++      // Remote copies persist only while their target keeps them open: this
++      // component cannot prevent target close/reuse between observations and
++      // does not establish continuous worker retention or effect admission.
++      // No external Job holder, Job duplication or debugger detach exists.
++    }
++  }
+   static readonly object outputLock = new object();
+   static void Require(bool ok,string phase) { if(!ok) throw new InvalidOperationException("codex_job_"+phase+":"+Marshal.GetLastWin32Error()); }
+   static void CloseChecked(ref IntPtr handle,string phase) {
+@@ -134,16 +525,16 @@ public static class MetaengineCodexJob {
+       ",\"job_accounting\":{\"active_processes\":"+a.active+",\"total_processes\":"+a.total+",\"total_terminated_processes\":"+a.terminated+"}}";
+   }
+   public static void Run(string exe,string[] args,string cwd,string runId,uint timeout,string expectedSha,string absoluteDeadlineMs,string requestId,string requestSha,string bindingSha,string promptSha) {
+-    RunCore(exe,args,cwd,runId,timeout,expectedSha,absoluteDeadlineMs,requestId,requestSha,bindingSha,promptSha,null,null);
++    RunCore(exe,args,cwd,runId,timeout,expectedSha,absoluteDeadlineMs,requestId,requestSha,bindingSha,promptSha,null,null,null);
+   }
+   public static void RunPolicy(string exe,string[] args,string cwd,string runId,uint timeout,string expectedSha,string absoluteDeadlineMs,string requestId,string requestSha,string bindingSha,string promptSha,string inputProtocol,string policyNonce) {
+     if(inputProtocol!="EFFECTIVE_POLICY_ACK_V1" || !System.Text.RegularExpressions.Regex.IsMatch(policyNonce??"","\\A[a-f0-9]{64}\\z")) throw new InvalidOperationException("codex_job_policy_protocol_invalid");
+-    RunCore(exe,args,cwd,runId,timeout,expectedSha,absoluteDeadlineMs,requestId,requestSha,bindingSha,promptSha,inputProtocol,policyNonce);
++    RunCore(exe,args,cwd,runId,timeout,expectedSha,absoluteDeadlineMs,requestId,requestSha,bindingSha,promptSha,inputProtocol,policyNonce,null);
+   }
+-  static void RunCore(string exe,string[] args,string cwd,string runId,uint timeout,string expectedSha,string absoluteDeadlineMs,string requestId,string requestSha,string bindingSha,string promptSha,string inputProtocol,string policyNonce) {
++  static void RunCore(string exe,string[] args,string cwd,string runId,uint timeout,string expectedSha,string absoluteDeadlineMs,string requestId,string requestSha,string bindingSha,string promptSha,string inputProtocol,string policyNonce,OriginalRecoveryBundle originalRecovery) {
+     bool policyMode=inputProtocol=="EFFECTIVE_POLICY_ACK_V1";
+     IntPtr job=IntPtr.Zero,stdinRead=IntPtr.Zero,stdinWrite=IntPtr.Zero,stdoutRead=IntPtr.Zero,stdoutWrite=IntPtr.Zero,stderrRead=IntPtr.Zero,stderrWrite=IntPtr.Zero;
+-    var process=new ProcessInfo(); bool assigned=false;
++    var process=new ProcessInfo(); bool assigned=false;RecoveryDirectoryScope recovery=null;
+     long helperBirth,helperExit,helperKernel,helperUser;
+     Require(GetProcessTimes(GetCurrentProcess(),out helperBirth,out helperExit,out helperKernel,out helperUser),"helper_birth_failed");
+     string helperIdentity=Identity(GetCurrentProcessId(),helperBirth);
+@@ -156,6 +547,10 @@ public static class MetaengineCodexJob {
+       job=CreateJobObject(IntPtr.Zero,null); Require(job!=IntPtr.Zero,"create_failed");
+       var limits=new Limits(); limits.basic.flags=0x2000|0x8; limits.basic.active=64;
+       Require(SetInformationJobObject(job,9,ref limits,(uint)Marshal.SizeOf(typeof(Limits))),"limits_failed");
++      // Private source only: no current caller can construct originalRecovery.
++      // Both original namespace and all-worker-birth facets are required
++      // BEFORE CreateProcess; debug events cannot manufacture that provenance.
++      if(originalRecovery!=null)recovery=new RecoveryDirectoryScope(originalRecovery,job);
+       var security=new Security(); security.length=Marshal.SizeOf(typeof(Security)); security.inherit=1;
+       Require(CreatePipe(out stdinRead,out stdinWrite,ref security,0),"stdin_pipe_failed");
+       Require(CreatePipe(out stdoutRead,out stdoutWrite,ref security,0),"stdout_pipe_failed");
+@@ -183,7 +578,9 @@ public static class MetaengineCodexJob {
+         Require(UpdateProcThreadAttribute(attributes,0,new UIntPtr(0x00020002),handleList,new UIntPtr((uint)(IntPtr.Size*3)),IntPtr.Zero,IntPtr.Zero),"handle_attribute_failed");
+         var extended=new StartupEx(); extended.startup=startup; extended.startup.cb=Marshal.SizeOf(typeof(StartupEx)); extended.attributes=attributes;
+         ProcessInfo createdProcess;
+-        bool created=CreateProcess(exe,childCommandLine,IntPtr.Zero,IntPtr.Zero,true,0x08000004|0x00080000,IntPtr.Zero,cwd,ref extended,out createdProcess);
++        bool created;
++        if(recovery==null)created=CreateProcess(exe,childCommandLine,IntPtr.Zero,IntPtr.Zero,true,0x08000004|0x00080000,IntPtr.Zero,cwd,ref extended,out createdProcess);
++        else created=CreateProcess(exe,childCommandLine,IntPtr.Zero,IntPtr.Zero,true,0x08000004|0x00080000|0x00000001,IntPtr.Zero,cwd,ref extended,out createdProcess);
+         Require(created,"create_process_failed");
+         // Failed PROCESS_INFORMATION outputs are not owned handles. Transfer
+         // them into the outer cleanup scope only after successful creation.
+@@ -199,6 +596,7 @@ public static class MetaengineCodexJob {
+       long birth,exit,kernel,user; Require(GetProcessTimes(process.process,out birth,out exit,out kernel,out user),"birth_readback_failed");
+       var image=new StringBuilder(32768); uint imageSize=32768; Require(QueryFullProcessImageName(process.process,0,image,ref imageSize),"image_readback_failed");
+       if(!String.Equals(Path.GetFullPath(image.ToString()),Path.GetFullPath(exe),StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("codex_job_image_changed");
++      if(recovery!=null)recovery.CaptureInitial(process);
+       CloseChecked(ref stdinRead,"stdin_child_close_failed"); CloseChecked(ref stdoutWrite,"stdout_child_close_failed"); CloseChecked(ref stderrWrite,"stderr_child_close_failed");
+       string sid=System.Security.Principal.WindowsIdentity.GetCurrent().User.Value;
+       Emit("{\"type\":\"ready\",\"launch\":"+launch+",\"helper_process\":"+helperIdentity+",\"pid\":"+process.pid+",\"process_incarnation_id\":"+Escape("pid:"+process.pid+":created_100ns:"+birth)+
+@@ -213,6 +611,7 @@ public static class MetaengineCodexJob {
+         // This branch cannot call ResumeThread or pump/write child input. A receipt
+         // is emitted only after native exit, empty accounting and checked closes.
+         Require(TerminateJobObject(job,125),"suspended_termination_failed");
++        if(recovery!=null)recovery.TerminateAndJoin(125);
+         Require(WaitForSingleObject(process.process,5000)==0,"suspended_exit_wait_failed");
+         uint cancelledCode; Require(GetExitCodeProcess(process.process,out cancelledCode),"suspended_exit_readback_failed");
+         Require(cancelledCode==125,"suspended_exit_code_invalid");
+@@ -227,6 +626,7 @@ public static class MetaengineCodexJob {
+         // This unnamed, non-inheritable Job received exactly this one process;
+         // its initial thread was never resumed, so it could not spawn children.
+         Require(cancelledAccounting.active==0 && cancelledAccounting.total==1 && cancelledAccounting.terminated<=cancelledAccounting.total,"suspended_accounting_invalid");
++        if(recovery!=null)recovery.JoinIOAndRelease(true);
+         CloseChecked(ref job,"suspended_job_close_failed");
+         Emit(Terminal("suspended_cancelled",launch,helperIdentity,runId,process,birth,cancelledCode,cancel[2],true,cancel[1],cancelledAccounting));
+         return;
+@@ -246,16 +646,23 @@ public static class MetaengineCodexJob {
+       }
+       if(DateTime.UtcNow>=deadline) throw new InvalidOperationException("codex_job_deadline_expired_before_resume");
+       byte[] prompt=policyMode?null:Prompt(resumeBody.Substring(separator+1),promptSha);
+-      Require(ResumeThread(process.thread)!=0xffffffff,"resume_failed");
++      if(recovery!=null)recovery.ResumeInitial(process);
++      else Require(ResumeThread(process.thread)!=0xffffffff,"resume_failed");
+       Emit("{\"type\":\"resumed\",\"request_id\":"+Escape(requestId)+",\"request_sha256\":"+Escape(requestSha)+"}");
+       var outTask=Pump(stdoutRead,"stdout"); stdoutRead=IntPtr.Zero; var errTask=Pump(stderrRead,"stderr"); stderrRead=IntPtr.Zero;
+       PolicyInputWriter policyInput=policyMode?new PolicyInputWriter(stdinWrite,requestId,requestSha,policyNonce):null;
+-      var inputTask=policyMode?policyInput.task:WriteInput(stdinWrite,prompt); stdinWrite=IntPtr.Zero;
++      var inputTask=policyMode?policyInput.task:recovery==null?WriteInput(stdinWrite,prompt):recovery.WriteOriginalInput(stdinWrite,prompt); stdinWrite=IntPtr.Zero;
+       var control=Task.Run(()=>Console.In.ReadLine()); string reason=null; bool invalidControl=false; int inputPhase=0;
++      if(recovery!=null)recovery.RecordIO(outTask,errTask,inputTask,control);
+       while(WaitForSingleObject(process.process,100)==0x102) {
++        if(recovery!=null)recovery.PumpOne(0);
+         if(DateTime.UtcNow>=deadline) { reason="TIMEOUT"; break; }
+         if(inputTask.IsFaulted) { invalidControl=true; reason="CANCELLED"; break; }
+         if(control.IsCompleted) {
++          // No recovery producer owns a replacement control read or can join
++          // it yet. Revoke and enter physical cleanup BEFORE policy ACK/prompt
++          // writes or scheduling another read; observation is not a new lease.
++          if(recovery!=null) { recovery.Abandon();reason="CANCELLED";break; }
+           string command=control.GetAwaiter().GetResult();
+           if(!policyMode || command==null || command.StartsWith("CANCEL ",StringComparison.Ordinal)) { reason="CANCELLED"; break; }
+           try {
+@@ -263,8 +670,10 @@ public static class MetaengineCodexJob {
+             string ackPrefix="POLICY_ACK "+requestId+" "+requestSha+" ",promptPrefix="PROMPT "+requestId+" "+requestSha+" ";
+             if(inputPhase==0 && command.StartsWith(ackPrefix,StringComparison.Ordinal)) {
+               string context; byte[] ack=PolicyAck(command.Substring(ackPrefix.Length),policyNonce,out context);
++              if(recovery!=null)recovery.AssertInputCurrent();
+               policyInput.Write(ack,context,false); inputPhase=1;
+             } else if(inputPhase==1 && policyInput.AckWritten && command.StartsWith(promptPrefix,StringComparison.Ordinal)) {
++              if(recovery!=null)recovery.AssertInputCurrent();
+               policyInput.Write(Prompt(command.Substring(promptPrefix.Length),promptSha),null,true); inputPhase=2;
+             } else throw new InvalidOperationException("codex_job_input_phase_invalid");
+           } catch { invalidControl=true; reason="CANCELLED"; break; }
+@@ -272,6 +681,7 @@ public static class MetaengineCodexJob {
+         }
+       }
+       if(reason!=null) Require(TerminateJobObject(job,124),"termination_failed");
++      if(recovery!=null)recovery.TerminateAndJoin(124);
+       Require(WaitForSingleObject(process.process,5000)==0,"exit_wait_failed");
+       uint code; Require(GetExitCodeProcess(process.process,out code),"exit_readback_failed");
+       // Stop grandchildren even when the main CLI exited successfully. Observe
+@@ -286,6 +696,7 @@ public static class MetaengineCodexJob {
+       // Killing the exact job closes every child-owned pipe end BEFORE joining
+       // readers/writer. Never wait for stdin consumption before terminating it.
+       Require(Task.WaitAll(new[]{outTask,errTask,inputTask},5000),"pipe_drain_unconfirmed");
++      if(recovery!=null)recovery.JoinIOAndRelease(false);
+       if(policyInput!=null) policyInput.Dispose();
+       if(invalidControl || policyMode && reason==null && !policyInput.PromptWritten) throw new InvalidOperationException("codex_job_input_phase_unconfirmed");
+       CloseChecked(ref process.thread,"thread_close_failed"); CloseChecked(ref process.process,"process_close_failed");
+@@ -294,7 +705,12 @@ public static class MetaengineCodexJob {
+       Emit(Terminal("exit",launch,helperIdentity,runId,process,birth,code,reason,false,null,accounting));
+     } finally {
+       if(process.process!=IntPtr.Zero && !assigned) TerminateProcess(process.process,125);
+-      foreach(IntPtr h in new[]{job,stdinRead,stdinWrite,stdoutRead,stdoutWrite,stderrRead,stderrWrite,process.thread,process.process}) if(h!=IntPtr.Zero) CloseHandle(h);
++      if(recovery!=null && !recovery.Released) {
++        // UNKNOWN does not close a recovery lease. Keep raw opens in THIS
++        // original owner table, request termination, and let actual owner exit
++        // close its sole Job. No external holder changes kill-on-close lifetime.
++        recovery.Quarantine();if(job!=IntPtr.Zero)TerminateJobObject(job,125);
++      } else foreach(IntPtr h in new[]{job,stdinRead,stdinWrite,stdoutRead,stdoutWrite,stderrRead,stderrWrite,process.thread,process.process}) if(h!=IntPtr.Zero) CloseHandle(h);
+     }
+   }
+ }
+diff --git a/apps/metaengine-browser/test/codex-cli-recovery-runner-source.test.mjs b/apps/metaengine-browser/test/codex-cli-recovery-runner-source.test.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..a24b499daf3cabf71b1218016965dcea53e8633d
+--- /dev/null
++++ b/apps/metaengine-browser/test/codex-cli-recovery-runner-source.test.mjs
+@@ -0,0 +1,312 @@
++// SOURCE CONTRACTS + EXACT SOURCE EXPRESSIONS ONLY. No C# compiler or Windows
++// runtime is available in this lane. A scalar guard evaluating true is never
++// an original issuer, all-worker birth coverage, or physical cleanup proof.
++import assert from 'node:assert/strict';
++import {createHash} from 'node:crypto';
++import fs from 'node:fs/promises';
++import test from 'node:test';
++import {resolveCodexCliJobHelperSource} from '../src/codex-cli-windows-process-controller.mjs';
++import {extractCodexCliJobRuntimeTemplate} from '../scripts/prepare-codex-cli-job-runtime.mjs';
++import {csharpTokens,compactCsharp,exactSourcePredicate,sourceBlock,requireOrderedCsharp,
++  createEventStatements,executeCreateEventStatements}
++  from './fixtures/recovery-runner-source-contract.mjs';
++
++const readSource=async()=>extractCodexCliJobRuntimeTemplate(await fs.readFile(resolveCodexCliJobHelperSource())).csharpBytes.toString('utf8');
++const originalSlot=()=>({revoked:false,joined:false,consumed:false,scopeGeneration:7n,activeGeneration:7n,
++  slotGeneration:11n,expectedSlotGeneration:11n,capturedBirth:133333333333333333n,observedBirth:133333333333333333n});
++const originalRelease=()=>({revoked:true,unknown:false,eventPending:false,ioJoined:true,active:0,workers:2,joined:2});
++
++test('actual private slot expression rejects replay, stale generations and a one-tick birth mismatch',async t=>{
++  const source=await readSource(),predicate=exactSourcePredicate(source,'RecoverySlotCurrent');
++  assert.equal(predicate.execute(originalSlot()),true,'scalar consistency only; no authority is created');
++  for(const [name,change] of [
++    ['revoked scope',{revoked:true}],['joined slot',{joined:true}],['consumed slot replay',{consumed:true}],
++    ['stale scope generation',{scopeGeneration:6n}],['changed active generation',{activeGeneration:8n}],
++    ['stale slot generation',{slotGeneration:10n}],['changed expected slot',{expectedSlotGeneration:12n}],
++    ['missing original birth',{capturedBirth:0n,observedBirth:0n}],
++    ['birth drift within one millisecond',{observedBirth:133333333333333334n}],
++  ])await t.test(name,()=>assert.equal(predicate.execute({...originalSlot(),...change}),false));
++  assert.ok(!compactCsharp(source).includes('public static bool RecoverySlotCurrent'));
++});
++
++test('actual private release expression requires revocation, original event/IO joins and empty Job',async t=>{
++  const source=await readSource(),predicate=exactSourcePredicate(source,'RecoveryMayRelease');
++  assert.equal(predicate.execute(originalRelease()),true,'scalar consistency only; native observations remain independently required');
++  for(const [name,change] of [
++    ['not revoked',{revoked:false}],['unknown physical work',{unknown:true}],['pending debug event',{eventPending:true}],
++    ['unjoined IO',{ioJoined:false}],['live Job member',{active:1}],['no original worker',{workers:0,joined:0}],
++    ['one original worker unjoined',{joined:1}],['invalid negative worker set',{workers:-1,joined:-1}],
++  ])await t.test(name,()=>assert.equal(predicate.execute({...originalRelease(),...change}),false));
++  assert.ok(!compactCsharp(source).includes('public static bool RecoveryMayRelease'));
++});
++
++function omitConjunct(expression,fragment){
++  const body=compactCsharp(expression),target=compactCsharp(fragment);
++  if(body.startsWith(target+' && '))return body.slice(target.length+4);
++  assert.ok(body.includes(' && '+target),'counterfactual must remove an actual source conjunct');
++  return body.replace(' && '+target,'');
++}
++
++test('generated slot counterfactuals demonstrate each source fence contributes to refusal',async t=>{
++  const source=await readSource(),original=exactSourcePredicate(source,'RecoverySlotCurrent');
++  for(const [fragment,change] of [
++    ['!revoked',{revoked:true}],['!joined',{joined:true}],['!consumed',{consumed:true}],
++    ['scopeGeneration==activeGeneration',{scopeGeneration:8n}],
++    ['slotGeneration==expectedSlotGeneration',{slotGeneration:12n}],
++    ['capturedBirth>0',{capturedBirth:0n,observedBirth:0n}],
++    ['capturedBirth==observedBirth',{observedBirth:133333333333333334n}],
++  ])await t.test(fragment,()=>{
++    const values={...originalSlot(),...change};assert.equal(original.execute(values),false);
++    const altered=source.replace(original.expression,omitConjunct(original.expression,fragment));
++    assert.notEqual(altered,source);
++    assert.equal(exactSourcePredicate(altered,'RecoverySlotCurrent').execute(values),true,
++      'removing this real source fence must admit the deliberately invalid scalar control');
++  });
++});
++
++test('generated release counterfactuals reject exit-only, IO-only and empty-worker shortcuts',async t=>{
++  const source=await readSource(),original=exactSourcePredicate(source,'RecoveryMayRelease');
++  for(const [fragment,change] of [
++    ['revoked',{revoked:false}],['!unknown',{unknown:true}],['!eventPending',{eventPending:true}],
++    ['ioJoined',{ioJoined:false}],['active==0',{active:1}],['workers>0',{workers:0,joined:0}],
++    ['workers==joined',{joined:1}],
++  ])await t.test(fragment,()=>{
++    const values={...originalRelease(),...change};assert.equal(original.execute(values),false);
++    const altered=source.replace(original.expression,omitConjunct(original.expression,fragment));
++    assert.equal(exactSourcePredicate(altered,'RecoveryMayRelease').execute(values),true,
++      'the deliberately weakened source control must expose the missing refusal');
++  });
++});
++
++function includesSource(source,snippet){assert.ok(compactCsharp(source).includes(compactCsharp(snippet)),snippet);}
++const scopeOf=source=>sourceBlock(source,'sealed class RecoveryDirectoryScope').body;
++
++function assertOriginalProducerUnavailable(source){
++  const code=csharpTokens(source).filter(token=>token.kind!=='literal').map(token=>token.text).join(' ');
++  assert.doesNotMatch(code,/new OriginalRecovery(?:Bundle|BirthCoverage) \(/,'no modeled or public producer may construct the absent original facets');
++  assert.equal(compactCsharp(sourceBlock(source,'sealed class OriginalRecoveryBirthCoverage').body),
++    'private OriginalRecoveryBirthCoverage ( ) { }',
++    'debug-chain observations, child-policy flags and Job totals cannot manufacture an all-birth issuer');
++  const original=sourceBlock(source,'sealed class OriginalRecoveryBundle').body;
++  includesSource(original,'private OriginalRecoveryBundle(');
++  const take=sourceBlock(original,'internal void Take').body;
++  for(const required of ['authenticatedJob==null','request==null','phase==null','owner==null','host==null','birthCoverage==null',
++    'System.Threading.Interlocked.CompareExchange(ref taken,1,0)!=0'])includesSource(take,required);
++  includesSource(sourceBlock(source,'public static void Run').body,
++    'RunCore(exe,args,cwd,runId,timeout,expectedSha,absoluteDeadlineMs,requestId,requestSha,bindingSha,promptSha,null,null,null);');
++  includesSource(sourceBlock(source,'public static void RunPolicy').body,
++    'RunCore(exe,args,cwd,runId,timeout,expectedSha,absoluteDeadlineMs,requestId,requestSha,bindingSha,promptSha,inputProtocol,policyNonce,null);');
++  const core=sourceBlock(source,'static void RunCore');
++  includesSource(core.header,'OriginalRecoveryBundle originalRecovery');
++  includesSource(scopeOf(source),'source.birthCoverage!=null');
++}
++
++function assertOriginalAcquisitionAndJobOwner(source){
++  const core=sourceBlock(source,'static void RunCore').body,scope=scopeOf(source);
++  requireOrderedCsharp(core,[
++    'job=CreateJobObject(IntPtr.Zero,null);','limits.basic.flags=0x2000|0x8;',
++    'Require(SetInformationJobObject(job,9,ref limits,(uint)Marshal.SizeOf(typeof(Limits))),"limits_failed");',
++    'if(originalRecovery!=null)recovery=new RecoveryDirectoryScope(originalRecovery,job);',
++    'Require(UpdateProcThreadAttribute(attributes,0,new UIntPtr(0x0002000d),jobList,new UIntPtr((uint)IntPtr.Size),IntPtr.Zero,IntPtr.Zero),"job_attribute_failed");',
++    'else created=CreateProcess(exe,childCommandLine,IntPtr.Zero,IntPtr.Zero,true,0x08000004|0x00080000|0x00000001,IntPtr.Zero,cwd,ref extended,out createdProcess);',
++    'Require(created,"create_process_failed");','process=createdProcess;',
++    'if(recovery!=null)recovery.CaptureInitial(process);','string resume=Console.In.ReadLine();',
++    'if(recovery!=null)recovery.ResumeInitial(process);',
++  ]);
++  includesSource(core,'if(recovery==null)created=CreateProcess(exe,childCommandLine,IntPtr.Zero,IntPtr.Zero,true,0x08000004|0x00080000,IntPtr.Zero,cwd,ref extended,out createdProcess);');
++  includesSource(core,'else Require(ResumeThread(process.thread)!=0xffffffff,"resume_failed");');
++  includesSource(scope,'original.Take();source=original;job=ownedJob;creatorThread=GetCurrentThreadId();');
++  includesSource(scope,'generation=System.Threading.Interlocked.Increment(ref recoveryGeneration);');
++  includesSource(scope,'objects[i*2]=RecoveryObject.Capture(directory.directory,1);objects[i*2+1]=RecoveryObject.Capture(directory.anchor,-1);');
++  assert.doesNotMatch(compactCsharp(scope),/OpenJobObject|CreateJobObject|DebugActiveProcessStop/);
++  for(const declaration of ['internal RecoveryDirectoryScope','internal void CaptureInitial','bool ReadEvent',
++    'void ContinuePending','internal void ResumeInitial','internal void PumpOne','internal Accounting TerminateAndJoin'])
++    assert.doesNotMatch(compactCsharp(sourceBlock(scope,declaration).body),/Task \. Run/,'native debug ownership must stay on its original OS thread');
++  const object=sourceBlock(source,'sealed class RecoveryObject').body;
++  requireOrderedCsharp(sourceBlock(object,'internal static RecoveryObject Capture').body,[
++    'result.original=Duplicate(GetCurrentProcess(),source,GetCurrentProcess());',
++    'Require(CompareObjectHandles(source,result.original),"recovery_original_object_changed");',
++    'result.identity=Read(result.original,kind);',
++    'result.held=ReOpenFile(result.original,0x00120081,1,0x02200000);',
++    'result.comparison=Duplicate(GetCurrentProcess(),result.held,GetCurrentProcess());','result.Check();',
++  ]);
++  const capture=sourceBlock(object,'internal static RecoveryObject Capture').body,captureTokens=csharpTokens(capture);
++  assert.equal(captureTokens.filter((token,index)=>token.text==='ReOpenFile'&&captureTokens[index+1]?.text==='(').length,1,
++    'a refused sharing-participating open must not retry a weaker mask');
++  includesSource(capture,'Require(Valid(result.held),"recovery_reopen_failed");');
++  assert.doesNotMatch(compactCsharp(capture),/CreateFile/,'original acquisition has no path fallback');
++  const originals=sourceBlock(scope,'void CheckOriginals').body;
++  for(const required of ['SameThread();','foreach(RecoveryObject value in objects)value.Check();',
++    '!objects[i].identity.SamePhysical(objects[j].identity)',
++    'String.Equals(Parent(anchor),directory,StringComparison.Ordinal)',
++    'Require(found,"recovery_original_ancestor_missing");',
++    'Require(!ContainsPath(backup,data) && !ContainsPath(data,backup),"recovery_namespaces_overlap");',
++    'String.Equals(Parent(backup),hostState,StringComparison.Ordinal)',
++    'String.Equals(backup,hostState+"\\\\protected-backup-root-v1",StringComparison.OrdinalIgnoreCase)'])includesSource(originals,required);
++}
++
++function assertOriginalWorkerAndEventBarrier(source){
++  const scope=scopeOf(source),retain=sourceBlock(scope,'RecoverySlot RetainStoppedWorker').body;
++  requireOrderedCsharp(retain,[
++    'CheckOriginals();Require(!revoked,"recovery_revoked");',
++    'Require(workers.Count<256,"recovery_worker_budget_exhausted");',
++    'foreach(RecoveryWorker old in workers)Require(old.pid!=pid,"recovery_worker_pid_replayed");',
++    'workers.Add(worker);','worker.process=RecoveryObject.Duplicate(GetCurrentProcess(),original,GetCurrentProcess());',
++    'worker.comparison=RecoveryObject.Duplicate(GetCurrentProcess(),worker.process,GetCurrentProcess());',
++    'CompareObjectHandles(original,worker.process)',
++    'IsProcessInJob(worker.process,job,out member) && member',
++    'worker.ticket=new RecoverySlot(invocation,worker,generation,worker.slotGeneration,worker.birth);',
++    'for(int i=0;i<objects.Length;i++)worker.remote[i]=RecoveryObject.Duplicate(GetCurrentProcess(),objects[i].held,worker.process);',
++    'CheckWorker(worker,worker.ticket,true);return worker.ticket;',
++  ]);
++  includesSource(retain,'catch { Abandon();throw; }');
++  const check=sourceBlock(scope,'void CheckWorker').body;
++  for(const required of ['SameThread();','Object.ReferenceEquals(ticket.owner,invocation)',
++    'Object.ReferenceEquals(ticket.worker,worker)','Object.ReferenceEquals(worker.ticket,ticket)',
++    'Object.ReferenceEquals(worker.owner,invocation) && workers.Contains(worker)',
++    'RecoverySlotCurrent(revoked,worker.joined,beforeContinue&&worker.consumed,ticket.generation,generation,worker.slotGeneration,ticket.slotGeneration,ticket.birth,birth)',
++    'CompareObjectHandles(worker.process,worker.comparison)',
++    'IsProcessInJob(worker.process,job,out member) && member',
++    'copy=RecoveryObject.Duplicate(worker.process,worker.remote[i],GetCurrentProcess());',
++    'Require(CompareObjectHandles(copy,objects[i].held),"recovery_remote_object_changed");'])includesSource(check,required);
++  assert.doesNotMatch(compactCsharp(scope),/workers \. (?:Clear|Remove|RemoveAt) \(/,'original PID/slot tombstones must survive until scope completion');
++  assert.equal(compactCsharp(createEventStatements(source)),compactCsharp(`
++    RecoverySlot ticket=RetainStoppedWorker(eventProcess,eventPid);CheckOriginals();CheckWorker(ticket.worker,ticket,true);
++    ticket.worker.consumed=true;ContinuePending(0x00010002);`));
++  assert.equal(compactCsharp(sourceBlock(scope,'internal void ResumeInitial').body),compactCsharp(`
++    SameThread();CheckOriginals();CheckWorker(initial.worker,initial,true);
++    Require(eventPending && eventCode==3 && eventPid==process.pid && source.birthCoverage!=null,"recovery_original_birth_coverage_required");
++    initial.worker.consumed=true;Require(ResumeThread(process.thread)==1,"recovery_original_suspend_count_invalid");
++    ContinuePending(0x00010002);resumed=true;`));
++  const initial=sourceBlock(scope,'internal void CaptureInitial').body;
++  requireOrderedCsharp(initial,['SameThread();','Require(DebugSetProcessKillOnExit(true),"recovery_debug_exit_policy_failed");',
++    'CompareObjectHandles(eventProcess,process.process)','initial=RetainStoppedWorker(eventProcess,eventPid);']);
++  assert.doesNotMatch(compactCsharp(initial),/ContinuePending|ResumeThread/,'initial native birth remains stopped before second authorization');
++  requireOrderedCsharp(sourceBlock(scope,'bool ReadEvent').body,['SameThread();','Require(!eventPending,"recovery_debug_event_pending");',
++    'WaitForDebugEvent(eventBuffer,milliseconds)','eventPending=true;','eventCode=unchecked((uint)Marshal.ReadInt32(eventBuffer));']);
++  requireOrderedCsharp(sourceBlock(scope,'void ContinuePending').body,['SameThread();','Require(eventPending,"recovery_debug_event_missing");',
++    'Require(ContinueDebugEvent(eventPid,eventTid,status),"recovery_debug_continue_failed");','eventPending=false;']);
++  requireOrderedCsharp(sourceBlock(scope,'internal void PumpOne').body,['Require(!revoked,"recovery_revoked");','if(!ReadEvent(milliseconds))return;']);
++}
++
++function assertPhysicalJoinAndUnknownRetention(source){
++  const scope=scopeOf(source),join=sourceBlock(scope,'internal Accounting TerminateAndJoin').body;
++  requireOrderedCsharp(join,['SameThread();revoked=true;','Require(TerminateJobObject(job,terminationCode),"recovery_termination_failed");',
++    'IntPtr exact=eventCode==3?eventProcess:Worker(eventPid).process;',
++    'Require(TerminateProcess(exact,terminationCode),"recovery_pending_process_termination_failed");',
++    'ContinuePending(0x00010002);','QueryInformationJobObject(job,1,out accounting,',
++    'worker.exitContinued && WaitForSingleObject(worker.process,0)==0',
++    'GetExitCodeProcess(worker.process,out code) && code!=259',
++    'CompareObjectHandles(worker.process,worker.comparison)',
++    'GetProcessTimes(worker.process,out birth,out exit,out kernel,out user) && birth==worker.birth',
++    'worker.joined=true;',
++    'if(accounting.active==0 && joined==workers.Count && workers.Count>0)',
++    'Require(accounting.total==(uint)workers.Count && accounting.terminated<=accounting.total,"recovery_unobserved_descendant");',
++    'joinedAccounting=accounting;return accounting;',
++  ]);
++  const pump=sourceBlock(scope,'internal void PumpOne').body;
++  const exit=sourceBlock(pump,'else if(eventCode==5)').body;
++  requireOrderedCsharp(exit,['RecoveryWorker worker=Worker(eventPid);','ContinuePending(0x00010002);','worker.exitContinued=true;']);
++  assert.doesNotMatch(compactCsharp(exit),/CloseHandle|CloseChecked|joined = true/,'EXIT event receipt alone cannot release the independently retained process');
++  includesSource(sourceBlock(scope,'internal void RecordIO').body,'originalIO=new[]{output,error,input,control};');
++  includesSource(sourceBlock(scope,'internal void AssertInputCurrent').body,
++    'Require(!revoked && !unknown && resumed && !released && source.birthCoverage!=null,"recovery_input_revoked");');
++  requireOrderedCsharp(sourceBlock(scope,'internal Task WriteOriginalInput').body,
++    ['AssertInputCurrent();','input.Write(bytes,0,bytes.Length);','CloseChecked(ref handle,"recovery_input_pipe_close_failed");']);
++  const release=sourceBlock(scope,'internal void JoinIOAndRelease').body;
++  requireOrderedCsharp(release,['SameThread();','else Require(originalIO!=null && Task.WaitAll(originalIO,5000),"recovery_original_io_join_unconfirmed");',
++    'ioJoined=true;',
++    'Require(RecoveryMayRelease(revoked,unknown,eventPending,ioJoined,joinedAccounting.active,workers.Count,joined),"recovery_release_unconfirmed");',
++    'foreach(RecoveryObject value in objects)value.Close();','released=true;']);
++  assert.equal(compactCsharp(sourceBlock(scope,'internal void Quarantine').body),'Abandon ( ) ;');
++  includesSource(sourceBlock(scope,'internal void Abandon').body,'revoked=true;unknown=true;');
++  const core=sourceBlock(source,'static void RunCore').body;
++  requireOrderedCsharp(core,['if(recovery!=null)recovery.RecordIO(outTask,errTask,inputTask,control);',
++    'if(recovery!=null)recovery.PumpOne(0);',
++    'if(recovery!=null) { recovery.Abandon();reason="CANCELLED";break; }',
++    'string command=control.GetAwaiter().GetResult();']);
++  requireOrderedCsharp(core,['if(recovery!=null)recovery.TerminateAndJoin(124);',
++    'Require(Task.WaitAll(new[]{outTask,errTask,inputTask},5000),"pipe_drain_unconfirmed");',
++    'if(recovery!=null)recovery.JoinIOAndRelease(false);','CloseChecked(ref job,"job_close_failed");']);
++  includesSource(core,'if(recovery!=null && !recovery.Released)');
++  includesSource(core,'recovery.Quarantine();if(job!=IntPtr.Zero)TerminateJobObject(job,125);');
++  includesSource(core,'else foreach(IntPtr h in new[]{job,stdinRead,stdinWrite,stdoutRead,stdoutWrite,stderrRead,stderrWrite,process.thread,process.process})');
++}
++
++for(const [name,contract] of [
++  ['public entry points cannot construct an original recovery producer or all-birth facet',assertOriginalProducerUnavailable],
++  ['RunCore acquires original namespace custody in its own Job owner before native birth',assertOriginalAcquisitionAndJobOwner],
++  ['each observed birth retains and checks every original descriptor before continuation',assertOriginalWorkerAndEventBarrier],
++  ['release follows exact process, original Job and all original IO joins; UNKNOWN retains owners',assertPhysicalJoinAndUnknownRetention],
++])test(name,async()=>contract(await readSource()));
++
++function mutateMethod(source,declaration,before,after){
++  const code=compactCsharp(source),method=sourceBlock(code,declaration),target=compactCsharp(before);
++  assert.equal(method.body.split(target).length,2,'counterfactual must change one actual method statement');
++  const replacement=method.body.replace(target,compactCsharp(after));
++  return code.slice(0,method.bodyStart)+replacement+code.slice(method.bodyEnd);
++}
++
++test('generated actual-call-site counterfactuals cannot bypass origin, transfer, replay or physical joins',async t=>{
++  const source=await readSource();
++  for(const [name,contract,declaration,before,after] of [
++    ['minted coverage facet',assertOriginalProducerUnavailable,'private OriginalRecoveryBirthCoverage','', ''],
++    ['missing prebirth acquisition',assertOriginalAcquisitionAndJobOwner,'static void RunCore',
++      'if(originalRecovery!=null)recovery=new RecoveryDirectoryScope(originalRecovery,job);',''],
++    ['debugger excludes descendants',assertOriginalAcquisitionAndJobOwner,'static void RunCore',
++      '0x08000004|0x00080000|0x00000001','0x08000004|0x00080000|0x00000001|0x00000002'],
++    ['metadata-only mask cannot provide a share veto',assertOriginalAcquisitionAndJobOwner,'internal static RecoveryObject Capture',
++      '0x00120081','0x00120080'],
++    ['slot expectation becomes tautological',assertOriginalWorkerAndEventBarrier,'void CheckWorker',
++      'worker.slotGeneration,ticket.slotGeneration,ticket.birth,birth','worker.slotGeneration,worker.slotGeneration,ticket.birth,birth'],
++    ['unchecked Job membership',assertOriginalWorkerAndEventBarrier,'void CheckWorker',
++      'IsProcessInJob(worker.process,job,out member) && member','true'],
++    ['numeric remote handle replaces same-object readback',assertOriginalWorkerAndEventBarrier,'void CheckWorker',
++      'CompareObjectHandles(copy,objects[i].held)','copy==worker.remote[i]'],
++    ['continue before descriptor checks',assertOriginalWorkerAndEventBarrier,'internal void PumpOne',
++      'CheckWorker(ticket.worker,ticket,true);','ContinuePending(0x00010002);CheckWorker(ticket.worker,ticket,true);'],
++    ['partial worker not retained',assertOriginalWorkerAndEventBarrier,'RecoverySlot RetainStoppedWorker','workers.Add(worker);',''],
++    ['exact pending process not stopped',assertPhysicalJoinAndUnknownRetention,'internal Accounting TerminateAndJoin',
++      'Require(TerminateProcess(exact,terminationCode),"recovery_pending_process_termination_failed");',''],
++    ['EXIT receipt pretends physical signal',assertPhysicalJoinAndUnknownRetention,'internal Accounting TerminateAndJoin',
++      'worker.exitContinued && WaitForSingleObject(worker.process,0)==0','worker.exitContinued'],
++    ['Job zero hides an unobserved descendant',assertPhysicalJoinAndUnknownRetention,'internal Accounting TerminateAndJoin',
++      'Require(accounting.total==(uint)workers.Count && accounting.terminated<=accounting.total,"recovery_unobserved_descendant");',''],
++    ['IO claimed without join',assertPhysicalJoinAndUnknownRetention,'internal void JoinIOAndRelease',
++      'Task.WaitAll(originalIO,5000)','true'],
++    ['late input bypasses original veto',assertPhysicalJoinAndUnknownRetention,'internal Task WriteOriginalInput',
++      'AssertInputCurrent();',''],
++    ['replacement control is treated as a new lease',assertPhysicalJoinAndUnknownRetention,'static void RunCore',
++      'if(recovery!=null) { recovery.Abandon();reason="CANCELLED";break; }',''],
++  ])await t.test(name,()=>{
++    const changed=name==='minted coverage facet'?source+'\nstatic object Fake(){return new OriginalRecoveryBirthCoverage();}\n':
++      mutateMethod(source,declaration,before,after);
++    assert.notEqual(changed,source);assert.throws(()=>contract(changed),assert.AssertionError);
++  });
++});
++
++test('actual CREATE event statements consume only after retained-worker checks; every failure stops continuation',async t=>{
++  const source=await readSource(),statements=createEventStatements(source),predicate=exactSourcePredicate(source,'RecoverySlotCurrent');
++  for(const failure of [null,'retain','originals','worker','stale slot','replay'])await t.test(failure??'source statement order',()=>{
++    const calls=[],worker={consumed:failure==='replay'},ticket={worker};
++    const handlers={eventProcess:'SYNTHETIC_ORIGINAL_EVENT_HANDLE',eventPid:123,
++      RetainStoppedWorker(original,pid){calls.push('retain');assert.equal(original,handlers.eventProcess);assert.equal(pid,123);
++        if(failure==='retain')throw Error('SYNTHETIC_TRANSFER_REFUSED');return ticket;},
++      CheckOriginals(){calls.push('originals');if(failure==='originals')throw Error('SYNTHETIC_ORIGINALS_REFUSED');},
++      CheckWorker(original,token,beforeContinue){calls.push('worker');assert.equal(original,worker);assert.equal(token,ticket);assert.equal(beforeContinue,true);
++        const values={...originalSlot(),consumed:worker.consumed,...(failure==='stale slot'?{expectedSlotGeneration:12n}:{})};
++        if(failure==='worker'||!predicate.execute(values))throw Error('SYNTHETIC_WORKER_REFUSED');},
++      ContinuePending(status){calls.push('continue');assert.equal(status,0x00010002);assert.equal(worker.consumed,true);},
++    };
++    if(failure){assert.throws(()=>executeCreateEventStatements(statements,handlers),/SYNTHETIC_/);assert.ok(!calls.includes('continue'));}
++    else{executeCreateEventStatements(statements,handlers);assert.deepEqual(calls,['retain','originals','worker','continue']);}
++  });
++});
++
++test('reported source evidence cannot be upgraded into Windows, compiler or all-worker birth proof',async t=>{
++  const source=await readSource();assertOriginalProducerUnavailable(source);
++  t.diagnostic(JSON.stringify({evidence:'ACTUAL_SOURCE_EXPRESSIONS_AND_STATEMENTS_WITH_CALL_TRACE_CONTRACTS',
++    csharp_sha256:createHash('sha256').update(source).digest('hex'),csharp_compilation:'NOT_RUN',windows_native_execution:'NOT_RUN',
++    production_issuer_available:false,all_worker_birth_coverage_proven:false,continuous_worker_descriptor_retention_proven:false,
++    physical_authority:false,authority_effect:false}));
++});
+diff --git a/apps/metaengine-browser/test/codex-cli-windows-job-birth.test.mjs b/apps/metaengine-browser/test/codex-cli-windows-job-birth.test.mjs
+index fabf324016552c362e008f149d301998cefd613c..2e01382e3de2ecf9ac0966569eea77f2ac6f8ab3 100644
+--- a/apps/metaengine-browser/test/codex-cli-windows-job-birth.test.mjs
++++ b/apps/metaengine-browser/test/codex-cli-windows-job-birth.test.mjs
+@@ -18,7 +18,8 @@ const markers = {
+   handleValues: 'Marshal.WriteIntPtr(handleList,0,stdinRead); Marshal.WriteIntPtr(handleList,IntPtr.Size,stdoutWrite); Marshal.WriteIntPtr(handleList,IntPtr.Size*2,stderrWrite);',
+   handleAttribute: 'Require(UpdateProcThreadAttribute(attributes,0,new UIntPtr(0x00020002),handleList,new UIntPtr((uint)(IntPtr.Size*3)),IntPtr.Zero,IntPtr.Zero),"handle_attribute_failed");',
+   startup: 'extended.startup.cb=Marshal.SizeOf(typeof(StartupEx)); extended.attributes=attributes;',
+-  create: 'bool created=CreateProcess(exe,childCommandLine,IntPtr.Zero,IntPtr.Zero,true,0x08000004|0x00080000,IntPtr.Zero,cwd,ref extended,out createdProcess);',
++  create: 'if(recovery==null)created=CreateProcess(exe,childCommandLine,IntPtr.Zero,IntPtr.Zero,true,0x08000004|0x00080000,IntPtr.Zero,cwd,ref extended,out createdProcess);',
++  createRecovery: 'else created=CreateProcess(exe,childCommandLine,IntPtr.Zero,IntPtr.Zero,true,0x08000004|0x00080000|0x00000001,IntPtr.Zero,cwd,ref extended,out createdProcess);',
+   creationSuccess: 'Require(created,"create_process_failed");',
+   ownership: 'process=createdProcess;',
+   deletion: 'if(attributesInitialized) DeleteProcThreadAttributeList(attributes);',
+@@ -48,7 +49,8 @@ function assertJobBirthContract(source) {
+   const creationScope = source.slice(source.indexOf(markers.sizing), source.indexOf(markers.membership));
+   assert.match(creationScope, /\} finally \{/);
+   assert.doesNotMatch(creationScope, /\bcatch\b/, 'attribute refusal cannot recover into a fallback creation');
+-  assert.equal(source.match(/\bCreateProcess\s*\(/g)?.length, 2, 'only the P/Invoke declaration and one guarded creation call are permitted');
++  assert.equal(source.match(/\bCreateProcess\s*\(/g)?.length, 3,
++    'only the P/Invoke declaration and the two closed legacy/private creation branches are permitted');
+   assert.doesNotMatch(source, /\bAssignProcessToJobObject\s*\(/, 'sequential assignment would reopen the birth window');
+   assert.match(source, /limits\.basic\.flags=0x2000\|0x8;/, 'retain kill-on-close without enabling breakaway');
+ }
+@@ -68,6 +70,8 @@ for (const [name, mutate] of [
+   ['sequential fallback', source => source + '\nAssignProcessToJobObject(job,process.process);'],
+   ['additional bare creation fallback', source => source.replace(markers.ownership, markers.ownership + '\nCreateProcess(exe,childCommandLine,IntPtr.Zero,IntPtr.Zero,true,0x08000004,IntPtr.Zero,cwd,ref extended,out process);')],
+   ['missing extended-startup flag', source => source.replace('true,0x08000004|0x00080000,', 'true,0x08000004,')],
++  ['private creation without original debug birth', source => source.replace(markers.createRecovery,
++    markers.createRecovery.replace('|0x00000001,', ','))],
+   ['wrong native startup size', source => source.replace('extended.startup.cb=Marshal.SizeOf(typeof(StartupEx))', 'extended.startup.cb=Marshal.SizeOf(typeof(Startup))')],
+   ['freed Job-list value before attribute deletion', source => source.replace(markers.freeValue, '').replace(markers.deletion, markers.freeValue + '\n' + markers.deletion)],
+   ['early ready before membership readback', source => source.replace(markers.membership, '').replace(markers.authorization, markers.membership + '\n' + markers.authorization)],
+diff --git a/apps/metaengine-browser/test/fixtures/recovery-runner-source-contract.mjs b/apps/metaengine-browser/test/fixtures/recovery-runner-source-contract.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..38f734ae0e30e112919a90858e7cd64f6af5724c
+--- /dev/null
++++ b/apps/metaengine-browser/test/fixtures/recovery-runner-source-contract.mjs
+@@ -0,0 +1,133 @@
++// TEST ONLY: inspect committed C# source and execute its small, unchanged
++// boolean expressions in JavaScript. This is not a C# compiler, native API
++// model, original scope factory, or evidence of Windows execution.
++import assert from 'node:assert/strict';
++
++export function csharpTokens(source){
++  const result=[];let cursor=0;
++  while(cursor<source.length){
++    const start=cursor,ch=source[cursor],next=source[cursor+1];
++    if(/\s/.test(ch)){cursor++;continue;}
++    if(ch==='/'&&next==='/'){cursor=source.indexOf('\n',cursor+2);if(cursor<0)break;continue;}
++    if(ch==='/'&&next==='*'){
++      cursor=source.indexOf('*/',cursor+2);assert.ok(cursor>=0,'unterminated C# comment');cursor+=2;continue;
++    }
++    if(ch==='@'&&next==='"'){
++      cursor+=2;let closed=false;
++      while(cursor<source.length){
++        if(source[cursor]==='"'){
++          if(source[cursor+1]==='"'){cursor+=2;continue;}
++          cursor++;closed=true;break;
++        }
++        cursor++;
++      }
++      assert.ok(closed,'unterminated verbatim C# string');
++      result.push({text:source.slice(start,cursor),kind:'literal',start,end:cursor});continue;
++    }
++    if(ch==='"'||ch==="'"){
++      cursor++;let closed=false;
++      while(cursor<source.length){
++        if(source[cursor]==='\\'){cursor+=2;continue;}
++        if(source[cursor++]===ch){closed=true;break;}
++      }
++      assert.ok(closed,'unterminated C# literal');
++      result.push({text:source.slice(start,cursor),kind:'literal',start,end:cursor});continue;
++    }
++    const identifier=/^[A-Za-z_][A-Za-z0-9_]*/.exec(source.slice(cursor));
++    if(identifier){cursor+=identifier[0].length;result.push({text:identifier[0],kind:'identifier',start,end:cursor});continue;}
++    const number=/^[0-9][A-Za-z0-9_.]*/.exec(source.slice(cursor));
++    if(number){cursor+=number[0].length;result.push({text:number[0],kind:'number',start,end:cursor});continue;}
++    const pair=source.slice(cursor,cursor+2);
++    cursor+=['&&','||','==','!=','<=','>=','=>','++','--','??','+=','-=','<<','>>'].includes(pair)?2:1;
++    result.push({text:source.slice(start,cursor),kind:'punctuation',start,end:cursor});
++  }
++  return result;
++}
++
++export const compactCsharp=source=>csharpTokens(source).map(token=>token.text).join(' ');
++
++export function sourceBlock(source,declaration){
++  const tokens=csharpTokens(source),wanted=csharpTokens(declaration).map(token=>token.text),matches=[];
++  for(let index=0;index<=tokens.length-wanted.length;index++)
++    if(wanted.every((text,offset)=>tokens[index+offset].text===text))matches.push(index);
++  assert.equal(matches.length,1,`one actual ${declaration} declaration required`);
++  const start=matches[0];let open=start+wanted.length;
++  while(open<tokens.length&&tokens[open].text!=='{'){
++    assert.notEqual(tokens[open].text,';',`${declaration} has no method/class body`);open++;
++  }
++  assert.ok(open<tokens.length,`${declaration} body missing`);
++  let depth=1,close=open+1;
++  for(;close<tokens.length;close++){
++    if(tokens[close].text==='{')depth++;
++    else if(tokens[close].text==='}'&&--depth===0)break;
++  }
++  assert.ok(close<tokens.length,`${declaration} body unclosed`);
++  return {header:source.slice(tokens[start].start,tokens[open].start),
++    body:source.slice(tokens[open].end,tokens[close].start),
++    start:tokens[start].start,end:tokens[close].end,bodyStart:tokens[open].end,bodyEnd:tokens[close].start};
++}
++
++export function exactSourcePredicate(source,name){
++  const method=sourceBlock(source,'static bool '+name),signature=method.header.slice(method.header.indexOf('(')+1,method.header.lastIndexOf(')'));
++  const parameters=signature.split(',').map(value=>{
++    const match=/^\s*(bool|long|uint|int)\s+([A-Za-z_][A-Za-z0-9_]*)\s*$/.exec(value);
++    assert.ok(match,`${name} must have only the explicitly modeled scalar parameter types`);
++    return {type:match[1],name:match[2]};
++  });
++  const tokens=csharpTokens(method.body);
++  assert.equal(tokens[0]?.text,'return');assert.equal(tokens.at(-1)?.text,';');
++  const expressionTokens=tokens.slice(1,-1),names=new Set(parameters.map(value=>value.name));
++  for(const token of expressionTokens){
++    if(token.kind==='identifier')assert.ok(names.has(token.text)||['true','false'].includes(token.text),`${name} uses an unmodeled identifier`);
++    else if(token.kind==='number')assert.equal(token.text,'0',`${name} uses an unmodeled numeric literal`);
++    else assert.ok(['(',')','!','&&','||','==','!=','>','<','>=','<='].includes(token.text),`${name} must remain a pure boolean expression`);
++  }
++  assert.ok(expressionTokens.length>0);
++  const expression=method.body.slice(expressionTokens[0].start,expressionTokens.at(-1).end);
++  // No algorithm transcription or C# rewrite: these operators have the same
++  // meaning on the strictly typed synthetic scalar arguments below.
++  const run=new Function(...parameters.map(value=>value.name),`'use strict'; return (${expression});`);
++  const execute=values=>{
++    assert.deepEqual(Object.keys(values).sort(),[...names].sort());
++    const args=parameters.map(({type,name:parameter})=>{
++      const value=values[parameter];
++      if(type==='bool')assert.equal(typeof value,'boolean');
++      else if(type==='long'){
++        assert.equal(typeof value,'bigint');assert.ok(value>=-(2n**63n)&&value<2n**63n);
++      }else{
++        assert.ok(Number.isInteger(value));
++        assert.ok(type==='uint'?value>=0&&value<=0xffffffff:value>=-0x80000000&&value<=0x7fffffff);
++      }
++      return value;
++    });
++    const result=run(...args);assert.equal(typeof result,'boolean');return result;
++  };
++  return {execute,expression,method,parameters};
++}
++
++export function requireOrderedCsharp(source,snippets){
++  const body=compactCsharp(source);let cursor=-1;
++  for(const snippet of snippets){
++    const text=compactCsharp(snippet),position=body.indexOf(text,cursor+1);
++    assert.ok(position>=0,`missing or out-of-order source statement: ${snippet}`);cursor=position;
++  }
++}
++
++export function createEventStatements(source){
++  const scope=sourceBlock(source,'sealed class RecoveryDirectoryScope').body;
++  const pump=sourceBlock(scope,'internal void PumpOne').body;
++  return sourceBlock(pump,'if(eventCode==3)').body;
++}
++
++export function executeCreateEventStatements(statements,handlers){
++  // This one straight-line C# branch is otherwise also valid JavaScript.
++  // Change only its typed local declaration; retain actual source call order,
++  // arguments, consumption and failure propagation. The supplied functions
++  // are deterministic call-trace boundaries, not native capabilities.
++  const declaration=/\bRecoverySlot\s+ticket\s*=/g;
++  assert.equal([...statements.matchAll(declaration)].length,1);
++  const body=statements.replace(declaration,'const ticket=');
++  const names=['eventProcess','eventPid','RetainStoppedWorker','CheckOriginals','CheckWorker','ContinuePending'];
++  assert.deepEqual(Object.keys(handlers).sort(),[...names].sort());
++  return new Function(...names,`'use strict';${body}`)(...names.map(name=>handlers[name]));
++}
+diff --git a/apps/metaengine-browser/test/native/recovery-directory-handles-synthetic/README.md b/apps/metaengine-browser/test/native/recovery-directory-handles-synthetic/README.md
+index ebbdde1f704fcdc56d047042c7535314a5b21088..6ed49995699817bc281cd74433759f6df485f881 100644
+--- a/apps/metaengine-browser/test/native/recovery-directory-handles-synthetic/README.md
++++ b/apps/metaengine-browser/test/native/recovery-directory-handles-synthetic/README.md
+@@ -7,7 +7,12 @@ module into an application, connects to PostgreSQL, changes an installed
+ directory, or supplies authentication or backup/restore evidence.
+ 
+ Unlike a flag-recording stub, its file opens enforce share conflicts in both
+-directions. Paths name model objects; separate handles retain the same original
++directions, only when **both** opens have a participating data, execute or
++delete access right. Metadata-only access does not participate. This follows
++[MS-FSA sharing checks](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fsa/8c0e3f4f-0729-49f4-a14d-7f7add593819).
++The earlier model incorrectly included metadata-only opens in those checks;
++the correction and counterexample below prevent that false veto from recurring.
++Paths name model objects; separate handles retain the same original
+ object. Independent rename and reparse attempts consult live opens, rather than
+ calling the implementation's recheck. Relative exclusive creation is resolved
+ through the supplied original parent handle and returns the new child handle
+@@ -18,7 +23,7 @@ physical authority `false`. A successful mechanical test cannot replace either
+ existing JavaScript HOLD fence or qualify Windows sharing, process lifetime,
+ ACLs, kernel calls, physical recovery or production authority.
+ 
+-The 37 cases run in fresh executable processes. They cover complete ancestry,
++The 40 cases run in fresh executable processes. They cover complete ancestry,
+ sharing in both directions, post-check namespace swaps, retained anchors and
+ attribute-only reparse attempts, same-object comparisons despite equal IDs,
+ exclusive relative creation and collision preservation, unanchored-child
+@@ -36,7 +41,7 @@ process's physical exit advances separately.
+ 
+ One crash case puts all Job handles in the modeled owner. Its death requests
+ termination while the registered worker's own directory and anchor copies
+-continue denying swaps until physical exit. Two additional cases intentionally
++continue denying swaps until physical exit. Four additional cases intentionally
+ expose the missing production integration:
+ 
+ - An external surviving holder duplicates the original Job and can still pass
+@@ -45,14 +50,28 @@ expose the missing production integration:
+ - A live descendant belongs to the Job but has no descriptor copies. After
+   the owner and its registered parent die, namespace mutation succeeds while
+   that descendant remains alive and termination is still pending.
++- An admitted worker closes all its own directory and anchor handles after
++  the last successful duplicate-back check. The owner's local holds initially
++  protect the namespaces, but its crash exposes a gap while worker termination
++  and modeled IO completion remain pending. Sampling cannot prevent the
++  target from subsequently closing or reusing its own handles.
++- An attributes/READ_CONTROL/SYNCHRONIZE-only open requests `FILE_SHARE_READ`
++  but cannot veto a DELETE-access open or directory/anchor rename. The actual
++  corrected core must retain `FILE_READ_DATA` (`FILE_LIST_DIRECTORY` for a
++  directory) and refuse acquisition if that access is unavailable. A dedicated
++  regression rejects weaker-mask retries and by-name fallback; the exclusive
++  child-creation test checks the returned original has the same access bit.
+ 
+-These two results are labeled `COUNTEREXAMPLE_CONFIRMED`, not accepted
++These four results are labeled `COUNTEREXAMPLE_CONFIRMED`, not accepted
+ architectures. Every row reports `production_issuer_available:false` and
+-`architecture_accepted:false`. The 35 mechanical cases and two counterexample
++`architecture_accepted:false`. The 36 mechanical cases and four counterexample
+ controls do not prove that an authenticated runner bound every effect worker
+ before resume or that a real helper owns the original Job. Those integrations
+ remain absent; both production HOLD fences remain necessary. The actual C++
+ mechanical core is compiled unchanged, and no native issuer is invented here.
++This C++ fixture does not compile or execute the new C# runner. The separate
++runner source tests report their expression/statement and source-contract
++evidence independently, with C# compilation and Windows execution `NOT_RUN`.
+ 
+ Run from `apps/metaengine-browser`:
+ 
+diff --git a/apps/metaengine-browser/test/native/recovery-directory-handles-synthetic/core.cpp b/apps/metaengine-browser/test/native/recovery-directory-handles-synthetic/core.cpp
+index f094e70a7750c9614655064e6b689651dec613ea..1e2ca7bdfae72d070d90c6db6385c8abf968fb36 100644
+--- a/apps/metaengine-browser/test/native/recovery-directory-handles-synthetic/core.cpp
++++ b/apps/metaengine-browser/test/native/recovery-directory-handles-synthetic/core.cpp
+@@ -59,6 +59,7 @@ struct Process{
+     DWORD pid=0;
+     std::uint64_t birth=134000000000000123ULL;
+     bool live=true,termination_requested=false;
++    unsigned pending_io=0;
+     std::map<HANDLE,std::shared_ptr<Object>> handles;
+     std::uintptr_t next_handle=0x100;
+ };
+@@ -76,7 +77,9 @@ struct World{
+     std::function<void()> on_wait,on_sleep,on_nt_create,on_metadata;
+     bool missing_nt_create=false,pending_create=false,duplicate_denied=false,wrong_file_duplicate=false,
+         compare_denied=false,query_job_denied=false,created_metadata_denied=false,
+-        throw_created_metadata=false,throw_worker_copyback=false,process_wait_failed=false;
++        throw_created_metadata=false,throw_worker_copyback=false,process_wait_failed=false,deny_data_reopen=false;
++    std::vector<DWORD> reopen_accesses,create_accesses;
++    unsigned create_file_calls=0;
+     DWORD fail_duplicate_target_pid=0;
+     unsigned target_duplicate_count=0,fail_target_duplicate_at=0;
+     unsigned creates=0,cancel_requests=0,close_before_completion=0,
+@@ -161,12 +164,20 @@ bool compatible(DWORD desired,DWORD share){
+         (!(access&(FILE_WRITE_DATA|FILE_APPEND_DATA))||(share&FILE_SHARE_WRITE))&&
+         (!(access&DELETE)||(share&FILE_SHARE_DELETE));
+ }
++bool participatesInSharing(DWORD desired){
++    return (expanded(desired)&(FILE_READ_DATA|FILE_EXECUTE|FILE_WRITE_DATA|FILE_APPEND_DATA|DELETE))!=0;
++}
+ bool canOpen(const std::shared_ptr<Node>& node,DWORD access,DWORD share){
++    // MS-FSA 2.1.5.1.2.2: perform the six symmetric share tests only when
++    // BOTH the new and existing open contain a participating data/execute/
++    // delete right. Attributes/READ_CONTROL/SYNCHRONIZE alone do not count.
++    if(!participatesInSharing(access))return true;
+     for(const auto& [pid,p]:world.processes){
+         (void)pid;
+         for(const auto& [raw,object]:p->handles){
+             (void)raw;
+             if(object->kind!=Kind::File||object->open->node!=node)continue;
++            if(!participatesInSharing(object->open->access))continue;
+             if(!compatible(access,object->open->share)||!compatible(object->open->access,share)){
+                 world.error=ERROR_SHARING_VIOLATION;return false;
+             }
+@@ -219,7 +230,9 @@ bool attributeOnlyJunction(HANDLE original){
+     object->open->node->attributes|=FILE_ATTRIBUTE_REPARSE_POINT;return true;
+ }
+ void exitProcess(const std::shared_ptr<Process>& p){
+-    require(p!=nullptr,"missing_process");p->live=false;
++    require(p!=nullptr,"missing_process");
++    require(p->pending_io==0,"modeled_process_cannot_physically_exit_before_pending_io_finishes");
++    p->live=false;
+     while(!p->handles.empty())require(closeOwned(p,p->handles.begin()->first),"process_handle_close_failed");
+ }
+ std::size_t fileHandleCount(const std::shared_ptr<Process>& p){
+@@ -270,10 +283,13 @@ BOOL QueryInformationJobObject(HANDLE handle,JOBOBJECTINFOCLASS kind,LPVOID outp
+     return FALSE;
+ }
+ HANDLE CreateFileW(LPCWSTR path,DWORD access,DWORD share,SECURITY_ATTRIBUTES*,DWORD disposition,DWORD,HANDLE){
++    ++model::world.create_file_calls;
+     if(!path||disposition!=OPEN_EXISTING){SetLastError(ERROR_INVALID_PARAMETER);return INVALID_HANDLE_VALUE;}
+     return model::open(model::named(path),access,share);
+ }
+ HANDLE ReOpenFile(HANDLE original,DWORD access,DWORD share,DWORD){
++    model::world.reopen_accesses.push_back(access);
++    if(model::world.deny_data_reopen&&(access&FILE_READ_DATA)){SetLastError(ERROR_ACCESS_DENIED);return INVALID_HANDLE_VALUE;}
+     const auto object=model::lookup(original);
+     if(!object||object->kind!=model::Kind::File)return INVALID_HANDLE_VALUE;
+     return model::open(object->open->node,access,share);
+@@ -407,7 +423,7 @@ NTSTATUS NTAPI modeledNtCreateFile(PHANDLE returned,ACCESS_MASK access,POBJECT_A
+     PIO_STATUS_BLOCK status,PLARGE_INTEGER,ULONG fileAttributes,ULONG share,ULONG disposition,
+     ULONG options,PVOID,ULONG){
+     using namespace model;
+-    ++world.creates;
++    ++world.creates;world.create_accesses.push_back(access);
+     if(!returned||!attributes||!attributes->ObjectName||!status||disposition!=2||
+         !(options&1)||!(options&0x20)||!(attributes->Attributes&0x1000U))return invalid_status;
+     const auto parent=lookup(attributes->RootDirectory);
+@@ -453,7 +469,7 @@ FARPROC GetProcAddress(HMODULE module,LPCSTR name){
+ namespace tests {
+ using namespace metaengine::guardian;
+ using model::require;
+-enum class Counterexample{None,ExternalJobDuplicate,UnregisteredDescendant};
++enum class Counterexample{None,ExternalJobDuplicate,UnregisteredDescendant,WorkerDropsDescriptors,MetadataOnlySharing};
+ Counterexample counterexample=Counterexample::None;
+ constexpr DWORD all_sharing=FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE;
+ constexpr DWORD metadata_access=FILE_READ_ATTRIBUTES|READ_CONTROL|SYNCHRONIZE;
+@@ -558,6 +574,46 @@ std::vector<Case> cases(){return {
+             FILE_FLAG_BACKUP_SEMANTICS|FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+         require(!model::live(late)&&GetLastError()==ERROR_SHARING_VIOLATION,"future_writer_not_denied");f.drain(*held);
+     }},
++    {"actual_retained_opens_participate_in_sharing_and_denied_data_access_has_no_fallback",[]{
++        Fixture f;auto held=f.retain();
++        for(std::size_t i=0;i<f.names.size();++i){
++            HANDLE duplicate=nullptr;
++            require(held->duplicateOriginalDirectory(i,&duplicate,&f.failure),"original_directory_duplicate_failed");
++            const auto object=model::lookup(duplicate);
++            require(object&&object->kind==model::Kind::File&&(object->open->access&FILE_READ_DATA)&&
++                model::participatesInSharing(object->open->access),"retained_directory_is_metadata_only");
++            require(object->open->share==FILE_SHARE_READ,"retained_directory_sharing_widened");CloseHandle(duplicate);
++        }
++        const auto deleting=CreateFileW(state.c_str(),DELETE,all_sharing,nullptr,OPEN_EXISTING,
++            FILE_FLAG_BACKUP_SEMANTICS|FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
++        require(!model::live(deleting)&&GetLastError()==ERROR_SHARING_VIOLATION,"participating_original_failed_to_veto_delete_access");
++        f.drain(*held);model::world.reopen_accesses.clear();model::world.deny_data_reopen=true;
++        const auto opens_before=model::world.create_file_calls;
++        auto refused=RecoveryDirectoryHandles::retainOriginal(f.correlation,f.originals,&f.failure);
++        require(!refused,"denied_list_directory_access_fell_back_to_metadata_only_hold");
++        require(model::world.reopen_accesses.size()==1&&(model::world.reopen_accesses.front()&FILE_READ_DATA),
++            "denied_participating_open_was_retried_with_another_mask");
++        require(model::world.create_file_calls==opens_before,"denied_original_reopen_fell_back_to_path_open");
++    }},
++    {"metadata_only_share_read_open_cannot_veto_delete_access_or_rename_counterexample",[]{
++        Fixture f;
++        // This is the old 0x00120080 mask, deliberately bypassing the now
++        // corrected native core. Even FILE_SHARE_READ does not enroll such an
++        // open in the share-access algorithm. No production scope is issued.
++        const auto directory=ReOpenFile(f.originals[2].directory,metadata_access,FILE_SHARE_READ,
++            FILE_FLAG_OPEN_REPARSE_POINT|FILE_FLAG_BACKUP_SEMANTICS);
++        const auto anchor=ReOpenFile(f.originals[2].direct_child_anchor,metadata_access,FILE_SHARE_READ,
++            FILE_FLAG_OPEN_REPARSE_POINT);
++        require(model::live(directory)&&model::live(anchor),"metadata_only_control_open_failed");
++        require(!model::participatesInSharing(model::lookup(directory)->open->access)&&
++            !model::participatesInSharing(model::lookup(anchor)->open->access),"metadata_control_accidentally_participates");
++        const auto anchor_path=child(state,L"namespace-anchor.bin");
++        const auto deleting=CreateFileW(anchor_path.c_str(),DELETE,all_sharing,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
++        require(model::live(deleting),"metadata_only_open_unexpectedly_vetoed_delete_access");CloseHandle(deleting);
++        require(model::rename(anchor_path,anchor_path+L"-renamed"),"metadata_only_anchor_unexpectedly_vetoed_rename");
++        require(model::rename(state,state+L"-renamed"),"metadata_only_directory_unexpectedly_vetoed_rename");
++        counterexample=Counterexample::MetadataOnlySharing;CloseHandle(anchor);CloseHandle(directory);
++    }},
+     {"direct_child_anchor_is_required",[]{
+         Fixture f;auto missing=f.originals;missing[2].direct_child_anchor=nullptr;
+         require(!RecoveryDirectoryHandles::retainOriginal(f.correlation,missing,&f.failure),"unanchored_namespace_admitted");
+@@ -619,6 +675,8 @@ std::vector<Case> cases(){return {
+         const auto index=held->createProtectedBackupRoot(2,&f.failure);
+         require(index.has_value(),"fixed_child_creation_failed:"+f.failure);
+         require(model::world.creates==1&&model::world.relative_creates==1,"creation_did_not_use_exclusive_relative_syscall");
++        require(model::world.create_accesses.size()==1&&(model::world.create_accesses.front()&FILE_READ_DATA),
++            "exclusive_created_original_does_not_participate_in_sharing");
+         require(model::named(state)==original_parent,"creation_parent_changed");
+         require(model::named(fixed_root)!=nullptr,"fixed_child_absent");
+         require(held->attachOriginalDirectChildAnchor(*index,f.addAnchor(fixed_root),&f.failure),"created_child_anchor_failed:"+f.failure);
+@@ -896,6 +954,40 @@ std::vector<Case> cases(){return {
+         model::exitProcess(descendant);worker.job->members.erase(descendant);
+         (void)ticket.release();(void)held.release();
+     }},
++    {"admitted_worker_closes_descriptors_after_readback_then_owner_crashes_counterexample",[]{
++        Fixture f;auto held=f.retain();Worker worker;
++        auto ticket=held->retainOriginalWorker(worker.process_handle,worker.job_handle,&f.failure);
++        auto callback=held->beginOperation(&f.failure);
++        require(ticket&&callback,"mechanical_worker_and_callback_registration_failed");
++        require(held->checkOriginals(&f.failure),"last_original_remote_readback_failed");
++        require(model::fileHandleCount(worker.process)==f.names.size()*2,"complete_remote_descriptor_control_missing");
++        // The target owns its own handle table. Successful duplicate-back
++        // sampling cannot prevent this later CloseHandle sequence.
++        model::world.current_pid=worker.process->pid;
++        std::vector<HANDLE> closing;
++        for(const auto& [raw,object]:worker.process->handles)if(object->kind==model::Kind::File)closing.push_back(raw);
++        for(const auto raw:closing)require(CloseHandle(raw),"target_descriptor_close_failed");
++        require(model::fileHandleCount(worker.process)==0&&worker.process->live,"target_close_control_failed");
++        model::world.current_pid=model::main_pid;
++        require(!model::rename(state,state+L"-owner-still-live"),"owner_local_lease_control_failed");
++        worker.process->pending_io=1;
++        model::exitProcess(model::process(model::main_pid));
++        require(model::jobHandleCount(worker.job)==0&&worker.job->last_close_termination_requests==1&&
++            worker.process->termination_requested,"original_owner_crash_did_not_request_kill");
++        require(worker.process->live&&worker.process->pending_io==1,"kill_request_was_mistaken_for_physical_io_join");
++        auto observer=std::make_shared<model::Process>();observer->pid=3001;
++        model::world.processes.emplace(observer->pid,observer);model::world.current_pid=observer->pid;
++        require(model::rename(state,state+L"-gap-with-worker-io-pending"),
++            "after_readback_target_close_did_not_expose_namespace_gap");
++        bool premature_exit_refused=false;
++        try{worker.physicalExit();}catch(const std::runtime_error&){premature_exit_refused=true;}
++        require(premature_exit_refused&&worker.process->live,"pending_io_did_not_keep_physical_exit_distinct");
++        counterexample=Counterexample::WorkerDropsDescriptors;
++        worker.process->pending_io=0;worker.physicalExit();worker.jobJoin();
++        // The source owner is dead. No later sampling, callback completion,
++        // restart or external holder may reconstruct an original producer.
++        (void)callback.release();(void)ticket.release();(void)held.release();
++    }},
+     {"process_exit_and_original_job_descendant_join_are_distinct",[]{
+         Fixture f;auto held=f.retain();Worker worker;
+         auto ticket=held->retainOriginalWorker(worker.process_handle,worker.job_handle,&f.failure);
+@@ -973,7 +1065,9 @@ void emit(const char* name,bool passed,const std::string& reason={}){
+         <<"\"production_issuer_available\":false,\"architecture_accepted\":false,\"counterexample\":"<<(confirmed?"true":"false");
+     if(confirmed)std::cout<<",\"counterexample_kind\":\""<<
+         (counterexample==Counterexample::ExternalJobDuplicate?"EXTERNAL_JOB_HANDLE_SUPPRESSES_OWNER_CRASH_TERMINATION":
+-            "JOB_MEMBERSHIP_WITHOUT_DESCRIPTOR_COPIES_LEAVES_LIVE_DESCENDANT_GAP")<<'\"';
++            counterexample==Counterexample::UnregisteredDescendant?"JOB_MEMBERSHIP_WITHOUT_DESCRIPTOR_COPIES_LEAVES_LIVE_DESCENDANT_GAP":
++            counterexample==Counterexample::WorkerDropsDescriptors?"WORKER_CLOSES_DESCRIPTOR_COPIES_AFTER_READBACK_BEFORE_OWNER_CRASH":
++            "METADATA_ONLY_OPEN_CANNOT_VETO_DELETE_ACCESS_OR_RENAME")<<'\"';
+     if(!reason.empty()){
+         std::cout<<",\"reason\":\"";
+         for(const char ch:reason){if(ch=='\\'||ch=='\"')std::cout<<'\\';if(ch>=' ')std::cout<<ch;}
+diff --git a/apps/metaengine-browser/test/recovery-directory-handles.test.mjs b/apps/metaengine-browser/test/recovery-directory-handles.test.mjs
+index 8e229367717d10434a8dbcf55f17278eb2e5d943..ac570d71584efd89b65eb9fba8848cf9c13a2070 100644
+--- a/apps/metaengine-browser/test/recovery-directory-handles.test.mjs
++++ b/apps/metaengine-browser/test/recovery-directory-handles.test.mjs
+@@ -23,15 +23,20 @@ test('actual recovery directory mechanics retain original objects against a simu
+       path.join(native,'recovery-directory-handles.cpp'),'-o',executable],
+     {cwd:temporary,encoding:'utf8',timeout:60_000});
+     const names=JSON.parse(execFileSync(executable,['--list'],{encoding:'utf8',timeout:5_000}));
+-    assert.equal(names.length,37,'the model must retain every mechanical and counterexample scenario');
++    assert.equal(names.length,40,'the model must retain every mechanical and counterexample scenario');
+     assert.equal(new Set(names).size,names.length,'duplicate native scenarios');
+     const counterexamples=new Map([
+       ['external_surviving_job_duplicate_suppresses_kill_on_close_counterexample',
+         'EXTERNAL_JOB_HANDLE_SUPPRESSES_OWNER_CRASH_TERMINATION'],
+       ['job_member_without_worker_descriptors_leaves_crash_gap_counterexample',
+         'JOB_MEMBERSHIP_WITHOUT_DESCRIPTOR_COPIES_LEAVES_LIVE_DESCENDANT_GAP'],
++      ['admitted_worker_closes_descriptors_after_readback_then_owner_crashes_counterexample',
++        'WORKER_CLOSES_DESCRIPTOR_COPIES_AFTER_READBACK_BEFORE_OWNER_CRASH'],
++      ['metadata_only_share_read_open_cannot_veto_delete_access_or_rename_counterexample',
++        'METADATA_ONLY_OPEN_CANNOT_VETO_DELETE_ACCESS_OR_RENAME'],
+     ]);
+     for(const required of ['swap_after_last_check_is_denied_without_another_check',
++      'actual_retained_opens_participate_in_sharing_and_denied_data_access_has_no_fallback',
+       'preexisting_attribute_only_handle_cannot_convert_retained_nonempty_directory',
+       'fixed_child_create_uses_retained_parent_and_same_returned_object',
+       'pending_native_create_cancellation_joins_late_completion',
+diff --git a/infra/client-state-runtime/README-recovery-directory-custody.md b/infra/client-state-runtime/README-recovery-directory-custody.md
+index eac841eac899e9034494c1c44d339d09106d0061..f3922c558d7dd33e60f8b66ba26e68051569c96c 100644
+--- a/infra/client-state-runtime/README-recovery-directory-custody.md
++++ b/infra/client-state-runtime/README-recovery-directory-custody.md
+@@ -32,13 +32,57 @@ positive authorization export. Its binding strings are correlation only.
+ 
+ The interface consumes borrowed original handles, duplicates and compares the
+ exact native opens, and strengthens their sharing with `ReOpenFile` on the
+-original object. It records volume/file/birth identity and checks reparse and
++original object. The retained and exclusively created opens require
++`FILE_READ_DATA` / `FILE_LIST_DIRECTORY`, as well as metadata rights: metadata-only
++opens do not participate in share checks. There is no attributes-only fallback.
++It records volume/file/birth identity and checks reparse and
+ case-sensitive state. A retained direct child is required to keep each
+ directory nonempty: restrictive sharing alone does not exclude an
+ attribute-only empty-directory junction conversion. Raw native identity is
+ diagnostic; it is not an admitted replacement for the existing JavaScript
+ filesystem-identity digest.
+ 
++## Private component in the original RunCore owner
++
++The existing single C# assembly in `codex-cli-job-runner.ps1` now contains a
++private `RecoveryDirectoryScope` branch of `MetaengineCodexJob.RunCore`. It
++acquires object-relative restrictive holds from original directory/ancestor/
++anchor handles, validates the fixed backup leaf and parent, and keeps the
++original Job in that same helper process. It never duplicates the Job into a
++surviving external holder.
++
++For an observed stopped native CREATE event, the branch retains the original
++process object, transfers every held directory/anchor open into that worker,
++and compares the copies back before Resume/Continue. Debug calls stay on the
++creating OS thread. Immutable original slot objects bind process birth and
++local generations; consumed slots and PID tombstones cannot be reused.
++Unknown transfer or event work revokes the branch and quarantines its opens.
++An exit event must be continued and the independently duplicated process
++handle signaled before cleanup can count that worker joined. Job accounting
++and every original I/O task, including the control reader, must also join.
++Pending/replaced control tasks are not discarded to claim a successful close.
++
++This is an unarmed source component, **not a genuine issuer**. Public `Run` and
++`RunPolicy` still pass a null recovery bundle. There are no constructor call
++sites for either private `OriginalRecoveryBundle` or
++`OriginalRecoveryBirthCoverage`; a bag of nonnull object fields is not a native
++authentication/lifetime producer. The JS effect refusals and selector HOLD
++remain. No new PowerShell entry, wire permit, signing key or helper binary was
++introduced.
++
++Debug events guarantee an event-local pre-user-mode stop, but a nested debug
++chain or broker-created process can escape coverage. Job totals checked after
++exit cannot prove that an unobserved descendant never ran. Workers can also
++close/reuse their own copies between readbacks. Enforceable complete birth and
++continuous-retention provenance are therefore still missing. This branch
++passes exceptions unhandled; it does not invent an attestation for the initial
++loader breakpoint. A cancellable original control-reader join is also missing.
++
++The portable tests execute only exact extracted scalar expressions and one
++straight-line source branch with synthetic call boundaries, plus structural
++contracts. They do not compile or execute C#. C# compilation, interop ABI and
++Windows execution remain **NOT RUN**.
++
+ ## Available installed source composition
+ 
+ The offline inventory now admits exactly
+@@ -123,13 +167,13 @@ The following work is still required before either fixed HOLD may be removed:
+    observations to the missing native issuer. The available fixed composition,
+    prepared package selection and original service facet do not establish kernel
+    handle custody. Host-generation veto callbacks only remove readiness.
+-7. Extend the same prepared C# runner at `MetaengineCodexJob.RunCore`, which
+-   creates/owns the actual Job. The C++ mechanics are compiled in Electron Main
+-   and have no callable bridge into that owner. Port or link the mechanics
+-   inside that original owner, preserving the existing package trust binding.
+-   Supply original acquisition and suspended birth/transfer for every effectful
+-   descendant. The current three-stdio inheritance list and Job membership do
+-   not provide this producer.
++7. Supply genuine native producers for the private RunCore component: original
++   authenticated namespace/lifetime custody, enforceable pre-execution birth
++   coverage and continuous per-worker retention, qualified loader handling and
++   cancellable control joins. Bind the helper-owned scope to the exact original
++   authenticated service facet and controller process registry. The unissued
++   private component, three-stdio public inheritance list and Job membership do
++   not provide that handoff or authorize recovery.
+ 8. Qualify the static Windows build and real kernel/filesystem behavior,
+    including directory sharing, attribute/reparse changes, live PostgreSQL
+    compatibility, process inheritance and all crash/join paths. Linux modeled
+@@ -149,6 +193,11 @@ external Job duplicate suppresses last-handle-close termination, and Job
+ membership without per-descendant directory copies leaves a namespace gap.
+ Their expected failure is reported as `COUNTEREXAMPLE_CONFIRMED`, never as
+ architecture acceptance or evidence that an issuer exists.
++It additionally exposes worker self-close after the last readback and the
++metadata-only share-mask bypass. Its sharing checks now require both opens to
++have participating data/execute/delete access, matching the documented
++filesystem algorithm. The older unconditional modeled sharing rule was too
++strong and has been corrected.
+ 
+ Primary API references:
+ 
+@@ -159,3 +208,7 @@ Primary API references:
+ - [Job limits: kill-on-close requires the last Job handle to close](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_basic_limit_information)
+ - [Job process membership and descendant behavior](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)
+ - [Explicit process handle inheritance list](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-updateprocthreadattribute)
++- [Sharing checks exclude metadata-only opens](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fsa/8c0e3f4f-0729-49f4-a14d-7f7add593819)
++- [Debug event stop and physical exit sequencing](https://learn.microsoft.com/en-us/windows/win32/debug/debugging-events)
++- [Debugging chain coverage excludes nested debug chains](https://learn.microsoft.com/en-us/windows/win32/debug/process-functions-for-debugging)
++- [Exact-process termination and asynchronous exit](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-terminateprocess)

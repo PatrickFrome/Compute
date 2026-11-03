@@ -1,0 +1,39 @@
+{
+  "gates_unchanged": [
+    {
+      "path": "apps/metaengine-browser/src/owned-protected-backup-root.mjs",
+      "base_sha256": "ef5aca423d064ae09409a2e798c25613d7ea0fd47973a4980daadcd0a0617734",
+      "result_sha256": "ef5aca423d064ae09409a2e798c25613d7ea0fd47973a4980daadcd0a0617734",
+      "byte_unchanged": true
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-recovery-directory-custody.mjs",
+      "base_sha256": "fefc7abf814dd61243455831af1b343a657e2bfd55ba970ae14379b0cd896cdf",
+      "result_sha256": "fefc7abf814dd61243455831af1b343a657e2bfd55ba970ae14379b0cd896cdf",
+      "byte_unchanged": true
+    },
+    {
+      "path": "infra/client-state-runtime/native-coding-recovery-directory-lifetime.mjs",
+      "base_sha256": "df55cecc985871c34ee287eb83a20248fe14b629e4b3f60f1381e61044db94c3",
+      "result_sha256": "df55cecc985871c34ee287eb83a20248fe14b629e4b3f60f1381e61044db94c3",
+      "byte_unchanged": true
+    },
+    {
+      "path": "infra/client-state-runtime/pg17-recovery-producer.mjs",
+      "base_sha256": "c45d614c2fca311e4edf658722f382f5143394ca80e50ccf409e58eb8eff8b66",
+      "result_sha256": "c45d614c2fca311e4edf658722f382f5143394ca80e50ccf409e58eb8eff8b66",
+      "byte_unchanged": true
+    },
+    {
+      "path": "infra/client-state-runtime/pg17-native-recovery-process.mjs",
+      "base_sha256": "00c141548d807cf9f79f8464e484b73926b18080b57e3a94cc5345d4fc0a4389",
+      "result_sha256": "00c141548d807cf9f79f8464e484b73926b18080b57e3a94cc5345d4fc0a4389",
+      "byte_unchanged": true
+    }
+  ],
+  "public_run_recovery_argument": "null",
+  "public_runpolicy_recovery_argument": "null",
+  "original_bundle_constructor_calls": 0,
+  "native_custody_state": "HOLD",
+  "selector_creation_state": "HOLD"
+}

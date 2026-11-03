@@ -1,0 +1,15 @@
+{
+  "scope": "TEMPLATE_EXTRACTION_SOURCE_ONLY",
+  "template_bytes": 58937,
+  "csharp_bytes": 55624,
+  "template_sha256": "eb7fdbf214271b8275573c1765e4b46e913c3949404f388a57bcd44502481ded",
+  "csharp_sha256": "8a951ac23ead3710e1ab78883008fd7341838dce05232cd0703730a628797851",
+  "single_add_type": true,
+  "powershell_prefix_unchanged": true,
+  "powershell_suffix_unchanged": true,
+  "public_reflection_signatures_unchanged": true,
+  "original_bundle_constructor_calls": 0,
+  "csharp_compilation": "NOT_RUN",
+  "windows_execution": "NOT_RUN",
+  "authority_effect": false
+}
