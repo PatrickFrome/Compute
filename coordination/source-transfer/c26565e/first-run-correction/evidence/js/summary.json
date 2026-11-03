@@ -1,0 +1,44 @@
+{
+  "source_commit": "59ccb6cb33a94583bc515ff508dc3bdc30b1b2ab",
+  "source_tree": "c5c432b8973bbf4d0e618b19ac433a2bea6479d4",
+  "runs": [
+    {
+      "name": "contracts",
+      "command": [
+        "node",
+        "--test",
+        "apps/metaengine-browser/test/browser-guardian-original-main-launch-protocol.test.mjs",
+        "apps/metaengine-browser/test/guardian-owner-loaded-read.test.mjs",
+        "apps/metaengine-browser/test/browser-guardian-native-ticket-enrollment-contract.test.mjs",
+        "apps/metaengine-browser/test/browser-guardian-loaded-status-reader.test.mjs",
+        "apps/metaengine-browser/test/browser-guardian-status-cancellation.test.mjs",
+        "apps/metaengine-browser/test/browser-guardian-status-observer.test.mjs",
+        "apps/metaengine-browser/test/browser-guardian-machine-bootstrap-launcher.test.mjs",
+        "apps/metaengine-browser/test/fresh-provider-restart-fence.test.mjs",
+        "apps/metaengine-browser/test/persistent-local-provider-boot.test.mjs",
+        "apps/metaengine-browser/test/local-provider-upgrade-gate.test.mjs",
+        "apps/metaengine-browser/test/installed-fresh-provider-setup.test.mjs",
+        "apps/metaengine-browser/test/single-instance-guard.test.mjs",
+        "apps/metaengine-browser/test/source-check-runner.test.mjs",
+        "apps/metaengine-browser/test/private-windows-storage-acl.test.mjs",
+        "infra/client-state-runtime/first-run-preflight.test.mjs",
+        "infra/client-state-runtime/guardian-owner-consume.test.mjs"
+      ],
+      "cwd": "/workspace/metaengine-enrollment-c26565e/source/Compute",
+      "exit_code": 0,
+      "stdout_sha256": "83b1e7d32328f5365cfaf2b888acaa28cb2bc03c8693d9c8588a4b29a0e0f150",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "source-check",
+      "command": [
+        "node",
+        "scripts/check-source.mjs"
+      ],
+      "cwd": "/workspace/metaengine-enrollment-c26565e/source/Compute/apps/metaengine-browser",
+      "exit_code": 0,
+      "stdout_sha256": "2e3c29254be31e2ecbbea97d05182882904335990b0096065689223851896054",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ]
+}

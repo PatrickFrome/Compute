@@ -1,0 +1,825 @@
+diff --git a/apps/metaengine-browser/src/browser-guardian-status-observer.mjs b/apps/metaengine-browser/src/browser-guardian-status-observer.mjs
+index 320e8ae7d4dbfedb8e5c0a475bf24affc144425c..18515ee078201c7391b51afe87e7f17f43b6b8ba 100644
+--- a/apps/metaengine-browser/src/browser-guardian-status-observer.mjs
++++ b/apps/metaengine-browser/src/browser-guardian-status-observer.mjs
+@@ -166,6 +166,9 @@ export function createBrowserGuardianStatusObserver({
+   let invalidatedReason = 'GUARDIAN_OBSERVATION_NOT_YET_AVAILABLE';
+   let inFlight = null;
+   let sourceRead = null;
++  let sourceAbort = null;
++  let paused = false;
++  let quiescing = null;
+ 
+   function isFresh(at = now()) {
+     return Boolean(cached && observedAtMs > 0 && at - observedAtMs <= ttl);
+@@ -246,6 +249,7 @@ export function createBrowserGuardianStatusObserver({
+   }
+ 
+   async function observe({ force = false } = {}) {
++    if (paused) return projected();
+     if (!force && isFresh()) return projected();
+     if (inFlight) return inFlight;
+     // A diagnostic timeout does not close the original loaded-only pipe.
+@@ -253,9 +257,14 @@ export function createBrowserGuardianStatusObserver({
+     // read to a newer generation or open another pipe before actual settlement.
+     if (sourceRead) return projected();
+     const capturedGeneration = generation;
+-    const originalRead = Promise.resolve().then(() => readStatus());
++    const cancellation = new AbortController();
++    sourceAbort = cancellation;
++    const originalRead = Promise.resolve().then(() => readStatus({ signal: cancellation.signal }));
+     const held = originalRead.finally(() => {
+-      if (sourceRead === held) sourceRead = null;
++      if (sourceRead === held) {
++        sourceRead = null;
++        sourceAbort = null;
++      }
+     });
+     sourceRead = held;
+     const promise = boundedRead(capturedGeneration, held).finally(() => {
+@@ -266,7 +275,7 @@ export function createBrowserGuardianStatusObserver({
+   }
+ 
+   function refreshIfDue() {
+-    if (inFlight || sourceRead || isFresh()) return false;
++    if (paused || inFlight || sourceRead || isFresh()) return false;
+     void observe().catch(() => {});
+     return true;
+   }
+@@ -281,27 +290,45 @@ export function createBrowserGuardianStatusObserver({
+     return projected();
+   }
+ 
+-  async function quiesce() {
+-    // Activation must join the source even if its diagnostic budget expired.
++  function quiesce() {
++    if (quiescing) return quiescing;
++    // Pause through activation, until its caller records a new current result.
++    // Abort/destroy is only a cancellation request; the original source still
++    // owns physical closure, including after its diagnostic budget expired.
++    paused = true;
++    invalidate(invalidatedReason || 'GUARDIAN_OBSERVATION_QUIESCING');
+     const originalRead = sourceRead;
+     const observation = inFlight;
+-    if (originalRead) {
+-      try { await originalRead; } catch {}
+-    }
+-    if (observation) {
+-      try { await observation; } catch {}
+-    }
+-    return projected();
++    sourceAbort?.abort();
++    const join = (async () => {
++      if (originalRead) {
++        try { await originalRead; } catch {}
++      }
++      if (observation) {
++        try { await observation; } catch {}
++      }
++      return projected();
++    })();
++    const pending = join.finally(() => {
++      if (quiescing === pending) quiescing = null;
++    });
++    quiescing = pending;
++    return pending;
+   }
+ 
+   function record(status) {
++    if (paused && (sourceRead || inFlight || quiescing)) {
++      throw new Error('guardian_status_observation_quiesce_pending');
++    }
++    const checked = validateStatus(status);
+     generation += 1;
+-    cached = validateStatus(status);
++    cached = checked;
+     observedAtMs = now();
+     revision += 1;
+     lastConfirmed = historical(cached, observedAtMs);
+     lastError = null;
+     invalidatedReason = null;
++    paused = false;
+     return projected();
+   }
+ 
+@@ -329,6 +356,10 @@ export function browserGuardianStatusObserverContract() {
+     accepted_observation_revision_monotonic_within_process: true,
+     discarded_late_read_advances_revision: false,
+     late_prior_read_can_overwrite_post_activation_state: false,
++    original_read_cancellation_owned: true,
++    quiesce_requests_cancellation: true,
++    quiesce_requires_source_settlement: true,
++    quiesce_pauses_reads_until_record: true,
+     launcher_positive_state_requires_owner_and_device_proof: true,
+     supervisor_admission_authority: false,
+     automatic_retry_allowed: false,
+diff --git a/apps/metaengine-browser/src/fresh-provider-restart-fence.mjs b/apps/metaengine-browser/src/fresh-provider-restart-fence.mjs
+index 7be408a065c8e8819270ac8dff1c92c50b898984..13785ace7390e76d036d784b795a614e52ae2b37 100644
+--- a/apps/metaengine-browser/src/fresh-provider-restart-fence.mjs
++++ b/apps/metaengine-browser/src/fresh-provider-restart-fence.mjs
+@@ -1,114 +1,24 @@
+-import fs from 'node:fs/promises';
+-import path from 'node:path';
+-import { createHash } from 'node:crypto';
+-
+ const ROOT_NAME = 'client-first-run-v1';
+-const JOURNAL_LIMIT = 16384;
+-const SHA256 = /^[a-f0-9]{64}$/;
+-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+-const fail = () => { throw new Error('local_state_provider_fresh_install_incomplete'); };
+-const samePath = (a, b) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
+-const exactKeys = (value, keys) => value && typeof value === 'object' && !Array.isArray(value)
+-  && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
+ 
+-function freshJournalFile(config, env) {
++function claimsFreshLayout(config) {
+   const files = [config?.runtime_identity_file, config?.runtime_host?.config_file];
+   // Either path claiming METAENGINE's reserved fresh tree activates the fence;
+   // an unrelated user/parent named client-first-run-v1 does not. Inspect raw
+   // components so '..' cannot normalize an interrupted fresh claim away.
+-  if (!files.some(file => {
++  return files.some(file => {
+     if (typeof file !== 'string') return false;
+     const parts = file.split(/[\\/]/).filter(Boolean).map(part => part.toLowerCase());
+     return parts.some((part, index) => part === 'metaengine' && parts[index + 1] === ROOT_NAME);
+-  })) return null;
+-  if (typeof env.LOCALAPPDATA !== 'string' || !path.isAbsolute(env.LOCALAPPDATA)
+-    || /^(?:\\\\|\/\/)/.test(env.LOCALAPPDATA) || /[\x00-\x1f]/.test(env.LOCALAPPDATA)) fail();
+-  const root = path.join(env.LOCALAPPDATA, 'METAENGINE', ROOT_NAME);
+-  if (!files.every(file => typeof file === 'string' && path.isAbsolute(file))
+-    || !samePath(files[0], path.join(root, 'runtime', 'runtime-instance.json'))
+-    || !samePath(files[1], path.join(root, 'runtime', 'host-config.json'))
+-    || !SHA256.test(config.runtime_host.expected_bundle_sha256 || '')) fail();
+-  return path.join(root, 'install-journal.json');
+-}
+-
+-const sameObject = (a, b) => a.dev === b.dev && a.ino === b.ino;
+-const regularJournal = stat => stat.isFile() && !stat.isSymbolicLink()
+-  && stat.nlink === 1 && stat.size > 0 && stat.size <= JOURNAL_LIMIT;
+-
+-async function readJournal(file) {
+-  const parents = [];
+-  let current = path.parse(file).root;
+-  for (const part of path.relative(current, path.dirname(file)).split(path.sep).filter(Boolean)) {
+-    current = path.join(current, part);
+-    const stat = await fs.lstat(current);
+-    if (!stat.isDirectory() || stat.isSymbolicLink()) fail();
+-    parents.push({ file: current, stat });
+-  }
+-  const before = await fs.lstat(file);
+-  if (!regularJournal(before)) fail();
+-  const handle = await fs.open(file, 'r');
+-  try {
+-    const opened = await handle.stat();
+-    if (!regularJournal(opened) || !sameObject(before, opened)) fail();
+-    const bytes = Buffer.alloc(JOURNAL_LIMIT + 1);
+-    const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0);
+-    const after = await handle.stat(), named = await fs.lstat(file);
+-    if (bytesRead !== opened.size || !regularJournal(after) || !regularJournal(named)
+-      || !sameObject(opened, after) || !sameObject(after, named)
+-      || opened.size !== after.size || opened.mtimeMs !== after.mtimeMs || opened.ctimeMs !== after.ctimeMs) fail();
+-    for (const parent of parents) {
+-      const stat = await fs.lstat(parent.file);
+-      if (!stat.isDirectory() || stat.isSymbolicLink() || !sameObject(parent.stat, stat)) fail();
+-    }
+-    const content = bytes.subarray(0, bytesRead), record = JSON.parse(content.toString('utf8'));
+-    // The sole writer uses exactly JSON.stringify(record) plus one newline.
+-    // Refuse duplicate keys, invalid UTF-8 and partial/noncanonical rewrites.
+-    if (!content.equals(Buffer.from(JSON.stringify(record) + '\n'))) fail();
+-    return record;
+-  } finally { await handle.close(); }
+-}
+-
+-function terminalJournal(record, config) {
+-  if (!exactKeys(record, ['schema', 'stage', 'bundle_sha256', 'automatic_retry_allowed',
+-    'device_enrolled', 'guardian_ready', 'device_enrollment'])
+-    || record.schema !== 'compute.fresh-client-install-journal.v1'
+-    || record.stage !== 'PROVIDER_CONFIGURED_DEVICE_ADMIN_VERIFIED'
+-    || record.bundle_sha256 !== config.runtime_host.expected_bundle_sha256
+-    || record.automatic_retry_allowed !== false || record.device_enrolled !== true
+-    || record.guardian_ready !== false) fail();
+-  const binding = record.device_enrollment;
+-  if (!exactKeys(binding, ['cluster_system_identifier', 'runtime_instance_id', 'client_id', 'profile',
+-    'public_jwk', 'key_fingerprint_sha256', 'request_id', 'requested_at', 'expires_at',
+-    'requested_at_db', 'expires_at_db', 'device_id'])
+-    || typeof binding.cluster_system_identifier !== 'string'
+-    || !/^[1-9][0-9]{0,19}$/.test(binding.cluster_system_identifier)
+-    || !['runtime_instance_id', 'client_id', 'request_id', 'device_id'].every(key => UUID.test(binding[key] || ''))
+-    || binding.profile !== 'A2_DEVICE_HTTP_SIGNATURE_V1' || !SHA256.test(binding.key_fingerprint_sha256 || '')) fail();
+-  const key = binding.public_jwk;
+-  if (!exactKeys(key, ['crv', 'ext', 'key_ops', 'kty', 'x', 'y']) || key.crv !== 'P-256'
+-    || key.ext !== true || key.kty !== 'EC' || JSON.stringify(key.key_ops) !== '["verify"]'
+-    || !/^[A-Za-z0-9_-]{43}$/.test(key.x || '') || !/^[A-Za-z0-9_-]{43}$/.test(key.y || '')) fail();
+-  const canonical = { crv: key.crv, ext: true, key_ops: ['verify'], kty: key.kty, x: key.x, y: key.y };
+-  if (createHash('sha256').update(JSON.stringify(canonical)).digest('hex') !== binding.key_fingerprint_sha256) fail();
+-  // These are historical enrollment observations. Normal restart changes the
+-  // runtime UUID, and expiration of the old request does not undo its commit.
+-  for (const key of ['requested_at', 'expires_at', 'requested_at_db', 'expires_at_db']) {
+-    if (typeof binding[key] !== 'string' || binding[key].length > 128
+-      || !Number.isFinite(Date.parse(binding[key]))) fail();
+-  }
+-  if (Date.parse(binding.requested_at) !== Date.parse(binding.requested_at_db)
+-    || Date.parse(binding.expires_at) !== Date.parse(binding.expires_at_db)
+-    || Date.parse(binding.expires_at) <= Date.parse(binding.requested_at)) fail();
++  });
+ }
+ 
+-// A denial-only restart fence for the existing fresh operator's fixed layout.
+-// An Owner profile can be published before its terminal journal append fails.
+-// Reading a terminal record merely removes that interruption veto; this helper
+-// issues no READY, provenance, native Owner, Guardian, device or task authority.
+-// The original runtime/PG/health admission checks must still run afterwards.
+-export async function assertFreshProviderRestartFence(config, { env = process.env } = {}) {
+-  try {
+-    const file = freshJournalFile(config, env);
+-    if (file) terminalJournal(await readJournal(file), config);
+-  } catch { fail(); }
++// The fresh operator's journal is writable/deletable by its current OS owner.
++// Canonical terminal JSON, matching public hashes, file identity or an owner-only
++// DACL cannot prove original installation or native first-Owner completion.
++// This composition has no genuine native completion producer to clear the fence.
++// Keep every recognized fresh restart on HOLD without reading, repairing or
++// trusting journal bytes, caller completion flags, credentials or ACL assertions.
++// Unrelated attached/upgrade providers retain their existing admission checks.
++export async function assertFreshProviderRestartFence(config) {
++  if (claimsFreshLayout(config)) throw new Error('local_state_provider_fresh_install_incomplete');
+ }
+diff --git a/apps/metaengine-browser/src/local-state-provider-bootstrap.mjs b/apps/metaengine-browser/src/local-state-provider-bootstrap.mjs
+index d0b293f63c42cdf8b90c7c8530d1386a537d6913..7ec0e84110662e8f279a9501e08e46b5ac2c3777 100644
+--- a/apps/metaengine-browser/src/local-state-provider-bootstrap.mjs
++++ b/apps/metaengine-browser/src/local-state-provider-bootstrap.mjs
+@@ -103,8 +103,9 @@ export async function bootstrapPersistentLocalProvider({
+       // published descriptor must not restart an interrupted fresh transaction.
+       // Validation above succeeded, but inspect its original path spellings:
+       // normalization must not erase a raw reserved fresh claim containing '..'.
+-      // This veto does not replace the independent runtime/PG/health checks.
+-      await assertFreshProviderRestartFence(ownerRead.value, { env });
++      // No authenticated native completion producer exists to clear this veto;
++      // a terminal journal or current-user ACL is not installation authority.
++      await assertFreshProviderRestartFence(ownerRead.value);
+     } catch {
+       delete env.METAENGINE_SUPERVISOR_BASE_URL;
+       delete env.METAENGINE_LOCAL_STATE_INSTANCE_ID;
+diff --git a/apps/metaengine-browser/src/main.mjs b/apps/metaengine-browser/src/main.mjs
+index 69fbd711a9b722fbd24d2ae837f13fa1c92e98c0..d12255055b443dfac88e46aa2019c31f558c8f3c 100644
+--- a/apps/metaengine-browser/src/main.mjs
++++ b/apps/metaengine-browser/src/main.mjs
+@@ -2719,7 +2719,7 @@ function ensureGuardianBootstrapLauncher() {
+ function ensureGuardianStatusObserver() {
+   if (!guardianStatusObserver) {
+     guardianStatusObserver = createBrowserGuardianStatusObserver({
+-      readStatus: () => ensureGuardianBootstrapLauncher().statusLoaded(),
++      readStatus: ({ signal }) => ensureGuardianBootstrapLauncher().statusLoaded({ signal }),
+     });
+   }
+   return guardianStatusObserver;
+diff --git a/apps/metaengine-browser/test/browser-guardian-loaded-status-reader.test.mjs b/apps/metaengine-browser/test/browser-guardian-loaded-status-reader.test.mjs
+index 925188462d74cb59ac25829dc1d83e02303b2d82..9d6efda14997ec0c4cc1f72d87dd5ce029c52aa4 100644
+--- a/apps/metaengine-browser/test/browser-guardian-loaded-status-reader.test.mjs
++++ b/apps/metaengine-browser/test/browser-guardian-loaded-status-reader.test.mjs
+@@ -49,11 +49,16 @@ test('Main Guardian status uses its cached loaded-only reader without credential
+   const end = main.indexOf('\nasync function initGithubChatRelay(', start);
+   assert.ok(start >= 0 && end > start);
+   const source = main.slice(start, end);
+-  assert.match(source, /readStatus:\s*\(\) => ensureGuardianBootstrapLauncher\(\)\.statusLoaded\(\)/);
++  assert.match(source, /readStatus:\s*\(\{ signal \}\) => ensureGuardianBootstrapLauncher\(\)\.statusLoaded\(\{ signal \}\)/);
+   assert.doesNotMatch(source, /\.status\(|\.ensure\(|\.activate\(/);
+   let loaded = 0, legacy = 0, initializations = 0;
+   const launcher = {
+-    statusLoaded() { loaded++; return Promise.resolve(hold('DEVICE_NOT_LOADED')); },
++    statusLoaded({ signal }) {
++      assert(signal instanceof AbortSignal);
++      assert.equal(signal.aborted, false);
++      loaded++;
++      return Promise.resolve(hold('DEVICE_NOT_LOADED'));
++    },
+     status() { legacy++; throw Error('legacy owner status forbidden'); },
+     ensure() { initializations++; throw Error('credential initialization forbidden'); },
+   };
+diff --git a/apps/metaengine-browser/test/browser-guardian-status-cancellation.test.mjs b/apps/metaengine-browser/test/browser-guardian-status-cancellation.test.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..19b13f31f780f3cdd4f55649d87860d6ee5f6393
+--- /dev/null
++++ b/apps/metaengine-browser/test/browser-guardian-status-cancellation.test.mjs
+@@ -0,0 +1,272 @@
++import assert from 'node:assert/strict';
++import { EventEmitter } from 'node:events';
++import { createHash } from 'node:crypto';
++import fs from 'node:fs/promises';
++import net from 'node:net';
++import os from 'node:os';
++import path from 'node:path';
++import test from 'node:test';
++import vm from 'node:vm';
++import { createBrowserGuardianMachineBootstrapLauncher } from '../src/browser-guardian-machine-bootstrap-launcher.mjs';
++import { createBrowserGuardianStatusObserver } from '../src/browser-guardian-status-observer.mjs';
++import { BROWSER_GUARDIAN_UPDATE_ACTUATOR_PIPE } from '../src/browser-guardian-update-actuator-client.mjs';
++
++// Production Main/observer/launcher/actuator/read-pipe methods, with generated
++// files, signing data and EventEmitter sockets only. No Windows, package-signing,
++// DPAPI, real credential, native process or database qualification is claimed.
++const tick = () => new Promise(resolve => setImmediate(resolve));
++const fingerprint = 'd'.repeat(64);
++function tracked(promise) {
++  let settled = false;
++  promise.then(() => { settled = true; }, () => { settled = true; });
++  return { promise, get settled() { return settled; } };
++}
++function hold(reason) {
++  return Object.freeze({
++    schema: 'metaengine.browser-guardian.machine-bootstrap-launcher.v1',
++    state: 'HOLD', reason, ready: false, guardian_service_ready: false,
++    owner_binding_proven: false, device_binding_proven: false,
++    explicit_user_action_required: true, uac_consent_required: false,
++    fixed_packaged_bootstrap: true, caller_supplied_path_used: false,
++    caller_supplied_arguments_used: false, arbitrary_shell_used: false,
++    automatic_retry_allowed: false, authority_effect: false,
++  });
++}
++const boundResponse = {
++  schema: 'metaengine.browser-guardian.update-actuator-result.v1',
++  state: 'OWNER_BOUND', reason: 'SYNTHETIC_TEST_RESPONSE_ONLY',
++  effect_absent_proven: true, owner_binding_proven: true,
++  device_binding_proven: true, device_key_fingerprint_sha256: fingerprint,
++  automatic_retry_allowed: false, caller_supplied_path_used: false,
++  caller_supplied_url_used: false, caller_supplied_shell_used: false,
++  authority_effect: false,
++};
++
++async function fixture(t) {
++  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'guardian-status-cancellation-'));
++  t.after(() => fs.rm(directory, { recursive: true, force: true }));
++  const version = '0.7.0-dev.2.1', head = 'a'.repeat(40);
++  const name = `METAENGINE-Guardian-Bootstrap-${version}-x64.exe`;
++  const bytes = Buffer.alloc(64 * 1024, 0x41);
++  await fs.mkdir(path.join(directory, 'guardian-bootstrap'));
++  await fs.writeFile(path.join(directory, 'guardian-bootstrap', name), bytes);
++  const binding = {
++    schema: 'metaengine.browser-guardian.machine-bootstrap-binding.v1',
++    source_head: head, package_version: version,
++    slot_id: '0123456789abcdef-fedcba9876543210', bootstrap_name: name,
++    bootstrap_sha256: createHash('sha256').update(bytes).digest('hex'),
++    bootstrap_size: bytes.length, guardian_manifest_sha256: 'b'.repeat(64),
++    service_sha256: 'c'.repeat(64), configurator_sha256: 'd'.repeat(64),
++    embedded_assets_only: true, explicit_elevated_install_required: true,
++    automatic_retry_allowed: false, authority_effect: false,
++  };
++  let signerReads = 0, legacyReads = 0, bindingReads = 0, elevations = 0;
++  const identity = {
++    randomNonce: () => 'a'.repeat(32),
++    guardianOwnerReadChallenge() {
++      signerReads++;
++      return { public_jwk: { kty: 'EC', crv: 'P-256', x: 'A'.repeat(43), y: 'B'.repeat(43) },
++        signature: 'C'.repeat(86), key_fingerprint_sha256: fingerprint };
++    },
++    guardianOwnerChallenge() { legacyReads++; throw Error('ensure-capable signer forbidden'); },
++    guardianUpdateActuatorProof() { throw Error('effectful signer forbidden'); },
++  };
++  const launcher = createBrowserGuardianMachineBootstrapLauncher({
++    platform: 'win32', isPackaged: true, resourcesPath: directory, version, identity,
++    openPath() { elevations++; throw Error('native launch forbidden'); },
++    trustRootLoader: () => ({ build_sha: head }),
++    bindingLoader: () => { bindingReads++; return binding; },
++  });
++  const platform = Object.getOwnPropertyDescriptor(process, 'platform');
++  Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
++  t.after(() => Object.defineProperty(process, 'platform', platform));
++  const sockets = [];
++  t.mock.method(net, 'createConnection', pipe => {
++    assert.equal(pipe, BROWSER_GUARDIAN_UPDATE_ACTUATOR_PIPE);
++    const socket = new EventEmitter();
++    socket.writes = [];
++    socket.destroyCalls = 0;
++    socket.destroy = () => { socket.destroyCalls++; return socket; };
++    socket.setTimeout = () => socket;
++    socket.write = value => { socket.writes.push(value); return true; };
++    sockets.push(socket);
++    return socket;
++  });
++  // Explicit synthetic fixture cleanup only. Tests assert that an absent close
++  // notification cannot settle a production read; destroy never emits it here.
++  t.after(async () => { for (const socket of sockets) socket.emit('close'); await tick(); });
++  t.mock.timers.enable({ apis: ['setTimeout'] });
++  const main = await fs.readFile(new URL('../src/main.mjs', import.meta.url), 'utf8');
++  const start = main.indexOf('function ensureGuardianStatusObserver() {');
++  const end = main.indexOf('\nasync function initGithubChatRelay(', start);
++  assert.ok(start >= 0 && end > start);
++  const ensureObserver = vm.runInNewContext(`let guardianStatusObserver = null;\n${main.slice(start, end)}\nensureGuardianStatusObserver`, {
++    createBrowserGuardianStatusObserver,
++    ensureGuardianBootstrapLauncher: () => launcher,
++  });
++  return { observer: ensureObserver(), sockets, main,
++    counters: () => ({ signerReads, legacyReads, bindingReads, elevations }) };
++}
++
++test('quiesce before loaded dispatch passes an already-aborted signal and opens no pipe', async t => {
++  const f = await fixture(t);
++  const reading = tracked(f.observer.observe({ force: true }));
++  const joining = tracked(f.observer.quiesce());
++  await Promise.all([reading.promise, joining.promise]);
++  assert.deepEqual(f.counters(), { signerReads: 0, legacyReads: 0, bindingReads: 0, elevations: 0 });
++  assert.equal(f.sockets.length, 0);
++  assert.equal((await f.observer.observe({ force: true })).state, 'HOLD');
++  assert.equal(f.observer.refreshIfDue(), false);
++  assert.equal(f.sockets.length, 0);
++});
++
++for (const connected of [false, true]) {
++  test(`quiesce aborts the original hung read but joins only its actual close; connected=${connected}`, async t => {
++    const f = await fixture(t);
++    const reading = tracked(f.observer.observe({ force: true }));
++    await tick();
++    assert.equal(f.sockets.length, 1);
++    const [socket] = f.sockets;
++    if (connected) socket.emit('connect');
++    const joining = tracked(f.observer.quiesce());
++    assert.strictEqual(f.observer.quiesce(), joining.promise);
++    assert.equal(socket.destroyCalls, 1, 'observer cancellation must reach the real fixed read-pipe method');
++    socket.emit('connect');
++    socket.emit('data', Buffer.from(JSON.stringify(boundResponse) + '\n'));
++    socket.emit('end');
++    t.mock.timers.tick(30_000);
++    await reading.promise;
++    await tick();
++    assert.equal(joining.settled, false);
++    assert.equal(f.observer.snapshot().state, 'HOLD');
++    assert.equal(f.observer.snapshot().owner_binding_proven, false);
++    assert.equal(socket.writes.length, connected ? 1 : 0);
++    assert.equal((await f.observer.observe({ force: true })).state, 'HOLD');
++    assert.equal(f.observer.refreshIfDue(), false);
++    assert.equal(f.sockets.length, 1);
++    assert.throws(() => f.observer.record(hold('PREMATURE_RECORD')), /quiesce_pending/);
++    socket.emit('close');
++    await joining.promise;
++    assert.equal(f.observer.snapshot().refresh_in_flight, false);
++    assert.equal((await f.observer.observe({ force: true })).state, 'HOLD');
++    assert.equal(f.sockets.length, 1, 'activation fence survives physical read completion');
++    assert.throws(() => f.observer.record({}), /schema_invalid/);
++    assert.equal(f.observer.refreshIfDue(), false);
++    f.observer.record(hold('POST_ACTIVATION_RESULT'));
++    const next = f.observer.observe({ force: true });
++    await tick();
++    assert.equal(f.sockets.length, 2);
++    const nextJoin = f.observer.quiesce();
++    f.sockets[1].emit('close');
++    await Promise.all([next, nextJoin]);
++    assert.equal(f.counters().legacyReads, 0);
++    assert.equal(f.counters().elevations, 0);
++  });
++}
++
++test('lost close after a complete response cannot restore stale READY across quiesce and invalidation', async t => {
++  const f = await fixture(t);
++  const reading = tracked(f.observer.observe({ force: true }));
++  await tick();
++  const [socket] = f.sockets;
++  socket.emit('connect');
++  socket.emit('data', Buffer.from(JSON.stringify(boundResponse) + '\n'));
++  await tick();
++  assert.equal(reading.settled, false);
++  const joining = tracked(f.observer.quiesce());
++  f.observer.invalidate('LATER_GENERATION');
++  const refresh = await f.observer.observe({ force: true });
++  assert.equal(refresh.state, 'HOLD');
++  t.mock.timers.tick(30_000);
++  await reading.promise;
++  assert.equal(joining.settled, false);
++  assert.equal(f.sockets.length, 1);
++  socket.emit('close');
++  await joining.promise;
++  socket.emit('data', Buffer.from(JSON.stringify(boundResponse) + '\n'));
++  socket.emit('close');
++  assert.equal(f.observer.snapshot().state, 'HOLD');
++  assert.equal(f.observer.snapshot().reason, 'LATER_GENERATION');
++  assert.equal(f.observer.snapshot().observation_revision, 0);
++  assert.equal(f.observer.refreshIfDue(), false);
++});
++
++test('Main waits for original socket close before activation and pauses status through its result callback', async t => {
++  const f = await fixture(t);
++  const reading = f.observer.observe({ force: true });
++  await tick();
++  const [socket] = f.sockets;
++  socket.emit('connect');
++  let handler, activations = 0, finishActivation;
++  const result = new Promise(resolve => { finishActivation = resolve; });
++  const start = f.main.indexOf("ipcMain.handle('metaengine:client:activate-guardian'");
++  const end = f.main.indexOf('\nfunction readClientWorkReadiness()', start);
++  assert.ok(start >= 0 && end > start);
++  vm.runInNewContext(f.main.slice(start, end), {
++    ipcMain: { handle(name, callback) { assert.equal(name, 'metaengine:client:activate-guardian'); handler = callback; } },
++    assertShellSender() {},
++    nativeSupervisor: { connectionStatus: () => ({ admin_ready: true, access_tier: 'ADMIN' }) },
++    ensureGuardianStatusObserver: () => f.observer,
++    // The production activation handler is evaluated unchanged. Only its final
++    // effect callback is held test data; no elevation or native effect is run.
++    ensureGuardianBootstrapLauncher: () => ({ activate() { activations++; return result; } }),
++  });
++  const activating = tracked(handler({}));
++  assert.equal(socket.destroyCalls, 1);
++  assert.equal(activations, 0);
++  t.mock.timers.tick(30_000);
++  await reading;
++  assert.equal(activating.settled, false);
++  assert.equal(activations, 0);
++  assert.equal((await f.observer.observe({ force: true })).state, 'HOLD');
++  assert.equal(f.sockets.length, 1);
++  socket.emit('close');
++  await tick();
++  assert.equal(activations, 1);
++  assert.equal(activating.settled, false);
++  assert.equal((await f.observer.observe({ force: true })).state, 'HOLD');
++  assert.equal(f.observer.refreshIfDue(), false);
++  assert.equal(f.sockets.length, 1);
++  finishActivation(hold('POST_ACTIVATION_RESULT'));
++  assert.equal((await activating.promise).reason, 'POST_ACTIVATION_RESULT');
++  assert.equal(activations, 1);
++  assert.equal(f.sockets.length, 1);
++});
++
++test('pipe and observer deadlines cannot substitute for close before quiesce cancellation', async t => {
++  const f = await fixture(t);
++  const reading = f.observer.observe({ force: true });
++  await tick();
++  const [socket] = f.sockets;
++  socket.emit('connect');
++  t.mock.timers.tick(3_000);
++  await reading;
++  assert.equal(socket.destroyCalls, 1);
++  const joining = tracked(f.observer.quiesce());
++  t.mock.timers.tick(30_000);
++  await tick();
++  assert.equal(joining.settled, false);
++  assert.equal(f.observer.snapshot().refresh_in_flight, true);
++  socket.emit('close');
++  await joining.promise;
++  assert.equal(f.observer.snapshot().state, 'HOLD');
++});
++
++test('missing close notification leaves quiesce pending and read admission fenced', async t => {
++  const f = await fixture(t);
++  const reading = f.observer.observe({ force: true });
++  await tick();
++  const joining = tracked(f.observer.quiesce());
++  f.sockets[0].emit('error', Error('synthetic lost response'));
++  t.mock.timers.tick(60_000);
++  await reading;
++  await tick();
++  assert.equal(joining.settled, false);
++  assert.equal(f.observer.snapshot().refresh_in_flight, true);
++  assert.equal(f.observer.snapshot().state, 'HOLD');
++  assert.equal((await f.observer.observe({ force: true })).state, 'HOLD');
++  assert.equal(f.observer.refreshIfDue(), false);
++  assert.equal(f.sockets.length, 1);
++  // No successful join is asserted. The fixture's after-hook supplies an
++  // explicit synthetic close solely to release test resources after assertions.
++});
+diff --git a/apps/metaengine-browser/test/fresh-provider-restart-fence.test.mjs b/apps/metaengine-browser/test/fresh-provider-restart-fence.test.mjs
+index 90c1543d1133cd0d58e1d661f12d0da96c66fd2b..0ff25bed75dbf97effc581ba351c064837726d5d 100644
+--- a/apps/metaengine-browser/test/fresh-provider-restart-fence.test.mjs
++++ b/apps/metaengine-browser/test/fresh-provider-restart-fence.test.mjs
+@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
+ import fs from 'node:fs/promises';
+ import os from 'node:os';
+ import path from 'node:path';
+-import { createHash } from 'node:crypto';
++import { createHash, createPublicKey } from 'node:crypto';
+ import { registerHooks } from 'node:module';
+ import { after, test } from 'node:test';
+ import { assertFreshProviderRestartFence } from '../src/fresh-provider-restart-fence.mjs';
+@@ -14,8 +14,8 @@ const currentInstance = '11111111-1111-4111-8111-111111111111';
+ const historicalInstance = '22222222-2222-4222-8222-222222222222';
+ const failure = /^Error: local_state_provider_fresh_install_incomplete$/;
+ 
+-// Only the runtime effects are inert. Production Owner publication, bootstrap,
+-// fresh-layout selection, physical journal reads and health admission run below.
++// Only the runtime effects are inert. Production Owner publication, bootstrap
++// and raw fresh-layout selection run against real temporary files below.
+ const effects = { starts: 0, stops: 0, health: 0 };
+ globalThis.__freshProviderRestartFenceTestEffects = effects;
+ const bootstrapUrl = new URL('../src/local-state-provider-bootstrap.mjs', import.meta.url).href;
+@@ -40,7 +40,10 @@ process.argv = originalArgv;
+ after(() => { hook.deregister(); delete globalThis.__freshProviderRestartFenceTestEffects; });
+ 
+ function terminalRecord() {
+-  const public_jwk = { crv: 'P-256', ext: true, key_ops: ['verify'], kty: 'EC', x: 'A'.repeat(43), y: 'B'.repeat(43) };
++  // Public P-256 fixture only. No private key or credential is created/exported.
++  const public_jwk = { crv: 'P-256', ext: true, key_ops: ['verify'], kty: 'EC',
++    x: Buffer.from('6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296', 'hex').toString('base64url'),
++    y: Buffer.from('4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5', 'hex').toString('base64url') };
+   return { schema: 'compute.fresh-client-install-journal.v1', stage: 'PROVIDER_CONFIGURED_DEVICE_ADMIN_VERIFIED',
+     bundle_sha256: digest, automatic_retry_allowed: false, device_enrolled: true, guardian_ready: false,
+     device_enrollment: { cluster_system_identifier: '765432109876543210', runtime_instance_id: historicalInstance,
+@@ -138,21 +141,114 @@ test('missing, malformed, duplicate-key, excessive or nonterminal fresh journal
+   }
+ });
+ 
+-test('terminal journal only removes interruption veto; current runtime and health still decide provider readiness', async t => {
++test('an exact forged terminal in owner-only writable storage cannot authorize a fresh restart', async t => {
+   const f = await fixture(t);
+   await f.writeJournal(terminalRecord());
+-  assert.equal(await assertFreshProviderRestartFence(f.owner, { env: { LOCALAPPDATA: f.local } }), undefined);
+-  assert.notEqual(historicalInstance, currentInstance); // historical requests may expire and runtimes reincarnate
+-  const good = await restart(f);
+-  assert.equal((await good.observed).state, 'READY');
+-  assert.equal(effects.starts, 1); assert.equal(effects.health, 1);
+-  const unattested = await restart(f, { healthy: false });
+-  await assert.rejects(unattested.observed, /local_state_provider_health_unattested/);
+-  assert.equal(unattested.env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE, 'BLOCKED');
++  await fs.chmod(f.root, 0o700);
++  await fs.chmod(f.journal, 0o600);
++  // POSIX mode settings above are test setup, not Windows DACL qualification.
++  const ownerBefore = await fs.readFile(f.ownerFile), journalBefore = await fs.readFile(f.journal);
++  // These exact canonical bytes satisfied the removed consistency parser. Their
++  // matching public JWK/hash is synthetic data, with no native completion scope.
++  assert.equal(journalBefore.toString(), JSON.stringify(terminalRecord()) + '\n');
++  assert.equal(createPublicKey({ key: terminalRecord().device_enrollment.public_jwk, format: 'jwk' }).asymmetricKeyType, 'ec');
++  await assert.rejects(assertFreshProviderRestartFence(f.owner, { env: { LOCALAPPDATA: f.local } }), failure);
++  for (const healthy of [true, false]) {
++    const { observed, env } = await restart(f, { healthy });
++    await assert.rejects(observed, failure);
++    assert.equal(effects.starts, 0); assert.equal(effects.health, 0);
++    assert.equal(env.METAENGINE_LOCAL_PROVIDER_BOOT_STATE, 'BLOCKED');
++  }
+   await fs.writeFile(f.owner.runtime_identity_file, JSON.stringify({ ...f.identity, state: 'STOPPED' }));
+   const stopped = await restart(f);
+-  await assert.rejects(stopped.observed, /local_state_provider_runtime_identity_invalid/);
+-  assert.equal(effects.health, 0);
++  await assert.rejects(stopped.observed, failure);
++  assert.equal(effects.starts, 0); assert.equal(effects.health, 0);
++  assert.deepEqual(await fs.readFile(f.ownerFile), ownerBefore);
++  assert.deepEqual(await fs.readFile(f.journal), journalBefore);
++});
++
++test('replayed and cross-device terminal copies cannot authorize another fresh Owner', async t => {
++  const source = await fixture(t), target = await fixture(t);
++  await source.writeJournal(terminalRecord());
++  const original = await fs.readFile(source.journal), ownerBefore = await fs.readFile(target.ownerFile);
++  const crossDevice = terminalRecord();
++  crossDevice.device_enrollment.client_id = '66666666-6666-4666-8666-666666666666';
++  crossDevice.device_enrollment.device_id = '77777777-7777-4777-8777-777777777777';
++  for (const bytes of [original, Buffer.from(JSON.stringify(crossDevice) + '\n'), original]) {
++    await fs.writeFile(target.journal, bytes, { mode: 0o600 });
++    const { observed } = await restart(target);
++    await assert.rejects(observed, failure);
++    assert.equal(effects.starts, 0); assert.equal(effects.health, 0);
++    assert.deepEqual(await fs.readFile(target.journal), bytes);
++    assert.deepEqual(await fs.readFile(target.ownerFile), ownerBefore);
++  }
++  assert.deepEqual(await fs.readFile(source.journal), original);
++});
++
++test('atomic terminal replacement racing bootstrap cannot clear HOLD or trigger journal repair', async t => {
++  const f = await fixture(t);
++  await f.writeJournal({ ...terminalRecord(), stage: 'OWNER_PUBLICATION_PENDING' });
++  const ownerBefore = await fs.readFile(f.ownerFile);
++  const replacement = path.join(f.root, 'replacement-journal.json');
++  const forged = JSON.stringify(terminalRecord()) + '\n';
++  await fs.writeFile(replacement, forged, { flag: 'wx', mode: 0o600 });
++  const { observed } = await restart(f);
++  const denied = assert.rejects(observed, failure);
++  // The attacker owns these real temporary files. Replacement may happen before
++  // or after raw Owner readback; neither ordering supplies native completion.
++  await fs.rename(replacement, f.journal);
++  await denied;
++  assert.equal(effects.starts, 0); assert.equal(effects.health, 0);
++  assert.equal(await fs.readFile(f.journal, 'utf8'), forged);
++  assert.deepEqual(await fs.readFile(f.ownerFile), ownerBefore);
++  await assert.rejects(fs.stat(replacement), { code: 'ENOENT' });
++  const again = await restart(f);
++  await assert.rejects(again.observed, failure);
++  assert.equal(effects.starts, 0); assert.equal(effects.health, 0);
++  assert.equal(await fs.readFile(f.journal, 'utf8'), forged);
++});
++
++test('an original writable journal handle can race truncation and forgery without admitting Host or health', async t => {
++  const f = await fixture(t);
++  await f.writeJournal({ ...terminalRecord(), stage: 'OUTCOME_REQUIRES_REVIEW' });
++  const ownerBefore = await fs.readFile(f.ownerFile);
++  const writer = await fs.open(f.journal, 'r+');
++  try {
++    const { observed } = await restart(f);
++    const denied = assert.rejects(observed, failure);
++    await writer.truncate(0);
++    await denied;
++    assert.equal(effects.starts, 0); assert.equal(effects.health, 0);
++    // Admission settles while the original writer is still held and the file is
++    // empty. Completing attacker-controlled JSON afterwards still cannot retry.
++    assert.equal((await writer.stat()).size, 0);
++    const forged = JSON.stringify(terminalRecord()) + '\n';
++    await writer.write(forged, 0, 'utf8');
++    await writer.sync();
++    const again = await restart(f);
++    await assert.rejects(again.observed, failure);
++    assert.equal(effects.starts, 0); assert.equal(effects.health, 0);
++    assert.equal(await fs.readFile(f.journal, 'utf8'), forged);
++    assert.deepEqual(await fs.readFile(f.ownerFile), ownerBefore);
++  } finally { await writer.close(); }
++});
++
++test('fresh refusal acquires no journal, ACL, native, database or caller completion capability', async () => {
++  const isolated = new URL('../src/fresh-provider-restart-fence.mjs?no-authority-acquisition', import.meta.url).href;
++  let acquisitions = 0;
++  const noCapabilities = registerHooks({ resolve(specifier, context, next) {
++    if (context.parentURL === isolated) { acquisitions++; throw Error('unexpected_guard_dependency'); }
++    return next(specifier, context);
++  } });
++  try {
++    const guard = await import(isolated);
++    const forbidden = new Proxy({}, { get() { throw Error('caller_completion_capability_forbidden'); } });
++    await assert.rejects(guard.assertFreshProviderRestartFence({
++      runtime_identity_file: 'C:\\Owner\\METAENGINE\\client-first-run-v1\\runtime\\runtime-instance.json',
++      guardian_ready: true, native_completion_verified: true,
++    }, forbidden), failure);
++    assert.equal(acquisitions, 0);
++  } finally { noCapabilities.deregister(); }
+ });
+ 
+ test('journal schema, bundle, device binding and claimed Guardian/readiness upgrades cannot clear the veto', async t => {
+diff --git a/docs/guardian-first-run-enrollment-source-review.md b/docs/guardian-first-run-enrollment-source-review.md
+index aa148a8034c98af74d427f128870d0683cdab9ed..fa1d00ee45c416280b15d77a26cb1a432ad73083 100644
+--- a/docs/guardian-first-run-enrollment-source-review.md
++++ b/docs/guardian-first-run-enrollment-source-review.md
+@@ -8,6 +8,12 @@ the joined archive SHA256 is
+ The archive and tree were verified before edits. Earlier incremental patches
+ must not be applied to this snapshot again.
+ 
++The PR #1437 correction applies separately to its result tree
++`2e00ee9976fcc939ee3021bf2cde31eccbb50f08` (local reconstructed verification
++commit `f0bbb447b6dfd9d4cae05dac2b6572c302f54e0d`). It supersedes the earlier
++terminal-journal accepting path. A cumulative patch may instead be applied
++directly to the original source baseline above; do not apply both deltas.
++
+ ## Remaining first owner boundary
+ 
+ First owner enrollment and an ORIGINAL Main launch remain HOLD. The original
+@@ -37,20 +43,60 @@ The patch repairs two independently actionable first run problems while keeping
+ the authority gap closed:
+ 
+ * Guardian status uses the existing loaded-only signer and fixed read transport.
+-  Status discovery cannot call `ensure()` to create a device key. The original
+-  pending read remains held across observer deadlines until its actual joined
+-  transport promise settles; a refresh cannot open a second read in that interval.
+-* Restart admission checks the first run journal before starting the normal Host
+-  for the fixed fresh-provider layout. Owner publication alone cannot hide a
+-  pending or unknown install result. The check is a veto only: terminal journal
+-  bytes do not replace the existing package, Host, PostgreSQL or health checks,
+-  and never prove Guardian readiness. Missing or damaged evidence is preserved
+-  for review rather than repaired or replayed.
++  Status discovery cannot call `ensure()` to create a device key. Quiesce pauses
++  new observations, revokes the original read generation and requests cancellation
++  through its own AbortController. The same signal reaches the fixed pipe. Abort,
++  destroy and diagnostic timeout are not cleanup: the original source promise
++  remains held until the actual socket close is observed. A missing close keeps
++  the operation pending and the fence held; it does not authorize activation.
++* Recognized fresh-provider restart remains HOLD before starting the normal Host.
++  The earlier PR #1437 terminal-JSON acceptance was insufficient: a terminal
++  journal has no authenticated completion producer. The corrective patch removes
++  that accepting path entirely. Canonical JSON, matching public fields, a stable
++  file and even a legitimate current-user DACL cannot clear this veto. Journal,
++  Owner and PGDATA bytes are preserved for review without repair or retry.
+ 
+ Neither change supplies the missing first owner producer, registers a new trust
+ root, consumes a real ticket, creates production credentials, launches Main or
+ changes a database.
+ 
++## Journal authority and reviewed threat boundary
++
++The fresh writer creates the private root and journal in
++`infra/client-state-runtime/fresh-client-provider.mjs`. Its root is protected by
++`protectOwnerOnlyWindowsDirectory`, and the journal uses `secureAttachedPrivateFile`
++from `attached-postgres-onboarding.mjs`. The latter sets the current SID as file
++owner and grants that SID `Read,Write,ReadPermissions,Delete`; SYSTEM receives
++FullControl. The root DACL in `private-windows-storage-acl.mjs` grants the current
++SID, SYSTEM and Administrators inheritable FullControl.
++
++Those ACLs restrict other principals when correctly applied on Windows. They do
++not identify the process which wrote a terminal record. Another process running
++as the current SID can rewrite or replace the journal after the original install
++exits, including recreating the same ACL. The terminal record contains public
++observations and a public-key fingerprint, with no signed completion, retained
++native receipt or original writer capability. Inode checks, canonical JSON and
++an added owner/DACL check therefore cannot authenticate completion. The previous
++acceptance incorrectly let attacker-created data remove a startup prohibition.
++The relevant Windows access check uses the token SIDs and requested rights;
++see [Microsoft's DACL access-check description](https://learn.microsoft.com/en-us/windows/win32/secauthz/how-dacls-control-access-to-an-object).
++
++The correction denies every recognized raw `METAENGINE/client-first-run-v1`
++layout claim independently of journal bytes, file replacement races or ACL
++assertions. It does not read the journal for admission and accepts no caller
++override. Attached and upgrade descriptors remain subject to their existing
++admission routes; this scoped veto does not authenticate mutable descriptors or
++claim to isolate arbitrary same-SID code. Genuine native completion and original
++descriptor/process custody are still missing and remain HOLD.
++Consequently even a previously completed installation in the reserved fresh
++layout remains HOLD; this correction provides no migration or journal-based
++reenablement route.
++
++Adversarial tests create forged terminal records and replace files in temporary
++current-user storage while the real bootstrap is invoked with inert Host effects.
++They prove the denial path does not depend on the forged bytes; they are not
++Windows DACL, native pipe or physical filesystem race qualification.
++
+ ## Minimum interface still needed
+ 
+ The existing trust owners must jointly produce an original, non-reconstructible

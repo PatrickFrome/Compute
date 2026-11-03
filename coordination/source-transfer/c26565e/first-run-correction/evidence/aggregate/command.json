@@ -1,0 +1,15 @@
+{
+  "source_commit": "59ccb6cb33a94583bc515ff508dc3bdc30b1b2ab",
+  "source_tree": "c5c432b8973bbf4d0e618b19ac433a2bea6479d4",
+  "command": [
+    "python3",
+    "apps/metaengine-browser/test/native/verify-guardian-original-main-source.py",
+    "--repo",
+    "/workspace/metaengine-enrollment-c26565e/source/Compute",
+    "--out",
+    "/workspace/metaengine-enrollment-c26565e/correction-evidence/aggregate/checks"
+  ],
+  "exit_code": 0,
+  "stdout_sha256": "a3551a05ea7e41c770a6db24e2e8ae1311bfbd77e822c723d0b1a902bd20cb64",
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}
