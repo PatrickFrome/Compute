@@ -1,0 +1,90 @@
+✔ current Codex authorization permits one BEGIN after the readback before root preparation (13.235015ms)
+✖ Codex revocation during the readback before root preparation vetoes subsequent effects (4.583534ms)
+✖ Codex account switch during the readback before root preparation vetoes subsequent effects (3.336478ms)
+✔ current Codex authorization permits one BEGIN after the readback before provider/BEGIN dispatch (3.565231ms)
+✖ Codex revocation during the readback before provider/BEGIN dispatch vetoes subsequent effects (3.585863ms)
+✖ Codex account switch during the readback before provider/BEGIN dispatch vetoes subsequent effects (3.537931ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 2
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 95.966248
+
+✖ failing tests:
+
+test at apps/metaengine-browser/test/native-coding-initial-auth-dispatch-race.test.mjs:58:3
+✖ Codex revocation during the readback before root preparation vetoes subsequent effects (4.583534ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    {
+      begin: 0,
+  +   prepare: 1,
+  -   prepare: 0,
+      provider: 0
+    }
+  
+      at TestContext.<anonymous> (file:///workspace/metaengine-auth-c265/Compute/apps/metaengine-browser/test/native-coding-initial-auth-dispatch-race.test.mjs:64:12)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { prepare: 1, provider: 0, begin: 0 },
+    expected: { prepare: 0, provider: 0, begin: 0 },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at apps/metaengine-browser/test/native-coding-initial-auth-dispatch-race.test.mjs:58:3
+✖ Codex account switch during the readback before root preparation vetoes subsequent effects (3.336478ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    {
+      begin: 0,
+  +   prepare: 1,
+  -   prepare: 0,
+      provider: 0
+    }
+  
+      at TestContext.<anonymous> (file:///workspace/metaengine-auth-c265/Compute/apps/metaengine-browser/test/native-coding-initial-auth-dispatch-race.test.mjs:64:12)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { prepare: 1, provider: 0, begin: 0 },
+    expected: { prepare: 0, provider: 0, begin: 0 },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at apps/metaengine-browser/test/native-coding-initial-auth-dispatch-race.test.mjs:58:3
+✖ Codex revocation during the readback before provider/BEGIN dispatch vetoes subsequent effects (3.585863ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async TestContext.<anonymous> (file:///workspace/metaengine-auth-c265/Compute/apps/metaengine-browser/test/native-coding-initial-auth-dispatch-race.test.mjs:63:5)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: /native_initial_selection_codex_authentication_required/,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at apps/metaengine-browser/test/native-coding-initial-auth-dispatch-race.test.mjs:58:3
+✖ Codex account switch during the readback before provider/BEGIN dispatch vetoes subsequent effects (3.537931ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async TestContext.<anonymous> (file:///workspace/metaengine-auth-c265/Compute/apps/metaengine-browser/test/native-coding-initial-auth-dispatch-race.test.mjs:63:5)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: /native_initial_selection_codex_account_changed/,
+    operator: 'rejects',
+    diff: 'simple'
+  }

@@ -1,0 +1,3 @@
+Archive SHA256, patch SHA256, clean applicability and both trees: PASS
+Restored source: /workspace/metaengine-auth-applycheck/Compute
+Product tests, native Windows and live Codex login: not run by this helper
