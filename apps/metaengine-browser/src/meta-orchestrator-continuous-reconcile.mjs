@@ -122,7 +122,27 @@ function safetyState(plan, tasks) {
     if (missing.length) missingGroups.push({ node, missing, kind: 'SAFETY_REPAIR' });
   }
 
-  return { missingGroups, active, ambiguous, failed };
+  // Also inspect every observed plan-linked descendant, not only fixed safety
+  // companions. A later COMPLETED task cannot settle an earlier AMBIGUOUS
+  // effect from another incarnation. These rows are observations only:
+  // no new scheduler, permit, authority, or implicit retry is introduced.
+  const planPoints = new Set((plan.nodes || []).map((node) => String(node.point_id).toLowerCase()));
+  for (const task of Array.isArray(tasks) ? tasks : []) {
+    const point = String(task?.point_id || '').toLowerCase();
+    const parent = String(task?.parent_plan_point || '').toLowerCase();
+    const isPlanPoint = planPoints.has(point);
+    const isLinkedChild = planPoints.has(parent) && point !== parent && point.startsWith(`${parent}.`);
+    if (!isPlanPoint && !isLinkedChild) continue;
+    const state = String(task?.state || 'UNKNOWN').toUpperCase();
+    const row = { parent_point_id: isLinkedChild ? parent : point, point_id: point, state };
+    if (state === 'AMBIGUOUS') ambiguous.push(row);
+    else if (isLinkedChild && (FAILED_TASK_STATES.has(state) || state === 'UNKNOWN'
+      || (!ACTIVE_TASK_STATES.has(state) && state !== 'COMPLETED'))) failed.push(row);
+    else if (isLinkedChild && ACTIVE_TASK_STATES.has(state)) active.push(row);
+    else if (isPlanPoint && ACTIVE_TASK_STATES.has(state) && taskState(tasks, point) === 'COMPLETED') active.push(row);
+  }
+  const uniqueByPoint = (rows) => [...new Map(rows.map((row) => [row.point_id, row])).values()];
+  return { missingGroups, active: uniqueByPoint(active), ambiguous: uniqueByPoint(ambiguous), failed: uniqueByPoint(failed) };
 }
 
 function newFrontierGroups(plan, tasks, byPoint) {
