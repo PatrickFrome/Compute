@@ -1,62 +1,43 @@
-# METAENGINE Windows payload: offline qualification harness
+# METAENGINE e30 Windows payload: historical source-only qualification
 
-**Purpose:** independently establish a file-level origin → packaging destination → cryptographic integrity → consumer record for the five Windows toolchains **Node, Deno, PostgreSQL, Git and Codex**. A partial catalog or a missing staging directory must **not** turn into an installation-ready claim.
+This PR audits **Node, Deno, PostgreSQL, Git and Codex** on the **historical**, not-current GitHub reconstructed tree. The verified `METAENGINE-e30-github-only-source.zip` was provided through an authorized ChatGPT Space Library file. **No installation readiness** is claimed.
 
-**Source constraints:** the specified historical GitHub transfer is `PatrickFrome/Compute`, branch `work/source-transfer-c26565e-20261103`, commit `accb28e72c87c059e780efb8e6681886b33e9b4f`; integrated patch is at `d53ccd4135f28206d91d6804cf0626095565e6af`. This is an older, historical transfer, **not** a claim about current HEAD.
+- Exact Space archive SHA-256: `169f4dc6379605d68d34360c9d28d687b4da3dc856aea6fc1fb27e6bc6d3ba06`.
+- Independently computed Git tree: `90fa5633d7926dd71a7303266073e0625325e740`; **4,346 tracked files**, including **74 executable modes (100755)**.
+- GitHub origin: source transfer `accb28e72c87c059e780efb8e6681886b33e9b4f`, then integrated patch `d53ccd4135f28206d91d6804cf0626095565e6af`.
+- Source producer, exact destination and consumer mapping for the **44 explicit minimum required files**: [PACKAGE_FILE_MATRIX.md](./PACKAGE_FILE_MATRIX.md).
+- Detailed source/physical evidence and PASS / FAIL / SKIP / NOT RUN accounting: [REPORT.md](./REPORT.md).
+- Narrow synthetic PostgreSQL fixture regression: [fixture-pg10-regression.patch](./fixture-pg10-regression.patch).
 
-This is an inert stdlib-only Python 3.11+ helper. It never downloads binaries, accesses installed clients, starts installers, real services, databases, or socket listeners, or changes original source. The `tree` subcommand uses Git only in a **new temporary local clone**. No Windows PE execution or signing occurs.
+## Run the read-only ZIP verifier
 
-## Offline commands (only after acquiring the exact authorized GitHub bytes)
+Python 3.11+ and Git are required; Git is invoked only in a **new temporary, disposable directory** to create an index and compute a tree. ZIP bytes, SHA-256, file count, execute modes and Git tree are checked. No vendor executable, installer, service, database, user PC, listener, or remote process is launched.
 
-```bash
-python windows_payload_audit.py transfer archive.part00 archive.part01 archive.part02
-# Expected archive SHA256: 4200e492828dbb857aaa737a7ce56d0aeda3c97c84f7743b1501ef2f229d3636
-# The command checks each Git blob SHA-1 AND the SHA-256 of concatenated bytes in that order.
-
-# After unpacking the verified archive and preparing a local Git checkout:
-python windows_payload_audit.py tree \
-  --checkout /path/to/disposable/source-checkout \
-  --patch /path/to/integrated-c265-to-e30.patch
-# Requires source commit c26565e58ab92dcbcda9663c4d231bdf4a9a7ee6,
-# source tree 2dbe253e97379532f6f4b52ef7edf26109a9266d,
-# expected postpatch tree 90fa5633d7926dd71a7303266073e0625325e740.
-
-# File-by-file proof requires two independently collected inputs from that exact
-# source: an authoritative package catalog and a provenance/consumer matrix.
-python windows_payload_audit.py inventory \
-  --catalog /path/to/generated-package-catalog.json \
-  --matrix /path/to/reviewed-file-matrix.json \
-  --checkout /path/to/disposable/source-checkout \
-  --origin-root /path/to/disposable/origin-bytes \
-  --staging-root /path/to/disposable/package-staging
-
+```sh
+python windows_payload_audit.py snapshot --archive /path/to/METAENGINE-e30-github-only-source.zip
 python -m unittest -v test_windows_payload_audit.py
 ```
 
-## Contract for inventory inputs
+Expected ZIP result: **3 PASS** (`zip.sha256`, `zip.files-modes`, `zip.tree`). Synthetic unittest result: **10 PASS**.
 
-Both JSON documents must bind `"source_tree"` to the exact expected **post-patch** Git tree. The catalog is independently derived from the source's authoritative package declaration; it must enumerate **every required file** (not just the five executables):
+The older `transfer` and `tree` commands remain available for independent reconstruction from the original three split GitHub parts and separate patch **if those bytes are independently obtained**; those earlier split-archive SHA checks were not rerun with the restored ZIP. They are not prerequisites for byte-verified evidence from the supplied recovered ZIP.
+
+## File-level physical inventory is a separate gate
+
+The `inventory` command consumes **independently reviewed** `--catalog` and `--matrix` JSON, both bound to source tree `90fa5633d7926dd71a7303266073e0625325e740`, plus optional `--origin-root`, `--staging-root`, `--checkout`. The catalog enumerates every mandatory packaged file for all five components; the matrix contains a nonempty source provenance, relative packaged path, exact SHA-256, source consumer path and literal. Example *synthetic* format:
 
 ```json
 {"source_tree":"90fa5633d7926dd71a7303266073e0625325e740","files":[
-  {"component":"node","package_path":"tooling/node/node.exe"}
+  {"component":"node","package_path":"client-state-runtime/runtime/node/node.exe"}
 ]}
 ```
 
-The example path above is **synthetic** and **not** a claim that METAENGINE uses this packaging path. The catalog must include entries for all five components. The separate reviewed matrix has the same `source_tree` and exactly the same `(component,package_path)` pairs, each with:
+For a real run, **all five components and every dynamically included file** are required. The present [44-row matrix](./PACKAGE_FILE_MATRIX.md) is an explicit minimum only, not the authoritative physical catalog. Without real pinned vendor ZIP/TAR archives and independently observed staging bytes, `inventory` returns **NOT RUN** (nonzero exit), not PASS; static source/consumer references cannot prove Windows execution. The repo's private tool full-inventory expectations are approximately **375 Git** and **50 Codex** files, not just an executable.
 
-- `component`: `node`, `deno`, `postgresql`, `git`, or `codex`.
-- `origin_path`: relative path to the immutable input byte file within `--origin-root`.
-- `provenance`: reviewed origin identifier (e.g. pinned version + original release/repository source); present but not independently network-attested by the harness.
-- `package_path`: canonical POSIX-style path relative to the Windows staging directory.
-- `sha256`: pinned SHA-256, checked separately against origin bytes **and** staged bytes.
-- `consumer_path`: source checkout file with a concrete reference to the packaged artifact.
-- `consumer_literal`: exact literal reference to find in that consumer file.
+## Inert test scope and correction
 
-`consumer_literal` is a static traceability guard, **not** proof of runtime invocation. Dynamic consumers need a separately reviewed integration test. Missing source catalog, source tree, origin bytes or staging bytes cannot be treated as a passing physical check. A matching manually authored catalog alone does **not** prove source closure; it must be generated and independently reviewed from exact production packaging declarations.
+The historical `infra/client-state-runtime/native-tools-installed-binding.test.mjs` fixture included 5 PostgreSQL CLI placeholders, while the current verifier demanded 10. The reviewed patch only changes that test fixture and adds a negative missing-`pg_dump.exe` regression; production assertions and trust gates are unchanged. The patch is provided separately because this GitHub PR base holds the historical original snapshot in compressed transfer artifacts, not individual working-tree production source files.
 
-The CLI prints JSON rows with `PASS`, `FAIL`, and `NOT RUN` and exits `0` only for all-PASS results; `1` for FAIL; `2` for NOT RUN without FAIL. All tests use tiny invented temporary fixtures and do not exercise actual METAENGINE binaries.
+Source diagnostics were run on Linux Node **22.16.0** (the app expects **>=24**), Python **3.13.5**, Git **2.47.3**. Targeted Node results after fix: **65 PASS / 1 FAIL** (missing local `@electron/asar`) / **4 SKIP**. The independently verified source archive, source-level matrix and fixture corrections do **not** qualify a physical Windows installer. Actual vendor bytes, packaging, PE/installer, clean install, update and first useful task are **NOT RUN**.
 
-## Known limitation / exact-source gate
-
-The current GitHub connector gives metadata for the 7.2 MB + 7.2 MB + 1.66 MB archive parts but returns no content bytes for the large part; the published patch (1,269,917 bytes) also cannot be read through the available connector. The isolated execution container cannot resolve the GitHub raw hostname. No actual archive SHA256, post-patch tree, package catalog, or staged-file checksum has therefore been independently verified in this run. See `REPORT.md`; real Windows clean install, upgrade, attached database and first useful task remain `NOT RUN`.
+No secrets, user data, deployment action or merge are included.
