@@ -1,0 +1,34 @@
+diff --git a/infra/client-state-runtime/native-tools-installed-binding.test.mjs b/infra/client-state-runtime/native-tools-installed-binding.test.mjs
+index 6caefbc..56b7c13 100644
+--- a/infra/client-state-runtime/native-tools-installed-binding.test.mjs
++++ b/infra/client-state-runtime/native-tools-installed-binding.test.mjs
+@@ -60,7 +60,7 @@ async function fixture(t,{bound=true}={}){
+   const denoExecutable=await put('inputs/deno/deno.exe','generated inert Deno bytes');
+   await put('inputs/licenses/deno-LICENSE.txt','Copyright Deno generated fixture\n'.repeat(30));
+   await put('inputs/licenses/postgresql-COPYRIGHT.txt','Copyright PostgreSQL generated fixture\n'.repeat(30));
+-  for(const name of ['postgres','psql','initdb','pg_ctl','pg_config'])await put('inputs/pg/bin/'+name+'.exe','generated inert '+name);
++  for(const name of ['postgres','psql','initdb','pg_ctl','pg_config','pg_isready','pg_controldata','pg_dump','pg_restore','pg_dumpall'])await put('inputs/pg/bin/'+name+'.exe','generated inert '+name);
+   await put('inputs/pg/share/postgres.bki','generated inert schema placeholder');
+   await put('inputs/pg/lib/plpgsql.dll','generated inert extension bytes');
+   await put('inputs/cache/npm/registry.npmjs.org/postgres/3.4.7/package.json',JSON.stringify({name:'postgres',version:'3.4.7'}));
+@@ -96,6 +96,20 @@ async function fixture(t,{bound=true}={}){
+   return {root,put,resources,toolsRoot,toolsBytes,toolsBinding,sources,options,bundle,manifest,verified,exe,config,operator,permit,scope,receipt,sql};
+ }
+ 
++// The installed-Host fixture must model the same full PostgreSQL tool set as
++// offline-runtime-bundle.validateRecords; the previous five-tool fixture
++// failed before any private-native-tools binding behavior could be exercised.
++test('installed binding fixture includes every required PG CLI and retains missing-tool rejection',async t=>{
++  const f=await fixture(t);
++  const names=['postgres','psql','initdb','pg_ctl','pg_config','pg_isready','pg_controldata','pg_dump','pg_restore','pg_dumpall'];
++  for(const name of names){
++    assert(f.manifest.files.some(row=>row.path==='runtime/postgresql/bin/'+name+'.exe'),'fixture omits '+name);
++  }
++  await fs.unlink(path.join(f.sources.postgresDirectory,'bin','pg_dump.exe'));
++  await assert.rejects(captureOfflineRuntimeInventory({...f.options,privateNativeToolsBinding:f.toolsBinding}),
++    /offline_bundle_required_file_missing/);
++});
++
+ test('generated bundle binds metadata and real build binding requires exact ASAR agreement',async t=>{
+   const f=await fixture(t);
+   assert.deepEqual(f.manifest.private_native_tools,f.toolsBinding);
