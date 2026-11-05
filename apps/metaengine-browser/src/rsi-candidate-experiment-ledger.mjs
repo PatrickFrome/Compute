@@ -565,6 +565,15 @@ export class RsiCandidateExperimentLedger{
     const checkedIntent=verifyRsiCandidateExperimentIntent(intent);
     const checkedReceipt=verifyRsiCandidateExperimentReceipt(receipt,{intent:checkedIntent});
     if(checkedIntent.source_sha!==this.#sourceSha||checkedReceipt.source_sha!==this.#sourceSha)throw new Error('rsi_experiment_ledger_binding_mismatch');
+    // Historical materialized outcomes are retained, not redelivered as current outcomes.
+    // In particular, an old exact duplicate must not bypass the generation/epoch fence.
+    const latestMaterialized=this.#rows.filter(r=>r.intent.evaluation_request_kind==='MATERIALIZED_CANDIDATE').at(-1)?.intent??null;
+    if(checkedIntent.evaluation_request_kind==='MATERIALIZED_CANDIDATE'&&latestMaterialized
+      &&(checkedIntent.evaluator_generation_seq<latestMaterialized.evaluator_generation_seq
+        ||(checkedIntent.evaluator_generation_seq===latestMaterialized.evaluator_generation_seq
+          &&checkedIntent.evaluation_epoch_seq<latestMaterialized.evaluation_epoch_seq))){
+      throw new Error('rsi_experiment_stale_materialized_outcome_replay');
+    }
     const existing=this.#rows.find(r=>r.intent.intent_digest===checkedIntent.intent_digest||r.receipt.receipt_id===checkedReceipt.receipt_id);
     if(existing){
       if(existing.intent.intent_digest!==checkedIntent.intent_digest||existing.receipt.receipt_digest!==checkedReceipt.receipt_digest)throw new Error('rsi_experiment_ledger_identity_conflict');

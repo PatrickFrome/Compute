@@ -3986,3 +3986,88 @@ test('Phase34B runtime lifecycle trust root freezes CAS, durable pre-effect stat
   assert.equal(root.zero_evidence_skill_activation_forbidden,true);
   assert.equal(root.authority_effect,false);
 });
+
+
+test('Phase29 exact older handoff redelivery is rejected after evaluator rotation, including after restart',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase29-stale-handoff-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'handoffs.json');
+  const ledger=new RsiMaterializedCandidateEvaluationHandoffLedger({statePath,source_sha:SOURCE});
+  await ledger.init();
+  const oldFx=phase28ArtifactFixture('rsi-fence-old-handoff');
+  const oldHandoff=phase29Handoff(oldFx,'rsi-fence-old-handoff',{
+    evaluator_generation_seq:1,evaluation_epoch_seq:1,
+    evaluator_generation_history_anchor_digest:labelDigest('rsi-fence-history-genesis'),
+  });
+  const oldDelivery={
+    handoff:oldHandoff,artifact_receipt:oldFx.artifactReceipt,
+    artifact_verification:oldFx.artifactVerification,
+  };
+  assert.equal((await ledger.add(oldDelivery)).handoff_seq,1);
+  const newFx=phase28ArtifactFixture('rsi-fence-new-handoff');
+  const newHandoff=phase29Handoff(newFx,'rsi-fence-new-handoff',{
+    evaluator_generation_seq:2,evaluation_epoch_seq:1,
+    evaluator_generation_history_anchor_digest:rsiMaterializedEvaluatorGenerationPredecessorAnchor(oldHandoff),
+  });
+  const rotation=createRsiEvaluatorGenerationRotation({
+    rotation_id:'rsi.fence.rotation.2',source_sha:SOURCE,
+    previous_evaluator_root_digest:oldHandoff.evaluator_root_digest,
+    previous_evaluator_generation_digest:oldHandoff.evaluator_generation_digest,
+    previous_evaluator_generation_seq:oldHandoff.evaluator_generation_seq,
+    previous_evaluation_epoch_digest:oldHandoff.evaluation_epoch_digest,
+    previous_evaluation_epoch_seq:oldHandoff.evaluation_epoch_seq,
+    next_evaluator_root_digest:newHandoff.evaluator_root_digest,
+    next_evaluator_generation_digest:newHandoff.evaluator_generation_digest,
+    next_evaluator_generation_seq:newHandoff.evaluator_generation_seq,
+    next_evaluation_epoch_digest:newHandoff.evaluation_epoch_digest,
+    next_evaluation_epoch_seq:newHandoff.evaluation_epoch_seq,
+    next_generation_history_anchor_digest:newHandoff.evaluator_generation_history_anchor_digest,
+    anchor_recalibration_digest:labelDigest('rsi-fence-anchor-recalibration'),
+    external_rotation_receipt_digest:labelDigest('rsi-fence-rotation-receipt'),
+    external_generation_owner:true,authored_by_candidate:false,
+  });
+  const newDelivery={
+    handoff:newHandoff,artifact_receipt:newFx.artifactReceipt,
+    artifact_verification:newFx.artifactVerification,rotation,
+  };
+  assert.equal((await ledger.add(newDelivery)).handoff_seq,2);
+  await assert.rejects(()=>ledger.add(oldDelivery),/stale_handoff_replay/);
+  assert.equal((await ledger.add(newDelivery)).state,'IDEMPOTENT');
+  assert.equal(ledger.snapshot().row_count,2);
+  const reloaded=new RsiMaterializedCandidateEvaluationHandoffLedger({statePath,source_sha:SOURCE});
+  await reloaded.init();
+  await assert.rejects(()=>reloaded.add(oldDelivery),/stale_handoff_replay/);
+  assert.equal(reloaded.snapshot().row_count,2);
+});
+
+test('Phase29 exact old experiment outcome redelivery cannot bypass generation/epoch progression',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase29-stale-outcome-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'experiments.json');
+  const ledger=new RsiCandidateExperimentLedger({statePath,source_sha:SOURCE});
+  await ledger.init();
+  const g1=evaluatedPhase29('rsi-fence-outcome-g1',{generation:'rsi-fence-g1',generationSeq:1,epochSeq:1});
+  const g2=evaluatedPhase29('rsi-fence-outcome-g2',{generation:'rsi-fence-g2',generationSeq:2,epochSeq:1});
+  assert.equal((await ledger.add({intent:g1.intent,receipt:g1.receipt})).state,g1.receipt.state);
+  assert.equal((await ledger.add({intent:g2.intent,receipt:g2.receipt})).state,g2.receipt.state);
+  await assert.rejects(()=>ledger.add({intent:g1.intent,receipt:g1.receipt}),/stale_materialized_outcome_replay/);
+  assert.equal((await ledger.add({intent:g2.intent,receipt:g2.receipt})).state,'IDEMPOTENT');
+  assert.equal(ledger.snapshot().row_count,2);
+  const reloaded=new RsiCandidateExperimentLedger({statePath,source_sha:SOURCE});
+  await reloaded.init();
+  await assert.rejects(()=>reloaded.add({intent:g1.intent,receipt:g1.receipt}),/stale_materialized_outcome_replay/);
+  assert.equal(reloaded.snapshot().row_count,2);
+});
+
+test('Phase29 exact old experiment epoch redelivery is rejected without changing retained evidence',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase29-stale-epoch-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const ledger=new RsiCandidateExperimentLedger({statePath:path.join(dir,'experiments.json'),source_sha:SOURCE});
+  await ledger.init();
+  const e1=evaluatedPhase29('rsi-fence-epoch-one',{generation:'rsi-fence-same',generationSeq:1,epochSeq:1});
+  const e2=evaluatedPhase29('rsi-fence-epoch-two',{generation:'rsi-fence-same',generationSeq:1,epochSeq:2});
+  await ledger.add({intent:e1.intent,receipt:e1.receipt});
+  await ledger.add({intent:e2.intent,receipt:e2.receipt});
+  await assert.rejects(()=>ledger.add({intent:e1.intent,receipt:e1.receipt}),/stale_materialized_outcome_replay/);
+  assert.equal(ledger.snapshot().row_count,2);
+});
