@@ -248,3 +248,112 @@ test('island trust root records async/QD mechanics without scheduler authority',
   assert.equal(root.authority_effect,false);
   assert.match(root.island_root_digest,/^sha256:[0-9a-f]{64}$/);
 });
+
+// Exercise the exported production proposal API with real externally-owned
+// member/state/portfolio envelopes; no synthetic scheduler or task authority.
+function numberedPortfolio({count=32,paused=[],exhausted=[],reverse=false}={}){
+  const pausedIds=new Set(paused);
+  const exhaustedIds=new Set(exhausted);
+  const islands=Array.from({length:count},(_,n)=>{
+    const id=String(n+1).padStart(2,'0');
+    return island(id,['1'],{
+      health:pausedIds.has(id)?'PAUSED':'READY',
+      pending:exhaustedIds.has(id)?16:0,
+      budget:16,
+    });
+  });
+  return createRsiIslandPortfolio({
+    portfolio_id:'portfolio.work.fairness',epoch:1,
+    islands:reverse?islands.reverse():islands,
+    migration_interval:5,migration_rate:0.1,
+    external_owner:true,authored_by_candidate:false,
+  });
+}
+
+function proposalIds(work){
+  return work.proposals.map(row=>row.island_id);
+}
+
+test('32 eligible islands with cap 16 get full coverage in two consecutive rounds, not permanent prefix starvation',()=>{
+  const p=numberedPortfolio();
+  const rounds=Array.from({length:4},(_,i)=>createRsiIslandWorkProposals({
+    portfolio:p,proposal_round:i+1,max_proposals:16,
+  }));
+  const expected=Array.from({length:32},(_,n)=>`island.${String(n+1).padStart(2,'0')}`);
+  for(const work of rounds){
+    assert.equal(work.proposal_count,16);
+    assert.equal(new Set(proposalIds(work)).size,16);
+    assert.deepEqual(proposalIds(work),proposalIds(work).toSorted(), 'wire ordering stays canonical');
+  }
+  for(let n=0;n<4;n+=2){
+    assert.deepEqual(new Set([...proposalIds(rounds[n]),...proposalIds(rounds[n+1])]),new Set(expected));
+    assert.equal(proposalIds(rounds[n]).filter(id=>proposalIds(rounds[n+1]).includes(id)).length,0);
+  }
+  assert.deepEqual(proposalIds(rounds[0]),expected.slice(0,16));
+  assert.deepEqual(proposalIds(rounds[1]),expected.slice(16));
+});
+
+test('uneven proposal caps retain bounded, gap-free eligible coverage across rounds',()=>{
+  const p=numberedPortfolio();
+  const expected=new Set(p.islands.map(row=>row.island_id));
+  for(const cap of [1,3,7,15,17,31,32,64]){
+    const horizon=Math.ceil(expected.size/cap);
+    for(const startRound of [1,9]){
+      const seen=new Set();
+      for(let round=startRound;round<startRound+horizon;round++){
+        const work=createRsiIslandWorkProposals({portfolio:p,proposal_round:round,max_proposals:cap});
+        assert.equal(work.proposal_count,Math.min(cap,expected.size));
+        for(const id of proposalIds(work)) seen.add(id);
+      }
+      assert.deepEqual(seen,expected,`cap=${cap} start=${startRound}`);
+    }
+  }
+});
+
+test('PAUSED and budget-exhausted islands are never proposed; remaining eligible islands rotate',()=>{
+  const paused=['03','07','19','31'];
+  const exhausted=['06','12','24','32'];
+  const p=numberedPortfolio({paused,exhausted});
+  const ineligible=new Set([...paused,...exhausted].map(id=>`island.${id}`));
+  const eligible=new Set(p.islands.map(row=>row.island_id).filter(id=>!ineligible.has(id)));
+  const seen=new Set();
+  for(let round=1;round<=4;round++){
+    const work=createRsiIslandWorkProposals({portfolio:p,proposal_round:round,max_proposals:7});
+    assert.equal(work.proposal_count,7);
+    for(const proposal of work.proposals){
+      assert.ok(eligible.has(proposal.island_id));
+      assert.equal(proposal.work_proposal_is_task,false);
+      assert.equal(proposal.work_proposal_is_lease,false);
+      assert.equal(proposal.existing_scheduler_admission_required,true);
+      assert.equal(proposal.scheduler_action_authorized,false);
+      assert.equal(proposal.authority_effect,false);
+      seen.add(proposal.island_id);
+    }
+  }
+  assert.deepEqual(seen,eligible);
+  const onlyTwo=numberedPortfolio({paused:Array.from({length:30},(_,n)=>String(n+1).padStart(2,'0'))});
+  for(const round of [1,2,3]){
+    const work=createRsiIslandWorkProposals({portfolio:onlyTwo,proposal_round:round,max_proposals:16});
+    assert.equal(work.proposal_count,2);
+    assert.deepEqual(proposalIds(work),['island.31','island.32']);
+  }
+});
+
+test('round is replay-stable across input order and pause/recovery produces truthful selection',()=>{
+  const initial=numberedPortfolio();
+  const reversed=numberedPortfolio({reverse:true});
+  assert.equal(initial.portfolio_digest,reversed.portfolio_digest);
+  const one=createRsiIslandWorkProposals({portfolio:initial,proposal_round:2,max_proposals:16});
+  const replay=createRsiIslandWorkProposals({portfolio:reversed,proposal_round:2,max_proposals:16});
+  assert.deepEqual(one,replay);
+  assert.equal(one.work_portfolio_digest,replay.work_portfolio_digest);
+  const paused=numberedPortfolio({paused:['31','32']});
+  const held=createRsiIslandWorkProposals({portfolio:paused,proposal_round:2,max_proposals:16});
+  assert.equal(held.proposals.some(row=>['island.31','island.32'].includes(row.island_id)),false);
+  assert.notEqual(held.portfolio_digest,initial.portfolio_digest);
+  assert.notEqual(held.work_portfolio_digest,one.work_portfolio_digest);
+  const resumed=createRsiIslandWorkProposals({portfolio:initial,proposal_round:2,max_proposals:16});
+  assert.deepEqual(resumed,one,'recovered externally-owned state is deterministic without cached scheduler state');
+  assert.throws(()=>createRsiIslandWorkProposals({portfolio:initial,proposal_round:0}),/proposal_round_invalid/);
+  assert.throws(()=>createRsiIslandWorkProposals({portfolio:initial,proposal_round:1,max_proposals:65}),/max_proposals_invalid/);
+});
