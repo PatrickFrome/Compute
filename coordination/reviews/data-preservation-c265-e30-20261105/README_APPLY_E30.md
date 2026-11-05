@@ -10,12 +10,12 @@ The production fix is **already present in e30**. This handoff changes no produc
 
 The `.patch` is a Git unified diff against the precise original e30 tree. The Draft PR is based on the public transfer-patch branch (which does not itself contain the complete reconstructed e30 tree); **do not merge the PR onto that branch as if it were a production patch**. A coordinator can review and apply the regression to the correct e30-derived checkout later.
 
-Safe repeatability on **disposable source only**:
+Safe repeatability on **disposable source only** (download the patch from this review package, then replace `/path/to/review` with its actual location):
 
 ```bash
 # From an isolated, Git-initialized checkout of the ZIP, after verifying SHA and tree:
-git apply --check patches/DP01_e30_inert_regression.patch
-git apply patches/DP01_e30_inert_regression.patch
+git apply --check /path/to/review/patches/DP01_e30_inert_regression.patch
+git apply /path/to/review/patches/DP01_e30_inert_regression.patch
 node --test --test-concurrency=1 --test-reporter=tap \
   apps/metaengine-browser/test/self-update-transaction-cas.generated.test.mjs \
   apps/metaengine-browser/test/self-update-transaction-journal.test.mjs \
