@@ -667,6 +667,14 @@ export class RsiMaterializedCandidateEvaluationHandoffLedger{
     const evidence=verifyPersistedHandoffEvidence({handoff,artifact_receipt,artifact_verification});
     const checked=evidence.handoff;
     if(checked.source_sha!==this.#sourceSha)throw new Error('rsi_materialized_eval_handoff_ledger_source_mismatch');
+    // A repeated delivery from an earlier evaluator generation/epoch is not a current handoff.
+    // Check freshness before the idempotency fast-path; old receipts remain in the archive.
+    const latestHandoff=this.#rows.at(-1)?.handoff??null;
+    if(latestHandoff&&(checked.evaluator_generation_seq<latestHandoff.evaluator_generation_seq
+      ||(checked.evaluator_generation_seq===latestHandoff.evaluator_generation_seq
+        &&checked.evaluation_epoch_seq<latestHandoff.evaluation_epoch_seq))){
+      throw new Error('rsi_materialized_eval_stale_handoff_replay');
+    }
     const existing=this.#rows.find(row=>row.handoff.evaluation_handoff_digest===checked.evaluation_handoff_digest);
     if(existing)return zero({state:'IDEMPOTENT',handoff_seq:existing.handoff_seq,evaluation_handoff_digest:checked.evaluation_handoff_digest});
     const identity=`${checked.phase28_artifact_receipt_digest}:${checked.evaluator_generation_seq}:${checked.evaluation_epoch_seq}`;
