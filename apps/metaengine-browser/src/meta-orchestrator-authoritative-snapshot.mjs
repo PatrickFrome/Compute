@@ -1,4 +1,4 @@
-import { reconcileMetaOrchestrator } from './meta-orchestrator-core.mjs';
+import { reconcileContinuousMetaOrchestrator } from './meta-orchestrator-continuous-reconcile.mjs';
 
 const SHA40_RE = /^[a-f0-9]{40}$/;
 const POINT_RE = /^[a-z0-9][a-z0-9._:-]{2,191}$/;
@@ -225,7 +225,7 @@ export function buildMetaAuthoritativeSnapshot({
 export function reconcileMetaAuthoritativeSnapshot({ plan, snapshot, leader = {}, policy = {} } = {}) {
   object(snapshot, 'authoritative_snapshot');
   if (snapshot.schema !== 'metaengine.meta-orchestrator.authoritative-snapshot.v1') throw new Error('meta_snapshot_schema_invalid');
-  return reconcileMetaOrchestrator({
+  return reconcileContinuousMetaOrchestrator({
     plan,
     observed_alignment_epoch: snapshot.observed_alignment_epoch,
     observed_plan_generation: snapshot.observed_plan_generation,
