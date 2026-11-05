@@ -187,6 +187,133 @@ test('routing plan is deterministic for exact same external evidence',()=>{
   assert.deepEqual(left.allocations,right.allocations);
 });
 
+function route(ctx,outcomes,routingId='routing.outcome-identity.1') {
+  return createRsiSearchModeRoutingPlan({
+    context:ctx,
+    outcomes,
+    routing_id:routingId,
+    proposal_budget_units:100,
+    exploration_fraction:0.2,
+    external_router:true,
+    authored_by_candidate:false,
+  });
+}
+
+test('replayed canonical outcome is counted once and cannot flip exploitation budget',()=>{
+  const ctx=context({trace_history_available:false,lineage_candidate_count:0});
+  const fixed=outcome(ctx,'a1','FIXED_SKELETON',{win:true,cost:5});
+  const broad=outcome(ctx,'b1','BROAD_ARCHITECTURE',{win:true,cost:1});
+  const once=route(ctx,[fixed,broad]);
+  const replayed=route(ctx,[structuredClone(fixed),broad,fixed,structuredClone(fixed)]);
+  assert.equal(once.allocations.find((row)=>row.role==='EXPLOIT')?.search_mode,'BROAD_ARCHITECTURE');
+  assert.equal(once.mode_statistics.find((row)=>row.search_mode==='FIXED_SKELETON')?.attempts,1);
+  assert.deepEqual(replayed,once);
+  assert.equal(replayed.evidence_outcome_digests.length,2);
+  verifyRsiSearchModeRoutingPlan(replayed);
+});
+
+test('canonically equivalent replay with reordered evidence_refs is still one outcome',()=>{
+  const ctx=context();
+  const evidence=createRsiSearchModeOutcome({
+    outcome_id:'outcome.a.canonical',context:ctx,search_mode:'FIXED_SKELETON',
+    net_benefit_verified:true,hard_invariants_pass:true,candidate_valid:true,
+    cost_units:4,evaluation_digest:d('a'),evidence_refs:['EVAL_B','EVAL_A'],
+    external_evaluator:true,authored_by_candidate:false,
+  });
+  const reordered={...evidence,evidence_refs:['EVAL_B','EVAL_A']};
+  const once=route(ctx,[evidence],'routing.canonical-replay.1');
+  const repeated=route(ctx,[reordered,structuredClone(evidence)],'routing.canonical-replay.1');
+  assert.deepEqual(repeated,once);
+  assert.equal(repeated.evidence_outcome_digests.length,1);
+});
+
+test('reordering unique outcomes including fractional costs is deterministic',()=>{
+  const ctx=context({trace_history_available:false,lineage_candidate_count:0});
+  const a=outcome(ctx,'a1','FIXED_SKELETON',{win:true,cost:0.1});
+  const b=outcome(ctx,'b1','FIXED_SKELETON',{win:true,cost:0.2});
+  const c=outcome(ctx,'c1','FIXED_SKELETON',{win:false,cost:0.3});
+  const d=outcome(ctx,'d1','BROAD_ARCHITECTURE',{win:false,cost:1});
+  const original=route(ctx,[a,b,c,d],'routing.order-independent.1');
+  const reversed=route(ctx,[d,c,b,a],'routing.order-independent.1');
+  assert.deepEqual(reversed,original);
+  assert.equal(reversed.routing_digest,original.routing_digest);
+});
+
+test('replay position and permutation cannot change statistics, budget, evidence or digest',()=>{
+  const ctx=context();
+  const a=outcome(ctx,'a1','FIXED_SKELETON',{win:true,cost:0.1});
+  const b=outcome(ctx,'b1','FIXED_SKELETON',{win:false,cost:0.2});
+  const c=outcome(ctx,'c1','BROAD_ARCHITECTURE',{win:true,cost:3});
+  const d=outcome(ctx,'d1','RECURSIVE_DEPTH',{win:false,valid:false,hard:false,cost:7});
+  const baseline=route(ctx,[a,b,c,d],'routing.replay-permutation.1');
+  const inputs=[
+    [a,b,c,d,a],
+    [structuredClone(d),c,structuredClone(b),a,d,b],
+    [b,a,c,a,b,d,c,structuredClone(d)],
+    [d,c,b,a],
+  ];
+  for (const rows of inputs) {
+    const candidate=route(ctx,rows,'routing.replay-permutation.1');
+    assert.deepEqual(candidate.mode_statistics,baseline.mode_statistics);
+    assert.deepEqual(candidate.allocations,baseline.allocations);
+    assert.deepEqual(candidate.evidence_outcome_digests,baseline.evidence_outcome_digests);
+    assert.equal(candidate.routing_digest,baseline.routing_digest);
+    verifyRsiSearchModeRoutingPlan(candidate);
+  }
+});
+
+test('same outcome_id with different valid canonical content is rejected in either order',()=>{
+  const ctx=context();
+  const first=outcome(ctx,'a1','FIXED_SKELETON',{win:true,cost:5});
+  const variants=[
+    outcome(ctx,'a1','BROAD_ARCHITECTURE',{win:true,cost:5}),
+    outcome(ctx,'a1','FIXED_SKELETON',{win:true,cost:6}),
+    outcome(ctx,'a1','FIXED_SKELETON',{win:false,cost:5}),
+    createRsiSearchModeOutcome({
+      outcome_id:first.outcome_id,context:ctx,search_mode:first.search_mode,
+      net_benefit_verified:true,hard_invariants_pass:true,candidate_valid:true,
+      cost_units:first.cost_units,evaluation_digest:d('f'),evidence_refs:first.evidence_refs,
+      external_evaluator:true,authored_by_candidate:false,
+    }),
+  ];
+  for(const other of variants){
+    assert.notEqual(first.outcome_digest,other.outcome_digest);
+    assert.throws(()=>route(ctx,[first,other]),/rsi_mode_outcome_id_conflict/);
+    assert.throws(()=>route(ctx,[other,first]),/rsi_mode_outcome_id_conflict/);
+    assert.throws(()=>route(ctx,[first,structuredClone(first),other]),/rsi_mode_outcome_id_conflict/);
+  }
+});
+
+test('invalid or mismatched outcome digest cannot be laundered by a duplicate',()=>{
+  const ctx=context();
+  const first=outcome(ctx,'a1','FIXED_SKELETON',{win:true,cost:5});
+  const other=outcome(ctx,'b1','BROAD_ARCHITECTURE',{win:false,cost:7});
+  const forged={...first,cost_units:99};
+  const borrowedDigest={...other,outcome_digest:first.outcome_digest};
+  assert.throws(()=>route(ctx,[first,forged]),/rsi_mode_outcome_digest_mismatch/);
+  assert.throws(()=>route(ctx,[forged,first]),/rsi_mode_outcome_digest_mismatch/);
+  assert.throws(()=>route(ctx,[first,borrowedDigest]),/rsi_mode_outcome_digest_mismatch/);
+  assert.throws(()=>route(ctx,[borrowedDigest,first]),/rsi_mode_outcome_digest_mismatch/);
+});
+
+test('distinct outcome IDs remain independent even if their evaluation_digest matches',()=>{
+  const ctx=context();
+  const first=outcome(ctx,'a1','FIXED_SKELETON',{win:true,cost:2});
+  const second=outcome(ctx,'a2','FIXED_SKELETON',{win:false,cost:4});
+  assert.equal(first.evaluation_digest,second.evaluation_digest);
+  assert.notEqual(first.outcome_digest,second.outcome_digest);
+  const stats=route(ctx,[first,second]).mode_statistics.find((row)=>row.search_mode==='FIXED_SKELETON');
+  assert.equal(stats.attempts,2);
+  assert.equal(stats.wins,1);
+  assert.equal(stats.avgCost,3);
+});
+
+test('raw outcome array bound is enforced before replay deduplication',()=>{
+  const ctx=context();
+  const a=outcome(ctx,'a1','FIXED_SKELETON',{win:true,cost:2});
+  assert.throws(()=>route(ctx,Array(4097).fill(a)),/rsi_mode_outcomes_invalid/);
+});
+
 test('routing changes proposal budget only and never becomes scheduler/evaluator/promotion authority',()=>{
   const ctx=context();
   const plan=createRsiSearchModeRoutingPlan({
