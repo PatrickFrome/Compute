@@ -136,5 +136,34 @@ class WindowsPayloadAuditTest(unittest.TestCase):
             self.assertIn("FAIL", [r["status"] for r in result])
 
 
+# Additional exact ZIP-source regressions; no installed software or vendor binaries.
+class ZipSnapshotRegression(unittest.TestCase):
+    def test_preserves_zip_execute_modes_and_tree(self):
+        import zipfile
+        import windows_payload_audit as audit
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp);source=path/'source';source.mkdir()
+            for name,contents in [('main.txt',b'example\n'),('bin/run.sh',b'run\n')]:
+                output=source/name;output.parent.mkdir(parents=True,exist_ok=True);output.write_bytes(contents)
+                output.chmod(0o755 if name.endswith('.sh') else 0o644)
+            subprocess.run(['git','-C',str(source),'init','-q'],check=True,capture_output=True)
+            subprocess.run(['git','-C',str(source),'add','--force','--all'],check=True,capture_output=True)
+            tree=subprocess.check_output(['git','-C',str(source),'write-tree'],text=True).strip()
+            z=path/'synthetic.zip'
+            with zipfile.ZipFile(z,'w') as f:
+                for name in ['main.txt','bin/run.sh']:
+                    entry=zipfile.ZipInfo('Compute/'+name);entry.create_system=3
+                    entry.external_attr=(0o100755 if name.endswith('.sh') else 0o100644)<<16
+                    f.writestr(entry,(source/name).read_bytes())
+            digest=audit.sha256_file(z)
+            good=audit.verify_snapshot_zip(z,digest,tree,2,1)
+            self.assertEqual([r['status'] for r in good],['PASS']*3)
+            missing=audit.verify_snapshot_zip(z,digest,tree,2,2)
+            self.assertEqual([r['status'] for r in missing],['PASS','FAIL'])
+            wrong_tree=audit.verify_snapshot_zip(z,digest,'0'*40,2,1)
+            self.assertEqual([r['status'] for r in wrong_tree],['PASS','PASS','FAIL'])
+            wrong_bytes=audit.verify_snapshot_zip(z,'1'*64,tree,2,1)
+            self.assertEqual([r['status'] for r in wrong_bytes],['FAIL'])
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
