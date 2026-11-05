@@ -77,7 +77,6 @@ def verify_parts(parts: list[Path], expected_part_shas: list[str], expected_arch
 
 
 
-
 def verify_snapshot_zip(archive: Path, expected_sha256: str, expected_tree: str,
                         expected_files: int = 4346, expected_executables: int = 74) -> list[dict]:
     """Reconstruct exact tracked files/modes from ZIP into a temporary local Git index."""
@@ -134,6 +133,7 @@ def verify_snapshot_zip(archive: Path, expected_sha256: str, expected_tree: str,
     except (ValueError, OSError, zipfile.BadZipFile, RuntimeError, subprocess.CalledProcessError) as exc:
         result.append(row("zip.snapshot", "FAIL", str(exc)[:500]))
     return result
+
 
 def git(cwd: Path, *args: str) -> str:
     # Runs only local Git commands in a caller-selected disposable checkout.
