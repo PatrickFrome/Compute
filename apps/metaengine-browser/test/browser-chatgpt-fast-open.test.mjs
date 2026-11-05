@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const main = await readFile(new URL('../src/main.mjs', import.meta.url), 'utf8');
+const creation = await readFile(new URL('../src/tab-creation-lifecycle.mjs', import.meta.url), 'utf8');
 
 // Interactive latency may improve only inside the existing exact WebContents/session boundary.
 test('GLM agent platform interactive open preconnects the persistent authenticated session', () => {
@@ -21,8 +22,9 @@ test('New Chat selects and exposes the exact WebContents before bounded network 
   const fn = main.slice(start, end);
   const navigationStart = fn.indexOf('boundedNavigation(view.webContents, d.normalized_url');
   assert.ok(navigationStart >= 0, 'createTab must start remote navigation through boundedNavigation');
-  assert.ok(fn.indexOf('registry.select(tab.tab_id)') < navigationStart);
-  assert.ok(fn.indexOf('attachSelected()') < navigationStart);
+  assert.ok(fn.indexOf('createAttachedTabView({') < navigationStart);
+  assert.match(creation, /if \(select\) registry\.select\(tab\.tab_id\)/);
+  assert.ok(creation.indexOf('registry.select(tab.tab_id)') < creation.indexOf('attachSelected();'));
   assert.match(fn, /if \(awaitLoad\) navigation = await pendingLoad/);
   assert.match(fn, /load_pending: load && !awaitLoad/);
   assert.match(fn, /navigation,/);
