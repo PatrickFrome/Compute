@@ -235,6 +235,30 @@ function verifyOutcome(row,context){
   return canonical;
 }
 
+// Replays are transport duplicates, not fresh evaluation attempts. Check every
+// supplied row before deduplicating so a forged replay cannot be hidden behind
+// an earlier valid copy; retain the raw MAX_OUTCOMES bound in the caller.
+function uniqueVerifiedOutcomes(outcomes,context){
+  const byId=new Map();
+  const idByDigest=new Map();
+  for(const input of outcomes){
+    const row=verifyOutcome(input,context);
+    const previous=byId.get(row.outcome_id);
+    if(previous){
+      if(previous.outcome_digest!==row.outcome_digest||JSON.stringify(previous)!==JSON.stringify(row)){
+        throw new Error('rsi_mode_outcome_id_conflict');
+      }
+      continue;
+    }
+    if(idByDigest.has(row.outcome_digest)) throw new Error('rsi_mode_outcome_digest_conflict');
+    byId.set(row.outcome_id,row);
+    idByDigest.set(row.outcome_digest,row.outcome_id);
+  }
+  // Stable accumulation order matters for fractional cost_units as well as
+  // for outcome identity. A permutation cannot change floating-point averages.
+  return [...byId.values()].sort((a,b)=>a.outcome_id<b.outcome_id?-1:a.outcome_id>b.outcome_id?1:0);
+}
+
 function compatible(modeId,context){
   if(modeId==='FIXED_SKELETON') return context.skeleton_available;
   if(modeId==='RECURSIVE_DEPTH') return context.trace_history_available;
@@ -263,7 +287,7 @@ export function createRsiSearchModeRoutingPlan({
   const checked=verifyRsiSearchContext(context);
   if(external_router!==true||authored_by_candidate!==false) throw new Error('rsi_mode_router_external_origin_required');
   if(!Array.isArray(outcomes)||outcomes.length>MAX_OUTCOMES) throw new Error('rsi_mode_outcomes_invalid');
-  const verified=outcomes.map((row)=>verifyOutcome(row,checked));
+  const verified=uniqueVerifiedOutcomes(outcomes,checked);
   const totalBudget=positive(proposal_budget_units,'proposal_budget_units');
   const explore=boundedScore(exploration_fraction,'exploration_fraction');
   if(explore<=0||explore>=0.5) throw new Error('rsi_mode_exploration_fraction_invalid');
