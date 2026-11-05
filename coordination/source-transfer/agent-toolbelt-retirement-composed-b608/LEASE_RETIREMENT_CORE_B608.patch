@@ -1,0 +1,466 @@
+diff --git a/apps/metaengine-browser/src/agent-toolbelt-core.mjs b/apps/metaengine-browser/src/agent-toolbelt-core.mjs
+index 49d5d1f..c0a4f79 100644
+--- a/apps/metaengine-browser/src/agent-toolbelt-core.mjs
++++ b/apps/metaengine-browser/src/agent-toolbelt-core.mjs
+@@ -37,11 +37,22 @@ function leaseKey(lease) {
+   return `${taskId}:${generation}`;
+ }
+ 
++// This is an in-process collision fence, not a lease proof or permission.
++// Durable project custody verifies the actual binding before each tool effect.
++function leaseOwner(lease) {
++  return JSON.stringify([String(lease?.agent_id || '').toLowerCase(),
++    lease?.tab_id ?? null, String(lease?.target_id ?? '').toLowerCase() || null,
++    lease?.agent_generation_epoch ?? null]);
++}
++
+ export class AgentToolbelt {
+   #signedRequest;
+   #maxInFlightPerLease;
+   // key `${task_id}:${lease_generation}` → served/issued request rows.
+   #byLease = new Map();
++  // Same task/generation must never alias a different agent/tab incarnation.
++  // The keys are co-retired with #byLease; snapshots do not serialize them.
++  #leaseOwners = new Map();
+   // Synchronous reservations bridge the async custody/issue boundary. They
+   // are process-local current-work pressure, never a lifetime quota.
+   #reservations = new Map();
+@@ -65,6 +76,14 @@ export class AgentToolbelt {
+     this.#projectRuntime = runtime;
+   }
+ 
++  // Local cache eviction is never a substitute for the project journal's
++  // original request/effect custody. Keep any unresolved or unpersisted
++  // receipt, including the overflow witness which is stored outside rows.
++  #locallySettled(row) {
++    return !row || (['COMPLETED','FAILED','UNAVAILABLE'].includes(row.status)
++      && row.effect_unknown !== true && row.custody_pending !== true);
++  }
++
+   #leaseRows(key) {
+     let rows = this.#byLease.get(key);
+     if (!rows) {
+@@ -72,15 +91,41 @@ export class AgentToolbelt {
+         // Settled caches may be discarded: original dedup and undelivered
+         // terminal results live in the journal. Active/UNKNOWN work is kept.
+         const old=[...this.#byLease].find(([id,cache])=>!(this.#reservations.get(id)?.size)
+-          &&![...cache.values()].some(row=>row.status==='PENDING'||row.effect_unknown===true));
++          &&[...cache.values(),this.#budgetWitnesses.get(id)].every(row=>this.#locallySettled(row)));
+         if(!old)return null;
+-        this.#byLease.delete(old[0]);this.#reservations.delete(old[0]);this.#budgetWitnesses.delete(old[0]);
++        this.#byLease.delete(old[0]);this.#reservations.delete(old[0]);this.#budgetWitnesses.delete(old[0]);this.#leaseOwners.delete(old[0]);
+       }
+       rows = new Map(); this.#byLease.set(key, rows);
+     }
+     return rows;
+   }
+ 
++  // Main task-cycle calls this ONLY after a same-generation authenticated
++  // terminal task readback. This method is a local memory operation, not an
++  // authority API: it cannot create, cancel, acknowledge or retry an effect.
++  // The durable tool journal remains the sole source for old request IDs.
++  // Never drop a PENDING/UNKNOWN/uncommitted budget row or an in-flight
++  // reservation, even if the task completion write was acknowledged.
++  canRetireSettledLease(lease) {
++    const key = leaseKey(lease);
++    const rows = this.#byLease.get(key);
++    return Boolean(rows && this.#leaseOwners.get(key)===leaseOwner(lease)
++      && !this.#reservations.get(key)?.size
++      && [...rows.values(),this.#budgetWitnesses.get(key)].every(row=>this.#locallySettled(row)));
++  }
++
++  retireSettledLease(lease) {
++    if (!this.canRetireSettledLease(lease)) return false;
++    const key = leaseKey(lease);
++    this.#byLease.delete(key);
++    this.#reservations.delete(key);
++    this.#budgetWitnesses.delete(key);
++    this.#leaseOwners.delete(key);
++    // Keep #results: its global bounded ring delivers previous task results
++    // to the agent's next message. It is not effect-custody or a replay key.
++    return true;
++  }
++
+   #rememberResult(row) {
+     this.#results.set(row.request_id, row);
+     while (this.#results.size > MAX_SERVED_RESULTS) {
+@@ -95,8 +140,12 @@ export class AgentToolbelt {
+     const agentId = String(lease?.agent_id || '').toLowerCase();
+     const tabId = String(lease?.tab_id || '');
+     if (!AGENT_RE.test(agentId)) return { issued: [], unavailable: [], error: 'agent_toolbelt_agent_invalid' };
++    const owner=leaseOwner(lease);
++    if(this.#leaseOwners.has(key)&&this.#leaseOwners.get(key)!==owner)
++      return {issued:[],unavailable:[],error:'agent_toolbelt_lease_identity_conflict'};
+     const rows = this.#leaseRows(key);
+     if(!rows)return {issued:[],unavailable:[],error:'TOOL_ACTIVE_READBACK_PRESSURE'};
++    this.#leaseOwners.set(key,owner);
+     let reservations = this.#reservations.get(key);
+     if (!reservations) { reservations = new Set(); this.#reservations.set(key, reservations); }
+     const issued = [];
+@@ -104,7 +153,10 @@ export class AgentToolbelt {
+     const deny = (requestId, reason, { effectUnknown = false } = {}) => {
+       unavailable.push({ request_id: requestId, status: 'UNAVAILABLE', reason });
+       const budgetHold=reason.startsWith('TOOL_ADMISSION_')||reason==='TOOL_CURRENT_PRESSURE'||reason==='STORAGE_BACKPRESSURE';
+-      if (budgetHold && this.#budgetWitnesses.has(key)) return;
++      // An admission-pressure display cannot erase an UNKNOWN witness. A
++      // second unresolvable effect must be stopped BEFORE its durable reserve.
++      const witness=this.#budgetWitnesses.get(key);
++      if (witness && (!this.#locallySettled(witness) || budgetHold)) return;
+       const row = {
+         request_id: requestId,
+         action: null,
+@@ -136,11 +188,16 @@ export class AgentToolbelt {
+       const durableCustody=typeof this.#projectRuntime?.beginToolBudgetRequest==='function';
+       if(!durableCustody){deny(requestId,'DURABLE_REQUEST_CUSTODY_REQUIRED');continue;}
+       if(this.pendingCount(lease)>=this.#maxInFlightPerLease){deny(requestId,'TOOL_CURRENT_PRESSURE');continue;}
+-      if(rows.size>=MAX_SERVED_RESULTS) {
+-        const old=[...rows].find(([,row])=>row.status!=='PENDING'&&row.effect_unknown!==true);
+-        if(old)rows.delete(old[0]);
+-        else {deny(requestId,'TOOL_ADMISSION_LOCAL_READBACK_PRESSURE');continue;}
++      // Reserve BOTH durable effect capacity and eventual cache placement
++      // before the first await. Otherwise concurrent RESOLVED/late ACK rows
++      // can overrun 128 and displace unresolved original custody.
++      let noRoom=false;
++      while(rows.size+reservations.size>=MAX_SERVED_RESULTS) {
++        const old=[...rows].find(([id,row])=>!reservations.has(id)&&this.#locallySettled(row));
++        if(!old){noRoom=true;break;}
++        rows.delete(old[0]);
+       }
++      if(noRoom){deny(requestId,'TOOL_ADMISSION_LOCAL_READBACK_PRESSURE');continue;}
+       reservations.add(requestId);
+       let budgetCustody=null;
+       try {
+@@ -257,10 +314,14 @@ export class AgentToolbelt {
+     const key = leaseKey(lease);
+     const rows = this.#byLease.get(key);
+     const agentId = String(lease?.agent_id || '').toLowerCase();
+-    if (!rows || rows.size === 0) return [];
++    if (!rows || rows.size === 0 || this.#leaseOwners.get(key)!==leaseOwner(lease)) return [];
++    const inFlight=this.#reservations.get(key);
+     const terminal = [];
+     for (const row of rows.values()) {
+-      if (row.status !== 'PENDING') continue;
++      if (row.status !== 'PENDING' || inFlight?.has(row.request_id)) continue;
++      // Late parallel harvests must not both settle an original terminal. The
++      // same local reservation also prevents retirement during signed GET.
++      inFlight?.add(row.request_id);
+       try {
+         const response = await this.#signedRequest(`/v1/commands/${encodeURIComponent(row.command_id)}/receipt`, { method: 'GET' });
+         const body = await response.json().catch(() => ({}));
+@@ -292,14 +353,27 @@ export class AgentToolbelt {
+         terminal.push({ ...row });
+       } catch (error) {
+         this.#lastError = clip(error?.message || error, 240);
+-      }
++      } finally {inFlight?.delete(row.request_id);}
+     }
+     return terminal;
+   }
+ 
++  // Read-only uncertainty count. UNKNOWN is displayed as UNAVAILABLE, not
++  // as a pending *command*; the task lifecycle must still HOLD completion.
++  // This never interprets an absent local cache as proof of durable clearance.
++  unresolvedCustodyCount(lease) {
++    const key=leaseKey(lease),rows=this.#byLease.get(key);
++    if(!rows)return 0;
++    if(this.#leaseOwners.get(key)!==leaseOwner(lease))return 1;
++    const uncertain=row=>row && (row.effect_unknown===true||row.custody_pending===true);
++    return [...rows.values()].filter(uncertain).length+(uncertain(this.#budgetWitnesses.get(key))?1:0);
++  }
++
+   pendingCount(lease) {
+-    const rows = this.#byLease.get(leaseKey(lease));
++    const key=leaseKey(lease),rows=this.#byLease.get(key);
+     if (!rows) return 0;
++    if (this.#leaseOwners.get(key)!==leaseOwner(lease)) return 1; // fail closed for stale incarnation
++
+     let pending = 0;
+     for (const row of rows.values()) if (row.status === 'PENDING') pending += 1;
+     for (const id of this.#reservations.get(leaseKey(lease)) || []) if (rows.get(id)?.status !== 'PENDING') pending += 1;
+@@ -321,7 +395,7 @@ export class AgentToolbelt {
+     if(!Number.isSafeInteger(limit)||limit<1||limit>128||delivered!==null&&!(delivered instanceof Map))throw Error('agent_toolbelt_result_selection_invalid');
+     const key = leaseKey(lease);
+     const rows = this.#byLease.get(key);
+-    if (!rows) return [];
++    if (!rows || this.#leaseOwners.get(key)!==leaseOwner(lease)) return [];
+     const budget = this.#budgetWitnesses.get(key);
+     return [...rows.values(), ...(budget ? [budget] : [])].filter(row => ['COMPLETED', 'FAILED', 'UNAVAILABLE'].includes(row.status)
+         && (!delivered||delivered.get(row.request_id)!==toolDeliveryDigest(row)))
+diff --git a/apps/metaengine-browser/test/agent-toolbelt-lease-retirement.test.mjs b/apps/metaengine-browser/test/agent-toolbelt-lease-retirement.test.mjs
+new file mode 100644
+index 0000000..74cc834
+--- /dev/null
++++ b/apps/metaengine-browser/test/agent-toolbelt-lease-retirement.test.mjs
+@@ -0,0 +1,168 @@
++// Inert source-only regression of bounded completed-lease memory. No network,
++// browser, database, actual commands, installed components, or scheduler.
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import { AgentToolbelt } from '../src/agent-toolbelt-core.mjs';
++import { toolbeltCustodyModel, flushCustodyMicrotasks } from './fixtures/toolbelt-custody-model.mjs';
++
++const AGENT = 'agent_lease-retirement-0001';
++const lease = n => Object.freeze({
++  task_id: `${(n + 1).toString(16).padStart(8,'0')}-1111-4111-8111-111111111111`,
++  lease_generation: 1, agent_id: AGENT,
++});
++const req = (id,action='CAPTURE') => ({ request_id:`retire:${id}`,action,payload:{} });
++const ack = id => ({ok:true,status:200,json:async()=>({accepted:true,command_id:`inert-command-${id}`})});
++const receipt = (status='COMPLETED') => ({ok:true,status:200,json:async()=>({found:true,terminal:true,status,receipt:{result:'inert'}})});
++const resolved = (id) => ({request_id:id,action:'PROJECT_HISTORY',status:'COMPLETED',summary:'durable in-memory fixture',command_id:null});
++const settledRuntime = (decide=()=>({state:'RESOLVED'})) => ({
++  serveToolRequests:async()=>[],
++  beginToolBudgetRequest:async(l,r)=>{
++    const decision=decide(l,r);
++    if(decision instanceof Error)throw decision;
++    if(decision.state==='RESOLVED')return {state:'RESOLVED',result:resolved(r.request_id)};
++    return decision;
++  },
++});
++
++function gate(){let release;const promise=new Promise(resolve=>release=resolve);return {promise,release};}
++
++test('thousands of genuinely settled leases retire without retaining per-lease rows or witness maps',async()=>{
++  const belt=new AgentToolbelt({signedRequest:async()=>assert.fail('fixture resolved before transport')});
++  belt.bindProjectRuntime(settledRuntime());
++  for(let n=0;n<3000;n++){
++    const current=lease(n);
++    await belt.serveToolRequests({lease:current,requests:[req(n)]});
++    assert.equal(belt.resultsForLease(current).length,1);
++    assert.equal(belt.retireSettledLease(current),true);
++    assert.equal(belt.retireSettledLease(current),false);
++    if(n%100===0)assert.equal(belt.snapshot().lease_count,0);
++  }
++  assert.equal(belt.snapshot().lease_count,0);
++  assert.equal(belt.snapshot().served_result_count,128,'agent result ring retains its existing global bound');
++  assert.equal(belt.resultsForAgent(AGENT).length,4);
++});
++
++test('unsettled PENDING, UNKNOWN and pending durable resolution prohibit retirement',async()=>{
++  const current=lease(3001);
++  for(const kind of ['PENDING','UNKNOWN','CUSTODY_PENDING']){
++    let issues=0;
++    const belt=new AgentToolbelt({signedRequest:async()=>{
++      issues++;
++      if(kind==='UNKNOWN')throw Error('inert lost reply');
++      return ack(issues);
++    }});
++    const custody=toolbeltCustodyModel([current],kind==='CUSTODY_PENDING'?{
++      resolveToolBudgetRequest:async()=>{throw Error('inert journal write held');}
++    }:{});
++    belt.bindProjectRuntime(custody);
++    if(kind==='CUSTODY_PENDING')await belt.serveToolRequests({lease:current,requests:[req(kind,'INVALID_ACTION')]});
++    else await belt.serveToolRequests({lease:current,requests:[req(kind)]});
++    assert.equal(belt.retireSettledLease(current),false,kind);
++    assert.equal(belt.snapshot().lease_count,1,kind);
++    if(kind==='UNKNOWN'){
++      await belt.serveToolRequests({lease:current,requests:[req(kind)]});
++      assert.equal(issues,1,'UNKNOWN must never be blindly reissued');
++    }
++  }
++});
++
++test('concurrent late issue/receipt cannot be retired while an original reservation or pending command exists',async()=>{
++  const current=lease(3002),blocked=gate();let issues=0;
++  const belt=new AgentToolbelt({signedRequest:async(path,{method}={})=>{
++    if(method==='GET')return receipt();
++    issues++;await blocked.promise;return ack(issues);
++  }});
++  const custody=toolbeltCustodyModel([current]);belt.bindProjectRuntime(custody);
++  const original=belt.serveToolRequests({lease:current,requests:[req('late')]});
++  await flushCustodyMicrotasks();
++  assert.equal(issues,1);
++  assert.equal(belt.retireSettledLease(current),false,'original request is in flight');
++  blocked.release();await original;
++  assert.equal(belt.retireSettledLease(current),false,'issued command still PENDING');
++  assert.equal((await belt.harvestResults({lease:current})).length,1);
++  assert.equal(belt.retireSettledLease(current),true);
++  const late=await belt.serveToolRequests({lease:current,requests:[req('late')]});
++  assert.deepEqual(late.issued,[]);
++  assert.equal(issues,1,'durable RESOLVED readback never resends the command');
++  assert.equal(belt.resultsForLease(current)[0].status,'COMPLETED');
++});
++
++test('old UNKNOWN result is not forgotten by settled-LRU eviction',async()=>{
++  const belt=new AgentToolbelt({signedRequest:async()=>assert.fail('no transport for resolved fixture')});
++  const first=lease(4000);
++  belt.bindProjectRuntime(settledRuntime((_l,r)=>r.request_id==='retire:uncertain'
++    ?new Error('lost durable custody readback'):{state:'RESOLVED'}));
++  for(let n=0;n<128;n++)await belt.serveToolRequests({lease:first,requests:[req(`first-${n}`)]});
++  await belt.serveToolRequests({lease:first,requests:[req('uncertain')]});
++  assert.equal(belt.resultsForLease(first,{limit:128}).length,128);
++  assert.equal(belt.retireSettledLease(first),false,'row has effect=UNKNOWN');
++  for(let n=1;n<=127;n++)await belt.serveToolRequests({lease:lease(4000+n),requests:[req(`later-${n}`)]});
++  await belt.serveToolRequests({lease:lease(4200),requests:[req('newest')]});
++  assert.equal(belt.snapshot().lease_count,128);
++  assert.equal(belt.retireSettledLease(first),false,'cache pressure must not evict an UNKNOWN row');
++  assert.ok(belt.resultsForLease(first,{limit:128}).length>0);
++});
++
++
++test('uncommitted budget resolution survives 128-cache eviction pressure',async()=>{
++  const first=lease(4500);
++  const belt=new AgentToolbelt({signedRequest:async()=>assert.fail('inert no tool issue')});
++  belt.bindProjectRuntime({
++    serveToolRequests:async()=>[],
++    beginToolBudgetRequest:async(l,r)=>l.task_id===first.task_id?{state:'NEW'}:{state:'RESOLVED',result:resolved(r.request_id)},
++    resolveToolBudgetRequest:async()=>{throw Error('inert failed budget journal settlement');},
++  });
++  await belt.serveToolRequests({lease:first,requests:[req('uncommitted','INVALID_ACTION')]});
++  assert.equal(belt.resultsForLease(first)[0].status,'UNAVAILABLE');
++  assert.equal(belt.retireSettledLease(first),false);
++  for(let n=1;n<=128;n++)await belt.serveToolRequests({lease:lease(4500+n),requests:[req(`settled-${n}`)]});
++  assert.equal(belt.snapshot().lease_count,128);
++  assert.equal(belt.retireSettledLease(first),false,'uncommitted original debit must not be evicted');
++  assert.equal(belt.resultsForLease(first)[0].request_id,'retire:uncommitted');
++});
++
++test('retirement clears a settled capacity witness without dropping next-message results',async()=>{
++  const current=lease(4900);let sends=0;
++  const belt=new AgentToolbelt({signedRequest:async(_path,{method}={})=>{
++    if(method==='GET')return receipt();
++    sends++;return ack(sends);
++  }});
++  belt.bindProjectRuntime(toolbeltCustodyModel([current]));
++  for(let n=0;n<8;n++)await belt.serveToolRequests({lease:current,requests:[req(`pending-${n}`)]});
++  await belt.serveToolRequests({lease:current,requests:[req('pressure')]});
++  assert.equal(belt.retireSettledLease(current),false);
++  await belt.harvestResults({lease:current});
++  assert.equal(belt.pendingCount(current),0);
++  assert.equal(belt.retireSettledLease(current),true);
++  assert.equal(belt.snapshot().lease_count,0);
++  assert.equal(belt.resultsForAgent(AGENT).length,4);
++  assert.equal(sends,8);
++});
++
++test('128 unresolved leases produce explicit backpressure rather than evict PENDING or UNKNOWN',async()=>{
++  const belt=new AgentToolbelt({signedRequest:async()=>{throw Error('inert lost ACK');}});
++  // A fixed fixture never hands out new effect permission for a previous request.
++  belt.bindProjectRuntime({serveToolRequests:async()=>[],beginToolBudgetRequest:async()=>({state:'UNKNOWN'})});
++  for(let n=0;n<128;n++){
++    const current=lease(5000+n);
++    await belt.serveToolRequests({lease:current,requests:[req(n)]});
++    assert.equal(belt.retireSettledLease(current),false);
++  }
++  const pressure=await belt.serveToolRequests({lease:lease(5200),requests:[req('overflow')]});
++  assert.equal(pressure.error,'TOOL_ACTIVE_READBACK_PRESSURE');
++  assert.equal(belt.snapshot().lease_count,128);
++});
++
++test('reconstruction uses retained original durable result, not a fresh issue',async()=>{
++  const current=lease(6000),runtime=toolbeltCustodyModel([current]);let sends=0;
++  const make=()=>{const b=new AgentToolbelt({signedRequest:async(path,{method}={})=>{
++    if(method==='GET')return receipt();
++    sends++;return ack(sends);
++  }});b.bindProjectRuntime(runtime);return b;};
++  const first=make();await first.serveToolRequests({lease:current,requests:[req('durable')]});
++  await first.harvestResults({lease:current});assert.equal(first.retireSettledLease(current),true);
++  const restored=make();await restored.serveToolRequests({lease:current,requests:[req('durable')]});
++  assert.equal(restored.resultsForLease(current)[0].status,'COMPLETED');
++  assert.equal(sends,1,'no repeat effect after new toolbelt instance');
++  assert.equal(restored.retireSettledLease(current),true);
++});
+diff --git a/apps/metaengine-browser/test/agent-toolbelt-retirement-composed.test.mjs b/apps/metaengine-browser/test/agent-toolbelt-retirement-composed.test.mjs
+new file mode 100644
+index 0000000..03149d9
+--- /dev/null
++++ b/apps/metaengine-browser/test/agent-toolbelt-retirement-composed.test.mjs
+@@ -0,0 +1,98 @@
++// Source-only composition regression. Uses only disposable memory and delayed promises.
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import {AgentToolbelt} from '../src/agent-toolbelt-core.mjs';
++import {flushCustodyMicrotasks,toolbeltCustodyModel} from './fixtures/toolbelt-custody-model.mjs';
++
++const AGENT='agent_retirement-composed-0001';
++const lease=n=>Object.freeze({task_id:`${(n+1).toString(16).padStart(8,'0')}-2222-4222-8222-222222222222`,lease_generation:1,agent_id:AGENT});
++const req=n=>({request_id:`composed:retirement:${n}`,action:'CAPTURE',payload:{}});
++const resolved=r=>({request_id:r.request_id,action:r.action,status:'COMPLETED',summary:'fixture original receipt',command_id:null});
++const ack=id=>({ok:true,status:200,json:async()=>({accepted:true,command_id:id})});
++const receipt=()=>({ok:true,status:200,json:async()=>({found:true,terminal:true,status:'COMPLETED',receipt:{result:'inert'}})});
++const gate=()=>{let release;const promise=new Promise(resolve=>{release=resolve;});return{promise,release};};
++
++// Red on #1459: requests admitted against the same old row count, then all
++// commit their result after the await and push the map over 128.
++test('same-lease async admission reserves bounded row capacity before awaiting durable readback',async()=>{
++ const current=lease(10),block=gate();let entered=0;
++ const belt=new AgentToolbelt({signedRequest:async()=>assert.fail('no command issue for durable result')});
++ belt.bindProjectRuntime({serveToolRequests:async()=>[],beginToolBudgetRequest:async(_l,r)=>{
++  if(r.request_id.startsWith('composed:retirement:late-')){entered++;await block.promise;}
++  return{state:'RESOLVED',result:resolved(r)};
++ }});
++ for(let n=0;n<127;n++)await belt.serveToolRequests({lease:current,requests:[req(n)]});
++ const pending=Array.from({length:8},(_,n)=>belt.serveToolRequests({lease:current,requests:[req('late-'+n)]}));
++ await flushCustodyMicrotasks();
++ try{
++  assert.equal(entered,8);
++  assert.equal(belt.snapshot().lease_count,1);
++ }finally{block.release();}
++ await Promise.all(pending);
++ assert.ok(belt.snapshot().issued_command_count<=128,'local cache cap cannot be bypassed by late asynchronous results');
++});
++
++// Red on #1459: two harvest invocations both see PENDING, read the same
++// original receipt, and commit its terminal accounting twice.
++test('overlapping late receipt reads serialize per request and account for exactly one durable terminal',async()=>{
++ const current=lease(20),block=gate();let gets=0,issue=0,settled=0;
++ const belt=new AgentToolbelt({signedRequest:async(_route,options={})=>{
++  if(options.method==='GET'){gets++;await block.promise;return receipt();}
++  issue++;return ack(`command-${issue}`);
++ }});
++ belt.bindProjectRuntime(toolbeltCustodyModel([current],{resolveToolBudgetRequest:async()=>{settled++;}}));
++ await belt.serveToolRequests({lease:current,requests:[req('read-once')]});
++ const a=belt.harvestResults({lease:current}),b=belt.harvestResults({lease:current});
++ await flushCustodyMicrotasks();
++ try{assert.equal(gets,1,'only one reader owns the exact pending request');}
++ finally{block.release();}
++ const results=await Promise.all([a,b]);
++ assert.equal(results.flat().length,1);
++ assert.equal(settled,1);
++ assert.equal(belt.snapshot().counters.results_terminal,1);
++ assert.equal(belt.retireSettledLease(current),true);
++});
++
++// Red on #1459: keying by task_id:generation alone lets another agent or
++// same task rebind retirement, even though durable custody binds agent_id.
++test('foreign agent cannot reuse cached lease identity or retire a different agent receipt',async()=>{
++ const current=lease(30),foreign={...current,agent_id:'agent_foreign-000000001'};
++ const belt=new AgentToolbelt({signedRequest:async()=>assert.fail('no command effect')});
++ belt.bindProjectRuntime({serveToolRequests:async()=>[],beginToolBudgetRequest:async(_l,r)=>({state:'RESOLVED',result:resolved(r)})});
++ await belt.serveToolRequests({lease:current,requests:[req('owner')]});
++ assert.deepEqual(belt.resultsForLease(foreign),[]);
++ assert.equal(belt.pendingCount(foreign),1);
++ assert.equal(belt.canRetireSettledLease(foreign),false);
++ assert.equal(belt.retireSettledLease(foreign),false);
++ const denied=await belt.serveToolRequests({lease:foreign,requests:[req('foreign')]});
++ assert.equal(denied.error,'agent_toolbelt_lease_identity_conflict');
++ assert.equal(belt.retireSettledLease(current),true);
++});
++
++test('serialized observation is read-only and does not resurrect retired request authority after restart',async()=>{
++ const current=lease(40),runtime=toolbeltCustodyModel([current]);let issues=0;
++ const create=()=>{const belt=new AgentToolbelt({signedRequest:async(_route,opts={})=>{
++  if(opts.method==='GET')return receipt();issues++;return ack(`inert-command-${issues}`);
++ }});belt.bindProjectRuntime(runtime);return belt;};
++ const first=create();await first.serveToolRequests({lease:current,requests:[req('restart')]});
++ await first.harvestResults({lease:current});assert.equal(first.retireSettledLease(current),true);
++ const serialized=JSON.parse(JSON.stringify(first.snapshot()));
++ assert.equal(serialized.lease_count,0);
++ assert.equal(Object.hasOwn(serialized,'byLease'),false);
++ assert.equal(Object.hasOwn(serialized,'budgetWitnesses'),false);
++ const second=create();await second.serveToolRequests({lease:current,requests:[req('restart')]});
++ assert.equal(second.resultsForLease(current)[0].status,'COMPLETED');
++ assert.equal(issues,1);
++});
++
++test('UNKNOWN durable readback retains original row and never repeats a lost issue ACK after restart',async()=>{
++ const current=lease(50),runtime=toolbeltCustodyModel([current]);let issues=0;
++ const make=()=>{const belt=new AgentToolbelt({signedRequest:async()=>{issues++;throw Error('inert lost command ACK');}});belt.bindProjectRuntime(runtime);return belt;};
++ const first=make();await first.serveToolRequests({lease:current,requests:[req('unknown')]});
++ assert.equal(first.retireSettledLease(current),false);
++ const snapshot=JSON.parse(JSON.stringify(first.snapshot()));assert.ok(snapshot.lease_count===1);
++ const restarted=make();await restarted.serveToolRequests({lease:current,requests:[req('unknown')]});
++ assert.equal(restarted.resultsForLease(current)[0].effect_unknown,true);
++ assert.equal(restarted.retireSettledLease(current),false);
++ assert.equal(issues,1);
++});

@@ -1,0 +1,380 @@
+diff --git a/apps/metaengine-browser/src/autonomous-project-task-runtime.mjs b/apps/metaengine-browser/src/autonomous-project-task-runtime.mjs
+index f067bf6..9581c4c 100644
+--- a/apps/metaengine-browser/src/autonomous-project-task-runtime.mjs
++++ b/apps/metaengine-browser/src/autonomous-project-task-runtime.mjs
+@@ -85,7 +85,8 @@ export class AutonomousProjectTaskRuntime {
+     // conversation turns. Shutdown cannot close SQLite under an active turn.
+     for (const name of ['prepareLease', 'waitForChildren', 'refreshContext', 'continueConversation', 'latestTurnForLease',
+       'reconcilePending', 'serveToolRequests', 'recordActivity', 'tick', 'suspendWaitingParent', 'releaseCompletedBrowserChild', 'beginToolEffect', 'ackToolEffect', 'resolveToolEffect',
+-      'initializeToolBudget', 'beginToolBudgetRequest', 'resolveToolBudgetRequest', 'undeliveredToolResults']) {
++      'initializeToolBudget', 'beginToolBudgetRequest', 'resolveToolBudgetRequest', 'undeliveredToolResults',
++      'readToolCustodyForCompletion']) {
+       const operation = this[name].bind(this);
+       this[name] = (...args) => {
+         if (this.#closing) return Promise.reject(new Error('autonomous_project_closed'));
+@@ -218,6 +219,18 @@ export class AutonomousProjectTaskRuntime {
+     if(!original.receipt)return null;
+     return {request_id:request.request_id,action:request.action,status:'COMPLETED',summary:JSON.stringify(original.receipt),command_id:null};
+   }
++  // Read-only consumer of the existing original journal. This is advisory
++  // custody evidence, never a new effect permit, settlement or scheduler.
++  // Its promise is joined by the normal runtime close barrier above.
++  async readToolCustodyForCompletion(lease) {
++    leaseIdentity(lease);
++    if(typeof this.#journal.hasPendingTaskEffect!=='function')fail('tool_custody_readback_required');
++    const pending=await this.#journal.hasPendingTaskEffect(lease);
++    if(typeof pending!=='boolean')fail('tool_custody_readback_invalid');
++    return Object.freeze({schema:'metaengine.project.tool-custody-completion-read.v1',
++      task_id:lease.task_id,agent_id:lease.agent_id,lease_generation:lease.lease_generation,
++      state:pending?'PENDING':'CLEAR',...flags});
++  }
+   async resolveToolBudgetRequest(lease,requestId,result) {
+     if(typeof this.#journal.resolveToolBudgetRequest!=='function')fail('tool_budget_custody_required');
+     const value=await this.#journal.resolveToolBudgetRequest(lease,requestId,result);
+diff --git a/apps/metaengine-browser/src/devos-native-task-cycle-core.mjs b/apps/metaengine-browser/src/devos-native-task-cycle-core.mjs
+index 837219c..9058335 100644
+--- a/apps/metaengine-browser/src/devos-native-task-cycle-core.mjs
++++ b/apps/metaengine-browser/src/devos-native-task-cycle-core.mjs
+@@ -961,9 +961,13 @@ export class DevOsNativeTaskCycle {
+         }
+       }
+       const results = await this.#toolbelt.harvestResults({ lease });
+-      return { pending: this.#toolbelt.pendingCount(lease), results, result_claim: harvest.result_claim || null };
++      return { pending: this.#toolbelt.pendingCount(lease),
++        unresolved: this.#toolbelt.unresolvedCustodyCount(lease), results, result_claim: harvest.result_claim || null };
+     } catch {
+-      return { pending: 0, results: [] };
++      // A failed transcript/receipt read cannot clear an already-UNKNOWN
++      // original tool effect on a later observation of the same lease.
++      return { pending: this.#toolbelt.pendingCount(lease),
++        unresolved: this.#toolbelt.unresolvedCustodyCount(lease), results: [] };
+     }
+   }
+ 
+@@ -1362,6 +1366,10 @@ export class DevOsNativeTaskCycle {
+     if (toolState.pending > 0) {
+       return { state: 'TOOL_EXECUTION_PENDING', task_id: lease.task_id, pending_tool_commands: toolState.pending, authority_effect: false };
+     }
++    if (toolState.unresolved > 0) return {
++      state: 'TOOL_EFFECT_READBACK_REQUIRED', task_id: lease.task_id,
++      unresolved_tool_custody: toolState.unresolved, automatic_retry_allowed: false, authority_effect: false,
++    };
+ 
+     if (projectRuntime) {
+       const childState = await projectRuntime.waitForChildren(lease);
+@@ -1486,9 +1494,32 @@ export class DevOsNativeTaskCycle {
+   }
+ 
+   async #postCompletionWithReadback(lease, state, summary, error = null) {
++    const projectRuntime=this.#projectRuntimeForLease(lease);
++    // A restarted cycle can have an empty local Toolbelt but an original
++    // unresolved project-journal effect. Consume the EXISTING read-only
++    // custody witness before finalization; no journal mutation or retry.
++    const readCustody=async()=>{
++      if(typeof projectRuntime?.readToolCustodyForCompletion!=='function')return 'NOT_BOUND';
++      try {
++        const value=await projectRuntime.readToolCustodyForCompletion(lease);
++        if(value?.schema==='metaengine.project.tool-custody-completion-read.v1'
++          &&value.task_id===lease.task_id&&value.agent_id===lease.agent_id
++          &&value.lease_generation===lease.lease_generation&&value.authority_effect===false
++          &&value.automatic_retry_allowed===false&&['CLEAR','PENDING'].includes(value.state))return value.state;
++      }catch { /* UNKNOWN must never mean CLEAR. */ }
++      return 'UNKNOWN';
++    };
++    // Trusted completion commands can bypass the ordinary transcript harvest.
++    // Local UNKNOWN/uncommitted budget custody never becomes task completion;
++    // the original project journal must settle it before a new observation.
++    const unresolved=this.#toolbelt.unresolvedCustodyCount(lease);
++    const custody=state==='AMBIGUOUS'?'NOT_APPLICABLE':await readCustody();
++    if(state!=='AMBIGUOUS'&&(unresolved>0||!['CLEAR','NOT_BOUND'].includes(custody)))return {
++      state:'TOOL_EFFECT_READBACK_REQUIRED',task_id:lease.task_id,lease_generation:lease.lease_generation,
++      unresolved_tool_custody:unresolved,custody_state:custody,automatic_retry_allowed:false,authority_effect:false,
++    };
+     // Project history is advisory until the independently fenced completion
+     // write. Preserve the claim/observation, never mark it verified ourselves.
+-    const projectRuntime = this.#projectRuntimeForLease(lease);
+     if (projectRuntime) {
+       await projectRuntime.recordActivity(lease, {
+         request_id: `result:${lease.lease_generation}:${state.toLowerCase()}:${sha256(JSON.stringify(summary)).slice(0, 20)}`,
+@@ -1518,12 +1549,29 @@ export class DevOsNativeTaskCycle {
+       }
+       return receipt;
+     };
++    // A completion write response is not, by itself, proof that the same lease
++    // generation was finalized. Only the independently signed task-status
++    // readback permits the toolbelt to release fully settled local caches.
++    // This performs no tool command, journal write, or effect retry.
++    const retireAfterReadback = async (receipt, status = null) => {
++      if (!['RESULT_READY','BLOCKED','COMPLETED','FAILED'].includes(receipt.state)
++        || !this.#toolbelt.canRetireSettledLease(lease)) return receipt;
++      const checked = status || await this.#readTaskStatus(lease);
++      // A late durable write/ACK can arrive between initial CLEAR and the
++      // signed task-status readback. A second original-journal READ fences
++      // retirement even after a successful task completion response.
++      if (checked && ['RESULT_READY','BLOCKED','COMPLETED','FAILED'].includes(checked.state)
++        &&['CLEAR','NOT_BOUND'].includes(await readCustody()))
++        this.#toolbelt.retireSettledLease(lease);
++      return receipt;
++    };
+     try {
+       const response = await this.#signedRequest('/v1/devos/complete', {
+         payload: { ...bindingPayload(lease), state, summary, error: error ? clip(error, 160) : null },
+       });
+       const body = await responseJson(response, 'devos_complete_http');
+-      return releaseCompleted({ state: String(body.state || state).toUpperCase(), task_id: lease.task_id, lease_generation: lease.lease_generation, readback: 'WRITE_ACK', automatic_retry_allowed: false, authority_effect: false });
++      const receipt = await releaseCompleted({ state: String(body.state || state).toUpperCase(), task_id: lease.task_id, lease_generation: lease.lease_generation, readback: 'WRITE_ACK', automatic_retry_allowed: false, authority_effect: false });
++      return retireAfterReadback(receipt);
+     } catch (writeError) {
+       const response = await this.#signedRequest(`/v1/devos/tasks/${encodeURIComponent(lease.task_id)}/status`, { method: 'GET' });
+       const body = await responseJson(response, 'devos_status_http');
+@@ -1534,7 +1582,8 @@ export class DevOsNativeTaskCycle {
+         throw mismatch;
+       }
+       if (TERMINAL_STATES.has(observed) || observed === 'RESULT_READY' || observed === 'BLOCKED') {
+-        return releaseCompleted({ state: observed, task_id: lease.task_id, lease_generation: lease.lease_generation, readback: 'STATUS_PROVEN_AFTER_AMBIGUOUS_WRITE', automatic_retry_allowed: false, authority_effect: false });
++        const receipt = await releaseCompleted({ state: observed, task_id: lease.task_id, lease_generation: lease.lease_generation, readback: 'STATUS_PROVEN_AFTER_AMBIGUOUS_WRITE', automatic_retry_allowed: false, authority_effect: false });
++        return retireAfterReadback(receipt, { state: observed });
+       }
+       const errorOut = new Error(`devos_completion_transport_ambiguous:${clip(writeError?.message || writeError, 200)}`);
+       errorOut.automatic_retry_allowed = false;
+diff --git a/apps/metaengine-browser/test/agent-toolbelt-lease-retirement-integration.test.mjs b/apps/metaengine-browser/test/agent-toolbelt-lease-retirement-integration.test.mjs
+new file mode 100644
+index 0000000..aa8648b
+--- /dev/null
++++ b/apps/metaengine-browser/test/agent-toolbelt-lease-retirement-integration.test.mjs
+@@ -0,0 +1,67 @@
++// Inert cycle integration: requires the separate task-cycle integration hunk.
++// Neither browser, model, database, service nor network is started.
++import assert from 'node:assert/strict';
++import test from 'node:test';
++const AGENT = 'agent_lease-retirement-0001';
++const lease = n => Object.freeze({task_id: `${(n+1).toString(16).padStart(8,'0')}-1111-4111-8111-111111111111`,
++  lease_generation:1,agent_id:AGENT});
++
++// Integration below uses the real task-cycle source with a disposable in-memory
++// signed-route fixture. The shared cycle implementation is delivered in a
++// SEPARATE integration hunk, not committed to its neighboring owner branch.
++import {createHash} from 'node:crypto';
++import {DevOsNativeTaskCycle} from '../src/devos-native-task-cycle-core.mjs';
++
++const sha = value => createHash('sha256').update(value).digest('hex');
++const url = 'https://chatgpt.com/c/12345678-abcd-4abc-8abc-123456789abc';
++const cycleLease = Object.freeze({...lease(7000),role:'IMPLEMENTER',
++  tab_id:'tab_123e4567-e89b-42d3-a456-426614174222',target_id:'webcontents:9',
++  base_sha:'a'.repeat(40),agent_generation_epoch:1,automatic_retry_allowed:false,
++  task_spec:{objective:'Inert retirement check',constraints:[],deliverable:'source test'},
++  conversation_url_sha256:sha(url),
++});
++const cycleFleet = {schema:'metaengine.browser.fleet-snapshot.v1',policy:{warm_agents:1,spawn_burst_limit:1},
++  agents:[{agent_id:cycleLease.agent_id,role:cycleLease.role,tab_id:cycleLease.tab_id,target_id:cycleLease.target_id,
++    lifecycle_state:'ACTIVE',generation_epoch:1,automatic_retry_allowed:false}]};
++const cycleResponse = body=>({ok:true,status:200,json:async()=>structuredClone(body)});
++const transcript = ['```tool','TOOL_REQUEST_V1','request_id=retire:inert-cycle','action=CAPTURE',
++  `tab_id=${cycleLease.tab_id}`,'payload_json={}','```'].join('\n');
++
++for(const [name,ackMode,statusState,statusGeneration,expectedRetired] of [
++  ['confirmed same-generation result','ACK','RESULT_READY',1,true],
++  ['status remains running','ACK','RUNNING',1,false],
++  ['changed lease generation','ACK','RESULT_READY',2,false],
++  ['lost ACK confirmed by exact status','LOST_ACK','RESULT_READY',1,true],
++])test(`real cycle frees only local settled lease after ${name}`,async()=>{
++  const calls={status:0,completion:0,issued:0};
++  const cycle=new DevOsNativeTaskCycle({
++    getState:async()=>({fleet:cycleFleet}),
++    executeCommand:async command=>{
++      if(command.action==='FLEET_RECONCILE')return cycleFleet;
++      if(command.action==='CAPTURE')return {url,tab_id:cycleLease.tab_id,semantic_targets:[]};
++      if(command.action==='READ_TRANSCRIPT')return {text:transcript,total_chars:transcript.length,
++        has_more:false,census_truncated:false};
++      throw Error('unexpected inert command '+command.action);
++    },
++    signedRequest:async(route,options={})=>{
++      if(route==='/v1/devos/cycle')return cycleResponse({schema:'metaengine.devos.browser-cycle.v1',
++        backlog:{ready:0,running:1},running:[cycleLease]});
++      if(route==='/v1/devos/complete'){
++        calls.completion++;
++        if(ackMode==='LOST_ACK')throw Error('inert lost completion ACK');
++        return cycleResponse({state:'RESULT_READY'});
++      }
++      if(route.endsWith('/status')){calls.status++;return cycleResponse({state:statusState,lease_generation:statusGeneration});}
++      if(route==='/v1/commands/issue-tool'){calls.issued++;throw Error('tool issue cannot run without project custody');}
++      throw Error('unexpected signed fixture '+route);
++    },
++  });
++  const result=await cycle.cycle();
++  assert.equal(result.result_ready.state,'RESULT_READY');
++  assert.equal(calls.completion,1);
++  assert.equal(calls.status,1);
++  assert.equal(calls.issued,0);
++  assert.equal(cycle.snapshot().agent_toolbelt.lease_count,expectedRetired?0:1);
++  assert.equal(cycle.snapshot().agent_toolbelt.served_result_count,1,
++    'bounded next-task result ring is retained after lease-local retirement');
++});
+diff --git a/apps/metaengine-browser/test/agent-toolbelt-retirement-composed-integration.test.mjs b/apps/metaengine-browser/test/agent-toolbelt-retirement-composed-integration.test.mjs
+new file mode 100644
+index 0000000..5953fb8
+--- /dev/null
++++ b/apps/metaengine-browser/test/agent-toolbelt-retirement-composed-integration.test.mjs
+@@ -0,0 +1,103 @@
++// Inert production-cycle routing: signed-route responses are fixed local objects.
++// No agent, browser, network, service, real SQL or installed client is started.
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import {createHash} from 'node:crypto';
++import {DevOsNativeTaskCycle} from '../src/devos-native-task-cycle-core.mjs';
++
++const sha=s=>createHash('sha256').update(s).digest('hex');
++const chat='https://chatgpt.com/c/12345678-abcd-4abc-8abc-123456789abc';
++const lease=Object.freeze({task_id:'66666666-6666-4666-8666-666666666666',lease_generation:1,
++ agent_id:'agent_composed-retirement-00001',role:'IMPLEMENTER',tab_id:'tab_123e4567-e89b-42d3-a456-426614174222',
++ target_id:'webcontents:9',base_sha:'a'.repeat(40),agent_generation_epoch:1,automatic_retry_allowed:false,
++ task_spec:{objective:'Inert completion readback',constraints:[],deliverable:'fixture'},conversation_url_sha256:sha(chat)});
++const fleet={schema:'metaengine.browser.fleet-snapshot.v1',policy:{warm_agents:1,spawn_burst_limit:1},
++ agents:[{agent_id:lease.agent_id,role:lease.role,tab_id:lease.tab_id,target_id:lease.target_id,
++ lifecycle_state:'ACTIVE',generation_epoch:1,automatic_retry_allowed:false}]};
++const response=body=>({ok:true,status:200,json:async()=>structuredClone(body)});
++const transcript=['```tool','TOOL_REQUEST_V1','request_id=composed:unknown','action=CAPTURE',`tab_id=${lease.tab_id}`,'payload_json={}','```'].join('\n');
++function makeCycle({budgetState='UNKNOWN',ackLost=false,status='RESULT_READY',generation=1}={}) {
++ const calls={complete:0,status:0,issue:0,budget:0,custody:0};
++ const runtime={
++  prepareLease:async()=>null,contextForLease:()=>'',continueConversation:async()=>null,waitForChildren:async()=>({waiting:false,children:[],pending_message_seqs:[]}),
++  recordActivity:async()=>({recorded:true}),
++  readToolCustodyForCompletion:async current=>{
++   calls.custody++;return {schema:'metaengine.project.tool-custody-completion-read.v1',
++    task_id:current.task_id,agent_id:current.agent_id,lease_generation:current.lease_generation,
++    state:budgetState==='UNKNOWN'?'PENDING':'CLEAR',authority_effect:false,automatic_retry_allowed:false};
++  },
++  serveToolRequests:async()=>[],beginToolBudgetRequest:async(_lease,request)=>{calls.budget++;return budgetState==='RESOLVED'
++   ?{state:'RESOLVED',result:{request_id:request.request_id,action:request.action,status:'COMPLETED',summary:'already durable',command_id:null}}
++   :{state:budgetState};},
++  undeliveredToolResults:async()=>[],
++ };
++ const cycle=new DevOsNativeTaskCycle({getState:async()=>({fleet}),
++  executeCommand:async command=>{
++   if(command.action==='FLEET_RECONCILE')return fleet;
++   if(command.action==='CAPTURE')return{url:chat,tab_id:lease.tab_id,semantic_targets:[]};
++   if(command.action==='READ_TRANSCRIPT')return{text:transcript,total_chars:transcript.length,has_more:false,census_truncated:false};
++   throw Error('unexpected source-only command:'+command.action);
++  },
++  signedRequest:async(route,opts={})=>{
++   if(route==='/v1/devos/cycle')return response({schema:'metaengine.devos.browser-cycle.v1',backlog:{ready:0,running:1},running:[lease]});
++   if(route==='/v1/devos/complete') {calls.complete++;if(ackLost)throw Error('lost completion ACK');return response({state:'RESULT_READY'});}
++   if(route.endsWith('/status')){calls.status++;return response({state:status,lease_generation:generation});}
++   if(route==='/v1/commands/issue-tool'){calls.issue++;throw Error('tool issue must not be attempted');}
++   throw Error('unexpected signed route:'+route);
++  },
++ });
++ cycle.bindProjectRuntime(runtime);
++ return {cycle,calls};
++}
++
++// Red against #1459: the UNKNOWN budget result is rendered UNAVAILABLE and
++// pendingCount remains 0; old task-cycle can then complete as RESULT_READY.
++test('UNKNOWN original durable budget readback stops task completion, including a reconstructed task-cycle',async()=>{
++ for(let restart=0;restart<2;restart++){
++  const {cycle,calls}=makeCycle({budgetState:'UNKNOWN'});
++  const value=await cycle.cycle();
++  assert.equal(value.result_ready.state,'TOOL_EFFECT_READBACK_REQUIRED');
++  assert.equal(calls.complete,0);
++  assert.equal(calls.issue,0);
++  assert.equal(cycle.snapshot().agent_toolbelt.lease_count,1);
++  assert.equal(calls.budget,1,'one exact original custody read per reconstruction');
++ }
++});
++
++test('completion ACK uncertainty plus stale generation or UNKNOWN status retains local lease and does not replay',async()=>{
++ for(const [status,generation] of [['RESULT_READY',2],['AMBIGUOUS',1],['UNKNOWN',1]]){
++  const {cycle,calls}=makeCycle({budgetState:'RESOLVED',ackLost:true,status,generation});
++  if(status==='AMBIGUOUS'){
++   const outcome=await cycle.cycle();
++   assert.equal(outcome.result_ready.state,'AMBIGUOUS');
++  } else await assert.rejects(()=>cycle.cycle(),/devos_completion_(?:status_generation_mismatch|transport_ambiguous)/);
++  assert.equal(calls.complete,1,'never retry POST /complete');
++  assert.equal(calls.status,1,'read only exact current status once');
++  assert.equal(calls.issue,0);
++  assert.equal(cycle.snapshot().agent_toolbelt.lease_count,1);
++ }
++});
++
++test('successful ACK followed by UNKNOWN status keeps fully settled cache; exact later ACK can retire',async()=>{
++ const uncertain=makeCycle({budgetState:'RESOLVED',status:'UNKNOWN'});
++ const first=await uncertain.cycle.cycle();
++ assert.equal(first.result_ready.state,'RESULT_READY');
++ assert.equal(uncertain.calls.complete,1);assert.equal(uncertain.calls.status,1);
++ assert.equal(uncertain.cycle.snapshot().agent_toolbelt.lease_count,1);
++ const confirmed=makeCycle({budgetState:'RESOLVED',status:'RESULT_READY'});
++ const second=await confirmed.cycle.cycle();
++ assert.equal(second.result_ready.state,'RESULT_READY');
++ assert.equal(confirmed.calls.complete,1);assert.equal(confirmed.calls.status,1);
++ assert.equal(confirmed.cycle.snapshot().agent_toolbelt.lease_count,0);
++});
++
++
++test('trusted completion after restart checks original journal even when Toolbelt cache is empty',async()=>{
++ const {cycle,calls}=makeCycle({budgetState:'UNKNOWN'});
++ const result=await cycle.completeFromTrustedCommand({...lease,state:'RESULT_READY',summary:{}});
++ assert.equal(result.state,'TOOL_EFFECT_READBACK_REQUIRED');
++ assert.equal(result.custody_state,'PENDING');
++ assert.equal(calls.custody,1);
++ assert.equal(calls.complete,0,'no completion write is sent before durable clearance');
++ assert.equal(calls.issue,0,'readback cannot create tool command');
++});
+diff --git a/apps/metaengine-browser/test/agent-toolbelt-retirement-runtime-readback.test.mjs b/apps/metaengine-browser/test/agent-toolbelt-retirement-runtime-readback.test.mjs
+new file mode 100644
+index 0000000..8be35cd
+--- /dev/null
++++ b/apps/metaengine-browser/test/agent-toolbelt-retirement-runtime-readback.test.mjs
+@@ -0,0 +1,53 @@
++// Native project runtime read-only consumer of the original durable journal.
++// No SQL engine, disk database, socket, browser or live agent is created.
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import {AutonomousProjectTaskRuntime} from '../src/autonomous-project-task-runtime.mjs';
++const lease={task_id:'88888888-8888-4888-8888-888888888888',agent_id:'agent_custody-readback-0001',lease_generation:3};
++const gate=()=>{let release;const promise=new Promise(resolve=>release=resolve);return{promise,release};};
++
++function makeRuntime(journal) {
++ return new AutonomousProjectTaskRuntime({
++  request:async()=>assert.fail('no project network effect'),
++  journal:{find:async()=>null,begin:async()=>assert.fail('no mutation'),confirm:async()=>assert.fail('no mutation'),...journal},
++  materializeProject:async()=>assert.fail('no project materialization'),
++ });
++}
++test('original pending journal readback is typed, bound and JSON-serializable without issuing any effect',async()=>{
++ let reads=0;
++ const runtime=makeRuntime({hasPendingTaskEffect:async current=>{reads++;assert.equal(current.task_id,lease.task_id);return true;}});
++ try{
++  const pending=await runtime.readToolCustodyForCompletion(lease);
++  assert.deepEqual(JSON.parse(JSON.stringify(pending)),pending);
++  assert.deepEqual(pending,{schema:'metaengine.project.tool-custody-completion-read.v1',
++   task_id:lease.task_id,agent_id:lease.agent_id,lease_generation:lease.lease_generation,
++   state:'PENDING',authority_effect:false,scheduler_authority:false,second_scheduler_loop:false,automatic_retry_allowed:false});
++  assert.equal(reads,1);
++ }finally{await runtime.close();}
++});
++
++test('missing, malformed or failed journal custody readback never claims CLEAR',async()=>{
++ for(const value of [undefined,null,0,'false']){
++  const runtime=makeRuntime({hasPendingTaskEffect:async()=>value});
++  try{await assert.rejects(()=>runtime.readToolCustodyForCompletion(lease),/tool_custody_readback_invalid/);}
++  finally{await runtime.close();}
++ }
++ const missing=makeRuntime({});
++ try{await assert.rejects(()=>missing.readToolCustodyForCompletion(lease),/tool_custody_readback_required/);}
++ finally{await missing.close();}
++});
++
++test('project runtime close joins in-flight original readback before closing its journal',async()=>{
++ const blocked=gate();let reads=0,closes=0;
++ const runtime=makeRuntime({hasPendingTaskEffect:async()=>{reads++;await blocked.promise;return false;},close:async()=>{closes++;}});
++ const reading=runtime.readToolCustodyForCompletion(lease);
++ await new Promise(resolve=>setImmediate(resolve));
++ assert.equal(reads,1);
++ const closing=runtime.close();let completed=false;closing.then(()=>{completed=true;});
++ await new Promise(resolve=>setImmediate(resolve));
++ try{assert.equal(completed,false);assert.equal(closes,0);}
++ finally{blocked.release();}
++ const result=await reading;await closing;
++ assert.equal(result.state,'CLEAR');assert.equal(closes,1);
++ await assert.rejects(()=>runtime.readToolCustodyForCompletion(lease),/autonomous_project_closed/);
++});
