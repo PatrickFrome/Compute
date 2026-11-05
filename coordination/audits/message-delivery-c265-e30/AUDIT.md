@@ -24,14 +24,16 @@
 
 **D2 — pending notification displaced by full tool-results page.** `DevOsNativeTaskCycle` sent eight tool results and appended a synthetic `project:messages:pending` ninth row, while the downstream runtime rendered only eight. The recipient could miss the notice despite a genuine pending committed event. Fix: reserve a slot for notification when pending sequences exist: seven tool results + one notification; otherwise retain eight slots. Omitted tool result remains pending for later delivery; no status/ACK becomes authority. Inert page regression: **PASS**.
 
+**D3 — old journal key can replay an already-confirmed send across upgrade/restart.** The original durable turn keyed a nine-row result while the physical prompt included eight; merely changing the key to eight rows leaves an existing, confirmed legacy journal entry under the old key. A resumed runtime did not find the new key and acquired another send for identical bytes. Reproduced with a synthetically seeded valid old-key SQLite journal derived from a genuine confirmed predecessor: **FAIL before compatibility fix**, `actual=DELIVERED`, `expected=ALREADY_DELIVERED`. Narrow fix: when the exact prompt SHA and full binding match a confirmed predecessor, and no older pending conversation turn exists, return the confirmed transcript boundary without a new send. Any binding drift or unknown predecessor remains a HOLD, never auto-authority. Final regression: **PASS**.
+
 **No SQL changes, new schedulers, limit on total agents, approvals, budget-policy changes, new authority or new trust roots.** The bounded page size remains eight physical rows per continuation; this is a message-size cap, not a logical-agent cap.
 
 ## Tests and limits
 
 - **PASS** archive exact SHA256, both independent Git-tree calculations, all 74 executable bits preserved.
-- **FAIL 1 (expected before fix)** D1 red regression on original source; source showed second physical send.
-- **PASS 120 / FAIL 0 / SKIP 0** after patch with Node 22.16.0, six focused suites (Browser runtime, cycle, Edge route, native agent host tool, new delivery page and production chain).
-- **PASS 5 / FAIL 0** clean-archive extraction → `git apply --check` → `git apply` → direct new test suites.
+- **FAIL 2 (expected before respective fixes)**: D1 on untouched source and D3 on the first bounded-key patch; both showed a second physical send before correction.
+- **PASS 121 / FAIL 0 / SKIP 0** after patch with Node 22.16.0, six focused suites (Browser runtime, cycle, Edge route, native agent host tool, new delivery page and production chain).
+- **PASS 121 / FAIL 0 / SKIP 0** independent clean-archive extraction → `git apply --check` → `git apply` → all six focused suites.
 - **PASS** `git diff --check` and `node --check` for modified production/test modules.
 - **NOT RUN** real PostgreSQL 17/SQL migrations, native Windows process, services, installed application, real provider send or physical external delivery ACK. Integration uses real Browser runtime + Edge route modules and disposable local SQLite journal; **RPC is an inert in-memory fixture**, not genuine DB authority. No real-world claims based on it.
 - **NOT RUN** previously declined security checks, local PC/installer/service/network listener, unrelated budget/approval/trust-policy changes.
@@ -41,6 +43,7 @@
 1. Browser send persisted, lost HTTP reply; restart runtime/journal; same request returned original message sequence without duplicate. Recipient history full text read; wrong recipient ACK denied; lost ACK reply + restart returned original ACK event and `processing_verified:false`.
 2. 18 committed messages, pending snapshot only first 16; history paginated in 5s with pinned `through_seq`, with a 19th event arriving after first page and a restart mid-way. All first 18 read once; after ACK first 16, 17/18/19 reappear as pending in order.
 3. Malformed ACK declaring processing verified is rejected; original intent can be safely replayed only with proper readback, without duplicate ACK effect.
+4. Valid legacy nine-row-key predecessor with eight visible rows is never re-sent after restart; exactly one confirmed physical turn remains. A stale/unknown predecessor is not accepted as a new-send permit.
 
 ## Applying patch
 

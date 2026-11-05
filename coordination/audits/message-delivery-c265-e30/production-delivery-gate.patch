@@ -1,5 +1,5 @@
 diff --git a/apps/metaengine-browser/src/autonomous-project-task-runtime.mjs b/apps/metaengine-browser/src/autonomous-project-task-runtime.mjs
-index fa1645e..e98c808 100644
+index fa1645e..49242a1 100644
 --- a/apps/metaengine-browser/src/autonomous-project-task-runtime.mjs
 +++ b/apps/metaengine-browser/src/autonomous-project-task-runtime.mjs
 @@ -288,12 +288,15 @@ export class AutonomousProjectTaskRuntime {
@@ -20,7 +20,21 @@ index fa1645e..e98c808 100644
      const binding = { schema: 'metaengine.devos.project-conversation-turn.v1', project_id: current.snapshot.project_id,
        task_id: lease.task_id, agent_id: lease.agent_id, lease_generation: lease.lease_generation,
        prompt_sha256: digest(prompt), ...flags };
-@@ -323,14 +326,14 @@ export class AutonomousProjectTaskRuntime {
+@@ -320,17 +323,28 @@ export class AutonomousProjectTaskRuntime {
+         || previous.intent.transcript_floor < 0 || previous.receipt.transcript_floor !== previous.intent.transcript_floor)) {
+       return { state: 'AMBIGUOUS', physical_effect_replayed: false, ...flags };
+     }
++    // Old releases digested unseen rows in effectKey but did not render them.
++    // A confirmed predecessor with this exact physical prompt is already sent
++    // even if the corrected bounded-page key differs after an upgrade/restart.
++    if (previous?.intent?.prompt_sha256 === binding.prompt_sha256) {
++      const { transcript_floor: oldFloor, delivered_tool_results, delivery_history_complete,
++        unresolved_tool_effects, ...previousBinding } = previous.intent;
++      if (digest(previousBinding) !== digest(binding)) fail('continuation_binding_drift');
++      if (await this.#journal.hasPendingConversationTurn?.(lease) !== false)
++        return { state: 'AMBIGUOUS', physical_effect_replayed: false, ...flags };
++      return { state: 'ALREADY_DELIVERED', transcript_floor: oldFloor, physical_effect_replayed: false, ...flags };
++    }
      const transcript_floor = await observeTranscriptFloor();
      if (!Number.isSafeInteger(transcript_floor) || transcript_floor < 0) fail('continuation_boundary_invalid');
      const delivered = new Map((previous?.intent?.delivered_tool_results || []).map(row => [row.request_id, row]));
@@ -76,10 +90,10 @@ index ec63c72..92aac48 100644
          ? [...projectResults,{request_id:'project:messages:pending',status:'COMPLETED',summary:JSON.stringify({pending_message_seqs:pendingMessages,
            instruction:'Read these committed events with PROJECT_HISTORY, then acknowledge addressed messages with PROJECT_ACK_MESSAGE.',authority_effect:false})}]
 diff --git a/apps/metaengine-browser/test/autonomous-project-task-runtime.test.mjs b/apps/metaengine-browser/test/autonomous-project-task-runtime.test.mjs
-index 5d35bcf..9af9f3f 100644
+index 5d35bcf..10578fc 100644
 --- a/apps/metaengine-browser/test/autonomous-project-task-runtime.test.mjs
 +++ b/apps/metaengine-browser/test/autonomous-project-task-runtime.test.mjs
-@@ -753,3 +753,21 @@ test('only explicit resolved repair obligations stop waiting on retained RESULT_
+@@ -753,3 +753,57 @@ test('only explicit resolved repair obligations stop waiting on retained RESULT_
   f.provider.update(state=>{state.tasks[1].repair_obligation='RESOLVED';state.tasks[1].state='FAILED';});
   await assert.rejects(f.runtime.waitForChildren(rootTask()),/repair_obligation_invalid/);
  });
@@ -100,6 +114,42 @@ index 5d35bcf..9af9f3f 100644
 +  assert.equal(second.state, 'ALREADY_DELIVERED', 'a hidden ninth result must not change physical effect identity');
 +  assert.equal(sent.length, 1, 'the same rendered prompt must never be sent twice');
 +  assert(!sent[0].includes('unseen-a') && !sent[0].includes('unseen-b'));
++});
++
++test('restart after legacy unbounded-key send never replays the same bounded physical prompt', async t => {
++  const f = await fixture(t);
++  const lease = rootTask();
++  const visible = Array.from({ length: 8 }, (_, i) => ({
++    request_id: `fixture:legacy:visible-${i}`, status: 'COMPLETED', summary: `readback-${i}`,
++  }));
++  const oldNinth = { request_id: 'fixture:legacy:unseen-nine', status: 'COMPLETED', summary: 'hidden' };
++  const boundary = { observeTranscriptFloor: async () => 41 };
++  let physicalSends = 0;
++  const first = await f.runtime.continueConversation(lease, visible, async () => {
++    physicalSends++; return { effect_state: 'PROVEN_COMPOSER_CLEARED' };
++  }, boundary);
++  assert.equal(first.state, 'DELIVERED');
++  const committed = await f.journal.latestConversationTurn(lease);
++  assert(committed?.receipt, 'the fixture predecessor is physically confirmed');
++  // This is the exact previous release's effect-key construction: it digested
++  // the ninth invisible row even though the prompt only contained first eight.
++  const stable = v => Array.isArray(v) ? v.map(stable) : v && typeof v === 'object'
++    ? Object.fromEntries(Object.keys(v).sort().map(k => [k, stable(v[k])])) : v;
++  const oldRows = [...visible, oldNinth].map(row => ({ request_id: row.request_id, status: row.status, summary: row.summary }));
++  const oldDigest = crypto.createHash('sha256').update(JSON.stringify(stable(oldRows))).digest('hex');
++  const legacyKey = `turn:${lease.task_id}:${lease.lease_generation}:${oldDigest}`;
++  assert.notEqual(legacyKey, committed.effect_key);
++  const oldJournal = f.own(createAutonomousProjectJournal({ filePath: path.join(f.root, 'legacy.sqlite') }));
++  const begun = await oldJournal.begin(legacyKey, committed.intent, { previous_turn_key: null });
++  assert.equal(begun.created, true);
++  await oldJournal.confirm(legacyKey, committed.receipt);
++  const restarted = f.own(new AutonomousProjectTaskRuntime({ journal: oldJournal,
++    request: input => f.provider.request(input), materializeProject: async () => ({ state: 'NOT_REQUIRED' }) }));
++  const replay = await restarted.continueConversation(lease, [...visible, oldNinth], async () => {
++    physicalSends++; return { effect_state: 'PROVEN_COMPOSER_CLEARED' };
++  }, boundary);
++  assert.equal(replay.state, 'ALREADY_DELIVERED');
++  assert.equal(physicalSends, 1, 'restart with an old journal must never send identical bytes twice');
 +});
 diff --git a/apps/metaengine-browser/test/project-message-delivery-page.test.mjs b/apps/metaengine-browser/test/project-message-delivery-page.test.mjs
 new file mode 100644
