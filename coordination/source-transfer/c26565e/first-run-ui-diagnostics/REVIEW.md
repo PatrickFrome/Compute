@@ -1,26 +1,42 @@
-# METAENGINE: first-run UI diagnostics, historical c265 + e30
+# METAENGINE — first-run diagnostics on verified historical c265+e30
 
-**Status: DRAFT, SOURCE-ONLY, NOT QUALIFIED FOR INTEGRATION.**
+**SOURCE-ONLY PATCH VERIFIED ON EXACT ISOLATED SOURCE. Draft PR #1448; no merge, no Windows qualification.**
+Date: 2026-11-05. Repo: PatrickFrome/Compute.
 
-## Provenance (not the latest version)
-- GitHub-only source-transfer commit: `accb28e72c87c059e780efb8e6681886b33e9b4f` on `work/source-transfer-c26565e-20261103`.
-- Manifest: `coordination/source-transfer/c26565e/README.txt`; parts 7,200,000 + 7,200,000 + 1,657,953 bytes (16,057,953).
-- Manifest **claims**, not independently verified: archive SHA256 `4200e492828dbb857aaa737a7ce56d0aeda3c97c84f7743b1501ef2f229d3636`, source revision `c26565e58ab92dcbcda9663c4d231bdf4a9a7ee6`, tree `2dbe253e97379532f6f4b52ef7edf26109a9266d`.
-- Integration patch commit `d53ccd4135f28206d91d6804cf0626095565e6af`; patch blob `79d40bf024a6553656b86fb1a29c1313dd458a0e`. Target tree `90fa5633d7926dd71a7303266073e0625325e740` **not independently verified**.
+## Historical baseline verification (not latest version)
 
-## Findings
-The e30 patch context shows that B's `native-coding-initial-setup-panel.mjs` directly appends `errorText` and invokes `statusText()` on both readbacks. This is a display boundary for diagnostic text; an actual leak from backend to renderer is **not proven**, because source archive binary parts could not be materialized to inspect upstream assignments. No confirmed false READY was observed in the accessible e30 hunks.
+- GitHub c265 archive: `accb28e72c87c059e780efb8e6681886b33e9b4f` (`coordination/source-transfer/c26565e`), followed by `integrated-c265-to-e30.patch` from `d53ccd4135f28206d91d6804cf0626095565e6af`.
+- Source ZIP from user-authorized Space: `METAENGINE-e30-github-only-source.zip`, SHA256 **PASS**: `169f4dc6379605d68d34360c9d28d687b4da3dc856aea6fc1fb27e6bc6d3ba06`.
+- Safe extraction: **4346 files, 74 executable modes (100755) preserved**, no extracted path traversal.
+- Independently recomputed Git tree **PASS**: `90fa5633d7926dd71a7303266073e0625325e740`.
+- Source-only candidate unified patch SHA256 **`b28528a1dc057f1bcf8ec9c83ad467eb54128c10e452a6303675963dffc63a7d`**; 11 paths, +650/-69. Patched Git tree independently verified in a second disposable checkout: `9d5f18ff5d65a76fc7846a8bfd69aef66d061d4c`.
+- The previously published candidate (SHA256 `c07deeaac950fdb11989fb68367dbc6607087a1ed27db2b3e086841a67dda978`) did apply and its 32 inert tests passed, but only addressed an auxiliary browser DOM B-panel. The verified consolidated patch additionally fixes the **actually mounted React UI**. The prior review's "not independently verified" finding is superseded.
 
-The e30 patch already distinguishes account `PRODUCER_UNAVAILABLE` from observed `AUTHENTICATION_REQUIRED` and prohibits confirmation without a true observed account. Existing e30 test hunks cover no provider/BEGIN on account drift, preparation failure, and HOLD/AMBIGUOUS. Those test hunks have **not** been run against the full historical source.
+## Reproducible first-run UI defects
 
-Actual installed `apps/me2-ui` package, Guardian and PostgreSQL components were **not** inspectable from the available text patch. Do not call them verified.
+Production renderer composition: `apps/me2-ui/src/components/me2/pages/system.tsx` -> `NativeInitialSetup` -> `apps/me2-ui/src/lib/native-initial-setup-resource.mjs` -> installed preload `window.metaengineClient.nativeInitialSetup` typed IPC -> Main. Defects reproduced with **9 initially failing red tests**:
 
-## Source-only mitigation
-The attached candidate patch (SHA256 `c07deeaac950fdb11989fb68367dbc6607087a1ed27db2b3e086841a67dda978`) adds a display-only allowlist formatter, pure inert Node tests, and narrow B-panel error/readback rendering changes. Unknown errors do not echo raw stderr, credentials, private paths or evidence; HOLD/AMBIGUOUS/COMPLETED cannot become READY; missing account producer does not suggest login as repair. Native authority logic is unchanged.
+1. UI rejected genuine `PRODUCER_UNAVAILABLE` from Codex account facts as malformed, losing an actionable missing-producer diagnosis.
+2. `goalSubmissionMode.kind=NATIVE_CODING` with `state=HOLD` falsely appeared ready.
+3. `local_runtime_ready=true` without attested own `LOCAL_POSTGRES` falsely unblocked setup.
+4. Stale positive status persisted after failed refresh or unmount/navigation.
+5. Confirmation/BEGIN could be repeated after an ACK, lost reply or pending cancellation without a fresh authoritative readback.
+6. Renderer let the user type an `account_id` that is not an account observation from Main.
+7. Unknown readback codes were not always fail-closed, and the auxiliary B DOM panel echoed complete readback JSON.
 
-Tests: **32 PASS, 0 FAIL** under `node --test`; Node syntax check PASS; `git apply --check` PASS **only** on a synthetic context fixture derived from e30 hunks, not on the complete source tree. Actual archive SHA, integrated tree, full build, installed UI/browser, Windows, services, PostgreSQL and ACL: **NOT VERIFIED / NOT RUN**.
+The patch adds strict code/readback allowlists; local ownPG, Guardian, HOLD and setup gate; independent readback-before-retry; single CANCEL sender; explicit user-facing missing-producer vs signed-out advice; no raw stderr, paths, credentials, private evidence or synthetic authority. `COMPLETED` never implies `READY`. Backend/authority checks are not relaxed.
 
-## Next gate
-Materialize approved GitHub archive parts; compare concatenated SHA256 and Git tree, apply e30 exactly, verify tree 90fa..., then apply candidate patch, run actual `apps/me2-ui` build/browser tests with no user data, and review status-code ownership and recovery advice. Do not relax HOLD, substitute ACK/boolean for authority, launch real services/installers, or merge this draft until qualified. The repository branch contains review artifacts only, not a modified installed source tree.
+## Tests and honest limits
 
-**No merge, no client installation, no signing, no model/API billing, no cloud or GLM.**
+- Before patch: new regressions **9 FAIL / 0 PASS**. After patch, source-only available suite **249 PASS / 0 FAIL** across 13 specified Node suite files (see independent local evidence).
+- Separate complete-patch replay in isolated baseline: `git apply --check` **PASS**, `git apply` **PASS**, patched tree exact match `9d5f18ff...`, **89 PASS / 0 FAIL**.
+- TSX structural transpilation via TypeScript 5.8.3: **PASS**, 0 syntax diagnostics. This is not a typecheck.
+- `npm run build --prefix apps/me2-ui`: **FAIL, exit 127**, because Next.js is absent from the source-only executor (`next: not found`). No dependency installation performed.
+- `apps/me2-ui/src/lib/interrupted-setup-recovery.ui.test.mjs`: **BLOCKED**, missing `react` and `react-dom`; explicitly excluded from the 249 PASS count.
+- Real browser/screenshots, installed Windows application, Guardian service, PostgreSQL, ACL, models/API billing: **NOT RUN**.
+
+## How to apply and qualify
+
+The full consolidated **verified patch** is in `first-run-ui-c265-e30-verified.patch.xz.b64` as base64(xz(unified diff)); see `HOW_TO_INSPECT.txt` for safe offline decoding. Verify patch SHA and baseline tree before `git apply --check`. The branch is a GitHub review-and-patch artefact only: it does not contain modified installed application source, because the c265/e30 tree is an orphan snapshot not present as regular files on the target branch. Do not merge this PR or install from it without fresh Next build, browser qualification, and an independently authorized Windows test.
+
+**No native service, actual DB, installed client, secrets, credentials, model/API calls, publishing a website, release signing, or merge performed.**
