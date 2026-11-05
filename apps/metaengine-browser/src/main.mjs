@@ -50,6 +50,7 @@ import { SupervisorDeviceIdentity } from './supervisor-device-identity.mjs';
 import { navigationDecision, newWindowDecision, REMOTE_WEB_PREFERENCES, SECURITY_POLICY } from './browser-policy.mjs';
 import { TabRegistry } from './tab-registry.mjs';
 import { reconcileDestroyedTabView } from './tab-view-lifecycle.mjs';
+import { createAttachedTabView } from './tab-creation-lifecycle.mjs';
 import { assertReloadAllowed, initiateSelectedTabReload } from './reload-auth-redirect-gate.mjs';
 import { ExactBrowserTabViewMap, resolveExactWebContentsTabBinding } from './browser-webcontents-tab-index.mjs';
 import {
@@ -1701,12 +1702,14 @@ async function createTabWithRecoveryAdmission(input = AGENT_PLATFORM_HOME_URL, {
   if (!userSession) configureUserSession();
   const d = navigationDecision(input);
   if (!d.allow) throw new Error(`navigation_blocked:${d.reason}`);
-  const tab = registry.create({ url: d.normalized_url, kind: d.kind, role, title: d.kind === 'GLM_CHAT' ? 'Z.ai' : (d.kind === 'CHATGPT' ? 'ChatGPT' : ''), created_by_continuity_id });
-  const view = new WebContentsView({ webPreferences: { ...REMOTE_WEB_PREFERENCES, session: userSession } });
-  views.set(tab.tab_id, view);
-  wireRemoteView(tab, view);
-  if (select) registry.select(tab.tab_id);
-  attachSelected();
+  const { tab, view } = createAttachedTabView({
+    registry, views,
+    tabOptions: { url: d.normalized_url, kind: d.kind, role, title: d.kind === 'GLM_CHAT' ? 'Z.ai' : (d.kind === 'CHATGPT' ? 'ChatGPT' : ''), created_by_continuity_id },
+    createView: () => new WebContentsView({ webPreferences: { ...REMOTE_WEB_PREFERENCES, session: userSession } }),
+    wireView: wireRemoteView,
+    select, attachSelected,
+    detachView: createdView => windowRef?.contentView.removeChildView(createdView),
+  });
   let navigation = null;
   if (load) {
     const pendingLoad = boundedNavigation(view.webContents, d.normalized_url);
