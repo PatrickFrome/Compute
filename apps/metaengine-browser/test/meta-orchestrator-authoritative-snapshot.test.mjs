@@ -169,7 +169,15 @@ test('reconcile consumes the sanitized snapshot and converges only on verified r
     roadmapAuthority,
     plan,
     observedPlanGeneration: 3,
-    tasks: [task()],
+    tasks: [task(), task({
+      task_id: '11111111-1111-4111-8111-111111111111',
+      point_id: 'devos_ide_v1.critic',
+      role: 'CRITIC',
+      task_spec: {
+        ...task().task_spec,
+        meta_orchestrator: { ...task().task_spec.meta_orchestrator, parent_point_id: 'devos_ide_v1' },
+      },
+    })],
     roadmapReceipts: [receipt()],
     capacity: { source: 'DEVOS_SCHEDULER_SNAPSHOT', available_slots: 1 },
   });
