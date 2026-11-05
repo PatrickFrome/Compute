@@ -1,0 +1,426 @@
+diff --git a/apps/metaengine-browser/src/meta-orchestrator-authoritative-snapshot.mjs b/apps/metaengine-browser/src/meta-orchestrator-authoritative-snapshot.mjs
+index a56f6e1..edbcdb7 100644
+--- a/apps/metaengine-browser/src/meta-orchestrator-authoritative-snapshot.mjs
++++ b/apps/metaengine-browser/src/meta-orchestrator-authoritative-snapshot.mjs
+@@ -1,4 +1,4 @@
+-import { reconcileMetaOrchestrator } from './meta-orchestrator-core.mjs';
++import { reconcileContinuousMetaOrchestrator } from './meta-orchestrator-continuous-reconcile.mjs';
+ 
+ const SHA40_RE = /^[a-f0-9]{40}$/;
+ const POINT_RE = /^[a-z0-9][a-z0-9._:-]{2,191}$/;
+@@ -192,6 +192,14 @@ export function buildMetaAuthoritativeSnapshot({
+     throw new Error('meta_snapshot_capacity_source_invalid');
+   }
+   const safeAvailableSlots = capacitySource === 'UNSPECIFIED_FAIL_CLOSED' ? 0 : availableSlots;
++  // Both published SQL authoritative-inputs producers use LIMIT 512, with
++  // no authoritative exhaustion/cursor proof. A full window may hide an
++  // unresolved descendant. Never infer completeness from that window.
++  // This is a source-read gate, not an agent, spawn or command budget.
++  if (!Array.isArray(tasks) || tasks.length >= 512
++      || !Array.isArray(roadmapReceipts) || roadmapReceipts.length >= 512) {
++    throw new Error('meta_snapshot_authoritative_window_incomplete');
++  }
+   const taskRows = projectDevosTasksForMetaPlan(tasks, { plan });
+   const evidenceRows = projectVerifiedRoadmapReceipts(roadmapReceipts, { plan });
+ 
+@@ -225,7 +233,7 @@ export function buildMetaAuthoritativeSnapshot({
+ export function reconcileMetaAuthoritativeSnapshot({ plan, snapshot, leader = {}, policy = {} } = {}) {
+   object(snapshot, 'authoritative_snapshot');
+   if (snapshot.schema !== 'metaengine.meta-orchestrator.authoritative-snapshot.v1') throw new Error('meta_snapshot_schema_invalid');
+-  return reconcileMetaOrchestrator({
++  return reconcileContinuousMetaOrchestrator({
+     plan,
+     observed_alignment_epoch: snapshot.observed_alignment_epoch,
+     observed_plan_generation: snapshot.observed_plan_generation,
+diff --git a/apps/metaengine-browser/src/meta-orchestrator-continuous-reconcile.mjs b/apps/metaengine-browser/src/meta-orchestrator-continuous-reconcile.mjs
+index 8767349..baedb23 100644
+--- a/apps/metaengine-browser/src/meta-orchestrator-continuous-reconcile.mjs
++++ b/apps/metaengine-browser/src/meta-orchestrator-continuous-reconcile.mjs
+@@ -124,7 +124,33 @@ function safetyState(plan, tasks) {
+     if (missing.length) missingGroups.push({ node, missing, kind: 'SAFETY_REPAIR' });
+   }
+ 
+-  return { missingGroups, active, ambiguous, failed };
++  // These are source-projected, plan-bound observations only; they do not
++  // assign work or grant authority. An observed descendant outside the fixed
++  // verifier set can still have an unresolved effect. Do not infer that a newer
++  // COMPLETED lease resolves an older AMBIGUOUS/failed child incarnation.
++  const planPoints = new Set((plan.nodes || []).map(node => String(node.point_id).toLowerCase()));
++  for (const task of Array.isArray(tasks) ? tasks : []) {
++    const pointId = String(task?.point_id || '').toLowerCase();
++    const parentPoint = String(task?.parent_plan_point || '').toLowerCase();
++    const isParent = planPoints.has(pointId);
++    const isChild = planPoints.has(parentPoint) && pointId !== parentPoint
++      && pointId.startsWith(`${parentPoint}.`);
++    if (!isParent && !isChild) continue;
++    const state = String(task?.state || 'UNKNOWN').toUpperCase();
++    const row = { parent_point_id: isChild ? parentPoint : pointId, point_id: pointId, state };
++    if (state === 'AMBIGUOUS') ambiguous.push(row);
++    else if (isChild && (FAILED_TASK_STATES.has(state) || state === 'UNKNOWN'
++      || (!ACTIVE_TASK_STATES.has(state) && state !== 'COMPLETED'))) failed.push(row);
++    else if (isChild && ACTIVE_TASK_STATES.has(state)) active.push(row);
++  }
++  // Prefer unresolved effect ambiguity over a newer completion observation;
++  // then failure/cancellation over active states. One action per semantic point.
++  const pending = new Map();
++  for (const [kind, rows] of [['active', active], ['failed', failed], ['ambiguous', ambiguous]]) {
++    for (const row of rows) pending.set(row.point_id, { kind, row });
++  }
++  const unique = (kind) => [...pending.values()].filter(value => value.kind === kind).map(value => value.row);
++  return { missingGroups, active: unique('active'), ambiguous: unique('ambiguous'), failed: unique('failed') };
+ }
+ 
+ function newFrontierGroups(plan, tasks, byPoint) {
+@@ -241,7 +267,7 @@ export function reconcileContinuousMetaOrchestrator(args = {}) {
+ 
+   // Authority/generation/evidence/ambiguity fences and the R86 post-result
+   // verification/acceptance sequencing from the base reconcile always win.
+-  if (['FENCED', 'STALE', 'RECONCILING', 'VERIFYING', 'ACCEPTANCE_PENDING'].includes(base.state)) return base;
++  if (['FENCED', 'STALE', 'RECONCILING'].includes(base.state)) return base;
+ 
+   const plan = args.plan;
+   const tasks = Array.isArray(args.tasks) ? args.tasks : [];
+@@ -298,6 +324,10 @@ export function reconcileContinuousMetaOrchestrator(args = {}) {
+     return result;
+   }
+ 
++  // Preserve R86 post-result verification and acceptance sequencing, but
++  // do not allow those actions to mask unresolved observed child effects.
++  if (['VERIFYING', 'ACCEPTANCE_PENDING'].includes(base.state)) return base;
++
+   const repairGroups = safety.missingGroups.map((group) => repairGroupToProposals(group, plan));
+   const selected = selectAtomicGroups(base, [...repairGroups, ...eligibleGroups], args.capacity || {}, args.policy || {});
+   if (selected) {
+diff --git a/apps/metaengine-browser/src/meta-orchestrator-privileged-adapter.mjs b/apps/metaengine-browser/src/meta-orchestrator-privileged-adapter.mjs
+index 38a525c..3dbd64d 100644
+--- a/apps/metaengine-browser/src/meta-orchestrator-privileged-adapter.mjs
++++ b/apps/metaengine-browser/src/meta-orchestrator-privileged-adapter.mjs
+@@ -1,7 +1,5 @@
+-import {
+-  assertZeroAuthorityMetaOutput,
+-  reconcileMetaOrchestrator,
+-} from './meta-orchestrator-core.mjs';
++import { assertZeroAuthorityMetaOutput } from './meta-orchestrator-core.mjs';
++import { reconcileContinuousMetaOrchestrator } from './meta-orchestrator-continuous-reconcile.mjs';
+ import {
+   buildMetaAuthoritativeSnapshot,
+   projectMetaRoadmapAuthority,
+@@ -200,7 +198,7 @@ export class MetaOrchestratorPrivilegedAdapter {
+ 
+   async reconcile({ workspace_id, roadmap_id, leader = {}, policy = {}, worker_observer = null } = {}) {
+     const bundle = await this.readAuthoritativeBundle({ workspace_id, roadmap_id, worker_observer });
+-    return reconcileMetaOrchestrator({
++    return reconcileContinuousMetaOrchestrator({
+       plan: bundle.plan,
+       observed_alignment_epoch: bundle.snapshot.observed_alignment_epoch,
+       observed_plan_generation: bundle.snapshot.observed_plan_generation,
+diff --git a/apps/metaengine-browser/test/meta-orchestrator-authoritative-snapshot.test.mjs b/apps/metaengine-browser/test/meta-orchestrator-authoritative-snapshot.test.mjs
+index efb97d5..f6423f0 100644
+--- a/apps/metaengine-browser/test/meta-orchestrator-authoritative-snapshot.test.mjs
++++ b/apps/metaengine-browser/test/meta-orchestrator-authoritative-snapshot.test.mjs
+@@ -169,7 +169,18 @@ test('reconcile consumes the sanitized snapshot and converges only on verified r
+     roadmapAuthority,
+     plan,
+     observedPlanGeneration: 3,
+-    tasks: [task()],
++    tasks: [task(), task({
++      task_id: '11111111-1111-4111-8111-111111111111',
++      point_id: 'devos_ide_v1.critic',
++      role: 'CRITIC',
++      task_spec: {
++        ...task().task_spec,
++        meta_orchestrator: {
++          ...task().task_spec.meta_orchestrator,
++          parent_point_id: 'devos_ide_v1',
++        },
++      },
++    })],
+     roadmapReceipts: [receipt()],
+     capacity: { source: 'DEVOS_SCHEDULER_SNAPSHOT', available_slots: 1 },
+   });
+@@ -184,7 +195,18 @@ test('reconcile consumes the sanitized snapshot and converges only on verified r
+     roadmapAuthority,
+     plan,
+     observedPlanGeneration: 3,
+-    tasks: [task()],
++    tasks: [task(), task({
++      task_id: '11111111-1111-4111-8111-111111111111',
++      point_id: 'devos_ide_v1.critic',
++      role: 'CRITIC',
++      task_spec: {
++        ...task().task_spec,
++        meta_orchestrator: {
++          ...task().task_spec.meta_orchestrator,
++          parent_point_id: 'devos_ide_v1',
++        },
++      },
++    })],
+     roadmapReceipts: [receipt({ status: 'PASS' })],
+     capacity: { source: 'DEVOS_SCHEDULER_SNAPSHOT', available_slots: 1 },
+   });
+diff --git a/apps/metaengine-browser/test/meta-orchestrator-continuous-reconcile.test.mjs b/apps/metaengine-browser/test/meta-orchestrator-continuous-reconcile.test.mjs
+index c92aeb9..c43f8e4 100644
+--- a/apps/metaengine-browser/test/meta-orchestrator-continuous-reconcile.test.mjs
++++ b/apps/metaengine-browser/test/meta-orchestrator-continuous-reconcile.test.mjs
+@@ -128,8 +128,8 @@ test('ambiguous safety companion requests readback and never retry',()=>{
+     {point_id:'meta.core.critic',state:'AMBIGUOUS',lease_generation:1},
+   ];
+   const r=run(p,{tasks});
+-  assert.equal(r.state,'VERIFYING');
+-  assert.equal(r.reason,'RESULT_READY_REQUIRES_INDEPENDENT_VERIFICATION');
++  assert.equal(r.state,'RECONCILING');
++  assert.equal(r.reason,'SAFETY_COMPANION_AMBIGUOUS');
+   assert.equal(r.actions[0].type,'REQUEST_RECONCILIATION');
+   assert.equal(r.actions[0].automatic_retry_allowed,false);
+   assert.equal(r.actions.some((row)=>String(row.type).includes('RETRY')),false);
+diff --git a/apps/metaengine-browser/test/meta-orchestrator-parent-child-exact-tree.test.mjs b/apps/metaengine-browser/test/meta-orchestrator-parent-child-exact-tree.test.mjs
+new file mode 100644
+index 0000000..0ca1c90
+--- /dev/null
++++ b/apps/metaengine-browser/test/meta-orchestrator-parent-child-exact-tree.test.mjs
+@@ -0,0 +1,223 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import { compileMetaPlan, assertZeroAuthorityMetaOutput } from '../src/meta-orchestrator-core.mjs';
++import { reconcileContinuousMetaOrchestrator } from '../src/meta-orchestrator-continuous-reconcile.mjs';
++import {
++  buildMetaAuthoritativeSnapshot,
++  reconcileMetaAuthoritativeSnapshot,
++} from '../src/meta-orchestrator-authoritative-snapshot.mjs';
++import { MetaOrchestratorPrivilegedAdapter } from '../src/meta-orchestrator-privileged-adapter.mjs';
++import { createMetaDevosSuperstep } from '../supabase/a2-browser-native-supervisor-v1/meta-devos-superstep.mjs';
++import { createDevosSupervisorRoutes } from '../supabase/a2-browser-native-supervisor-v1/devos-routes.mjs';
++
++const WS = '2de9f84b-7c0a-4091-911c-894ff1d6eaf4';
++const ROADMAP = 'metaengine-development-os-v1';
++const SHA = 'd91e94b307ed60e890aabc53a2678a8ae9c6a79d';
++const authority = {
++  authority_key: 'METAENGINE_DEVOS', roadmap_id: ROADMAP,
++  active_milestone_key: 'META_ORCHESTRATOR_V1', integration_line: 'integration/metaengine-development-os-v1',
++  baseline_sha: SHA, alignment_epoch: 7, updated_at: '2026-11-05T00:00:00Z',
++};
++const plan = compileMetaPlan({ authority, plan_generation: 3, nodes: [
++  { point_id: 'meta.core', role: 'IMPLEMENTER', objective: 'Verify parent/child closure', risk: 'NORMAL',
++    evidence_contract: { required: ['roadmap_receipt:mainline_seal'], min_verified: 1 } },
++] });
++const receipt = { roadmap_id: ROADMAP, milestone_key: 'meta.core', step_kind: 'MAINLINE_SEAL',
++  status: 'VERIFIED', result_checkpoint_id: 'verified_checkpoint_001', receipt_id: 1 };
++function rawTask(point_id, state, taskSequence = 1, generation = 1, planGeneration = 3) {
++  return { task_id: `00000000-0000-4000-8000-${String(taskSequence).padStart(12, '0')}`,
++    point_id, state, role: point_id === 'meta.core' ? 'IMPLEMENTER' : 'CRITIC',
++    base_sha: SHA, lease_generation: generation, authority_effect: false,
++    task_spec: { meta_orchestrator: {
++      roadmap_id: ROADMAP, alignment_epoch: 7, plan_generation: planGeneration,
++      parent_plan_point: 'meta.core', parent_point_id: point_id === 'meta.core' ? null : 'meta.core',
++    } },
++  };
++}
++function planState() { return {
++  schema: 'metaengine.meta-orchestrator.plan-state.v1', found: true,
++  workspace_id: WS, roadmap_id: ROADMAP, plan_generation: 3, alignment_epoch: 7,
++  baseline_sha: SHA, plan_sha256: 'a'.repeat(64), plan_spec: plan, state: 'ACTIVE',
++  automatic_retry_allowed: false, scheduler_authority: false, browser_authority: false,
++  release_authority: false, authority_effect: false,
++}; }
++function inputRows(tasks) { return {
++  schema: 'metaengine.meta-orchestrator.authoritative-inputs.v1', workspace_id: WS,
++  roadmap_id: ROADMAP, roadmap_authority: authority, plan_state: planState(),
++  tasks, roadmap_receipts: [receipt],
++  capacity: { source: 'DEVOS_SCHEDULER_SNAPSHOT', available_slots: 0 },
++  task_meta_projection_only: true, task_payload_exposed: false, result_summary_exposed: false,
++  scheduler_identity_exposed: false, receipt_summary_exposed: false, receipt_evidence_exposed: false,
++  automatic_retry_allowed: false, task_content_authority: false, scheduler_authority: false,
++  browser_authority: false, release_authority: false, authority_effect: false,
++}; }
++const leader = { expected_epoch: 9, observed_epoch: 9 };
++const parent = () => rawTask('meta.core', 'COMPLETED', 1);
++const child = (state, i = 2, point = 'meta.core.critic', generation = 1) => rawTask(point, state, i, generation);
++function snapshot(rows) { return buildMetaAuthoritativeSnapshot({
++  roadmapAuthority: authority, plan, observedPlanGeneration: 3,
++  tasks: rows, roadmapReceipts: [receipt],
++  capacity: { source: 'DEVOS_SCHEDULER_SNAPSHOT', available_slots: 0 },
++}); }
++function continuous(rows) {
++  const s = snapshot(rows);
++  return reconcileContinuousMetaOrchestrator({ plan, leader, tasks: s.tasks,
++    evidence: s.evidence, observed_alignment_epoch: 7, observed_plan_generation: 3,
++    capacity: s.capacity });
++}
++function adapter(rows) {
++  return new MetaOrchestratorPrivilegedAdapter({
++    readAuthoritativeInputs: async () => inputRows(rows),
++    activatePlan: async () => { throw new Error('effect_forbidden_in_source_test'); },
++  });
++}
++
++for (const [state, expected] of [
++  ['RUNNING', 'SAFETY_WAIT'], ['AMBIGUOUS', 'RECONCILING'],
++  ['CANCELLED', 'BLOCKED'], ['FAILED', 'BLOCKED'], ['COMPLETED', 'CONVERGED'],
++]) {
++  test(`authoritative snapshot routes ${state} child to ${expected}`, () => {
++    const r = reconcileMetaAuthoritativeSnapshot({ plan, snapshot: snapshot([parent(), child(state)]), leader });
++    assert.equal(r.state, expected);
++    assert.equal(assertZeroAuthorityMetaOutput(r), true);
++    assert.equal(r.actions.some(action => String(action.type).includes('RETRY')), false);
++  });
++  test(`privileged adapter routes ${state} child to ${expected}`, async () => {
++    const r = await adapter([parent(), child(state)]).reconcile({ workspace_id: WS, roadmap_id: ROADMAP, leader });
++    assert.equal(r.state, expected);
++  });
++}
++
++test('production continuous reconciler holds a non-verifier child', () => {
++  const r = continuous([parent(), child('COMPLETED'), child('RUNNING', 3, 'meta.core.audit')]);
++  assert.equal(r.state, 'SAFETY_WAIT');
++});
++test('old ambiguous child effect does not disappear behind newer completed incarnation', () => {
++  const r = continuous([parent(), child('AMBIGUOUS', 2, 'meta.core.audit', 1),
++    child('COMPLETED', 3, 'meta.core.audit', 2), child('COMPLETED', 4)]);
++  assert.equal(r.state, 'RECONCILING');
++  assert.equal(r.actions.some(action => String(action.type).includes('RETRY')), false);
++});
++test('cancelled generic child blocks convergence and is not a success receipt', () => {
++  assert.equal(continuous([parent(), child('CANCELLED', 2, 'meta.core.audit'), child('COMPLETED', 3)]).state, 'BLOCKED');
++});
++test('stale observer plan generation cannot clear safety debt', () => {
++  const old = rawTask('meta.core.critic', 'COMPLETED', 2, 1, 2);
++  assert.notEqual(continuous([parent(), old]).state, 'CONVERGED');
++});
++const complete512 = [parent(), child('COMPLETED'), ...Array.from({ length: 510 }, (_, i) =>
++  child('COMPLETED', i + 3, `meta.core.audit${i}`))];
++
++test('bounded 512-row authoritative SQL result is incomplete until exact producer proves exhaustion', async () => {
++  await assert.rejects(
++    adapter(complete512).readAuthoritativeBundle({ workspace_id: WS, roadmap_id: ROADMAP }),
++    /incomplete|truncat|page_exhaustion/i,
++  );
++});
++
++test('production superstep refuses a potentially truncated 512-row read and never admits', async () => {
++  const calls = [];
++  const rpc = async (name) => {
++    calls.push(name);
++    if (name === 'meta_orchestrator_controller_lease_v1') return {
++      schema: 'metaengine.meta-orchestrator.controller-lease.v1', workspace_id: WS,
++      roadmap_id: ROADMAP, leased: true, leader_epoch: 9, holder_verified: true,
++      not_expired: true, expires_at: '2099-01-01T00:00:00Z', transitions: 1,
++      lease_seconds: 12, scheduler_authority: false, browser_authority: false,
++      release_authority: false, authority_effect: false,
++    };
++    if (name === 'meta_orchestrator_authoritative_inputs_v1') return inputRows(complete512);
++    if (name === 'devos_fleet_capacity_snapshot_v1') return {
++      schema: 'metaengine.devos.scheduler-capacity.v1', workspace_id: WS,
++      source: 'DEVOS_SCHEDULER_SNAPSHOT', state: 'FRESH', available_slots: 0, new_frontier_slots: 0,
++      live_transport_slots: 1, ready_backlog: 0, leased_backlog: 0, running_backlog: 0,
++      result_ready_backlog: 0, ambiguous_backlog: 0, blocked_backlog: 0, active_claims: 0,
++      ready_backlog_limit: 8, ambiguity_pressure_limit: 8, pressure_state: 'NORMAL',
++      transport_admission: 'ACTIVE_EXACT_PROOF_V1', scheduler_source: 'NATIVE_SUPERVISOR_HEARTBEAT',
++      automatic_retry_allowed: false, authority_effect: false,
++    };
++    throw new Error(`unexpected_rpc:${name}`);
++  };
++  const run = createMetaDevosSuperstep({ rpc, workspaceId: WS, roadmapId: ROADMAP });
++  const result = await run({ clientId: 'native:test/browser-1' });
++  assert.equal(result.state, 'PROVIDER_NOT_READY');
++  assert.equal(result.reason, 'PROVIDER_NOT_READY');
++  assert.equal(calls.some(x => x.includes('admit')), false);
++});
++
++
++test('511 fully observed rows do not introduce an artificial fleet-wide cap', () => {
++  const allObserved = complete512.slice(0, 511);
++  const s = snapshot(allObserved);
++  assert.equal(s.tasks.length, 511);
++  assert.equal(reconcileMetaAuthoritativeSnapshot({ plan, snapshot: s, leader }).state, 'CONVERGED');
++});
++
++test('a 512-receipt bounded SQL window fails closed without a trusted exhaustion cursor', () => {
++  assert.throws(() => buildMetaAuthoritativeSnapshot({
++    roadmapAuthority: authority, plan, observedPlanGeneration: 3,
++    tasks: [parent(), child('COMPLETED')],
++    roadmapReceipts: Array.from({ length: 512 }, (_, i) => ({ ...receipt, receipt_id: i + 1 })),
++  }), /incomplete/);
++});
++
++test('old parent ambiguity is not cleared by newer parent completion without readback', () => {
++  const r = continuous([rawTask('meta.core', 'AMBIGUOUS', 40, 1),
++    rawTask('meta.core', 'COMPLETED', 1, 2), child('COMPLETED')]);
++  assert.equal(r.state, 'RECONCILING');
++  assert.equal(r.actions[0].automatic_retry_allowed, false);
++});
++
++test('failed member of critical parent+critic+falsifier group cannot be suppressed', () => {
++  const critical = compileMetaPlan({ authority, plan_generation: 3, nodes: [{
++    point_id: 'meta.core', role: 'IMPLEMENTER', objective: 'test critical partial failure',
++    risk: 'CRITICAL', evidence_contract: { required: ['roadmap_receipt:mainline_seal'], min_verified: 1 },
++  }] });
++  const s = buildMetaAuthoritativeSnapshot({ roadmapAuthority: authority, plan: critical,
++    observedPlanGeneration: 3, tasks: [parent(), child('COMPLETED'),
++      child('FAILED', 3, 'meta.core.falsifier')], roadmapReceipts: [receipt],
++    capacity: { source: 'DEVOS_SCHEDULER_SNAPSHOT', available_slots: 0 },
++  });
++  const r = reconcileMetaAuthoritativeSnapshot({ plan: critical, snapshot: s, leader });
++  assert.equal(r.state, 'BLOCKED');
++  assert.equal(r.actions.some(action => String(action.type).includes('RETRY')), false);
++});
++
++test('production DevOS cycle preserves the existing scheduler when Meta readback is incomplete', async () => {
++  const names = [];
++  const rpc = async (name) => {
++    names.push(name);
++    if (name === 'meta_orchestrator_controller_lease_v1') return {
++      schema: 'metaengine.meta-orchestrator.controller-lease.v1', workspace_id: WS,
++      roadmap_id: ROADMAP, leased: true, leader_epoch: 9, holder_verified: true,
++      not_expired: true, expires_at: '2099-01-01T00:00:00Z',
++      scheduler_authority: false, browser_authority: false, release_authority: false, authority_effect: false,
++    };
++    if (name === 'meta_orchestrator_authoritative_inputs_v1') return inputRows(complete512);
++    if (name === 'devos_fleet_capacity_snapshot_v1') return {
++      schema: 'metaengine.devos.scheduler-capacity.v1', workspace_id: WS,
++      source: 'DEVOS_SCHEDULER_SNAPSHOT', state: 'FRESH', available_slots: 0, new_frontier_slots: 0,
++      live_transport_slots: 1, ready_backlog: 0, leased_backlog: 0, running_backlog: 0,
++      result_ready_backlog: 0, ambiguous_backlog: 0, blocked_backlog: 0, active_claims: 0,
++      ready_backlog_limit: 8, ambiguity_pressure_limit: 8, pressure_state: 'NORMAL',
++      authority_effect: false, automatic_retry_allowed: false,
++    };
++    if (name === 'devos_fleet_reconcile_v1') return {
++      schema: 'metaengine.devos.reconcile.v1', requeued: 0, failed: 0, authority_effect: false,
++    };
++    if (name === 'devos_fleet_snapshot_v1') return {
++      active_tasks: [], active_claims: [], recent_events: [], authority_effect: false,
++    };
++    throw new Error(`unexpected_rpc:${name}`);
++  };
++  const handle = createDevosSupervisorRoutes({ rpc, workspaceId: WS, metaRoadmapId: ROADMAP });
++  const response = await handle({ req: { method: 'POST' }, path: '/v1/devos/cycle',
++    body: { fleet: { agents: [] } }, clientId: 'native:test/browser-1' });
++  assert.equal(response.status, 200);
++  const result = await response.json();
++  assert.equal(result.meta_orchestrator.state, 'PROVIDER_NOT_READY');
++  assert.equal(result.automatic_retry_allowed, false);
++  assert.equal(names.filter(name => name === 'devos_fleet_reconcile_v1').length, 1);
++  assert.equal(names.filter(name => name === 'devos_fleet_snapshot_v1').length, 1);
++  assert.equal(names.some(name => name.startsWith('meta_orchestrator_frontier_admit')), false);
++});
+diff --git a/apps/metaengine-browser/test/meta-orchestrator-privileged-adapter.test.mjs b/apps/metaengine-browser/test/meta-orchestrator-privileged-adapter.test.mjs
+index d5f3425..47817f5 100644
+--- a/apps/metaengine-browser/test/meta-orchestrator-privileged-adapter.test.mjs
++++ b/apps/metaengine-browser/test/meta-orchestrator-privileged-adapter.test.mjs
+@@ -150,7 +150,16 @@ test('privileged read path rejects stale durable plan before task/evidence recon
+ });
+ 
+ test('reconcile uses DB-owned active plan and converges only through sanitized verified evidence', async () => {
+-  const out = await adapter().reconcile({
++  const critic = {
++    ...task(),
++    task_id: '11111111-1111-4111-8111-111111111111',
++    point_id: 'devos_ide_v1.critic',
++    role: 'CRITIC',
++    task_spec: { ...task().task_spec, meta_orchestrator: {
++      ...task().task_spec.meta_orchestrator, parent_point_id: 'devos_ide_v1',
++    } },
++  };
++  const out = await adapter({ readDevosTasks: async () => [task(), critic] }).reconcile({
+     workspace_id: workspace,
+     roadmap_id: plan.roadmap_id,
+     leader: { expected_epoch: 1, observed_epoch: 1 },
