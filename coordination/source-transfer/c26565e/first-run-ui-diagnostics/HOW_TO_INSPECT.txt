@@ -1,0 +1,43 @@
+METAENGINE historical c265 + integrated e30, source-only first-run UI diagnostic patch
+========================================================================================
+
+Exact GitHub historical source: c265 transfer commit
+  accb28e72c87c059e780efb8e6681886b33e9b4f
+and integrated-c265-to-e30.patch commit
+  d53ccd4135f28206d91d6804cf0626095565e6af
+Historical snapshot is not the latest working candidate.
+
+Space source package SHA256:
+  169f4dc6379605d68d34360c9d28d687b4da3dc856aea6fc1fb27e6bc6d3ba06
+Source tree after extraction preserving 74 executable file modes:
+  90fa5633d7926dd71a7303266073e0625325e740
+
+New payload:
+  first-run-ui-c265-e30-verified.patch.xz.b64
+Format: BASE64( XZ( UTF8 unified git diff ) ).
+Decode in a disposable isolated checkout, not an installed PC:
+  base64 -d first-run-ui-c265-e30-verified.patch.xz.b64 | xz -dc > first-run-ui-c265-e30-verified.patch
+
+Decoded patch SHA256:
+  b28528a1dc057f1bcf8ec9c83ad467eb54128c10e452a6303675963dffc63a7d
+
+Then only after base tree checksum:
+  git write-tree                # must equal 90fa5633...
+  git apply --check first-run-ui-c265-e30-verified.patch
+  git apply first-run-ui-c265-e30-verified.patch
+  git add -A && git write-tree  # expected 9d5f18ff5d65a76fc7846a8bfd69aef66d061d4c
+
+Source-only test command (the source-only test fixtures do not call real DB/Guardian):
+  node --test apps/metaengine-browser/test/native-coding-initial-setup-diagnostics.test.mjs \
+    apps/me2-ui/src/lib/native-initial-setup-diagnostics.test.mjs \
+    apps/me2-ui/src/lib/native-initial-setup-resource.test.mjs
+
+Recorded local verification: 249 PASS / 0 FAIL available 13-file Node suites;
+independent replay 89 PASS / 0 FAIL. Production Next build FAIL (no Next installed);
+React UI suite BLOCKED (no react/react-dom); real browser and Windows NOT RUN.
+
+This branch contains patches and audit records, not an installed-ready build.
+Do not merge, launch services, enable self-update, install client, or interpret
+backend readback COMPLETED as READY without independent permitted qualification.
+
+The prior compressed patch in this folder is SUPERSEDED, retained for provenance.
