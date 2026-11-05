@@ -1,0 +1,36 @@
+METAENGINE source-only first-run UI diagnostics candidate
+=====================================================
+
+The parent work/source-transfer-c26565e-20261103 branch points to
+accb28e72c87c059e780efb8e6681886b33e9b4f, which contains only the historical
+c265 source-transfer archive parts. The integrated e30 patch is at GitHub
+commit d53ccd4135f28206d91d6804cf0626095565e6af, separately.
+
+Candidate payload is BASE64( gzip( UTF-8 unified diff ) ), not installed source:
+  first-run-diagnostics-c265-e30.patch.gz.b64
+
+In a disposable, offline checkout only:
+  base64 -d first-run-diagnostics-c265-e30.patch.gz.b64 | gzip -dc > first-run-diagnostics-c265-e30.patch
+  sha256sum first-run-diagnostics-c265-e30.patch
+Expected patch SHA256:
+  c07deeaac950fdb11989fb68367dbc6607087a1ed27db2b3e086841a67dda978
+
+The diff adds:
+  apps/metaengine-browser/src/native-coding-initial-setup-diagnostics.mjs
+  apps/metaengine-browser/test/native-coding-initial-setup-diagnostics.test.mjs
+and modifies:
+  apps/metaengine-browser/src/native-coding-initial-setup-panel.mjs
+
+Verification gate BEFORE applying:
+  - concatenate ONLY the 3 GitHub c265 archive parts; verify its manifest SHA256;
+  - verify source Git tree 2dbe253e97379532f6f4b52ef7edf26109a9266d;
+  - apply integrated-c265-to-e30.patch from d53...; verify tree
+    90fa5633d7926dd71a7303266073e0625325e740;
+  - then git apply --check candidate in this isolated tree.
+
+Only the standalone diagnostics tests and a synthetic e30 context patch fixture
+have been checked. The candidate has NOT been applied to or built against the
+complete historical source. Do not merge or deploy on that evidence.
+
+No real installer, service, database, ACL, account login, model/API billing,
+signing, remote-PC operation, or release publication is part of this review.
