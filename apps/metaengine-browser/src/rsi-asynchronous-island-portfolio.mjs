@@ -635,7 +635,15 @@ export function createRsiIslandWorkProposals({
     }));
   }
   proposals.sort((a, b) => a.island_id.localeCompare(b.island_id));
-  const selected = proposals.slice(0, max);
+  // Rotate the existing proposal budget over eligible islands, not the first
+  // island_ids forever. Consecutive rounds consume adjacent, non-overlapping
+  // portions of this deterministic ring before wrapping. PAUSED and budget-
+  // exhausted islands are not in the ring; no scheduler/lease is created here.
+  const selected = proposals.length <= max
+    ? proposals
+    : Array.from({ length: max }, (_, offset) =>
+      proposals[(((round - 1) * max) + offset) % proposals.length]
+    ).sort((a, b) => a.island_id.localeCompare(b.island_id));
   const core = {
     schema: 'metaengine.rsi.island-work-portfolio.v1',
     version: 1,
