@@ -1,7 +1,7 @@
 // INERT behavioral regression on an isolated synthetic userData directory.
-// Run only against a checked-out GitHub repo containing the genuine module.
-// The current public transfer parent is expected to reveal a race; no production
-// code or installed profile, DB, service, installer or listener is accessed.
+// Run against the independently verified e30 Git tree (90fa5633d7926dd...).
+// e30 already guards DP-01; precisely one winner must be observed.
+// No production code or installed profile, DB, service, installer or listener is accessed.
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -21,7 +21,7 @@ function fakeReceipt() {
 test('concurrent first begins cannot both claim one durable PREPARED attempt', async t => {
   const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'me-inert-begin-regression-'));
   t.after(() => fs.rm(temporary, {recursive:true,force:true}));
-  // Multiple isolated rounds expose scheduling-dependent read-before-write races.
+  // Multiple isolated rounds exercise the original begin under concurrent calls.
   // Never use the real Electron userData path.
   for (let i=0; i<16; i++) {
     const userData = path.join(temporary, 'case-'+i);
