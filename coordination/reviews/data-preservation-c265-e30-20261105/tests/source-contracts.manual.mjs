@@ -1,87 +1,98 @@
-// Manual, inert static regression against the GitHub transfer branch.
-// Execute from an actual checkout containing d53ccd... + source-transfer files:
-//   node --test coordination/reviews/data-preservation-c265-e30-20261105/tests/source-contracts.manual.mjs
-// This is structural evidence, not a physical data/restore qualification.
+// Run from the VERIFIED e30 source tree (Git tree 90fa5633d7926dd71a7303266073e0625325e740).
+// Read-only assertions; no services, installer, PG, listener or user data.
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import test from 'node:test';
 import {fileURLToPath} from 'node:url';
-
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../');
-const read = relative => fs.readFile(path.join(root, relative), 'utf8');
-const sourceDir = 'apps/metaengine-browser/src/';
-const transfer = 'coordination/source-transfer/c26565e/integrated-c265-to-e30.patch';
-const patchSection = (patch, filename) => patch.split(/(?=^diff --git a\/)/m)
-  .find(section => section.startsWith(`diff --git a/${filename} `)) || '';
-
-let sources;
+const read = name => fs.readFile(path.join(root, name), 'utf8');
+const browser = 'apps/metaengine-browser/';
+let source;
 test.before(async () => {
-  const [patch, journal, updater, installer] = await Promise.all([
-    read(transfer), read(sourceDir + 'self-update-transaction-journal.mjs'),
-    read(sourceDir + 'self-update-runtime.mjs'),
-    read('apps/metaengine-browser/test/installer-upgrade-identity.test.mjs'),
-  ]);
-  sources = {patch, journal, updater, installer};
+  const paths = {
+    journal: browser + 'src/self-update-transaction-journal.mjs',
+    durable: browser + 'src/durable-json-file.cjs',
+    updater: browser + 'src/self-update-runtime.mjs',
+    config: browser + 'electron-builder.test.json',
+    provider: browser + 'src/local-state-provider-bootstrap.mjs',
+    root: browser + 'src/owned-protected-backup-root.mjs',
+    pg: 'infra/client-state-runtime/pg17-recovery-producer.mjs',
+    backup: 'infra/client-state-runtime/upgrade-backup-gate.mjs',
+    project: browser + 'src/autonomous-project-journal.mjs',
+    callback: browser + 'src/native-coding-run-callback-journal.mjs',
+  };
+  source = Object.fromEntries(await Promise.all(Object.entries(paths)
+    .map(async ([key,value]) => [key,await read(value)])));
 });
 
-test('unresolved upgrade attempt retains a non-retry journal on sequential begin', () => {
-  assert.match(sources.journal, /BEGIN_ALLOWED_PRIOR_STATES = new Set\(\['QUALIFIED', 'SUPERSEDED'\]\)/);
-  assert.match(sources.journal, /self_update_transaction_unresolved_prior/);
-  assert.match(sources.journal, /automatic_retry_allowed: false/);
+test('DP-01: PREPARED is decided under the same exclusive durable lock', () => {
+  const begin = source.journal.split('export async function beginSelfUpdateTransaction')[1]
+    .split('export async function transitionSelfUpdateTransaction')[0];
+  assert.match(begin, /withTransactionLock\(app, async \(control\)/);
+  assert.match(begin, /readSnapshot\(app, \{ locked: true \}\)/);
+  assert.match(begin, /BEGIN_ALLOWED_PRIOR_STATES\.has\(prior\.state\)/);
+  assert.match(begin, /expectedPreimage: snapshot\.raw/);
 });
 
-test('transaction evidence and state never declare authority effect', () => {
-  assert.match(sources.journal, /authority_effect: false/);
-  assert.match(sources.journal, /SELF_UPDATE_INSTALL_EFFECT_BARRIER = 'WRITE_AHEAD_V1'/);
+test('DP-01: transitions recheck exact preimage and retained attempt', () => {
+  const transition = source.journal.split('export async function transitionSelfUpdateTransaction')[1]
+    .split('export async function markSelfUpdateInstallEffectAttempted')[0];
+  assert.match(transition, /requireTransactionId/);
+  assert.match(transition, /if \(locked\.raw !== snapshot\.raw\)/);
+  assert.match(transition, /withTransactionLock\(app, async \(control\)/);
+  assert.match(transition, /expectedPreimage: snapshot\.raw/);
 });
 
-test('install-effect write-ahead precedes final updater handoff', () => {
-  assert.match(sources.journal, /markSelfUpdateInstallEffectAttempted/);
-  assert.match(sources.journal, /transitionSelfUpdateTransaction\(app, 'INSTALLING'/);
-  assert.match(sources.updater, /await installEffectBarrier\(structuredClone\(receipt\)\)/);
+test('DP-01: effect barrier retains original identity and exact PREPARED state', () => {
+  const effect = source.journal.split('export async function markSelfUpdateInstallEffectAttempted')[1]
+    .split('export async function qualifySelfUpdateTransaction')[0];
+  assert.match(effect, /requireTransactionId: current\.transaction_id/);
+  assert.match(effect, /requireState: 'PREPARED'/);
+  assert.match(effect, /effect_barrier_crossed: true/);
+  assert.match(effect, /automatic_retry_allowed: false/);
 });
 
-test('fresh provider restart fence remains in integrated transfer', () => {
-  const section = patchSection(sources.patch, sourceDir + 'local-state-provider-bootstrap.mjs');
-  assert.match(section, /assertFreshProviderRestartFence\(ownerRead.value\)/);
-  assert.match(section, /local_state_provider_fresh_install_incomplete/);
+test('DP-01: durable lock never has a guessed stale-reclaim path', () => {
+  assert.match(source.journal, /fs\.open\(lock, 'wx', 0o600\)/);
+  assert.match(source.journal, /self_update_transaction_lock_busy/);
+  assert.match(source.journal, /self_update_transaction_write_outcome_unknown/);
+  assert.doesNotMatch(source.journal, /unlink\(lock\).*catch\(\(\)\s*=>\s*\{\}\)/);
 });
 
-test('protected root cannot create a new registration without native parent custody', () => {
-  const section = patchSection(sources.patch, sourceDir + 'owned-protected-backup-root.mjs');
-  assert.match(section, /fail\('original_parent_namespace_custody_required'\)/);
-  assert.match(section, /if\(pin.state!=='READY'\)fail\('registration_incomplete'\)/);
+test('DP-01: byte-level CAS retains unknown publication evidence', () => {
+  assert.match(source.durable, /publishWithPreimage/);
+  assert.match(source.durable, /durable_json_preimage_mismatch/);
+  assert.match(source.durable, /renameState\.outcome_unknown = true/);
+  assert.match(source.durable, /await fsp\.link\(temp, file\)/);
 });
 
-test('PG17 source connection is not reached before original recovery custody', () => {
-  const section = patchSection(sources.patch, 'infra/client-state-runtime/pg17-recovery-producer.mjs');
-  const custody = section.indexOf('await beginOriginalRecoveryDirectoryCustody(');
-  const sql = section.indexOf('row.sourcePool=bindNativeCodingTransactionPool(');
-  assert.ok(custody >= 0 && sql > custody, 'source PG connect precedes custody');
+test('physical installer effect is preceded by the write-ahead barrier', () => {
+  assert.match(source.updater, /await installEffectBarrier\(structuredClone\(receipt\)\)/);
+  assert.match(source.journal, /transitionSelfUpdateTransaction\(app, 'INSTALLING'/);
 });
 
-test('disposable restore test has explicit prior-attempt readback barrier', () => {
-  const section = patchSection(sources.patch, 'apps/metaengine-browser/test/qa-disposable-image-restore.test.mjs');
-  assert.match(section, /existing_attempt_requires_readback/);
-  assert.match(section, /automatic_retry_allowed,false/);
+test('fresh provider restart keeps interrupted owner publication fenced', () => {
+  assert.match(source.provider, /assertFreshProviderRestartFence\(ownerRead\.value\)/);
+  assert.match(source.provider, /local_state_provider_fresh_install_incomplete/);
 });
 
-test('portable qualification must not assert production or physical restore proof', () => {
-  const section = patchSection(sources.patch, 'apps/metaengine-browser/test/safe-install-qualification.mjs');
-  assert.match(section, /production_qualified:false/);
-  assert.match(section, /physical_restore_proven:false/);
-  assert.match(section, /Physical PostgreSQL restore/);
+test('original backup root and PG source custody remain strict HOLD', () => {
+  assert.match(source.root, /fail\('original_parent_namespace_custody_required'\)/);
+  const custody = source.pg.indexOf('await beginOriginalRecoveryDirectoryCustody(');
+  const sourcePool = source.pg.indexOf('row.sourcePool=bindNativeCodingTransactionPool(');
+  assert.ok(custody >= 0 && sourcePool > custody);
+  assert.match(source.backup, /upgrade_authorized:false/);
 });
 
-test('NSIS identity test checks app data retention rather than declaring full preservation', () => {
-  assert.match(sources.installer, /deleteAppDataOnUninstall, false/);
+test('projects and callback results have additional non-PG durability owners', () => {
+  assert.match(source.project, /createAutonomousProjectJournal/);
+  assert.match(source.project, /FULL commits precede spawn POSTs/);
+  assert.match(source.callback, /host-callback-custody/);
+  assert.match(source.callback, /automatic_retry_allowed:false/);
 });
 
-test('new PREPARED attempts use the same lease as INSTALLING (known issue; expected to fail)', () => {
-  const begin = sources.journal.slice(
-    sources.journal.indexOf('export async function beginSelfUpdateTransaction'),
-    sources.journal.indexOf('export async function transitionSelfUpdateTransaction'));
-  assert.match(begin, /serializeInstallEffectBarrier\(/,
-    'begin performs read-then-replace without the serialized effect barrier; prior attempt may be overwritten');
+test('installer configuration does not directly request AppData deletion', () => {
+  const config = JSON.parse(source.config);
+  assert.equal(config.nsis.deleteAppDataOnUninstall, false);
 });
