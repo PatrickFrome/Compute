@@ -14,6 +14,8 @@ from pathlib import Path, PurePosixPath
 import subprocess
 import sys
 import tempfile
+import zipfile
+import stat
 
 REQUIRED_COMPONENTS = ("node", "deno", "postgresql", "git", "codex")
 DEFAULT_PART_HASHES = (
@@ -73,6 +75,65 @@ def verify_parts(parts: list[Path], expected_part_shas: list[str], expected_arch
         results.append(row("archive.sha256", "NOT RUN", "some source parts are not available"))
     return results
 
+
+
+
+def verify_snapshot_zip(archive: Path, expected_sha256: str, expected_tree: str,
+                        expected_files: int = 4346, expected_executables: int = 74) -> list[dict]:
+    """Reconstruct exact tracked files/modes from ZIP into a temporary local Git index."""
+    if not archive.is_file():
+        return [row("zip.input", "NOT RUN", "exact source ZIP is not available")]
+    actual = sha256_file(archive)
+    if actual != expected_sha256:
+        return [row("zip.sha256", "FAIL", f"actual={actual}; expected={expected_sha256}")]
+    result = [row("zip.sha256", "PASS", f"sha256={actual}")]
+    try:
+        with tempfile.TemporaryDirectory(prefix="metaengine-zip-snapshot-") as root:
+            directory = Path(root)
+            names, file_count, executable_count = set(), 0, 0
+            with zipfile.ZipFile(archive) as source:
+                for info in source.infolist():
+                    name = info.filename
+                    if name in names or not name.startswith("Compute/"):
+                        raise ValueError("invalid or duplicate ZIP entry")
+                    names.add(name)
+                    rel = name[len("Compute/"):]
+                    if not rel:
+                        if not info.is_dir():
+                            raise ValueError("invalid ZIP root")
+                        continue
+                    path = PurePosixPath(rel)
+                    if path.is_absolute() or str(path) != rel.rstrip("/") or ".." in path.parts or "\\" in rel:
+                        raise ValueError("noncanonical ZIP path")
+                    mode = info.external_attr >> 16
+                    if stat.S_ISLNK(mode) or (mode & 0o170000) not in (0, 0o100000):
+                        raise ValueError("nonregular ZIP member")
+                    target = directory.joinpath(*path.parts)
+                    if info.is_dir():
+                        target.mkdir(parents=True, exist_ok=True)
+                        continue
+                    if mode not in (0, 0o100644, 0o100755):
+                        raise ValueError("unsupported ZIP mode")
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    with source.open(info) as inp, target.open("xb") as out:
+                        import shutil
+                        shutil.copyfileobj(inp, out)
+                    target.chmod(0o755 if mode & 0o111 else 0o644)
+                    file_count += 1
+                    executable_count += bool(mode & 0o111)
+            if file_count != expected_files or executable_count != expected_executables:
+                raise ValueError(f"ZIP file/mode count {file_count}/{executable_count}; expected {expected_files}/{expected_executables}")
+            result.append(row("zip.files-modes", "PASS", f"files={file_count}, executable_modes={executable_count}"))
+            subprocess.run(["git", "-C", str(directory), "init", "-q"], check=True, capture_output=True)
+            git(directory, "config", "core.filemode", "true")
+            git(directory, "config", "core.autocrlf", "false")
+            git(directory, "add", "--force", "--all")
+            tree = git(directory, "write-tree")
+            result.append(row("zip.tree", "PASS" if tree == expected_tree else "FAIL",
+                              f"actual={tree}; expected={expected_tree}"))
+    except (ValueError, OSError, zipfile.BadZipFile, RuntimeError, subprocess.CalledProcessError) as exc:
+        result.append(row("zip.snapshot", "FAIL", str(exc)[:500]))
+    return result
 
 def git(cwd: Path, *args: str) -> str:
     # Runs only local Git commands in a caller-selected disposable checkout.
@@ -220,6 +281,12 @@ def main() -> int:
     tree.add_argument("--commit", default=DEFAULT_SOURCE_COMMIT)
     tree.add_argument("--source-tree", default=DEFAULT_SOURCE_TREE)
     tree.add_argument("--final-tree", default=DEFAULT_PATCHED_TREE)
+    snapshot = sp.add_parser("snapshot", help="verify complete restored GitHub e30 ZIP, including execute modes and tree")
+    snapshot.add_argument("--archive", required=True, type=Path)
+    snapshot.add_argument("--archive-sha256", default="169f4dc6379605d68d34360c9d28d687b4da3dc856aea6fc1fb27e6bc6d3ba06")
+    snapshot.add_argument("--tree", default=DEFAULT_PATCHED_TREE)
+    snapshot.add_argument("--file-count", type=int, default=4346)
+    snapshot.add_argument("--executable-count", type=int, default=74)
     inventory = sp.add_parser("inventory", help="compare independent catalog, matrix, physical bytes and consumers")
     inventory.add_argument("--catalog", type=Path, required=True)
     inventory.add_argument("--matrix", type=Path, required=True)
@@ -232,6 +299,9 @@ def main() -> int:
         return print_results(verify_parts(args.parts, args.part_sha1, args.archive_sha256))
     if args.cmd == "tree":
         return print_results(verify_tree(args.checkout, args.patch, args.commit, args.source_tree, args.final_tree))
+    if args.cmd == "snapshot":
+        return print_results(verify_snapshot_zip(args.archive, args.archive_sha256,
+                                                 args.tree, args.file_count, args.executable_count))
     try:
         catalog = json.loads(args.catalog.read_text(encoding="utf-8")) if args.catalog.is_file() else {}
         matrix = json.loads(args.matrix.read_text(encoding="utf-8")) if args.matrix.is_file() else {}
