@@ -1,0 +1,35 @@
+{
+  "schema": "metaengine.source-audit.e30-preservation-verification.v1",
+  "source_repository": "PatrickFrome/Compute",
+  "source_transfer_commit": "accb28e72c87c059e780efb8e6681886b33e9b4f",
+  "integrated_patch_commit": "d53ccd4135f28206d91d6804cf0626095565e6af",
+  "archive_filename": "METAENGINE-e30-github-only-source.zip",
+  "archive_sha256": "169f4dc6379605d68d34360c9d28d687b4da3dc856aea6fc1fb27e6bc6d3ba06",
+  "verified_git_tree": "90fa5633d7926dd71a7303266073e0625325e740",
+  "tree_verified_two_independent_methods": true,
+  "git_mode_counts": {
+    "100644": 4272,
+    "100755": 74
+  },
+  "source_file_count": 4346,
+  "journal_source_blob": "ce9ee1f55273f9a8fa511cb3c33165fd141879ec",
+  "durable_writer_blob": "d00b80244d7ff1aa1a3e66e92f1c689ef82fbb84",
+  "dp01_outcome": "NOT_REPRODUCED_ON_EXACT_E30",
+  "production_code_change_required": false,
+  "test_only_patch_file": "patches/DP01_e30_inert_regression.patch",
+  "test_only_patch_sha256": "54992b243ff00df6220877de61629bbb76b1dcdca51579e3a78b4fa8c8809f9b",
+  "patch_git_apply_cached_check": "PASS",
+  "combined_tests": {
+    "pass": 48,
+    "fail": 0,
+    "skip": 0,
+    "cancelled": 0,
+    "todo": 0
+  },
+  "physical_windows": "NOT_RUN",
+  "physical_pg17": "NOT_RUN",
+  "installation_qualified": false,
+  "full_data_preservation_proven": false,
+  "automatic_retry_allowed": false,
+  "authority_effect": false
+}

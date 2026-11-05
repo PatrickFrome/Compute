@@ -1,0 +1,109 @@
+diff --git a/apps/metaengine-browser/test/self-update-dp01-e30.test.mjs b/apps/metaengine-browser/test/self-update-dp01-e30.test.mjs
+new file mode 100644
+index 0000000..6a9a578
+--- /dev/null
++++ b/apps/metaengine-browser/test/self-update-dp01-e30.test.mjs
+@@ -0,0 +1,103 @@
++// DP-01 regression against production code from the verified e30 Git tree.
++// Only synthetic, temporary userData. No updater, installer, database or network.
++import assert from 'node:assert/strict';
++import fs from 'node:fs/promises';
++import os from 'node:os';
++import path from 'node:path';
++import test from 'node:test';
++import {
++  SELF_UPDATE_TRANSACTION_FILE,
++  SELF_UPDATE_TRANSACTION_LOCK_FILE,
++  beginSelfUpdateTransaction,
++  markSelfUpdateInstallEffectAttempted,
++  qualifySelfUpdateTransaction,
++  readSelfUpdateTransaction,
++  transitionSelfUpdateTransaction,
++} from '../src/self-update-transaction-journal.mjs';
++
++const FROM = '0.7.0-fixture-source';
++const TO = '0.7.0-fixture-target';
++const receipt = version => ({version, available_version: version,
++  metadata_verified: true, restart_gate_safe: true, authority_effect: false});
++
++async function fixture(t) {
++  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-e30-dp01-'));
++  t.after(async () => {
++    // Only remove the directory created by THIS fixture.
++    assert.equal(path.dirname(home), os.tmpdir());
++    assert.match(path.basename(home), /^metaengine-e30-dp01-/);
++    await fs.rm(home, {recursive: true, force: true});
++  });
++  let version = FROM;
++  const app = {
++    getPath(name) { assert.equal(name, 'userData'); return home; },
++    getVersion() { return version; },
++    setVersion(value) { version = value; },
++  };
++  return {home, app, journalPath: path.join(home, SELF_UPDATE_TRANSACTION_FILE),
++    lockPath: path.join(home, SELF_UPDATE_TRANSACTION_LOCK_FILE)};
++}
++
++async function assertOneBegin(app, target, contenders = 12) {
++  const settled = await Promise.allSettled(Array.from({length: contenders},
++    () => beginSelfUpdateTransaction(app, receipt(target))));
++  const accepted = settled.filter(value => value.status === 'fulfilled');
++  assert.equal(accepted.length, 1, 'concurrent PREPARED must never grant two attempts');
++  const stored = await readSelfUpdateTransaction(app);
++  assert.equal(stored.transaction_id, accepted[0].value.transaction_id);
++  assert.equal(stored.state, 'PREPARED');
++  assert.equal(stored.automatic_retry_allowed, false);
++  assert.equal(stored.authority_effect, false);
++  return stored;
++}
++
++test('DP-01: twelve concurrent first begins admit exactly one original PREPARED attempt', async t => {
++  const f = await fixture(t);
++  const current = await assertOneBegin(f.app, TO);
++  assert.equal(current.attempt_count, 1);
++  await assert.rejects(fs.stat(f.lockPath), {code: 'ENOENT'});
++  await assert.rejects(beginSelfUpdateTransaction(f.app, receipt(TO)),
++    /self_update_transaction_unresolved_prior:PREPARED/);
++  assert.equal((await readSelfUpdateTransaction(f.app)).transaction_id, current.transaction_id);
++});
++
++test('DP-01: qualified prior attempt permits only one next PREPARED generation', async t => {
++  const f = await fixture(t);
++  const first = await beginSelfUpdateTransaction(f.app, receipt(TO));
++  await transitionSelfUpdateTransaction(f.app, 'SUCCESSOR_BOOTED',
++    {requireTargetVersion: TO, requireTransactionId: first.transaction_id});
++  f.app.setVersion(TO);
++  await qualifySelfUpdateTransaction(f.app, {fixture_qualified: true});
++  const second = await assertOneBegin(f.app, TO);
++  assert.notEqual(second.transaction_id, first.transaction_id);
++  assert.equal(second.attempt_count, 2);
++  assert.equal(second.source_version, TO);
++});
++
++test('DP-01: competing begin cannot overwrite INSTALLING effect barrier', async t => {
++  const f = await fixture(t);
++  const first = await beginSelfUpdateTransaction(f.app, receipt(TO));
++  const contenders = await Promise.allSettled([
++    markSelfUpdateInstallEffectAttempted(f.app, {targetVersion: TO}),
++    beginSelfUpdateTransaction(f.app, receipt(TO + '-other')),
++  ]);
++  assert.equal(contenders[0].status, 'fulfilled');
++  assert.equal(contenders[1].status, 'rejected');
++  const final = await readSelfUpdateTransaction(f.app);
++  assert.equal(final.transaction_id, first.transaction_id);
++  assert.equal(final.state, 'INSTALLING');
++  assert.equal(final.evidence.effect_barrier_crossed, true);
++  assert.equal(final.automatic_retry_allowed, false);
++  assert.equal(final.authority_effect, false);
++});
++
++test('DP-01: abandoned lock with no journal is UNKNOWN, never a fresh attempt', async t => {
++  const f = await fixture(t);
++  const marker = 'inert-unknown-previous-owner\n';
++  await fs.writeFile(f.lockPath, marker, {flag: 'wx'});
++  await assert.rejects(readSelfUpdateTransaction(f.app), /self_update_transaction_write_outcome_unknown/);
++  await assert.rejects(beginSelfUpdateTransaction(f.app, receipt(TO)),
++    /self_update_transaction_write_outcome_unknown|self_update_transaction_lock_busy/);
++  assert.equal(await fs.readFile(f.lockPath, 'utf8'), marker);
++  await assert.rejects(fs.stat(f.journalPath), {code: 'ENOENT'});
++});

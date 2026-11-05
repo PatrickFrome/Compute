@@ -1,0 +1,298 @@
+TAP version 13
+# Subtest: DP-01: twelve concurrent first begins admit exactly one original PREPARED attempt
+ok 1 - DP-01: twelve concurrent first begins admit exactly one original PREPARED attempt
+  ---
+  duration_ms: 33.957836
+  type: 'test'
+  ...
+# Subtest: DP-01: qualified prior attempt permits only one next PREPARED generation
+ok 2 - DP-01: qualified prior attempt permits only one next PREPARED generation
+  ---
+  duration_ms: 61.678204
+  type: 'test'
+  ...
+# Subtest: DP-01: competing begin cannot overwrite INSTALLING effect barrier
+ok 3 - DP-01: competing begin cannot overwrite INSTALLING effect barrier
+  ---
+  duration_ms: 28.324524
+  type: 'test'
+  ...
+# Subtest: DP-01: abandoned lock with no journal is UNKNOWN, never a fresh attempt
+ok 4 - DP-01: abandoned lock with no journal is UNKNOWN, never a fresh attempt
+  ---
+  duration_ms: 4.734202
+  type: 'test'
+  ...
+# Subtest: durable write-ahead barrier is single-shot even under concurrent callers
+ok 5 - durable write-ahead barrier is single-shot even under concurrent callers
+  ---
+  duration_ms: 36.872198
+  type: 'test'
+  ...
+# Subtest: wrong target cannot cross install barrier and leaves PREPARED state intact
+ok 6 - wrong target cannot cross install barrier and leaves PREPARED state intact
+  ---
+  duration_ms: 21.357489
+  type: 'test'
+  ...
+# Subtest: stable runtime crosses barrier before final handoff and quitAndInstall
+ok 7 - stable runtime crosses barrier before final handoff and quitAndInstall
+  ---
+  duration_ms: 6.185272
+  type: 'test'
+  ...
+# Subtest: barrier persistence failure blocks final handoff and physical installer effect
+ok 8 - barrier persistence failure blocks final handoff and physical installer effect
+  ---
+  duration_ms: 2.108216
+  type: 'test'
+  ...
+# Subtest: production wiring places durable barrier between v8 restart gate and physical install
+ok 9 - production wiring places durable barrier between v8 restart gate and physical install
+  ---
+  duration_ms: 3.474267
+  type: 'test'
+  ...
+# Subtest: six generated Node processes admit only one begin transaction
+ok 10 - six generated Node processes admit only one begin transaction
+  ---
+  duration_ms: 237.089088
+  type: 'test'
+  ...
+# Subtest: six generated Node processes admit only one mark transaction
+ok 11 - six generated Node processes admit only one mark transaction
+  ---
+  duration_ms: 189.196372
+  type: 'test'
+  ...
+# Subtest: independent query-string module instances admit only one install barrier
+ok 12 - independent query-string module instances admit only one install barrier
+  ---
+  duration_ms: 60.767203
+  type: 'test'
+  ...
+# Subtest: concurrent valid transaction inserted inside link-to-final is never overwritten
+ok 13 - concurrent valid transaction inserted inside link-to-final is never overwritten
+  ---
+  duration_ms: 36.688757
+  type: 'test'
+  ...
+# Subtest: concurrent valid bytes inserted immediately before claim rename are restored without overwrite
+ok 14 - concurrent valid bytes inserted immediately before claim rename are restored without overwrite
+  ---
+  duration_ms: 35.729487
+  type: 'test'
+  ...
+# Subtest: physical publication with lost ACK and EACCES readback retains state, temp, backup and lock
+ok 15 - physical publication with lost ACK and EACCES readback retains state, temp, backup and lock
+  ---
+  duration_ms: 41.88362
+  type: 'test'
+  ...
+# Subtest: lost claim rename ACK preserves previous bytes and a missing final remains UNKNOWN
+ok 16 - lost claim rename ACK preserves previous bytes and a missing final remains UNKNOWN
+  ---
+  duration_ms: 32.408145
+  type: 'test'
+  ...
+# Subtest: corrupt transaction journal cannot be erased by a new begin and startup holds retry
+ok 17 - corrupt transaction journal cannot be erased by a new begin and startup holds retry
+  ---
+  duration_ms: 9.709651
+  type: 'test'
+  ...
+# Subtest: unresolved transaction rejects a new receipt without destroying prior evidence
+ok 18 - unresolved transaction rejects a new receipt without destroying prior evidence
+  ---
+  duration_ms: 37.630414
+  type: 'test'
+  ...
+# Subtest: INSTALLING with missing pre-install receipt converges to durable ambiguity, never NONE
+ok 19 - INSTALLING with missing pre-install receipt converges to durable ambiguity, never NONE
+  ---
+  duration_ms: 42.444033
+  type: 'test'
+  ...
+# Subtest: INSTALLING with old process version becomes AMBIGUOUS and remains held on repeated startup
+ok 20 - INSTALLING with old process version becomes AMBIGUOUS and remains held on repeated startup
+  ---
+  duration_ms: 30.805263
+  type: 'test'
+  ...
+# Subtest: persisted AMBIGUOUS_INSTALL is superseded only by a trusted newer executable on disk
+ok 21 - persisted AMBIGUOUS_INSTALL is superseded only by a trusted newer executable on disk
+  ---
+  duration_ms: 36.330315
+  type: 'test'
+  ...
+# Subtest: newer installed version cannot supersede ambiguous journal without trusted installed-release proof
+ok 22 - newer installed version cannot supersede ambiguous journal without trusted installed-release proof
+  ---
+  duration_ms: 153.059784
+  type: 'test'
+  ...
+# Subtest: INSTALLING converges to SUCCESSOR_BOOTED only on exact installed target version
+ok 23 - INSTALLING converges to SUCCESSOR_BOOTED only on exact installed target version
+  ---
+  duration_ms: 48.619737
+  type: 'test'
+  ...
+# Subtest: journal starts fail-closed with swapping marker and no automatic retry
+ok 24 - journal starts fail-closed with swapping marker and no automatic retry
+  ---
+  duration_ms: 51.704583
+  type: 'test'
+  ...
+# Subtest: ambiguous installer state cannot transition back to PREPARED for blind retry
+ok 25 - ambiguous installer state cannot transition back to PREPARED for blind retry
+  ---
+  duration_ms: 52.276874
+  type: 'test'
+  ...
+# Subtest: successor must match exact target before qualification
+ok 26 - successor must match exact target before qualification
+  ---
+  duration_ms: 60.489891
+  type: 'test'
+  ...
+# Subtest: qualified transaction cannot regress into ambiguous install
+ok 27 - qualified transaction cannot regress into ambiguous install
+  ---
+  duration_ms: 47.34888
+  type: 'test'
+  ...
+# Subtest: transaction persistence is pinned to the shared committed-file durability primitive
+ok 28 - transaction persistence is pinned to the shared committed-file durability primitive
+  ---
+  duration_ms: 1.537034
+  type: 'test'
+  ...
+# Subtest: concurrent first begins cannot both claim one durable PREPARED attempt
+ok 29 - concurrent first begins cannot both claim one durable PREPARED attempt
+  ---
+  duration_ms: 368.060629
+  type: 'test'
+  ...
+# Subtest: synthetic five-surface byte-for-byte readback is accepted only as a fixture match
+ok 30 - synthetic five-surface byte-for-byte readback is accepted only as a fixture match
+  ---
+  duration_ms: 46.092493
+  type: 'test'
+  ...
+# Subtest: synthetic profile mutation is detected before any preservation claim
+ok 31 - synthetic profile mutation is detected before any preservation claim
+  ---
+  duration_ms: 42.696389
+  type: 'test'
+  ...
+# Subtest: synthetic postgres mutation is detected before any preservation claim
+ok 32 - synthetic postgres mutation is detected before any preservation claim
+  ---
+  duration_ms: 64.675675
+  type: 'test'
+  ...
+# Subtest: synthetic project mutation is detected before any preservation claim
+ok 33 - synthetic project mutation is detected before any preservation claim
+  ---
+  duration_ms: 63.59569
+  type: 'test'
+  ...
+# Subtest: synthetic message mutation is detected before any preservation claim
+ok 34 - synthetic message mutation is detected before any preservation claim
+  ---
+  duration_ms: 271.435535
+  type: 'test'
+  ...
+# Subtest: synthetic result mutation is detected before any preservation claim
+ok 35 - synthetic result mutation is detected before any preservation claim
+  ---
+  duration_ms: 14.890355
+  type: 'test'
+  ...
+# Subtest: a missing synthetic result cannot be counted as a preserved delivery
+ok 36 - a missing synthetic result cannot be counted as a preserved delivery
+  ---
+  duration_ms: 11.45474
+  type: 'test'
+  ...
+# Subtest: PREPARED and INSTALLING remain HOLD even if synthetic files appear unchanged
+ok 37 - PREPARED and INSTALLING remain HOLD even if synthetic files appear unchanged
+  ---
+  duration_ms: 19.743823
+  type: 'test'
+  ...
+# Subtest: a missing readback cannot be repaired by a matching synthetic file digest
+ok 38 - a missing readback cannot be repaired by a matching synthetic file digest
+  ---
+  duration_ms: 14.502665
+  type: 'test'
+  ...
+# Subtest: DP-01: PREPARED is decided under the same exclusive durable lock
+ok 39 - DP-01: PREPARED is decided under the same exclusive durable lock
+  ---
+  duration_ms: 10.645569
+  type: 'test'
+  ...
+# Subtest: DP-01: transitions recheck exact preimage and retained attempt
+ok 40 - DP-01: transitions recheck exact preimage and retained attempt
+  ---
+  duration_ms: 0.942205
+  type: 'test'
+  ...
+# Subtest: DP-01: effect barrier retains original identity and exact PREPARED state
+ok 41 - DP-01: effect barrier retains original identity and exact PREPARED state
+  ---
+  duration_ms: 0.213848
+  type: 'test'
+  ...
+# Subtest: DP-01: durable lock never has a guessed stale-reclaim path
+ok 42 - DP-01: durable lock never has a guessed stale-reclaim path
+  ---
+  duration_ms: 0.249401
+  type: 'test'
+  ...
+# Subtest: DP-01: byte-level CAS retains unknown publication evidence
+ok 43 - DP-01: byte-level CAS retains unknown publication evidence
+  ---
+  duration_ms: 0.119114
+  type: 'test'
+  ...
+# Subtest: physical installer effect is preceded by the write-ahead barrier
+ok 44 - physical installer effect is preceded by the write-ahead barrier
+  ---
+  duration_ms: 0.159761
+  type: 'test'
+  ...
+# Subtest: fresh provider restart keeps interrupted owner publication fenced
+ok 45 - fresh provider restart keeps interrupted owner publication fenced
+  ---
+  duration_ms: 0.082595
+  type: 'test'
+  ...
+# Subtest: original backup root and PG source custody remain strict HOLD
+ok 46 - original backup root and PG source custody remain strict HOLD
+  ---
+  duration_ms: 0.493518
+  type: 'test'
+  ...
+# Subtest: projects and callback results have additional non-PG durability owners
+ok 47 - projects and callback results have additional non-PG durability owners
+  ---
+  duration_ms: 0.255586
+  type: 'test'
+  ...
+# Subtest: installer configuration does not directly request AppData deletion
+ok 48 - installer configuration does not directly request AppData deletion
+  ---
+  duration_ms: 0.508926
+  type: 'test'
+  ...
+1..48
+# tests 48
+# suites 0
+# pass 48
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3151.84027
