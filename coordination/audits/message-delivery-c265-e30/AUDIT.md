@@ -1,52 +1,59 @@
-# METAENGINE — message delivery source-only audit (c265 → e30)
+# METAENGINE — project-message delivery and ACK source-only audit
 
-Status: **BLOCKED ON SOURCE MATERIALIZATION**. This is a **trace-oracle scaffold**, not a repair to METAENGINE production code, and not a positive delivery qualification.
+**Result:** verified source-only patch; **not** a PostgreSQL/native/installed-host qualification.
+**Repository:** `PatrickFrome/Compute`.
+**Source provenance:** source transfer `accb28e72c87c059e780efb8e6681886b33e9b4f`, `coordination/source-transfer/c26565e`, then integrated plaintext patch at `d53ccd4135f28206d91d6804cf0626095565e6af`.
+**Source archive:** `METAENGINE-e30-github-only-source.zip`, SHA-256 `169f4dc6379605d68d34360c9d28d687b4da3dc856aea6fc1fb27e6bc6d3ba06`.
+**Independent source tree (two calculations):** `90fa5633d7926dd71a7303266073e0625325e740`. 4,346 files, 74 with executable mode. `zipfile` extraction preserves Unicode pathnames; vanilla `unzip` on this host mangled non-ASCII filenames, producing a false negative tree. No changes to GitHub source transfer or original release were made.
 
-## Permitted source identity / GitHub evidence
+## Verified producer → pending → reference → ACK trace
 
-- Repository: `PatrickFrome/Compute`.
-- Transfer branch: `work/source-transfer-c26565e-20261103`, head `accb28e72c87c059e780efb8e6681886b33e9b4f`.
-- Archive: `coordination/source-transfer/c26565e/archive.part00`, `.part01`, `.part02`, concatenated in that order.
-- GitHub archive part blob SHA-1: `485ca6ce2d467f9e577aaf263626af52154425ab`, `a02e1d8217d878fdabbf01ff7f7c04b883158407`, `b0b280633fff1e794d6b6079e313412b6e2ca04e`.
-- Archive part lengths (GitHub API): 7,200,000 + 7,200,000 + 1,657,953 bytes.
-- Expected archive SHA256 from transfer README: `4200e492828dbb857aaa737a7ce56d0aeda3c97c84f7743b1501ef2f229d3636` (**not independently computed**).
-- Source revision from transfer README: `c26565e58ab92dcbcda9663c4d231bdf4a9a7ee6`; pre-patch tree `2dbe253e97379532f6f4b52ef7edf26109a9266d` (**not independently verified**).
-- Integrated patch commit: `d53ccd4135f28206d91d6804cf0626095565e6af`; GitHub blob SHA-1 `79d40bf024a6553656b86fb1a29c1313dd458a0e` at `coordination/source-transfer/c26565e/integrated-c265-to-e30.patch` (1,269,917 bytes by GitHub metadata).
-- Expected post-patch Git tree provided for this task: `90fa5633d7926dd71a7303266073e0625325e740` (**not verified**).
+| Stage | Production source / concrete function | Identity and durability semantics |
+|---|---|---|
+| Browser producer | `apps/metaengine-browser/src/autonomous-project-task-runtime.mjs` (`serveToolRequests`, `PROJECT_MESSAGE`, `#message`); `apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/project-continuity-routes.mjs` (`/v1/devos/project/message`) | Existing sender task/claim/generation and `request_id` drive `public.h205f22_project_message_v1`; message stored as project event. Lost HTTP reply is not equivalent to absence of commit. |
+| Browser storage | `infra/client-state-runtime/browser-project-messages-v1.sql` | `h205f22_project_message_v1` binds the original project task/claim and recipient and idempotency key; request collisions must fail. |
+| Native producer | `infra/client-state-runtime/native-coding-agent-host-tools.mjs` and `supabase/migrations/20261025090000_native_coding_agent_project_tools_v1.sql`, as modified by `infra/client-state-runtime/native-coding-chat-messages-v1.sql` | Separate native run/request replay path; inspected only as source, no real PG run. |
+| Pending read | `infra/client-state-runtime/project-message-wake-v1.sql`, `destruktion_meta.project_pending_message_seqs_v1` → `project_task_projection_h205f22` → `AutonomousProjectTaskRuntime.waitForChildren` | Returns only first **16** unacknowledged addressed sequences per task. Page is a wake/read hint, not proof of processing or a complete backlog. |
+| History / content | `supabase/migrations/20261010100000_project_continuity_history_v1.sql`, `h205f22_project_history_v1`, Browser `PROJECT_HISTORY` / `/v1/devos/project/history` | Commit-ordered page with `after_seq`, pinned `through_seq`, `next_seq`, `has_more`; explicit `content_seq/content_offset` reads required to recover full text. |
+| Delivery reference | `AutonomousProjectTaskRuntime.continueConversation`, `apps/metaengine-browser/src/autonomous-project-journal.mjs` | SQLite intent and physical-turn receipt store delivered request hashes and transcript boundary. Distinct physical sends require bound effect identity; failed/ambiguous sends must HOLD rather than silently retry. |
+| ACK | Browser `PROJECT_ACK_MESSAGE` → `/v1/devos/project/message-ack` → `infra/client-state-runtime/project-message-ack-v1.sql`, `project_message_ack_v1` | Recipient-bound ACK event keyed to original message; repeat must return same event. `recipient_acknowledged` means receipt of address, **not** `processing_verified`. Native counterpart uses `native_coding_agent_message_ack_v1`. |
 
-## Precise blocker
+## Reproduced defects and narrow patch
 
-The GitHub connector can fetch the transfer README and the plaintext integrated patch; for the three binary archive blobs it produces a UTF-8 decoding failure, while GitHub's Contents view for large files provides no file payload. The isolated executor cannot resolve `github.com` for Git operations or HTTP downloads. Consequently **the prescribed archive cannot be reconstructed, hashed, unpacked, or checked out here**, and the e30 tree cannot be verified. Do not substitute the public historical branch, a prior Space zip, the installed Windows client, or another repo snapshot.
+**D1 — duplicate physical continuation due to invisible ninth result.** Original `AutonomousProjectTaskRuntime.continueConversation` rendered only `results.slice(0,8)` into the prompt and delivery references but digested **all** `results` as `effectKey`. A changed ninth item could acquire a different durable turn and trigger a second physical send of identical visible content. Inert regression on untouched source: **FAIL**, `actual=DELIVERED`, `expected=ALREADY_DELIVERED`. Fix: calculate one `visibleResults=results.slice(0,8)` once; use for prompt, durable key, delivery references and unknown-effect tracking. Retest: **PASS**. This preserves the prior journal's ambiguous-outcome hold; it does not grant retry authority.
 
-The assistant has **not** inspected actual c265/e30 message producers, pending read handlers, delivery reference stores, ACK implementations, or production IPC. No defect in those components has been reproduced, and no production fix is claimed. This report and its inert tests are the only proposed changes.
+**D2 — pending notification displaced by full tool-results page.** `DevOsNativeTaskCycle` sent eight tool results and appended a synthetic `project:messages:pending` ninth row, while the downstream runtime rendered only eight. The recipient could miss the notice despite a genuine pending committed event. Fix: reserve a slot for notification when pending sequences exist: seven tool results + one notification; otherwise retain eight slots. Omitted tool result remains pending for later delivery; no status/ACK becomes authority. Inert page regression: **PASS**.
 
-## Trace-contract audit targets (NOT RUN against METAENGINE)
+**No SQL changes, new schedulers, limit on total agents, approvals, budget-policy changes, new authority or new trust roots.** The bounded page size remains eight physical rows per continuation; this is a message-size cap, not a logical-agent cap.
 
-| Case | Required observation | Failure to look for |
-| --- | --- | --- |
-| Producer → pending | Durable message identity linked to producer and authorized task; read can find pending message | Produced item missing from pending reads |
-| Duplicate delivery | Same logical message / reference replay does not duplicate externally visible completion | Multiple distinct effects for one message and consumer |
-| Duplicate ACK | Re-ACK and duplicate readback converge on one terminal record | Second terminal effect or changed meaning of reference |
-| Restart | Pending cursor and unresolved deliveries survive an agent/host restart with durable provenance | Lost work, old in-memory success reused as proof |
-| Pagination | All pages processed until authoritative completion; next cursor chains without omission | Premature `caught_up`, cursor gap, stuck cursor |
-| ACK reply lost | Outcome remains unknown until durable readback; retry is idempotent | Success inferred from request/timeout/local flag |
-| Native/IPC close unknown | No synthetic success or confirmed ACK without original durable evidence | Optimistic terminal completion |
-| Cross-agent reference | ACK must refer to a previously delivered reference for the correct consumer | Orphan ACK or reference collision |
+## Tests and limits
 
-A real audit must map each case onto actual source entrypoints, inspect SQL/transaction and transport commitments if present, and run deterministic project tests against an isolated checkout of the **verified** tree. The attached oracle accepts normalized *trusted observations* as input; it cannot establish their authenticity and is never an authority source.
+- **PASS** archive exact SHA256, both independent Git-tree calculations, all 74 executable bits preserved.
+- **FAIL 1 (expected before fix)** D1 red regression on original source; source showed second physical send.
+- **PASS 120 / FAIL 0 / SKIP 0** after patch with Node 22.16.0, six focused suites (Browser runtime, cycle, Edge route, native agent host tool, new delivery page and production chain).
+- **PASS 5 / FAIL 0** clean-archive extraction → `git apply --check` → `git apply` → direct new test suites.
+- **PASS** `git diff --check` and `node --check` for modified production/test modules.
+- **NOT RUN** real PostgreSQL 17/SQL migrations, native Windows process, services, installed application, real provider send or physical external delivery ACK. Integration uses real Browser runtime + Edge route modules and disposable local SQLite journal; **RPC is an inert in-memory fixture**, not genuine DB authority. No real-world claims based on it.
+- **NOT RUN** previously declined security checks, local PC/installer/service/network listener, unrelated budget/approval/trust-policy changes.
 
-## Evidence and outcomes
+### Inert chain regressions
 
-- GitHub transfer README and exact transfer commits: **PASS (metadata retrieval)**.
-- Plaintext integrated patch retrieval: **PASS (GitHub connector)**.
-- Reconstructed archive SHA256: **NOT RUN (binary bytes unavailable)**.
-- Base Git tree `2dbe253e...`: **NOT RUN**.
-- Integrated Git tree `90fa5633...`: **NOT RUN**.
-- Actual production delivery/ACK audit: **NOT RUN**.
-- Production defect reproduction/fix: **NOT RUN — no production patch**.
-- Inert standalone trace-oracle unit tests: **16 PASS / 0 FAIL** on Node.js v22.16.0.
-- External DB, PC, services, network listeners, approvals, budget policy, trust boundaries, installation, signing, or merge: **NOT RUN / UNCHANGED**.
+1. Browser send persisted, lost HTTP reply; restart runtime/journal; same request returned original message sequence without duplicate. Recipient history full text read; wrong recipient ACK denied; lost ACK reply + restart returned original ACK event and `processing_verified:false`.
+2. 18 committed messages, pending snapshot only first 16; history paginated in 5s with pinned `through_seq`, with a 19th event arriving after first page and a restart mid-way. All first 18 read once; after ACK first 16, 17/18/19 reappear as pending in order.
+3. Malformed ACK declaring processing verified is rejected; original intent can be safely replayed only with proper readback, without duplicate ACK effect.
 
-### Next safe step
+## Applying patch
 
-Materialize the **exact** archive binary from the cited GitHub commit into an isolated executor with direct authorized GitHub download access, verify its SHA256 and source tree, apply the d53 patch, verify the expected tree, then locate the actual message delivery entrypoints. Use the oracle only after producing concrete normalized observations from those entrypoints. Any defect repair must be independently reviewed and delivered in a new narrow production patch; this draft must not be treated as that repair.
+```sh
+git apply --check production-delivery-gate.patch
+git apply production-delivery-gate.patch
+node --test --test-concurrency=1 \
+ apps/metaengine-browser/test/autonomous-project-task-runtime.test.mjs \
+ apps/metaengine-browser/test/devos-native-task-cycle.test.mjs \
+ apps/metaengine-browser/test/project-continuity-routes.test.mjs \
+ apps/metaengine-browser/test/project-message-delivery-page.test.mjs \
+ apps/metaengine-browser/test/project-message-production-chain.test.mjs \
+ infra/client-state-runtime/native-coding-agent-host-tools.test.mjs
+```
+
+GitHub delivery: existing **Draft PR #1447** is audit-only, not merged. Because the native source tree is available as an archive rather than as checked-out files on PR's base branch, the full `production-delivery-gate.patch` should be reviewed and applied to the **verified tree `90fa5633…`** separately; do not overlay shared Browser runtime files against a different integration version.
