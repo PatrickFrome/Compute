@@ -9,6 +9,7 @@ import {
   verifyRsiKnowledgeTransferValidation,
   verifyRsiKnowledgeConsolidationAdmission,
 } from './rsi-slow-knowledge-consolidation.mjs';
+import { classifyRsiConsumerEvidenceAppend, assessRsiConsumerKnowledgeReview } from './rsi-consumer-evidence-frontier.mjs';
 
 export const RSI_VALIDATED_KNOWLEDGE_CONSUMER_HANDOFF_SCHEMA='metaengine.rsi.validated-knowledge-consumer-handoff.v1';
 export const RSI_CONSUMER_LOCAL_REVALIDATION_RECEIPT_SCHEMA='metaengine.rsi.consumer-local-revalidation-receipt.v1';
@@ -555,7 +556,7 @@ function archiveState(sourceSha,rows){
 }
 
 export class RsiConsumerRevalidationArchive{
-  #path;#sourceSha;#resolver;#rows=[];#initialized=false;
+  #path;#sourceSha;#resolver;#rows=[];#initialized=false;#writeTail=Promise.resolve();
   constructor({statePath,source_sha,evidenceResolver}={}){
     if(!statePath)throw new Error('rsi_consumer_archive_path_required');
     if(typeof evidenceResolver!=='function')throw new Error('rsi_consumer_archive_evidence_resolver_required');
@@ -577,7 +578,7 @@ export class RsiConsumerRevalidationArchive{
       const clone=structuredClone(p);delete clone.state_digest;
       if(digest(clone)!==exactDigest(p.state_digest,'archive'))throw new Error('rsi_consumer_archive_digest_mismatch');
       if(!Array.isArray(p.rows)||p.rows.length>MAX_ROWS)throw new Error('rsi_consumer_archive_rows_invalid');
-      const identities=new Set();
+      const histories=new Map();
       const checkedRows=[];
       for(const row of p.rows){
         if(row.source_sha!==this.#sourceSha)throw new Error('rsi_consumer_archive_source_mismatch');
@@ -589,10 +590,12 @@ export class RsiConsumerRevalidationArchive{
         const handoff=verifyRsiValidatedKnowledgeConsumerHandoff(row.handoff,evidence||{});
         const receipt=verifyRsiConsumerLocalRevalidationReceipt(row.receipt,{handoff});
         const key=consumerIdentity(handoff);
-        if(identities.has(key))throw new Error('rsi_consumer_archive_identity_duplicate');
-        identities.add(key);
         if(row.consumer_identity!==key)throw new Error('rsi_consumer_archive_consumer_identity_mismatch');
-        checkedRows.push(Object.freeze({source_sha:this.#sourceSha,consumer_identity:key,handoff,receipt}));
+        const checkedRow=Object.freeze({source_sha:this.#sourceSha,consumer_identity:key,handoff,receipt});
+        const history=histories.get(key)||[];
+        const transition=classifyRsiConsumerEvidenceAppend(history,checkedRow);
+        if(transition==='IDEMPOTENT')throw new Error('rsi_consumer_archive_duplicate_receipt');
+        history.push(checkedRow);histories.set(key,history);checkedRows.push(checkedRow);
       }
       this.#rows=checkedRows;
     }catch(error){if(error?.code!=='ENOENT')throw error;}
@@ -603,7 +606,12 @@ export class RsiConsumerRevalidationArchive{
     try{await h.writeFile(`${JSON.stringify(s)}\n`,'utf8');await h.sync();}finally{await h.close();}
     await fs.rename(tmp,this.#path);
   }
-  async add({handoff,receipt,proposal,validations,admission,source_rows}={}){
+  async add(args={}){
+    const operation=this.#writeTail.then(()=>this.#addVerified(args));
+    this.#writeTail=operation.then(()=>undefined,()=>undefined);
+    return operation;
+  }
+  async #addVerified({handoff,receipt,proposal,validations,admission,source_rows}={}){
     if(!this.#initialized)throw new Error('rsi_consumer_archive_not_initialized');
     const checkedHandoff=verifyRsiValidatedKnowledgeConsumerHandoff(handoff,{proposal,validations,admission,source_rows});
     const checkedReceipt=verifyRsiConsumerLocalRevalidationReceipt(receipt,{handoff:checkedHandoff});
@@ -612,15 +620,18 @@ export class RsiConsumerRevalidationArchive{
       throw new Error('rsi_consumer_archive_binding_mismatch');
     }
     const key=consumerIdentity(handoff);
-    const existing=this.#rows.find(r=>r.consumer_identity===key);
-    if(existing){
-      if(existing.handoff.handoff_digest!==handoff.handoff_digest||existing.receipt.receipt_digest!==receipt.receipt_digest)throw new Error('rsi_consumer_archive_identity_conflict');
-      return zero({state:'IDEMPOTENT',receipt_digest:receipt.receipt_digest});
-    }
+    const checkedRow=Object.freeze({source_sha:this.#sourceSha,consumer_identity:key,handoff:structuredClone(handoff),receipt:structuredClone(receipt)});
+    const transition=classifyRsiConsumerEvidenceAppend(this.#rows.filter(r=>r.consumer_identity===key),checkedRow);
+    if(transition==='IDEMPOTENT')return zero({state:'IDEMPOTENT',receipt_digest:receipt.receipt_digest});
     if(this.#rows.length>=MAX_ROWS)throw new Error('rsi_consumer_archive_capacity_exceeded');
-    const next=[...this.#rows,Object.freeze({source_sha:this.#sourceSha,consumer_identity:key,handoff:structuredClone(handoff),receipt:structuredClone(receipt)})];
+    const next=[...this.#rows,checkedRow];
     await this.#persist(next);this.#rows=next;
     return zero({state:receipt.state,receipt_digest:receipt.receipt_digest});
+  }
+  reviewFor({handoff,observed}={}){
+    if(!this.#initialized)throw new Error('rsi_consumer_archive_not_initialized');
+    const key=handoff?consumerIdentity(handoff):null;
+    return assessRsiConsumerKnowledgeReview({rows:key?this.#rows.filter(r=>r.consumer_identity===key):[],handoff,observed});
   }
   snapshot(){
     const s=archiveState(this.#sourceSha,this.#rows);
