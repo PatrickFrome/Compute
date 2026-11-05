@@ -1,0 +1,114 @@
+diff --git a/apps/metaengine-browser/src/devos-native-task-cycle-core.mjs b/apps/metaengine-browser/src/devos-native-task-cycle-core.mjs
+index 4e97e31..dfce686 100644
+--- a/apps/metaengine-browser/src/devos-native-task-cycle-core.mjs
++++ b/apps/metaengine-browser/src/devos-native-task-cycle-core.mjs
+@@ -1516,12 +1516,25 @@ export class DevOsNativeTaskCycle {
+       }
+       return receipt;
+     };
++    // A completion write response is not, by itself, proof that the same lease
++    // generation was finalized. Only the independently signed task-status
++    // readback permits the toolbelt to release fully settled local caches.
++    // This performs no tool command, journal write, or effect retry.
++    const retireAfterReadback = async (receipt, status = null) => {
++      if (!['RESULT_READY','BLOCKED','COMPLETED','FAILED'].includes(receipt.state)
++        || !this.#toolbelt.canRetireSettledLease(lease)) return receipt;
++      const checked = status || await this.#readTaskStatus(lease);
++      if (checked && ['RESULT_READY','BLOCKED','COMPLETED','FAILED'].includes(checked.state))
++        this.#toolbelt.retireSettledLease(lease);
++      return receipt;
++    };
+     try {
+       const response = await this.#signedRequest('/v1/devos/complete', {
+         payload: { ...bindingPayload(lease), state, summary, error: error ? clip(error, 160) : null },
+       });
+       const body = await responseJson(response, 'devos_complete_http');
+-      return releaseCompleted({ state: String(body.state || state).toUpperCase(), task_id: lease.task_id, lease_generation: lease.lease_generation, readback: 'WRITE_ACK', automatic_retry_allowed: false, authority_effect: false });
++      const receipt = await releaseCompleted({ state: String(body.state || state).toUpperCase(), task_id: lease.task_id, lease_generation: lease.lease_generation, readback: 'WRITE_ACK', automatic_retry_allowed: false, authority_effect: false });
++      return retireAfterReadback(receipt);
+     } catch (writeError) {
+       const response = await this.#signedRequest(`/v1/devos/tasks/${encodeURIComponent(lease.task_id)}/status`, { method: 'GET' });
+       const body = await responseJson(response, 'devos_status_http');
+@@ -1532,7 +1545,8 @@ export class DevOsNativeTaskCycle {
+         throw mismatch;
+       }
+       if (TERMINAL_STATES.has(observed) || observed === 'RESULT_READY' || observed === 'BLOCKED') {
+-        return releaseCompleted({ state: observed, task_id: lease.task_id, lease_generation: lease.lease_generation, readback: 'STATUS_PROVEN_AFTER_AMBIGUOUS_WRITE', automatic_retry_allowed: false, authority_effect: false });
++        const receipt = await releaseCompleted({ state: observed, task_id: lease.task_id, lease_generation: lease.lease_generation, readback: 'STATUS_PROVEN_AFTER_AMBIGUOUS_WRITE', automatic_retry_allowed: false, authority_effect: false });
++        return retireAfterReadback(receipt, { state: observed });
+       }
+       const errorOut = new Error(`devos_completion_transport_ambiguous:${clip(writeError?.message || writeError, 200)}`);
+       errorOut.automatic_retry_allowed = false;
+diff --git a/apps/metaengine-browser/test/agent-toolbelt-lease-retirement-integration.test.mjs b/apps/metaengine-browser/test/agent-toolbelt-lease-retirement-integration.test.mjs
+new file mode 100644
+index 0000000..aa8648b
+--- /dev/null
++++ b/apps/metaengine-browser/test/agent-toolbelt-lease-retirement-integration.test.mjs
+@@ -0,0 +1,67 @@
++// Inert cycle integration: requires the separate task-cycle integration hunk.
++// Neither browser, model, database, service nor network is started.
++import assert from 'node:assert/strict';
++import test from 'node:test';
++const AGENT = 'agent_lease-retirement-0001';
++const lease = n => Object.freeze({task_id: `${(n+1).toString(16).padStart(8,'0')}-1111-4111-8111-111111111111`,
++  lease_generation:1,agent_id:AGENT});
++
++// Integration below uses the real task-cycle source with a disposable in-memory
++// signed-route fixture. The shared cycle implementation is delivered in a
++// SEPARATE integration hunk, not committed to its neighboring owner branch.
++import {createHash} from 'node:crypto';
++import {DevOsNativeTaskCycle} from '../src/devos-native-task-cycle-core.mjs';
++
++const sha = value => createHash('sha256').update(value).digest('hex');
++const url = 'https://chatgpt.com/c/12345678-abcd-4abc-8abc-123456789abc';
++const cycleLease = Object.freeze({...lease(7000),role:'IMPLEMENTER',
++  tab_id:'tab_123e4567-e89b-42d3-a456-426614174222',target_id:'webcontents:9',
++  base_sha:'a'.repeat(40),agent_generation_epoch:1,automatic_retry_allowed:false,
++  task_spec:{objective:'Inert retirement check',constraints:[],deliverable:'source test'},
++  conversation_url_sha256:sha(url),
++});
++const cycleFleet = {schema:'metaengine.browser.fleet-snapshot.v1',policy:{warm_agents:1,spawn_burst_limit:1},
++  agents:[{agent_id:cycleLease.agent_id,role:cycleLease.role,tab_id:cycleLease.tab_id,target_id:cycleLease.target_id,
++    lifecycle_state:'ACTIVE',generation_epoch:1,automatic_retry_allowed:false}]};
++const cycleResponse = body=>({ok:true,status:200,json:async()=>structuredClone(body)});
++const transcript = ['```tool','TOOL_REQUEST_V1','request_id=retire:inert-cycle','action=CAPTURE',
++  `tab_id=${cycleLease.tab_id}`,'payload_json={}','```'].join('\n');
++
++for(const [name,ackMode,statusState,statusGeneration,expectedRetired] of [
++  ['confirmed same-generation result','ACK','RESULT_READY',1,true],
++  ['status remains running','ACK','RUNNING',1,false],
++  ['changed lease generation','ACK','RESULT_READY',2,false],
++  ['lost ACK confirmed by exact status','LOST_ACK','RESULT_READY',1,true],
++])test(`real cycle frees only local settled lease after ${name}`,async()=>{
++  const calls={status:0,completion:0,issued:0};
++  const cycle=new DevOsNativeTaskCycle({
++    getState:async()=>({fleet:cycleFleet}),
++    executeCommand:async command=>{
++      if(command.action==='FLEET_RECONCILE')return cycleFleet;
++      if(command.action==='CAPTURE')return {url,tab_id:cycleLease.tab_id,semantic_targets:[]};
++      if(command.action==='READ_TRANSCRIPT')return {text:transcript,total_chars:transcript.length,
++        has_more:false,census_truncated:false};
++      throw Error('unexpected inert command '+command.action);
++    },
++    signedRequest:async(route,options={})=>{
++      if(route==='/v1/devos/cycle')return cycleResponse({schema:'metaengine.devos.browser-cycle.v1',
++        backlog:{ready:0,running:1},running:[cycleLease]});
++      if(route==='/v1/devos/complete'){
++        calls.completion++;
++        if(ackMode==='LOST_ACK')throw Error('inert lost completion ACK');
++        return cycleResponse({state:'RESULT_READY'});
++      }
++      if(route.endsWith('/status')){calls.status++;return cycleResponse({state:statusState,lease_generation:statusGeneration});}
++      if(route==='/v1/commands/issue-tool'){calls.issued++;throw Error('tool issue cannot run without project custody');}
++      throw Error('unexpected signed fixture '+route);
++    },
++  });
++  const result=await cycle.cycle();
++  assert.equal(result.result_ready.state,'RESULT_READY');
++  assert.equal(calls.completion,1);
++  assert.equal(calls.status,1);
++  assert.equal(calls.issued,0);
++  assert.equal(cycle.snapshot().agent_toolbelt.lease_count,expectedRetired?0:1);
++  assert.equal(cycle.snapshot().agent_toolbelt.served_result_count,1,
++    'bounded next-task result ring is retained after lease-local retirement');
++});
